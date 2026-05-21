@@ -1,0 +1,36 @@
+# Django
+# ------------------------------------------------------------------------------
+USE_DOCKER=yes
+IPYTHONDIR=/app/.ipython
+
+# Domain — used in DEFAULT_FROM_EMAIL and ALLOWED_HOSTS defaults.
+# Override for your own deployment.
+DJANGO_DOMAIN=example.com
+
+# Redis
+# ------------------------------------------------------------------------------
+REDIS_URL=redis://redis:6379/0
+
+# Celery Flower — choose a strong username/password for the dashboard.
+# `just bootstrap` generates random values automatically.
+# ------------------------------------------------------------------------------
+CELERY_FLOWER_USER=changeme
+CELERY_FLOWER_PASSWORD=changeme
+
+# OpenRouter — get a key at https://openrouter.ai/keys
+# ------------------------------------------------------------------------------
+# Optional global fallback key. Each user can also configure their own key via
+# Settings → API Access in the web UI (stored encrypted in the DB, recommended).
+# When a job runs, the user's personal key is used if set; otherwise we fall
+# back to this global key when OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK is True.
+OPENROUTER_API_KEY=
+# Set to False to require every user to bring their own key (recommended for
+# shared deployments). Defaults to True.
+OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK=True
+
+# Hosts / CORS
+# Set these when accessing the app from a non-localhost domain.
+# ------------------------------------------------------------------------------
+DJANGO_ALLOWED_HOSTS=localhost,0.0.0.0,127.0.0.1,django
+CORS_ALLOWED_ORIGINS=http://localhost:8000,http://localhost:8080
+CSRF_TRUSTED_ORIGINS=http://localhost:8000,http://localhost:8080

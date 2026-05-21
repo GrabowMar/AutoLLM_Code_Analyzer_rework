@@ -1,0 +1,9 @@
+# CODEOWNERS — automatic review assignments for any PR.
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+*                       @GrabowMar
+/.github/               @GrabowMar
+/frontend/              @GrabowMar
+/llm_lab/               @GrabowMar
+/config/                @GrabowMar
+/compose/               @GrabowMar

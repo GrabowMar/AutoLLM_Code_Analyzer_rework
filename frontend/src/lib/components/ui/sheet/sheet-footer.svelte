@@ -1,0 +1,14 @@
+<script lang="ts">
+	import type { HTMLAttributes } from 'svelte/elements';
+	import { cn } from '$lib/utils';
+
+	let {
+		class: className,
+		children,
+		...restProps
+	}: HTMLAttributes<HTMLDivElement> & { children?: import('svelte').Snippet } = $props();
+</script>
+
+<div class={cn('mt-auto flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2', className)} {...restProps}>
+	{#if children}{@render children()}{/if}
+</div>

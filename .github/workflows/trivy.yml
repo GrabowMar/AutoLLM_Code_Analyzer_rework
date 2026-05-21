@@ -1,0 +1,97 @@
+name: Trivy
+
+on:
+  pull_request:
+    branches: ['main']
+    paths:
+      - 'compose/**'
+      - 'docker-compose.local.yml'
+      - 'docker-compose.production.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+  push:
+    branches: ['main']
+    paths:
+      - 'compose/**'
+      - 'docker-compose.local.yml'
+      - 'docker-compose.production.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+  schedule:
+    - cron: '42 4 * * 3'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  fs-scan:
+    name: Filesystem scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+  image-scan:
+    name: Image scan (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [django, nginx]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/bake-action@v7
+        with:
+          push: false
+          load: true
+          files: docker-compose.production.yml
+          targets: ${{ matrix.target }}
+
+      - name: Discover image tag
+        id: img
+        run: |
+          tag=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '(^|/)${{ matrix.target }}:' | head -1)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Trivy image scan
+        if: steps.img.outputs.tag != ''
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.img.outputs.tag }}
+          format: sarif
+          output: trivy-${{ matrix.target }}.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Upload SARIF
+        if: steps.img.outputs.tag != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.target }}.sarif
+          category: trivy-${{ matrix.target }}

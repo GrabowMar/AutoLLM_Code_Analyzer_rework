@@ -1,0 +1,111 @@
+[
+  {
+    "model_id": "openai/gpt-4o",
+    "humaneval": 90.2,
+    "mbpp": 87.6,
+    "swebench": 38.0,
+    "bfcl_score": 88.5,
+    "webdev_elo": 1255,
+    "livebench_coding": 67.4,
+    "livecodebench": 49.2,
+    "gpqa_score": 53.6
+  },
+  {
+    "model_id": "openai/gpt-4o-mini",
+    "humaneval": 87.2,
+    "mbpp": 84.8,
+    "swebench": 28.0,
+    "bfcl_score": 80.0,
+    "webdev_elo": 1180,
+    "livebench_coding": 52.8,
+    "livecodebench": 38.2
+  },
+  {
+    "model_id": "anthropic/claude-3.5-sonnet",
+    "humaneval": 92.0,
+    "mbpp": 89.4,
+    "swebench": 49.0,
+    "bfcl_score": 90.4,
+    "webdev_elo": 1310,
+    "livebench_coding": 73.6,
+    "livecodebench": 55.0,
+    "gpqa_score": 67.2
+  },
+  {
+    "model_id": "anthropic/claude-3-haiku",
+    "humaneval": 75.9,
+    "mbpp": 80.2,
+    "swebench": 13.5,
+    "bfcl_score": 70.0,
+    "webdev_elo": 1080
+  },
+  {
+    "model_id": "google/gemini-2.0-flash",
+    "humaneval": 88.4,
+    "mbpp": 85.0,
+    "swebench": 32.0,
+    "bfcl_score": 82.5,
+    "webdev_elo": 1220,
+    "livebench_coding": 60.2,
+    "livecodebench": 44.0
+  },
+  {
+    "model_id": "google/gemini-1.5-pro",
+    "humaneval": 84.1,
+    "mbpp": 82.5,
+    "swebench": 25.0,
+    "bfcl_score": 78.0,
+    "webdev_elo": 1175,
+    "livebench_coding": 55.4
+  },
+  {
+    "model_id": "meta-llama/llama-3.1-70b-instruct",
+    "humaneval": 80.5,
+    "mbpp": 78.2,
+    "bfcl_score": 75.0,
+    "webdev_elo": 1110,
+    "livebench_coding": 47.2
+  },
+  {
+    "model_id": "meta-llama/llama-3.1-405b-instruct",
+    "humaneval": 89.0,
+    "mbpp": 84.5,
+    "swebench": 24.0,
+    "bfcl_score": 82.0,
+    "webdev_elo": 1190,
+    "livebench_coding": 56.0
+  },
+  {
+    "model_id": "deepseek/deepseek-chat",
+    "humaneval": 89.6,
+    "mbpp": 86.7,
+    "swebench": 33.0,
+    "bfcl_score": 84.5,
+    "webdev_elo": 1215,
+    "livebench_coding": 62.4,
+    "livecodebench": 51.0
+  },
+  {
+    "model_id": "qwen/qwen-2.5-coder-32b-instruct",
+    "humaneval": 92.7,
+    "mbpp": 88.5,
+    "swebench": 30.0,
+    "livecodebench": 47.4,
+    "webdev_elo": 1165
+  },
+  {
+    "model_id": "mistralai/mistral-large",
+    "humaneval": 81.1,
+    "mbpp": 79.4,
+    "bfcl_score": 73.5,
+    "webdev_elo": 1095
+  },
+  {
+    "model_id": "x-ai/grok-2",
+    "humaneval": 85.6,
+    "mbpp": 82.0,
+    "bfcl_score": 78.2,
+    "webdev_elo": 1175,
+    "livebench_coding": 52.0
+  }
+]
