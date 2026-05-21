@@ -15,217 +15,223 @@
  * `lib/docs/mermaid.ts` upgrades after mount.
  */
 
-import { Marked } from 'marked';
-import markedAlert from 'marked-alert';
-import { gfmHeadingId } from 'marked-gfm-heading-id';
-import DOMPurify from 'dompurify';
-import { createHighlighter, type Highlighter } from 'shiki';
+import { Marked } from "marked";
+import markedAlert from "marked-alert";
+import { gfmHeadingId } from "marked-gfm-heading-id";
+import DOMPurify from "dompurify";
+import { createHighlighter, type Highlighter } from "shiki";
 import {
-	transformerNotationDiff,
-	transformerNotationHighlight,
-	transformerNotationFocus,
-} from '@shikijs/transformers';
+  transformerNotationDiff,
+  transformerNotationHighlight,
+  transformerNotationFocus,
+} from "@shikijs/transformers";
 
 export interface Heading {
-	id: string;
-	text: string;
-	level: number;
+  id: string;
+  text: string;
+  level: number;
 }
 
 export interface RenderedDoc {
-	html: string;
-	headings: Heading[];
-	hasMermaid: boolean;
+  html: string;
+  headings: Heading[];
+  hasMermaid: boolean;
 }
 
 const SHIKI_LANGS = [
-	'bash',
-	'sh',
-	'shell',
-	'console',
-	'python',
-	'py',
-	'javascript',
-	'js',
-	'typescript',
-	'ts',
-	'tsx',
-	'jsx',
-	'json',
-	'jsonc',
-	'yaml',
-	'yml',
-	'toml',
-	'ini',
-	'dockerfile',
-	'docker',
-	'html',
-	'css',
-	'scss',
-	'svelte',
-	'sql',
-	'diff',
-	'markdown',
-	'md',
-	'text',
-	'plaintext',
+  "bash",
+  "sh",
+  "shell",
+  "console",
+  "python",
+  "py",
+  "javascript",
+  "js",
+  "typescript",
+  "ts",
+  "tsx",
+  "jsx",
+  "json",
+  "jsonc",
+  "yaml",
+  "yml",
+  "toml",
+  "ini",
+  "dockerfile",
+  "docker",
+  "html",
+  "css",
+  "scss",
+  "svelte",
+  "sql",
+  "diff",
+  "markdown",
+  "md",
+  "text",
+  "plaintext",
 ];
 
 const LANG_ALIASES: Record<string, string> = {
-	py: 'python',
-	js: 'javascript',
-	ts: 'typescript',
-	yml: 'yaml',
-	docker: 'dockerfile',
-	sh: 'bash',
-	shell: 'bash',
-	console: 'bash',
-	plaintext: 'text',
-	md: 'markdown',
+  py: "python",
+  js: "javascript",
+  ts: "typescript",
+  yml: "yaml",
+  docker: "dockerfile",
+  sh: "bash",
+  shell: "bash",
+  console: "bash",
+  plaintext: "text",
+  md: "markdown",
 };
 
 let _highlighterPromise: Promise<Highlighter> | null = null;
 
 function getHighlighter(): Promise<Highlighter> {
-	if (!_highlighterPromise) {
-		_highlighterPromise = createHighlighter({
-			themes: ['github-light', 'github-dark'],
-			langs: SHIKI_LANGS,
-		});
-	}
-	return _highlighterPromise;
+  if (!_highlighterPromise) {
+    _highlighterPromise = createHighlighter({
+      themes: ["github-light", "github-dark"],
+      langs: SHIKI_LANGS,
+    });
+  }
+  return _highlighterPromise;
 }
 
 function escapeHtml(s: string): string {
-	return s
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#39;');
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function escapeAttr(s: string): string {
-	return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }
 
 function langOrFallback(lang: string, highlighter: Highlighter): string {
-	const aliased = LANG_ALIASES[lang] ?? lang;
-	const loaded = new Set<string>(highlighter.getLoadedLanguages());
-	if (loaded.has(aliased)) return aliased;
-	return 'text';
+  const aliased = LANG_ALIASES[lang] ?? lang;
+  const loaded = new Set<string>(highlighter.getLoadedLanguages());
+  if (loaded.has(aliased)) return aliased;
+  return "text";
 }
 
 interface CodeMeta {
-	lang: string;
-	title?: string;
-	highlightLines: Set<number>;
-	showLineNumbers: boolean;
-	wrap: boolean;
+  lang: string;
+  title?: string;
+  highlightLines: Set<number>;
+  showLineNumbers: boolean;
+  wrap: boolean;
 }
 
 function parseCodeMeta(rawLang: string): CodeMeta {
-	const info = (rawLang || '').trim();
-	// First token is the language.
-	const firstSpace = info.search(/\s/);
-	const lang = (firstSpace === -1 ? info : info.slice(0, firstSpace)).toLowerCase();
-	const rest = firstSpace === -1 ? '' : info.slice(firstSpace + 1);
+  const info = (rawLang || "").trim();
+  // First token is the language.
+  const firstSpace = info.search(/\s/);
+  const lang = (
+    firstSpace === -1 ? info : info.slice(0, firstSpace)
+  ).toLowerCase();
+  const rest = firstSpace === -1 ? "" : info.slice(firstSpace + 1);
 
-	const meta: CodeMeta = {
-		lang,
-		highlightLines: new Set<number>(),
-		showLineNumbers: false,
-		wrap: false,
-	};
+  const meta: CodeMeta = {
+    lang,
+    highlightLines: new Set<number>(),
+    showLineNumbers: false,
+    wrap: false,
+  };
 
-	// title="..."
-	const titleMatch = rest.match(/title=(?:"([^"]+)"|'([^']+)'|(\S+))/);
-	if (titleMatch) meta.title = titleMatch[1] ?? titleMatch[2] ?? titleMatch[3];
+  // title="..."
+  const titleMatch = rest.match(/title=(?:"([^"]+)"|'([^']+)'|(\S+))/);
+  if (titleMatch) meta.title = titleMatch[1] ?? titleMatch[2] ?? titleMatch[3];
 
-	// {1,3-5}
-	const hlMatch = rest.match(/\{([\d,\s\-]+)\}/);
-	if (hlMatch) {
-		for (const part of hlMatch[1].split(',')) {
-			const trimmed = part.trim();
-			if (!trimmed) continue;
-			if (trimmed.includes('-')) {
-				const [a, b] = trimmed.split('-').map((n) => parseInt(n, 10));
-				if (Number.isFinite(a) && Number.isFinite(b)) {
-					for (let i = Math.min(a, b); i <= Math.max(a, b); i++) meta.highlightLines.add(i);
-				}
-			} else {
-				const n = parseInt(trimmed, 10);
-				if (Number.isFinite(n)) meta.highlightLines.add(n);
-			}
-		}
-	}
+  // {1,3-5}
+  const hlMatch = rest.match(/\{([\d,\s\-]+)\}/);
+  if (hlMatch) {
+    for (const part of hlMatch[1].split(",")) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      if (trimmed.includes("-")) {
+        const [a, b] = trimmed.split("-").map((n) => parseInt(n, 10));
+        if (Number.isFinite(a) && Number.isFinite(b)) {
+          for (let i = Math.min(a, b); i <= Math.max(a, b); i++)
+            meta.highlightLines.add(i);
+        }
+      } else {
+        const n = parseInt(trimmed, 10);
+        if (Number.isFinite(n)) meta.highlightLines.add(n);
+      }
+    }
+  }
 
-	if (/\b(showLineNumbers|numbers)\b/i.test(rest)) meta.showLineNumbers = true;
-	if (/\bwrap\b/i.test(rest)) meta.wrap = true;
+  if (/\b(showLineNumbers|numbers)\b/i.test(rest)) meta.showLineNumbers = true;
+  if (/\bwrap\b/i.test(rest)) meta.wrap = true;
 
-	return meta;
+  return meta;
 }
 
 /** Render markdown to sanitized HTML. */
 export async function renderMarkdown(raw: string): Promise<RenderedDoc> {
-	const highlighter = await getHighlighter();
+  const highlighter = await getHighlighter();
 
-	const marked = new Marked({
-		gfm: true,
-		breaks: false,
-	});
+  const marked = new Marked({
+    gfm: true,
+    breaks: false,
+  });
 
-	marked.use(markedAlert());
-	marked.use(gfmHeadingId());
+  marked.use(markedAlert());
+  marked.use(gfmHeadingId());
 
-	marked.use({
-		renderer: {
-			code({ text, lang }: { text: string; lang?: string }) {
-				const meta = parseCodeMeta(lang ?? '');
-				if (meta.lang === 'mermaid') {
-					return `<div class="mermaid-placeholder" data-source="${escapeAttr(text)}"></div>`;
-				}
+  marked.use({
+    renderer: {
+      code({ text, lang }: { text: string; lang?: string }) {
+        const meta = parseCodeMeta(lang ?? "");
+        if (meta.lang === "mermaid") {
+          return `<div class="mermaid-placeholder" data-source="${escapeAttr(text)}"></div>`;
+        }
 
-				const effective = langOrFallback(meta.lang || 'text', highlighter);
-				const displayLang = meta.lang || 'text';
+        const effective = langOrFallback(meta.lang || "text", highlighter);
+        const displayLang = meta.lang || "text";
 
-				const highlighted = highlighter.codeToHtml(text, {
-					lang: effective,
-					themes: { light: 'github-light', dark: 'github-dark' },
-					defaultColor: false,
-					transformers: [
-						transformerNotationDiff({ matchAlgorithm: 'v3' }),
-						transformerNotationHighlight({ matchAlgorithm: 'v3' }),
-						transformerNotationFocus({ matchAlgorithm: 'v3' }),
-						{
-							name: 'docs:lines',
-							line(node, line) {
-								node.properties['data-line'] = line;
-								if (meta.highlightLines.has(line)) {
-									const cur = (node.properties.class as string | undefined) ?? '';
-									node.properties.class = `${cur} highlighted`.trim();
-								}
-							},
-							pre(node) {
-								const cur = (node.properties.class as string | undefined) ?? '';
-								const flags = [
-									meta.showLineNumbers ? 'has-line-numbers' : '',
-									meta.wrap ? 'is-wrapped' : '',
-								]
-									.filter(Boolean)
-									.join(' ');
-								if (flags) node.properties.class = `${cur} ${flags}`.trim();
-							},
-						},
-					],
-				});
+        const highlighted = highlighter.codeToHtml(text, {
+          lang: effective,
+          themes: { light: "github-light", dark: "github-dark" },
+          defaultColor: false,
+          transformers: [
+            transformerNotationDiff({ matchAlgorithm: "v3" }),
+            transformerNotationHighlight({ matchAlgorithm: "v3" }),
+            transformerNotationFocus({ matchAlgorithm: "v3" }),
+            {
+              name: "docs:lines",
+              line(node, line) {
+                node.properties["data-line"] = line;
+                if (meta.highlightLines.has(line)) {
+                  const cur =
+                    (node.properties.class as string | undefined) ?? "";
+                  node.properties.class = `${cur} highlighted`.trim();
+                }
+              },
+              pre(node) {
+                const cur = (node.properties.class as string | undefined) ?? "";
+                const flags = [
+                  meta.showLineNumbers ? "has-line-numbers" : "",
+                  meta.wrap ? "is-wrapped" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+                if (flags) node.properties.class = `${cur} ${flags}`.trim();
+              },
+            },
+          ],
+        });
 
-				const titleAttr = meta.title ? ` data-title="${escapeAttr(meta.title)}"` : '';
-				const titleNode = meta.title
-					? `<span class="code-block__title">${escapeHtml(meta.title)}</span>`
-					: '';
+        const titleAttr = meta.title
+          ? ` data-title="${escapeAttr(meta.title)}"`
+          : "";
+        const titleNode = meta.title
+          ? `<span class="code-block__title">${escapeHtml(meta.title)}</span>`
+          : "";
 
-				return `<figure class="code-block" data-lang="${escapeAttr(displayLang)}"${titleAttr}>
+        return `<figure class="code-block" data-lang="${escapeAttr(displayLang)}"${titleAttr}>
 <figcaption class="code-block__header">
 <span class="code-block__dots" aria-hidden="true"><i></i><i></i><i></i></span>
 ${titleNode}
@@ -238,51 +244,51 @@ ${titleNode}
 </figcaption>
 <div class="code-block__body">${highlighted}</div>
 </figure>`;
-			},
-		},
-	});
+      },
+    },
+  });
 
-	const dirty = await marked.parse(raw, { async: true });
-	const clean = DOMPurify.sanitize(dirty, {
-		ADD_TAGS: ['figure', 'figcaption', 'svg', 'path', 'i'],
-		ADD_ATTR: [
-			'data-lang',
-			'data-source',
-			'data-copy',
-			'data-theme',
-			'data-line',
-			'data-title',
-			'data-highlighted',
-			'data-focused',
-			'data-diff',
-			'style',
-			'tabindex',
-			'viewBox',
-			'width',
-			'height',
-			'fill',
-			'aria-hidden',
-			'aria-label',
-		],
-	});
+  const dirty = await marked.parse(raw, { async: true });
+  const clean = DOMPurify.sanitize(dirty, {
+    ADD_TAGS: ["figure", "figcaption", "svg", "path", "i"],
+    ADD_ATTR: [
+      "data-lang",
+      "data-source",
+      "data-copy",
+      "data-theme",
+      "data-line",
+      "data-title",
+      "data-highlighted",
+      "data-focused",
+      "data-diff",
+      "style",
+      "tabindex",
+      "viewBox",
+      "width",
+      "height",
+      "fill",
+      "aria-hidden",
+      "aria-label",
+    ],
+  });
 
-	const headings: Heading[] = [];
-	let hasMermaid = false;
-	if (typeof window !== 'undefined') {
-		const tmpl = document.createElement('template');
-		tmpl.innerHTML = clean;
-		const root = tmpl.content;
-		root.querySelectorAll('h1, h2, h3, h4').forEach((el) => {
-			const id = el.getAttribute('id');
-			if (!id) return;
-			headings.push({
-				id,
-				text: (el.textContent ?? '').trim(),
-				level: Number(el.tagName.slice(1)),
-			});
-		});
-		hasMermaid = root.querySelectorAll('.mermaid-placeholder').length > 0;
-	}
+  const headings: Heading[] = [];
+  let hasMermaid = false;
+  if (typeof window !== "undefined") {
+    const tmpl = document.createElement("template");
+    tmpl.innerHTML = clean;
+    const root = tmpl.content;
+    root.querySelectorAll("h1, h2, h3, h4").forEach((el) => {
+      const id = el.getAttribute("id");
+      if (!id) return;
+      headings.push({
+        id,
+        text: (el.textContent ?? "").trim(),
+        level: Number(el.tagName.slice(1)),
+      });
+    });
+    hasMermaid = root.querySelectorAll(".mermaid-placeholder").length > 0;
+  }
 
-	return { html: clean, headings, hasMermaid };
+  return { html: clean, headings, hasMermaid };
 }

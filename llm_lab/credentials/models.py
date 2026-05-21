@@ -39,13 +39,13 @@ class UserApiCredential(models.Model):
         on_delete=models.CASCADE,
         related_name="api_credentials",
     )
-    provider = models.CharField(max_length=32, choices=Provider.choices)
+    provider = models.CharField(max_length=32, choices=Provider)
     encrypted_secret = models.TextField()
     key_prefix = models.CharField(max_length=PREFIX_LENGTH, blank=True, default="")
     last_validated_at = models.DateTimeField(null=True, blank=True)
     last_validation_status = models.CharField(
         max_length=32,
-        choices=ValidationStatus.choices,
+        choices=ValidationStatus,
         default=ValidationStatus.UNVALIDATED,
     )
     last_validation_message = models.CharField(max_length=500, blank=True, default="")

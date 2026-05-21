@@ -10,31 +10,37 @@
 // Returning a 404 here would NOT kill an existing SW — the browser keeps the
 // old one. Returning this script does.
 
-self.addEventListener('install', function (event) {
+self.addEventListener("install", function (event) {
   self.skipWaiting();
 });
 
-self.addEventListener('activate', function (event) {
+self.addEventListener("activate", function (event) {
   event.waitUntil(
     (async function () {
       try {
         const keys = await caches.keys();
-        await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+        await Promise.all(
+          keys.map(function (k) {
+            return caches.delete(k);
+          }),
+        );
       } catch (_) {}
       try {
         await self.registration.unregister();
       } catch (_) {}
       try {
-        const clients = await self.clients.matchAll({ type: 'window' });
+        const clients = await self.clients.matchAll({ type: "window" });
         clients.forEach(function (c) {
-          try { c.navigate(c.url); } catch (_) {}
+          try {
+            c.navigate(c.url);
+          } catch (_) {}
         });
       } catch (_) {}
-    })()
+    })(),
   );
 });
 
-self.addEventListener('fetch', function (event) {
+self.addEventListener("fetch", function (event) {
   // Pass everything through to the network — never serve from any cache.
   event.respondWith(fetch(event.request));
 });
