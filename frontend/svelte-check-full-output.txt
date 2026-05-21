@@ -1,0 +1,157 @@
+﻿Loading svelte-check in workspace: c:\Users\marci\Documents\GitHub\app\frontend
+Getting Svelte diagnostics...
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\analysis\+page.svelte[39m:334:10
+[33mWarn[39m: Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events (svelte)
+[36m								<td class="px-4 py-3">
+									[35m<div class="flex items-center gap-1" onclick={(e) => e.stopPropagation()}>
+										{#if task.status === 'Completed' || task.status === 'Partial'}
+											<Button variant="ghost" size="sm" class="h-7 w-7 p-0" href="/analysis/{task.id}" title="View results">
+												<Eye class="h-3.5 w-3.5" />
+											</Button>
+											<Button variant="ghost" size="sm" class="h-7 w-7 p-0" disabled title="Download">
+												<Download class="h-3.5 w-3.5" />
+											</Button>
+										{:else if task.status === 'Running'}
+											<Button variant="ghost" size="sm" class="h-7 w-7 p-0" disabled title="Stop">
+												<StopCircle class="h-3.5 w-3.5" />
+											</Button>
+										{/if}
+									</div>[36m
+								</td>[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\analysis\+page.svelte[39m:334:10
+[33mWarn[39m: `<div>` with a click handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions (svelte)
+[36m								<td class="px-4 py-3">
+									[35m<div class="flex items-center gap-1" onclick={(e) => e.stopPropagation()}>
+										{#if task.status === 'Completed' || task.status === 'Partial'}
+											<Button variant="ghost" size="sm" class="h-7 w-7 p-0" href="/analysis/{task.id}" title="View results">
+												<Eye class="h-3.5 w-3.5" />
+											</Button>
+											<Button variant="ghost" size="sm" class="h-7 w-7 p-0" disabled title="Download">
+												<Download class="h-3.5 w-3.5" />
+											</Button>
+										{:else if task.status === 'Running'}
+											<Button variant="ghost" size="sm" class="h-7 w-7 p-0" disabled title="Stop">
+												<StopCircle class="h-3.5 w-3.5" />
+											</Button>
+										{/if}
+									</div>[36m
+								</td>[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\analysis\[taskId]\+page.svelte[39m:33:11
+[33mWarn[39m: This reference only captures the initial value of `taskId`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally (svelte)
+[36m	const result = {
+		taskId: [35mtaskId[36m,
+		model: 'GPT-4o',[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\analysis\[taskId]\+page.svelte[39m:182:33
+[33mWarn[39m: Quoted attributes on components and custom elements will be stringified in a future version of Svelte. If this isn't what you want, remove the quotes
+https://svelte.dev/e/attribute_quoted (svelte)
+[36m							<h1 class="text-xl font-semibold">{result.type}</h1>
+							<Badge variant="outline" [35mclass="{statusColors[result.status] ?? ''}"[36m>{result.status}</Badge>
+							<Badge variant="outline">{result.model}</Badge>[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\analysis\create\+page.svelte[39m:337:10
+[33mWarn[39m: A form label must be associated with a control
+https://svelte.dev/e/a11y_label_has_associated_control (svelte)
+[36m								<div>
+									[35m<label class="text-sm font-medium">Priority</label>[36m
+									<select class="mt-1 h-9 w-full rounded-md border border-input bg-background px-3 text-sm" bind:value={priority}>[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\applications\[slug]\[appNum]\+page.svelte[39m:196:33
+[33mWarn[39m: Quoted attributes on components and custom elements will be stringified in a future version of Svelte. If this isn't what you want, remove the quotes
+https://svelte.dev/e/attribute_quoted (svelte)
+[36m							<Badge variant="outline">{app.modelProvider}</Badge>
+							<Badge variant="outline" [35mclass="{statusColors[app.status] ?? ''}"[36m>
+								{#if app.status === 'Running'}[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\applications\[slug]\[appNum]\+page.svelte[39m:47:98
+[31mError[39m: 'slug' is possibly 'undefined'. (ts)
+[36m		modelSlug: slug,
+		modelName: slug === 'gpt-4o' ? 'GPT-4o' : slug === 'claude-3-5-sonnet' ? 'Claude 3.5 Sonnet' : [35mslug[36m.replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+		modelProvider: slug.startsWith('gpt') ? 'OpenAI' : slug.startsWith('claude') ? 'Anthropic' : slug.startsWith('gemini') ? 'Google' : 'Other',[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\applications\[slug]\[appNum]\+page.svelte[39m:48:18
+[31mError[39m: 'slug' is possibly 'undefined'. (ts)
+[36m		modelName: slug === 'gpt-4o' ? 'GPT-4o' : slug === 'claude-3-5-sonnet' ? 'Claude 3.5 Sonnet' : slug.replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+		modelProvider: [35mslug[36m.startsWith('gpt') ? 'OpenAI' : slug.startsWith('claude') ? 'Anthropic' : slug.startsWith('gemini') ? 'Google' : 'Other',
+		appNumber: appNum,[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\applications\[slug]\[appNum]\+page.svelte[39m:48:54
+[31mError[39m: 'slug' is possibly 'undefined'. (ts)
+[36m		modelName: slug === 'gpt-4o' ? 'GPT-4o' : slug === 'claude-3-5-sonnet' ? 'Claude 3.5 Sonnet' : slug.replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+		modelProvider: slug.startsWith('gpt') ? 'OpenAI' : [35mslug[36m.startsWith('claude') ? 'Anthropic' : slug.startsWith('gemini') ? 'Google' : 'Other',
+		appNumber: appNum,[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\applications\[slug]\[appNum]\+page.svelte[39m:48:96
+[31mError[39m: 'slug' is possibly 'undefined'. (ts)
+[36m		modelName: slug === 'gpt-4o' ? 'GPT-4o' : slug === 'claude-3-5-sonnet' ? 'Claude 3.5 Sonnet' : slug.replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+		modelProvider: slug.startsWith('gpt') ? 'OpenAI' : slug.startsWith('claude') ? 'Anthropic' : [35mslug[36m.startsWith('gemini') ? 'Google' : 'Other',
+		appNumber: appNum,[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\applications\[slug]\[appNum]\failure\+page.svelte[39m:23:3
+[31mError[39m: 'slug' is possibly 'undefined'. (ts)
+[36m		slug === 'deepseek-v3' ? 'DeepSeek V3' :
+		[35mslug[36m.replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
+	);[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\automation\+page.svelte[39m:470:7
+[33mWarn[39m: A form label must be associated with a control
+https://svelte.dev/e/a11y_label_has_associated_control (svelte)
+[36m					<div class="flex items-center gap-3">
+						[35m<label class="text-sm font-medium whitespace-nowrap">Pipeline Name</label>[36m
+						<Input bind:value={pipelineName} placeholder="e.g. Full Benchmark Run" class="max-w-sm" />[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\models\[slug]\+page.svelte[39m:65:9
+[33mWarn[39m: This reference only captures the initial value of `slug`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally (svelte)
+[36m	const defaultModel: ModelData = {
+		name: [35mslug[36m.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), provider: 'Unknown', contextWindow: '128K', inputPrice: '$1.00', outputPrice: '$3.00', status: 'active',
+		description: 'A large language model optimized for code generation and analysis tasks.',[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\models\[slug]\+page.svelte[39m:84:27
+[33mWarn[39m: This reference only captures the initial value of `slug`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally (svelte)
+[36m		],
+		metadata: { 'Model ID': [35mslug[36m, 'Architecture': 'Transformer', 'Training Cutoff': 'Unknown', 'Max Output Tokens': '8,192', 'Created': 'Unknown' },
+	};[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\models\[slug]\+page.svelte[39m:65:9
+[31mError[39m: 'slug' is possibly 'undefined'. (ts)
+[36m	const defaultModel: ModelData = {
+		name: [35mslug[36m.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), provider: 'Unknown', contextWindow: '128K', inputPrice: '$1.00', outputPrice: '$3.00', status: 'active',
+		description: 'A large language model optimized for code generation and analysis tasks.',[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\models\[slug]\+page.svelte[39m:84:15
+[31mError[39m: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'. (ts)
+[36m		],
+		metadata: { [35m'Model ID'[36m: slug, 'Architecture': 'Transformer', 'Training Cutoff': 'Unknown', 'Max Output Tokens': '8,192', 'Created': 'Unknown' },
+	};[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\models\[slug]\+page.svelte[39m:87:34
+[31mError[39m: Type 'undefined' cannot be used as an index type. (ts)
+[36m
+	const model = $derived(modelMap[[35mslug[36m] ?? defaultModel);[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\models\compare\+page.svelte[39m:80:6
+[33mWarn[39m: A form label must be associated with a control
+https://svelte.dev/e/a11y_label_has_associated_control (svelte)
+[36m				<div class="flex items-center gap-2">
+					[35m<label class="text-sm font-medium">Baseline:</label>[36m
+					<select class="h-8 rounded-md border border-input bg-background px-2 text-sm" bind:value={baseline}>[39m
+
+c:\Users\marci\Documents\GitHub\app\frontend\[32msrc\routes\(app)\models\compare\+page.svelte[39m:87:6
+[33mWarn[39m: A form label must be associated with a control
+https://svelte.dev/e/a11y_label_has_associated_control (svelte)
+[36m				<div class="flex items-center gap-2">
+					[35m<label class="text-sm font-medium">Highlight:</label>[36m
+					<select class="h-8 rounded-md border border-input bg-background px-2 text-sm" bind:value={highlightSlug}>[39m
+
+====================================
+[31msvelte-check found 8 errors and 11 warnings in 8 files
+[39m

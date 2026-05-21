@@ -1,0 +1,213 @@
+[project]
+name = "llm-lab"
+version = "0.1.0"
+description = "A Django platform for generating, analyzing, and benchmarking AI-generated applications across multiple LLM providers."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+  { name = "Marcin Grabowski", email = "marcin27059@gmail.com" },
+]
+requires-python = "==3.13.*"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+  "argon2-cffi==25.1.0",
+  "celery==5.6.3",
+  "croniter>=3.0,<4",
+  "django==6.0.5",
+  "django-allauth[headless,mfa]==65.16.1",
+  "django-anymail==14.0",
+  "django-celery-beat==2.9.0",
+  "django-cors-headers==4.9.0",
+  "django-environ==0.13.0",
+  "django-model-utils==5.0.0",
+  "django-ninja==1.6.2",
+  "django-redis==6.0.0",
+  "docker==7.1.0",
+  "flower==2.0.1",
+  "gunicorn==25.1.0",
+  "hiredis==3.3.1",
+  "pillow==12.2.0",
+  "psutil==6.1.0",
+  "psycopg[c]==3.3.4",
+  "python-slugify==8.0.4",
+  "redis==7.4.0",
+  "sentry-sdk==2.60.0",
+  "uvicorn[standard]==0.47.0",
+  "uvicorn-worker==0.4.0",
+  "whitenoise==6.12.0",
+]
+
+[dependency-groups]
+dev = [
+  "coverage==7.14.0",
+  "django-coverage-plugin==3.2.2",
+  "django-debug-toolbar==6.3.0",
+  "django-extensions==4.1",
+  "django-stubs[compatible-mypy]==5.2.9",
+  "djlint==1.36.4",
+  "factory-boy==3.3.3",
+  "ipdb==0.13.13",
+  "mypy==1.19.1",
+  "pre-commit==4.6.0",
+  "psycopg[c]==3.3.4",
+  "pytest==9.0.3",
+  "pytest-django==4.12.0",
+  "pytest-sugar==1.1.1",
+  "ruff==0.15.13",
+  "watchfiles==1.2.0",
+  "werkzeug[watchdog]==3.1.8",
+]
+
+[tool.ruff]
+# Match djlint's max_line_length and the existing project house style.
+line-length = 119
+# Exclude a variety of commonly ignored directories.
+extend-exclude = [
+  "*/migrations/*.py",
+  "staticfiles/*",
+]
+lint.select = [
+  "A",
+  "ASYNC",
+  "B",
+  "BLE",
+  "C4",
+  "C90",
+  "COM",
+  "DJ",
+  "DTZ",
+  "E",
+  "EM",
+  "ERA",
+  "EXE",
+  "F",
+  "FA",
+  "FBT",
+  "FLY",
+  "G",
+  "I",
+  "ICN",
+  "INP",
+  "INT",
+  "ISC",
+  "N",
+  "PD",
+  "PERF",
+  "PGH",
+  "PIE",
+  "PL",
+  "PT",
+  "PTH",
+  "PYI",
+  "Q",
+  "RET",
+  "RSE",
+  "RUF",
+  "S",
+  "SIM",
+  "SLF",
+  "SLOT",
+  "T10",
+  "T20",
+  "TC",
+  "TID",
+  "TRY",
+  "UP",
+  "W",
+  "YTT",
+]
+lint.ignore = [
+  "A002",    # Shadowing a builtin is sometimes the right API (e.g. `format=`).
+  "C901",    # Function complexity — tracked separately; refactor incrementally.
+  "FBT001",  # Boolean-typed positional arg — sometimes the clearest helper signature.
+  "FBT002",  # Boolean default positional arg — same rationale as FBT001.
+  "FLY002",  # str.join vs f-string — stylistic.
+  "PERF401", # `list.extend` vs comprehension — micro-optimisation, low value.
+  "PLC0415", # Non-top-level imports — required to break circular deps in Celery tasks.
+  "PLR0912", # Too many branches — same rationale as C901.
+  "PLR0913", # Too many arguments — common in Django/Ninja view signatures.
+  "PLR0915", # Too many statements — same rationale as C901.
+  "PLR2004", # Magic values — HTTP codes, retry counts, etc. are common literals.
+  "RUF003",  # Ambiguous unicode in comments — false positives on intentional `×`/`→`.
+  "RUF012",  # Mutable class attributes should be annotated with `typing.ClassVar`
+  "S101",    # Use of assert detected https://docs.astral.sh/ruff/rules/assert/
+  "S701",    # Jinja2 autoescape=False — intentional: we render code templates, not HTML.
+  "SIM102",  # sometimes it's better to nest
+  "SIM108",  # Ternary suggestion — stylistic.
+  "TC003",   # stdlib import in TYPE_CHECKING block — minor optimisation.
+  "TRY300",  # Stylistic; existing code prefers in-try returns for readability.
+  "TRY301",  # Abstract `raise` to inner function — stylistic.
+  # of types for comparison.
+  # Deactivated because it can make the code slow:
+  # https://github.com/astral-sh/ruff/issues/7871
+]
+lint.per-file-ignores."**/management/commands/**" = [
+  "T201", # `print` is the expected output channel for management commands.
+]
+# Tests and one-off scripts get a more lenient ruleset.
+lint.per-file-ignores."**/tests/**" = [
+  "PLR0913", # Test fixtures legitimately accept many arguments.
+  "PLR0915", # Some integration tests are intentionally long.
+  "PLR2004", # Magic values are idiomatic in test assertions (HTTP codes, counts).
+  "SLF001",  # Accessing private members is sometimes necessary to test internals.
+]
+lint.per-file-ignores."config/settings/local.py" = [
+  "S701", # Local-dev settings intentionally enable Jinja2 autoescape=False stand-ins.
+]
+lint.isort.force-single-line = true
+
+[tool.pyproject-fmt]
+keep_full_version = true
+
+[tool.pytest]
+# ==== pytest ====
+ini_options.minversion = "6.0"
+ini_options.addopts = "--ds=config.settings.test --reuse-db --import-mode=importlib"
+ini_options.python_files = [
+  "tests.py",
+  "test_*.py",
+]
+
+[tool.coverage]
+# ==== Coverage ====
+run.include = [ "llm_lab/**" ]
+run.omit = [ "*/migrations/*", "*/tests/*" ]
+run.plugins = [ "django_coverage_plugin" ]
+
+# ==== mypy ====
+[tool.mypy]
+python_version = "3.13"
+check_untyped_defs = true
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+plugins = [
+  "mypy_django_plugin.main",
+]
+overrides = [
+  # Django migrations should not produce any errors:
+  { module = "*.migrations.*", ignore_errors = true },
+]
+
+[tool.django-stubs]
+django_settings_module = "config.settings.test"
+
+# ==== djLint ====
+[tool.djlint]
+blank_line_after_tag = "load,extends"
+close_void_tags = true
+extend_exclude = "frontend/"
+format_css = true
+format_js = true
+# TODO: remove T002 when fixed https://github.com/djlint/djLint/issues/687
+ignore = "H006,H016,H021,H030,H031,T002,D018"
+include = "H017,H035"
+indent = 2
+max_line_length = 119
+profile = "django"
+css.indent_size = 2
+js.indent_size = 2

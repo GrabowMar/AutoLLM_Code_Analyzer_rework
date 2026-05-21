@@ -1,0 +1,52 @@
+# Production Django environment.
+# Copy to `.envs/.production/.django` and fill in real values.
+# Do NOT commit the real file — it's gitignored.
+# ------------------------------------------------------------------------------
+
+# Domain — used throughout: traefik routing, ALLOWED_HOSTS default,
+# DEFAULT_FROM_EMAIL default, vite allowedHosts, OpenRouter HTTP-Referer.
+DJANGO_DOMAIN=example.com
+
+# Secrets
+# ------------------------------------------------------------------------------
+DJANGO_SECRET_KEY=
+DJANGO_ADMIN_URL=
+DJANGO_ALLOWED_HOSTS=example.com,www.example.com
+
+# Security
+# ------------------------------------------------------------------------------
+DJANGO_SECURE_SSL_REDIRECT=False
+
+# Email
+# ------------------------------------------------------------------------------
+MAILGUN_API_KEY=
+DJANGO_SERVER_EMAIL=
+MAILGUN_DOMAIN=
+
+# AWS
+# ------------------------------------------------------------------------------
+DJANGO_AWS_ACCESS_KEY_ID=
+DJANGO_AWS_SECRET_ACCESS_KEY=
+DJANGO_AWS_STORAGE_BUCKET_NAME=
+
+# django-allauth
+# ------------------------------------------------------------------------------
+DJANGO_ACCOUNT_ALLOW_REGISTRATION=True
+
+# Redis
+# ------------------------------------------------------------------------------
+REDIS_URL=redis://redis:6379/0
+
+# Celery Flower
+# ------------------------------------------------------------------------------
+CELERY_FLOWER_USER=
+CELERY_FLOWER_PASSWORD=
+
+# OpenRouter — get a key at https://openrouter.ai/keys
+# ------------------------------------------------------------------------------
+# Optional global fallback key. In production we recommend leaving this empty
+# and requiring every user to add their own key via Settings → API Access
+# (stored encrypted in the DB). Set OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK=False
+# to enforce per-user keys.
+OPENROUTER_API_KEY=
+OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK=False

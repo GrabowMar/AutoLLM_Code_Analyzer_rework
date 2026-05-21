@@ -1,0 +1,10 @@
+# Production frontend (SvelteKit) environment.
+# ------------------------------------------------------------------------------
+NODE_ENV=production
+PORT=8080
+HOST=0.0.0.0
+API_TARGET=http://django:8000
+
+# Public origin (used by SvelteKit for CSRF / cookies). Must match the URL
+# users actually visit, e.g. https://example.com.
+ORIGIN=https://example.com

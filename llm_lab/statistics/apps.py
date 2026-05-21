@@ -1,0 +1,9 @@
+from __future__ import annotations
+
+from django.apps import AppConfig
+
+
+class StatisticsConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "llm_lab.statistics"
+    verbose_name = "Statistics"

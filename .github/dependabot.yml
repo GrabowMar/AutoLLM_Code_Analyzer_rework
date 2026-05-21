@@ -1,0 +1,88 @@
+# Dependabot config — weekly cadence, broad grouping, fewer noisy PRs.
+# Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # GitHub Actions
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  # Docker images — Python base images (local + docs + production)
+  - package-ecosystem: 'docker'
+    directories:
+      - 'compose/local/django/'
+      - 'compose/local/docs/'
+      - 'compose/production/django/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    # Ignore Python major/minor bumps (these are project decisions)
+    ignore:
+      - dependency-name: '*'
+        update-types:
+          - 'version-update:semver-major'
+          - 'version-update:semver-minor'
+    groups:
+      docker-python:
+        patterns: ['*']
+
+  # Docker images — everything else (node, postgres, redis, traefik, nginx…)
+  - package-ecosystem: 'docker'
+    directories:
+      - 'compose/local/node/'
+      - 'compose/production/aws/'
+      - 'compose/production/postgres/'
+      - 'compose/production/traefik/'
+      - 'compose/production/nginx/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    open-pull-requests-limit: 5
+    groups:
+      docker-infra:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  # Compose files
+  - package-ecosystem: 'docker-compose'
+    directories:
+      - '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    groups:
+      docker-compose:
+        patterns: ['*']
+
+  # Python / uv
+  - package-ecosystem: 'uv'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    open-pull-requests-limit: 10
+    groups:
+      python-minor:
+        update-types: ['minor', 'patch']
+      python-major:
+        update-types: ['major']
+
+  # Frontend / npm
+  - package-ecosystem: 'npm'
+    directory: '/frontend'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor:
+        update-types: ['minor', 'patch']
+      npm-major:
+        update-types: ['major']
