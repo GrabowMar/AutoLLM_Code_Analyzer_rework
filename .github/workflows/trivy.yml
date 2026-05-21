@@ -65,6 +65,7 @@ jobs:
 
       - name: Seed production env files from examples
         run: |
+          shopt -s dotglob
           for f in .envs/.production/*.example; do
             cp -n "$f" "${f%.example}"
           done
