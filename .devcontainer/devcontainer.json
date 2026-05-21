@@ -1,6 +1,7 @@
 // For format details, see https://containers.dev/implementors/json_reference/
 {
     "name": "llm_lab_dev",
+    "initializeCommand": "cd ${localWorkspaceFolder} && python scripts/bootstrap.py",
     "dockerComposeFile": [
         "../docker-compose.local.yml"
     ],
@@ -17,9 +18,8 @@
             "type": "bind"
         }
     ],
-    // Tells devcontainer.json supporting services / tools whether they should run
-    // /bin/sh -c "while sleep 1000; do :; done" when starting the container instead of the container’s default command
-    "overrideCommand": false,
+    // Keep django alive for VS Code attach; app server starts in postAttach (see post-attach.sh).
+    "overrideCommand": true,
     "service": "django",
     // "remoteEnv": {"PATH": "/home/dev-user/.local/bin:${containerEnv:PATH}"},
     "remoteUser": "dev-user",
@@ -59,10 +59,6 @@
             ]
         }
     },
-    // Uncomment the next line if you want start specific services in your Docker Compose config.
-    // "runServices": [],
-    // Uncomment the next line if you want to keep your containers running after VS Code shuts down.
-    // "shutdownAction": "none",
-    // Uncomment the next line to run commands after the container is created.
-    "postCreateCommand": "git config --global --add safe.directory /app && cat .devcontainer/bashrc.override.sh >> ~/.bashrc"
+    "postCreateCommand": "git config --global --add safe.directory /app && cat .devcontainer/bashrc.override.sh >> ~/.bashrc",
+    "postAttachCommand": "bash .devcontainer/post-attach.sh"
 }

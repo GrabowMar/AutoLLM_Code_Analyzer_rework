@@ -6,6 +6,106 @@
 
 Solutions for common issues in ThesisAppRework.
 
+## Dev Containers / Docker Compose
+
+### Postgres `password authentication failed` / django container exits
+
+**Symptoms:** `django-1` stops in Docker Desktop; logs show
+`FATAL: password authentication failed for user "..."`; Dev Containers reports
+`container ... is not running` or exit code 137 after reconnect.
+
+**Cause:** Postgres only reads `POSTGRES_USER` / `POSTGRES_PASSWORD` when its
+data volume is **first created**. Re-running bootstrap (or editing
+`.envs/.local/.postgres`) does not change credentials inside an existing volume.
+
+**Solution:** Reset the local DB volume, then start again:
+
+```bash
+docker compose -f docker-compose.local.yml down -v
+# or: just prune
+just up
+```
+
+You will need to run migrations and recreate a superuser afterward. To keep
+data, restore the old `.postgres` file from backup instead of resetting the
+volume.
+
+### `env file ... .envs/.local/.django not found`
+
+**Symptoms:** VS Code Dev Containers or `docker compose -f docker-compose.local.yml config`
+fails because `.envs/.local/.django` (or `.postgres`) is missing.
+
+**Cause:** Real env files are gitignored; only `*.example` templates are committed.
+
+**Solution:**
+
+```bash
+python scripts/bootstrap.py
+# or: just bootstrap
+```
+
+Then confirm Compose parses:
+
+```bash
+docker compose -f docker-compose.local.yml config
+```
+
+Reopen the folder with **Dev Containers: Reopen in Container**. Fresh clones
+should auto-bootstrap via `initializeCommand` in `.devcontainer/devcontainer.json`.
+
+### WSL `Read-only file system` when connecting
+
+**Symptoms:** Log shows `Could not connect to WSL` and `mkdir: can't create directory '/root/.vscode-remote-containers/...': Read-only file system` for the `docker-desktop` distro.
+
+**Cause:** VS Code tried to install its server into Docker Desktop's minimal WSL VM.
+
+**Solution:** Usually safe to ignore if `docker version` succeeds and the dev
+container build continues. Ensure Docker Desktop is running; use Dev Containers
+with the Docker engine, not WSL-as-remote-host, if attach still fails.
+
+### VS Code Server install fails with exit code 137
+
+**Symptoms:** Containers start (`up 9/9` or similar), then the log ends with
+`Exit code 137`, `Shell server terminated`, or `Keep-alive process ended` while
+“Installing VS Code Server”.
+
+**Cause:** Exit 137 is SIGKILL — often **out-of-memory**. Starting every Compose
+service (Django, Celery worker/beat, Flower, frontend, Postgres, Redis, Mailpit)
+plus unpacking VS Code Server can exceed Docker Desktop’s memory limit on Windows.
+
+**Solution:**
+
+1. Docker Desktop → **Settings → Resources** → set memory to **at least 4 GB**
+   (8 GB if you run the full stack often).
+2. Stop unused stacks: `docker compose -f docker-compose.local.yml down`, then
+   **Rebuild and Reopen in Container**.
+3. If only four containers are running (no `frontend`, `celeryworker`, etc.),
+   start the full stack from the project root on the host:
+   `docker compose -f docker-compose.local.yml up -d` or `just up`.
+
+### Only postgres / redis / mailpit / django are running
+
+**Symptoms:** Docker Desktop shows four containers; <http://localhost:8000> does
+not load; Celery tasks never run.
+
+**Cause:** An older devcontainer config limited `runServices`, or attach failed
+before the rest of the stack started.
+
+**Solution:** Rebuild the dev container after updating
+[`.devcontainer/devcontainer.json`](../.devcontainer/devcontainer.json), or run
+`docker compose -f docker-compose.local.yml up -d` from the host.
+
+### Git `dubious ownership` at `/app`
+
+**Symptoms:** `fatal: detected dubious ownership in repository at '/app'`.
+
+**Solution:** Run inside the dev container (or rely on `postCreateCommand` after
+a successful attach):
+
+```bash
+git config --global --add safe.directory /app
+```
+
 ## Quick Diagnostics
 
 ```bash

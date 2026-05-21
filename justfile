@@ -11,7 +11,7 @@ default:
 
 # bootstrap: Create local .env files from templates and generate secrets.
 bootstrap:
-    @./scripts/bootstrap.sh
+    @python scripts/bootstrap.py
 
 # build: Build python image.
 build *args:
