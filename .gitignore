@@ -298,3 +298,7 @@ frontend/playwright-report/
 /login_probe.png
 /ss_*.png
 *.local.png
+
+# curl / wget cookie jars (may contain session/CSRF tokens)
+cookies.txt
+**/cookies.txt

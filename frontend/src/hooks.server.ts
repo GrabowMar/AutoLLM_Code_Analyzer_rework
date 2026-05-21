@@ -4,6 +4,20 @@ const API_TARGET = process.env.API_TARGET ?? "http://localhost:8001";
 
 const PROXY_PREFIXES = ["/api/", "/_allauth/", "/admin/", "/media/"];
 
+function buildProxyHeaders(
+  clientRequest: Request,
+  clientUrl: URL,
+): Headers {
+  const headers = new Headers(clientRequest.headers);
+  const proto = clientUrl.protocol.replace(":", "");
+  headers.set("X-Forwarded-Host", clientUrl.host);
+  headers.set("X-Forwarded-Proto", proto);
+  headers.set("X-Forwarded-For", "127.0.0.1");
+  // Preserve the browser Host so Django does not see the internal API_TARGET host.
+  headers.set("Host", clientUrl.host);
+  return headers;
+}
+
 export const handle: Handle = async ({ event, resolve }) => {
   const path = event.url.pathname;
 
@@ -16,7 +30,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 
     const upstream = await fetch(targetUrl, {
       method: event.request.method,
-      headers: event.request.headers,
+      headers: buildProxyHeaders(event.request, event.url),
       body: reqBody,
       // @ts-expect-error Node 18+ fetch supports duplex
       duplex: reqBody ? "half" : undefined,

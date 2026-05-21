@@ -1,5 +1,6 @@
 <script lang="ts">
 	import '../app.css';
+	import { ensureCsrfCookie } from '$lib/api/core';
 	import { getAuth } from '$lib/stores/auth.svelte';
 	import { Toaster } from '$lib/components/ui/sonner';
 	import { ModeWatcher } from 'mode-watcher';
@@ -9,7 +10,8 @@
 	let { children } = $props();
 	const auth = getAuth();
 
-	onMount(() => {
+	onMount(async () => {
+		await ensureCsrfCookie();
 		auth.checkSession();
 		// Signal to the hydration watchdog that JS loaded successfully
 		(window as any).__sveltekit_hydrated = true;

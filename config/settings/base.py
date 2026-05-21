@@ -337,11 +337,18 @@ SOCIALACCOUNT_FORMS = {"signup": "llm_lab.users.forms.UserSocialSignupForm"}
 # django-allauth headless
 # ------------------------------------------------------------------------------
 HEADLESS_ONLY = True
-HEADLESS_FRONTEND_URLS = {
-    "account_confirm_email": "/auth/verify-email/{key}",
-    "account_reset_password_from_key": "/auth/password/reset/{key}",
-    "account_signup": "/auth/signup",
-}
+# HEADLESS_FRONTEND_URLS is set below (after DJANGO_DOMAIN / FRONTEND_PUBLIC_ORIGIN).
+
+
+def build_headless_frontend_urls(origin: str) -> dict[str, str]:
+    """Absolute URLs for links in allauth emails (required for headless mode)."""
+    base = origin.rstrip("/")
+    return {
+        "account_confirm_email": f"{base}/auth/verify-email/{{key}}",
+        "account_reset_password": f"{base}/auth/password/reset",
+        "account_reset_password_from_key": f"{base}/auth/password/reset/{{key}}",
+        "account_signup": f"{base}/auth/signup",
+    }
 
 
 # Your stuff...
@@ -350,6 +357,13 @@ HEADLESS_FRONTEND_URLS = {
 # `HTTP-Referer` we send to OpenRouter. Override in env per environment.
 DJANGO_DOMAIN = env("DJANGO_DOMAIN", default="example.com")
 SITE_NAME = env("SITE_NAME", default="LLM Eval Lab")
+
+# Browser-reachable origin for the SvelteKit app (email links, redirects).
+# Must not be an internal Docker hostname (e.g. django:8000).
+FRONTEND_PUBLIC_ORIGIN = env("FRONTEND_PUBLIC_ORIGIN", default="").strip().rstrip("/")
+HEADLESS_FRONTEND_URLS = build_headless_frontend_urls(
+    FRONTEND_PUBLIC_ORIGIN or f"https://{DJANGO_DOMAIN}",
+)
 
 OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/models"

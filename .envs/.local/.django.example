@@ -28,6 +28,11 @@ OPENROUTER_API_KEY=
 # shared deployments). Defaults to True.
 OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK=True
 
+# Public URL of the SvelteKit app in the browser (used in verification/reset emails).
+# Must match how you open the app — not the internal Docker service name.
+# ------------------------------------------------------------------------------
+FRONTEND_PUBLIC_ORIGIN=http://localhost:8000
+
 # Hosts / CORS
 # Set these when accessing the app from a non-localhost domain.
 # ------------------------------------------------------------------------------

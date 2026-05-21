@@ -99,5 +99,19 @@ CSRF_TRUSTED_ORIGINS = env.list(
 CSRF_COOKIE_HTTPONLY = False  # SvelteKit needs to read the CSRF token from the cookie
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
+
+# django-allauth — optional locally so you can log in without Mailpit during dev.
+# Production stays mandatory via base.py. Override: ACCOUNT_EMAIL_VERIFICATION=mandatory
+# ------------------------------------------------------------------------------
+ACCOUNT_EMAIL_VERIFICATION = env("ACCOUNT_EMAIL_VERIFICATION", default="optional")
+
+# django-allauth headless — absolute email links (see base.build_headless_frontend_urls)
+# ------------------------------------------------------------------------------
+FRONTEND_PUBLIC_ORIGIN = env(
+    "FRONTEND_PUBLIC_ORIGIN",
+    default="http://localhost:8000",
+).strip().rstrip("/")
+HEADLESS_FRONTEND_URLS = build_headless_frontend_urls(FRONTEND_PUBLIC_ORIGIN)  # noqa: F405
+
 # Your stuff...
 # ------------------------------------------------------------------------------

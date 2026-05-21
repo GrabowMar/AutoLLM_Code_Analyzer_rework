@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { formatApiError } from '$lib/api/core';
 	import { getAuth } from '$lib/stores/auth.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -30,14 +31,9 @@
 				error = res.error || 'Sign up failed. Please try again.';
 				return;
 			}
-			goto('/auth/verify-email');
+			goto('/auth/verify-email?created=1');
 		} catch (err: unknown) {
-			const e = err as { errors?: Array<{ message: string }> };
-			if (e.errors?.length) {
-				error = e.errors.map((e) => e.message).join('. ');
-			} else {
-				error = 'Sign up failed. Please try again.';
-			}
+			error = formatApiError(err, 'Sign up failed. Please try again.');
 		} finally {
 			submitting = false;
 		}

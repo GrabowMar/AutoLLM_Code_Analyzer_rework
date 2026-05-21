@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { formatApiError } from '$lib/api/core';
 	import { getAuth } from '$lib/stores/auth.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -20,10 +21,14 @@
 
 		try {
 			const res = await auth.login(email, password);
-			// Check for pending flows (e.g. 2FA)
 			if (!res.ok && res.pendingFlow) {
 				if (res.pendingFlow === 'mfa_authenticate') {
 					goto('/auth/2fa');
+					return;
+				}
+				if (res.pendingFlow === 'verify_email') {
+					error =
+						'Please verify your email before signing in. Check Mailpit at http://localhost:8025 for the verification link.';
 					return;
 				}
 			}
@@ -33,12 +38,7 @@
 			}
 			goto('/');
 		} catch (err: unknown) {
-			const e = err as { errors?: Array<{ message: string }> };
-			if (e.errors?.length) {
-				error = e.errors.map((e) => e.message).join('. ');
-			} else {
-				error = 'Login failed. Please check your credentials.';
-			}
+			error = formatApiError(err, 'Login failed. Please check your credentials.');
 		} finally {
 			submitting = false;
 		}

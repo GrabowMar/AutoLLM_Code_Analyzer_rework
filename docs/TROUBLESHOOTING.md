@@ -30,6 +30,92 @@ You will need to run migrations and recreate a superuser afterward. To keep
 data, restore the old `.postgres` file from backup instead of resetting the
 volume.
 
+### Login shows "Please check your credentials" right after sign up
+
+**Symptoms:** Sign up appears to fail, or login always says credentials are wrong even with
+the correct password.
+
+**Causes:**
+
+1. **Email not verified** (when `ACCOUNT_EMAIL_VERIFICATION=mandatory`) — login returns HTTP
+   `401` with a `verify_email` pending flow, not a password error. Open Mailpit
+   (http://localhost:8025), click the verification link, then log in.
+2. **Local dev default is now `optional`** — after restarting Django, you can log in without
+   verifying. Hard-refresh the browser (Ctrl+Shift+R) so the frontend picks up auth fixes.
+3. **Wrong or outdated password** — password reset links are one-time; use only the newest
+   Mailpit reset email.
+
+### Sign up shows "Sign up failed" on `/auth/signup`
+
+**Symptoms:** Generic error on the Create Account page; browser Network tab shows
+`POST /_allauth/browser/v1/auth/signup` failing.
+
+**Diagnose:**
+
+1. Open DevTools → Network → submit the form. Note the HTTP status and JSON body.
+2. Check Django: `docker compose -f docker-compose.local.yml logs django --tail=80`
+3. Confirm Mailpit is running: `docker compose -f docker-compose.local.yml ps mailpit`
+   (verification emails go to http://localhost:8025).
+
+**Common causes:**
+
+| Status | Cause | Fix |
+|--------|--------|-----|
+| 403 | Missing CSRF cookie/token | Hard-refresh the page. The app loads `GET /_allauth/browser/v1/config` on startup to set `csrftoken`. |
+| 500 / failed fetch | Django not listening | With Dev Containers, Django starts in the background via `post-attach.sh`. Otherwise run `docker compose -f docker-compose.local.yml up -d django` and check logs. |
+| 400 | Weak/common password or validation error | Use a stronger password; the UI should now show the API message. |
+| 409 / field error | Email already registered | Use another email or remove the user in admin. |
+
+**Dev Container note:** `overrideCommand` keeps the `django` service alive for VS Code
+attach; the app server is started by `.devcontainer/post-attach.sh`. If signup fails
+with HTTP 500, read `/tmp/django-start.log` inside the container.
+
+**URL note:** If you open the app at `http://127.0.0.1:8000` instead of
+`http://localhost:8000`, add both to `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS`
+in `.envs/.local/.django`.
+
+### Password reset shows "failed" but the link looks valid
+
+**Symptoms:** Submitting a new password on `/auth/password/reset/{key}` always shows a
+generic failure, even for a fresh link from Mailpit.
+
+**Causes:**
+
+1. **Stale token** — Reset links are one-time. After `docker compose down -v` or a failed
+   attempt, request a new link at `/auth/password/reset`.
+2. **HTTP 401 treated as error** — django-allauth returns `401` with login/signup flows
+   after a successful reset (same as signup + email verification). Older frontend code
+   treated any non-2xx response as failure.
+3. **CSRF / host mismatch** — Submit without a CSRF cookie returns HTTP 403 (generic
+   failure). Use the same host as in the email (`http://localhost:8000`, not
+   `http://127.0.0.1:8000`) and allow cookies.
+
+**Solution:** Hard-refresh the app (Ctrl+Shift+R), request a new reset email, and use the
+**top / newest** Mailpit message only (http://localhost:8025). Links must start with
+`http://localhost:8000/auth/password/reset/...`.
+
+Only the **most recent** reset email works. Requesting again invalidates older links (for
+example `2-d8y7fn-...` stops working as soon as a newer reset is sent). Each link is also
+**one-time**: after a successful submit, use login or request another reset.
+
+If submit seemed to fail but may have succeeded (older UI bug around HTTP 401), try logging
+in before requesting yet another reset.
+
+### Email verification link opens `http://django:8000/...` (DNS_PROBE_FINISHED_NXDOMAIN)
+
+**Symptoms:** Mailpit (or your inbox) shows a link to `django:8000`; the browser cannot
+resolve host `django`.
+
+**Cause:** Verification emails must use an absolute public URL. Relative
+`HEADLESS_FRONTEND_URLS` paths were combined with the internal proxy host (`django:8000`).
+
+**Solution:**
+
+1. Set `FRONTEND_PUBLIC_ORIGIN` in `.envs/.local/.django` to how you open the app, e.g.
+   `http://localhost:8000` (must match the host in your browser, not `django:8000`).
+2. Restart Django: `docker compose -f docker-compose.local.yml restart django`
+3. Sign up again (or resend verification) and use the **new** email link.
+
 ### `env file ... .envs/.local/.django not found`
 
 **Symptoms:** VS Code Dev Containers or `docker compose -f docker-compose.local.yml config`

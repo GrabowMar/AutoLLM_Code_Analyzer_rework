@@ -1,4 +1,9 @@
-import { allauthFetch, apiFetch } from "./core";
+import {
+  allauthFetch,
+  apiFetch,
+  isAllauthMutationSuccess,
+  parseAllauthJson,
+} from "./core";
 
 export interface ApiUser {
   email: string;
@@ -63,18 +68,34 @@ export async function requestPasswordReset(email: string): Promise<void> {
   }
 }
 
+export async function validatePasswordResetKey(key: string): Promise<void> {
+  const res = await allauthFetch("/auth/password/reset", {
+    method: "GET",
+    headers: { "X-Password-Reset-Key": key },
+  });
+  if (res.ok) return;
+  const body = await parseAllauthJson(res);
+  throw body;
+}
+
 export async function resetPassword(
   key: string,
   password: string,
 ): Promise<void> {
   const res = await allauthFetch("/auth/password/reset", {
     method: "POST",
+    headers: { "X-Password-Reset-Key": key },
     body: JSON.stringify({ key, password }),
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw body;
+  const body = await parseAllauthJson(res);
+  if (isAllauthMutationSuccess(res, body)) return;
+  if (res.status === 403) {
+    throw {
+      message:
+        "Security check failed (CSRF). Hard-refresh this page (Ctrl+F5), then submit again using only the newest reset email.",
+    };
   }
+  throw body;
 }
 
 export async function updateMe(data: { name: string }): Promise<ApiUser> {
@@ -90,8 +111,7 @@ export async function verifyEmail(key: string): Promise<void> {
     method: "POST",
     body: JSON.stringify({ key }),
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw body;
-  }
+  const body = await parseAllauthJson(res);
+  if (isAllauthMutationSuccess(res, body)) return;
+  throw body;
 }

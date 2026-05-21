@@ -1,10 +1,11 @@
-const ALLAUTH_BASE = "/_allauth/browser/v1";
-
-function getCsrfToken(): string {
-  if (typeof document === "undefined") return "";
-  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
+import {
+  ALLAUTH_BASE,
+  ensureCsrfCookie,
+  formatApiError,
+  getCsrfToken,
+  parseAllauthAuthResponse,
+  parseAllauthJson,
+} from "$lib/api/core";
 
 interface AuthUser {
   id: number;
@@ -22,6 +23,17 @@ interface LoginResult {
 interface SignupResult {
   ok: boolean;
   error?: string;
+  pendingFlow?: string;
+}
+
+function mapUser(raw: Record<string, unknown> | undefined): AuthUser | null {
+  if (!raw || typeof raw.email !== "string") return null;
+  return {
+    id: typeof raw.id === "number" ? raw.id : Number(raw.id),
+    email: raw.email,
+    display: typeof raw.display === "string" ? raw.display : undefined,
+    name: typeof raw.name === "string" ? raw.name : undefined,
+  };
 }
 
 function createAuth() {
@@ -32,6 +44,7 @@ function createAuth() {
   async function checkSession() {
     isLoading = true;
     try {
+      await ensureCsrfCookie();
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
       const res = await fetch(`${ALLAUTH_BASE}/auth/session`, {
@@ -39,10 +52,12 @@ function createAuth() {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
-      const body = await res.json();
-      if (res.ok && body.data?.user) {
+      const body = await parseAllauthJson(res);
+      const parsed = parseAllauthAuthResponse(res, body, "");
+      const mapped = mapUser(parsed.user);
+      if (parsed.ok && mapped) {
         isAuthenticated = true;
-        user = body.data.user;
+        user = mapped;
       } else {
         isAuthenticated = false;
         user = null;
@@ -56,6 +71,7 @@ function createAuth() {
   }
 
   async function login(email: string, password: string): Promise<LoginResult> {
+    await ensureCsrfCookie();
     const res = await fetch(`${ALLAUTH_BASE}/auth/login`, {
       method: "POST",
       headers: {
@@ -65,27 +81,38 @@ function createAuth() {
       credentials: "include",
       body: JSON.stringify({ email, password }),
     });
-    const body = await res.json();
+    const body = await parseAllauthJson(res);
+    const parsed = parseAllauthAuthResponse(
+      res,
+      body,
+      `Login failed (HTTP ${res.status}).`,
+    );
 
-    if (res.ok && body.data?.user) {
-      isAuthenticated = true;
-      user = body.data.user;
-      return { ok: true };
-    }
-
-    // Check for pending flows (e.g. MFA)
-    if (body.data?.flows) {
-      const pending = body.data.flows.find(
-        (f: { id: string; is_pending?: boolean }) => f.is_pending,
-      );
-      if (pending) {
-        return { ok: false, pendingFlow: pending.id };
+    if (parsed.ok) {
+      const mapped = mapUser(parsed.user);
+      if (mapped) {
+        isAuthenticated = true;
+        user = mapped;
+        return { ok: true };
       }
     }
 
-    const errors = body.errors as Array<{ message: string }> | undefined;
-    const errorMsg = errors?.map((e) => e.message).join(". ");
-    return { ok: false, error: errorMsg };
+    if (parsed.pendingFlow) {
+      if (import.meta.env.DEV) {
+        console.error("login pending flow", res.status, body);
+      }
+      return { ok: false, pendingFlow: parsed.pendingFlow };
+    }
+
+    if (import.meta.env.DEV) {
+      console.error("login failed", res.status, body);
+    }
+    return {
+      ok: false,
+      error:
+        parsed.error ||
+        "Login failed. Please check your credentials.",
+    };
   }
 
   async function signup(
@@ -93,6 +120,7 @@ function createAuth() {
     password: string,
     _password2: string,
   ): Promise<SignupResult> {
+    await ensureCsrfCookie();
     const res = await fetch(`${ALLAUTH_BASE}/auth/signup`, {
       method: "POST",
       headers: {
@@ -102,20 +130,38 @@ function createAuth() {
       credentials: "include",
       body: JSON.stringify({ email, password }),
     });
-    const body = await res.json();
+    const body = await parseAllauthJson(res);
+    const parsed = parseAllauthAuthResponse(
+      res,
+      body,
+      `Sign up failed (HTTP ${res.status}).`,
+    );
 
-    if (res.ok || res.status === 401) {
-      // 401 with email_verification_sent flow is expected
+    // Signup success: 200 with user, or 401 with verify_email pending
+    if (parsed.ok) {
       return { ok: true };
     }
+    if (parsed.pendingFlow === "verify_email") {
+      return { ok: true, pendingFlow: "verify_email" };
+    }
+    if (res.status === 401 && parsed.pendingFlow) {
+      return { ok: true, pendingFlow: parsed.pendingFlow };
+    }
 
-    const errors = body.errors as Array<{ message: string }> | undefined;
-    const errorMsg = errors?.map((e) => e.message).join(". ");
-    return { ok: false, error: errorMsg };
+    if (import.meta.env.DEV) {
+      console.error("signup failed", res.status, body);
+    }
+    return {
+      ok: false,
+      error:
+        parsed.error ||
+        "Sign up failed. Please try again.",
+    };
   }
 
   async function logout(): Promise<void> {
     try {
+      await ensureCsrfCookie();
       await fetch(`${ALLAUTH_BASE}/auth/session`, {
         method: "DELETE",
         headers: {

@@ -46,7 +46,9 @@
 				<Alert>
 					<AlertDescription>
 						If an account exists with that email, we've sent a password reset link.
-						Check your inbox.
+						Open the <strong>latest</strong> message only — in local dev, see
+						<a href="http://localhost:8025" class="underline" target="_blank" rel="noreferrer">Mailpit</a>.
+						Older reset emails stop working after you request a new one.
 					</AlertDescription>
 				</Alert>
 			{:else}
