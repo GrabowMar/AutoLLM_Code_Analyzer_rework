@@ -56,12 +56,8 @@ def _build_auth_error(status_code: int, body: str) -> OpenRouterError:
     return OpenRouterError(
         f"API error {status_code}: {body[:500]}",
         status_code=status_code,
-        user_facing_message=(
-            "OpenRouter rejected the API key used for this request."
-        ),
-        remediation=(
-            "Update or rotate your OpenRouter API key in Settings → API Access."
-        ),
+        user_facing_message=("OpenRouter rejected the API key used for this request."),
+        remediation=("Update or rotate your OpenRouter API key in Settings → API Access."),
     )
 
 
@@ -155,9 +151,8 @@ class OpenRouterClient:
 
                 if response.status_code != HTTP_200_OK:
                     error_body = response.text[:500]
-                    if response.status_code == 401 or (  # noqa: PLR2004
-                        response.status_code == 403  # noqa: PLR2004
-                        and any(f in error_body.lower() for f in _AUTH_HINT_FRAGMENTS)
+                    if response.status_code == 401 or (
+                        response.status_code == 403 and any(f in error_body.lower() for f in _AUTH_HINT_FRAGMENTS)
                     ):
                         raise _build_auth_error(response.status_code, error_body)
                     msg = f"API error {response.status_code}: {error_body}"

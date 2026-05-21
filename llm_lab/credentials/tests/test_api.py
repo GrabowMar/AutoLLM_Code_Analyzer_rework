@@ -7,8 +7,8 @@ from django.test import Client
 
 from llm_lab.credentials.models import Provider
 from llm_lab.credentials.models import UserApiCredential
-from llm_lab.credentials.services.validator import ValidationResult
 from llm_lab.credentials.models import ValidationStatus
+from llm_lab.credentials.services.validator import ValidationResult
 
 pytestmark = pytest.mark.django_db
 

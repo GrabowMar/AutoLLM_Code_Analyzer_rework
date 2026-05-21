@@ -62,6 +62,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Bootstrap env files
+        run: ./scripts/bootstrap.sh
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 

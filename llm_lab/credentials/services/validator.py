@@ -34,7 +34,7 @@ class ValidationResult:
         return self.status == ValidationStatus.VALID
 
 
-def validate_openrouter_key(api_key: str, *, timeout: int = DEFAULT_TIMEOUT) -> ValidationResult:
+def validate_openrouter_key(api_key: str, *, timeout: int = DEFAULT_TIMEOUT) -> ValidationResult:  # noqa: PLR0911
     """Probe OpenRouter to check whether ``api_key`` is accepted.
 
     Hits ``GET /api/v1/key`` which is cheap and returns metadata about the
@@ -78,7 +78,7 @@ def validate_openrouter_key(api_key: str, *, timeout: int = DEFAULT_TIMEOUT) -> 
     )
 
 
-def validate_huggingface_key(
+def validate_huggingface_key(  # noqa: PLR0911
     api_key: str,
     *,
     timeout: int = DEFAULT_TIMEOUT,

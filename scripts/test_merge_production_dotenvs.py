@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+
 from scripts.merge_production_dotenvs import merge
 
 

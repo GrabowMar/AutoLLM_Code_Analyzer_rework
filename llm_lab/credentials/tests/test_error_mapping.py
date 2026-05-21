@@ -20,10 +20,13 @@ def _fake_response(status_code: int, body: str) -> MagicMock:
 
 def test_401_user_not_found_maps_to_friendly_error():
     client = OpenRouterClient(api_key="bad")
-    with patch(
-        "llm_lab.generation.services.openrouter_client.requests.post",
-        return_value=_fake_response(401, '{"error":{"message":"User not found.","code":401}}'),
-    ), pytest.raises(OpenRouterError) as exc_info:
+    with (
+        patch(
+            "llm_lab.generation.services.openrouter_client.requests.post",
+            return_value=_fake_response(401, '{"error":{"message":"User not found.","code":401}}'),
+        ),
+        pytest.raises(OpenRouterError) as exc_info,
+    ):
         client.chat_completion(model="x", messages=[{"role": "user", "content": "hi"}])
 
     err = exc_info.value
@@ -37,10 +40,13 @@ def test_401_user_not_found_maps_to_friendly_error():
 
 def test_non_auth_error_is_not_remapped():
     client = OpenRouterClient(api_key="ok")
-    with patch(
-        "llm_lab.generation.services.openrouter_client.requests.post",
-        return_value=_fake_response(400, '{"error":"bad request"}'),
-    ), pytest.raises(OpenRouterError) as exc_info:
+    with (
+        patch(
+            "llm_lab.generation.services.openrouter_client.requests.post",
+            return_value=_fake_response(400, '{"error":"bad request"}'),
+        ),
+        pytest.raises(OpenRouterError) as exc_info,
+    ):
         client.chat_completion(model="x", messages=[{"role": "user", "content": "hi"}])
 
     err = exc_info.value
