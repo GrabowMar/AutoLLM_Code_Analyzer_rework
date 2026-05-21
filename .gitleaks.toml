@@ -1,0 +1,19 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project-wide allowlist for documented false positives."
+
+paths = [
+  # `*.example` env templates are intentionally committed placeholders.
+  '''(^|/)\.envs/.*\.example$''',
+]
+
+[[rules]]
+id = "curl-auth-header"
+
+  [rules.allowlist]
+  description = "TokenSection.svelte renders a curl example with the literal placeholder `YOUR_TOKEN` for users."
+  paths = [
+    '''frontend/src/lib/components/users-settings/TokenSection\.svelte''',
+  ]
