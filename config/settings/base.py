@@ -156,6 +156,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "allauth.account.middleware.AccountMiddleware",
+    "llm_lab.users.middleware.RememberMeMiddleware",
 ]
 
 # STATIC
@@ -178,6 +179,12 @@ STATICFILES_FINDERS = [
 MEDIA_ROOT = str(APPS_DIR / "media")
 # https://docs.djangoproject.com/en/dev/ref/settings/#media-url
 MEDIA_URL = "/media/"
+
+# Copilot (Aider) generation workspaces
+# ------------------------------------------------------------------------------
+GENERATION_WORKSPACE_ROOT = str(Path(MEDIA_ROOT) / "generation_workspaces")
+AIDER_COPILOT_TIMEOUT_SECONDS = env.int("AIDER_COPILOT_TIMEOUT_SECONDS", default=600)
+AIDER_AUTO_TEST = env.bool("AIDER_AUTO_TEST", default=True)
 
 # TEMPLATES
 # ------------------------------------------------------------------------------
@@ -219,6 +226,8 @@ FIXTURE_DIRS = (str(APPS_DIR / "fixtures"),)
 # ------------------------------------------------------------------------------
 # https://docs.djangoproject.com/en/dev/ref/settings/#session-cookie-httponly
 SESSION_COOKIE_HTTPONLY = True
+# Long-lived sessions when "Stay logged in" is checked (see AccountAdapter.login).
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 30  # 30 days
 # https://docs.djangoproject.com/en/dev/ref/settings/#csrf-cookie-httponly
 # Must be False so the SvelteKit frontend can read the token from document.cookie
 # and send it in the X-CSRFToken header for API requests.

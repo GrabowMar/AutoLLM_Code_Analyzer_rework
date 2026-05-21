@@ -21,6 +21,13 @@ function buildProxyHeaders(
 export const handle: Handle = async ({ event, resolve }) => {
   const path = event.url.pathname;
 
+  if (path === "/favicon.png" || path === "/favicon.ico") {
+    return new Response(null, {
+      status: 302,
+      headers: { Location: "/favicon.svg" },
+    });
+  }
+
   if (PROXY_PREFIXES.some((prefix) => path.startsWith(prefix))) {
     const targetUrl = `${API_TARGET}${path}${event.url.search}`;
     const reqBody =
@@ -46,7 +53,16 @@ export const handle: Handle = async ({ event, resolve }) => {
   return resolve(event);
 };
 
-export const handleError: HandleServerError = async ({ error }) => {
+export const handleError: HandleServerError = async ({ error, status }) => {
+  const message = error instanceof Error ? error.message : String(error);
+  // Missing static assets (favicon, old PWA paths) should not spam logs or mask real errors.
+  if (
+    status === 404 &&
+    (/favicon\.(png|ico|svg)/i.test(message) ||
+      /^Not found: \/(_app|sw\.js|favicon)/i.test(message))
+  ) {
+    return { message: "Not found" };
+  }
   console.error("Server error:", error);
   return {
     message: "An unexpected error occurred",

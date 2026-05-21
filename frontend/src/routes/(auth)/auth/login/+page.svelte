@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { formatApiError } from '$lib/api/core';
 	import { getAuth } from '$lib/stores/auth.svelte';
@@ -9,10 +10,38 @@
 
 	const auth = getAuth();
 
+	const REMEMBER_KEY = 'llm_lab_stay_logged_in';
+
 	let email = $state('');
 	let password = $state('');
+	let stayLoggedIn = $state(true);
 	let error = $state('');
 	let submitting = $state(false);
+
+	onMount(() => {
+		try {
+			const saved = localStorage.getItem(REMEMBER_KEY);
+			if (saved !== null) {
+				stayLoggedIn = saved === '1';
+			}
+		} catch {
+			// private browsing / blocked storage
+		}
+	});
+
+	function persistRememberPreference() {
+		try {
+			localStorage.setItem(REMEMBER_KEY, stayLoggedIn ? '1' : '0');
+		} catch {
+			// ignore
+		}
+	}
+
+	$effect(() => {
+		if (!auth.isLoading && auth.isAuthenticated) {
+			goto('/');
+		}
+	});
 
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
@@ -20,7 +49,8 @@
 		submitting = true;
 
 		try {
-			const res = await auth.login(email, password);
+			persistRememberPreference();
+			const res = await auth.login(email, password, stayLoggedIn);
 			if (!res.ok && res.pendingFlow) {
 				if (res.pendingFlow === 'mfa_authenticate') {
 					goto('/auth/2fa');
@@ -85,6 +115,17 @@
 						class="h-11 text-base sm:h-9 sm:text-sm"
 					/>
 				</div>
+				<label
+					class="flex items-center gap-2.5 text-sm cursor-pointer select-none text-muted-foreground hover:text-foreground"
+				>
+					<input
+						type="checkbox"
+						bind:checked={stayLoggedIn}
+						onchange={persistRememberPreference}
+						class="h-4 w-4 rounded border-input accent-primary"
+					/>
+					Stay logged in
+				</label>
 				<Button type="submit" class="h-11 w-full text-base sm:h-9 sm:text-sm" disabled={submitting}>
 					{submitting ? 'Signing in...' : 'Sign In'}
 				</Button>

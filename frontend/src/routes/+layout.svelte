@@ -10,11 +10,20 @@
 	let { children } = $props();
 	const auth = getAuth();
 
-	onMount(async () => {
-		await ensureCsrfCookie();
-		auth.checkSession();
-		// Signal to the hydration watchdog that JS loaded successfully
-		(window as any).__sveltekit_hydrated = true;
+	onMount(() => {
+		(window as typeof window & { __sveltekit_hydrated?: boolean }).__sveltekit_hydrated =
+			true;
+
+		void (async () => {
+			try {
+				await ensureCsrfCookie();
+				await auth.checkSession();
+			} catch (err) {
+				if (import.meta.env.DEV) {
+					console.warn('Session bootstrap failed:', err);
+				}
+			}
+		})();
 	});
 </script>
 

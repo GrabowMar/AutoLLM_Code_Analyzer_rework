@@ -707,6 +707,43 @@ If you see icon-related build failures, the healer should have stripped them. Ch
 docker compose logs celery-worker | grep -i icon
 ```
 
+## Sample Generator — Copilot (Aider)
+
+Copilot mode uses [Aider](https://github.com/Aider-AI/aider) to edit a temporary git
+workspace under `llm_lab/media/generation_workspaces/`. Each job needs:
+
+| Requirement | Notes |
+|-------------|--------|
+| `aider-chat` package | Installed via `uv sync` (see `pyproject.toml`) |
+| `git` in PATH | Required in the Django container (`compose/production/django/Dockerfile` includes it) |
+| OpenRouter API key | User key from Settings → API Access (same as other generation modes) |
+| Writable `MEDIA_ROOT` | Workspaces are deleted after the job finishes; results live in `result_data` |
+
+**Symptoms:** Copilot job fails immediately with “aider-chat is not installed” or “git is not available”.
+
+**Fix:**
+
+```bash
+# Local / devcontainer
+uv sync
+which git
+
+# Docker
+docker compose -f docker-compose.local.yml build django
+docker compose -f docker-compose.local.yml exec django git --version
+docker compose -f docker-compose.local.yml exec django python -c "import aider"
+```
+
+**Symptoms:** Iterations run but validation never passes (short placeholder `app.py`).
+
+**Cause:** Aider did not expand the scaffold, or the OpenRouter model/key failed silently.
+
+**Fix:** Check Django logs for `Aider copilot iter` lines, confirm the model in the job,
+and retry with a different model or a more specific description. Optional env vars:
+
+- `AIDER_COPILOT_TIMEOUT_SECONDS` (default `600`) — per-iteration subprocess budget
+- `AIDER_AUTO_TEST` (default `true`) — run `py_compile` / `compileall` after each iteration
+
 ## Getting Help
 
 1. Check logs first: `./start.ps1 -Mode Logs`

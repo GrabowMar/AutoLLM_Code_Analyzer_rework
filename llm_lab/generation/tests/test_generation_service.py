@@ -99,25 +99,31 @@ class TestValidatePythonCode:
 
 
 class TestPickCopilotModel:
-    """Tests for _pick_copilot_model static method."""
+    """Tests for pick_copilot_model_id."""
 
     def test_explicit_model(self) -> None:
+        from llm_lab.generation.services.aider_runner import pick_copilot_model_id
+
         job = MagicMock()
         job.model = MagicMock()
         job.model.model_id = "openai/gpt-4o"
-        result = GenerationService._pick_copilot_model(job)
+        result = pick_copilot_model_id(job)
         assert result == "openai/gpt-4o"
 
     def test_open_source_default(self) -> None:
+        from llm_lab.generation.services.aider_runner import pick_copilot_model_id
+
         job = MagicMock()
         job.model = None
         job.copilot_use_open_source = True
-        result = GenerationService._pick_copilot_model(job)
+        result = pick_copilot_model_id(job)
         assert "deepseek" in result
 
     def test_closed_source_default(self) -> None:
+        from llm_lab.generation.services.aider_runner import pick_copilot_model_id
+
         job = MagicMock()
         job.model = None
         job.copilot_use_open_source = False
-        result = GenerationService._pick_copilot_model(job)
+        result = pick_copilot_model_id(job)
         assert "gpt-4o-mini" in result

@@ -79,7 +79,7 @@
 				<Button variant="outline" size="sm" onclick={onRefresh} title="Refresh metadata from OpenRouter" disabled={refreshing}>
 					<RefreshCw class="h-3.5 w-3.5 sm:mr-1.5 {refreshing ? 'animate-spin' : ''}" /><span class="hidden sm:inline">Refresh Data</span>
 				</Button>
-				<Button size="sm" href="/sample-generator?model={slug}" title="Generate an app with this model">
+				<Button size="sm" href="/sample-generator?mode=custom&model={slug}" title="Generate an app with this model">
 					<Sparkles class="h-3.5 w-3.5 sm:mr-1.5" /><span class="hidden sm:inline">Generate App</span>
 				</Button>
 			</div>

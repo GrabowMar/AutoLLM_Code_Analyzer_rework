@@ -24,16 +24,33 @@ export function getCsrfToken(): string {
   return "";
 }
 
+let csrfBootstrap: Promise<void> | null = null;
+
 /** Fetch allauth config so Django sets the CSRF cookie before mutating requests. */
 export async function ensureCsrfCookie(): Promise<void> {
   if (typeof document === "undefined") return;
-  await fetch(`${ALLAUTH_BASE}/config`, {
-    credentials: "include",
-  });
-  if (!getCsrfToken()) {
-    throw new Error(
-      "Could not load security token (CSRF). Enable cookies and open the app at the same host as in your email (e.g. http://localhost:8000, not 127.0.0.1).",
-    );
+  if (getCsrfToken()) return;
+
+  if (csrfBootstrap) return csrfBootstrap;
+
+  csrfBootstrap = (async () => {
+    const res = await fetch(`${ALLAUTH_BASE}/config`, {
+      credentials: "include",
+    });
+    if (!res.ok && import.meta.env.DEV) {
+      console.warn(`allauth config returned HTTP ${res.status}`);
+    }
+    if (!getCsrfToken()) {
+      throw new Error(
+        "Could not load security token (CSRF). Enable cookies and open the app at the same host as in your email (e.g. http://localhost:8000, not 127.0.0.1).",
+      );
+    }
+  })();
+
+  try {
+    await csrfBootstrap;
+  } finally {
+    csrfBootstrap = null;
   }
 }
 
@@ -98,10 +115,19 @@ export function parseAllauthAuthResponse(
   };
 }
 
+function isAbortError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === "AbortError") return true;
+  if (error instanceof Error && /aborted/i.test(error.message)) return true;
+  return false;
+}
+
 export function formatApiError(
   error: unknown,
   fallback = "Request failed.",
 ): string {
+  if (isAbortError(error)) {
+    return "The request timed out. Check that the backend is running (Docker: django service) and reload the page.";
+  }
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "string" && error) return error;
   if (!error || typeof error !== "object") return fallback;

@@ -21,6 +21,7 @@ def dispatch_job(job: GenerationJob) -> None:
         service.execute(
             GenerationJob.objects.select_related(
                 "model",
+                "created_by",
                 "app_requirement",
                 "scaffolding_template",
                 "backend_prompt_template",

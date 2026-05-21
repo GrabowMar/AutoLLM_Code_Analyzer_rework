@@ -16,6 +16,7 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Layers from '@lucide/svelte/icons/layers';
 	import Bot from '@lucide/svelte/icons/bot';
+	import ModelSelector from '$lib/components/sample-generator/ModelSelector.svelte';
 
 	type TabId = 'custom' | 'scaffolding' | 'copilot';
 
@@ -38,6 +39,7 @@
 	export interface CopilotPayload {
 		description: string;
 		model_id?: number;
+		scaffolding_template_id?: number;
 		max_iterations: number;
 		use_open_source: boolean;
 	}
@@ -56,6 +58,9 @@
 		scaffoldingResult: { batch_id: string; job_count: number; status: string } | null;
 		copilotSubmitting: boolean;
 		copilotError: string;
+		customModelId?: number | '';
+		copilotModelId?: number | '';
+		copilotScaffoldId?: number | '';
 		onSubmitCustom: (payload: CustomPayload) => void;
 		onSubmitScaffolding: (payload: ScaffoldingPayload) => void;
 		onSubmitCopilot: (payload: CopilotPayload) => void;
@@ -75,6 +80,9 @@
 		scaffoldingResult,
 		copilotSubmitting,
 		copilotError,
+		customModelId = $bindable('' as number | ''),
+		copilotModelId = $bindable('' as number | ''),
+		copilotScaffoldId = $bindable('' as number | ''),
 		onSubmitCustom,
 		onSubmitScaffolding,
 		onSubmitCopilot,
@@ -83,7 +91,6 @@
 	// Custom form
 	let customSystemPrompt = $state('You are an expert full-stack developer. Write clean, well-structured code with proper error handling, type safety, and following best practices.');
 	let customUserPrompt = $state('');
-	let customModelId = $state<number | ''>('');
 	let customTemperature = $state(0.3);
 	let customMaxTokens = $state(32000);
 
@@ -94,13 +101,21 @@
 	let scaffoldingTemperature = $state(0.3);
 	let scaffoldingMaxTokens = $state(32000);
 	let appSearch = $state('');
-	let modelSearch = $state('');
 
 	// Copilot form
 	let copilotDescription = $state('');
-	let copilotModelId = $state<number | ''>('');
 	let copilotMaxIterations = $state(5);
 	let copilotUseOpenSource = $state(true);
+
+	let lastDefaultedCopilotScaffoldKey = $state('');
+	$effect(() => {
+		const key = scaffoldingTemplates.map(s => s.id).join(',');
+		if (key && key !== lastDefaultedCopilotScaffoldKey && copilotScaffoldId === '') {
+			const def = scaffoldingTemplates.find(s => s.is_default);
+			copilotScaffoldId = def ? def.id : scaffoldingTemplates[0]?.id ?? '';
+			lastDefaultedCopilotScaffoldKey = key;
+		}
+	});
 
 	let lastDefaultedScaffoldKey = $state<string>('');
 	$effect(() => {
@@ -118,15 +133,6 @@
 			t.description.toLowerCase().includes(appSearch.toLowerCase())
 		)
 	);
-
-	const filteredModels = $derived(
-		models.filter(m =>
-			m.model_name.toLowerCase().includes(modelSearch.toLowerCase()) ||
-			m.provider.toLowerCase().includes(modelSearch.toLowerCase())
-		)
-	);
-
-	const modelProviders = $derived([...new Set(filteredModels.map(m => m.provider))].sort());
 
 	function toggleAppTemplate(id: number) {
 		const s = new Set(selectedAppIds);
@@ -149,7 +155,7 @@
 	}
 
 	function selectAllModelIds() {
-		selectedModelIds = new Set(filteredModels.map(m => m.id));
+		selectedModelIds = new Set(models.map((m) => m.id));
 	}
 
 	function clearModelIds() {
@@ -183,6 +189,7 @@
 		onSubmitCopilot({
 			description: copilotDescription,
 			model_id: copilotModelId ? (copilotModelId as number) : undefined,
+			scaffolding_template_id: copilotScaffoldId ? (copilotScaffoldId as number) : undefined,
 			max_iterations: copilotMaxIterations,
 			use_open_source: copilotUseOpenSource,
 		});
@@ -219,25 +226,14 @@
 					></textarea>
 				</div>
 
-				<div class="grid gap-4 grid-cols-1 sm:grid-cols-3">
-					<div class="space-y-2">
-						<Label>Model</Label>
-						{#if modelsLoading}
-							<div class="flex h-9 items-center gap-2 rounded-md border px-3 text-sm text-muted-foreground">
-								<LoaderCircle class="h-3.5 w-3.5 animate-spin" /> Loading…
-							</div>
-						{:else}
-							<select
-								bind:value={customModelId}
-								class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-							>
-								<option value="">Select a model</option>
-								{#each models as m}
-									<option value={m.id}>{m.model_name} ({m.provider})</option>
-								{/each}
-							</select>
-						{/if}
-					</div>
+				<ModelSelector
+					{models}
+					loading={modelsLoading}
+					mode="single"
+					bind:selectedId={customModelId}
+				/>
+
+				<div class="grid gap-4 grid-cols-1 sm:grid-cols-2">
 					<div class="space-y-2">
 						<Label>Temperature: {customTemperature.toFixed(1)}</Label>
 						<input
@@ -379,52 +375,14 @@
 						</div>
 					</div>
 
-					<!-- Models -->
-					<div class="space-y-3">
-						<div class="flex items-center justify-between">
-							<Label>Models</Label>
-							<div class="flex gap-1 text-[10px]">
-								<button class="text-primary hover:underline" onclick={selectAllModelIds}>Select All</button>
-								<span class="text-muted-foreground">|</span>
-								<button class="text-muted-foreground hover:underline" onclick={clearModelIds}>Clear</button>
-								<span class="ml-1 text-muted-foreground">({selectedModelIds.size})</span>
-							</div>
-						</div>
-						<div class="relative">
-							<Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-							<Input bind:value={modelSearch} placeholder="Search models…" class="h-8 pl-8 text-xs" />
-						</div>
-						<div class="max-h-64 space-y-1 overflow-y-auto rounded-md border p-1">
-							{#if modelsLoading}
-								<div class="flex items-center justify-center py-6 text-sm text-muted-foreground">
-									<LoaderCircle class="mr-2 h-4 w-4 animate-spin" /> Loading…
-								</div>
-							{:else}
-								{#each modelProviders as provider}
-									<div class="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{provider}</div>
-									{#each filteredModels.filter(m => m.provider === provider) as m}
-										<button
-											class="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted/50 {selectedModelIds.has(m.id) ? 'bg-primary/5 ring-1 ring-primary/20' : ''}"
-											onclick={() => toggleModelSelection(m.id)}
-										>
-											<div class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border {selectedModelIds.has(m.id) ? 'bg-primary border-primary text-primary-foreground' : 'border-border'}">
-												{#if selectedModelIds.has(m.id)}<Check class="h-3 w-3" />{/if}
-											</div>
-											<span class="font-medium">{m.model_name}</span>
-											{#if m.is_free}
-												<Badge variant="secondary" class="ml-auto text-[10px]">Free</Badge>
-											{:else}
-												<span class="ml-auto font-mono text-xs text-muted-foreground">${m.input_price_per_million}</span>
-											{/if}
-										</button>
-									{/each}
-								{/each}
-								{#if filteredModels.length === 0}
-									<p class="py-4 text-center text-xs text-muted-foreground">No models found.</p>
-								{/if}
-							{/if}
-						</div>
-					</div>
+					<ModelSelector
+						{models}
+						loading={modelsLoading}
+						mode="multi"
+						bind:selectedIds={selectedModelIds}
+						onSelectAll={selectAllModelIds}
+						onClearAll={clearModelIds}
+					/>
 				</div>
 
 				<Separator />
@@ -496,8 +454,14 @@
 {#if activeTab === 'copilot'}
 	<Card.Root>
 		<Card.Header>
-			<Card.Title>Copilot Generation</Card.Title>
-			<Card.Description>Describe what you want to build and let the AI copilot iterate to produce it.</Card.Description>
+			<div class="flex flex-wrap items-center gap-2">
+				<Card.Title>Copilot Generation</Card.Title>
+				<Badge variant="secondary" class="text-[10px]">Powered by Aider</Badge>
+			</div>
+			<Card.Description>
+				Describe your app. Aider edits a scaffolded git workspace using your stored OpenRouter key,
+				iterating until validation passes.
+			</Card.Description>
 		</Card.Header>
 		<Card.Content>
 			<div class="space-y-4">
@@ -511,53 +475,87 @@
 					></textarea>
 				</div>
 
-				<div class="grid gap-4 grid-cols-1 sm:grid-cols-2">
-					<div class="space-y-2">
-						<Label>Model (optional)</Label>
-						{#if modelsLoading}
-							<div class="flex h-9 items-center gap-2 rounded-md border px-3 text-sm text-muted-foreground">
-								<LoaderCircle class="h-3.5 w-3.5 animate-spin" /> Loading…
-							</div>
-						{:else}
-							<select
-								bind:value={copilotModelId}
-								class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-							>
-								<option value="">Auto-select</option>
-								{#each models as m}
-									<option value={m.id}>{m.model_name} ({m.provider})</option>
-								{/each}
-							</select>
-						{/if}
-					</div>
-					<div class="space-y-2">
-						<Label>Max Iterations: {copilotMaxIterations}</Label>
-						<input
-							type="range"
-							min="1"
-							max="10"
-							step="1"
-							bind:value={copilotMaxIterations}
-							class="w-full accent-primary"
-						/>
-						<div class="flex justify-between text-[10px] text-muted-foreground">
-							<span>1</span>
-							<span>10</span>
+				<div class="space-y-2">
+					<Label>Scaffolding template</Label>
+					{#if scaffoldingLoading}
+						<div class="flex h-9 items-center gap-2 rounded-md border px-3 text-sm text-muted-foreground">
+							<LoaderCircle class="h-3.5 w-3.5 animate-spin" /> Loading…
 						</div>
+					{:else}
+						<div class="grid gap-3 grid-cols-1 sm:grid-cols-2">
+							{#each scaffoldingTemplates as tpl}
+								<button
+									type="button"
+									class="rounded-lg border p-4 text-left transition-colors {copilotScaffoldId === tpl.id ? 'ring-2 ring-primary bg-primary/5' : 'hover:bg-muted/50'}"
+									onclick={() => (copilotScaffoldId = tpl.id)}
+								>
+									<div class="flex items-center gap-2">
+										<Layers
+											class="h-4 w-4 {copilotScaffoldId === tpl.id ? 'text-primary' : 'text-muted-foreground'}"
+										/>
+										<span class="text-sm font-medium">{tpl.name}</span>
+										{#if tpl.is_default}
+											<Badge variant="secondary" class="text-[10px]">Default</Badge>
+										{/if}
+									</div>
+									<p class="mt-1 text-xs text-muted-foreground line-clamp-2">{tpl.description}</p>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+
+				<div class="space-y-1">
+					<ModelSelector
+						{models}
+						loading={modelsLoading}
+						mode="single"
+						allowEmpty
+						emptyLabel="Auto-select (DeepSeek or GPT-4o mini)"
+						bind:selectedId={copilotModelId}
+					/>
+					<p class="text-[10px] text-muted-foreground">
+						{#if copilotModelId === ''}
+							When auto-select is on, “Use open-source models” picks DeepSeek vs GPT-4o mini.
+						{:else}
+							Selected model is used with your OpenRouter key from Settings.
+						{/if}
+					</p>
+				</div>
+
+				<div class="space-y-2">
+					<Label>Max Iterations: {copilotMaxIterations}</Label>
+					<input
+						type="range"
+						min="1"
+						max="10"
+						step="1"
+						bind:value={copilotMaxIterations}
+						class="w-full accent-primary"
+					/>
+					<div class="flex justify-between text-[10px] text-muted-foreground">
+						<span>1</span>
+						<span>10</span>
 					</div>
 				</div>
 
-				<label class="flex items-center gap-2 text-sm cursor-pointer">
+				<label
+					class="flex items-center gap-2 text-sm cursor-pointer {copilotModelId !== '' ? 'opacity-50' : ''}"
+					title={copilotModelId !== '' ? 'Only applies when model is auto-select' : ''}
+				>
 					<div class="relative">
 						<input
 							type="checkbox"
 							bind:checked={copilotUseOpenSource}
+							disabled={copilotModelId !== ''}
 							class="peer sr-only"
 						/>
-						<div class="h-5 w-9 rounded-full bg-muted transition-colors peer-checked:bg-primary"></div>
-						<div class="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-background shadow-sm transition-transform peer-checked:translate-x-4"></div>
+						<div class="h-5 w-9 rounded-full bg-muted transition-colors peer-checked:bg-primary peer-disabled:opacity-50"></div>
+						<div
+							class="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-background shadow-sm transition-transform peer-checked:translate-x-4"
+						></div>
 					</div>
-					Use open-source models
+					Prefer open-source models (auto-select only)
 				</label>
 
 				{#if copilotError}
@@ -566,14 +564,11 @@
 					</div>
 				{/if}
 
-				<Button
-					onclick={submitCopilot}
-					disabled={copilotSubmitting || !copilotDescription.trim()}
-				>
+				<Button onclick={submitCopilot} disabled={copilotSubmitting || !copilotDescription.trim()}>
 					{#if copilotSubmitting}
-						<LoaderCircle class="mr-2 h-4 w-4 animate-spin" /> Starting…
+						<LoaderCircle class="mr-2 h-4 w-4 animate-spin" /> Starting Aider…
 					{:else}
-						<Bot class="mr-2 h-4 w-4" /> Start Copilot
+						<Bot class="mr-2 h-4 w-4" /> Start Aider Copilot
 					{/if}
 				</Button>
 			</div>

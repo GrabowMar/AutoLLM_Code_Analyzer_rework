@@ -40,18 +40,18 @@ function createAuth() {
   let isAuthenticated = $state(false);
   let isLoading = $state(true);
   let user = $state<AuthUser | null>(null);
+  let sessionCheckGeneration = 0;
 
   async function checkSession() {
+    const generation = ++sessionCheckGeneration;
     isLoading = true;
     try {
       await ensureCsrfCookie();
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
       const res = await fetch(`${ALLAUTH_BASE}/auth/session`, {
         credentials: "include",
-        signal: controller.signal,
       });
-      clearTimeout(timeoutId);
+      if (generation !== sessionCheckGeneration) return;
+
       const body = await parseAllauthJson(res);
       const parsed = parseAllauthAuthResponse(res, body, "");
       const mapped = mapUser(parsed.user);
@@ -63,14 +63,23 @@ function createAuth() {
         user = null;
       }
     } catch {
+      if (generation !== sessionCheckGeneration) return;
       isAuthenticated = false;
       user = null;
     } finally {
-      isLoading = false;
+      if (generation === sessionCheckGeneration) {
+        isLoading = false;
+      }
     }
   }
 
-  async function login(email: string, password: string): Promise<LoginResult> {
+  async function login(
+    email: string,
+    password: string,
+    remember = true,
+  ): Promise<LoginResult> {
+    // Ignore in-flight checkSession so it cannot clear state after a successful login.
+    sessionCheckGeneration++;
     await ensureCsrfCookie();
     const res = await fetch(`${ALLAUTH_BASE}/auth/login`, {
       method: "POST",
@@ -79,9 +88,23 @@ function createAuth() {
         "X-CSRFToken": getCsrfToken(),
       },
       credentials: "include",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, remember }),
     });
     const body = await parseAllauthJson(res);
+
+    // Already signed in (session cookie present) — treat as success.
+    if (res.status === 409) {
+      await checkSession();
+      if (isAuthenticated && user) {
+        return { ok: true };
+      }
+      return {
+        ok: false,
+        error:
+          "You already have an active session. Open the home page or sign out from the user menu, then try again.",
+      };
+    }
+
     const parsed = parseAllauthAuthResponse(
       res,
       body,
@@ -120,6 +143,7 @@ function createAuth() {
     password: string,
     _password2: string,
   ): Promise<SignupResult> {
+    sessionCheckGeneration++;
     await ensureCsrfCookie();
     const res = await fetch(`${ALLAUTH_BASE}/auth/signup`, {
       method: "POST",

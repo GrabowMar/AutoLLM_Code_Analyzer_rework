@@ -63,7 +63,7 @@
 				<Card.Title class="text-base">Applications</Card.Title>
 				<Badge variant="outline" class="text-xs">{total}</Badge>
 			</div>
-			<Button size="sm" href="/sample-generator?model={slug}">
+			<Button size="sm" href="/sample-generator?mode=custom&model={slug}">
 				<Sparkles class="h-3.5 w-3.5 mr-1.5" />New
 			</Button>
 		</Card.Header>
@@ -78,7 +78,7 @@
 				<div class="py-8 text-center text-sm text-muted-foreground">
 					No applications generated with this model yet.
 					<div class="mt-2">
-						<Button size="sm" variant="outline" href="/sample-generator?model={slug}">
+						<Button size="sm" variant="outline" href="/sample-generator?mode=custom&model={slug}">
 							<Sparkles class="h-3.5 w-3.5 mr-1.5" />Generate the first one
 						</Button>
 					</div>

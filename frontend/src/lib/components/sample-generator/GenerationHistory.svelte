@@ -15,6 +15,7 @@
 	import Square from '@lucide/svelte/icons/square';
 	import FileCode from '@lucide/svelte/icons/file-code';
 	import Download from '@lucide/svelte/icons/download';
+	import ExternalLink from '@lucide/svelte/icons/external-link';
 
 	interface Props {
 		historyData: PaginatedJobs | null;
@@ -29,6 +30,7 @@
 		onFilterChange: () => void;
 		onPageChange: (page: number) => void;
 		onCancelJob: (id: string) => void;
+		onOpenJob?: (mode: string, id: string) => void;
 	}
 
 	let {
@@ -44,6 +46,7 @@
 		onFilterChange,
 		onPageChange,
 		onCancelJob,
+		onOpenJob,
 	}: Props = $props();
 
 	let expandedJobId = $state<string | null>(null);
@@ -141,6 +144,7 @@
 						<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Template</th>
 						<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Duration</th>
 						<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Created</th>
+						<th class="px-3 py-2 text-right text-xs font-medium text-muted-foreground w-20"></th>
 					</tr>
 				</thead>
 				<tbody class="divide-y">
@@ -150,7 +154,12 @@
 							onclick={() => toggleExpandJob(job.id)}
 						>
 							<td class="px-3 py-2">
-								<Badge variant="secondary" class="text-[10px]">{modeLabels[job.mode] ?? job.mode}</Badge>
+								<div class="flex flex-wrap items-center gap-1">
+									<Badge variant="secondary" class="text-[10px]">{modeLabels[job.mode] ?? job.mode}</Badge>
+									{#if job.mode === 'copilot'}
+										<Badge variant="outline" class="text-[9px]">Aider</Badge>
+									{/if}
+								</div>
 							</td>
 							<td class="px-3 py-2">
 								<Badge variant="outline" class="text-[10px] {statusColors[job.status] ?? ''}">
@@ -164,12 +173,27 @@
 							<td class="px-3 py-2 text-xs">{job.template_name ?? job.scaffolding_name ?? '—'}</td>
 							<td class="px-3 py-2 text-xs font-mono text-muted-foreground">{formatDuration(job.duration_seconds)}</td>
 							<td class="px-3 py-2 text-xs text-muted-foreground">{formatDate(job.created_at)}</td>
+							<td class="px-3 py-2 text-right">
+								{#if onOpenJob}
+									<Button
+										variant="ghost"
+										size="sm"
+										class="h-7 px-2 text-xs"
+										onclick={(e) => {
+											e.stopPropagation();
+											onOpenJob(job.mode, job.id);
+										}}
+									>
+										<ExternalLink class="h-3 w-3 mr-1" /> Open
+									</Button>
+								{/if}
+							</td>
 						</tr>
 
 						<!-- Expanded row -->
 						{#if expandedJobId === job.id}
 							<tr>
-								<td colspan="6" class="bg-muted/10 px-4 py-4">
+								<td colspan="7" class="bg-muted/10 px-4 py-4">
 									{#if expandedLoading}
 										<div class="flex items-center gap-2 text-sm text-muted-foreground">
 											<LoaderCircle class="h-4 w-4 animate-spin" /> Loading details…
