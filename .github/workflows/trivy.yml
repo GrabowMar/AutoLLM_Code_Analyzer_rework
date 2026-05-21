@@ -62,6 +62,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Seed production env files from examples
+        run: |
+          for f in .envs/.production/*.example; do
+            cp -n "$f" "${f%.example}"
+          done
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
