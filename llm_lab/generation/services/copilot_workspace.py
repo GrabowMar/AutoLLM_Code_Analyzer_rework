@@ -88,7 +88,6 @@ class CopilotWorkspace:
     def primary_python_path(self) -> Path:
         """Best-effort main Python file for validation."""
         candidates = [
-            self.root / "backend" / "app.py",
             self.root / "app.py",
         ]
         for candidate in candidates:

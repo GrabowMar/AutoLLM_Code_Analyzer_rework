@@ -147,9 +147,11 @@ This app runs in a single Docker container. Flask serves **both** the API and th
 Required structure — follow exactly:
 ```python
 import os
+from pathlib import Path
 from flask import Flask, jsonify, send_from_directory
 
-app = Flask(__name__, static_folder='static', static_url_path='')
+app = Flask(__name__)  # do NOT pass static_folder or static_url_path
+_STATIC = Path(__file__).parent / 'static'
 
 # ALL API routes go here, under /api/ prefix
 # ...
@@ -158,9 +160,10 @@ app = Flask(__name__, static_folder='static', static_url_path='')
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def _serve_spa(path):
-    if path and os.path.exists(os.path.join(app.static_folder, path)):
-        return send_from_directory(app.static_folder, path)
-    return send_from_directory(app.static_folder, 'index.html')
+    target = _STATIC / path if path else None
+    if target and target.is_file():
+        return send_from_directory(str(_STATIC), path)
+    return send_from_directory(str(_STATIC), 'index.html')
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8000))
@@ -168,10 +171,10 @@ if __name__ == '__main__':
 ```
 
 Rules:
-- `static_folder='static'` on `Flask()` — required, do not omit
+- Do NOT pass `static_folder` or `static_url_path` to `Flask()` — doing so causes Flask's built-in static handler to shadow the catch-all, breaking SPA routing
 - Every API route MUST start with `/api/`
 - `_serve_spa` must be the very last route — nothing after it
-- Database stored at `data/app.db` (directory always exists)
+- Database: `app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///data/app.db'` (directory always exists)
 - Read port from `PORT` env var with default 8000
 
 ## Forbidden

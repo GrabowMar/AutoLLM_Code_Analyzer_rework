@@ -184,16 +184,23 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
 
 def _write_minimal_dockerfile(path: Path) -> None:
     (path / "Dockerfile").write_text(
-        'FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nRUN pip install flask --quiet\nCMD ["python", "app.py"]\n',
+        "FROM python:3.11-slim\n"
+        "WORKDIR /app\n"
+        "COPY . .\n"
+        "RUN pip install flask --quiet\n"
+        "EXPOSE 8000\n"
+        'CMD ["python", "app.py"]\n',
     )
     (path / "app.py").write_text(
+        "import os\n"
         "from flask import Flask, jsonify\n"
         "app = Flask(__name__)\n\n"
         "@app.route('/api/health')\n"
         "def health():\n"
         "    return jsonify({'status': 'ok'})\n\n"
         "if __name__ == '__main__':\n"
-        "    app.run(host='0.0.0.0', port=5000)\n",
+        "    port = int(os.environ.get('PORT', 8000))\n"
+        "    app.run(host='0.0.0.0', port=port)\n",
     )
 
 
