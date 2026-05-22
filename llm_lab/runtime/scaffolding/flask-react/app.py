@@ -7,7 +7,9 @@ from flask import Flask, jsonify, send_from_directory
 #   1. Do NOT pass static_folder or static_url_path to Flask() — the catch-all below handles all static serving
 #   2. All API routes MUST use the /api/ prefix
 #   3. Keep _serve_spa as the very last route — do not add routes after it
-#   4. Database: use sqlite:///data/app.db (the data/ directory always exists)
+#   4. Database: use f"sqlite:///{Path(__file__).parent / 'data' / 'app.db'}" — do NOT use the
+#      bare sqlite:///data/app.db form; Flask-SQLAlchemy 3.x resolves relative URIs against
+#      instance_path, not cwd, so the absolute form is required.
 
 app = Flask(__name__)
 _STATIC = Path(__file__).parent / 'static'

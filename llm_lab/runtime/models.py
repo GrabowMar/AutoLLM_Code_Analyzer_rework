@@ -214,7 +214,7 @@ class PortAllocation(models.Model):
 
         from django.db import transaction
 
-        base_port = 8001
+        base_port = 9001
         max_retries = 5
 
         def _is_port_free(port: int) -> bool:

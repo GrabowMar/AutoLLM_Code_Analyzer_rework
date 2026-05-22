@@ -174,7 +174,7 @@ Rules:
 - Do NOT pass `static_folder` or `static_url_path` to `Flask()` — doing so causes Flask's built-in static handler to shadow the catch-all, breaking SPA routing
 - Every API route MUST start with `/api/`
 - `_serve_spa` must be the very last route — nothing after it
-- Database: `app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///data/app.db'` (directory always exists)
+- Database: `app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{Path(__file__).parent / 'data' / 'app.db'}"` — use this exact form with `Path(__file__).parent`; do NOT write `sqlite:///data/app.db` (Flask-SQLAlchemy 3.x resolves relative URIs against `instance_path`, not cwd, which breaks startup)
 - Read port from `PORT` env var with default 8000
 
 ## Forbidden
