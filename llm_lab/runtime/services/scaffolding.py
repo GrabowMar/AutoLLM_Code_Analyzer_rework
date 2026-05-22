@@ -69,7 +69,8 @@ def _scaffold_flask_react(
 ) -> None:
     template_dir = _TEMPLATES_DIR / "flask-react"
     _copy_template_dir(template_dir, dest)
-    (dest / "app.py").write_text(backend_code or _placeholder_backend())
+    patched = _patch_backend_code(backend_code or _placeholder_backend())
+    (dest / "app.py").write_text(patched)
     _patch_requirements(dest, backend_code)
 
     if frontend_code:
@@ -81,7 +82,8 @@ def _scaffold_flask_react(
 def _scaffold_generic_python(dest: Path, backend_code: str) -> None:
     template_dir = _TEMPLATES_DIR / "generic-python"
     _copy_template_dir(template_dir, dest)
-    (dest / "app.py").write_text(backend_code or _placeholder_backend())
+    patched = _patch_backend_code(backend_code or _placeholder_backend())
+    (dest / "app.py").write_text(patched)
     _patch_requirements(dest, backend_code)
 
 
@@ -117,6 +119,116 @@ def _patch_requirements(dest: Path, backend_code: str) -> None:
     if new_pkgs:
         extra = "\n".join(new_pkgs)
         req_path.write_text(existing_text.rstrip() + "\n" + extra + "\n")
+
+
+def _patch_backend_code(code: str) -> str:
+    """Apply runtime-invariant fixes to generated Flask backend code."""
+    code = _fix_sqlite_uri(code)
+    code = _fix_flask_port(code)
+    code = _fix_db_create_all(code)
+    return code
+
+
+def _fix_sqlite_uri(code: str) -> str:
+    """Replace relative sqlite:/// URIs with an absolute /app/data/ path.
+
+    Flask-SQLAlchemy 3.x resolves relative SQLite paths relative to the Flask
+    instance folder (/app/instance/), not CWD. The Dockerfile creates /app/data/,
+    so we rewrite any sqlite:/// (3-slash relative) URI to sqlite:////app/data/app.db.
+    Absolute paths (4 slashes) are left unchanged.
+    """
+    def _rewrite(m: re.Match) -> str:
+        # Extract just the filename from whatever path the LLM used
+        original_path = m.group(1)
+        filename = Path(original_path).name or "app.db"
+        return f"sqlite:////app/data/{filename}"
+
+    return re.sub(
+        r"sqlite:///([^'\"]+)",
+        lambda m: _rewrite(m),
+        code,
+    )
+
+
+def _fix_db_create_all(code: str) -> str:
+    """Wrap the init block inside if __name__ in with app.app_context().
+
+    Flask-SQLAlchemy 3.x requires all DB operations to run inside an app context.
+    LLMs often call db.create_all() and seed functions outside a context. This
+    patches the pattern by wrapping the full init block (from db.create_all up to
+    but not including port assignment / app.run) in with app.app_context().
+    """
+    if "with app.app_context()" in code:
+        return code
+    if "db.create_all()" not in code:
+        return code
+
+    lines = code.splitlines(keepends=True)
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.lstrip()
+
+        # Find the if __name__ == '__main__': block
+        if re.match(r"if __name__\s*==\s*['\"]__main__['\"]:", stripped):
+            block_indent = len(line) - len(line.lstrip())
+            body_indent = block_indent + 4
+            result.append(line)
+            i += 1
+
+            # Collect the body of the if block
+            init_lines: list[str] = []
+            run_lines: list[str] = []
+            in_run_section = False
+            while i < len(lines):
+                body_line = lines[i]
+                # Stop if we've de-indented back past the block
+                if body_line.strip() and len(body_line) - len(body_line.lstrip()) <= block_indent:
+                    break
+                body_stripped = body_line.strip()
+                # Once we see port= or app.run(), switch to run_lines
+                if body_stripped.startswith("port ") or body_stripped.startswith("app.run("):
+                    in_run_section = True
+                if in_run_section:
+                    run_lines.append(body_line)
+                else:
+                    init_lines.append(body_line)
+                i += 1
+
+            if init_lines:
+                ctx_indent = " " * body_indent
+                result.append(f"{ctx_indent}with app.app_context():\n")
+                for il in init_lines:
+                    # Add 4 spaces of extra indent for each init line
+                    result.append("    " + il if il.strip() else il)
+            result.extend(run_lines)
+            continue
+
+        result.append(line)
+        i += 1
+
+    return "".join(result)
+
+
+def _fix_flask_port(code: str) -> str:
+    """Ensure Flask listens on the PORT env variable defaulting to 8000.
+
+    The Dockerfile maps 8000/tcp. LLMs sometimes default to PORT=5000.
+    """
+    # Replace default port of 5000 with 8000 in os.environ.get('PORT', N)
+    code = re.sub(
+        r"os\.environ\.get\(['\"]PORT['\"],\s*5000\s*\)",
+        "os.environ.get('PORT', 8000)",
+        code,
+    )
+    # Replace bare app.run(..., port=5000, ...) with PORT-aware binding
+    code = re.sub(
+        r"app\.run\(([^)]*\b)port\s*=\s*5000([^)]*)\)",
+        lambda m: f"app.run({m.group(1)}port=int(os.environ.get('PORT', 8000)){m.group(2)})",
+        code,
+    )
+    return code
 
 
 def _sanitize_lucide_imports(code: str) -> str:
