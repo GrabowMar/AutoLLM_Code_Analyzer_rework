@@ -43,7 +43,6 @@
 	let modelsLoading = $state(true);
 	let customModelId = $state<number | ''>('');
 	let copilotModelId = $state<number | ''>('');
-	let copilotScaffoldId = $state<number | ''>('');
 
 	let scaffoldingTemplates = $state<ScaffoldingTemplate[]>([]);
 	let appTemplates = $state<AppRequirementTemplate[]>([]);
@@ -407,36 +406,6 @@
 
 	<OpenRouterKeyBanner />
 
-	<div class="grid gap-2 grid-cols-1 sm:grid-cols-3">
-		<button
-			type="button"
-			class="rounded-lg border p-3 text-left text-xs transition-colors hover:bg-muted/50 {activeTab === 'custom' ? 'ring-2 ring-primary bg-primary/5' : ''}"
-			onclick={() => switchTab('custom')}
-		>
-			<div class="flex items-center gap-1.5 font-medium"><Code class="h-3.5 w-3.5" /> Custom</div>
-			<p class="mt-1 text-muted-foreground">Single prompt, one model, immediate output.</p>
-		</button>
-		<button
-			type="button"
-			class="rounded-lg border p-3 text-left text-xs transition-colors hover:bg-muted/50 {activeTab === 'scaffolding' ? 'ring-2 ring-primary bg-primary/5' : ''}"
-			onclick={() => switchTab('scaffolding')}
-		>
-			<div class="flex items-center gap-1.5 font-medium"><Layers class="h-3.5 w-3.5" /> Scaffolding</div>
-			<p class="mt-1 text-muted-foreground">App templates × models in one batch.</p>
-		</button>
-		<button
-			type="button"
-			class="rounded-lg border p-3 text-left text-xs transition-colors hover:bg-muted/50 {activeTab === 'copilot' ? 'ring-2 ring-primary bg-primary/5' : ''}"
-			onclick={() => switchTab('copilot')}
-		>
-			<div class="flex items-center gap-1.5 font-medium">
-				<Bot class="h-3.5 w-3.5" /> Copilot
-				<Badge variant="secondary" class="text-[9px]">Aider</Badge>
-			</div>
-			<p class="mt-1 text-muted-foreground">Iterative agent edits until validation passes.</p>
-		</button>
-	</div>
-
 	<div class="flex gap-1 rounded-lg bg-muted p-1 overflow-x-auto flex-nowrap">
 		<button
 			type="button"
@@ -483,7 +452,6 @@
 				{copilotError}
 				bind:customModelId
 				bind:copilotModelId
-				bind:copilotScaffoldId
 				onSubmitCustom={submitCustomJob}
 				onSubmitScaffolding={submitScaffoldingBatch}
 				onSubmitCopilot={submitCopilotJob}

@@ -133,17 +133,27 @@ def get_model_comparison(
         .order_by("-apps")[:limit]
     )
 
-    rows: list[dict[str, Any]] = []
-    for j in jobs:
-        # Pull severity rollup from analyses on jobs for this model
-        sev = (
-            Finding.objects.filter(
-                result__task__generation_job__model_id=j["model_id"],
-            )
-            .values("severity")
-            .annotate(c=Count("id"))
+    jobs_list = list(jobs)
+    model_ids = [j["model_id"] for j in jobs_list]
+
+    # Bulk fetch all finding severity counts for all target models in one query!
+    sev_data = (
+        Finding.objects.filter(
+            result__task__generation_job__model_id__in=model_ids,
         )
-        sev_map = {row["severity"]: int(row["c"]) for row in sev}
+        .values("result__task__generation_job__model_id", "severity")
+        .annotate(c=Count("id"))
+    )
+
+    # Map by model_id -> severity -> count
+    sev_map_by_model: dict[str, dict[str, int]] = {}
+    for item in sev_data:
+        m_id = item["result__task__generation_job__model_id"]
+        sev_map_by_model.setdefault(m_id, {})[item["severity"]] = int(item["c"])
+
+    rows: list[dict[str, Any]] = []
+    for j in jobs_list:
+        sev_map = sev_map_by_model.get(j["model_id"], {})
         critical = sev_map.get("critical", 0)
         high = sev_map.get("high", 0)
         medium = sev_map.get("medium", 0)
@@ -215,17 +225,27 @@ def get_tool_effectiveness(
         .order_by("-findings")
     )
 
+    by_tool_list = list(by_tool)
+    tool_names = [t["analyzer_name"] for t in by_tool_list]
+
+    # Bulk fetch top rules for all tools in one grouped query!
+    rules_data = (
+        Finding.objects.filter(result__analyzer_name__in=tool_names)
+        .exclude(rule_id="")
+        .values("result__analyzer_name", "rule_id")
+        .annotate(c=Count("id"))
+        .order_by("result__analyzer_name", "-c")
+    )
+
+    # Group in Python: the first rule we see for a tool name is the top rule because it's sorted by -c!
+    top_rules: dict[str, str] = {}
+    for item in rules_data:
+        name = item["result__analyzer_name"]
+        if name not in top_rules:
+            top_rules[name] = item["rule_id"]
+
     rows: list[dict[str, Any]] = []
-    for t in by_tool:
-        # Top rule for this tool
-        top = (
-            Finding.objects.filter(result__analyzer_name=t["analyzer_name"])
-            .exclude(rule_id="")
-            .values("rule_id")
-            .annotate(c=Count("id"))
-            .order_by("-c")
-            .first()
-        )
+    for t in by_tool_list:
         scans = int(t["scans"]) or 0
         findings = int(t["findings"]) or 0
         rows.append(
@@ -235,7 +255,7 @@ def get_tool_effectiveness(
                 "scans": scans,
                 "findings": findings,
                 "avg_per_scan": round(findings / scans, 1) if scans else 0.0,
-                "top_rule": (top or {}).get("rule_id", ""),
+                "top_rule": top_rules.get(t["analyzer_name"], ""),
             },
         )
     return rows
@@ -274,7 +294,7 @@ def get_code_generation_stats(
         avg_duration=Avg("duration_seconds", filter=Q(status="completed")),
     )
 
-    completed = jobs.filter(status="completed").only("metrics", "result_data")
+    completed = jobs.filter(status="completed").only("metrics")
     total_tokens = 0
     total_cost = 0.0
     total_loc = 0
@@ -290,10 +310,25 @@ def get_code_generation_stats(
         cost = metrics.get("cost") or metrics.get("total_cost")
         if isinstance(cost, (int, float)):
             total_cost += float(cost)
-        result = j.result_data or {}
-        for blob in (result.get("backend"), result.get("frontend")):
-            if isinstance(blob, str):
-                total_loc += blob.count("\n") + 1
+        
+        loc = metrics.get("lines_of_code")
+        if loc is not None:
+            total_loc += int(loc)
+        else:
+            # Fallback for old/legacy jobs: lazily loads result_data (Django will hit DB)
+            result = j.result_data or {}
+            job_loc = 0
+            for key in ("backend", "frontend", "backend_code", "frontend_code", "content"):
+                blob = result.get(key)
+                if isinstance(blob, str):
+                    job_loc += blob.count("\n") + 1
+            # Also handle copilot files dict if present
+            files = result.get("files")
+            if isinstance(files, dict):
+                for code in files.values():
+                    if isinstance(code, str):
+                        job_loc += code.count("\n") + 1
+            total_loc += job_loc
 
     return {
         "total_apps": counts["total"] or 0,
@@ -310,6 +345,12 @@ def get_code_generation_stats(
 
 
 def get_analyzer_health() -> dict[str, Any]:
+    from django.core.cache import cache
+    cache_key = "analyzer_health_status"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     analyzers = AnalyzerRegistry.list_available()
     online = sum(1 for a in analyzers if a.get("available"))
     by_type: dict[str, dict[str, int]] = {}
@@ -321,7 +362,7 @@ def get_analyzer_health() -> dict[str, Any]:
         bucket["total"] += 1
         if a.get("available"):
             bucket["online"] += 1
-    return {
+    res = {
         "total": len(analyzers),
         "online": online,
         "offline": len(analyzers) - online,
@@ -337,3 +378,6 @@ def get_analyzer_health() -> dict[str, Any]:
             for a in analyzers
         ],
     }
+    # Cache for 5 minutes (300 seconds)
+    cache.set(cache_key, res, 300)
+    return res

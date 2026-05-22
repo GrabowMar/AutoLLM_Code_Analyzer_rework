@@ -39,7 +39,6 @@
 	export interface CopilotPayload {
 		description: string;
 		model_id?: number;
-		scaffolding_template_id?: number;
 		max_iterations: number;
 		use_open_source: boolean;
 	}
@@ -60,7 +59,6 @@
 		copilotError: string;
 		customModelId?: number | '';
 		copilotModelId?: number | '';
-		copilotScaffoldId?: number | '';
 		onSubmitCustom: (payload: CustomPayload) => void;
 		onSubmitScaffolding: (payload: ScaffoldingPayload) => void;
 		onSubmitCopilot: (payload: CopilotPayload) => void;
@@ -82,7 +80,6 @@
 		copilotError,
 		customModelId = $bindable('' as number | ''),
 		copilotModelId = $bindable('' as number | ''),
-		copilotScaffoldId = $bindable('' as number | ''),
 		onSubmitCustom,
 		onSubmitScaffolding,
 		onSubmitCopilot,
@@ -106,16 +103,6 @@
 	let copilotDescription = $state('');
 	let copilotMaxIterations = $state(5);
 	let copilotUseOpenSource = $state(true);
-
-	let lastDefaultedCopilotScaffoldKey = $state('');
-	$effect(() => {
-		const key = scaffoldingTemplates.map(s => s.id).join(',');
-		if (key && key !== lastDefaultedCopilotScaffoldKey && copilotScaffoldId === '') {
-			const def = scaffoldingTemplates.find(s => s.is_default);
-			copilotScaffoldId = def ? def.id : scaffoldingTemplates[0]?.id ?? '';
-			lastDefaultedCopilotScaffoldKey = key;
-		}
-	});
 
 	let lastDefaultedScaffoldKey = $state<string>('');
 	$effect(() => {
@@ -189,7 +176,6 @@
 		onSubmitCopilot({
 			description: copilotDescription,
 			model_id: copilotModelId ? (copilotModelId as number) : undefined,
-			scaffolding_template_id: copilotScaffoldId ? (copilotScaffoldId as number) : undefined,
 			max_iterations: copilotMaxIterations,
 			use_open_source: copilotUseOpenSource,
 		});
@@ -473,36 +459,6 @@
 						class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 						placeholder="Describe what you want to build. Be specific about features, tech stack, and requirements…"
 					></textarea>
-				</div>
-
-				<div class="space-y-2">
-					<Label>Scaffolding template</Label>
-					{#if scaffoldingLoading}
-						<div class="flex h-9 items-center gap-2 rounded-md border px-3 text-sm text-muted-foreground">
-							<LoaderCircle class="h-3.5 w-3.5 animate-spin" /> Loading…
-						</div>
-					{:else}
-						<div class="grid gap-3 grid-cols-1 sm:grid-cols-2">
-							{#each scaffoldingTemplates as tpl}
-								<button
-									type="button"
-									class="rounded-lg border p-4 text-left transition-colors {copilotScaffoldId === tpl.id ? 'ring-2 ring-primary bg-primary/5' : 'hover:bg-muted/50'}"
-									onclick={() => (copilotScaffoldId = tpl.id)}
-								>
-									<div class="flex items-center gap-2">
-										<Layers
-											class="h-4 w-4 {copilotScaffoldId === tpl.id ? 'text-primary' : 'text-muted-foreground'}"
-										/>
-										<span class="text-sm font-medium">{tpl.name}</span>
-										{#if tpl.is_default}
-											<Badge variant="secondary" class="text-[10px]">Default</Badge>
-										{/if}
-									</div>
-									<p class="mt-1 text-xs text-muted-foreground line-clamp-2">{tpl.description}</p>
-								</button>
-							{/each}
-						</div>
-					{/if}
 				</div>
 
 				<div class="space-y-1">

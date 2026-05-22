@@ -261,10 +261,10 @@ class AiderRunner:
     def _build_message(self, iteration: int, errors: list[str]) -> str:
         if iteration == 1:
             stack = ""
-            if self.workspace.is_react_flask():
+            if self.workspace.is_flask_react():
                 stack = (
-                    "\n\nStack: Flask backend in backend/app.py, "
-                    "React frontend in frontend/src/App.jsx with Tailwind CSS."
+                    "\n\nStack: Flask 3.x API (all routes under /api/) in app.py, "
+                    "React 18 frontend in frontend/src/App.jsx with Tailwind CSS."
                 )
             return (
                 f"Build the following application:\n\n{self.job.copilot_description}"

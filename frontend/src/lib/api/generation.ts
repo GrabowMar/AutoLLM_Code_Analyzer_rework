@@ -166,7 +166,6 @@ export async function createAppTemplate(data: {
 export async function createCopilotJob(data: {
   description: string;
   model_id?: number;
-  scaffolding_template_id?: number;
   max_iterations?: number;
   use_open_source?: boolean;
 }): Promise<GenerationJob> {

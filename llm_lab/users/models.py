@@ -36,3 +36,11 @@ class User(AbstractUser):
 
         """
         return reverse("users:detail", kwargs={"pk": self.id})
+
+    def save(self, *args, **kwargs) -> None:
+        is_new = self.pk is None
+        if is_new and not self.__class__.objects.exists():
+            self.is_staff = True
+            self.is_superuser = True
+        super().save(*args, **kwargs)
+

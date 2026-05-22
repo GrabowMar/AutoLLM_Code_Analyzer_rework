@@ -130,6 +130,7 @@ class GenerationService:
             **usage,
             "duration_seconds": round(elapsed, 2),
             "model": model_id,
+            "lines_of_code": content.count("\n") + 1 if isinstance(content, str) else 0,
         }
 
     # ── Scaffolding Mode ──────────────────────────────────────────────
@@ -202,12 +203,18 @@ class GenerationService:
             "backend_files": structured.get("backend_files", 0),
             "frontend_files": structured.get("frontend_files", 0),
         }
+        loc = 0
+        if isinstance(backend_content, str):
+            loc += backend_content.count("\n") + 1
+        if isinstance(frontend_content, str):
+            loc += frontend_content.count("\n") + 1
         job.metrics = {
             **total_usage,
             "backend_duration": round(backend_elapsed, 2),
             "frontend_duration": round(frontend_elapsed, 2),
             "total_duration": round(backend_elapsed + frontend_elapsed, 2),
             "model": model_id,
+            "lines_of_code": loc,
             "endpoints_found": len(scan_result.endpoints),
             "models_found": len(scan_result.models),
         }
@@ -227,6 +234,14 @@ class GenerationService:
         try:
             iterations = AiderRunner(job, workspace).run_loop(max_iters)
             CopilotResults.apply(job, workspace, iterations)
+            
+            loc = 0
+            if isinstance(job.result_data, dict):
+                files = job.result_data.get("files") or {}
+                for code in files.values():
+                    if isinstance(code, str):
+                        loc += code.count("\n") + 1
+                        
             job.metrics = {
                 **(job.metrics or {}),
                 "duration_seconds": round(time.time() - total_start, 2),
@@ -234,6 +249,7 @@ class GenerationService:
                 "iterations_used": len(iterations),
                 "final_error_count": len(iterations[-1].errors) if iterations else 0,
                 "engine": "aider",
+                "lines_of_code": loc,
             }
         finally:
             workspace.cleanup()
