@@ -174,16 +174,18 @@
 		{/if}
 
 		{#if showPorts && previewUrl && container.status === 'running'}
-			<a
+			<Button
+				variant="outline"
+				size={btnSize}
 				href={previewUrl}
 				target="_blank"
 				rel="noopener noreferrer"
-				class="text-xs font-mono text-primary hover:underline inline-flex items-center gap-1"
+				class="text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 hover:border-emerald-500/50"
 				title="Open app preview"
 			>
-				:{container.app_port}
-				<ExternalLink class="h-3 w-3" />
-			</a>
+				<ExternalLink class="{iconCls} {showLabels ? 'sm:mr-1.5' : ''}" />
+				{#if showLabels}<span class="hidden sm:inline">Open</span>{/if}
+			</Button>
 		{/if}
 
 		{#if container.status === 'stopped'}
