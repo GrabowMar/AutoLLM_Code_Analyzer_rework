@@ -35,14 +35,19 @@ DJANGO_ACCOUNT_ALLOW_REGISTRATION=True
 # Browser-facing app URL (https) — used in verification and password-reset emails.
 FRONTEND_PUBLIC_ORIGIN=https://example.com
 
-# Sample-app container access
+# Sample-app container access (Traefik TLS termination)
 # ------------------------------------------------------------------------------
-# Hostname (or IP) used to build the "Open" URL for generated sample-app containers.
-# Defaults to DJANGO_DOMAIN when left empty.
-# IMPORTANT: If HSTS is active on your domain, browsers upgrade http://domain:PORT
-# to https://domain:PORT, which fails for plain-HTTP container ports.
-# Set this to the server's public IP address to avoid that redirect, e.g.:
-# CONTAINER_APP_HOST=1.2.3.4
+# TRAEFIK_DYNAMIC_DIR and DOCKER_APPS_NETWORK are set automatically by
+# docker-compose.production.yml — do not override here unless you know what
+# you're doing.
+#
+# When TRAEFIK_DYNAMIC_DIR is set, Django writes per-container route files so
+# Traefik terminates TLS on each app's port (9001-9020) and forwards traffic
+# to the container via the llm_apps Docker network.  URLs become
+# https://<domain>:<port>/ — HTTPS on the domain's valid cert, no path prefix.
+#
+# CONTAINER_APP_HOST is only used when TRAEFIK_DYNAMIC_DIR is NOT set (e.g.
+# local dev without Traefik).  Leave empty to fall back to DJANGO_DOMAIN.
 CONTAINER_APP_HOST=
 
 

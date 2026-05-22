@@ -50,6 +50,9 @@ class ContainerInstanceSchema(ModelSchema):
         if not obj.app_port:
             return None
         from django.conf import settings
+        if getattr(settings, "TRAEFIK_DYNAMIC_DIR", ""):
+            domain = getattr(settings, "DJANGO_DOMAIN", "localhost")
+            return f"https://{domain}:{obj.app_port}"
         host = getattr(settings, "CONTAINER_APP_HOST", "") or getattr(settings, "DJANGO_DOMAIN", "localhost")
         return f"http://{host}:{obj.app_port}"
 

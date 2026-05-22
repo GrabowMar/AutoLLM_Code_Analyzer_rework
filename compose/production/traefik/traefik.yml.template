@@ -3,101 +3,73 @@ log:
 
 entryPoints:
   web:
-    # http
     address: ':80'
     http:
-      # https://doc.traefik.io/traefik/routing/entrypoints/#entrypoint
       redirections:
         entryPoint:
           to: web-secure
 
   web-secure:
-    # https
     address: ':443'
 
   flower:
     address: ':5555'
 
+  # Sample-app entry points — Traefik terminates TLS here and routes to the
+  # container on the llm_apps Docker network.  Ports must not be bound by the
+  # app containers themselves; they are owned exclusively by Traefik.
+  app-9001:
+    address: ':9001'
+  app-9002:
+    address: ':9002'
+  app-9003:
+    address: ':9003'
+  app-9004:
+    address: ':9004'
+  app-9005:
+    address: ':9005'
+  app-9006:
+    address: ':9006'
+  app-9007:
+    address: ':9007'
+  app-9008:
+    address: ':9008'
+  app-9009:
+    address: ':9009'
+  app-9010:
+    address: ':9010'
+  app-9011:
+    address: ':9011'
+  app-9012:
+    address: ':9012'
+  app-9013:
+    address: ':9013'
+  app-9014:
+    address: ':9014'
+  app-9015:
+    address: ':9015'
+  app-9016:
+    address: ':9016'
+  app-9017:
+    address: ':9017'
+  app-9018:
+    address: ':9018'
+  app-9019:
+    address: ':9019'
+  app-9020:
+    address: ':9020'
+
 certificatesResolvers:
   letsencrypt:
-    # https://doc.traefik.io/traefik/https/acme/#lets-encrypt
     acme:
       email: '${LETSENCRYPT_EMAIL}'
       storage: /etc/traefik/acme/acme.json
-      # https://doc.traefik.io/traefik/https/acme/#httpchallenge
       httpChallenge:
         entryPoint: web
 
-http:
-  routers:
-    web-secure-router:
-      rule: '(Host(`${DJANGO_DOMAIN}`) || Host(`www.${DJANGO_DOMAIN}`)) && (PathPrefix(`/api/`) || PathPrefix(`/_allauth/`) || PathPrefix(`/admin/`))'
-      entryPoints:
-        - web-secure
-      middlewares:
-        - csrf
-      service: django
-      tls:
-        certResolver: letsencrypt
-
-    frontend-secure-router:
-      rule: 'Host(`${DJANGO_DOMAIN}`) || Host(`www.${DJANGO_DOMAIN}`)'
-      entryPoints:
-        - web-secure
-      service: frontend
-      tls:
-        certResolver: letsencrypt
-      priority: 1
-
-    flower-secure-router:
-      rule: 'Host(`${DJANGO_DOMAIN}`)'
-      entryPoints:
-        - flower
-      service: flower
-      tls:
-        # https://doc.traefik.io/traefik/master/routing/routers/#certresolver
-        certResolver: letsencrypt
-
-    web-media-router:
-      rule: '(Host(`${DJANGO_DOMAIN}`) || Host(`www.${DJANGO_DOMAIN}`)) && PathPrefix(`/media/`)'
-      entryPoints:
-        - web-secure
-      middlewares:
-        - csrf
-      service: django-media
-      tls:
-        certResolver: letsencrypt
-
-  middlewares:
-    csrf:
-      # https://doc.traefik.io/traefik/master/middlewares/http/headers/#hostsproxyheaders
-      # https://docs.djangoproject.com/en/dev/ref/csrf/#ajax
-      headers:
-        hostsProxyHeaders: ['X-CSRFToken']
-
-  services:
-    django:
-      loadBalancer:
-        servers:
-          - url: http://django:5000
-
-    flower:
-      loadBalancer:
-        servers:
-          - url: http://flower:5555
-
-    django-media:
-      loadBalancer:
-        servers:
-          - url: http://nginx:80
-
-    frontend:
-      loadBalancer:
-        servers:
-          - url: http://frontend:3000
-
 providers:
-  # https://doc.traefik.io/traefik/master/providers/file/
+  # Static routes (django, frontend, flower) live in dynamic/static.yml.
+  # Per-container routes are written to dynamic/app-PORT.yml at runtime.
   file:
-    filename: /etc/traefik/traefik.yml
+    directory: /etc/traefik/dynamic/
     watch: true

@@ -129,7 +129,11 @@ def prepare_live_target(
         msg = f"Container {instance.name} has no allocated port."
         raise RuntimeError(msg)
 
-    target_url = f"http://127.0.0.1:{port}"
+    from django.conf import settings
+    if getattr(settings, "DOCKER_APPS_NETWORK", ""):
+        target_url = f"http://{instance.name}:8000"
+    else:
+        target_url = f"http://127.0.0.1:{port}"
 
     # Brief TCP probe to confirm port is accepting connections.
     probe_deadline = time.monotonic() + TCP_PROBE_TIMEOUT_SECONDS

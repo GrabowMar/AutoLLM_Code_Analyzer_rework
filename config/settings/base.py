@@ -389,8 +389,16 @@ OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK = env.bool(
     default=True,
 )
 
-# Hostname (or IP) used to build public URLs for generated sample-app containers.
-# Defaults to DJANGO_DOMAIN. Override with the server's public IP when HSTS is
-# active on the domain, since browsers upgrade http://domain:PORT → https://domain:PORT
-# which fails for plain-HTTP container ports.
+# Hostname used to build public URLs for generated sample-app containers.
+# Only used when TRAEFIK_DYNAMIC_DIR is NOT set (local dev / non-Traefik).
 CONTAINER_APP_HOST = env("CONTAINER_APP_HOST", default="")
+
+# When set, Django writes per-container Traefik dynamic route files here so
+# Traefik can terminate TLS on each app's dedicated port.  Must be the same
+# path mounted into the Traefik container as /etc/traefik/dynamic/.
+TRAEFIK_DYNAMIC_DIR = env("TRAEFIK_DYNAMIC_DIR", default="")
+
+# Docker network for sample-app containers.  When set, containers are spawned
+# on this network WITHOUT host port binding; Traefik (also on the network)
+# reaches them by container name at port 8000.
+DOCKER_APPS_NETWORK = env("DOCKER_APPS_NETWORK", default="")

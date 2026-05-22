@@ -110,16 +110,22 @@ def run_container(
     ports: dict[str, int],
     env: dict[str, str],
     container_instance_id: str = "",
+    network: str = "",
 ) -> str:
-    """Start a container and return its container ID."""
+    """Start a container and return its container ID.
+
+    When *network* is provided the container is attached to that Docker network
+    and *ports* host-bindings are ignored (Traefik routes traffic via the
+    network).  Without *network* the container uses the default bridge with the
+    given *ports* mapping.
+    """
     c = client()
     if c is None:
         msg = "Docker daemon unavailable"
         raise ConnectionError(msg)
-    container = c.containers.run(
-        image,
+
+    kwargs: dict[str, Any] = dict(
         name=name,
-        ports=ports,
         environment=env,
         detach=True,
         cap_drop=["ALL"],
@@ -127,12 +133,18 @@ def run_container(
         mem_limit="512m",
         cpu_period=100000,
         cpu_quota=50000,
-        network_mode="bridge",
         labels={
             "llm_lab.managed": "true",
             "llm_lab.instance_id": container_instance_id,
         },
     )
+    if network:
+        kwargs["network"] = network
+    else:
+        kwargs["ports"] = ports
+        kwargs["network_mode"] = "bridge"
+
+    container = c.containers.run(image, **kwargs)
     return container.id
 
 
