@@ -24,6 +24,12 @@ if TYPE_CHECKING:
 
 def get_system_overview(user: AbstractBaseUser | None = None) -> dict[str, Any]:
     """High-level KPIs for dashboard cards & the statistics page."""
+    from django.core.cache import cache
+    u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
+    cache_key = f"stats_overview_{u_key}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     jobs = _scoped(GenerationJob.objects.all(), user, "created_by")
     tasks = _scoped(AnalysisTask.objects.all(), user, "created_by")
@@ -52,7 +58,7 @@ def get_system_overview(user: AbstractBaseUser | None = None) -> dict[str, Any]:
 
     unique_models_used = jobs.exclude(model__isnull=True).values_list("model_id", flat=True).distinct().count()
 
-    return {
+    res = {
         "total_models": LLMModel.objects.count(),
         "models_in_use": unique_models_used,
         "total_apps": job_counts["total"] or 0,
@@ -78,11 +84,20 @@ def get_system_overview(user: AbstractBaseUser | None = None) -> dict[str, Any]:
         ),
         "total_findings": findings.count(),
     }
+    cache.set(cache_key, res, 15)
+    return res
 
 
 def get_severity_distribution(
     user: AbstractBaseUser | None = None,
 ) -> dict[str, Any]:
+    from django.core.cache import cache
+    u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
+    cache_key = f"stats_severity_{u_key}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     findings = _scoped(
         Finding.objects.all(),
         user,
@@ -103,7 +118,9 @@ def get_severity_distribution(
         }
         for s in severities
     ]
-    return {"total": total, "distribution": distribution}
+    res = {"total": total, "distribution": distribution}
+    cache.set(cache_key, res, 15)
+    return res
 
 
 def get_model_comparison(
@@ -111,6 +128,12 @@ def get_model_comparison(
     limit: int = 25,
 ) -> list[dict[str, Any]]:
     """Per-model rollup: apps generated, success rate, avg duration, scores."""
+    from django.core.cache import cache
+    u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
+    cache_key = f"stats_models_{limit}_{u_key}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     jobs = (
         _scoped(GenerationJob.objects.all(), user, "created_by")
@@ -202,6 +225,7 @@ def get_model_comparison(
         )
 
     rows.sort(key=lambda r: r["mss"], reverse=True)
+    cache.set(cache_key, rows, 15)
     return rows
 
 
@@ -209,6 +233,12 @@ def get_tool_effectiveness(
     user: AbstractBaseUser | None = None,
 ) -> list[dict[str, Any]]:
     """Per-analyzer scan and finding totals."""
+    from django.core.cache import cache
+    u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
+    cache_key = f"stats_tools_{u_key}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     results = _scoped(
         AnalysisResult.objects.all(),
@@ -258,6 +288,7 @@ def get_tool_effectiveness(
                 "top_rule": top_rules.get(t["analyzer_name"], ""),
             },
         )
+    cache.set(cache_key, rows, 15)
     return rows
 
 
@@ -265,13 +296,20 @@ def get_top_findings(
     limit: int = 10,
     user: AbstractBaseUser | None = None,
 ) -> list[dict[str, Any]]:
+    from django.core.cache import cache
+    u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
+    cache_key = f"stats_top_findings_{limit}_{u_key}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     findings = _scoped(
         Finding.objects.all(),
         user,
         "result__task__created_by",
     )
     rows = findings.values("title", "severity").annotate(count=Count("id")).order_by("-count")[:limit]
-    return [
+    res = [
         {
             "title": r["title"],
             "severity": r["severity"],
@@ -279,11 +317,20 @@ def get_top_findings(
         }
         for r in rows
     ]
+    cache.set(cache_key, res, 15)
+    return res
 
 
 def get_code_generation_stats(
     user: AbstractBaseUser | None = None,
 ) -> dict[str, Any]:
+    from django.core.cache import cache
+    u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
+    cache_key = f"stats_code_gen_{u_key}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     jobs = _scoped(GenerationJob.objects.all(), user, "created_by")
 
     counts = jobs.aggregate(
@@ -330,7 +377,7 @@ def get_code_generation_stats(
                         job_loc += code.count("\n") + 1
             total_loc += job_loc
 
-    return {
+    res = {
         "total_apps": counts["total"] or 0,
         "completed": counts["completed"] or 0,
         "failed": counts["failed"] or 0,
@@ -342,6 +389,8 @@ def get_code_generation_stats(
         "total_lines_of_code": total_loc,
         "unique_templates": unique_templates,
     }
+    cache.set(cache_key, res, 15)
+    return res
 
 
 def get_analyzer_health() -> dict[str, Any]:

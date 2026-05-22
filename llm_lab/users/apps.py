@@ -10,3 +10,8 @@ class UsersConfig(AppConfig):
         """
         Override this method in subclasses to run code when Django starts.
         """
+        try:
+            import llm_lab.users.signals  # noqa: F401
+        except ImportError:
+            pass
+

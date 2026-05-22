@@ -12,6 +12,12 @@ from django.conf import settings
 
 
 def container_health() -> list[dict[str, Any]]:
+    from django.core.cache import cache
+    cache_key = "system_container_health"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         client = docker.from_env()
         containers = client.containers.list(all=True)
@@ -35,10 +41,17 @@ def container_health() -> list[dict[str, Any]]:
                 "health": health,
             },
         )
+    cache.set(cache_key, result, 10)
     return result
 
 
 def redis_status() -> dict[str, Any]:
+    from django.core.cache import cache
+    cache_key = "system_redis_status"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     url = getattr(settings, "REDIS_URL", "redis://redis:6379/0")
     try:
         client = redis_lib.from_url(url, socket_connect_timeout=2)
@@ -46,7 +59,7 @@ def redis_status() -> dict[str, Any]:
         client.ping()
         latency_ms = round((time.monotonic() - start) * 1000, 2)
         info = client.info()
-        return {
+        res = {
             "reachable": True,
             "ping_latency_ms": latency_ms,
             "connected_clients": info.get("connected_clients"),
@@ -55,12 +68,21 @@ def redis_status() -> dict[str, Any]:
             "redis_version": info.get("redis_version"),
         }
     except Exception as exc:  # noqa: BLE001
-        return {"reachable": False, "error": str(exc)}
+        res = {"reachable": False, "error": str(exc)}
+
+    cache.set(cache_key, res, 10)
+    return res
 
 
 def celery_status() -> dict[str, Any]:
+    from django.core.cache import cache
+    cache_key = "system_celery_status"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
-        inspector = celery_app.control.inspect(timeout=2)
+        inspector = celery_app.control.inspect(timeout=0.5)
         active = inspector.active() or {}
         scheduled = inspector.scheduled() or {}
         reserved = inspector.reserved() or {}
@@ -81,7 +103,7 @@ def celery_status() -> dict[str, Any]:
         except Exception as _queue_err:  # noqa: BLE001
             queue_lengths["error"] = str(_queue_err)
 
-        return {
+        res = {
             "reachable": True,
             "worker_count": len(workers),
             "workers": workers,
@@ -91,4 +113,7 @@ def celery_status() -> dict[str, Any]:
             "queue_lengths": queue_lengths,
         }
     except Exception as exc:  # noqa: BLE001
-        return {"reachable": False, "worker_count": 0, "error": str(exc)}
+        res = {"reachable": False, "worker_count": 0, "error": str(exc)}
+
+    cache.set(cache_key, res, 10)
+    return res

@@ -25,6 +25,12 @@ def get_analysis_trends(
     user: AbstractBaseUser | None = None,
 ) -> dict[str, Any]:
     """Daily analysis counts for the last *days* days."""
+    from django.core.cache import cache
+    u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
+    cache_key = f"stats_trends_{days}_{u_key}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     days = max(1, min(days, 90))
     start = datetime.now(tz=UTC) - timedelta(days=days - 1)
@@ -75,17 +81,26 @@ def get_analysis_trends(
         )
         cursor += timedelta(days=1)
 
-    return {
+    res = {
         "days": days,
         "total": sum(p["total"] for p in series),
         "series": series,
     }
+    cache.set(cache_key, res, 15)
+    return res
 
 
 def get_recent_activity(
     limit: int = 20,
     user: AbstractBaseUser | None = None,
 ) -> list[dict[str, Any]]:
+    from django.core.cache import cache
+    u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
+    cache_key = f"stats_activity_{limit}_{u_key}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     limit = max(1, min(limit, 100))
 
     jobs = (
@@ -119,4 +134,6 @@ def get_recent_activity(
     )
 
     items.sort(key=lambda i: i["created_at"], reverse=True)
-    return items[:limit]
+    res = items[:limit]
+    cache.set(cache_key, res, 15)
+    return res

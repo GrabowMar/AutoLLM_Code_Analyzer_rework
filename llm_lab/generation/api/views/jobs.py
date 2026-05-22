@@ -17,11 +17,26 @@ from llm_lab.generation.api.schema import GenerationArtifactSchema
 from llm_lab.generation.api.schema import GenerationBatchSchema
 from llm_lab.generation.api.schema import GenerationJobListSchema
 from llm_lab.generation.api.schema import GenerationJobSchema
+from django.db.models import Q
 from llm_lab.generation.api.schema import PaginatedJobsSchema
 from llm_lab.generation.api.views._router import router
 from llm_lab.generation.models import GenerationBatch
 from llm_lab.generation.models import GenerationJob
 from llm_lab.generation.services.dispatcher import dispatch_job
+
+
+@router.get("/jobs/stats/", response=dict)
+def job_stats(request):
+    """Get count of jobs by status."""
+    qs = GenerationJob.objects.filter(created_by=request.auth)
+    return {
+        "total": qs.count(),
+        "completed": qs.filter(status="completed").count(),
+        "running": qs.filter(status="running").count(),
+        "failed": qs.filter(status="failed").count(),
+        "pending": qs.filter(status="pending").count(),
+        "cancelled": qs.filter(status="cancelled").count(),
+    }
 
 
 @router.get("/jobs/", response=PaginatedJobsSchema)
@@ -32,6 +47,9 @@ def list_jobs(
     mode: str = Query(""),
     status: str = Query(""),
     model_id: str = Query(""),
+    search: str = Query(""),
+    sort_by: str = Query(""),
+    container_status: str = Query(""),
 ):
     """List generation jobs with pagination and filters."""
     qs = (
@@ -41,7 +59,6 @@ def list_jobs(
             "app_requirement",
             "scaffolding_template",
         )
-        .order_by("-created_at")
     )
     if mode:
         qs = qs.filter(mode=mode)
@@ -49,6 +66,44 @@ def list_jobs(
         qs = qs.filter(status=status)
     if model_id:
         qs = qs.filter(model__model_id=model_id)
+
+    # Filter by container status
+    if container_status:
+        if container_status == "running":
+            qs = qs.filter(container_instances__status="running")
+        elif container_status == "stopped":
+            qs = qs.filter(container_instances__status="stopped")
+        elif container_status == "building":
+            qs = qs.filter(container_instances__status__in=["building", "pending"])
+        elif container_status == "none":
+            qs = qs.filter(Q(container_instances__isnull=True) | Q(container_instances__status="removed"))
+
+    if search:
+        import uuid
+        uuid_q = Q()
+        try:
+            val = uuid.UUID(search)
+            uuid_q = Q(id=val)
+        except ValueError:
+            pass
+        qs = qs.filter(
+            uuid_q
+            | Q(model__model_name__icontains=search)
+            | Q(model__model_id__icontains=search)
+            | Q(app_requirement__name__icontains=search)
+            | Q(scaffolding_template__name__icontains=search)
+        )
+
+    # Sorting
+    allowed_sorts = {
+        "created_desc": "-created_at",
+        "created_asc": "created_at",
+        "duration_desc": "-duration_seconds",
+        "duration_asc": "duration_seconds",
+        "model_asc": "model__model_name",
+    }
+    order_field = allowed_sorts.get(sort_by, "-created_at")
+    qs = qs.order_by(order_field)
 
     page_qs, total, page, pages = paginate_queryset(qs, page, per_page)
 

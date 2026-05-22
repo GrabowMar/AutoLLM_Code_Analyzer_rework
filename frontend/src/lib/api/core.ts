@@ -207,8 +207,10 @@ export async function apiFetch(
   });
   if (!res.ok) {
     if (res.status === 401) {
-      window.location.href = "/auth/login";
-      return new Promise<Response>(() => {});
+      if (typeof window !== "undefined") {
+        window.location.href = "/auth/login";
+      }
+      throw { status: 401, message: "Unauthorized" };
     }
     const body = await res.json().catch(() => ({}));
     throw body;

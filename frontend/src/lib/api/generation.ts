@@ -293,6 +293,9 @@ export async function getGenerationJobs(params?: {
   mode?: string;
   status?: string;
   model_id?: string;
+  search?: string;
+  sort_by?: string;
+  container_status?: string;
 }): Promise<PaginatedJobs> {
   const q = new URLSearchParams();
   if (params?.page) q.set("page", String(params.page));
@@ -300,8 +303,23 @@ export async function getGenerationJobs(params?: {
   if (params?.mode) q.set("mode", params.mode);
   if (params?.status) q.set("status", params.status);
   if (params?.model_id) q.set("model_id", params.model_id);
+  if (params?.search) q.set("search", params.search);
+  if (params?.sort_by) q.set("sort_by", params.sort_by);
+  if (params?.container_status) q.set("container_status", params.container_status);
   const qs = q.toString();
   const res = await apiFetch(`/generation/jobs/${qs ? "?" + qs : ""}`);
+  return res.json();
+}
+
+export async function getGenerationJobsStats(): Promise<{
+  total: number;
+  completed: number;
+  running: number;
+  failed: number;
+  pending: number;
+  cancelled: number;
+}> {
+  const res = await apiFetch("/generation/jobs/stats/");
   return res.json();
 }
 

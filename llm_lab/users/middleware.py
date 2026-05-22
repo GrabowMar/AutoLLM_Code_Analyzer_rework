@@ -31,3 +31,19 @@ class RememberMeMiddleware:
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     request._remember_me = False  # noqa: SLF001
         return self.get_response(request)
+
+
+class ForceCsrfCookieMiddleware:
+    """Ensure CSRF cookie is set on GET/safe requests to allauth and API paths."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        if request.method in ("GET", "HEAD") and (
+            "_allauth/" in request.path or "api/" in request.path
+        ):
+            from django.middleware.csrf import get_token
+            get_token(request)
+        return self.get_response(request)
+

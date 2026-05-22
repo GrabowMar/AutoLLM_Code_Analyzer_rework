@@ -30,7 +30,13 @@ def _bytes_human(b: int) -> str:
 
 
 def host_metrics() -> dict[str, Any]:
-    cpu_percent = psutil.cpu_percent(interval=0.2)
+    from django.core.cache import cache
+    cache_key = "system_host_metrics"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    cpu_percent = psutil.cpu_percent(interval=None)
     mem = psutil.virtual_memory()
     load = psutil.getloadavg()
     boot_time = psutil.boot_time()
@@ -54,7 +60,7 @@ def host_metrics() -> dict[str, Any]:
         except PermissionError:
             pass
 
-    return {
+    res = {
         "cpu_percent": cpu_percent,
         "cpu_count": psutil.cpu_count(logical=True),
         "memory": {
@@ -68,9 +74,17 @@ def host_metrics() -> dict[str, Any]:
         "uptime_seconds": uptime_seconds,
         "boot_time": boot_time,
     }
+    cache.set(cache_key, res, 10)
+    return res
 
 
 def db_stats() -> dict[str, Any]:
+    from django.core.cache import cache
+    cache_key = "system_db_stats"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     with connection.cursor() as cursor:
         cursor.execute(
             """
@@ -128,10 +142,18 @@ def db_stats() -> dict[str, Any]:
             for r in cursor.fetchall()
         ]
 
-    return {"stats": stat, "top_tables_by_size": top_tables}
+    res = {"stats": stat, "top_tables_by_size": top_tables}
+    cache.set(cache_key, res, 30)
+    return res
 
 
 def app_stats() -> dict[str, Any]:
+    from django.core.cache import cache
+    cache_key = "system_app_stats"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     since = timezone.now() - timedelta(hours=24)
 
     def _counts(model):  # type: ignore[no-untyped-def]
@@ -142,9 +164,11 @@ def app_stats() -> dict[str, Any]:
             recent = model.objects.filter(created_at__gte=since).count()
         return {"by_status": by_status, "last_24h": recent}
 
-    return {
+    res = {
         "analysis_tasks": _counts(AnalysisTask),
         "generation_jobs": _counts(GenerationJob),
         "reports": _counts(Report),
         "container_instances": _counts(ContainerInstance),
     }
+    cache.set(cache_key, res, 10)
+    return res
