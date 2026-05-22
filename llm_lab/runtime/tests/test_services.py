@@ -44,8 +44,7 @@ def test_build_action_completes():
         user = UserFactory()
         container = ContainerInstanceFactory(
             status=ContainerInstance.Status.PENDING,
-            backend_port=5001,
-            frontend_port=8001,
+            app_port=8001,
         )
         action = container_service.create_action(
             container,

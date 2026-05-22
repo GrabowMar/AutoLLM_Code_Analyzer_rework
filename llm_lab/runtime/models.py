@@ -42,8 +42,7 @@ class ContainerInstance(models.Model):
         choices=Status.choices,
         default=Status.PENDING,
     )
-    backend_port = models.IntegerField(_("backend port"), null=True, blank=True)
-    frontend_port = models.IntegerField(_("frontend port"), null=True, blank=True)
+    app_port = models.IntegerField(_("app port"), null=True, blank=True)
     health_status = models.CharField(
         _("health status"),
         max_length=100,
@@ -191,8 +190,7 @@ class ContainerAction(models.Model):
 class PortAllocation(models.Model):
     """Tracks allocated host port pairs for container instances."""
 
-    backend_port = models.IntegerField(_("backend port"), unique=True)
-    frontend_port = models.IntegerField(_("frontend port"), unique=True)
+    app_port = models.IntegerField(_("app port"), unique=True)
     container = models.OneToOneField(
         ContainerInstance,
         on_delete=models.SET_NULL,
@@ -207,17 +205,16 @@ class PortAllocation(models.Model):
         verbose_name_plural = _("Port Allocations")
 
     def __str__(self) -> str:
-        return f"backend:{self.backend_port} / frontend:{self.frontend_port}"
+        return f"app:{self.app_port}"
 
     @classmethod
     def allocate(cls) -> PortAllocation:
-        """Find next free port pair and allocate it atomically."""
+        """Find the next free app port and allocate it atomically."""
         import socket
 
         from django.db import transaction
 
-        base_backend = 5001
-        base_frontend = 8001
+        base_port = 8001
         max_retries = 5
 
         def _is_port_free(port: int) -> bool:
@@ -232,34 +229,15 @@ class PortAllocation(models.Model):
 
         for _attempt in range(max_retries):
             with transaction.atomic():
-                used_backends = set(
-                    cls.objects.values_list("backend_port", flat=True),
-                )
-                used_frontends = set(
-                    cls.objects.values_list("frontend_port", flat=True),
-                )
-
-                candidate_b = base_backend
-                candidate_f = base_frontend
-
-                while True:
-                    if (
-                        candidate_b not in used_backends
-                        and candidate_f not in used_frontends
-                        and _is_port_free(candidate_b)
-                        and _is_port_free(candidate_f)
-                    ):
-                        break
-                    candidate_b += 1
-                    candidate_f += 1
+                used_ports = set(cls.objects.values_list("app_port", flat=True))
+                candidate = base_port
+                while candidate in used_ports or not _is_port_free(candidate):
+                    candidate += 1
 
                 try:
-                    return cls.objects.create(
-                        backend_port=candidate_b,
-                        frontend_port=candidate_f,
-                    )
+                    return cls.objects.create(app_port=candidate)
                 except Exception:  # noqa: BLE001, S112
                     continue  # race condition on creation — retry
 
-        msg = "Could not allocate port pair after retries"
+        msg = "Could not allocate port after retries"
         raise RuntimeError(msg)

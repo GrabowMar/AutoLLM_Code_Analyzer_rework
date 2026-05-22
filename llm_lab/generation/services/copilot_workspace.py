@@ -59,8 +59,8 @@ class CopilotWorkspace:
             return job_template.slug
         return "generic-python"
 
-    def is_react_flask(self) -> bool:
-        return self.template_slug() == "react-flask"
+    def is_flask_react(self) -> bool:
+        return self.template_slug() in ("flask-react", "react-flask")
 
     def tracked_files(self) -> list[str]:
         """Relative paths of editable source files for Aider."""
@@ -101,8 +101,8 @@ class CopilotWorkspace:
 
     def test_command(self) -> str | None:
         """Shell command for compile/test validation after Aider edits."""
-        if self.is_react_flask():
-            return "python -m compileall -q backend"
+        if self.is_flask_react():
+            return f"python -m py_compile {self.primary_python_path().relative_to(self.root).as_posix()}"
         if (self.root / "app.py").is_file():
             return f"python -m py_compile {self.primary_python_path().relative_to(self.root).as_posix()}"
         return None
@@ -116,8 +116,8 @@ class CopilotWorkspace:
                 return
 
         slug = self.template_slug()
-        if slug == "react-flask":
-            self._seed_react_flask_static()
+        if slug in ("flask-react", "react-flask"):
+            self._seed_flask_react_static()
         else:
             self._seed_minimal()
 
@@ -125,17 +125,12 @@ class CopilotWorkspace:
         with tarfile.open(archive_path, "r:gz") as tar:
             tar.extractall(path=self.root, filter="data")
 
-    def _seed_react_flask_static(self) -> None:
-        template_dir = _RUNTIME_SCAFFOLDING / "react-flask"
-        backend_dest = self.root / "backend"
-        backend_dest.mkdir(parents=True, exist_ok=True)
-        _copy_template_dir(template_dir / "backend", backend_dest)
-        (backend_dest / "app.py").write_text(_placeholder_backend(), encoding="utf-8")
+    def _seed_flask_react_static(self) -> None:
+        template_dir = _RUNTIME_SCAFFOLDING / "flask-react"
+        _copy_template_dir(template_dir, self.root)
+        (self.root / "app.py").write_text(_placeholder_backend(), encoding="utf-8")
 
-        frontend_dest = self.root / "frontend"
-        frontend_dest.mkdir(parents=True, exist_ok=True)
-        _copy_template_dir(template_dir / "frontend", frontend_dest)
-        src_dir = frontend_dest / "src"
+        src_dir = self.root / "frontend" / "src"
         src_dir.mkdir(parents=True, exist_ok=True)
         if not (src_dir / "App.jsx").is_file():
             (src_dir / "App.jsx").write_text(

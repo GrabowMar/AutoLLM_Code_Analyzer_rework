@@ -88,7 +88,7 @@ def prepare_live_target(
 
     Returns:
         (ContainerInstance, target_url) where *target_url* is e.g.
-        ``"http://127.0.0.1:<frontend_port>"``.
+        ``"http://127.0.0.1:<app_port>"``.
 
     Side-effect:
         Saves ``container_instance_id`` into ``task.configuration`` so it
@@ -124,8 +124,7 @@ def prepare_live_target(
         msg = f"Container {instance.name} did not reach running status within {POLL_TIMEOUT_SECONDS}s."
         raise TimeoutError(msg)
 
-    # Prefer frontend_port for web-facing analysis; fallback to backend_port.
-    port = instance.frontend_port or instance.backend_port
+    port = instance.app_port
     if port is None:
         msg = f"Container {instance.name} has no allocated port."
         raise RuntimeError(msg)

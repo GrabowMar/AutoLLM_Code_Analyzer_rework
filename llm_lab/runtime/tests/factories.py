@@ -14,8 +14,7 @@ class ContainerInstanceFactory(DjangoModelFactory):
     image = "llm_lab/test:latest"
     container_id = factory.Sequence(lambda n: f"abc{n:06d}")
     status = ContainerInstance.Status.STOPPED
-    backend_port = factory.Sequence(lambda n: 5100 + n)
-    frontend_port = factory.Sequence(lambda n: 8100 + n)
+    app_port = factory.Sequence(lambda n: 8100 + n)
     created_by = factory.SubFactory(UserFactory)
 
 

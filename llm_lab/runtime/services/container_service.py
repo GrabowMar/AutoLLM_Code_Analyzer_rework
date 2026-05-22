@@ -143,11 +143,8 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
 
         ports = {}
         env: dict[str, str] = {}
-        if container.backend_port:
-            ports["5000/tcp"] = container.backend_port
-            env["BACKEND_PORT"] = "5000"
-        if container.frontend_port:
-            ports["80/tcp"] = container.frontend_port
+        if container.app_port:
+            ports["8000/tcp"] = container.app_port
 
         cid = docker_manager.run_container(
             tag,
@@ -294,23 +291,19 @@ def _do_health(action: ContainerAction, container: ContainerInstance) -> None:
 
 def build_for_job(job: GenerationJob, user: User | None) -> ContainerInstance:
     """Create a ContainerInstance for *job* and kick off a build action."""
-    backend_port, frontend_port = port_allocator.allocate_pair()
+    app_port = port_allocator.allocate()
     slug = f"llm-{uuid.uuid4().hex[:8]}"
 
     instance = ContainerInstance.objects.create(
         generation_job=job,
         name=slug,
         status=ContainerInstance.Status.PENDING,
-        backend_port=backend_port,
-        frontend_port=frontend_port,
+        app_port=app_port,
         created_by=user,
     )
 
     try:
-        alloc = PortAllocation.objects.get(
-            backend_port=backend_port,
-            frontend_port=frontend_port,
-        )
+        alloc = PortAllocation.objects.get(app_port=app_port)
         alloc.container = instance
         alloc.save(update_fields=["container"])
     except PortAllocation.DoesNotExist:

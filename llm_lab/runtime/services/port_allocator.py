@@ -10,10 +10,10 @@ from llm_lab.runtime.models import PortAllocation
 logger = logging.getLogger(__name__)
 
 
-def allocate_pair() -> tuple[int, int]:
-    """Allocate next free (backend_port, frontend_port) pair."""
+def allocate() -> int:
+    """Allocate the next free app port and return it."""
     alloc = PortAllocation.allocate()
-    return alloc.backend_port, alloc.frontend_port
+    return alloc.app_port
 
 
 def release(container: ContainerInstance) -> None:
@@ -24,4 +24,4 @@ def release(container: ContainerInstance) -> None:
     except PortAllocation.DoesNotExist:
         pass
     except Exception:
-        logger.exception("Failed to release ports for container %s", container.name)
+        logger.exception("Failed to release port for container %s", container.name)

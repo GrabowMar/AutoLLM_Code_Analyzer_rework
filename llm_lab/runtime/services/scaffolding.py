@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from llm_lab.generation.models import GenerationJob
 
-# Base directory where static template files live
 _TEMPLATES_DIR = Path(__file__).parent.parent / "scaffolding"
 
 
@@ -26,8 +25,8 @@ def prepare_build_dir(job: GenerationJob, dest_path: Path) -> Path:
 
     template_slug = _resolve_template(job)
 
-    if template_slug == "react-flask":
-        _scaffold_react_flask(dest_path, backend_code, frontend_code)
+    if template_slug in ("flask-react", "react-flask"):
+        _scaffold_flask_react(dest_path, backend_code, frontend_code)
     else:
         _scaffold_generic_python(dest_path, backend_code)
 
@@ -36,29 +35,25 @@ def prepare_build_dir(job: GenerationJob, dest_path: Path) -> Path:
 
 def _resolve_template(job: GenerationJob) -> str:
     """Determine scaffolding template from job or fall back to generic-python."""
-    if job.scaffolding_template and job.scaffolding_template.slug == "react-flask":
-        return "react-flask"
+    if job.scaffolding_template:
+        slug = job.scaffolding_template.slug
+        if slug in ("flask-react", "react-flask"):
+            return slug
     return "generic-python"
 
 
-def _scaffold_react_flask(
+def _scaffold_flask_react(
     dest: Path,
     backend_code: str,
     frontend_code: str,
 ) -> None:
-    template_dir = _TEMPLATES_DIR / "react-flask"
+    template_dir = _TEMPLATES_DIR / "flask-react"
+    _copy_template_dir(template_dir, dest)
+    (dest / "app.py").write_text(backend_code or _placeholder_backend())
 
-    backend_dest = dest / "backend"
-    backend_dest.mkdir(exist_ok=True)
-    _copy_template_dir(template_dir / "backend", backend_dest)
-    (backend_dest / "app.py").write_text(backend_code or _placeholder_backend())
-
-    frontend_dest = dest / "frontend"
-    frontend_dest.mkdir(exist_ok=True)
-    _copy_template_dir(template_dir / "frontend", frontend_dest)
     if frontend_code:
-        src_dir = frontend_dest / "src"
-        src_dir.mkdir(exist_ok=True)
+        src_dir = dest / "frontend" / "src"
+        src_dir.mkdir(parents=True, exist_ok=True)
         (src_dir / "App.jsx").write_text(frontend_code)
 
 
@@ -82,11 +77,20 @@ def _copy_template_dir(src: Path, dst: Path) -> None:
 
 def _placeholder_backend() -> str:
     return (
-        "from flask import Flask, jsonify\n"
-        "app = Flask(__name__)\n\n"
+        "import os\n"
+        "from flask import Flask, jsonify, send_from_directory\n\n"
+        "app = Flask(__name__, static_folder='static', static_url_path='')\n\n"
         "@app.route('/api/health')\n"
         "def health():\n"
         "    return jsonify({'status': 'ok'})\n\n"
+        "@app.route('/', defaults={'path': ''})\n"
+        "@app.route('/<path:path>')\n"
+        "def _serve_spa(path):\n"
+        "    import os as _os\n"
+        "    if path and _os.path.exists(_os.path.join(app.static_folder, path)):\n"
+        "        return send_from_directory(app.static_folder, path)\n"
+        "    return send_from_directory(app.static_folder, 'index.html')\n\n"
         "if __name__ == '__main__':\n"
-        "    app.run(host='0.0.0.0', port=5000)\n"
+        "    port = int(os.environ.get('PORT', 8000))\n"
+        "    app.run(host='0.0.0.0', port=port, debug=False)\n"
     )

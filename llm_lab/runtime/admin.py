@@ -11,8 +11,7 @@ class ContainerInstanceAdmin(admin.ModelAdmin):
         "name",
         "status",
         "image",
-        "backend_port",
-        "frontend_port",
+        "app_port",
         "health_status",
         "created_by",
         "created_at",
@@ -42,6 +41,6 @@ class ContainerActionAdmin(admin.ModelAdmin):
 
 @admin.register(PortAllocation)
 class PortAllocationAdmin(admin.ModelAdmin):
-    list_display = ("backend_port", "frontend_port", "container", "allocated_at")
+    list_display = ("app_port", "container", "allocated_at")
     list_filter: list = []
     readonly_fields = ("allocated_at",)

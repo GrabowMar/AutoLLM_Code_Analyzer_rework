@@ -83,8 +83,7 @@ def _running_instance() -> ContainerInstance:
     """Create a ContainerInstance in RUNNING state."""
     return ContainerInstanceFactory(
         status=ContainerInstance.Status.RUNNING,
-        backend_port=6100,
-        frontend_port=7100,
+        app_port=7100,
     )
 
 
@@ -137,8 +136,7 @@ class TestPrepareLiveTarget:
         task = _make_task()
         instance = ContainerInstanceFactory(
             status=ContainerInstance.Status.RUNNING,
-            frontend_port=7200,
-            backend_port=6200,
+            app_port=7200,
         )
         mock_build.return_value = instance
 
@@ -148,7 +146,7 @@ class TestPrepareLiveTarget:
         )
 
         assert returned_instance.id == instance.id
-        assert url == f"http://127.0.0.1:{instance.frontend_port}"
+        assert url == f"http://127.0.0.1:{instance.app_port}"
         mock_build.assert_called_once()
 
     @patch(f"{_CS}.build_for_job")
@@ -157,8 +155,7 @@ class TestPrepareLiveTarget:
         task = _make_task()
         instance = ContainerInstanceFactory(
             status=ContainerInstance.Status.RUNNING,
-            frontend_port=7201,
-            backend_port=6201,
+            app_port=7201,
         )
         mock_build.return_value = instance
 
@@ -172,8 +169,7 @@ class TestPrepareLiveTarget:
         task = _make_task()
         instance = ContainerInstanceFactory(
             status=ContainerInstance.Status.FAILED,
-            frontend_port=7202,
-            backend_port=6202,
+            app_port=7202,
         )
         mock_build.return_value = instance
 
@@ -337,8 +333,7 @@ class TestAnalysisServiceLiveTarget:
         task = _make_task()
         instance = ContainerInstanceFactory(
             status=ContainerInstance.Status.FAILED,
-            frontend_port=7304,
-            backend_port=6304,
+            app_port=7304,
         )
 
         def _prepare_side_effect(t, job_id):
