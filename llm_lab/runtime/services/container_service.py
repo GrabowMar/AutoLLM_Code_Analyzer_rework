@@ -269,21 +269,25 @@ def _do_restart(action: ContainerAction, container: ContainerInstance) -> None:
 
 def _do_remove(action: ContainerAction, container: ContainerInstance) -> None:
     result = docker_manager.remove(container.name)
-    if "error" in result:
-        action.mark_failed(result["error"])
-    else:
-        port_allocator.release(container)
-        container.status = ContainerInstance.Status.REMOVED
-        container.save(update_fields=["status"])
-        action.mark_completed(output="Removed", exit_code=0)
-        realtime.publish(
-            f"runtime:{container.id}",
-            {
-                "type": "status",
-                "status": container.status,
-                "updated_at": timezone.now().isoformat(),
-            },
-        )
+    error = result.get("error", "")
+    # Treat "not found" as success — the container is already gone from Docker
+    not_found = error and ("404" in error or "No such container" in error)
+    if error and not not_found:
+        action.mark_failed(error)
+        return
+    port_allocator.release(container)
+    container.status = ContainerInstance.Status.REMOVED
+    container.save(update_fields=["status"])
+    output = "Removed" if not error else "Container not found in Docker (already removed)"
+    action.mark_completed(output=output, exit_code=0)
+    realtime.publish(
+        f"runtime:{container.id}",
+        {
+            "type": "status",
+            "status": container.status,
+            "updated_at": timezone.now().isoformat(),
+        },
+    )
 
 
 def _do_logs(action: ContainerAction, container: ContainerInstance) -> None:

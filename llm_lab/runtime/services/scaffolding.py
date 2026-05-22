@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -12,6 +14,22 @@ if TYPE_CHECKING:
     from llm_lab.generation.models import GenerationJob
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "scaffolding"
+_LUCIDE_ICONS_PATH = _TEMPLATES_DIR / "lucide_icons.json"
+_LUCIDE_FALLBACK = "AlertCircle"
+
+# Loaded lazily on first use
+_valid_lucide_icons: frozenset[str] | None = None
+
+
+def _get_valid_lucide_icons() -> frozenset[str]:
+    global _valid_lucide_icons  # noqa: PLW0603
+    if _valid_lucide_icons is None:
+        try:
+            data = json.loads(_LUCIDE_ICONS_PATH.read_text())
+            _valid_lucide_icons = frozenset(data)
+        except Exception:  # noqa: BLE001
+            _valid_lucide_icons = frozenset()
+    return _valid_lucide_icons
 
 
 def prepare_build_dir(job: GenerationJob, dest_path: Path) -> Path:
@@ -57,7 +75,7 @@ def _scaffold_flask_react(
     if frontend_code:
         src_dir = dest / "frontend" / "src"
         src_dir.mkdir(parents=True, exist_ok=True)
-        (src_dir / "App.jsx").write_text(frontend_code)
+        (src_dir / "App.jsx").write_text(_sanitize_lucide_imports(frontend_code))
 
 
 def _scaffold_generic_python(dest: Path, backend_code: str) -> None:
@@ -99,6 +117,42 @@ def _patch_requirements(dest: Path, backend_code: str) -> None:
     if new_pkgs:
         extra = "\n".join(new_pkgs)
         req_path.write_text(existing_text.rstrip() + "\n" + extra + "\n")
+
+
+def _sanitize_lucide_imports(code: str) -> str:
+    """Replace unknown lucide-react icon names with a safe fallback.
+
+    LLMs occasionally hallucinate icon names that don't exist in the installed
+    lucide-react version, which causes the npm build to fail.
+    """
+    valid = _get_valid_lucide_icons()
+    if not valid:
+        return code
+
+    def _fix_import(match: re.Match) -> str:
+        prefix, names_str, suffix = match.group(1), match.group(2), match.group(3)
+        names = [n.strip() for n in names_str.split(",") if n.strip()]
+        fixed: list[str] = []
+        fallback_needed = False
+        for name in names:
+            # Handle "Name as Alias" patterns
+            base = name.split(" as ")[0].strip() if " as " in name else name
+            if base in valid:
+                fixed.append(name)
+            else:
+                fallback_needed = True
+        if fallback_needed and _LUCIDE_FALLBACK not in [n.split(" as ")[0].strip() for n in fixed]:
+            fixed.append(_LUCIDE_FALLBACK)
+        if not fixed:
+            fixed = [_LUCIDE_FALLBACK]
+        return f"{prefix}{', '.join(fixed)}{suffix}"
+
+    # Match single-line and multi-line lucide-react import statements
+    pattern = re.compile(
+        r"(import\s*\{)([^}]+)(\}\s*from\s*['\"]lucide-react['\"])",
+        re.DOTALL,
+    )
+    return pattern.sub(_fix_import, code)
 
 
 def _placeholder_backend() -> str:
