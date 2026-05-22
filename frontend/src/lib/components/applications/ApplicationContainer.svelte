@@ -78,11 +78,11 @@ const statusColor: Record<string, string> = {
 					</div>
 					<div>
 						<span class="text-xs text-muted-foreground">Name</span>
-						<div class="font-mono text-xs break-all">{container.container_name}</div>
+						<div class="font-mono text-xs break-all">{container.name}</div>
 					</div>
 					<div class="md:col-span-2">
 						<span class="text-xs text-muted-foreground">Image</span>
-						<div class="font-mono text-xs break-all">{inspect?.image || container.image_tag || '—'}</div>
+						<div class="font-mono text-xs break-all">{inspect?.image || container.image || '—'}</div>
 					</div>
 				</div>
 
@@ -99,27 +99,16 @@ const statusColor: Record<string, string> = {
 								</tr>
 							</thead>
 							<tbody class="divide-y">
-								{#if container.backend_port}
+								{#if container.app_port}
 									<tr class="hover:bg-muted/30">
-										<td class="px-3 py-2">Backend</td>
-										<td class="px-3 py-2 font-mono text-xs">{container.backend_port}</td>
+										<td class="px-3 py-2">App</td>
+										<td class="px-3 py-2 font-mono text-xs">{container.app_port}</td>
 										<td class="px-3 py-2 font-mono text-xs">8000</td>
 										<td class="px-3 py-2">
-											<a href="http://localhost:{container.backend_port}" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline inline-flex items-center gap-1 text-xs">Open <ExternalLink class="h-3 w-3" /></a>
+											<a href="http://{typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:{container.app_port}" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline inline-flex items-center gap-1 text-xs">Open <ExternalLink class="h-3 w-3" /></a>
 										</td>
 									</tr>
-								{/if}
-								{#if container.frontend_port}
-									<tr class="hover:bg-muted/30">
-										<td class="px-3 py-2">Frontend</td>
-										<td class="px-3 py-2 font-mono text-xs">{container.frontend_port}</td>
-										<td class="px-3 py-2 font-mono text-xs">5000</td>
-										<td class="px-3 py-2">
-											<a href="http://localhost:{container.frontend_port}" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline inline-flex items-center gap-1 text-xs">Open <ExternalLink class="h-3 w-3" /></a>
-										</td>
-									</tr>
-								{/if}
-								{#if !container.backend_port && !container.frontend_port}
+								{:else}
 									<tr><td colspan="4" class="px-3 py-3 text-xs text-muted-foreground text-center">No ports mapped</td></tr>
 								{/if}
 							</tbody>
@@ -127,9 +116,9 @@ const statusColor: Record<string, string> = {
 					</div>
 				</div>
 
-				{#if container.last_error || container.error_message}
+				{#if container.last_error}
 					<div class="text-xs text-red-400 font-mono bg-red-500/5 border border-red-500/20 rounded p-2">
-						{container.last_error || container.error_message}
+						{container.last_error}
 					</div>
 				{/if}
 			{/if}

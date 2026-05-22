@@ -194,8 +194,8 @@ class GenerationService:
         structured = parse_result_to_structured(backend_content, frontend_content)
 
         job.result_data = {
-            "backend_code": backend_content,
-            "frontend_code": frontend_content,
+            "backend_code": structured.get("backend_code") or backend_content,
+            "frontend_code": structured.get("frontend_code") or frontend_content,
             "backend_truncated": OpenRouterClient.is_truncated(backend_resp),
             "frontend_truncated": OpenRouterClient.is_truncated(frontend_resp),
             "backend_scan": scan_result.to_dict(),

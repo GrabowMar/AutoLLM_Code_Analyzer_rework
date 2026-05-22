@@ -23,7 +23,6 @@ let loading = $state(true);
 let activeTab = $state<'api' | 'cmds' | 'env'>('api');
 
 let method = $state<'GET' | 'POST' | 'PUT' | 'DELETE'>('GET');
-let target = $state<'backend' | 'frontend'>('backend');
 let path = $state('/');
 let body = $state('');
 let apiResp = $state<{ status?: number; text?: string; error?: string } | null>(null);
@@ -54,9 +53,10 @@ onMount(refresh);
 
 async function sendRequest() {
 	if (!container) return;
-	const port = target === 'backend' ? container.backend_port : container.frontend_port;
-	if (!port) { toast.error(`No ${target} port mapped`); return; }
-	const url = `http://localhost:${port}${path.startsWith('/') ? '' : '/'}${path}`;
+	const port = container.app_port;
+	if (!port) { toast.error('No port mapped'); return; }
+	const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+	const url = `http://${host}:${port}${path.startsWith('/') ? '' : '/'}${path}`;
 	sending = true;
 	apiResp = null;
 	try {
@@ -118,10 +118,7 @@ const TABS: Array<{ k: 'api' | 'cmds' | 'env'; label: string }> = [
 							<select bind:value={method} class="rounded border bg-background px-2 py-1 text-sm">
 								<option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option>
 							</select>
-							<select bind:value={target} class="rounded border bg-background px-2 py-1 text-sm">
-								<option value="backend">Backend :{container.backend_port ?? '—'}</option>
-								<option value="frontend">Frontend :{container.frontend_port ?? '—'}</option>
-							</select>
+							<span class="text-xs font-mono text-muted-foreground border rounded px-2 py-1 bg-muted/30">:{container.app_port ?? '—'}</span>
 							<input bind:value={path} placeholder="/path" class="flex-1 min-w-[200px] rounded border bg-background px-2 py-1 text-sm font-mono" />
 							<Button size="sm" onclick={sendRequest} disabled={sending || container.status !== 'running'}>
 								<Play class="h-3.5 w-3.5 mr-1.5" /> Send

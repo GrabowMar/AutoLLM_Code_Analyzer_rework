@@ -6,6 +6,8 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from llm_lab.generation.services.code_parser import infer_python_dependencies
+
 if TYPE_CHECKING:
     from llm_lab.generation.models import GenerationJob
 
@@ -50,6 +52,7 @@ def _scaffold_flask_react(
     template_dir = _TEMPLATES_DIR / "flask-react"
     _copy_template_dir(template_dir, dest)
     (dest / "app.py").write_text(backend_code or _placeholder_backend())
+    _patch_requirements(dest, backend_code)
 
     if frontend_code:
         src_dir = dest / "frontend" / "src"
@@ -61,6 +64,7 @@ def _scaffold_generic_python(dest: Path, backend_code: str) -> None:
     template_dir = _TEMPLATES_DIR / "generic-python"
     _copy_template_dir(template_dir, dest)
     (dest / "app.py").write_text(backend_code or _placeholder_backend())
+    _patch_requirements(dest, backend_code)
 
 
 def _copy_template_dir(src: Path, dst: Path) -> None:
@@ -73,6 +77,28 @@ def _copy_template_dir(src: Path, dst: Path) -> None:
             shutil.copytree(str(item), str(dest_item), dirs_exist_ok=True)
         else:
             shutil.copy2(str(item), str(dest_item))
+
+
+def _patch_requirements(dest: Path, backend_code: str) -> None:
+    """Merge inferred deps from generated code into the template requirements.txt."""
+    req_path = dest / "requirements.txt"
+    if not req_path.exists() or not backend_code:
+        return
+
+    existing_text = req_path.read_text()
+    # Build a set of package names already listed (lowercase, strip versions)
+    existing_pkgs = {
+        line.split("==")[0].split(">=")[0].split("<=")[0].split("~=")[0].strip().lower()
+        for line in existing_text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+
+    inferred = infer_python_dependencies(backend_code)
+    new_pkgs = [pkg for pkg in inferred if pkg.lower() not in existing_pkgs]
+
+    if new_pkgs:
+        extra = "\n".join(new_pkgs)
+        req_path.write_text(existing_text.rstrip() + "\n" + extra + "\n")
 
 
 def _placeholder_backend() -> str:

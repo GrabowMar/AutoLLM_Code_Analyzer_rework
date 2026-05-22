@@ -29,7 +29,7 @@ def list_reports(
     limit = min(max(limit, 1), 200)
     offset = max(offset, 0)
     qs, total = services.list_reports(
-        user=request.user,
+        user=request.auth,
         report_type=report_type,
         status=status,
         limit=limit,
@@ -58,7 +58,7 @@ def generate_report(request, payload: GenerateReportIn):
             config=payload.config,
             title=payload.title,
             description=payload.description,
-            user=request.user,
+            user=request.auth,
             expires_in_days=payload.expires_in_days,
         )
     except ValueError as e:

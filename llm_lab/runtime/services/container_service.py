@@ -136,7 +136,7 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
                 _write_minimal_dockerfile(build_path)
 
             action.update_progress(40)
-            docker_manager.build_image(str(build_path), tag)
+            _, build_log = docker_manager.build_image(str(build_path), tag)
 
         container.image = tag
         action.update_progress(70)
@@ -157,7 +157,10 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
         container.status = ContainerInstance.Status.RUNNING
         container.save(update_fields=["image", "container_id", "status"])
         action.update_progress(100)
-        action.mark_completed(output=f"Built {tag}, container {cid}", exit_code=0)
+        action.mark_completed(
+            output=f"Built {tag}, container {cid}\n\n{build_log[-2000:]}",
+            exit_code=0,
+        )
         realtime.publish(
             f"runtime:{container.id}",
             {
@@ -171,7 +174,13 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
         logger.exception("Build failed for %s", container.name)
         container.status = ContainerInstance.Status.FAILED
         container.save(update_fields=["status"])
-        action.mark_failed(str(exc))
+        # Extract detailed Docker build log when available
+        try:
+            error_detail = docker_manager.extract_build_error(exc)
+        except Exception:  # noqa: BLE001
+            error_detail = ""
+        error_msg = error_detail or str(exc)
+        action.mark_failed(error_msg[-4000:])
         realtime.publish(
             f"runtime:{container.id}",
             {

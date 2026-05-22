@@ -138,11 +138,9 @@
 	const iconCls = $derived(compact ? 'h-3.5 w-3.5' : 'h-3.5 w-3.5');
 	const showLabels = $derived(!compact);
 	const previewUrl = $derived(
-		container && container.frontend_port
-			? `http://localhost:${container.frontend_port}`
-			: container && container.backend_port
-				? `http://localhost:${container.backend_port}`
-				: null,
+		container && container.app_port
+			? `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:${container.app_port}`
+			: null,
 	);
 </script>
 
@@ -173,9 +171,9 @@
 			{container.status}
 		</Badge>
 
-		{#if container.status === 'failed' && (container.last_error || container.error_message)}
-			<span class="text-xs text-red-400 truncate max-w-[260px]" title={container.last_error || container.error_message}>
-				⚠ {container.last_error || container.error_message}
+		{#if container.status === 'failed' && container.last_error}
+			<span class="text-xs text-red-400 truncate max-w-[260px]" title={container.last_error}>
+				⚠ {container.last_error}
 			</span>
 		{/if}
 
@@ -187,7 +185,7 @@
 				class="text-xs font-mono text-primary hover:underline inline-flex items-center gap-1"
 				title="Open app preview"
 			>
-				:{container.frontend_port ?? container.backend_port}
+				:{container.app_port}
 				<ExternalLink class="h-3 w-3" />
 			</a>
 		{/if}

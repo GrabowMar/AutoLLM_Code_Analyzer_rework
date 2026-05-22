@@ -98,10 +98,10 @@
 								<div class="flex items-center justify-between rounded border bg-muted/20 px-2 py-1.5 text-xs">
 									<div class="flex items-center gap-2 min-w-0">
 										<Badge variant="outline" class="text-[10px]">{c.status}</Badge>
-										<span class="font-mono truncate">{c.container_name || c.id.substring(0, 8)}</span>
+										<span class="font-mono truncate">{c.name || c.id.substring(0, 8)}</span>
 									</div>
 									<div class="text-muted-foreground font-mono whitespace-nowrap">
-										{c.frontend_port ? `:${c.frontend_port}` : ''} {c.backend_port ? `:${c.backend_port}` : ''}
+										{c.app_port ? `:${c.app_port}` : ''}
 									</div>
 								</div>
 							{/each}

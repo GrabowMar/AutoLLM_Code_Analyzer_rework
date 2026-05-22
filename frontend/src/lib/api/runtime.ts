@@ -30,16 +30,20 @@ export interface ContainerHealthResponse {
 
 export interface ContainerInstance {
   id: string;
-  job_id: string | null;
-  container_name: string;
-  image_tag: string;
+  generation_job_id: string | null;
+  name: string;
+  image: string;
+  container_id: string;
   status: ContainerStatus;
-  backend_port: number | null;
-  frontend_port: number | null;
-  error_message: string;
-  last_error?: string;
+  app_port: number | null;
+  health_status: string;
+  last_health_check: string | null;
+  config: Record<string, unknown>;
+  metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  last_error: string;
+  created_by_id: number | null;
 }
 
 export interface DockerInfo {

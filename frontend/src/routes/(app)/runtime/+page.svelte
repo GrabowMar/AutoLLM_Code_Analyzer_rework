@@ -161,27 +161,27 @@
 					<Card.Header class="pb-3">
 						<div class="flex items-start justify-between gap-2">
 							<Badge class={statusColors[c.status]}>{c.status}</Badge>
-							{#if c.frontend_port}
+							{#if c.app_port}
 								<a
-									href="http://localhost:{c.frontend_port}"
+									href="http://{typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:{c.app_port}"
 									target="_blank"
 									rel="noopener noreferrer"
 									class="text-xs text-blue-400 hover:underline"
-								>:{c.frontend_port}</a>
+								>:{c.app_port}</a>
 							{/if}
 						</div>
-						<Card.Title class="text-base mt-2 font-mono text-sm truncate">{c.container_name}</Card.Title>
-						{#if c.image_tag}
-							<Card.Description class="font-mono text-xs truncate">{c.image_tag}</Card.Description>
+						<Card.Title class="text-base mt-2 font-mono text-sm truncate">{c.name}</Card.Title>
+						{#if c.image}
+							<Card.Description class="font-mono text-xs truncate">{c.image}</Card.Description>
 						{/if}
 					</Card.Header>
 					<Card.Content class="flex-1 text-xs text-muted-foreground space-y-1">
-						{#if c.backend_port}
-							<div>Backend: :{c.backend_port} · Frontend: :{c.frontend_port}</div>
+						{#if c.app_port}
+							<div>Port: :{c.app_port}</div>
 						{/if}
 						<div>Created: {formatDate(c.created_at)}</div>
-						{#if c.error_message}
-							<div class="text-red-400 line-clamp-2">{c.error_message}</div>
+						{#if c.last_error}
+							<div class="text-red-400 line-clamp-2">{c.last_error}</div>
 						{/if}
 					</Card.Content>
 					<Card.Footer class="gap-1 pt-3 flex-wrap">

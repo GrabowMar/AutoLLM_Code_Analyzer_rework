@@ -154,7 +154,7 @@
 		</Button>
 		{#if container}
 			<Badge class={statusColors[container.status]}>{container.status}</Badge>
-			<h1 class="text-xl font-bold font-mono truncate">{container.container_name}</h1>
+			<h1 class="text-xl font-bold font-mono truncate">{container.name}</h1>
 		{/if}
 		<div class="ml-auto flex gap-2">
 			<Button variant="outline" size="sm" onclick={load}>
@@ -166,8 +166,8 @@
 				</Button>
 			{/if}
 			{#if container?.status === 'failed'}
-				<span class="text-xs text-red-400 self-center" title={container.last_error || container.error_message}>
-					⚠ Build failed{(container.last_error || container.error_message) ? `: ${container.last_error || container.error_message}` : ''}
+				<span class="text-xs text-red-400 self-center" title={container.last_error}>
+					⚠ Build failed{container.last_error ? `: ${container.last_error}` : ''}
 				</span>
 			{/if}
 			{#if container?.status === 'running'}
@@ -221,18 +221,14 @@
 						</div>
 						<div class="flex justify-between">
 							<span class="text-muted-foreground">Image</span>
-							<span class="font-mono text-xs">{container.image_tag || '—'}</span>
+							<span class="font-mono text-xs">{container.image || '—'}</span>
 						</div>
 						<div class="flex justify-between">
-							<span class="text-muted-foreground">Backend port</span>
-							<span>{container.backend_port ?? '—'}</span>
-						</div>
-						<div class="flex justify-between">
-							<span class="text-muted-foreground">Frontend port</span>
+							<span class="text-muted-foreground">App port</span>
 							<span>
-								{#if container.frontend_port}
-									<a href="http://localhost:{container.frontend_port}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">
-										{container.frontend_port}
+								{#if container.app_port}
+									<a href="http://{typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:{container.app_port}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">
+										{container.app_port}
 									</a>
 								{:else}
 									—
@@ -249,11 +245,11 @@
 						</div>
 					</Card.Content>
 				</Card.Root>
-				{#if container.error_message}
+				{#if container.last_error}
 					<Card.Root>
 						<Card.Header><Card.Title class="text-sm text-red-400">Error</Card.Title></Card.Header>
 						<Card.Content>
-							<p class="text-xs text-red-400">{container.error_message}</p>
+							<p class="text-xs text-red-400">{container.last_error}</p>
 						</Card.Content>
 					</Card.Root>
 				{/if}

@@ -38,20 +38,70 @@ def ping() -> bool:
         return False
 
 
-def build_image(path: str, tag: str, dockerfile: str | None = None):
+def build_image(path: str, tag: str, dockerfile: str | None = None) -> tuple:
     """Build a Docker image from the given directory.
 
-    Returns the image object on success, raises on failure.
+    Returns ``(image, log_text)`` on success.
+    Raises ``docker.errors.BuildError`` (with ``build_log`` attribute) on failure;
+    callers can use ``extract_build_error(exc)`` to get a human-readable summary.
     """
+    import docker  # noqa: PLC0415
+
     c = client()
     if c is None:
         msg = "Docker daemon unavailable"
         raise ConnectionError(msg)
-    kwargs: dict[str, Any] = {"path": path, "tag": tag, "rm": True}
+    kwargs: dict[str, Any] = {
+        "path": path,
+        "tag": tag,
+        "rm": True,
+        "decode": True,  # get dicts instead of raw bytes
+    }
     if dockerfile:
         kwargs["dockerfile"] = dockerfile
-    image, _ = c.images.build(**kwargs)
-    return image
+
+    log_lines: list[str] = []
+    build_errors: list[str] = []
+    try:
+        for chunk in c.api.build(**kwargs):
+            stream = chunk.get("stream", "")
+            if stream:
+                log_lines.append(stream)
+            error = chunk.get("error", "")
+            if error:
+                log_lines.append(f"ERROR: {error}\n")
+                build_errors.append(error)
+    except docker.errors.BuildError as exc:
+        exc._collected_log = "".join(log_lines)  # noqa: SLF001
+        raise
+
+    if build_errors:
+        # Stream had error chunks but no BuildError raised — construct one
+        combined_log = "".join(log_lines)
+        exc = docker.errors.BuildError(build_errors[-1], combined_log)
+        exc._collected_log = combined_log  # noqa: SLF001
+        raise exc
+
+    # Use high-level client to get the image object
+    image = c.images.get(tag)
+    return image, "".join(log_lines)
+
+
+def extract_build_error(exc) -> str:
+    """Extract a readable error summary from a docker BuildError."""
+    collected = getattr(exc, "_collected_log", "")
+    if collected:
+        # Return last 3000 chars of captured log — most relevant part
+        return collected[-3000:] if len(collected) > 3000 else collected
+    # Fall back to the SDK's build_log attribute
+    lines: list[str] = []
+    for entry in getattr(exc, "build_log", []):
+        if isinstance(entry, dict):
+            lines.append(entry.get("stream", "") + entry.get("error", ""))
+        else:
+            lines.append(str(entry))
+    text = "".join(lines)
+    return text[-3000:] if len(text) > 3000 else text
 
 
 def run_container(

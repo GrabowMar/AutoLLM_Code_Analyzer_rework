@@ -6,7 +6,7 @@ from llm_lab.tokens.auth import TokenAuth
 
 api = NinjaAPI(
     urls_namespace="api",
-    auth=[SessionAuth(), TokenAuth()],
+    auth=[TokenAuth(), SessionAuth()],
     docs_decorator=staff_member_required,
 )
 

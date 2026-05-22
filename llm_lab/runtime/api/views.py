@@ -103,7 +103,7 @@ def build_container_for_job(request: HttpRequest, job_id: str):
     if not docker_manager.ping():
         return 503, GenericResponse(success=False, message="Docker daemon unavailable")
     job = get_object_or_404(GenerationJob, id=job_id)
-    instance = container_service.build_for_job(job, request.user)
+    instance = container_service.build_for_job(job, request.auth)
     return 200, instance
 
 
@@ -138,7 +138,7 @@ def start_container(request: HttpRequest, container_id: str):
             success=False,
             message=f"Container is {instance.status}; wait for build to complete.",
         )
-    action = container_service.start_instance(instance, request.user)
+    action = container_service.start_instance(instance, request.auth)
     return 200, action
 
 
@@ -151,7 +151,7 @@ def stop_container(request: HttpRequest, container_id: str):
     if not docker_manager.ping():
         return 503, GenericResponse(success=False, message="Docker daemon unavailable")
     instance = get_object_or_404(ContainerInstance, id=container_id)
-    action = container_service.stop_instance(instance, request.user)
+    action = container_service.stop_instance(instance, request.auth)
     return 200, action
 
 
@@ -169,7 +169,7 @@ def restart_container(request: HttpRequest, container_id: str):
             success=False,
             message="Container is in a failed state. Rebuild it before restarting.",
         )
-    action = container_service.restart_instance(instance, request.user)
+    action = container_service.restart_instance(instance, request.auth)
     return 200, action
 
 
@@ -182,7 +182,7 @@ def remove_container(request: HttpRequest, container_id: str):
     if not docker_manager.ping():
         return 503, GenericResponse(success=False, message="Docker daemon unavailable")
     instance = get_object_or_404(ContainerInstance, id=container_id)
-    action = container_service.remove_instance(instance, request.user)
+    action = container_service.remove_instance(instance, request.auth)
     return 200, action
 
 
