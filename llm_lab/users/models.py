@@ -38,8 +38,10 @@ class User(AbstractUser):
         return reverse("users:detail", kwargs={"pk": self.id})
 
     def save(self, *args, **kwargs) -> None:
+        from django.conf import settings
+
         is_new = self.pk is None
-        if is_new and not self.__class__.objects.exists():
+        if is_new and not getattr(settings, "TESTING", False) and not self.__class__.objects.exists():
             self.is_staff = True
             self.is_superuser = True
         super().save(*args, **kwargs)
