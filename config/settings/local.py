@@ -107,10 +107,14 @@ ACCOUNT_EMAIL_VERIFICATION = env("ACCOUNT_EMAIL_VERIFICATION", default="optional
 
 # django-allauth headless — absolute email links (see base.build_headless_frontend_urls)
 # ------------------------------------------------------------------------------
-FRONTEND_PUBLIC_ORIGIN = env(
-    "FRONTEND_PUBLIC_ORIGIN",
-    default="http://localhost:8000",
-).strip().rstrip("/")
+FRONTEND_PUBLIC_ORIGIN = (
+    env(
+        "FRONTEND_PUBLIC_ORIGIN",
+        default="http://localhost:8000",
+    )
+    .strip()
+    .rstrip("/")
+)
 HEADLESS_FRONTEND_URLS = build_headless_frontend_urls(FRONTEND_PUBLIC_ORIGIN)  # noqa: F405
 
 # Your stuff...

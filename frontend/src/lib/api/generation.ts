@@ -305,7 +305,8 @@ export async function getGenerationJobs(params?: {
   if (params?.model_id) q.set("model_id", params.model_id);
   if (params?.search) q.set("search", params.search);
   if (params?.sort_by) q.set("sort_by", params.sort_by);
-  if (params?.container_status) q.set("container_status", params.container_status);
+  if (params?.container_status)
+    q.set("container_status", params.container_status);
   const qs = q.toString();
   const res = await apiFetch(`/generation/jobs/${qs ? "?" + qs : ""}`);
   return res.json();

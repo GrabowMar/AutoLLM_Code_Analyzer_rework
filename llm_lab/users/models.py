@@ -45,4 +45,3 @@ class User(AbstractUser):
             self.is_staff = True
             self.is_superuser = True
         super().save(*args, **kwargs)
-

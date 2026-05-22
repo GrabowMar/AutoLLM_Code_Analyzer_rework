@@ -26,6 +26,7 @@ def get_analysis_trends(
 ) -> dict[str, Any]:
     """Daily analysis counts for the last *days* days."""
     from django.core.cache import cache
+
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
     cache_key = f"stats_trends_{days}_{u_key}"
     cached = cache.get(cache_key)
@@ -95,6 +96,7 @@ def get_recent_activity(
     user: AbstractBaseUser | None = None,
 ) -> list[dict[str, Any]]:
     from django.core.cache import cache
+
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
     cache_key = f"stats_activity_{limit}_{u_key}"
     cached = cache.get(cache_key)

@@ -35,6 +35,7 @@ http:
 
 def _dynamic_dir() -> str:
     from django.conf import settings
+
     return getattr(settings, "TRAEFIK_DYNAMIC_DIR", "")
 
 
@@ -44,6 +45,7 @@ def write_route(container_name: str, port: int) -> None:
     if not dynamic_dir:
         return
     from django.conf import settings
+
     domain = getattr(settings, "DJANGO_DOMAIN", "localhost")
     content = _ROUTE_TEMPLATE.format(
         port=port,

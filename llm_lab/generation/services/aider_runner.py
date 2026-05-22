@@ -7,6 +7,9 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 from django.utils import timezone
 
@@ -16,8 +19,10 @@ from llm_lab.generation.models import CopilotIteration
 from llm_lab.generation.models import GenerationArtifact
 from llm_lab.generation.models import GenerationJob
 from llm_lab.generation.services import result_writer
-from llm_lab.generation.services.copilot_workspace import CopilotWorkspace
 from llm_lab.generation.services.copilot_validation import validate_python_code
+
+if TYPE_CHECKING:
+    from llm_lab.generation.services.copilot_workspace import CopilotWorkspace
 
 logger = logging.getLogger(__name__)
 
@@ -139,11 +144,7 @@ class AiderRunner:
                 errors = [*errors, *self._parse_build_errors(build_output)]
             build_success = len(errors) == 0
 
-            action = (
-                CopilotIteration.Action.GENERATE
-                if iteration == 1
-                else CopilotIteration.Action.FIX
-            )
+            action = CopilotIteration.Action.GENERATE if iteration == 1 else CopilotIteration.Action.FIX
             CopilotIteration.objects.create(
                 job=self.job,
                 iteration_number=iteration,
@@ -153,9 +154,7 @@ class AiderRunner:
                 build_output=build_output[:20000],
                 build_success=build_success and len(errors) == 0,
                 errors_detected=errors,
-                fix_applied=(
-                    f"Fix attempt for: {'; '.join(last_errors[:3])}" if iteration > 1 else ""
-                ),
+                fix_applied=(f"Fix attempt for: {'; '.join(last_errors[:3])}" if iteration > 1 else ""),
             )
             GenerationArtifact.objects.create(
                 job=self.job,
@@ -192,14 +191,16 @@ class AiderRunner:
         try:
             import aider  # noqa: F401
         except ImportError as exc:
+            msg = "aider-chat is not installed"
             raise AiderExecutionError(
-                "aider-chat is not installed",
+                msg,
                 user_facing_message="Copilot mode requires the aider-chat package.",
                 remediation="Install dependencies with: uv sync",
             ) from exc
         if not shutil_which("git"):
+            msg = "git is not available"
             raise AiderExecutionError(
-                "git is not available",
+                msg,
                 user_facing_message="Copilot mode requires git in the server environment.",
                 remediation="Install git in the Django container or host.",
             )
@@ -213,7 +214,7 @@ class AiderRunner:
         fnames = [str(self.workspace.root / f) for f in self.workspace.tracked_files()]
 
         apply_openrouter_key_to_env(api_key)
-        old_cwd = os.getcwd()
+        old_cwd = Path.cwd()
         lines: list[str] = []
 
         def capture(*args: object, **kwargs: object) -> None:
@@ -227,14 +228,11 @@ class AiderRunner:
             io.tool_output = capture  # type: ignore[method-assign]
             model = Model(aider_model)
             if model.missing_keys:
+                msg = f"OpenRouter API key not visible to Aider: {model.missing_keys}"
                 raise AiderExecutionError(
-                    f"OpenRouter API key not visible to Aider: {model.missing_keys}",
-                    user_facing_message=(
-                        "Copilot could not use your stored OpenRouter API key."
-                    ),
-                    remediation=(
-                        "Confirm your key in Settings → API Access is valid, then retry."
-                    ),
+                    msg,
+                    user_facing_message=("Copilot could not use your stored OpenRouter API key."),
+                    remediation=("Confirm your key in Settings → API Access is valid, then retry."),
                 )
             coder = Coder.create(
                 main_model=model,
@@ -248,8 +246,9 @@ class AiderRunner:
             if result:
                 lines.append(str(result))
         except Exception as exc:
+            msg = f"Aider failed: {exc}"
             raise AiderExecutionError(
-                f"Aider failed: {exc}",
+                msg,
                 user_facing_message="Aider could not complete this iteration.",
                 remediation="Check OpenRouter API key, model availability, and server logs.",
             ) from exc
@@ -289,10 +288,11 @@ class AiderRunner:
         if not cmd or not settings.AIDER_AUTO_TEST:
             return "", True
         try:
-            proc = subprocess.run(
+            proc = subprocess.run(  # noqa: S602
                 cmd,
                 cwd=self.workspace.root,
                 shell=True,
+                check=False,
                 capture_output=True,
                 text=True,
                 timeout=120,

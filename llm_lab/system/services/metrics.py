@@ -31,6 +31,7 @@ def _bytes_human(b: int) -> str:
 
 def host_metrics() -> dict[str, Any]:
     from django.core.cache import cache
+
     cache_key = "system_host_metrics"
     cached = cache.get(cache_key)
     if cached is not None:
@@ -80,6 +81,7 @@ def host_metrics() -> dict[str, Any]:
 
 def db_stats() -> dict[str, Any]:
     from django.core.cache import cache
+
     cache_key = "system_db_stats"
     cached = cache.get(cache_key)
     if cached is not None:
@@ -149,6 +151,7 @@ def db_stats() -> dict[str, Any]:
 
 def app_stats() -> dict[str, Any]:
     from django.core.cache import cache
+
     cache_key = "system_app_stats"
     cached = cache.get(cache_key)
     if cached is not None:

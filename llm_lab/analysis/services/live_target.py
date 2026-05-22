@@ -130,6 +130,7 @@ def prepare_live_target(
         raise RuntimeError(msg)
 
     from django.conf import settings
+
     if getattr(settings, "DOCKER_APPS_NETWORK", ""):
         target_url = f"http://{instance.name}:8000"
     else:

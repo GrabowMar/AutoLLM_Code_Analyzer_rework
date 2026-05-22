@@ -143,6 +143,7 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
         action.update_progress(70)
 
         from django.conf import settings
+
         apps_network = getattr(settings, "DOCKER_APPS_NETWORK", "")
 
         ports: dict[str, int] = {}

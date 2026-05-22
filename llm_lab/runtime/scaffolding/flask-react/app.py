@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
-from flask import Flask, jsonify, send_from_directory
+
+from flask import Flask
+from flask import jsonify
+from flask import send_from_directory
 
 # LLM: Replace this file with your full application.
 # Rules that must be followed:
@@ -12,26 +15,29 @@ from flask import Flask, jsonify, send_from_directory
 #      instance_path, not cwd, so the absolute form is required.
 
 app = Flask(__name__)
-_STATIC = Path(__file__).parent / 'static'
+_STATIC = Path(__file__).parent / "static"
 
 # --- LLM: insert imports, config, db models, and routes here ---
 
-@app.route('/api/health')
+
+@app.route("/api/health")
 def health():
-    return jsonify({'status': 'ok'})
+    return jsonify({"status": "ok"})
+
 
 # --- end of generated routes ---
 
+
 # SPA catch-all: serves static assets or falls back to index.html for client-side routes
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
 def _serve_spa(path):
     target = _STATIC / path if path else None
     if target and target.is_file():
         return send_from_directory(str(_STATIC), path)
-    return send_from_directory(str(_STATIC), 'index.html')
+    return send_from_directory(str(_STATIC), "index.html")
 
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    app.run(host="0.0.0.0", port=port, debug=False)

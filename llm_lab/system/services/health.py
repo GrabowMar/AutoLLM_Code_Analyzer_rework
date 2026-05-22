@@ -13,6 +13,7 @@ from django.conf import settings
 
 def container_health() -> list[dict[str, Any]]:
     from django.core.cache import cache
+
     cache_key = "system_container_health"
     cached = cache.get(cache_key)
     if cached is not None:
@@ -47,6 +48,7 @@ def container_health() -> list[dict[str, Any]]:
 
 def redis_status() -> dict[str, Any]:
     from django.core.cache import cache
+
     cache_key = "system_redis_status"
     cached = cache.get(cache_key)
     if cached is not None:
@@ -76,6 +78,7 @@ def redis_status() -> dict[str, Any]:
 
 def celery_status() -> dict[str, Any]:
     from django.core.cache import cache
+
     cache_key = "system_celery_status"
     cached = cache.get(cache_key)
     if cached is not None:

@@ -4,10 +4,7 @@ const API_TARGET = process.env.API_TARGET ?? "http://localhost:8001";
 
 const PROXY_PREFIXES = ["/api/", "/_allauth/", "/admin/", "/media/"];
 
-function buildProxyHeaders(
-  clientRequest: Request,
-  clientUrl: URL,
-): Headers {
+function buildProxyHeaders(clientRequest: Request, clientUrl: URL): Headers {
   const headers = new Headers(clientRequest.headers);
   const proto = clientUrl.protocol.replace(":", "");
   headers.set("X-Forwarded-Host", clientUrl.host);

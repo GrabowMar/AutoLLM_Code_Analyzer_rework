@@ -28,12 +28,16 @@
           var tasks = [];
           if (window.caches && caches.keys) {
             tasks.push(caches.keys().then(function(keys) {
-              return Promise.all(keys.map(function(k) { return caches.delete(k); }));
+              return Promise.all(keys.map(function(k) {
+                return caches.delete(k);
+              }));
             }));
           }
           if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
             tasks.push(navigator.serviceWorker.getRegistrations().then(function(regs) {
-              return Promise.all(regs.map(function(r) { return r.unregister(); }));
+              return Promise.all(regs.map(function(r) {
+                return r.unregister();
+              }));
             }));
           }
           if (tasks.length) {
@@ -60,7 +64,9 @@
 
       if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
         navigator.serviceWorker.getRegistrations().then(function(regs) {
-          regs.forEach(function(r) { r.unregister(); });
+          regs.forEach(function(r) {
+            r.unregister();
+          });
         }).catch(function() {});
       }
 

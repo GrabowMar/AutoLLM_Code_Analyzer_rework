@@ -633,7 +633,7 @@
 									<tr class="border-b transition-colors hover:bg-muted/50 group
 										{i % 2 === 0 ? '' : 'bg-muted/15'}
 										{job.status === 'failed' ? 'hover:bg-destructive/[0.04]' : ''}">
-										
+
 										<!-- Application (unified) -->
 										<td class="px-3 py-2 align-middle">
 											<div class="flex items-center gap-2.5">
@@ -1100,7 +1100,7 @@
 					<!-- Footer Info & Actions -->
 					<div class="flex items-center justify-between pt-3 border-t">
 						<span class="text-[11px] font-mono text-muted-foreground">{formatDuration(job.duration_seconds)}</span>
-						
+
 						<!-- Mobile Actions Group -->
 						<div class="flex items-center gap-1">
 							{#if container}

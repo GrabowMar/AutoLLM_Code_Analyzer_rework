@@ -30,8 +30,7 @@ def validate_python_code(code: str) -> list[str]:
 
     if len(code.strip().split("\n")) < 30:
         errors.append(
-            f"Code too short ({len(code.strip().split(chr(10)))} lines); "
-            "expected 100+ lines for a complete app",
+            f"Code too short ({len(code.strip().split(chr(10)))} lines); expected 100+ lines for a complete app",
         )
 
     return errors

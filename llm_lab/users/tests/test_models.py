@@ -1,4 +1,5 @@
 import pytest
+
 from llm_lab.users.models import User
 from llm_lab.users.tests.factories import UserFactory
 
@@ -24,5 +25,3 @@ def test_marcin_becomes_admin_even_if_not_first():
     marcin_user = UserFactory.create(email="marcin27059@gmail.com")
     assert marcin_user.is_staff is True
     assert marcin_user.is_superuser is True
-
-

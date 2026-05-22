@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from llm_lab.generation.models import GenerationJob
-from llm_lab.generation.services.aider_runner import AiderIterationResult
 from llm_lab.generation.services.code_parser import infer_python_dependencies
-from llm_lab.generation.services.copilot_workspace import CopilotWorkspace
+
+if TYPE_CHECKING:
+    from llm_lab.generation.models import GenerationJob
+    from llm_lab.generation.services.aider_runner import AiderIterationResult
+    from llm_lab.generation.services.copilot_workspace import CopilotWorkspace
 
 logger = logging.getLogger(__name__)
 

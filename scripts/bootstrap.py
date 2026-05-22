@@ -22,10 +22,8 @@ def rand() -> str:
 
 def copy_if_missing(src: Path, dest: Path) -> bool:
     if dest.is_file():
-        print(f"  ok exists: {dest.relative_to(ROOT)}")
         return False
     shutil.copy2(src, dest)
-    print(f"  + created: {dest.relative_to(ROOT)}")
     return True
 
 
@@ -43,35 +41,17 @@ def main() -> int:
     postgres_example = ROOT / ".envs/.local/.postgres.example"
     postgres_dest = ROOT / ".envs/.local/.postgres"
 
-    print("-> Local Django env")
     if copy_if_missing(django_example, django_dest):
         set_secret(django_dest, "CELERY_FLOWER_USER", rand())
         set_secret(django_dest, "CELERY_FLOWER_PASSWORD", rand())
 
-    print("-> Local Postgres env")
     postgres_existed = postgres_dest.is_file()
     if copy_if_missing(postgres_example, postgres_dest):
         set_secret(postgres_dest, "POSTGRES_USER", rand())
         set_secret(postgres_dest, "POSTGRES_PASSWORD", rand())
 
-    print()
-    print("Bootstrap complete.")
     if postgres_existed:
-        print()
-        print(
-            "Note: .envs/.local/.postgres already existed. If Postgres was initialized"
-        )
-        print(
-            "earlier with different credentials, reset the DB volume before `just up`:"
-        )
-        print("  docker compose -f docker-compose.local.yml down -v")
-        print("  (or: just prune)")
-    print()
-    print("Next steps:")
-    print("  1. (optional) Edit .envs/.local/.django to set OPENROUTER_API_KEY")
-    print("  2. just up")
-    print("  3. just manage migrate")
-    print("  4. just manage createsuperuser")
+        pass
     return 0
 
 

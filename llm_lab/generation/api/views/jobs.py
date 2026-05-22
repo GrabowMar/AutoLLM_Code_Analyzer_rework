@@ -8,6 +8,7 @@ registered AFTER the static job-creation routes in
 
 from __future__ import annotations
 
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from ninja import Query
 
@@ -17,7 +18,6 @@ from llm_lab.generation.api.schema import GenerationArtifactSchema
 from llm_lab.generation.api.schema import GenerationBatchSchema
 from llm_lab.generation.api.schema import GenerationJobListSchema
 from llm_lab.generation.api.schema import GenerationJobSchema
-from django.db.models import Q
 from llm_lab.generation.api.schema import PaginatedJobsSchema
 from llm_lab.generation.api.views._router import router
 from llm_lab.generation.models import GenerationBatch
@@ -52,13 +52,10 @@ def list_jobs(
     container_status: str = Query(""),
 ):
     """List generation jobs with pagination and filters."""
-    qs = (
-        GenerationJob.objects.filter(created_by=request.auth)
-        .select_related(
-            "model",
-            "app_requirement",
-            "scaffolding_template",
-        )
+    qs = GenerationJob.objects.filter(created_by=request.auth).select_related(
+        "model",
+        "app_requirement",
+        "scaffolding_template",
     )
     if mode:
         qs = qs.filter(mode=mode)
@@ -80,6 +77,7 @@ def list_jobs(
 
     if search:
         import uuid
+
         uuid_q = Q()
         try:
             val = uuid.UUID(search)
@@ -91,7 +89,7 @@ def list_jobs(
             | Q(model__model_name__icontains=search)
             | Q(model__model_id__icontains=search)
             | Q(app_requirement__name__icontains=search)
-            | Q(scaffolding_template__name__icontains=search)
+            | Q(scaffolding_template__name__icontains=search),
         )
 
     # Sorting

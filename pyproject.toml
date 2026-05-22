@@ -14,8 +14,8 @@ classifiers = [
 ]
 dependencies = [
   "aider-chat==0.86.2",
-  "audioop-lts>=0.2.1",
   "argon2-cffi==25.1.0",
+  "audioop-lts>=0.2.1",
   "celery==5.6.3",
   "croniter>=3.0,<4",
   "django==6.0.5",
@@ -66,8 +66,8 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-  "watchfiles==1.2.0",
   "pillow==12.2.0",
+  "watchfiles==1.2.0",
 ]
 
 [tool.ruff]
@@ -161,10 +161,27 @@ lint.per-file-ignores."**/tests/**" = [
   "PLR0913", # Test fixtures legitimately accept many arguments.
   "PLR0915", # Some integration tests are intentionally long.
   "PLR2004", # Magic values are idiomatic in test assertions (HTTP codes, counts).
+  "PT019",   # @patch injects mock parameters; names are intentionally unused.
   "SLF001",  # Accessing private members is sometimes necessary to test internals.
 ]
 lint.per-file-ignores."config/settings/local.py" = [
   "S701", # Local-dev settings intentionally enable Jinja2 autoescape=False stand-ins.
+]
+lint.per-file-ignores."llm_lab/generation/services/copilot_workspace.py" = [
+  "S603", # git init/add/commit — fixed argv, workspace-local cwd.
+  "S607", # git is resolved via PATH in the Django container.
+]
+lint.per-file-ignores."llm_lab/runtime/scaffolding/**" = [
+  "INP001",  # Scaffold templates are copied into generated apps, not imported as packages.
+  "PLW1508", # Generated Flask apps use int env defaults by design.
+  "S104",    # Generated apps bind 0.0.0.0 inside Docker.
+]
+lint.per-file-ignores."manage.py" = [
+  "EXE001", # Same as scripts — executable bit is platform-dependent in dev.
+]
+lint.per-file-ignores."scripts/**" = [
+  "EXE001", # Shebang on Windows checkouts may lack the executable bit.
+  "T201",   # CLI scripts use print for user-facing output.
 ]
 lint.isort.force-single-line = true
 

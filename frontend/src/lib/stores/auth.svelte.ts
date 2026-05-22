@@ -132,9 +132,7 @@ function createAuth() {
     }
     return {
       ok: false,
-      error:
-        parsed.error ||
-        "Login failed. Please check your credentials.",
+      error: parsed.error || "Login failed. Please check your credentials.",
     };
   }
 
@@ -183,9 +181,7 @@ function createAuth() {
     }
     return {
       ok: false,
-      error:
-        parsed.error ||
-        "Sign up failed. Please try again.",
+      error: parsed.error || "Sign up failed. Please try again.",
     };
   }
 

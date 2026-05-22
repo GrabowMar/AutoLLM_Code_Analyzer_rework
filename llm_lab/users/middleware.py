@@ -6,7 +6,8 @@ import json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from django.http import HttpRequest, HttpResponse
+    from django.http import HttpRequest
+    from django.http import HttpResponse
 
 
 class RememberMeMiddleware:
@@ -40,10 +41,8 @@ class ForceCsrfCookieMiddleware:
         self.get_response = get_response
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        if request.method in ("GET", "HEAD") and (
-            "_allauth/" in request.path or "api/" in request.path
-        ):
+        if request.method in ("GET", "HEAD") and ("_allauth/" in request.path or "api/" in request.path):
             from django.middleware.csrf import get_token
+
             get_token(request)
         return self.get_response(request)
-

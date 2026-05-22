@@ -10,10 +10,10 @@ from llm_lab.credentials.services.resolver import get_openrouter_key
 from llm_lab.generation.models import GenerationArtifact
 from llm_lab.generation.models import GenerationJob
 from llm_lab.generation.services import result_writer
-from llm_lab.generation.services.backend_scanner import BackendScanner
 from llm_lab.generation.services.aider_runner import AiderExecutionError
-from llm_lab.generation.services.copilot_validation import validate_python_code
+from llm_lab.generation.services.backend_scanner import BackendScanner
 from llm_lab.generation.services.code_parser import parse_result_to_structured
+from llm_lab.generation.services.copilot_validation import validate_python_code
 from llm_lab.generation.services.openrouter_client import OpenRouterClient
 from llm_lab.generation.services.openrouter_client import OpenRouterError
 from llm_lab.generation.services.prompt_renderer import PromptRenderer
@@ -234,14 +234,14 @@ class GenerationService:
         try:
             iterations = AiderRunner(job, workspace).run_loop(max_iters)
             CopilotResults.apply(job, workspace, iterations)
-            
+
             loc = 0
             if isinstance(job.result_data, dict):
                 files = job.result_data.get("files") or {}
                 for code in files.values():
                     if isinstance(code, str):
                         loc += code.count("\n") + 1
-                        
+
             job.metrics = {
                 **(job.metrics or {}),
                 "duration_seconds": round(time.time() - total_start, 2),
@@ -304,4 +304,3 @@ class GenerationService:
             completion_tokens=usage.get("completion_tokens", 0),
         )
         return response
-

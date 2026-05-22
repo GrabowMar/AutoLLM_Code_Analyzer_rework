@@ -125,8 +125,7 @@ def _patch_backend_code(code: str) -> str:
     """Apply runtime-invariant fixes to generated Flask backend code."""
     code = _fix_sqlite_uri(code)
     code = _fix_flask_port(code)
-    code = _fix_db_create_all(code)
-    return code
+    return _fix_db_create_all(code)
 
 
 def _fix_sqlite_uri(code: str) -> str:
@@ -137,6 +136,7 @@ def _fix_sqlite_uri(code: str) -> str:
     so we rewrite any sqlite:/// (3-slash relative) URI to sqlite:////app/data/app.db.
     Absolute paths (4 slashes) are left unchanged.
     """
+
     def _rewrite(m: re.Match) -> str:
         # Extract just the filename from whatever path the LLM used
         original_path = m.group(1)
@@ -145,7 +145,7 @@ def _fix_sqlite_uri(code: str) -> str:
 
     return re.sub(
         r"sqlite:///([^'\"]+)",
-        lambda m: _rewrite(m),
+        _rewrite,
         code,
     )
 
@@ -188,7 +188,7 @@ def _fix_db_create_all(code: str) -> str:
                     break
                 body_stripped = body_line.strip()
                 # Once we see port= or app.run(), switch to run_lines
-                if body_stripped.startswith("port ") or body_stripped.startswith("app.run("):
+                if body_stripped.startswith(("port ", "app.run(")):
                     in_run_section = True
                 if in_run_section:
                     run_lines.append(body_line)
@@ -223,12 +223,11 @@ def _fix_flask_port(code: str) -> str:
         code,
     )
     # Replace bare app.run(..., port=5000, ...) with PORT-aware binding
-    code = re.sub(
+    return re.sub(
         r"app\.run\(([^)]*\b)port\s*=\s*5000([^)]*)\)",
         lambda m: f"app.run({m.group(1)}port=int(os.environ.get('PORT', 8000)){m.group(2)})",
         code,
     )
-    return code
 
 
 def _sanitize_lucide_imports(code: str) -> str:

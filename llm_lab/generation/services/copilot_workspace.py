@@ -7,12 +7,15 @@ import shutil
 import subprocess
 import tarfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 
-from llm_lab.generation.models import GenerationJob
 from llm_lab.runtime.services.scaffolding import _copy_template_dir
 from llm_lab.runtime.services.scaffolding import _placeholder_backend
+
+if TYPE_CHECKING:
+    from llm_lab.generation.models import GenerationJob
 
 logger = logging.getLogger(__name__)
 
@@ -133,9 +136,7 @@ class CopilotWorkspace:
         src_dir.mkdir(parents=True, exist_ok=True)
         if not (src_dir / "App.jsx").is_file():
             (src_dir / "App.jsx").write_text(
-                "export default function App() {\n"
-                "  return <div className=\"p-8\">Hello</div>;\n"
-                "}\n",
+                'export default function App() {\n  return <div className="p-8">Hello</div>;\n}\n',
                 encoding="utf-8",
             )
 
@@ -183,6 +184,7 @@ class CopilotWorkspace:
         result = subprocess.run(
             ["git", *git_cfg, "commit", "-m", "Initial scaffold"],
             cwd=self.root,
+            check=False,
             capture_output=True,
             text=True,
             env=env,

@@ -45,7 +45,7 @@ def build_image(path: str, tag: str, dockerfile: str | None = None) -> tuple:
     Raises ``docker.errors.BuildError`` (with ``build_log`` attribute) on failure;
     callers can use ``extract_build_error(exc)`` to get a human-readable summary.
     """
-    import docker  # noqa: PLC0415
+    import docker
 
     c = client()
     if c is None:
@@ -124,20 +124,20 @@ def run_container(
         msg = "Docker daemon unavailable"
         raise ConnectionError(msg)
 
-    kwargs: dict[str, Any] = dict(
-        name=name,
-        environment=env,
-        detach=True,
-        cap_drop=["ALL"],
-        read_only=False,
-        mem_limit="512m",
-        cpu_period=100000,
-        cpu_quota=50000,
-        labels={
+    kwargs: dict[str, Any] = {
+        "name": name,
+        "environment": env,
+        "detach": True,
+        "cap_drop": ["ALL"],
+        "read_only": False,
+        "mem_limit": "512m",
+        "cpu_period": 100000,
+        "cpu_quota": 50000,
+        "labels": {
             "llm_lab.managed": "true",
             "llm_lab.instance_id": container_instance_id,
         },
-    )
+    }
     if network:
         kwargs["network"] = network
     else:

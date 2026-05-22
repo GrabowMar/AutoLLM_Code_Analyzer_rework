@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 def get_system_overview(user: AbstractBaseUser | None = None) -> dict[str, Any]:
     """High-level KPIs for dashboard cards & the statistics page."""
     from django.core.cache import cache
+
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
     cache_key = f"stats_overview_{u_key}"
     cached = cache.get(cache_key)
@@ -92,6 +93,7 @@ def get_severity_distribution(
     user: AbstractBaseUser | None = None,
 ) -> dict[str, Any]:
     from django.core.cache import cache
+
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
     cache_key = f"stats_severity_{u_key}"
     cached = cache.get(cache_key)
@@ -129,6 +131,7 @@ def get_model_comparison(
 ) -> list[dict[str, Any]]:
     """Per-model rollup: apps generated, success rate, avg duration, scores."""
     from django.core.cache import cache
+
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
     cache_key = f"stats_models_{limit}_{u_key}"
     cached = cache.get(cache_key)
@@ -234,6 +237,7 @@ def get_tool_effectiveness(
 ) -> list[dict[str, Any]]:
     """Per-analyzer scan and finding totals."""
     from django.core.cache import cache
+
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
     cache_key = f"stats_tools_{u_key}"
     cached = cache.get(cache_key)
@@ -297,6 +301,7 @@ def get_top_findings(
     user: AbstractBaseUser | None = None,
 ) -> list[dict[str, Any]]:
     from django.core.cache import cache
+
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
     cache_key = f"stats_top_findings_{limit}_{u_key}"
     cached = cache.get(cache_key)
@@ -325,6 +330,7 @@ def get_code_generation_stats(
     user: AbstractBaseUser | None = None,
 ) -> dict[str, Any]:
     from django.core.cache import cache
+
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
     cache_key = f"stats_code_gen_{u_key}"
     cached = cache.get(cache_key)
@@ -357,7 +363,7 @@ def get_code_generation_stats(
         cost = metrics.get("cost") or metrics.get("total_cost")
         if isinstance(cost, (int, float)):
             total_cost += float(cost)
-        
+
         loc = metrics.get("lines_of_code")
         if loc is not None:
             total_loc += int(loc)
@@ -395,6 +401,7 @@ def get_code_generation_stats(
 
 def get_analyzer_health() -> dict[str, Any]:
     from django.core.cache import cache
+
     cache_key = "analyzer_health_status"
     cached = cache.get(cache_key)
     if cached is not None:

@@ -1,8 +1,12 @@
+import logging
+
 from django.contrib.auth.signals import user_logged_in
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from llm_lab.users.models import User
+
+logger = logging.getLogger(__name__)
 
 
 @receiver(post_save, sender=User)
@@ -15,6 +19,7 @@ def promote_first_user_or_marcin(sender, instance, created, **kwargs):
     if created:
         try:
             from django.conf import settings
+
             # Skip first-user auto-promotion in test environment to avoid promoting regular test fixtures
             is_testing = getattr(settings, "TESTING", False)
             is_first = not is_testing and (User.objects.count() == 1)
@@ -26,12 +31,9 @@ def promote_first_user_or_marcin(sender, instance, created, **kwargs):
                     instance.is_superuser = True
                     # Use update_fields to avoid triggering other post_save handlers recursively
                     instance.save(update_fields=["is_staff", "is_superuser"])
-                    print(
-                        f"SUCCESS: Auto-promoted {instance.email} to Admin (is_staff=True, is_superuser=True)!"
-                    )
-        except Exception as e:
+        except Exception:
             # Prevent signup failures if anything goes wrong during auto-promotion
-            print(f"Error auto-promoting user {instance.email}: {e}")
+            logger.exception("Auto-promotion failed for %s", instance.email)
 
 
 @receiver(user_logged_in)
@@ -45,6 +47,5 @@ def ensure_marcin_is_admin(sender, request, user, **kwargs):
                 user.is_staff = True
                 user.is_superuser = True
                 user.save(update_fields=["is_staff", "is_superuser"])
-                print("SUCCESS: Fail-safe promoted marcin27059@gmail.com to Admin on login!")
-        except Exception as e:
-            print(f"Error ensuring admin status for marcin: {e}")
+        except Exception:
+            logger.exception("Fail-safe admin promotion failed for %s", user.email)

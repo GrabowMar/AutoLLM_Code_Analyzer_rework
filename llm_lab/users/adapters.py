@@ -6,10 +6,10 @@ from allauth.account import app_settings as account_settings
 from allauth.account.adapter import DefaultAccountAdapter
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from django.conf import settings
-from django.contrib.auth.models import AbstractBaseUser
 
 if typing.TYPE_CHECKING:
     from allauth.socialaccount.models import SocialLogin
+    from django.contrib.auth.models import AbstractBaseUser
     from django.http import HttpRequest
 
     from llm_lab.users.models import User
