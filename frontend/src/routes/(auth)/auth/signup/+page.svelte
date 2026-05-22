@@ -31,7 +31,13 @@
 				error = res.error || 'Sign up failed. Please try again.';
 				return;
 			}
-			goto('/auth/verify-email?created=1');
+			// If logged in immediately (email verification optional), go home.
+			// Otherwise go to verify-email flow.
+			if (auth.isAuthenticated) {
+				goto('/');
+			} else {
+				goto('/auth/verify-email?created=1');
+			}
 		} catch (err: unknown) {
 			error = formatApiError(err, 'Sign up failed. Please try again.');
 		} finally {

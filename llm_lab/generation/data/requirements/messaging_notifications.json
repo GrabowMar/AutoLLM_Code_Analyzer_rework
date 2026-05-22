@@ -1,0 +1,128 @@
+{
+  "slug": "messaging_notifications",
+  "name": "Notification Center",
+  "category": "Messaging",
+  "description": "View and manage notifications",
+  "backend_requirements": [
+    "Access control: allow public read-only notifications; require auth for creation",
+    "1. Notification model: id, message (required), type (info/warning/error), read (boolean), created_at",
+    "2. GET /api/notifications - return all, support ?unread=true filter",
+    "3. PUT /api/notifications/:id/read - mark as read",
+    "4. DELETE /api/notifications/:id - delete notification",
+    "5. POST /api/notifications - create new notification with type validation"
+  ],
+  "frontend_requirements": [
+    "Public guest view of notifications with CTA to sign in for management",
+    "1. Notification list with visual indicator based on type, message, time ago",
+    "2. Unread count badge in header",
+    "3. Unread notifications highlighted",
+    "4. 'Mark as read' button per notification",
+    "5. Delete button, 'Mark all as read' button"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/notifications",
+      "description": "List all notifications (supports ?read=true/false filter)",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "message": "string",
+            "type": "info",
+            "read": false,
+            "created_at": "ISO8601"
+          }
+        ],
+        "total": 1,
+        "unread_count": 5
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/notifications",
+      "description": "Create new notification",
+      "request": {
+        "message": "string",
+        "type": "string (info|warning|error)"
+      },
+      "response": {
+        "id": 1,
+        "message": "string",
+        "type": "info",
+        "read": false,
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/notifications/:id/read",
+      "description": "Mark notification as read",
+      "request": null,
+      "response": {
+        "id": 1,
+        "message": "string",
+        "type": "info",
+        "read": true,
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/notifications/:id",
+      "description": "Delete notification",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Notification",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "message": "text (required)",
+      "type": "string (info, warning, error)",
+      "read": "boolean (default: false)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any notification"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/notifications",
+      "description": "Admin overview: list all notifications and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/notifications/:id/toggle",
+      "description": "Toggle notification active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

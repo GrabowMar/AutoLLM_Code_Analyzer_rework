@@ -1,0 +1,114 @@
+{
+  "slug": "api_url_shortener",
+  "name": "URL Shortener",
+  "category": "API Integration",
+  "description": "Create short URLs",
+  "backend_requirements": [
+    "1. POST /api/shorten - accept long URL, generate 6-character random code",
+    "2. URL model: id, original_url, short_code (unique), created_at, click_count",
+    "3. GET /api/r/:code - lookup and redirect to original URL, increment counter",
+    "4. Validate URL format before shortening",
+    "5. GET /api/urls - return list of recently shortened URLs with click counts",
+    "Access control: allow public read-only short URL redirect and public list; require auth for creation and admin actions"
+  ],
+  "frontend_requirements": [
+    "1. Input field for long URL with 'Shorten' button",
+    "2. Display shortened URL with copy-to-clipboard button",
+    "3. Show click count for generated URLs",
+    "4. List of recently shortened URLs",
+    "5. Validation error for invalid URLs",
+    "Public guest view for shortening URLs with CTA to sign in for management"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/urls",
+      "description": "List recently shortened URLs",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "original_url": "string",
+            "short_code": "string",
+            "click_count": 0,
+            "created_at": "ISO8601"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/shorten",
+      "description": "Create short URL from original URL",
+      "request": {
+        "url": "string"
+      },
+      "response": {
+        "id": 1,
+        "original_url": "string",
+        "short_code": "string",
+        "short_url": "/api/r/abc123",
+        "click_count": 0,
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/r/:code",
+      "description": "Redirect short code to original URL",
+      "request": null,
+      "response": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "URL",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "original_url": "string (required, max 2048 chars)",
+      "short_code": "string (unique, 6 chars)",
+      "click_count": "integer (default: 0)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any short URL"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/urls",
+      "description": "Admin overview: list all URLs and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/urls/:id/toggle",
+      "description": "Toggle URL active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

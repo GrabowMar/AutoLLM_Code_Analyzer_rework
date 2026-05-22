@@ -1,0 +1,68 @@
+# {{ name }}
+
+{{ description }}
+
+## Task
+Generate `App.jsx` - a **comprehensive, production-quality** React application. Aim for **400+ lines** of well-structured code with **6+ distinct pages**.
+
+**IMPORTANT: Each application MUST have a unique visual identity. Do not use the same layouts or color schemes for every app. Be creative with Tailwind CSS and layout structures.**
+
+## Backend API Context
+{{ backend_api_context }}
+
+## Requirements
+
+### Features
+{% for req in frontend_requirements %}
+- {{ req }}
+{% endfor %}
+
+### Admin Features
+{% for req in admin_requirements %}
+- {{ req }}
+{% endfor %}
+
+## Design Guidelines
+
+### 1. Unique Visual Identity
+- **Color Palette**: Choose a unique, harmonious color scheme that fits the app's brand (e.g., "Neon Cyberpunk" for gaming, "Serene Emerald" for healthcare, "Modern Industrial" for inventory).
+- **Typography**: Use distinct font weights and sizes to create a clear hierarchy.
+- **Animations**: Implement subtle entrance animations and hover effects using standard CSS or Tailwind.
+
+### 2. Impressive Landing Page (/)
+Build a high-conversion landing page with:
+- **Unique Hero Section**: Instead of a generic centered title, try split screens, large image backgrounds, or floating 3D-effect cards.
+- **Dynamic Stats**: Use the `/api/public/stats` endpoint to show social proof.
+- **Feature Showcases**: Multi-column layouts with visual elements and cards.
+- **Visual Flourishes**: Use gradients, glassmorphism, or custom decorative elements.
+
+### 3. Comprehensive Page Suite
+Implement at least 6 distinct views:
+- **Landing Page**: The face of the app.
+- **Browse/Search Page**: Robust filtering (category, status, etc.) with a grid or list view.
+- **Item Detail Page**: Rich view of a single resource.
+- **User Dashboard**: Personalized overview for signed-in users.
+- **Auth Pages**: Beautifully designed Login and Register views.
+- **Admin Panel**: Data-heavy view for moderation and metrics.
+
+### 4. Component Architecture
+Create reusable, styled components within the same file:
+- Custom Buttons, Inputs, and Badges.
+- Sophisticated Data Tables and Stat Cards.
+- Navigation with responsive mobile support.
+- Loading states and Skeleton screens.
+
+## Technical Constraints
+- Use **Vite + React + Tailwind CSS**.
+- Required packages: `react`, `react-router-dom`, `axios`, `react-hot-toast`, `lucide-react`, `date-fns`, `clsx`.
+- **Icons**: Use `lucide-react` only. Import icons by PascalCase name: `import { Home, User } from 'lucide-react';`
+- **Single File**: All components and pages must be in `App.jsx`. Use internal functions and constants to organize.
+- **API URLs**: Use relative paths (e.g., `/api/items`) or handle base URL via `import.meta.env.VITE_API_BASE_URL`.
+
+## Performance & Quality
+- No stubs or "TODO" comments.
+- Implement real error handling for all API calls.
+- Full responsiveness (mobile, tablet, desktop).
+- **Aim for 400+ lines of high-quality code.**
+
+**GENERATE COMPLETE APP.JSX NOW.**

@@ -1,0 +1,141 @@
+{
+  "slug": "productivity_notes",
+  "name": "Notes",
+  "category": "Productivity",
+  "description": "Create and organize notes",
+  "backend_requirements": [
+    "Access control: allow public read-only notes; require auth for create/update/delete",
+    "1. Note model: id, title (required), content, tags, created_at",
+    "2. GET /api/notes - list notes",
+    "3. POST /api/notes - create note",
+    "4. PUT /api/notes/:id - update note",
+    "5. DELETE /api/notes/:id - delete note"
+  ],
+  "frontend_requirements": [
+    "HomePage displays ALL content in read-only mode for public users",
+    "Public users see \"Sign in to create notes\" CTAs instead of action buttons",
+    "Logged-in users see same content plus create/edit/delete functionality",
+    "1. Notes list with title and tags (visible to all)",
+    "2. Note editor with title and content (logged-in only)",
+    "3. Tag filter chips (visible to all)",
+    "4. Edit and delete actions (logged-in only)",
+    "5. Empty state messaging (visible to all)"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/notes",
+      "description": "List notes",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "title": "string",
+            "content": "string",
+            "tags": [
+              "tag"
+            ]
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/notes",
+      "description": "Create note",
+      "request": {
+        "title": "string",
+        "content": "string",
+        "tags": [
+          "tag"
+        ]
+      },
+      "response": {
+        "id": 1,
+        "title": "string",
+        "content": "string",
+        "tags": [
+          "tag"
+        ]
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/notes/:id",
+      "description": "Update note",
+      "request": {
+        "title": "string",
+        "content": "string",
+        "tags": [
+          "tag"
+        ]
+      },
+      "response": {
+        "id": 1,
+        "title": "string",
+        "content": "string",
+        "tags": [
+          "tag"
+        ]
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/notes/:id",
+      "description": "Delete note",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Note",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "title": "string (required, max 200 chars)",
+      "content": "text (optional)",
+      "tags": "JSON array of strings (optional)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any note"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/notes",
+      "description": "Admin overview: list all notes and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/notes/:id/toggle",
+      "description": "Toggle note active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "slug": "utility_base64_tool",
+  "name": "Base64 Converter",
+  "category": "Utility",
+  "description": "Encode and decode base64",
+  "backend_requirements": [
+    "Access control: allow public encode/decode; restrict saved history to authenticated users",
+    "1. POST /api/base64/encode - accept {text: string}, return {encoded: string}",
+    "2. POST /api/base64/decode - accept {encoded: string}, return {text: string}",
+    "3. Handle decode errors for invalid base64",
+    "4. Support UTF-8 encoding",
+    "5. Store each conversion in SQLite (Conversion) with direction, input_preview, output_preview, created_at, is_active"
+  ],
+  "frontend_requirements": [
+    "Public guest tool view with CTA to sign in for saved history",
+    "1. Two textareas: input and output",
+    "2. 'Encode' button converts input to base64 in output",
+    "3. 'Decode' button converts base64 input to text in output",
+    "4. Swap button to switch input/output",
+    "5. Copy to clipboard button for output"
+  ],
+  "api_endpoints": [
+    {
+      "method": "POST",
+      "path": "/api/base64/encode",
+      "description": "Encode text to base64",
+      "request": {
+        "text": "string"
+      },
+      "response": {
+        "encoded": "string (base64)"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/base64/decode",
+      "description": "Decode base64 to text",
+      "request": {
+        "encoded": "string (base64)"
+      },
+      "response": {
+        "text": "string"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Conversion",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "direction": "string (required: 'encode' or 'decode')",
+      "input_preview": "text (required, first 200 chars)",
+      "output_preview": "text (required, first 200 chars)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any conversion"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/conversions",
+      "description": "Admin overview: list all conversions and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/conversions/:id/toggle",
+      "description": "Toggle conversion active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

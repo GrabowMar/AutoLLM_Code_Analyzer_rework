@@ -1,0 +1,132 @@
+{
+  "slug": "monitoring_server_stats",
+  "name": "Server Monitor",
+  "category": "Monitoring",
+  "description": "Track server status",
+  "backend_requirements": [
+    "Access control: allow public read-only server list; require auth for create/update",
+    "1. Server model: id, name (required), host, status, last_check",
+    "2. GET /api/servers - list servers",
+    "3. GET /api/servers/:id - get server details",
+    "4. POST /api/servers - register server",
+    "5. POST /api/servers/:id/ping - update last_check and status"
+  ],
+  "frontend_requirements": [
+    "Public guest view of server status with CTA to sign in for management",
+    "1. Server list with status badges",
+    "2. Detail view with last check time",
+    "3. Add server form",
+    "4. Manual refresh button",
+    "5. Empty state messaging"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/servers",
+      "description": "List servers",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "name": "string",
+            "host": "example.com",
+            "status": "online",
+            "last_check": "ISO8601"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/servers/:id",
+      "description": "Get server details",
+      "request": null,
+      "response": {
+        "id": 1,
+        "name": "string",
+        "host": "example.com",
+        "status": "online",
+        "last_check": "ISO8601"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/servers",
+      "description": "Register server",
+      "request": {
+        "name": "string",
+        "host": "example.com"
+      },
+      "response": {
+        "id": 1,
+        "name": "string",
+        "host": "example.com",
+        "status": "unknown"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/servers/:id/ping",
+      "description": "Update server status",
+      "request": {
+        "status": "online|offline"
+      },
+      "response": {
+        "id": 1,
+        "status": "online",
+        "last_check": "ISO8601"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Server",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "name": "string (required)",
+      "host": "string (required)",
+      "status": "string (online, offline, unknown - default: unknown)",
+      "last_check": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any server"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/servers",
+      "description": "Admin overview: list all servers and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/servers/:id/toggle",
+      "description": "Toggle server active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,166 @@
+{
+  "slug": "social_blog_posts",
+  "name": "Blog",
+  "category": "Social",
+  "description": "Write and read blog posts",
+  "backend_requirements": [
+    "Access control: allow public read-only posts; require auth for create/update/delete",
+    "1. Post model: id, title (required), content (text), author, created_at, updated_at",
+    "2. CRUD endpoints: GET /api/posts (list), GET /api/posts/:id (single), POST, PUT, DELETE",
+    "3. Support pagination: ?page=1&limit=10",
+    "4. Search posts: ?search=query",
+    "5. Auto-update updated_at timestamp on every edit"
+  ],
+  "frontend_requirements": [
+    "HomePage displays ALL posts in read-only mode for public users",
+    "Public users see 'Sign in to write posts' CTAs instead of action buttons",
+    "Logged-in users see same content plus create/edit/delete functionality",
+    "1. Post list showing title, excerpt, date, author (visible to all)",
+    "2. Click post title to view full content (visible to all)",
+    "3. Create/edit post form (logged-in only)",
+    "4. Delete button with confirmation (logged-in only)",
+    "5. Pagination controls (visible to all)"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/posts",
+      "description": "List all blog posts (supports ?tag= filter)",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "title": "string",
+            "content": "string",
+            "author": "string",
+            "tags": [
+              "tag1"
+            ],
+            "published_at": "ISO8601",
+            "created_at": "ISO8601"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/posts",
+      "description": "Create new blog post",
+      "request": {
+        "title": "string",
+        "content": "string",
+        "author": "string",
+        "tags": "array (optional)"
+      },
+      "response": {
+        "id": 1,
+        "title": "string",
+        "content": "string",
+        "author": "string",
+        "tags": [
+          "tag1"
+        ],
+        "published_at": "ISO8601",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/posts/:id",
+      "description": "Get post details",
+      "request": null,
+      "response": {
+        "id": 1,
+        "title": "string",
+        "content": "string",
+        "author": "string",
+        "tags": [
+          "tag1"
+        ],
+        "published_at": "ISO8601",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/posts/:id",
+      "description": "Update blog post",
+      "request": {
+        "title": "string (optional)",
+        "content": "string (optional)",
+        "tags": "array (optional)"
+      },
+      "response": {
+        "id": 1,
+        "title": "string",
+        "content": "string",
+        "author": "string",
+        "tags": [
+          "tag1"
+        ],
+        "published_at": "ISO8601",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/posts/:id",
+      "description": "Delete blog post",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Post",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "title": "string (required, max 255 chars)",
+      "content": "text (required)",
+      "author": "string (required, max 100 chars)",
+      "tags": "JSON array of strings",
+      "published_at": "datetime (auto, ISO 8601 format)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any post"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/posts",
+      "description": "Admin overview: list all posts and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/posts/:id/toggle",
+      "description": "Toggle post active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

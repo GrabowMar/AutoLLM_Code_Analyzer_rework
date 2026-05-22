@@ -1,0 +1,106 @@
+{
+  "slug": "gaming_leaderboard",
+  "name": "Leaderboard",
+  "category": "Gaming",
+  "description": "Track player scores",
+  "backend_requirements": [
+    "Access control: allow public read-only leaderboard; require auth for score submissions",
+    "1. Score model: id, player_name (required), score (integer, required), achieved_at",
+    "2. POST /api/scores - submit new score",
+    "3. GET /api/leaderboard - return top 10 scores sorted descending",
+    "4. GET /api/leaderboard?player=name - get player's rank and best score",
+    "5. Input validation: player_name required (max 50 chars), score must be non-negative"
+  ],
+  "frontend_requirements": [
+    "Public guest view of leaderboard with CTA to sign in for submitting scores",
+    "1. Leaderboard table: rank, player name, score, date",
+    "2. Top 3 highlighted with gold/silver/bronze",
+    "3. Submit score form with player name and score",
+    "4. Filter to show all-time or today's scores",
+    "5. 'Refresh' button to update"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/leaderboard",
+      "description": "Get top players sorted by score",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "player_name": "string",
+            "score": 9999,
+            "rank": 1,
+            "achieved_at": "ISO8601"
+          }
+        ],
+        "total": 10
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/scores",
+      "description": "Submit new score",
+      "request": {
+        "player_name": "string",
+        "score": 1234
+      },
+      "response": {
+        "id": 1,
+        "player_name": "string",
+        "score": 1234,
+        "rank": 1,
+        "achieved_at": "ISO8601"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Score",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "player_name": "string (required, max 50 chars)",
+      "score": "integer (required, min 0)",
+      "achieved_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any score"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/scores",
+      "description": "Admin overview: list all scores and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/scores/:id/toggle",
+      "description": "Toggle score active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

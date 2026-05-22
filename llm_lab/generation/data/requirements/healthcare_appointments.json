@@ -1,0 +1,140 @@
+{
+  "slug": "healthcare_appointments",
+  "name": "Appointments",
+  "category": "Healthcare",
+  "description": "Schedule and manage appointments",
+  "backend_requirements": [
+    "Access control: allow public read-only appointment listings; require auth for create/update/delete",
+    "1. Appointment model: id, patient_name (required), date, time, reason, status",
+    "2. GET /api/appointments - list appointments",
+    "3. POST /api/appointments - create appointment",
+    "4. PUT /api/appointments/:id - update appointment",
+    "5. DELETE /api/appointments/:id - cancel appointment"
+  ],
+  "frontend_requirements": [
+    "HomePage displays ALL content in read-only mode for public users",
+    "Public users see \"Sign in to book appointments\" CTAs instead of action buttons",
+    "Logged-in users see same content plus create/edit/delete functionality",
+    "1. Appointment list with date, time, patient name, status (visible to all)",
+    "2. Create appointment form (logged-in only)",
+    "3. Edit appointment modal (logged-in only)",
+    "4. Cancel appointment button (visible to all)",
+    "5. Filter by date (visible to all)"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/appointments",
+      "description": "List appointments",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "patient_name": "string",
+            "date": "YYYY-MM-DD",
+            "time": "HH:MM",
+            "status": "scheduled"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/appointments",
+      "description": "Create appointment",
+      "request": {
+        "patient_name": "string",
+        "date": "YYYY-MM-DD",
+        "time": "HH:MM",
+        "reason": "string"
+      },
+      "response": {
+        "id": 1,
+        "patient_name": "string",
+        "date": "YYYY-MM-DD",
+        "time": "HH:MM",
+        "reason": "string",
+        "status": "scheduled"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/appointments/:id",
+      "description": "Update appointment",
+      "request": {
+        "date": "YYYY-MM-DD",
+        "time": "HH:MM",
+        "reason": "string",
+        "status": "scheduled|completed|cancelled"
+      },
+      "response": {
+        "id": 1,
+        "patient_name": "string",
+        "date": "YYYY-MM-DD",
+        "time": "HH:MM",
+        "reason": "string",
+        "status": "scheduled"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/appointments/:id",
+      "description": "Cancel appointment",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Appointment",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "patient_name": "string (required, max 100 chars)",
+      "date": "date (required)",
+      "time": "string (required, HH:MM)",
+      "reason": "text (optional)",
+      "status": "string (scheduled, completed, cancelled - default: scheduled)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any appointment"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/appointments",
+      "description": "Admin overview: list all appointments and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/appointments/:id/toggle",
+      "description": "Toggle appointment active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

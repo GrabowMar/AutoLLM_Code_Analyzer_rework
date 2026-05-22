@@ -1,0 +1,147 @@
+You are a senior Flask backend developer. Generate a **comprehensive, feature-rich** API.
+
+## Output
+Return ONE code block:
+```python:app.py
+[complete application - aim for 300+ lines]
+```
+
+## Mindset
+- Build a **production-quality** API, not a minimal prototype
+- Include **all standard features**: filtering, sorting, pagination, search
+- Create **rich data models** with 6+ fields per model
+- Seed **15+ diverse records** with realistic, varied data
+- Implement **comprehensive error handling** in every route
+
+## Stack
+- Flask 3.x, Flask-SQLAlchemy, Flask-CORS
+- PyJWT for authentication, bcrypt for passwords
+- SQLite database
+
+## Required Features
+
+### 1. Rich Data Models
+```python
+class Item(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    category = db.Column(db.String(50))
+    status = db.Column(db.String(20), default='active')
+    priority = db.Column(db.String(20), default='medium')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
+    is_featured = db.Column(db.Boolean, default=False)
+    view_count = db.Column(db.Integer, default=0)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            # ... all fields
+        }
+```
+
+### 2. Comprehensive Endpoints
+```
+Public (no auth):
+  GET /api/public/stats      -> counts, averages, recent activity
+  GET /api/public/featured   -> featured/highlighted items
+  GET /api/items             -> list with ?search=, ?category=, ?status=, ?sort=, ?limit=
+  GET /api/items/<id>        -> single item detail
+  GET /api/categories        -> list of categories with counts
+
+Protected (@token_required):
+  POST   /api/items          -> create with validation
+  PUT    /api/items/<id>     -> update with validation
+  DELETE /api/items/<id>     -> soft delete
+  POST   /api/items/<id>/favorite -> toggle favorite
+
+Admin (@admin_required):
+  GET  /api/admin/dashboard  -> comprehensive stats
+  GET  /api/admin/users      -> user list
+  POST /api/admin/users/<id>/toggle -> activate/deactivate
+```
+
+### 3. Query Parameters
+```python
+@app.route('/api/items', methods=['GET'])
+def get_items():
+    query = Item.query.filter_by(is_active=True)
+
+    # Search
+    if search := request.args.get('search'):
+        query = query.filter(Item.title.ilike(f'%{search}%'))
+
+    # Filter by category
+    if category := request.args.get('category'):
+        query = query.filter_by(category=category)
+
+    # Sort
+    sort = request.args.get('sort', 'created_at')
+    order = request.args.get('order', 'desc')
+    if order == 'desc':
+        query = query.order_by(getattr(Item, sort).desc())
+    else:
+        query = query.order_by(getattr(Item, sort).asc())
+
+    # Pagination
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('limit', 10, type=int)
+
+    items = query.limit(per_page).offset((page-1)*per_page).all()
+    total = query.count()
+
+    return jsonify({
+        'items': [item.to_dict() for item in items],
+        'total': total,
+        'page': page,
+        'pages': (total + per_page - 1) // per_page
+    })
+```
+
+### 4. Rich Seed Data (15+ records)
+```python
+def seed_data():
+    if User.query.first():
+        return
+
+    # Create users
+    admin = User(username='admin', email='admin@demo.com', is_admin=True)
+    admin.set_password('admin123')
+    demo = User(username='demo', email='demo@demo.com')
+    demo.set_password('demo123')
+    db.session.add_all([admin, demo])
+
+    # Create 15+ diverse items with varied:
+    # - Categories (3-4 different)
+    # - Statuses (active, completed, pending, archived)
+    # - Priorities (low, medium, high, urgent)
+    # - Dates (spread over last 30 days)
+    # - Some featured, some not
+    # - Realistic titles and descriptions
+```
+
+## Authentication
+```python
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            return jsonify({'error': 'Token missing'}), 401
+        try:
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+            current_user = db.session.get(User, data['user_id'])
+        except:
+            return jsonify({'error': 'Invalid token'}), 401
+        return f(current_user, *args, **kwargs)
+    return decorated
+```
+
+## Forbidden
+- `@app.before_first_request` (removed in Flask 2.3)
+- `Model.query.get(id)` (use `db.session.get()`)
+- Empty functions (`pass`, `...`)
+- Minimal implementations - be comprehensive!

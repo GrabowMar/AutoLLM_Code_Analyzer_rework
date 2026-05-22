@@ -1,0 +1,104 @@
+{
+  "slug": "api_weather_display",
+  "name": "Weather Display",
+  "category": "API",
+  "description": "Look up current weather by city",
+  "backend_requirements": [
+    "Access control: allow public read-only weather lookups; require auth for cache management",
+    "1. WeatherCache model: id, city (required), temperature, condition, fetched_at, expires_at",
+    "2. GET /api/weather?city=NAME - return current weather, use cached result when fresh",
+    "3. GET /api/weather/recent - return last 10 cached lookups",
+    "4. Validate: city is required and max 100 chars",
+    "5. Graceful error handling for unknown cities"
+  ],
+  "frontend_requirements": [
+    "Public guest weather search with CTA to sign in for cache management",
+    "1. Search input for city with 'Search' button",
+    "2. Weather card showing city, temperature, condition, last updated",
+    "3. Recent searches list (last 5)",
+    "4. Loading and error states",
+    "5. Units toggle (C/F) display-only"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/weather",
+      "description": "Get current weather by city (?city=)",
+      "request": null,
+      "response": {
+        "city": "string",
+        "temperature": 20.5,
+        "condition": "string",
+        "fetched_at": "ISO8601"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/weather/recent",
+      "description": "List recent cached lookups",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "city": "string",
+            "temperature": 20.5,
+            "condition": "string",
+            "fetched_at": "ISO8601"
+          }
+        ],
+        "total": 10
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "WeatherCache",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "city": "string (required, max 100 chars)",
+      "temperature": "decimal (nullable)",
+      "condition": "string (nullable)",
+      "fetched_at": "datetime (auto, ISO 8601 format in JSON)",
+      "expires_at": "datetime (nullable)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any cached entry"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/weather-cache",
+      "description": "Admin overview: list all cache entries and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/weather-cache/:id/toggle",
+      "description": "Toggle cache entry active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

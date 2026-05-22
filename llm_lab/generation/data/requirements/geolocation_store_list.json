@@ -1,0 +1,126 @@
+{
+  "slug": "geolocation_store_list",
+  "name": "Store Finder",
+  "category": "Geolocation",
+  "description": "Find stores by location",
+  "backend_requirements": [
+    "Access control: allow public read-only store browsing; require auth for create/update/delete",
+    "1. Store model: id, name, address, latitude, longitude, phone",
+    "2. GET /api/stores - return all stores",
+    "3. GET /api/stores/nearby?lat=X&lng=Y&radius=5 - filter by distance",
+    "4. Seed with 5-10 sample store locations",
+    "5. GET /api/stores/:id - return single store details"
+  ],
+  "frontend_requirements": [
+    "Public guest view for store browsing with CTA to sign in for management",
+    "1. Store list showing name, address, phone",
+    "2. Display distance from user location (if permission granted)",
+    "3. Optional: simple map using Leaflet.js showing store markers",
+    "4. Click store to view details",
+    "5. 'Get Directions' button with link to Google Maps"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/stores",
+      "description": "List all stores (supports ?lat=, ?lng=, ?radius= for proximity search)",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "name": "string",
+            "address": "string",
+            "latitude": 40.7128,
+            "longitude": -74.006,
+            "distance": 2.5
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/stores",
+      "description": "Create new store",
+      "request": {
+        "name": "string",
+        "address": "string",
+        "latitude": "number",
+        "longitude": "number"
+      },
+      "response": {
+        "id": 1,
+        "name": "string",
+        "address": "string",
+        "latitude": 40.7128,
+        "longitude": -74.006,
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/stores/:id",
+      "description": "Get store details",
+      "request": null,
+      "response": {
+        "id": 1,
+        "name": "string",
+        "address": "string",
+        "latitude": 40.7128,
+        "longitude": -74.006,
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Store",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "name": "string (required, max 100 chars)",
+      "address": "string (required, max 255 chars)",
+      "latitude": "decimal (required, -90 to 90)",
+      "longitude": "decimal (required, -180 to 180)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any store"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/stores",
+      "description": "Admin overview: list all stores and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/stores/:id/toggle",
+      "description": "Toggle store active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

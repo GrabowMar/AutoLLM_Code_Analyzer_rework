@@ -1,0 +1,139 @@
+{
+  "slug": "content_recipe_list",
+  "name": "Recipe Book",
+  "category": "Content",
+  "description": "Save and view recipes",
+  "backend_requirements": [
+    "Access control: allow public read-only recipes; require auth for create/update/delete",
+    "1. Recipe model: id, title (required), ingredients (JSON array), instructions (text), category (optional)",
+    "2. CRUD endpoints: GET /api/recipes, GET /api/recipes/:id, POST, DELETE",
+    "3. Filter by category: ?category=dessert query parameter",
+    "4. Seed with 3-5 sample recipes",
+    "5. JSON responses with proper status codes (200, 201, 404)"
+  ],
+  "frontend_requirements": [
+    "HomePage displays ALL content in read-only mode for public users",
+    "Public users see \"Sign in to add recipes\" CTAs instead of action buttons",
+    "Logged-in users see same content plus create/edit/delete functionality",
+    "1. Recipe list showing title and category (visible to all)",
+    "2. Click recipe to view full details (ingredients and instructions) (visible to all)",
+    "3. Add recipe form with title, ingredients, instructions, category (logged-in only)",
+    "4. Delete button with confirmation (logged-in only)",
+    "5. Filter by category dropdown (visible to all)"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/recipes",
+      "description": "List recipes (supports ?category= filter)",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "title": "string",
+            "category": "string",
+            "created_at": "ISO8601"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/recipes",
+      "description": "Create new recipe",
+      "request": {
+        "title": "string",
+        "ingredients": [
+          "string"
+        ],
+        "instructions": "string",
+        "category": "string"
+      },
+      "response": {
+        "id": 1,
+        "title": "string",
+        "ingredients": [
+          "string"
+        ],
+        "instructions": "string",
+        "category": "string",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/recipes/:id",
+      "description": "Get recipe details",
+      "request": null,
+      "response": {
+        "id": 1,
+        "title": "string",
+        "ingredients": [
+          "string"
+        ],
+        "instructions": "string",
+        "category": "string",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/recipes/:id",
+      "description": "Delete recipe",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Recipe",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "title": "string (required, max 255 chars)",
+      "ingredients": "JSON array of strings (required)",
+      "instructions": "text (required)",
+      "category": "string (optional, max 100 chars)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any recipe"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/recipes",
+      "description": "Admin overview: list all recipes and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/recipes/:id/toggle",
+      "description": "Toggle recipe active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

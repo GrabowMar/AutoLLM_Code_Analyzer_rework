@@ -1,0 +1,124 @@
+{
+  "slug": "dataviz_sales_table",
+  "name": "Sales Dashboard",
+  "category": "Data Visualization",
+  "description": "View and visualize sales data",
+  "backend_requirements": [
+    "Access control: allow public read-only sales view; require auth for create/update/delete",
+    "1. Sale model: id, product (required), amount (decimal), quantity (integer), date (default today)",
+    "2. GET /api/sales - return all sales, support date range filter (?start_date=, ?end_date=)",
+    "3. GET /api/sales/summary - return totals (total_sales, total_transactions, average_sale)",
+    "4. Seed with sample data if database is empty",
+    "5. POST /api/sales - create new sale with validation (amount > 0, quantity >= 1)"
+  ],
+  "frontend_requirements": [
+    "Public guest view of sales with CTA to sign in for full analytics",
+    "1. Sales table with date, product, amount, quantity columns",
+    "2. Total sales and transaction count displayed prominently at top",
+    "3. Simple bar chart showing sales over time (Chart.js or similar)",
+    "4. Date range filter (this month, last month, custom)",
+    "5. Add new sale form with product, amount, quantity, date"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/sales",
+      "description": "List all sales (supports ?start_date= and ?end_date= filters)",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "product": "string",
+            "amount": 100.5,
+            "quantity": 5,
+            "date": "ISO8601",
+            "created_at": "ISO8601"
+          }
+        ],
+        "total": 1,
+        "sum": 100.5
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/sales",
+      "description": "Create new sale record",
+      "request": {
+        "product": "string",
+        "amount": "number",
+        "quantity": "integer",
+        "date": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "product": "string",
+        "amount": 100.5,
+        "quantity": 5,
+        "date": "ISO8601",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/sales/summary",
+      "description": "Get sales summary statistics",
+      "request": null,
+      "response": {
+        "total_sales": 1500.75,
+        "total_transactions": 25,
+        "average_sale": 60.03
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Sale",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "product": "string (required, max 100 chars)",
+      "amount": "decimal (required, 2 decimal places)",
+      "quantity": "integer (required, min 1)",
+      "date": "date (default: today)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any record"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/sales",
+      "description": "Admin overview: list all sales and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/sales/:id/toggle",
+      "description": "Toggle sale active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

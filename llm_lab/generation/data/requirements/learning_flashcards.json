@@ -1,0 +1,131 @@
+{
+  "slug": "learning_flashcards",
+  "name": "Flashcards",
+  "category": "Learning",
+  "description": "Create and study flashcards",
+  "backend_requirements": [
+    "Access control: allow public read-only flashcards; require auth for create/update/delete",
+    "1. Flashcard model: id, question (required), answer (required), deck",
+    "2. GET /api/flashcards - list flashcards",
+    "3. POST /api/flashcards - create flashcard",
+    "4. PUT /api/flashcards/:id - update flashcard",
+    "5. DELETE /api/flashcards/:id - delete flashcard"
+  ],
+  "frontend_requirements": [
+    "HomePage displays ALL content in read-only mode for public users",
+    "Public users see \"Sign in to create flashcards\" CTAs instead of action buttons",
+    "Logged-in users see same content plus create/edit/delete functionality",
+    "1. Flashcard list with deck filter (visible to all)",
+    "2. Flip animation to show answer (visible to all)",
+    "3. Create flashcard form (logged-in only)",
+    "4. Edit and delete actions (logged-in only)",
+    "5. Search by question text (visible to all)"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/flashcards",
+      "description": "List flashcards",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "question": "string",
+            "answer": "string",
+            "deck": "string"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/flashcards",
+      "description": "Create flashcard",
+      "request": {
+        "question": "string",
+        "answer": "string",
+        "deck": "string"
+      },
+      "response": {
+        "id": 1,
+        "question": "string",
+        "answer": "string",
+        "deck": "string"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/flashcards/:id",
+      "description": "Update flashcard",
+      "request": {
+        "question": "string",
+        "answer": "string",
+        "deck": "string"
+      },
+      "response": {
+        "id": 1,
+        "question": "string",
+        "answer": "string",
+        "deck": "string"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/flashcards/:id",
+      "description": "Delete flashcard",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Flashcard",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "question": "string (required)",
+      "answer": "text (required)",
+      "deck": "string (optional)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any flashcard"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/flashcards",
+      "description": "Admin overview: list all flashcards and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/flashcards/:id/toggle",
+      "description": "Toggle flashcard active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

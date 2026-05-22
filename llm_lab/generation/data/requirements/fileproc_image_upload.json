@@ -1,0 +1,110 @@
+{
+  "slug": "fileproc_image_upload",
+  "name": "Image Upload",
+  "category": "File Processing",
+  "description": "Upload and view images",
+  "backend_requirements": [
+    "Access control: allow public gallery view; require auth for upload/delete",
+    "1. Image model: id, filename (required), url (required), uploaded_at",
+    "2. GET /api/images - list images",
+    "3. POST /api/images - upload image",
+    "4. DELETE /api/images/:id - delete image",
+    "5. Validate: allow only jpg/png and size limit"
+  ],
+  "frontend_requirements": [
+    "Public gallery with CTA to sign in for uploads",
+    "1. Grid of image thumbnails",
+    "2. Upload form with file picker",
+    "3. Preview of selected image",
+    "4. Delete button per image",
+    "5. Empty state when no images"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/images",
+      "description": "List images",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "filename": "string",
+            "url": "string",
+            "uploaded_at": "ISO8601"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/images",
+      "description": "Upload image",
+      "request": {
+        "file": "multipart"
+      },
+      "response": {
+        "id": 1,
+        "filename": "string",
+        "url": "string",
+        "uploaded_at": "ISO8601"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/images/:id",
+      "description": "Delete image",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Image",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "filename": "string (required)",
+      "url": "string (required)",
+      "uploaded_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any image"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/images",
+      "description": "Admin overview: list all images and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/images/:id/toggle",
+      "description": "Toggle image active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

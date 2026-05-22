@@ -1,0 +1,123 @@
+{
+  "slug": "booking_reservations",
+  "name": "Reservation System",
+  "category": "Booking",
+  "description": "Book time slots or rooms",
+  "backend_requirements": [
+    "Access control: allow public read-only reservation listings; require auth for create/update/delete",
+    "1. Reservation model: id, name (required), email (required), date (required), time (HH:MM format), party_size (integer)",
+    "2. CRUD endpoints: GET /api/reservations, POST, DELETE",
+    "3. Filter by date: ?date=YYYY-MM-DD query parameter",
+    "4. Validate: prevent double-booking same time slot, validate email format",
+    "5. JSON responses with proper status codes (200, 201, 400, 404, 409 for conflicts)"
+  ],
+  "frontend_requirements": [
+    "Public guest view of reservations with CTA to sign in for booking",
+    "1. Reservation list grouped by date, showing name, email, time, party size",
+    "2. Book form: name, email, date picker, time picker, party size",
+    "3. Validation for email format and required fields",
+    "4. Cancel reservation button with confirmation",
+    "5. Today's reservations highlighted"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/reservations",
+      "description": "List all reservations (supports ?date= filter)",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "name": "string",
+            "email": "string",
+            "date": "YYYY-MM-DD",
+            "time": "HH:MM",
+            "party_size": 2,
+            "created_at": "ISO8601"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/reservations",
+      "description": "Create new reservation",
+      "request": {
+        "name": "string",
+        "email": "string",
+        "date": "YYYY-MM-DD",
+        "time": "HH:MM",
+        "party_size": 2
+      },
+      "response": {
+        "id": 1,
+        "name": "string",
+        "email": "string",
+        "date": "YYYY-MM-DD",
+        "time": "HH:MM",
+        "party_size": 2,
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/reservations/:id",
+      "description": "Cancel reservation",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Reservation",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "name": "string (required, max 100 chars)",
+      "email": "string (required, valid email)",
+      "date": "date (required)",
+      "time": "string (required, HH:MM format)",
+      "party_size": "integer (required, min 1)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any reservation"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/reservations",
+      "description": "Admin overview: list all reservations and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/reservations/:id/toggle",
+      "description": "Toggle reservation active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

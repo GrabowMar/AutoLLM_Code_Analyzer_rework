@@ -1,0 +1,88 @@
+{
+  "slug": "validation_xml_checker",
+  "name": "XML Validator",
+  "category": "Validation",
+  "description": "Validate XML syntax",
+  "backend_requirements": [
+    "Access control: allow public validation; restrict history listing to authenticated users",
+    "1. POST /api/validate/xml - accept {xml: string}",
+    "2. Parse XML using Python's xml.etree or lxml",
+    "3. Return {valid: true} or {valid: false, error: message, line: number}",
+    "4. Handle syntax errors with helpful messages",
+    "5. Store each validation attempt in SQLite (XmlValidation) with valid/error/line and an xml_preview (first 200 chars)"
+  ],
+  "frontend_requirements": [
+    "Public guest validation view with CTA to sign in for saved history",
+    "1. Large textarea for XML input with monospace font",
+    "2. 'Validate' button",
+    "3. Result display: green checkmark for valid, red X with error message for invalid",
+    "4. Show line number for errors",
+    "5. Sample XML button to load example"
+  ],
+  "api_endpoints": [
+    {
+      "method": "POST",
+      "path": "/api/validate/xml",
+      "description": "Validate XML syntax",
+      "request": {
+        "xml": "string"
+      },
+      "response": {
+        "id": 1,
+        "valid": true,
+        "error": null,
+        "line": null
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "XmlValidation",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "xml_preview": "text (required, first 200 chars)",
+      "valid": "boolean (required)",
+      "error": "text (nullable)",
+      "line": "integer (nullable)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any validation"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/validations",
+      "description": "Admin overview: list all validations and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/validations/:id/toggle",
+      "description": "Toggle validation active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+{
+  "slug": "media_audio_player",
+  "name": "Audio Player",
+  "category": "Media",
+  "description": "Play and manage audio tracks",
+  "backend_requirements": [
+    "Access control: allow public read-only tracks; require auth for upload/delete",
+    "1. Track model: id, title (required), artist, url (required), duration",
+    "2. GET /api/tracks - list tracks",
+    "3. POST /api/tracks - add track",
+    "4. DELETE /api/tracks/:id - delete track",
+    "5. Validate: url must be valid and duration non-negative"
+  ],
+  "frontend_requirements": [
+    "Public guest player with CTA to sign in for management",
+    "1. Track list with play buttons",
+    "2. Audio player with progress bar",
+    "3. Current track display",
+    "4. Add track form",
+    "5. Delete track action"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/tracks",
+      "description": "List tracks",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "title": "string",
+            "artist": "string",
+            "url": "string",
+            "duration": 180
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/tracks",
+      "description": "Create track",
+      "request": {
+        "title": "string",
+        "artist": "string",
+        "url": "string",
+        "duration": 180
+      },
+      "response": {
+        "id": 1,
+        "title": "string",
+        "artist": "string",
+        "url": "string",
+        "duration": 180
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/tracks/:id",
+      "description": "Delete track",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Track",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "title": "string (required)",
+      "artist": "string (optional)",
+      "url": "string (required)",
+      "duration": "integer (seconds, optional)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any track"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/tracks",
+      "description": "Admin overview: list all tracks and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/tracks/:id/toggle",
+      "description": "Toggle track active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

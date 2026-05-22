@@ -1,0 +1,69 @@
+# {{ name }}
+
+{{ description }}
+
+## Task
+Generate `app.py` - a **comprehensive, production-quality** Flask API. Aim for **300+ lines** of well-structured code. 
+
+**IMPORTANT: Do not copy basic generic patterns. Each application should feel distinct in its logic, variable naming, and internal structure.**
+
+## Requirements
+
+### Features
+{% for req in backend_requirements %}
+- {{ req }}
+{% endfor %}
+
+### Admin Features
+{% for req in admin_requirements %}
+- {{ req }}
+{% endfor %}
+
+### Data Model Context
+{{ data_model }}
+
+### API Endpoints (Minimum required)
+{{ api_endpoints }}
+
+{{ admin_api_endpoints }}
+
+## Implementation Requirements
+
+### 1. Rich and Unique Data Models
+Each model must have **6+ meaningful fields** beyond just 'id' and 'name'. Use domain-specific naming:
+- Domain-specific core fields (e.g., `payload_size`, `coordinate_x`, `serial_number`, `stock_level`)
+- ENUM-like status fields using strings (e.g., `DRAFT`, `VALIDATED`, `PROCESSED`, `ARCHIVED`)
+- Realistic metadata (timers, counters, flags)
+- Clear relationships if specified in requirements
+
+### 2. Specialized Public Endpoints
+Implement logical public endpoints that match the application category:
+- **Statistics**: Summary metrics relevant to the app's purpose.
+- **Discovery**: Endpoints to fetch "featured", "recent", or "trending" items for a landing page.
+- **Helpers**: Domain-specific logic (e.g., converters, validators, generators).
+
+### 3. Advanced Querying & Business Logic
+The main list endpoint must support:
+- **Search**: Multi-field search logic.
+- **Filtering**: At least 2 domain-specific filters.
+- **Sorting**: Flexible sorting on multiple fields.
+- **Pagination**: Standard industrial pagination (offset/limit).
+- **Domain Logic**: The code should not just be CRUD; implement the specific algorithms or logic implied by the app description.
+
+### 4. Realistic and Diverse Seed Data (15+ records)
+Create a `seed_data()` function that populates the DB with **15-20 highly varied** records:
+- Use realistic, descriptive strings, not "Test 1", "Test 2".
+- Diversity in statuses, timestamps (spread over weeks), and priorities.
+- Distribute items across different "owners" or "categories".
+
+### 5. Secure Admin & Authentication
+- Implement robust JWT or Session-based auth logic (mocked if necessary, but structurally present).
+- Admin endpoints must have decorator-based protection.
+- Admin dashboard should return a rich JSON structure with complex aggregation metrics.
+
+## Output Structure
+- One single `app.py` file.
+- Use Flask-SQLAlchemy, Flask-CORS, and standard Python libraries.
+- **Aim for 300+ lines.** If needed, expand on validation logic, helper functions, and detailed docstrings.
+
+**START GENERATION NOW.**

@@ -1,0 +1,116 @@
+{
+  "slug": "auth_user_login",
+  "name": "User Login",
+  "category": "Auth",
+  "description": "Register and sign in users",
+  "backend_requirements": [
+    "Access control: public registration/login; require auth for profile access",
+    "1. User model: id, email (required, unique), password_hash, is_admin, created_at",
+    "2. POST /api/auth/register - create user account",
+    "3. POST /api/auth/login - return JWT token",
+    "4. GET /api/auth/me - return current user profile",
+    "5. Validate: strong password (min 8 chars) and email format"
+  ],
+  "frontend_requirements": [
+    "Public login/register view with CTA to sign in",
+    "1. Tab switch between Login and Register",
+    "2. Inline form validation and error messages",
+    "3. Show authenticated banner with user email",
+    "4. Logout button clears token",
+    "5. Protected area message only visible when logged in"
+  ],
+  "api_endpoints": [
+    {
+      "method": "POST",
+      "path": "/api/auth/register",
+      "description": "Register a new user",
+      "request": {
+        "email": "string",
+        "password": "string"
+      },
+      "response": {
+        "id": 1,
+        "email": "string",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "description": "Login and get JWT token",
+      "request": {
+        "email": "string",
+        "password": "string"
+      },
+      "response": {
+        "token": "jwt-token",
+        "user": {
+          "id": 1,
+          "email": "string",
+          "is_admin": false
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "description": "Get current user profile",
+      "request": null,
+      "response": {
+        "id": 1,
+        "email": "string",
+        "is_admin": false,
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "User",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "email": "string (required, unique)",
+      "password_hash": "string (required)",
+      "is_admin": "boolean (default: false)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any user"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/users",
+      "description": "Admin overview: list all users and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/users/:id/toggle",
+      "description": "Toggle user active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

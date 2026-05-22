@@ -142,6 +142,7 @@ function createAuth() {
     email: string,
     password: string,
     _password2: string,
+    remember = true,
   ): Promise<SignupResult> {
     sessionCheckGeneration++;
     await ensureCsrfCookie();
@@ -152,7 +153,7 @@ function createAuth() {
         "X-CSRFToken": getCsrfToken(),
       },
       credentials: "include",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, remember }),
     });
     const body = await parseAllauthJson(res);
     const parsed = parseAllauthAuthResponse(
@@ -161,8 +162,13 @@ function createAuth() {
       `Sign up failed (HTTP ${res.status}).`,
     );
 
-    // Signup success: 200 with user, or 401 with verify_email pending
+    // Signup success: 200 with user logged in immediately
     if (parsed.ok) {
+      const mapped = mapUser(parsed.user);
+      if (mapped) {
+        isAuthenticated = true;
+        user = mapped;
+      }
       return { ok: true };
     }
     if (parsed.pendingFlow === "verify_email") {

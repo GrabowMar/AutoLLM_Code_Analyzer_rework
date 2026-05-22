@@ -1,0 +1,130 @@
+{
+  "slug": "ecommerce_cart",
+  "name": "Shopping Cart",
+  "category": "E-commerce",
+  "description": "Browse products and manage a cart",
+  "backend_requirements": [
+    "Access control: allow public product browsing; require auth for cart management",
+    "1. Product model: id, name (required), price (decimal), image_url, stock",
+    "2. CartItem model: id, product_id, quantity, created_at",
+    "3. GET /api/products - list products",
+    "4. GET /api/cart - list current cart items",
+    "5. POST /api/cart - add or update a cart item"
+  ],
+  "frontend_requirements": [
+    "HomePage displays ALL content in read-only mode for public users",
+    "Public users see \"Sign in to manage your cart\" CTAs instead of action buttons",
+    "Logged-in users see same content plus create/edit/delete functionality",
+    "1. Product grid with image, price, and Add button (logged-in only)",
+    "2. Cart drawer showing items and totals (visible to all)",
+    "3. Quantity stepper per cart item (visible to all)",
+    "4. Remove item button (visible to all)",
+    "5. Empty cart state (visible to all)"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/products",
+      "description": "List products",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "name": "string",
+            "price": 9.99,
+            "image_url": "string",
+            "stock": 12
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/cart",
+      "description": "List cart items",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "product_id": 1,
+            "quantity": 2
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/cart",
+      "description": "Add or update a cart item",
+      "request": {
+        "product_id": 1,
+        "quantity": 2
+      },
+      "response": {
+        "id": 1,
+        "product_id": 1,
+        "quantity": 2
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/cart/:id",
+      "description": "Remove cart item",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "CartItem",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "product_id": "integer (required)",
+      "quantity": "integer (required, min 1)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    },
+    "related": "Product (id, name, price, image_url, stock)"
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any product"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/products",
+      "description": "Admin overview: list all products and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/products/:id/toggle",
+      "description": "Toggle product active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

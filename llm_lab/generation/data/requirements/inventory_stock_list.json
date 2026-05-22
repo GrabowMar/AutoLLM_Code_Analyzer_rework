@@ -1,0 +1,137 @@
+{
+  "slug": "inventory_stock_list",
+  "name": "Inventory",
+  "category": "Inventory",
+  "description": "Track stock levels",
+  "backend_requirements": [
+    "Access control: allow public read-only inventory; require auth for create/update/delete",
+    "1. Item model: id, name (required), sku, quantity, location",
+    "2. GET /api/items - list items",
+    "3. POST /api/items - create item",
+    "4. PUT /api/items/:id - update item",
+    "5. DELETE /api/items/:id - delete item"
+  ],
+  "frontend_requirements": [
+    "HomePage displays ALL content in read-only mode for public users",
+    "Public users see \"Sign in to manage inventory\" CTAs instead of action buttons",
+    "Logged-in users see same content plus create/edit/delete functionality",
+    "1. Inventory table: name, sku, quantity, location (visible to all)",
+    "2. Add item form (logged-in only)",
+    "3. Edit item dialog (logged-in only)",
+    "4. Delete item button (logged-in only)",
+    "5. Low-stock highlight (visible to all)"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/items",
+      "description": "List items",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "name": "string",
+            "sku": "SKU-001",
+            "quantity": 10,
+            "location": "A1"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/items",
+      "description": "Create item",
+      "request": {
+        "name": "string",
+        "sku": "string",
+        "quantity": 10,
+        "location": "string"
+      },
+      "response": {
+        "id": 1,
+        "name": "string",
+        "sku": "string",
+        "quantity": 10,
+        "location": "string"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/items/:id",
+      "description": "Update item",
+      "request": {
+        "name": "string",
+        "sku": "string",
+        "quantity": 10,
+        "location": "string"
+      },
+      "response": {
+        "id": 1,
+        "name": "string",
+        "sku": "string",
+        "quantity": 10,
+        "location": "string"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/items/:id",
+      "description": "Delete item",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Item",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "name": "string (required, max 200 chars)",
+      "sku": "string (optional)",
+      "quantity": "integer (required, min 0)",
+      "location": "string (optional)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any item"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/items",
+      "description": "Admin overview: list all items and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/items/:id/toggle",
+      "description": "Toggle item active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

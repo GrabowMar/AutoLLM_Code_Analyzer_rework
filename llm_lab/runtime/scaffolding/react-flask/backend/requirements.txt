@@ -1,3 +1,12 @@
-flask>=3.0
-flask-cors
-gunicorn
+# Core Flask Dependencies - DO NOT REMOVE
+Flask==3.0.0
+Flask-CORS==4.0.0
+Flask-SQLAlchemy==3.1.1
+Werkzeug==3.0.1
+SQLAlchemy==2.0.25
+bcrypt==4.1.2
+PyJWT==2.8.0
+
+# LLM: ADD APPLICATION-SPECIFIC DEPENDENCIES BELOW
+# Example: python-dateutil==2.8.2
+# Example: requests==2.31.0

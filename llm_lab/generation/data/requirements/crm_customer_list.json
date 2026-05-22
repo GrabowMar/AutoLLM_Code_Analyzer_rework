@@ -1,0 +1,143 @@
+{
+  "slug": "crm_customer_list",
+  "name": "Customer Directory",
+  "category": "CRM",
+  "description": "Manage customer contacts",
+  "backend_requirements": [
+    "Access control: allow public read-only customer listings; require auth for create/update/delete",
+    "1. Customer model: id, name (required), email (required, unique), phone, company, notes",
+    "2. CRUD endpoints: GET /api/customers, POST, PUT, DELETE",
+    "3. Search customers: ?query=text searches name, email, company",
+    "4. Email validation on create/update",
+    "5. JSON responses with proper status codes (200, 201, 400, 404, 409 for duplicate email)"
+  ],
+  "frontend_requirements": [
+    "Public guest view of customers with CTA to sign in for management",
+    "1. Customer list table: name, email, phone, company",
+    "2. Add customer form with validation",
+    "3. Click customer to view/edit details",
+    "4. Delete button with confirmation",
+    "5. Search box to filter customers"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/customers",
+      "description": "List all customers",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "name": "string",
+            "email": "string",
+            "phone": "string",
+            "company": "string",
+            "created_at": "ISO8601"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers",
+      "description": "Create customer",
+      "request": {
+        "name": "string",
+        "email": "string",
+        "phone": "string",
+        "company": "string",
+        "notes": "string"
+      },
+      "response": {
+        "id": 1,
+        "name": "string",
+        "email": "string",
+        "phone": "string",
+        "company": "string",
+        "notes": "string",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/customers/:id",
+      "description": "Update customer",
+      "request": {
+        "name": "string",
+        "email": "string",
+        "phone": "string",
+        "company": "string",
+        "notes": "string"
+      },
+      "response": {
+        "id": 1,
+        "name": "string",
+        "email": "string",
+        "phone": "string",
+        "company": "string",
+        "notes": "string",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/customers/:id",
+      "description": "Delete customer",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Customer",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "name": "string (required, max 100 chars)",
+      "email": "string (required, unique)",
+      "phone": "string (optional)",
+      "company": "string (optional)",
+      "notes": "text (optional)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any customer"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/customers",
+      "description": "Admin overview: list all customers and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/customers/:id/toggle",
+      "description": "Toggle customer active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

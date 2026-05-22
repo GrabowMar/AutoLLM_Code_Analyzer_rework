@@ -1,0 +1,135 @@
+{
+  "slug": "iot_sensor_display",
+  "name": "Sensor Dashboard",
+  "category": "IoT",
+  "description": "Display live sensor readings",
+  "backend_requirements": [
+    "Access control: allow public read-only sensor data; require auth for registering sensors and posting readings",
+    "1. Sensor model: id, name (required), location, unit, last_value, last_updated",
+    "2. GET /api/sensors - list sensors",
+    "3. GET /api/sensors/:id - get sensor details",
+    "4. POST /api/sensors - register new sensor",
+    "5. POST /api/sensors/:id/readings - update last_value"
+  ],
+  "frontend_requirements": [
+    "Public guest view of sensors with CTA to sign in for management",
+    "1. Sensor cards with name, location, last value, unit",
+    "2. Detail modal with last updated time",
+    "3. Add sensor form",
+    "4. Refresh button",
+    "5. Empty state when no sensors"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/sensors",
+      "description": "List sensors",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "name": "string",
+            "location": "string",
+            "last_value": 21.4,
+            "unit": "C"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/sensors/:id",
+      "description": "Get sensor details",
+      "request": null,
+      "response": {
+        "id": 1,
+        "name": "string",
+        "location": "string",
+        "last_value": 21.4,
+        "unit": "C",
+        "last_updated": "ISO8601"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/sensors",
+      "description": "Register new sensor",
+      "request": {
+        "name": "string",
+        "location": "string",
+        "unit": "string"
+      },
+      "response": {
+        "id": 1,
+        "name": "string",
+        "location": "string",
+        "unit": "string"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/sensors/:id/readings",
+      "description": "Post a new reading",
+      "request": {
+        "value": 21.4
+      },
+      "response": {
+        "id": 1,
+        "last_value": 21.4,
+        "last_updated": "ISO8601"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Sensor",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "name": "string (required, max 100 chars)",
+      "location": "string (optional)",
+      "unit": "string (required)",
+      "last_value": "decimal (nullable)",
+      "last_updated": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any sensor"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/sensors",
+      "description": "Admin overview: list all sensors and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/sensors/:id/toggle",
+      "description": "Toggle sensor active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+{
+  "slug": "workflow_task_board",
+  "name": "Kanban Board",
+  "category": "Workflow",
+  "description": "Visual task workflow",
+  "backend_requirements": [
+    "1. Task model: id, title (required), description, status (todo/in_progress/done), priority",
+    "2. CRUD endpoints: GET /api/tasks, POST, PUT, DELETE",
+    "3. Update status: PUT /api/tasks/:id/status with {status: 'done'}",
+    "4. Filter by status: ?status=todo",
+    "5. Validate: status must be one of todo/in_progress/done, priority must be low/medium/high",
+    "Access control: allow public read-only board view; require auth for create/update/delete"
+  ],
+  "frontend_requirements": [
+    "1. Three columns: To Do, In Progress, Done",
+    "2. Task cards showing title and description",
+    "3. Button to move task to next column",
+    "4. Add task form with title, description, priority",
+    "5. Delete button per task",
+    "Public guest view for board with CTA to sign in for full workflow"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/tasks",
+      "description": "List all tasks (supports ?status= filter)",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "title": "string",
+            "description": "string",
+            "status": "todo",
+            "priority": "medium",
+            "created_at": "ISO8601"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks",
+      "description": "Create new task",
+      "request": {
+        "title": "string",
+        "description": "string (optional)",
+        "priority": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "title": "string",
+        "description": "string",
+        "status": "todo",
+        "priority": "medium",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tasks/:id",
+      "description": "Update task",
+      "request": {
+        "title": "string (optional)",
+        "description": "string (optional)",
+        "status": "string (optional)",
+        "priority": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "title": "string",
+        "description": "string",
+        "status": "in_progress",
+        "priority": "high",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tasks/:id/status",
+      "description": "Update task status (accepts {status: 'todo'|'in_progress'|'done'})",
+      "request": {
+        "status": "string (todo|in_progress|done)"
+      },
+      "response": {
+        "id": 1,
+        "title": "string",
+        "description": "string",
+        "status": "done",
+        "priority": "medium",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/tasks/:id",
+      "description": "Delete task",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Task",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "title": "string (required, max 255 chars)",
+      "description": "text (optional)",
+      "status": "string (todo, in_progress, done - default: todo)",
+      "priority": "string (low, medium, high - default: medium)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any task"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/tasks",
+      "description": "Admin overview: list all tasks and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/tasks/:id/toggle",
+      "description": "Toggle task active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

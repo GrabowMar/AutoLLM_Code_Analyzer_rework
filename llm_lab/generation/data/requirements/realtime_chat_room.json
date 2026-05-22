@@ -1,0 +1,106 @@
+{
+  "slug": "realtime_chat_room",
+  "name": "Chat Room",
+  "category": "Real-time",
+  "description": "Simple real-time messaging",
+  "backend_requirements": [
+    "Access control: allow public read-only chat view; restrict sending messages to authenticated users",
+    "1. WebSocket endpoint at /api/ws/chat for bidirectional communication",
+    "2. Message model: id, username, text, timestamp",
+    "3. Broadcast incoming messages to all connected clients",
+    "4. Store last 50 messages in memory or SQLite",
+    "5. GET /api/messages - return recent message history for new connections"
+  ],
+  "frontend_requirements": [
+    "Public guest view of chat with CTA to sign in for sending messages",
+    "1. Message list showing username, text, and time",
+    "2. Input field with send button at bottom",
+    "3. Auto-scroll to newest message",
+    "4. WebSocket connection with reconnect logic",
+    "5. Show 'typing...' indicator when appropriate"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/messages",
+      "description": "Get recent chat messages",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "username": "string",
+            "text": "string",
+            "timestamp": "ISO8601"
+          }
+        ],
+        "total": 50
+      }
+    },
+    {
+      "method": "WS",
+      "path": "/api/ws/chat",
+      "description": "WebSocket endpoint for real-time messaging",
+      "request": {
+        "type": "message",
+        "username": "string",
+        "text": "string"
+      },
+      "response": {
+        "type": "message",
+        "id": 1,
+        "username": "string",
+        "text": "string",
+        "timestamp": "ISO8601"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Message",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "username": "string (required, max 50 chars)",
+      "text": "text (required, max 1000 chars)",
+      "timestamp": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any message"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/messages",
+      "description": "Admin overview: list all messages and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/messages/:id/toggle",
+      "description": "Toggle message active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

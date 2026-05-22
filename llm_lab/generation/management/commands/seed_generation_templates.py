@@ -1,4 +1,4 @@
-"""Seed default generation templates from ThesisAppRework data."""
+"""Seed default generation templates."""
 
 import json
 import logging
@@ -12,7 +12,9 @@ from llm_lab.generation.models import ScaffoldingTemplate
 
 logger = logging.getLogger(__name__)
 
-REQUIREMENTS_DIR = Path("/home/ubuntu/ThesisAppRework/misc/requirements")
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+REQUIREMENTS_DIR = DATA_DIR / "requirements"
+PROMPTS_DIR = DATA_DIR / "prompts"
 
 
 class Command(BaseCommand):
@@ -144,14 +146,8 @@ class Command(BaseCommand):
 
     @staticmethod
     def _read_old_prompt(relative_path: str) -> str:
-        """Read a prompt template from ThesisAppRework."""
-        prompt_path = (
-            Path(
-                "/home/ubuntu/ThesisAppRework/misc/prompts/v2",
-            )
-            / relative_path
-        )
+        prompt_path = PROMPTS_DIR / "v2" / relative_path
         if prompt_path.exists():
             return prompt_path.read_text()
-        logger.warning("Old prompt not found: %s", prompt_path)
+        logger.warning("Prompt not found: %s", prompt_path)
         return ""

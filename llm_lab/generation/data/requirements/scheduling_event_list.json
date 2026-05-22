@@ -1,0 +1,146 @@
+{
+  "slug": "scheduling_event_list",
+  "name": "Event Calendar",
+  "category": "Scheduling",
+  "description": "Track events by date",
+  "backend_requirements": [
+    "Access control: allow public read-only event listings; require auth for create/update/delete",
+    "1. Event model: id, title (required), date (required), time, description, location",
+    "2. CRUD endpoints: GET /api/events, POST, PUT, DELETE",
+    "3. Filter by date range: ?start=YYYY-MM-DD&end=YYYY-MM-DD",
+    "4. Sort events by date ascending",
+    "5. Validate: end_time must be after start_time, title is required"
+  ],
+  "frontend_requirements": [
+    "HomePage displays ALL content in read-only mode for public users",
+    "Public users see \"Sign in to create events\" CTAs instead of action buttons",
+    "Logged-in users see same content plus create/edit/delete functionality",
+    "1. Event list grouped by date, showing title and time (visible to all)",
+    "2. Add event form with date picker, time picker, title, description (logged-in only)",
+    "3. Click event to view details in modal (visible to all)",
+    "4. Edit and delete buttons per event (logged-in only)",
+    "5. Filter buttons: Today, This Week, This Month, All (visible to all)"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/events",
+      "description": "List all events (supports ?start_date= and ?end_date= filters)",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "title": "string",
+            "description": "string",
+            "start_time": "ISO8601",
+            "end_time": "ISO8601",
+            "location": "string",
+            "created_at": "ISO8601"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/events",
+      "description": "Create new event",
+      "request": {
+        "title": "string",
+        "description": "string (optional)",
+        "start_time": "string",
+        "end_time": "string",
+        "location": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "title": "string",
+        "description": "string",
+        "start_time": "ISO8601",
+        "end_time": "ISO8601",
+        "location": "string",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/events/:id",
+      "description": "Update event",
+      "request": {
+        "title": "string (optional)",
+        "description": "string (optional)",
+        "start_time": "string (optional)",
+        "end_time": "string (optional)",
+        "location": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "title": "string",
+        "description": "string",
+        "start_time": "ISO8601",
+        "end_time": "ISO8601",
+        "location": "string",
+        "created_at": "ISO8601"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/events/:id",
+      "description": "Delete event",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Event",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "title": "string (required, max 255 chars)",
+      "description": "text (optional)",
+      "start_time": "datetime (required, ISO 8601 format)",
+      "end_time": "datetime (required, ISO 8601 format)",
+      "location": "string (optional, max 255 chars)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any event"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/events",
+      "description": "Admin overview: list all events and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/events/:id/toggle",
+      "description": "Toggle event active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

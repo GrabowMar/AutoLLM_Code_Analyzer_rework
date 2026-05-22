@@ -1,0 +1,128 @@
+{
+  "slug": "finance_expense_list",
+  "name": "Expense Tracker",
+  "category": "Finance",
+  "description": "Track your expenses",
+  "backend_requirements": [
+    "Access control: allow public read-only expense summaries; require auth for personal expense CRUD",
+    "1. Expense model: id, amount (decimal, required), category (required), description, date",
+    "2. GET /api/expenses - list expenses",
+    "3. POST /api/expenses - add expense",
+    "4. DELETE /api/expenses/:id - delete expense",
+    "5. GET /api/expenses/total - return sum of expenses"
+  ],
+  "frontend_requirements": [
+    "HomePage displays ALL content in read-only mode for public users",
+    "Public users see \"Sign in to track expenses\" CTAs instead of action buttons",
+    "Logged-in users see same content plus create/edit/delete functionality",
+    "1. Expense list showing date, amount, category, description (visible to all)",
+    "2. Total amount card (visible to all)",
+    "3. Add expense form with validation (logged-in only)",
+    "4. Delete button per expense (logged-in only)",
+    "5. Filter by category (visible to all)"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/expenses",
+      "description": "List expenses",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "amount": 19.99,
+            "category": "string",
+            "description": "string",
+            "date": "YYYY-MM-DD"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/expenses",
+      "description": "Create expense",
+      "request": {
+        "amount": 19.99,
+        "category": "string",
+        "description": "string",
+        "date": "YYYY-MM-DD"
+      },
+      "response": {
+        "id": 1,
+        "amount": 19.99,
+        "category": "string",
+        "description": "string",
+        "date": "YYYY-MM-DD"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/expenses/:id",
+      "description": "Delete expense",
+      "request": null,
+      "response": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/expenses/total",
+      "description": "Get total expenses",
+      "request": null,
+      "response": {
+        "total": 120.5
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Expense",
+    "fields": {
+      "id": "integer (primary key, auto-increment)",
+      "amount": "decimal (required, min 0)",
+      "category": "string (required)",
+      "description": "text (optional)",
+      "date": "date (required)",
+      "created_at": "datetime (auto, ISO 8601 format in JSON)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any expense"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/expenses",
+      "description": "Admin overview: list all expenses and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/expenses/:id/toggle",
+      "description": "Toggle expense active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}

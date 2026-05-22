@@ -1,0 +1,131 @@
+{
+  "slug": "education_quiz_app",
+  "name": "Quiz Application",
+  "category": "Education",
+  "description": "Take multiple choice quizzes",
+  "backend_requirements": [
+    "Access control: allow public quiz taking; restrict quiz creation and results history to authenticated users",
+    "1. Question model: id, question_text (required), options (JSON array), correct_answer (integer index)",
+    "2. GET /api/quiz/questions - return 5-10 random questions",
+    "3. POST /api/quiz/submit - accept answers array, return score and correct answers",
+    "4. Seed with 20+ sample questions",
+    "5. GET /api/quiz/review/:id - return quiz results for review"
+  ],
+  "frontend_requirements": [
+    "Public guest view for taking quizzes with CTA to sign in for saved results",
+    "1. Display one question at a time with radio buttons for options",
+    "2. 'Next' button to proceed, 'Submit' on last question",
+    "3. Show score after submission with correct/incorrect indicators",
+    "4. Review mode showing all questions with correct answers",
+    "5. 'Start New Quiz' button"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/quiz/questions",
+      "description": "Get random quiz questions",
+      "request": null,
+      "response": {
+        "questions": [
+          {
+            "id": 1,
+            "question": "string",
+            "options": [
+              "A",
+              "B",
+              "C",
+              "D"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/quiz/submit",
+      "description": "Submit quiz answers and get score",
+      "request": {
+        "answers": [
+          {
+            "question_id": 1,
+            "answer": "string"
+          }
+        ]
+      },
+      "response": {
+        "score": 75,
+        "total": 100,
+        "correct": 3,
+        "total_questions": 4,
+        "results": [
+          {
+            "question_id": 1,
+            "correct": true,
+            "user_answer": "A",
+            "correct_answer": "A"
+          }
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/quiz/review/:id",
+      "description": "Review quiz results",
+      "request": null,
+      "response": {
+        "score": 75,
+        "total": 100,
+        "submitted_at": "ISO8601",
+        "results": []
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check endpoint",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Question",
+    "fields": {
+      "id": "integer (primary key)",
+      "question": "text (required)",
+      "options": "JSON array (4 options)",
+      "correct_answer": "string (A-D, not exposed to frontend until submitted)",
+      "is_active": "boolean (default: true, for soft delete)"
+    }
+  },
+  "admin_requirements": [
+    "1. Admin overview list with total/active/inactive counts",
+    "2. Toggle active status for any question"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/questions",
+      "description": "Admin overview: list all questions and counts",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "active": 0,
+        "inactive": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/questions/:id/toggle",
+      "description": "Toggle question active status",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": true
+      }
+    }
+  ]
+}
