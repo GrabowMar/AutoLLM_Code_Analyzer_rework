@@ -105,7 +105,7 @@ const statusColor: Record<string, string> = {
 										<td class="px-3 py-2 font-mono text-xs">{container.app_port}</td>
 										<td class="px-3 py-2 font-mono text-xs">8000</td>
 										<td class="px-3 py-2">
-											<a href="http://{typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:{container.app_port}" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline inline-flex items-center gap-1 text-xs">Open <ExternalLink class="h-3 w-3" /></a>
+											<a href={container.app_url ?? '#'} target="_blank" rel="noopener noreferrer" class="text-primary hover:underline inline-flex items-center gap-1 text-xs">Open <ExternalLink class="h-3 w-3" /></a>
 										</td>
 									</tr>
 								{:else}

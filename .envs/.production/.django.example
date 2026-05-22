@@ -35,6 +35,16 @@ DJANGO_ACCOUNT_ALLOW_REGISTRATION=True
 # Browser-facing app URL (https) — used in verification and password-reset emails.
 FRONTEND_PUBLIC_ORIGIN=https://example.com
 
+# Sample-app container access
+# ------------------------------------------------------------------------------
+# Hostname (or IP) used to build the "Open" URL for generated sample-app containers.
+# Defaults to DJANGO_DOMAIN when left empty.
+# IMPORTANT: If HSTS is active on your domain, browsers upgrade http://domain:PORT
+# to https://domain:PORT, which fails for plain-HTTP container ports.
+# Set this to the server's public IP address to avoid that redirect, e.g.:
+# CONTAINER_APP_HOST=1.2.3.4
+CONTAINER_APP_HOST=
+
 
 # Redis
 # ------------------------------------------------------------------------------

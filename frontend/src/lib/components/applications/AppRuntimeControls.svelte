@@ -137,11 +137,7 @@
 	const btnSize = $derived(compact ? 'sm' : 'sm');
 	const iconCls = $derived(compact ? 'h-3.5 w-3.5' : 'h-3.5 w-3.5');
 	const showLabels = $derived(!compact);
-	const previewUrl = $derived(
-		container && container.app_port
-			? `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:${container.app_port}`
-			: null,
-	);
+	const previewUrl = $derived(container?.app_url ?? null);
 </script>
 
 <div class="flex flex-wrap items-center gap-2">

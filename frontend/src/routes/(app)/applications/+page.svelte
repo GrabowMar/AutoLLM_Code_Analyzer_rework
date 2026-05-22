@@ -290,10 +290,7 @@
 	}
 
 	function getAccessUrl(c: ContainerInstance) {
-		const port = c.app_port;
-		if (!port) return null;
-		const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-		return `http://${host}:${port}`;
+		return c.app_url ?? null;
 	}
 
 	const containersByJobId = $derived(

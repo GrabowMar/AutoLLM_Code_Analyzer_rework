@@ -36,6 +36,7 @@ export interface ContainerInstance {
   container_id: string;
   status: ContainerStatus;
   app_port: number | null;
+  app_url: string | null;
   health_status: string;
   last_health_check: string | null;
   config: Record<string, unknown>;

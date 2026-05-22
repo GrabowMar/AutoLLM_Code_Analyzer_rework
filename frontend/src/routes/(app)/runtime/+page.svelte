@@ -161,9 +161,9 @@
 					<Card.Header class="pb-3">
 						<div class="flex items-start justify-between gap-2">
 							<Badge class={statusColors[c.status]}>{c.status}</Badge>
-							{#if c.app_port}
+							{#if c.app_url}
 								<a
-									href="http://{typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:{c.app_port}"
+									href={c.app_url}
 									target="_blank"
 									rel="noopener noreferrer"
 									class="text-xs text-blue-400 hover:underline"

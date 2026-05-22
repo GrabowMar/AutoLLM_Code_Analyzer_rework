@@ -17,6 +17,7 @@ class ContainerInstanceSchema(ModelSchema):
     generation_job_id: UUID | None = None
     created_by_id: int | None = None
     last_error: str = ""
+    app_url: str | None = None
 
     class Meta:
         model = ContainerInstance
@@ -43,6 +44,14 @@ class ContainerInstanceSchema(ModelSchema):
             .first()
         )
         return last_failed or ""
+
+    @staticmethod
+    def resolve_app_url(obj: ContainerInstance) -> str | None:
+        if not obj.app_port:
+            return None
+        from django.conf import settings
+        host = getattr(settings, "CONTAINER_APP_HOST", "") or getattr(settings, "DJANGO_DOMAIN", "localhost")
+        return f"http://{host}:{obj.app_port}"
 
 
 class ContainerActionSchema(ModelSchema):

@@ -227,7 +227,7 @@
 							<span class="text-muted-foreground">App port</span>
 							<span>
 								{#if container.app_port}
-									<a href="http://{typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:{container.app_port}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">
+									<a href={container.app_url ?? '#'} target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">
 										{container.app_port}
 									</a>
 								{:else}

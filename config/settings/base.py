@@ -157,6 +157,7 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "allauth.account.middleware.AccountMiddleware",
     "llm_lab.users.middleware.RememberMeMiddleware",
+    "llm_lab.users.middleware.ForceCsrfCookieMiddleware",
 ]
 
 # STATIC
@@ -387,3 +388,9 @@ OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK = env.bool(
     "OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK",
     default=True,
 )
+
+# Hostname (or IP) used to build public URLs for generated sample-app containers.
+# Defaults to DJANGO_DOMAIN. Override with the server's public IP when HSTS is
+# active on the domain, since browsers upgrade http://domain:PORT → https://domain:PORT
+# which fails for plain-HTTP container ports.
+CONTAINER_APP_HOST = env("CONTAINER_APP_HOST", default="")
