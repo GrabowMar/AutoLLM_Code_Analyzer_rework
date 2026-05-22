@@ -2,7 +2,7 @@
 
 Parses annotated code blocks from markdown-formatted LLM output, merges
 multi-file Python output into a single app.py, and infers dependencies.
-Simplified port from ThesisAppRework code_merger.py (no disk I/O).
+Merges multi-file Python output into a single app.py and infers dependencies.
 """
 
 import ast

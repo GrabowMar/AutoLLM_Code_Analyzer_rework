@@ -140,8 +140,43 @@ def token_required(f):
     return decorated
 ```
 
+## Single-Container Deployment
+
+This app runs in a single Docker container. Flask serves **both** the API and the pre-built React SPA.
+
+Required structure — follow exactly:
+```python
+import os
+from flask import Flask, jsonify, send_from_directory
+
+app = Flask(__name__, static_folder='static', static_url_path='')
+
+# ALL API routes go here, under /api/ prefix
+# ...
+
+# SPA catch-all — must be the LAST route
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def _serve_spa(path):
+    if path and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    return send_from_directory(app.static_folder, 'index.html')
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8000))
+    app.run(host='0.0.0.0', port=port, debug=False)
+```
+
+Rules:
+- `static_folder='static'` on `Flask()` — required, do not omit
+- Every API route MUST start with `/api/`
+- `_serve_spa` must be the very last route — nothing after it
+- Database stored at `data/app.db` (directory always exists)
+- Read port from `PORT` env var with default 8000
+
 ## Forbidden
 - `@app.before_first_request` (removed in Flask 2.3)
 - `Model.query.get(id)` (use `db.session.get()`)
 - Empty functions (`pass`, `...`)
 - Minimal implementations - be comprehensive!
+- Routes without the `/api/` prefix (except `_serve_spa`)

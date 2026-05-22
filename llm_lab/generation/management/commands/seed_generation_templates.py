@@ -27,26 +27,25 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Seeding complete."))
 
     def _seed_scaffolding(self):
-        """Create default React+Flask scaffolding template."""
+        """Create default single-container Flask+React scaffolding template."""
         obj, created = ScaffoldingTemplate.objects.update_or_create(
-            slug="react-flask",
+            slug="flask-react",
             defaults={
-                "name": "React + Flask",
+                "name": "Flask + React",
                 "description": (
-                    "Docker-based scaffolding with React 18 frontend (Vite + Tailwind) "
-                    "and Flask 3.x backend (SQLAlchemy + JWT auth). "
-                    "Includes docker-compose, nginx proxy, and health checks."
+                    "Single-container scaffolding: Flask 3.x serves both the REST API "
+                    "and a pre-built React 18 SPA (Vite + Tailwind). "
+                    "One port, no docker-compose required at runtime."
                 ),
                 "tech_stack": {
                     "frontend": "React 18 + Vite + Tailwind CSS",
                     "backend": "Flask 3.x + SQLAlchemy + JWT",
                     "database": "SQLite",
-                    "runtime": "Docker Compose",
+                    "runtime": "Single Docker container",
                 },
                 "substitution_vars": [
                     "{{APP_NAME}}",
-                    "{{BACKEND_PORT}}",
-                    "{{FRONTEND_PORT}}",
+                    "{{PORT}}",
                 ],
                 "is_default": True,
             },
@@ -55,7 +54,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  {action} scaffolding: {obj.name}")
 
     def _seed_requirements(self):
-        """Import all requirement templates from ThesisAppRework."""
+        """Import all requirement templates from the data directory."""
         if not REQUIREMENTS_DIR.exists():
             self.stdout.write(
                 self.style.WARNING(
@@ -93,7 +92,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  Total requirements: {count}")
 
     def _seed_prompts(self):
-        """Create default prompt templates (ported from ThesisAppRework v2)."""
+        """Create default v2 prompt templates for backend and frontend generation."""
         prompts = [
             {
                 "slug": "v2-backend-system",

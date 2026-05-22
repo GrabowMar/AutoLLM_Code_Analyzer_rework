@@ -2,7 +2,7 @@
 
 Scans generated Flask/Python backend code to extract endpoints, models, and auth info.
 This context feeds into frontend prompt rendering for two-stage scaffolding generation.
-Ported from ThesisAppRework/src/app/services/generation_v2/backend_scanner.py.
+Extracts endpoints, models, and auth info to feed into frontend prompt rendering.
 """
 
 import logging

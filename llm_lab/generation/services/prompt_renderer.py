@@ -10,7 +10,7 @@ from llm_lab.generation.models import PromptTemplate
 
 logger = logging.getLogger(__name__)
 
-# ── Default prompt templates (ported from ThesisAppRework v2) ─────────
+# ── Default prompt templates ──────────────────────────────────────────
 
 DEFAULT_BACKEND_SYSTEM = """\
 You are a senior Flask backend developer. Generate a **comprehensive, feature-rich** API.
