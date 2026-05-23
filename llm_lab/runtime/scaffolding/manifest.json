@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "default_stack": "generic-python",
+  "substitution_files": [".env.example"],
+  "stacks": {
+    "flask-react": {
+      "directory": "flask-react",
+      "aliases": ["react-flask"],
+      "has_frontend": true,
+      "default_port": 8000,
+      "patch_profile": "flask"
+    },
+    "generic-python": {
+      "directory": "generic-python",
+      "aliases": [],
+      "has_frontend": false,
+      "default_port": 8000,
+      "patch_profile": "flask"
+    },
+    "fastapi-vue": {
+      "directory": "fastapi-vue",
+      "aliases": [],
+      "has_frontend": true,
+      "frontend_component": "App.vue",
+      "default_port": 8000,
+      "patch_profile": "none"
+    }
+  }
+}

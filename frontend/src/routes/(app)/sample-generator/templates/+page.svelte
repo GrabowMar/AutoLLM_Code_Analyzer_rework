@@ -10,6 +10,7 @@
 		getScaffoldingTemplates,
 		getAppTemplates,
 		getPromptTemplates,
+		getTemplateBundles,
 		createScaffoldingTemplate,
 		updateScaffoldingTemplate,
 		deleteScaffoldingTemplate,
@@ -22,8 +23,10 @@
 		type ScaffoldingTemplate,
 		type AppRequirementTemplate,
 		type PromptTemplate,
+		type TemplateBundle,
 	} from '$lib/api/client';
 	import Layers from '@lucide/svelte/icons/layers';
+	import Package from '@lucide/svelte/icons/package';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -35,8 +38,11 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import Search from '@lucide/svelte/icons/search';
 
-	type TabId = 'scaffolding' | 'app' | 'prompt';
+	type TabId = 'scaffolding' | 'app' | 'prompt' | 'bundles';
 	let activeTab = $state<TabId>('scaffolding');
+
+	let templateBundles = $state<TemplateBundle[]>([]);
+	let bundlesLoading = $state(true);
 
 	// Scaffolding templates
 	let scaffoldingTemplates = $state<ScaffoldingTemplate[]>([]);
@@ -114,10 +120,21 @@
 		promptLoading = false;
 	}
 
+	async function loadBundles() {
+		bundlesLoading = true;
+		try {
+			templateBundles = await getTemplateBundles();
+		} catch {
+			/* ignore */
+		}
+		bundlesLoading = false;
+	}
+
 	onMount(() => {
 		loadScaffolding();
 		loadApp();
 		loadPrompt();
+		loadBundles();
 	});
 
 	// ── Scaffolding CRUD ────────────────────────────────────────
@@ -322,6 +339,13 @@
 		>
 			<MessageSquare class="h-4 w-4" />
 			Prompts ({promptTemplates.length})
+		</button>
+		<button
+			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap {activeTab === 'bundles' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
+			onclick={() => activeTab = 'bundles'}
+		>
+			<Package class="h-4 w-4" />
+			Bundles ({templateBundles.length})
 		</button>
 	</div>
 
@@ -653,6 +677,47 @@
 							</Card.Root>
 						{/each}
 					</div>
+				{/each}
+			{/if}
+		</div>
+	{/if}
+
+	{#if activeTab === 'bundles'}
+		<div class="space-y-3">
+			<p class="text-sm text-muted-foreground">
+				Template bundles compose content blocks into reproducible prompt sets. Per-app bundles are defined in
+				<code class="text-xs">data/requirements/manifests/</code>.
+			</p>
+			{#if bundlesLoading}
+				<div class="flex justify-center py-12">
+					<LoaderCircle class="h-6 w-6 animate-spin text-muted-foreground" />
+				</div>
+			{:else if templateBundles.length === 0}
+				<p class="text-sm text-muted-foreground">No bundles. Run <span class="font-mono">seed_generation_templates</span>.</p>
+			{:else}
+				{#each templateBundles as bundle}
+					<Card.Root>
+						<Card.Content class="py-3 px-4">
+							<div class="flex items-start justify-between gap-2">
+								<div>
+									<div class="flex items-center gap-2">
+										<span class="font-medium text-sm">{bundle.name}</span>
+										<span class="font-mono text-[10px] text-muted-foreground">{bundle.slug}</span>
+										{#if bundle.is_default}
+											<Badge variant="secondary" class="text-[10px]">Default</Badge>
+										{/if}
+										{#if bundle.is_system}
+											<Badge variant="outline" class="text-[10px]">System</Badge>
+										{/if}
+									</div>
+									<p class="mt-1 text-xs text-muted-foreground">{bundle.description || '—'}</p>
+									<p class="mt-1 text-[10px] text-muted-foreground">
+										{bundle.block_refs?.length ?? 0} blocks · stack {bundle.scaffolding_slug}
+									</p>
+								</div>
+							</div>
+						</Card.Content>
+					</Card.Root>
 				{/each}
 			{/if}
 		</div>

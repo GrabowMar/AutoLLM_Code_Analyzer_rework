@@ -8,6 +8,7 @@ registration order, and otherwise would interpret "custom" / "scaffolding" /
 
 from __future__ import annotations
 
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 
 from llm_lab.credentials.services.resolver import MissingApiKeyError
@@ -22,6 +23,9 @@ from llm_lab.generation.models import AppRequirementTemplate
 from llm_lab.generation.models import GenerationBatch
 from llm_lab.generation.models import GenerationJob
 from llm_lab.generation.models import ScaffoldingTemplate
+from llm_lab.generation.models import TemplateBundle
+from llm_lab.generation.services.bundle_resolver import apply_snapshot_to_job
+from llm_lab.generation.services.bundle_resolver import get_bundle_for_app
 from llm_lab.generation.services.dispatcher import dispatch_job
 from llm_lab.llm_models.models import LLMModel
 
@@ -73,6 +77,15 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
     )
     models_qs = LLMModel.objects.filter(id__in=payload.model_ids)
 
+    template_bundle = None
+    if payload.template_bundle_id:
+        template_bundle = get_object_or_404(
+            TemplateBundle.objects.filter(
+                Q(is_system=True) | Q(created_by=request.auth),
+            ),
+            id=payload.template_bundle_id,
+        )
+
     batch = GenerationBatch.objects.create(
         name=f"Scaffolding batch - {scaffolding.name}",
         mode="scaffolding",
@@ -82,20 +95,23 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
 
     job_count = 0
     for app_req in app_reqs:
+        job_bundle = template_bundle or get_bundle_for_app(app_req, request.auth)
         for model in models_qs:
-            GenerationJob.objects.create(
+            job = GenerationJob.objects.create(
                 mode=GenerationJob.Mode.SCAFFOLDING,
                 created_by=request.auth,
                 batch=batch,
                 model=model,
                 scaffolding_template=scaffolding,
                 app_requirement=app_req,
+                template_bundle=job_bundle,
                 temperature=payload.temperature,
                 max_tokens=payload.max_tokens,
             )
+            apply_snapshot_to_job(job)
             job_count += 1
 
-    for pending_job in batch.jobs.all():
+    for pending_job in batch.jobs.select_related("app_requirement", "model", "template_bundle").all():
         dispatch_job(pending_job)
 
     return BatchCreateResponseSchema(

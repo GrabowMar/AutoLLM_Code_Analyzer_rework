@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
-import tarfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from django.conf import settings
 
-from llm_lab.runtime.services.scaffolding import _copy_template_dir
-from llm_lab.runtime.services.scaffolding import _placeholder_backend
+from llm_lab.runtime.services.scaffolding import ScaffoldPhase
+from llm_lab.runtime.services.scaffolding import apply_scaffold
+from llm_lab.runtime.services.scaffolding import resolve_stack_slug
+from llm_lab.runtime.services.scaffolding import stack_has_frontend
 
 if TYPE_CHECKING:
     from llm_lab.generation.models import GenerationJob
 
 logger = logging.getLogger(__name__)
-
-_RUNTIME_SCAFFOLDING = Path(__file__).resolve().parents[2] / "runtime" / "scaffolding"
 
 _SKIP_DIRS = {
     ".git",
@@ -58,12 +58,10 @@ class CopilotWorkspace:
             shutil.rmtree(self.root, ignore_errors=True)
 
     def template_slug(self) -> str:
-        if job_template := self.job.scaffolding_template:
-            return job_template.slug
-        return "generic-python"
+        return resolve_stack_slug(self.job)
 
     def is_flask_react(self) -> bool:
-        return self.template_slug() in ("flask-react", "react-flask")
+        return stack_has_frontend(self.template_slug())
 
     def tracked_files(self) -> list[str]:
         """Relative paths of editable source files for Aider."""
@@ -103,62 +101,20 @@ class CopilotWorkspace:
 
     def test_command(self) -> str | None:
         """Shell command for compile/test validation after Aider edits."""
-        if self.is_flask_react():
-            return f"python -m py_compile {self.primary_python_path().relative_to(self.root).as_posix()}"
+        rel = self.primary_python_path().relative_to(self.root).as_posix()
         if (self.root / "app.py").is_file():
-            return f"python -m py_compile {self.primary_python_path().relative_to(self.root).as_posix()}"
+            return f"python -m py_compile {rel}"
         return None
 
     def _seed_scaffold(self) -> None:
-        template = self.job.scaffolding_template
-        if template and template.template_archive:
-            archive_path = Path(template.template_archive.path)
-            if archive_path.is_file():
-                self._extract_archive(archive_path)
-                return
-
-        slug = self.template_slug()
-        if slug in ("flask-react", "react-flask"):
-            self._seed_flask_react_static()
-        else:
-            self._seed_minimal()
-
-    def _extract_archive(self, archive_path: Path) -> None:
-        with tarfile.open(archive_path, "r:gz") as tar:
-            tar.extractall(path=self.root, filter="data")
-
-    def _seed_flask_react_static(self) -> None:
-        template_dir = _RUNTIME_SCAFFOLDING / "flask-react"
-        _copy_template_dir(template_dir, self.root)
-        (self.root / "app.py").write_text(_placeholder_backend(), encoding="utf-8")
-
-        src_dir = self.root / "frontend" / "src"
-        src_dir.mkdir(parents=True, exist_ok=True)
-        if not (src_dir / "App.jsx").is_file():
-            (src_dir / "App.jsx").write_text(
-                'export default function App() {\n  return <div className="p-8">Hello</div>;\n}\n',
-                encoding="utf-8",
-            )
-
+        apply_scaffold(self.job, self.root, phase=ScaffoldPhase.SEED)
         readme = self.root / "README.md"
         readme.write_text(
             f"# Copilot project\n\n{self.job.copilot_description}\n",
             encoding="utf-8",
         )
 
-    def _seed_minimal(self) -> None:
-        generic = _RUNTIME_SCAFFOLDING / "generic-python"
-        if generic.exists():
-            _copy_template_dir(generic, self.root)
-        (self.root / "app.py").write_text(_placeholder_backend(), encoding="utf-8")
-        (self.root / "README.md").write_text(
-            f"# Copilot project\n\n{self.job.copilot_description}\n",
-            encoding="utf-8",
-        )
-
     def _git_init_and_commit(self) -> None:
-        import os
-
         env = {
             **os.environ,
             "GIT_AUTHOR_NAME": "llm-lab",

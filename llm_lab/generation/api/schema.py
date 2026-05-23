@@ -7,12 +7,14 @@ from ninja import ModelSchema
 from ninja import Schema
 
 from llm_lab.generation.models import AppRequirementTemplate
+from llm_lab.generation.models import ContentBlock
 from llm_lab.generation.models import CopilotIteration
 from llm_lab.generation.models import GenerationArtifact
 from llm_lab.generation.models import GenerationBatch
 from llm_lab.generation.models import GenerationJob
 from llm_lab.generation.models import PromptTemplate
 from llm_lab.generation.models import ScaffoldingTemplate
+from llm_lab.generation.models import TemplateBundle
 
 # ── Template schemas ──────────────────────────────────────────────────
 
@@ -55,6 +57,7 @@ class AppRequirementTemplateSchema(ModelSchema):
             "admin_requirements",
             "api_endpoints",
             "data_model",
+            "admin_api_endpoints",
             "is_default",
             "created_at",
             "updated_at",
@@ -71,6 +74,68 @@ class AppRequirementCreateSchema(Schema):
     admin_requirements: list = []
     api_endpoints: list = []
     data_model: dict = {}
+    admin_api_endpoints: list = []
+
+
+class ContentBlockSchema(ModelSchema):
+    class Meta:
+        model = ContentBlock
+        fields = [
+            "id",
+            "block_type",
+            "slug",
+            "version",
+            "name",
+            "description",
+            "content",
+            "metadata",
+            "is_system",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class ContentBlockCreateSchema(Schema):
+    block_type: str
+    slug: str
+    version: int = 1
+    name: str
+    description: str = ""
+    content: str
+    metadata: dict = {}
+
+
+class BlockRefSchema(Schema):
+    type: str
+    slug: str
+    version: int = 1
+
+
+class TemplateBundleSchema(ModelSchema):
+    class Meta:
+        model = TemplateBundle
+        fields = [
+            "id",
+            "name",
+            "slug",
+            "description",
+            "scaffolding_slug",
+            "block_refs",
+            "llm_config",
+            "is_system",
+            "is_default",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class TemplateBundleCreateSchema(Schema):
+    name: str
+    slug: str
+    description: str = ""
+    scaffolding_slug: str = "flask-react"
+    block_refs: list[BlockRefSchema] = []
+    llm_config: dict = {}
 
 
 class PromptTemplateSchema(ModelSchema):
@@ -110,6 +175,8 @@ class GenerationJobSchema(ModelSchema):
     batch_name: str | None = None
     template_name: str | None = None
     scaffolding_name: str | None = None
+    bundle_name: str | None = None
+    bundle_slug: str | None = None
     created_by_email: str | None = None
 
     class Meta:
@@ -133,6 +200,9 @@ class GenerationJobSchema(ModelSchema):
             "error_message",
             "result_data",
             "metrics",
+            "experiment_seed",
+            "resolved_bundle",
+            "template_bundle",
             "created_at",
             "updated_at",
         ]
@@ -172,6 +242,21 @@ class GenerationJobSchema(ModelSchema):
         if obj.scaffolding_template:
             return obj.scaffolding_template.name
         return None
+
+    @staticmethod
+    def resolve_bundle_name(obj: GenerationJob) -> str | None:
+        if obj.template_bundle:
+            return obj.template_bundle.name
+        resolved = obj.resolved_bundle if isinstance(obj.resolved_bundle, dict) else {}
+        slug = resolved.get("bundle_slug")
+        return slug.replace("-", " ").title() if slug else None
+
+    @staticmethod
+    def resolve_bundle_slug(obj: GenerationJob) -> str | None:
+        if obj.template_bundle:
+            return obj.template_bundle.slug
+        resolved = obj.resolved_bundle if isinstance(obj.resolved_bundle, dict) else {}
+        return resolved.get("bundle_slug")
 
     @staticmethod
     def resolve_created_by_email(obj: GenerationJob) -> str | None:
@@ -221,6 +306,7 @@ class ScaffoldingJobCreateSchema(Schema):
     model_ids: list[int]
     temperature: float = 0.3
     max_tokens: int = 32000
+    template_bundle_id: int | None = None
 
 
 class CopilotJobCreateSchema(Schema):

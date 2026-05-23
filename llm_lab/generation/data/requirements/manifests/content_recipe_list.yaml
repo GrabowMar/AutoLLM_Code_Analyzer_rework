@@ -1,0 +1,9 @@
+app_slug: content_recipe_list
+bundle_slug: app-content-recipe-list
+name: Recipe Book (minimal bundle)
+description: Content app with minimal tone — matches small seed/recipe scope in JSON
+base_bundle_slug: system-scaffolding-standard
+extra_block_refs:
+  - type: prompt_tone
+    slug: tone-minimal
+    version: 1

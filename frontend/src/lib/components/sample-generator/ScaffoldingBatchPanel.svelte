@@ -3,9 +3,15 @@
 	import { Button } from '$lib/components/ui/button';
 	import Layers from '@lucide/svelte/icons/layers';
 	import History from '@lucide/svelte/icons/history';
+	import Package from '@lucide/svelte/icons/package';
 
 	interface Props {
-		result: { batch_id: string; job_count: number; status: string } | null;
+		result: {
+			batch_id: string;
+			job_count: number;
+			status: string;
+			bundle_name?: string;
+		} | null;
 		onViewHistory?: () => void;
 	}
 
@@ -23,6 +29,12 @@
 					<Layers class="h-4 w-4 shrink-0" />
 					<span class="font-medium">{result.job_count} jobs queued</span>
 				</div>
+				{#if result.bundle_name}
+					<div class="flex items-center gap-2 text-muted-foreground">
+						<Package class="h-3.5 w-3.5 shrink-0" />
+						<span class="text-xs">Bundle: {result.bundle_name}</span>
+					</div>
+				{/if}
 				<div class="space-y-1 text-xs text-muted-foreground">
 					<div class="flex justify-between">
 						<span>Batch ID</span>
@@ -33,6 +45,9 @@
 						<span>{result.status}</span>
 					</div>
 				</div>
+				<p class="text-[10px] text-muted-foreground">
+					Each job stores a frozen <span class="font-mono">resolved_bundle</span> for reproducible research exports.
+				</p>
 				{#if onViewHistory}
 					<Button variant="outline" size="sm" class="w-full" onclick={onViewHistory}>
 						<History class="mr-1.5 h-3.5 w-3.5" /> View in history

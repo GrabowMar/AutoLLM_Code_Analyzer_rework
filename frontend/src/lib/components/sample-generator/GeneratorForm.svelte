@@ -9,7 +9,9 @@
 		LLMModelSummary,
 		ScaffoldingTemplate,
 		AppRequirementTemplate,
+		TemplateBundle,
 	} from '$lib/api/client';
+	import BundlePicker from '$lib/components/sample-generator/BundlePicker.svelte';
 	import Play from '@lucide/svelte/icons/play';
 	import Search from '@lucide/svelte/icons/search';
 	import Check from '@lucide/svelte/icons/check';
@@ -34,6 +36,7 @@
 		model_ids: number[];
 		temperature: number;
 		max_tokens: number;
+		template_bundle_id?: number;
 	}
 
 	export interface CopilotPayload {
@@ -48,8 +51,10 @@
 		models: LLMModelSummary[];
 		modelsLoading: boolean;
 		scaffoldingTemplates: ScaffoldingTemplate[];
+		templateBundles: TemplateBundle[];
 		appTemplates: AppRequirementTemplate[];
 		scaffoldingLoading: boolean;
+		bundlesLoading: boolean;
 		customSubmitting: boolean;
 		customError: string;
 		scaffoldingSubmitting: boolean;
@@ -69,8 +74,10 @@
 		models,
 		modelsLoading,
 		scaffoldingTemplates,
+		templateBundles,
 		appTemplates,
 		scaffoldingLoading,
+		bundlesLoading,
 		customSubmitting,
 		customError,
 		scaffoldingSubmitting,
@@ -93,6 +100,7 @@
 
 	// Scaffolding form
 	let selectedScaffoldId = $state<number | ''>('');
+	let selectedBundleId = $state<number | ''>('');
 	let selectedAppIds = $state<Set<number>>(new Set());
 	let selectedModelIds = $state<Set<number>>(new Set());
 	let scaffoldingTemperature = $state(0.3);
@@ -119,6 +127,10 @@
 			t.name.toLowerCase().includes(appSearch.toLowerCase()) ||
 			t.description.toLowerCase().includes(appSearch.toLowerCase())
 		)
+	);
+
+	const selectedAppSlugs = $derived(
+		appTemplates.filter((t) => selectedAppIds.has(t.id)).map((t) => t.slug),
 	);
 
 	function toggleAppTemplate(id: number) {
@@ -168,6 +180,7 @@
 			model_ids: [...selectedModelIds],
 			temperature: scaffoldingTemperature,
 			max_tokens: scaffoldingMaxTokens,
+			template_bundle_id: selectedBundleId ? (selectedBundleId as number) : undefined,
 		});
 	}
 
@@ -272,7 +285,7 @@
 	<Card.Root>
 		<Card.Header>
 			<Card.Title>Scaffolding Batch Generation</Card.Title>
-			<Card.Description>Select a scaffolding template, app requirements, and models to generate in batch.</Card.Description>
+			<Card.Description>Select stack, prompt bundle, app requirements, and models. Each job freezes a reproducible bundle snapshot.</Card.Description>
 		</Card.Header>
 		<Card.Content>
 			<div class="space-y-6">
@@ -313,6 +326,15 @@
 						{/if}
 					{/if}
 				</div>
+
+				<Separator />
+
+				<BundlePicker
+					bundles={templateBundles}
+					loading={bundlesLoading}
+					bind:selectedId={selectedBundleId}
+					appSlugs={selectedAppSlugs}
+				/>
 
 				<Separator />
 

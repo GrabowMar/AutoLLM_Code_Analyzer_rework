@@ -6,6 +6,7 @@
 	import {
 		getModels,
 		getScaffoldingTemplates,
+		getTemplateBundles,
 		getAppTemplates,
 		createCustomJob,
 		createScaffoldingBatch,
@@ -15,6 +16,7 @@
 		cancelGenerationJob,
 		type LLMModelSummary,
 		type ScaffoldingTemplate,
+		type TemplateBundle,
 		type AppRequirementTemplate,
 		type GenerationJob,
 		type PaginatedJobs,
@@ -45,8 +47,10 @@
 	let copilotModelId = $state<number | ''>('');
 
 	let scaffoldingTemplates = $state<ScaffoldingTemplate[]>([]);
+	let templateBundles = $state<TemplateBundle[]>([]);
 	let appTemplates = $state<AppRequirementTemplate[]>([]);
 	let scaffoldingLoading = $state(true);
+	let bundlesLoading = $state(true);
 
 	let customSubmitting = $state(false);
 	let customError = $state('');
@@ -180,14 +184,17 @@
 
 	async function loadScaffoldingData() {
 		try {
-			const [scaffolds, apps] = await Promise.all([
+			const [scaffolds, bundles, apps] = await Promise.all([
 				getScaffoldingTemplates(),
+				getTemplateBundles(),
 				getAppTemplates(),
 			]);
 			scaffoldingTemplates = scaffolds;
+			templateBundles = bundles;
 			appTemplates = apps;
 		} finally {
 			scaffoldingLoading = false;
+			bundlesLoading = false;
 		}
 	}
 
@@ -266,7 +273,10 @@
 		scaffoldingResult = null;
 		try {
 			const result = await createScaffoldingBatch(payload);
-			scaffoldingResult = result;
+			const bundle = payload.template_bundle_id
+				? templateBundles.find((b) => b.id === payload.template_bundle_id)
+				: templateBundles.find((b) => b.is_default);
+			scaffoldingResult = { ...result, bundle_name: bundle?.name };
 			loadHistory();
 		} catch (err: any) {
 			const detail = err?.detail ?? err?.message ?? 'Failed to create batch';
@@ -441,8 +451,10 @@
 				{models}
 				{modelsLoading}
 				{scaffoldingTemplates}
+				{templateBundles}
 				{appTemplates}
 				{scaffoldingLoading}
+				{bundlesLoading}
 				{customSubmitting}
 				{customError}
 				{scaffoldingSubmitting}

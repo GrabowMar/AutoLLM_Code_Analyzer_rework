@@ -22,6 +22,7 @@ from llm_lab.generation.api.schema import PaginatedJobsSchema
 from llm_lab.generation.api.views._router import router
 from llm_lab.generation.models import GenerationBatch
 from llm_lab.generation.models import GenerationJob
+from llm_lab.generation.services.bundle_resolver import apply_snapshot_to_job
 from llm_lab.generation.services.dispatcher import dispatch_job
 
 
@@ -56,6 +57,7 @@ def list_jobs(
         "model",
         "app_requirement",
         "scaffolding_template",
+        "template_bundle",
     )
     if mode:
         qs = qs.filter(mode=mode)
@@ -139,6 +141,7 @@ def get_job(request, job_id: str):
             "model",
             "app_requirement",
             "scaffolding_template",
+            "template_bundle",
             "batch",
             "created_by",
         ),
@@ -182,6 +185,7 @@ def retry_job(request, job_id: str):
             "model",
             "app_requirement",
             "scaffolding_template",
+            "template_bundle",
             "backend_prompt_template",
             "frontend_prompt_template",
         ),
@@ -200,6 +204,7 @@ def retry_job(request, job_id: str):
         model=original.model,
         scaffolding_template=original.scaffolding_template,
         app_requirement=original.app_requirement,
+        template_bundle=original.template_bundle,
         backend_prompt_template=original.backend_prompt_template,
         frontend_prompt_template=original.frontend_prompt_template,
         custom_system_prompt=original.custom_system_prompt,
@@ -210,6 +215,8 @@ def retry_job(request, job_id: str):
         copilot_max_iterations=original.copilot_max_iterations,
         copilot_use_open_source=original.copilot_use_open_source,
     )
+    if original.mode == GenerationJob.Mode.SCAFFOLDING and original.app_requirement:
+        apply_snapshot_to_job(new_job)
     dispatch_job(new_job)
     return GenerationJobSchema.from_orm(
         GenerationJob.objects.select_related(
@@ -245,6 +252,7 @@ def export_job(request, job_id: str):
             "model",
             "app_requirement",
             "scaffolding_template",
+            "template_bundle",
             "batch",
             "created_by",
         ),
@@ -277,7 +285,24 @@ def export_job(request, job_id: str):
             "created_at",
         ),
     )
+    resolved = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
+    experiment = {
+        "bundle_schema_version": resolved.get("bundle_schema_version"),
+        "bundle_slug": resolved.get("bundle_slug"),
+        "scaffolding_slug": resolved.get("scaffolding_slug"),
+        "seed": resolved.get("seed", job.experiment_seed),
+        "prompt_hash": resolved.get("prompt_hash"),
+        "llm": resolved.get("llm"),
+        "block_count": len(resolved.get("blocks", [])),
+        "app_requirement_slug": (resolved.get("app_requirement") or {}).get("slug"),
+        "template_bundle_id": job.template_bundle_id,
+        "template_bundle_slug": (
+            job.template_bundle.slug if job.template_bundle else None
+        ),
+    }
     return {
+        "experiment": experiment,
+        "resolved_bundle": resolved,
         "job": GenerationJobSchema.from_orm(job).dict(),
         "artifacts": artifacts,
         "copilot_iterations": iterations,

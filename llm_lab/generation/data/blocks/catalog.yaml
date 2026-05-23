@@ -1,0 +1,73 @@
+bundle_schema_version: 1
+default_bundle_slug: system-scaffolding-standard
+
+default_block_refs:
+  - type: prompt_stage
+    slug: base-backend-system
+    version: 1
+  - type: prompt_stage
+    slug: base-backend-user
+    version: 1
+  - type: prompt_stage
+    slug: base-frontend-system
+    version: 1
+  - type: prompt_stage
+    slug: base-frontend-user
+    version: 1
+  - type: prompt_tone
+    slug: tone-standard
+    version: 1
+  - type: prompt_rules
+    slug: rules-flask-global
+    version: 1
+
+bundles:
+  - slug: system-scaffolding-standard
+    name: Standard scaffolding (v2 prompts)
+    description: Default research bundle — v2 stage prompts, standard tone, Flask rules
+    scaffolding_slug: flask-react
+    is_default: true
+    block_refs:
+      - type: prompt_stage
+        slug: base-backend-system
+        version: 1
+      - type: prompt_stage
+        slug: base-backend-user
+        version: 1
+      - type: prompt_stage
+        slug: base-frontend-system
+        version: 1
+      - type: prompt_stage
+        slug: base-frontend-user
+        version: 1
+      - type: prompt_tone
+        slug: tone-standard
+        version: 1
+      - type: prompt_rules
+        slug: rules-flask-global
+        version: 1
+
+  - slug: app-content-recipe-list
+    name: Recipe list (minimal tone)
+    description: Standard v2 prompts with minimal tone for content_recipe_list
+    scaffolding_slug: flask-react
+    is_default: false
+    block_refs:
+      - type: prompt_stage
+        slug: base-backend-system
+        version: 1
+      - type: prompt_stage
+        slug: base-backend-user
+        version: 1
+      - type: prompt_stage
+        slug: base-frontend-system
+        version: 1
+      - type: prompt_stage
+        slug: base-frontend-user
+        version: 1
+      - type: prompt_tone
+        slug: tone-minimal
+        version: 1
+      - type: prompt_rules
+        slug: rules-flask-global
+        version: 1

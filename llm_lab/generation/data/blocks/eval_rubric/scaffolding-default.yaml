@@ -1,0 +1,13 @@
+slug: scaffolding-default
+version: 1
+block_type: eval_rubric
+name: Default scaffolding rubric
+description: Soft metrics for research comparison (does not fail jobs)
+metadata:
+  metrics:
+    - deploy_success
+    - api_health_reachable
+    - prompt_token_total
+content: |
+  ## Evaluation rubric (informational)
+  Record deploy success, `/api/health` reachability, and total prompt tokens on the job metrics payload.

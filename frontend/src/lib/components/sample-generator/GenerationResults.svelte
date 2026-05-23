@@ -178,6 +178,18 @@
 								<span class="text-xs">{job.scaffolding_name}</span>
 							</div>
 						{/if}
+						{#if job.bundle_name || job.bundle_slug}
+							<div class="flex justify-between text-sm">
+								<span class="text-muted-foreground">Bundle</span>
+								<span class="text-xs font-mono">{job.bundle_name ?? job.bundle_slug}</span>
+							</div>
+						{/if}
+						{#if job.experiment_seed != null}
+							<div class="flex justify-between text-sm">
+								<span class="text-muted-foreground">Seed</span>
+								<span class="font-mono text-xs">{job.experiment_seed}</span>
+							</div>
+						{/if}
 						{#if job.model_name}
 							<div class="flex justify-between text-sm">
 								<span class="text-muted-foreground">Model</span>

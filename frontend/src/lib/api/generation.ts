@@ -84,6 +84,10 @@ export interface GenerationJob {
   error_message: string;
   result_data: Record<string, any>;
   metrics: Record<string, any>;
+  experiment_seed: number | null;
+  resolved_bundle: Record<string, any>;
+  bundle_name?: string | null;
+  bundle_slug?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -121,6 +125,20 @@ export interface PromptTemplate {
   description: string;
   is_default: boolean;
   version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateBundle {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  scaffolding_slug: string;
+  block_refs: { type: string; slug: string; version: number }[];
+  llm_config: Record<string, unknown>;
+  is_system: boolean;
+  is_default: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -204,12 +222,28 @@ export async function createPromptTemplate(data: {
   return res.json();
 }
 
+export async function getTemplateBundles(): Promise<TemplateBundle[]> {
+  const res = await apiFetch("/generation/bundles/");
+  return res.json();
+}
+
+export async function getBundlePreview(slug: string): Promise<{
+  slug: string;
+  scaffolding_slug: string;
+  block_count: number;
+  prompt_templates: Record<string, { system: string; user: string }>;
+}> {
+  const res = await apiFetch(`/generation/bundles/${slug}/preview/`);
+  return res.json();
+}
+
 export async function createScaffoldingBatch(data: {
   scaffolding_template_id: number;
   app_requirement_ids: number[];
   model_ids: number[];
   temperature?: number;
   max_tokens?: number;
+  template_bundle_id?: number;
 }): Promise<BatchCreateResponse> {
   const res = await apiFetch("/generation/jobs/scaffolding/", {
     method: "POST",

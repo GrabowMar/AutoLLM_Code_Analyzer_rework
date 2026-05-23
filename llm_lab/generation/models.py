@@ -76,6 +76,11 @@ class AppRequirementTemplate(models.Model):
     )
     api_endpoints = models.JSONField(_("API endpoints"), default=list, blank=True)
     data_model = models.JSONField(_("data model"), default=dict, blank=True)
+    admin_api_endpoints = models.JSONField(
+        _("admin API endpoints"),
+        default=list,
+        blank=True,
+    )
     is_default = models.BooleanField(_("system default"), default=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -134,6 +139,111 @@ class PromptTemplate(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.stage}/{self.role})"
+
+
+class ContentBlock(models.Model):
+    """Composable fragment for prompts, rules, validation, or rubrics."""
+
+    class BlockType(models.TextChoices):
+        REQUIREMENT = "requirement", _("Requirement")
+        API_SCHEMA = "api_schema", _("API schema")
+        PROMPT_TONE = "prompt_tone", _("Prompt tone")
+        PROMPT_RULES = "prompt_rules", _("Prompt rules")
+        SCAFFOLD_HINT = "scaffold_hint", _("Scaffold hint")
+        VALIDATION = "validation", _("Validation")
+        EVAL_RUBRIC = "eval_rubric", _("Eval rubric")
+        PROMPT_STAGE = "prompt_stage", _("Prompt stage")
+
+    block_type = models.CharField(
+        _("block type"),
+        max_length=30,
+        choices=BlockType.choices,
+    )
+    slug = models.SlugField(_("slug"), max_length=200)
+    version = models.PositiveIntegerField(_("version"), default=1)
+    name = models.CharField(_("name"), max_length=200)
+    description = models.TextField(_("description"), blank=True, default="")
+    content = models.TextField(_("content"))
+    metadata = models.JSONField(
+        _("metadata"),
+        default=dict,
+        blank=True,
+        help_text='e.g. {"stage": "backend", "role": "system"} for prompt_stage blocks',
+    )
+    is_system = models.BooleanField(
+        _("system block"),
+        default=False,
+        help_text="Shipped defaults; readable by all users",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="content_blocks",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("Content Block")
+        verbose_name_plural = _("Content Blocks")
+        ordering = ["block_type", "slug", "-version"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["slug", "version"],
+                name="generation_contentblock_slug_version_uniq",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.slug} v{self.version} ({self.block_type})"
+
+
+class TemplateBundle(models.Model):
+    """Ordered set of content blocks + scaffold slug for reproducible runs."""
+
+    name = models.CharField(_("name"), max_length=200)
+    slug = models.SlugField(_("slug"), max_length=200, unique=True)
+    description = models.TextField(_("description"), blank=True, default="")
+    scaffolding_slug = models.SlugField(
+        _("scaffolding slug"),
+        max_length=200,
+        default="flask-react",
+        help_text="Canonical stack slug from runtime/scaffolding/manifest.json",
+    )
+    block_refs = models.JSONField(
+        _("block references"),
+        default=list,
+        blank=True,
+        help_text='List of {"type", "slug", "version"} objects',
+    )
+    llm_config = models.JSONField(
+        _("LLM config defaults"),
+        default=dict,
+        blank=True,
+    )
+    is_system = models.BooleanField(_("system bundle"), default=False)
+    is_default = models.BooleanField(_("default bundle"), default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="template_bundles",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("Template Bundle")
+        verbose_name_plural = _("Template Bundles")
+        ordering = ["-is_default", "-is_system", "name"]
+
+    def __str__(self) -> str:
+        return self.name
 
 
 class GenerationBatch(models.Model):
@@ -253,6 +363,24 @@ class GenerationJob(models.Model):
         null=True,
         blank=True,
         related_name="frontend_jobs",
+    )
+    template_bundle = models.ForeignKey(
+        "TemplateBundle",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="jobs",
+    )
+    resolved_bundle = models.JSONField(
+        _("resolved bundle"),
+        default=dict,
+        blank=True,
+        help_text="Immutable snapshot of blocks, prompts, and app spec at job creation",
+    )
+    experiment_seed = models.PositiveIntegerField(
+        _("experiment seed"),
+        null=True,
+        blank=True,
     )
 
     # Custom mode

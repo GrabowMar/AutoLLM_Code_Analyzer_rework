@@ -1,7 +1,7 @@
 # Application Generation Process
 
 > **Summary**: How LLM code generation works, from prompt construction through scaffolding injection to final app output.
-> **Key files**: `src/app/services/generation_v2/service.py`, `misc/requirements/*.json`
+> **Key files**: `llm_lab/generation/services/orchestrator.py`, `llm_lab/runtime/services/scaffolding.py`, `llm_lab/generation/data/requirements/*.json`
 > **See also**: [Template Specification](TEMPLATE_SPECIFICATION.md), [Models Reference](MODELS_REFERENCE.md)
 
 This document describes the code generation architecture used in ThesisAppRework. The system generates full-stack web applications by combining immutable Docker scaffolding with AI-generated application code.
@@ -160,29 +160,32 @@ db.session.commit()
 
 ### Step 2: Scaffolding Copy
 
-The scaffolding from `misc/scaffolding/react-flask/` is copied to the target directory with port substitution:
+Runtime stacks live under `llm_lab/runtime/scaffolding/`. The registry file `manifest.json` maps template slugs to directories, ports, and capabilities (e.g. `flask-react`, `generic-python`).
+
+`apply_scaffold(job, dest, phase)` in `llm_lab/runtime/services/scaffolding.py` is the single entry point:
+
+| Phase | Used by | Behavior |
+|-------|---------|----------|
+| `seed` | Copilot (`CopilotWorkspace`) | Copy template (or `.tar.gz` archive), placeholders in `app.py` / `App.jsx` |
+| `build` | Docker build (`prepare_build_dir`) | Same copy, inject `job.result_data` code, Flask patches, Lucide sanitize |
+
+**Flask+React layout** (`flask-react/`, alias `react-flask`):
 
 ```
-misc/scaffolding/react-flask/
-├── .env.example          → .env (with allocated ports)
-├── docker-compose.yml    → docker-compose.yml
-├── backend/
-│   ├── .dockerignore
-│   ├── Dockerfile
-│   ├── app.py           (placeholder - fully replaced by AI)
-│   └── requirements.txt
-└── frontend/
-    ├── .dockerignore
+llm_lab/runtime/scaffolding/
+├── manifest.json
+└── flask-react/
     ├── Dockerfile
-    ├── nginx.conf        (reverse proxy config - immutable)
-    ├── vite.config.js    (build config - immutable)
-    ├── tailwind.config.js (CSS config - immutable)
-    ├── postcss.config.js
-    ├── package.json
-    ├── index.html
-    └── src/
-        └── App.jsx      (placeholder - fully replaced by AI)
+    ├── .env.example
+    ├── app.py
+    ├── requirements.txt
+    └── frontend/
+        └── src/App.jsx
 ```
+
+**Generic Python** (`generic-python/`): API-only tree, same port 8000 and `/app/data` SQLite conventions, no `frontend/` directory.
+
+Optional `ScaffoldingTemplate.template_archive` (`.tar.gz`) overrides the filesystem template for both copilot seed and container build.
 
 ### Step 3: Prompt Construction
 
