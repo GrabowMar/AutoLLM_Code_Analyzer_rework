@@ -25,6 +25,7 @@
 		type PromptTemplate,
 		type TemplateBundle,
 	} from '$lib/api/client';
+	import { Textarea } from '$lib/components/ui/textarea';
 	import Layers from '@lucide/svelte/icons/layers';
 	import Package from '@lucide/svelte/icons/package';
 	import FileText from '@lucide/svelte/icons/file-text';
@@ -380,11 +381,11 @@
 							</div>
 							<div class="space-y-1.5 md:col-span-2">
 								<Label class="text-xs">Description</Label>
-								<textarea bind:value={scaffoldingForm.description} rows="2" class="flex w-full rounded-md border bg-transparent px-3 py-2 text-sm" placeholder="Description…"></textarea>
+								<Textarea bind:value={scaffoldingForm.description} rows={2} placeholder="Description…" />
 							</div>
 							<div class="space-y-1.5">
 								<Label class="text-xs">Tech Stack (JSON)</Label>
-								<textarea bind:value={scaffoldingForm.tech_stack_json} rows="3" class="flex w-full rounded-md border bg-transparent px-3 py-2 text-xs font-mono overflow-x-auto" placeholder={'{"frontend": "React", "backend": "Flask"}'}></textarea>
+								<Textarea bind:value={scaffoldingForm.tech_stack_json} rows={3} placeholder={'{"frontend": "React", "backend": "Flask"}'} class="font-mono text-xs" />
 							</div>
 							<div class="space-y-1.5">
 								<Label class="text-xs">Substitution Vars (comma-separated)</Label>
@@ -488,19 +489,19 @@
 							</div>
 							<div class="space-y-1.5 md:col-span-2">
 								<Label class="text-xs">Description</Label>
-								<textarea bind:value={appForm.description} rows="2" class="flex w-full rounded-md border bg-transparent px-3 py-2 text-sm" placeholder="What does this app do?"></textarea>
+								<Textarea bind:value={appForm.description} rows={2} placeholder="What does this app do?" />
 							</div>
 							<div class="space-y-1.5">
 								<Label class="text-xs">Backend Requirements (one per line)</Label>
-								<textarea bind:value={appForm.backend_requirements} rows="4" class="flex w-full rounded-md border bg-transparent px-3 py-2 text-xs font-mono" placeholder="REST API with CRUD&#10;JWT authentication&#10;SQLite database"></textarea>
+								<Textarea bind:value={appForm.backend_requirements} rows={4} placeholder={"REST API with CRUD\nJWT authentication\nSQLite database"} class="font-mono text-xs" />
 							</div>
 							<div class="space-y-1.5">
 								<Label class="text-xs">Frontend Requirements (one per line)</Label>
-								<textarea bind:value={appForm.frontend_requirements} rows="4" class="flex w-full rounded-md border bg-transparent px-3 py-2 text-xs font-mono" placeholder="Responsive layout&#10;Search and filtering&#10;Dark theme"></textarea>
+								<Textarea bind:value={appForm.frontend_requirements} rows={4} placeholder={"Responsive layout\nSearch and filtering\nDark theme"} class="font-mono text-xs" />
 							</div>
 							<div class="space-y-1.5 md:col-span-2">
 								<Label class="text-xs">Admin Requirements (one per line)</Label>
-								<textarea bind:value={appForm.admin_requirements} rows="2" class="flex w-full rounded-md border bg-transparent px-3 py-2 text-xs font-mono" placeholder="Dashboard with stats&#10;User management"></textarea>
+								<Textarea bind:value={appForm.admin_requirements} rows={2} placeholder={"Dashboard with stats\nUser management"} class="font-mono text-xs" />
 							</div>
 						</div>
 						{#if appError}
@@ -571,12 +572,14 @@
 	{#if activeTab === 'prompt'}
 		<div class="space-y-4">
 			<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-				<div class="flex gap-2">
-					<select bind:value={promptStageFilter} class="h-9 w-full sm:w-auto rounded-md border bg-transparent px-2 text-sm">
-						<option value="">All stages</option>
-						<option value="backend">Backend</option>
-						<option value="frontend">Frontend</option>
-					</select>
+				<div class="flex items-center gap-0.5 rounded-md border bg-muted/30 p-0.5">
+					{#each [['', 'All stages'], ['backend', 'Backend'], ['frontend', 'Frontend']] as [val, label]}
+						<button
+							type="button"
+							class="rounded px-2.5 py-1 text-xs font-medium transition-colors {promptStageFilter === val ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
+							onclick={() => promptStageFilter = val}
+						>{label}</button>
+					{/each}
 				</div>
 				<Button size="sm" class="w-full sm:w-auto" onclick={startCreatePrompt}>
 					<Plus class="mr-1.5 h-3.5 w-3.5" /> New Prompt
@@ -615,7 +618,7 @@
 							</div>
 							<div class="space-y-1.5 md:col-span-2">
 								<Label class="text-xs">Content (Jinja2 template)</Label>
-								<textarea bind:value={promptForm.content} rows="12" class="flex w-full rounded-md border bg-transparent px-3 py-2 text-xs font-mono leading-relaxed overflow-x-auto" placeholder="You are a senior developer..."></textarea>
+								<Textarea bind:value={promptForm.content} rows={12} placeholder="You are a senior developer..." class="font-mono text-xs leading-relaxed" />
 								<p class="text-[10px] text-muted-foreground">
 									Available Jinja2 variables: name, description, backend_requirements, frontend_requirements, admin_requirements, api_endpoints, data_model, backend_api_context
 								</p>

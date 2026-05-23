@@ -1,8 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Separator } from '$lib/components/ui/separator';
 	import {
 		getModels,
 		getScaffoldingTemplates,
@@ -34,7 +33,6 @@
 	import GenerationResults from '$lib/components/sample-generator/GenerationResults.svelte';
 	import GenerationHistory from '$lib/components/sample-generator/GenerationHistory.svelte';
 	import OpenRouterKeyBanner from '$lib/components/sample-generator/OpenRouterKeyBanner.svelte';
-	import ScaffoldingBatchPanel from '$lib/components/sample-generator/ScaffoldingBatchPanel.svelte';
 
 	let { data } = $props();
 
@@ -69,7 +67,7 @@
 	let historyData = $state<PaginatedJobs | null>(null);
 	let historyLoading = $state(true);
 	let historyPage = $state(1);
-	let historyModeFilter = $state('');
+	let historyModeFilter = $state<string>(untrack(() => data.mode));
 	let historyStatusFilter = $state('');
 
 	let lastRestoredJobId = $state<string | null>(null);
@@ -105,6 +103,9 @@
 	}
 
 	function switchTab(tab: TabId) {
+		historyModeFilter = tab;
+		historyPage = 1;
+		loadHistory();
 		goto(sampleGeneratorUrl({ mode: tab, job: null }), {
 			replaceState: true,
 			keepFocus: true,
@@ -273,10 +274,7 @@
 		scaffoldingResult = null;
 		try {
 			const result = await createScaffoldingBatch(payload);
-			const bundle = payload.template_bundle_id
-				? templateBundles.find((b) => b.id === payload.template_bundle_id)
-				: templateBundles.find((b) => b.is_default);
-			scaffoldingResult = { ...result, bundle_name: bundle?.name };
+			scaffoldingResult = result;
 			loadHistory();
 		} catch (err: any) {
 			const detail = err?.detail ?? err?.message ?? 'Failed to create batch';
@@ -366,13 +364,6 @@
 		});
 	}
 
-	function scrollToScaffoldingHistory() {
-		historyModeFilter = 'scaffolding';
-		historyPage = 1;
-		loadHistory();
-		document.getElementById('generation-history')?.scrollIntoView({ behavior: 'smooth' });
-	}
-
 	function formatDuration(seconds: number | null): string {
 		if (seconds === null || seconds === undefined) return '—';
 		if (seconds < 60) return `${seconds.toFixed(0)}s`;
@@ -414,8 +405,6 @@
 		</div>
 	</div>
 
-	<OpenRouterKeyBanner />
-
 	<div class="flex gap-1 rounded-lg bg-muted p-1 overflow-x-auto flex-nowrap">
 		<button
 			type="button"
@@ -444,8 +433,11 @@
 		</button>
 	</div>
 
-	<div class="grid gap-6 lg:grid-cols-[1fr_360px]">
+	<div class="grid gap-6 {activeTab !== 'scaffolding' ? 'lg:grid-cols-[1fr_360px]' : ''}">
 		<div class="space-y-4">
+			{#if activeTab === 'copilot'}
+				<OpenRouterKeyBanner />
+			{/if}
 			<GeneratorForm
 				activeTab={activeTab}
 				{models}
@@ -470,9 +462,7 @@
 			/>
 		</div>
 
-		{#if activeTab === 'scaffolding'}
-			<ScaffoldingBatchPanel result={scaffoldingResult} onViewHistory={scrollToScaffoldingHistory} />
-		{:else}
+		{#if activeTab !== 'scaffolding'}
 			<GenerationResults
 				mode={activeTab === 'copilot' ? 'copilot' : 'custom'}
 				job={activeTab === 'copilot' ? copilotJob : customJob}
@@ -483,23 +473,19 @@
 		{/if}
 	</div>
 
-	<Separator />
-
-	<div id="generation-history">
-		<GenerationHistory
-			{historyData}
-			{historyLoading}
-			bind:historyModeFilter
-			bind:historyStatusFilter
-			{statusColors}
-			{modeLabels}
-			{formatDuration}
-			{formatDate}
-			onRefresh={loadHistory}
-			onFilterChange={onHistoryFilterChange}
-			onPageChange={onHistoryPageChange}
-			onCancelJob={cancelJob}
-			onOpenJob={openJobInSidebar}
-		/>
-	</div>
+	<GenerationHistory
+		{historyData}
+		{historyLoading}
+		bind:historyModeFilter
+		bind:historyStatusFilter
+		{statusColors}
+		{modeLabels}
+		{formatDuration}
+		{formatDate}
+		onRefresh={loadHistory}
+		onFilterChange={onHistoryFilterChange}
+		onPageChange={onHistoryPageChange}
+		onCancelJob={cancelJob}
+		onOpenJob={openJobInSidebar}
+	/>
 </div>

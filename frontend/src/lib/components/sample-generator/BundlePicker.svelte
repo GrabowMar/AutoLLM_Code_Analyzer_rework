@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { Badge } from '$lib/components/ui/badge';
-	import { Label } from '$lib/components/ui/label';
 	import type { TemplateBundle } from '$lib/api/client';
 	import { getBundlePreview } from '$lib/api/generation';
-	import Package from '@lucide/svelte/icons/package';
+	import Check from '@lucide/svelte/icons/check';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 
 	interface Props {
@@ -15,6 +15,7 @@
 
 	let { bundles, loading = false, selectedId = $bindable('' as number | ''), appSlugs = [] }: Props = $props();
 
+	let open = $state(false);
 	let previewLoading = $state(false);
 	let previewError = $state('');
 	let previewStages = $state<Record<string, { system: number; user: number }> | null>(null);
@@ -58,63 +59,107 @@
 	}
 
 	$effect(() => {
-		if (selected?.slug) {
+		if (open && selected?.slug) {
 			loadPreview(selected.slug);
-		} else {
+		} else if (!open) {
 			previewStages = null;
 		}
 	});
+
+	function select(id: number | '') {
+		selectedId = id;
+		open = false;
+	}
 </script>
 
-<div class="space-y-2">
-	<div class="flex items-center justify-between gap-2">
-		<Label>Prompt bundle</Label>
-		{#if suggestedBundle}
-			<span class="text-[10px] text-muted-foreground">
-				Suggested for {appSlugs[0]}: <span class="font-medium text-foreground">{suggestedBundle.name}</span>
-			</span>
+<div class="space-y-1">
+	<!-- Compact trigger row -->
+	<div class="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2">
+		<span class="text-xs font-medium text-muted-foreground shrink-0">Bundle</span>
+		{#if loading}
+			<LoaderCircle class="h-3 w-3 animate-spin text-muted-foreground" />
+		{:else if selected}
+			<span class="text-sm font-medium truncate">{selected.name}</span>
+			{#if selected.is_default}
+				<Badge variant="secondary" class="text-[9px] shrink-0">Default</Badge>
+			{/if}
+			{#if suggestedBundle?.id === selected.id}
+				<Badge variant="outline" class="text-[9px] text-primary border-primary/30 shrink-0">Suggested</Badge>
+			{/if}
+			<span class="text-[10px] text-muted-foreground shrink-0">{selected.block_refs?.length ?? 0} blocks</span>
+		{:else}
+			<span class="text-sm text-muted-foreground">Using default</span>
 		{/if}
+
+		{#if suggestedBundle && suggestedBundle.id !== selectedId}
+			<button
+				type="button"
+				class="ml-1 text-[10px] text-primary hover:underline shrink-0"
+				onclick={() => select(suggestedBundle!.id)}
+			>Use suggested</button>
+		{/if}
+
+		<button
+			type="button"
+			class="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors shrink-0"
+			onclick={() => (open = !open)}
+		>
+			Change <ChevronDown class="h-3 w-3 transition-transform duration-150 {open ? 'rotate-180' : ''}" />
+		</button>
 	</div>
-	{#if loading}
-		<div class="flex h-9 items-center gap-2 rounded-md border px-3 text-sm text-muted-foreground">
-			<LoaderCircle class="h-3.5 w-3.5 animate-spin" /> Loading bundles…
-		</div>
-	{:else}
-		<div class="grid gap-2 sm:grid-cols-2">
-			{#each bundles as bundle}
-				<button
-					type="button"
-					class="rounded-lg border p-3 text-left transition-colors {selectedId === bundle.id
-						? 'ring-2 ring-primary bg-primary/5'
-						: 'hover:bg-muted/50'}"
-					onclick={() => (selectedId = bundle.id)}
-				>
-					<div class="flex items-center gap-2">
-						<Package class="h-4 w-4 shrink-0 text-muted-foreground" />
-						<span class="text-sm font-medium">{bundle.name}</span>
+
+	<!-- Expanded picker -->
+	{#if open}
+		<div class="rounded-md border bg-popover shadow-sm overflow-hidden">
+			<!-- "No override" option -->
+			<button
+				type="button"
+				class="flex w-full items-center gap-2 border-b px-3 py-2 text-left text-xs hover:bg-muted/50 transition-colors {selectedId === '' ? 'bg-primary/5 text-primary' : 'text-muted-foreground'}"
+				onclick={() => select('')}
+			>
+				<div class="flex h-3.5 w-3.5 items-center justify-center">
+					{#if selectedId === ''}<Check class="h-3 w-3 text-primary" />{/if}
+				</div>
+				<span class="font-medium">System default</span>
+				<span class="ml-1 text-muted-foreground">(no override)</span>
+			</button>
+			<div class="max-h-52 overflow-y-auto divide-y">
+				{#each bundles as bundle}
+					<button
+						type="button"
+						class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/50 transition-colors {selectedId === bundle.id ? 'bg-primary/5' : ''}"
+						onclick={() => select(bundle.id)}
+					>
+						<div class="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+							{#if selectedId === bundle.id}<Check class="h-3 w-3 text-primary" />{/if}
+						</div>
+						<span class="font-medium truncate">{bundle.name}</span>
 						{#if bundle.is_default}
-							<Badge variant="secondary" class="text-[10px]">Default</Badge>
+							<Badge variant="secondary" class="text-[9px] shrink-0">Default</Badge>
 						{/if}
-					</div>
-					<p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{bundle.description || bundle.slug}</p>
-					<p class="mt-1 font-mono text-[10px] text-muted-foreground">
-						{bundle.block_refs?.length ?? 0} blocks · {bundle.scaffolding_slug}
-					</p>
-				</button>
-			{/each}
-		</div>
-		{#if bundles.length === 0}
-			<p class="text-sm text-muted-foreground">No bundles found. Run seed_generation_templates.</p>
-		{/if}
-		{#if selected && previewStages}
-			<div class="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-				Prompt sizes (chars): backend sys {previewStages.backend.system} / user {previewStages.backend.user};
-				frontend sys {previewStages.frontend.system} / user {previewStages.frontend.user}
+						{#if suggestedBundle?.id === bundle.id}
+							<Badge variant="outline" class="text-[9px] text-primary border-primary/30 shrink-0">Suggested</Badge>
+						{/if}
+						<span class="ml-auto text-[10px] text-muted-foreground shrink-0 tabular-nums">{bundle.block_refs?.length ?? 0} blocks</span>
+					</button>
+				{/each}
 			</div>
-		{:else if previewLoading}
-			<p class="text-xs text-muted-foreground">Loading preview…</p>
-		{:else if previewError}
-			<p class="text-xs text-red-400">{previewError}</p>
-		{/if}
+
+			<!-- Preview, shown at bottom of open picker -->
+			{#if previewLoading}
+				<div class="flex items-center gap-1.5 border-t px-3 py-2 text-xs text-muted-foreground">
+					<LoaderCircle class="h-3 w-3 animate-spin" /> Loading preview…
+				</div>
+			{:else if previewStages && selected}
+				<div class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 border-t bg-muted/20 px-3 py-2 text-[10px]">
+					<span class="text-muted-foreground">Backend sys / user</span>
+					<span class="font-mono text-right tabular-nums">{previewStages.backend.system.toLocaleString()} / {previewStages.backend.user.toLocaleString()}</span>
+					<span class="text-muted-foreground">Frontend sys / user</span>
+					<span class="font-mono text-right tabular-nums">{previewStages.frontend.system.toLocaleString()} / {previewStages.frontend.user.toLocaleString()}</span>
+				</div>
+			{:else if previewError}
+				<p class="border-t px-3 py-2 text-[10px] text-red-400">{previewError}</p>
+			{/if}
+		</div>
 	{/if}
 </div>

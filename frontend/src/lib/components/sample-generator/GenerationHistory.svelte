@@ -16,6 +16,8 @@
 	import FileCode from '@lucide/svelte/icons/file-code';
 	import Download from '@lucide/svelte/icons/download';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
+	import Lock from '@lucide/svelte/icons/lock';
+	import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
 
 	interface Props {
 		historyData: PaginatedJobs | null;
@@ -87,44 +89,44 @@
 				<Card.Title>Generation History</Card.Title>
 				<Card.Description>Past generation jobs and their results.</Card.Description>
 			</div>
-			<div class="flex flex-wrap items-center gap-2">
-				<select
-					bind:value={historyModeFilter}
-					onchange={onFilterChange}
-					class="h-8 rounded-md border bg-transparent px-2 text-xs"
-				>
-					<option value="">All modes</option>
-					<option value="custom">Custom</option>
-					<option value="scaffolding">Scaffolding</option>
-					<option value="copilot">Copilot</option>
-				</select>
-				<select
-					bind:value={historyStatusFilter}
-					onchange={onFilterChange}
-					class="h-8 rounded-md border bg-transparent px-2 text-xs"
-				>
-					<option value="">All statuses</option>
-					<option value="pending">Pending</option>
-					<option value="running">Running</option>
-					<option value="completed">Completed</option>
-					<option value="failed">Failed</option>
-					<option value="cancelled">Cancelled</option>
-				</select>
-				<Button variant="outline" size="sm" onclick={onRefresh} disabled={historyLoading}>
-					<RefreshCw class="h-3.5 w-3.5 {historyLoading ? 'animate-spin' : ''}" />
-				</Button>
-				<!-- Export generation jobs -->
-				<details class="relative">
-					<summary class="list-none">
-						<Button variant="outline" size="sm" tag="span">
-							<Download class="h-3.5 w-3.5" />
-						</Button>
-					</summary>
-					<div class="absolute right-0 z-50 mt-1 w-48 rounded-md border bg-popover p-1 shadow-md">
-						<button class="w-full rounded px-3 py-1.5 text-left text-sm hover:bg-accent" onclick={() => downloadExport('generation-jobs.csv')}>Jobs CSV</button>
-						<button class="w-full rounded px-3 py-1.5 text-left text-sm hover:bg-accent" onclick={() => downloadExport('generation-jobs.json')}>Jobs JSON</button>
-					</div>
-				</details>
+			<div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+				<!-- Mode filter pills -->
+				<div class="flex items-center gap-0.5 rounded-md border bg-muted/30 p-0.5">
+					{#each [['', 'All'], ['custom', 'Custom'], ['scaffolding', 'Scaffolding'], ['copilot', 'Copilot']] as [val, label]}
+						<button
+							type="button"
+							class="rounded px-2.5 py-1 text-xs font-medium transition-colors {historyModeFilter === val ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
+							onclick={() => { historyModeFilter = val; onFilterChange(); }}
+						>{label}</button>
+					{/each}
+				</div>
+				<!-- Status filter pills -->
+				<div class="flex items-center gap-0.5 rounded-md border bg-muted/30 p-0.5">
+					{#each [['', 'All'], ['pending', 'Pending'], ['running', 'Running'], ['completed', 'Completed'], ['failed', 'Failed'], ['cancelled', 'Cancelled']] as [val, label]}
+						<button
+							type="button"
+							class="rounded px-2.5 py-1 text-xs font-medium transition-colors {historyStatusFilter === val ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
+							onclick={() => { historyStatusFilter = val; onFilterChange(); }}
+						>{label}</button>
+					{/each}
+				</div>
+				<div class="flex items-center gap-1.5">
+					<Button variant="outline" size="sm" onclick={onRefresh} disabled={historyLoading}>
+						<RefreshCw class="h-3.5 w-3.5 {historyLoading ? 'animate-spin' : ''}" />
+					</Button>
+					<!-- Export generation jobs -->
+					<details class="relative">
+						<summary class="list-none cursor-pointer">
+							<Button variant="outline" size="sm" tag="span">
+								<Download class="h-3.5 w-3.5" />
+							</Button>
+						</summary>
+						<div class="absolute right-0 z-50 mt-1 w-48 rounded-md border bg-popover p-1 shadow-md">
+							<button class="w-full rounded px-3 py-1.5 text-left text-sm hover:bg-accent" onclick={() => downloadExport('generation-jobs.csv')}>Jobs CSV</button>
+							<button class="w-full rounded px-3 py-1.5 text-left text-sm hover:bg-accent" onclick={() => downloadExport('generation-jobs.json')}>Jobs JSON</button>
+						</div>
+					</details>
+				</div>
 			</div>
 		</div>
 	</Card.Header>
@@ -262,14 +264,14 @@
 																		<div class="mt-2">
 																			<span class="font-medium">Endpoints:</span>
 																			{#each expandedJob.result_data.backend_scan.endpoints as ep}
-																				<div class="ml-2 font-mono">{ep.method} {ep.path} {ep.requires_auth ? '🔒' : ''}</div>
+																				<div class="ml-2 flex items-center gap-1 font-mono">{ep.method} {ep.path}{#if ep.requires_auth} <Lock class="inline h-3 w-3 text-muted-foreground" />{/if}</div>
 																			{/each}
 																		</div>
 																	{/if}
 																</div>
 															{/if}
 															{#if expandedJob.result_data.backend_truncated || expandedJob.result_data.frontend_truncated}
-																<div class="text-xs text-amber-400">⚠ Output was truncated ({expandedJob.result_data.backend_truncated ? 'backend' : ''}{expandedJob.result_data.backend_truncated && expandedJob.result_data.frontend_truncated ? ' + ' : ''}{expandedJob.result_data.frontend_truncated ? 'frontend' : ''})</div>
+																<div class="flex items-center gap-1 text-xs text-amber-400"><AlertTriangle class="h-3 w-3 shrink-0" /> Output was truncated ({expandedJob.result_data.backend_truncated ? 'backend' : ''}{expandedJob.result_data.backend_truncated && expandedJob.result_data.frontend_truncated ? ' + ' : ''}{expandedJob.result_data.frontend_truncated ? 'frontend' : ''})</div>
 															{/if}
 														</div>
 													{:else if expandedJob.mode === 'copilot' && expandedJob.result_data.content}
@@ -282,7 +284,7 @@
 																		<span class="text-muted-foreground">Deps: {expandedJob.result_data.dependencies.join(', ')}</span>
 																	{/if}
 																	{#if expandedJob.result_data.final_errors?.length}
-																		<span class="text-amber-400">⚠ {expandedJob.result_data.final_errors.length} remaining errors</span>
+																		<span class="flex items-center gap-1 text-amber-400"><AlertTriangle class="h-3 w-3 shrink-0" /> {expandedJob.result_data.final_errors.length} remaining errors</span>
 																	{/if}
 																</div>
 															{/if}
