@@ -3,8 +3,10 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
+	import { Textarea } from '$lib/components/ui/textarea';
 	import { Label } from '$lib/components/ui/label';
 	import { Separator } from '$lib/components/ui/separator';
+	import { Switch } from '$lib/components/ui/switch';
 	import type {
 		LLMModelSummary,
 		ScaffoldingTemplate,
@@ -16,7 +18,7 @@
 	import Search from '@lucide/svelte/icons/search';
 	import Check from '@lucide/svelte/icons/check';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import Layers from '@lucide/svelte/icons/layers';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Bot from '@lucide/svelte/icons/bot';
 	import ModelSelector from '$lib/components/sample-generator/ModelSelector.svelte';
 
@@ -106,11 +108,17 @@
 	let scaffoldingTemperature = $state(0.3);
 	let scaffoldingMaxTokens = $state(32000);
 	let appSearch = $state('');
+	let categoryFilter = $state('');
 
 	// Copilot form
 	let copilotDescription = $state('');
 	let copilotMaxIterations = $state(5);
 	let copilotUseOpenSource = $state(true);
+
+	// UI state (Advanced toggles)
+	let customShowAdvanced = $state(false);
+	let scaffoldingShowAdvanced = $state(false);
+	let copilotShowAdvanced = $state(false);
 
 	let lastDefaultedScaffoldKey = $state<string>('');
 	$effect(() => {
@@ -122,11 +130,17 @@
 		}
 	});
 
+	const appCategories = $derived(
+		[...new Set(appTemplates.map(t => t.category).filter(Boolean))].sort() as string[]
+	);
+
 	const filteredAppTemplates = $derived(
-		appTemplates.filter(t =>
-			t.name.toLowerCase().includes(appSearch.toLowerCase()) ||
-			t.description.toLowerCase().includes(appSearch.toLowerCase())
-		)
+		appTemplates.filter(t => {
+			if (categoryFilter && t.category !== categoryFilter) return false;
+			if (!appSearch) return true;
+			const q = appSearch.toLowerCase();
+			return t.name.toLowerCase().includes(q) || (t.description ?? '').toLowerCase().includes(q);
+		})
 	);
 
 	const selectedAppSlugs = $derived(
@@ -199,31 +213,33 @@
 
 {#if activeTab === 'custom'}
 	<Card.Root>
-		<Card.Header>
+		<Card.Header class="pb-3">
 			<Card.Title>Custom Generation</Card.Title>
 			<Card.Description>Send a custom prompt to any model and get a generated response.</Card.Description>
 		</Card.Header>
 		<Card.Content>
-			<div class="space-y-4">
-				<div class="space-y-2">
-					<Label>System Prompt</Label>
-					<textarea
+			<div class="space-y-5">
+				<div class="space-y-1.5">
+					<Label class="text-xs uppercase tracking-wide text-muted-foreground" for="custom-system-prompt">System Prompt</Label>
+					<Textarea
+						id="custom-system-prompt"
 						bind:value={customSystemPrompt}
 						rows={3}
-						class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 						placeholder="Set the AI's behavior and role..."
-					></textarea>
+					/>
 				</div>
 
-				<div class="space-y-2">
-					<Label>User Prompt</Label>
-					<textarea
+				<div class="space-y-1.5">
+					<Label class="text-xs uppercase tracking-wide text-muted-foreground" for="custom-user-prompt">User Prompt</Label>
+					<Textarea
+						id="custom-user-prompt"
 						bind:value={customUserPrompt}
 						rows={6}
-						class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 						placeholder="Describe what you want the AI to generate..."
-					></textarea>
+					/>
 				</div>
+
+				<Separator />
 
 				<ModelSelector
 					{models}
@@ -232,32 +248,42 @@
 					bind:selectedId={customModelId}
 				/>
 
-				<div class="grid gap-4 grid-cols-1 sm:grid-cols-2">
-					<div class="space-y-2">
-						<Label>Temperature: {customTemperature.toFixed(1)}</Label>
-						<input
-							type="range"
-							min="0"
-							max="2"
-							step="0.1"
-							bind:value={customTemperature}
-							class="w-full accent-primary"
-						/>
-						<div class="flex justify-between text-[10px] text-muted-foreground">
-							<span>Precise</span>
-							<span>Creative</span>
+				<!-- Advanced (collapsed by default) -->
+				<div class="space-y-2">
+					<button
+						type="button"
+						class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+						onclick={() => (customShowAdvanced = !customShowAdvanced)}
+					>
+						<ChevronRight class="h-3.5 w-3.5 transition-transform duration-150 {customShowAdvanced ? 'rotate-90' : ''}" />
+						Advanced
+					</button>
+					{#if customShowAdvanced}
+						<div class="grid gap-4 sm:grid-cols-2 rounded-md border bg-muted/20 p-3">
+							<div class="space-y-1.5">
+								<Label class="text-xs">Temperature: {customTemperature.toFixed(1)}</Label>
+								<input
+									type="range" min="0" max="2" step="0.1"
+									bind:value={customTemperature}
+									class="w-full accent-primary"
+								/>
+								<div class="flex justify-between text-[10px] text-muted-foreground">
+									<span>Precise</span><span>Creative</span>
+								</div>
+							</div>
+							<div class="space-y-1.5">
+								<Label class="text-xs" for="custom-max-tokens">Max Tokens</Label>
+								<input
+									id="custom-max-tokens"
+									type="number"
+									bind:value={customMaxTokens}
+									min={1}
+									max={200000}
+									class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+								/>
+							</div>
 						</div>
-					</div>
-					<div class="space-y-2">
-						<Label>Max Tokens</Label>
-						<input
-							type="number"
-							bind:value={customMaxTokens}
-							min={1}
-							max={200000}
-							class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-						/>
-					</div>
+					{/if}
 				</div>
 
 				{#if customError}
@@ -266,16 +292,21 @@
 					</div>
 				{/if}
 
-				<Button
-					onclick={submitCustom}
-					disabled={customSubmitting || !customModelId || !customUserPrompt.trim()}
-				>
-					{#if customSubmitting}
-						<LoaderCircle class="mr-2 h-4 w-4 animate-spin" /> Submitting…
-					{:else}
-						<Play class="mr-2 h-4 w-4" /> Generate
-					{/if}
-				</Button>
+				<!-- Action row -->
+				<div class="flex items-center gap-3 rounded-md border bg-muted/20 px-3 py-2">
+					<Button
+						class="ml-auto"
+						onclick={submitCustom}
+						disabled={customSubmitting || !customModelId || !customUserPrompt.trim()}
+						title={!customModelId ? 'Select a model first' : !customUserPrompt.trim() ? 'Enter a user prompt' : undefined}
+					>
+						{#if customSubmitting}
+							<LoaderCircle class="mr-2 h-4 w-4 animate-spin" /> Submitting…
+						{:else}
+							<Play class="mr-2 h-4 w-4" /> Generate
+						{/if}
+					</Button>
+				</div>
 			</div>
 		</Card.Content>
 	</Card.Root>
@@ -283,79 +314,81 @@
 
 {#if activeTab === 'scaffolding'}
 	<Card.Root>
-		<Card.Header>
-			<Card.Title>Scaffolding Batch Generation</Card.Title>
-			<Card.Description>Select stack, prompt bundle, app requirements, and models. Each job freezes a reproducible bundle snapshot.</Card.Description>
+		<Card.Header class="pb-3">
+			<Card.Title>Scaffolding Batch</Card.Title>
+			<Card.Description>Select stack, apps, and models. Each job freezes a reproducible bundle snapshot.</Card.Description>
 		</Card.Header>
 		<Card.Content>
-			<div class="space-y-6">
-				<!-- Scaffolding Template -->
+			<div class="space-y-5">
+
+				<!-- Stack pills -->
 				<div class="space-y-2">
-					<Label>Scaffolding Template</Label>
+					<Label class="text-xs uppercase tracking-wide text-muted-foreground">Stack</Label>
 					{#if scaffoldingLoading}
-						<div class="flex h-9 items-center gap-2 rounded-md border px-3 text-sm text-muted-foreground">
-							<LoaderCircle class="h-3.5 w-3.5 animate-spin" /> Loading templates…
+						<div class="flex items-center gap-2 text-sm text-muted-foreground">
+							<LoaderCircle class="h-3.5 w-3.5 animate-spin" /> Loading…
 						</div>
+					{:else if scaffoldingTemplates.length === 0}
+						<p class="text-sm text-muted-foreground">No scaffolding templates found.</p>
 					{:else}
-						<div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+						<div class="flex flex-wrap gap-2">
 							{#each scaffoldingTemplates as tpl}
 								<button
-									class="rounded-lg border p-4 text-left transition-colors {selectedScaffoldId === tpl.id ? 'ring-2 ring-primary bg-primary/5' : 'hover:bg-muted/50'}"
-									onclick={() => selectedScaffoldId = tpl.id}
+									type="button"
+									class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition-colors
+										{selectedScaffoldId === tpl.id
+											? 'border-primary bg-primary/10 text-primary'
+											: 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+									onclick={() => (selectedScaffoldId = tpl.id)}
 								>
-									<div class="flex items-center gap-2">
-										<Layers class="h-4 w-4 {selectedScaffoldId === tpl.id ? 'text-primary' : 'text-muted-foreground'}" />
-										<span class="text-sm font-medium">{tpl.name}</span>
-										{#if tpl.is_default}
-											<Badge variant="secondary" class="text-[10px]">Default</Badge>
-										{/if}
-									</div>
-									<p class="mt-1 text-xs text-muted-foreground line-clamp-2">{tpl.description}</p>
-									{#if Object.keys(tpl.tech_stack).length > 0}
-										<div class="mt-2 flex flex-wrap gap-1">
-											{#each Object.entries(tpl.tech_stack) as [key, val]}
-												<Badge variant="outline" class="text-[10px]">{key}: {val}</Badge>
-											{/each}
-										</div>
+									{tpl.name}
+									{#if tpl.is_default && selectedScaffoldId !== tpl.id}
+										<span class="text-[9px] opacity-60">default</span>
 									{/if}
 								</button>
 							{/each}
 						</div>
-						{#if scaffoldingTemplates.length === 0}
-							<p class="text-sm text-muted-foreground">No scaffolding templates found. Create one in the admin.</p>
-						{/if}
 					{/if}
 				</div>
 
 				<Separator />
 
-				<BundlePicker
-					bundles={templateBundles}
-					loading={bundlesLoading}
-					bind:selectedId={selectedBundleId}
-					appSlugs={selectedAppSlugs}
-				/>
-
-				<Separator />
-
-				<!-- App Requirements + Models side by side -->
-				<div class="grid gap-4 md:grid-cols-2">
-					<!-- App Requirements -->
-					<div class="space-y-3">
+				<!-- Apps + Models: min-w-0 on both columns prevents fr-fraction overflow from shrink-0 content -->
+				<div class="grid gap-4 md:grid-cols-[5fr_6fr]">
+					<!-- App list -->
+					<div class="min-w-0 space-y-2">
 						<div class="flex items-center justify-between">
-							<Label>App Requirements</Label>
-							<div class="flex gap-1 text-[10px]">
-								<button class="text-primary hover:underline" onclick={selectAllApps}>Select All</button>
-								<span class="text-muted-foreground">|</span>
-								<button class="text-muted-foreground hover:underline" onclick={clearApps}>Clear</button>
-								<span class="ml-1 text-muted-foreground">({selectedAppIds.size})</span>
+							<Label class="text-xs uppercase tracking-wide text-muted-foreground">Apps</Label>
+							<div class="flex items-center gap-2 text-[10px]">
+								<button type="button" class="text-primary hover:underline" onclick={selectAllApps}>All</button>
+								<span class="text-muted-foreground">·</span>
+								<button type="button" class="text-muted-foreground hover:text-foreground hover:underline" onclick={clearApps}>None</button>
+								{#if selectedAppIds.size > 0}
+									<Badge variant="secondary" class="ml-1 text-[9px]">{selectedAppIds.size}</Badge>
+								{/if}
 							</div>
 						</div>
+						{#if appCategories.length > 1}
+							<div class="flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+								<button
+									type="button"
+									class="shrink-0 rounded px-2 py-0.5 text-[10px] font-medium transition-colors {categoryFilter === '' ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}"
+									onclick={() => (categoryFilter = '')}
+								>All</button>
+								{#each appCategories as cat}
+									<button
+										type="button"
+										class="shrink-0 rounded px-2 py-0.5 text-[10px] font-medium transition-colors {categoryFilter === cat ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}"
+										onclick={() => (categoryFilter = categoryFilter === cat ? '' : cat)}
+									>{cat}</button>
+								{/each}
+							</div>
+						{/if}
 						<div class="relative">
-							<Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-							<Input bind:value={appSearch} placeholder="Search apps…" class="h-8 pl-8 text-xs" />
+							<Search class="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+							<Input bind:value={appSearch} placeholder="Filter apps…" class="h-7 pl-8 text-xs" />
 						</div>
-						<div class="max-h-64 space-y-1 overflow-y-auto rounded-md border p-1">
+						<div class="max-h-60 overflow-y-auto rounded-md border divide-y divide-border/50">
 							{#if scaffoldingLoading}
 								<div class="flex items-center justify-center py-6 text-sm text-muted-foreground">
 									<LoaderCircle class="mr-2 h-4 w-4 animate-spin" /> Loading…
@@ -363,97 +396,125 @@
 							{:else}
 								{#each filteredAppTemplates as app}
 									<button
-										class="flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted/50 {selectedAppIds.has(app.id) ? 'bg-primary/5 ring-1 ring-primary/20' : ''}"
+										type="button"
+										class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted/40 {selectedAppIds.has(app.id) ? 'bg-primary/5' : ''}"
 										onclick={() => toggleAppTemplate(app.id)}
 									>
-										<div class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border {selectedAppIds.has(app.id) ? 'bg-primary border-primary text-primary-foreground' : 'border-border'}">
-											{#if selectedAppIds.has(app.id)}<Check class="h-3 w-3" />{/if}
+										<div class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors {selectedAppIds.has(app.id) ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/40'}">
+											{#if selectedAppIds.has(app.id)}<Check class="h-2.5 w-2.5" />{/if}
 										</div>
-										<div class="min-w-0">
-											<div class="font-medium">{app.name}</div>
-											<div class="text-xs text-muted-foreground line-clamp-1">{app.description}</div>
-										</div>
-										<Badge variant="secondary" class="ml-auto shrink-0 text-[10px]">{app.category}</Badge>
+										<span class="font-medium">{app.name}</span>
+										<Badge variant="secondary" class="ml-auto shrink-0 text-[9px]">{app.category}</Badge>
 									</button>
 								{/each}
 								{#if filteredAppTemplates.length === 0}
-									<p class="py-4 text-center text-xs text-muted-foreground">No templates found.</p>
+									<p class="py-4 text-center text-xs text-muted-foreground">No apps found.</p>
 								{/if}
 							{/if}
 						</div>
 					</div>
 
-					<ModelSelector
-						{models}
-						loading={modelsLoading}
-						mode="multi"
-						bind:selectedIds={selectedModelIds}
-						onSelectAll={selectAllModelIds}
-						onClearAll={clearModelIds}
-					/>
-				</div>
-
-				<Separator />
-
-				<!-- Controls row -->
-				<div class="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
-					<div class="space-y-2">
-						<Label>Temperature: {scaffoldingTemperature.toFixed(1)}</Label>
-						<input
-							type="range"
-							min="0"
-							max="2"
-							step="0.1"
-							bind:value={scaffoldingTemperature}
-							class="w-40 accent-primary"
+					<!-- Model selector — min-w-0 keeps it inside the fr column -->
+					<div class="min-w-0">
+						<ModelSelector
+							{models}
+							loading={modelsLoading}
+							mode="multi"
+							bind:selectedIds={selectedModelIds}
+							onSelectAll={selectAllModelIds}
+							onClearAll={clearModelIds}
 						/>
-					</div>
-					<div class="space-y-2">
-						<Label>Max Tokens</Label>
-						<input
-							type="number"
-							bind:value={scaffoldingMaxTokens}
-							min={1}
-							max={200000}
-							class="flex h-9 w-32 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-						/>
-					</div>
-					<div class="ml-auto flex items-center gap-3">
-						{#if selectedAppIds.size > 0 && selectedModelIds.size > 0}
-							<span class="text-sm text-muted-foreground">
-								{selectedAppIds.size} apps × {selectedModelIds.size} models = <span class="font-bold text-primary">{selectedAppIds.size * selectedModelIds.size}</span> jobs
-							</span>
-						{/if}
-						<Button
-							onclick={submitScaffolding}
-							disabled={scaffoldingSubmitting || !selectedScaffoldId || selectedAppIds.size === 0 || selectedModelIds.size === 0}
-						>
-							{#if scaffoldingSubmitting}
-								<LoaderCircle class="mr-2 h-4 w-4 animate-spin" /> Creating…
-							{:else}
-								<Play class="mr-2 h-4 w-4" /> Generate Batch
-							{/if}
-						</Button>
 					</div>
 				</div>
 
+				<!-- Bundle (on-demand) -->
+				<BundlePicker
+					bundles={templateBundles}
+					loading={bundlesLoading}
+					bind:selectedId={selectedBundleId}
+					appSlugs={selectedAppSlugs}
+				/>
+
+				<!-- Advanced (collapsed by default) -->
+				<div class="space-y-2">
+					<button
+						type="button"
+						class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+						onclick={() => (scaffoldingShowAdvanced = !scaffoldingShowAdvanced)}
+					>
+						<ChevronRight class="h-3.5 w-3.5 transition-transform duration-150 {scaffoldingShowAdvanced ? 'rotate-90' : ''}" />
+						Advanced
+					</button>
+					{#if scaffoldingShowAdvanced}
+						<div class="grid gap-4 sm:grid-cols-2 rounded-md border bg-muted/20 p-3">
+							<div class="space-y-1.5">
+								<Label class="text-xs">Temperature: {scaffoldingTemperature.toFixed(1)}</Label>
+								<input
+									type="range" min="0" max="2" step="0.1"
+									bind:value={scaffoldingTemperature}
+									class="w-full accent-primary"
+								/>
+								<div class="flex justify-between text-[10px] text-muted-foreground">
+									<span>Precise</span><span>Creative</span>
+								</div>
+							</div>
+							<div class="space-y-1.5">
+								<Label class="text-xs" for="scaffolding-max-tokens">Max Tokens</Label>
+								<input
+									id="scaffolding-max-tokens"
+									type="number"
+									bind:value={scaffoldingMaxTokens}
+									min={1}
+									max={200000}
+									class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+								/>
+							</div>
+						</div>
+					{/if}
+				</div>
+
+				<!-- Error / success feedback -->
 				{#if scaffoldingError}
 					<div class="rounded-md bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">
 						{scaffoldingError}
 					</div>
 				{/if}
-
 				{#if scaffoldingResult}
 					<div class="rounded-md bg-emerald-500/10 border border-emerald-500/30 px-4 py-3 text-sm text-emerald-400">
 						<div class="flex items-center gap-2">
 							<Check class="h-4 w-4" />
-							Batch created with {scaffoldingResult.job_count} jobs.
+							Batch created — {scaffoldingResult.job_count} jobs queued.
 						</div>
 						<div class="mt-1 text-xs text-muted-foreground">
-							Batch ID: <span class="font-mono">{scaffoldingResult.batch_id}</span> · Status: {scaffoldingResult.status}
+							Batch <span class="font-mono">{scaffoldingResult.batch_id.slice(0, 8)}…</span>
 						</div>
 					</div>
 				{/if}
+
+				<!-- Action row — job tally always visible -->
+				<div class="flex items-center gap-3 rounded-md border bg-muted/20 px-3 py-2">
+					<div class="flex flex-wrap items-baseline gap-1 text-xs">
+						<span class="tabular-nums {selectedAppIds.size > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}">{selectedAppIds.size}</span>
+						<span class="text-muted-foreground">apps ×</span>
+						<span class="tabular-nums {selectedModelIds.size > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}">{selectedModelIds.size}</span>
+						<span class="text-muted-foreground">models =</span>
+						<span class="tabular-nums text-base font-bold leading-none {selectedAppIds.size * selectedModelIds.size > 0 ? 'text-primary' : 'text-muted-foreground/50'}">{selectedAppIds.size * selectedModelIds.size}</span>
+						<span class="text-muted-foreground">jobs</span>
+					</div>
+					<Button
+						class="ml-auto"
+						onclick={submitScaffolding}
+						disabled={scaffoldingSubmitting || !selectedScaffoldId || selectedAppIds.size === 0 || selectedModelIds.size === 0}
+						title={selectedAppIds.size === 0 ? 'Select at least one app' : selectedModelIds.size === 0 ? 'Select at least one model' : undefined}
+					>
+						{#if scaffoldingSubmitting}
+							<LoaderCircle class="mr-2 h-4 w-4 animate-spin" /> Creating…
+						{:else}
+							<Play class="mr-2 h-4 w-4" /> Generate Batch
+						{/if}
+					</Button>
+				</div>
+
 			</div>
 		</Card.Content>
 	</Card.Root>
@@ -461,7 +522,7 @@
 
 {#if activeTab === 'copilot'}
 	<Card.Root>
-		<Card.Header>
+		<Card.Header class="pb-3">
 			<div class="flex flex-wrap items-center gap-2">
 				<Card.Title>Copilot Generation</Card.Title>
 				<Badge variant="secondary" class="text-[10px]">Powered by Aider</Badge>
@@ -472,18 +533,20 @@
 			</Card.Description>
 		</Card.Header>
 		<Card.Content>
-			<div class="space-y-4">
-				<div class="space-y-2">
-					<Label>Description</Label>
-					<textarea
+			<div class="space-y-5">
+				<div class="space-y-1.5">
+					<Label class="text-xs uppercase tracking-wide text-muted-foreground" for="copilot-description">Description</Label>
+					<Textarea
+						id="copilot-description"
 						bind:value={copilotDescription}
 						rows={5}
-						class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 						placeholder="Describe what you want to build. Be specific about features, tech stack, and requirements…"
-					></textarea>
+					/>
 				</div>
 
-				<div class="space-y-1">
+				<Separator />
+
+				<div class="space-y-1.5">
 					<ModelSelector
 						{models}
 						loading={modelsLoading}
@@ -494,47 +557,47 @@
 					/>
 					<p class="text-[10px] text-muted-foreground">
 						{#if copilotModelId === ''}
-							When auto-select is on, “Use open-source models” picks DeepSeek vs GPT-4o mini.
+							When auto-select is on, "Use open-source models" picks DeepSeek vs GPT-4o mini.
 						{:else}
 							Selected model is used with your OpenRouter key from Settings.
 						{/if}
 					</p>
 				</div>
 
+				<!-- Advanced (collapsed by default) -->
 				<div class="space-y-2">
-					<Label>Max Iterations: {copilotMaxIterations}</Label>
-					<input
-						type="range"
-						min="1"
-						max="10"
-						step="1"
-						bind:value={copilotMaxIterations}
-						class="w-full accent-primary"
-					/>
-					<div class="flex justify-between text-[10px] text-muted-foreground">
-						<span>1</span>
-						<span>10</span>
-					</div>
+					<button
+						type="button"
+						class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+						onclick={() => (copilotShowAdvanced = !copilotShowAdvanced)}
+					>
+						<ChevronRight class="h-3.5 w-3.5 transition-transform duration-150 {copilotShowAdvanced ? 'rotate-90' : ''}" />
+						Advanced
+					</button>
+					{#if copilotShowAdvanced}
+						<div class="grid gap-4 sm:grid-cols-2 rounded-md border bg-muted/20 p-3">
+							<div class="space-y-1.5">
+								<Label class="text-xs">Max Iterations: {copilotMaxIterations}</Label>
+								<input
+									type="range" min="1" max="10" step="1"
+									bind:value={copilotMaxIterations}
+									class="w-full accent-primary"
+								/>
+								<div class="flex justify-between text-[10px] text-muted-foreground">
+									<span>1</span><span>10</span>
+								</div>
+							</div>
+							<div class="space-y-1.5 flex flex-col justify-center">
+								<Switch
+									bind:checked={copilotUseOpenSource}
+									disabled={copilotModelId !== ''}
+									label="Prefer open-source models (auto-select only)"
+									id="copilot-open-source"
+								/>
+							</div>
+						</div>
+					{/if}
 				</div>
-
-				<label
-					class="flex items-center gap-2 text-sm cursor-pointer {copilotModelId !== '' ? 'opacity-50' : ''}"
-					title={copilotModelId !== '' ? 'Only applies when model is auto-select' : ''}
-				>
-					<div class="relative">
-						<input
-							type="checkbox"
-							bind:checked={copilotUseOpenSource}
-							disabled={copilotModelId !== ''}
-							class="peer sr-only"
-						/>
-						<div class="h-5 w-9 rounded-full bg-muted transition-colors peer-checked:bg-primary peer-disabled:opacity-50"></div>
-						<div
-							class="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-background shadow-sm transition-transform peer-checked:translate-x-4"
-						></div>
-					</div>
-					Prefer open-source models (auto-select only)
-				</label>
 
 				{#if copilotError}
 					<div class="rounded-md bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">
@@ -542,13 +605,21 @@
 					</div>
 				{/if}
 
-				<Button onclick={submitCopilot} disabled={copilotSubmitting || !copilotDescription.trim()}>
-					{#if copilotSubmitting}
-						<LoaderCircle class="mr-2 h-4 w-4 animate-spin" /> Starting Aider…
-					{:else}
-						<Bot class="mr-2 h-4 w-4" /> Start Aider Copilot
-					{/if}
-				</Button>
+				<!-- Action row -->
+				<div class="flex items-center gap-3 rounded-md border bg-muted/20 px-3 py-2">
+					<Button
+						class="ml-auto"
+						onclick={submitCopilot}
+						disabled={copilotSubmitting || !copilotDescription.trim()}
+						title={!copilotDescription.trim() ? 'Enter a description first' : undefined}
+					>
+						{#if copilotSubmitting}
+							<LoaderCircle class="mr-2 h-4 w-4 animate-spin" /> Starting Aider…
+						{:else}
+							<Bot class="mr-2 h-4 w-4" /> Start Aider Copilot
+						{/if}
+					</Button>
+				</div>
 			</div>
 		</Card.Content>
 	</Card.Root>
