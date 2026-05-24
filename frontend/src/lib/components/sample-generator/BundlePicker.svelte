@@ -94,14 +94,14 @@
 		{#if suggestedBundle && suggestedBundle.id !== selectedId}
 			<button
 				type="button"
-				class="ml-1 text-[10px] text-primary hover:underline shrink-0"
+				class="ml-1 text-[10px] text-primary hover:underline shrink-0 cursor-pointer"
 				onclick={() => select(suggestedBundle!.id)}
 			>Use suggested</button>
 		{/if}
 
 		<button
 			type="button"
-			class="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors shrink-0"
+			class="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors shrink-0 cursor-pointer"
 			onclick={() => (open = !open)}
 		>
 			Change <ChevronDown class="h-3 w-3 transition-transform duration-150 {open ? 'rotate-180' : ''}" />
@@ -114,7 +114,7 @@
 			<!-- "No override" option -->
 			<button
 				type="button"
-				class="flex w-full items-center gap-2 border-b px-3 py-2 text-left text-xs hover:bg-muted/50 transition-colors {selectedId === '' ? 'bg-primary/5 text-primary' : 'text-muted-foreground'}"
+				class="flex w-full items-center gap-2 border-b px-3 py-2 text-left text-xs hover:bg-muted/50 transition-colors cursor-pointer {selectedId === '' ? 'bg-primary/5 text-primary' : 'text-muted-foreground'}"
 				onclick={() => select('')}
 			>
 				<div class="flex h-3.5 w-3.5 items-center justify-center">
@@ -127,7 +127,7 @@
 				{#each bundles as bundle}
 					<button
 						type="button"
-						class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/50 transition-colors {selectedId === bundle.id ? 'bg-primary/5' : ''}"
+						class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/50 transition-colors cursor-pointer {selectedId === bundle.id ? 'bg-primary/5' : ''}"
 						onclick={() => select(bundle.id)}
 					>
 						<div class="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
