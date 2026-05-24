@@ -114,16 +114,27 @@
 		if (n === 0) return 'Free';
 		return `$${n.toFixed(2)}`;
 	}
+
+	$effect(() => {
+		if (mode === 'single' && selectedId && models.length > 0) {
+			const activeModel = models.find(m => m.id === selectedId);
+			if (activeModel && !expandedProviders.has(activeModel.provider)) {
+				const next = new Set(expandedProviders);
+				next.add(activeModel.provider);
+				expandedProviders = next;
+			}
+		}
+	});
 </script>
 
 <div class="space-y-2">
 	<div class="flex flex-wrap items-center justify-between gap-2">
-		<Label class="text-sm">Models</Label>
+		<Label class="text-xs uppercase tracking-wide text-muted-foreground">Models</Label>
 		{#if mode === 'multi' && onSelectAll && onClearAll}
 			<div class="flex gap-1 text-[10px]">
-				<button type="button" class="text-primary hover:underline" onclick={onSelectAll}>Select all</button>
+				<button type="button" class="text-primary hover:underline cursor-pointer" onclick={onSelectAll}>Select all</button>
 				<span class="text-muted-foreground">|</span>
-				<button type="button" class="text-muted-foreground hover:underline" onclick={onClearAll}>Clear</button>
+				<button type="button" class="text-muted-foreground hover:underline cursor-pointer" onclick={onClearAll}>Clear</button>
 				<span class="ml-1 text-muted-foreground">({selectedIds.size})</span>
 			</div>
 		{/if}
@@ -133,24 +144,24 @@
 	<div class="flex items-center gap-2">
 		<div class="relative flex-1">
 			<Search class="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
-			<Input bind:value={search} placeholder="Search models…" class="h-8 pl-8 text-xs" />
+			<Input bind:value={search} placeholder="Search models…" class="h-8 pl-8 text-xs transition-all hover:border-primary/45 focus-visible:ring-primary/20" />
 		</div>
 		<label class="flex shrink-0 cursor-pointer items-center gap-1.5 text-[10px] text-muted-foreground">
-			<input type="checkbox" bind:checked={freeOnly} class="rounded border-input" />
+			<input type="checkbox" bind:checked={freeOnly} class="rounded border-input cursor-pointer" />
 			Free only
 		</label>
 	</div>
 
 	{#if loading}
 		<div class="flex items-center justify-center rounded-md border py-8 text-sm text-muted-foreground">
-			<LoaderCircle class="mr-2 h-4 w-4 animate-spin" /> Loading models…
+			<LoaderCircle class="mr-2 h-4 w-4 animate-spin text-primary" /> Loading models…
 		</div>
 	{:else if providerGroups.size === 0}
 		<div class="rounded-md border py-6 text-center text-xs text-muted-foreground">
 			No models match your filters.
 		</div>
 	{:else if mode === 'multi'}
-		<!-- Accordion grouped by provider -->
+		<!-- Accordion grouped by provider (Multi-Select) -->
 		<div class="overflow-y-auto rounded-md border divide-y divide-border/50 {maxHeight}">
 			{#each [...providerGroups.entries()] as [provider, providerModels]}
 				{@const selCount = selectedPerProvider.get(provider) ?? 0}
@@ -159,13 +170,13 @@
 					<!-- Provider header — click to expand/collapse -->
 					<button
 						type="button"
-						class="flex w-full items-center gap-2 bg-muted/20 px-3 py-1.5 text-left text-xs font-medium transition-colors hover:bg-muted/40 {selCount > 0 ? 'text-foreground' : 'text-muted-foreground'}"
+						class="flex w-full items-center gap-2 bg-muted/20 px-3 py-1.5 text-left text-xs font-medium transition-colors hover:bg-muted/40 cursor-pointer {selCount > 0 ? 'text-foreground font-semibold bg-primary/[0.02]' : 'text-muted-foreground'}"
 						onclick={() => toggleProvider(provider)}
 					>
 						<ChevronRight class="h-3 w-3 shrink-0 transition-transform duration-150 {expanded ? 'rotate-90' : ''}" />
 						<span class="min-w-0 flex-1 truncate">{provider}</span>
 						{#if selCount > 0}
-							<Badge variant="secondary" class="shrink-0 text-[9px]">{selCount}/{providerModels.length}</Badge>
+							<Badge variant="secondary" class="shrink-0 text-[9px] px-1.5 py-0 bg-primary/10 text-primary border-primary/20">{selCount}/{providerModels.length}</Badge>
 						{:else}
 							<span class="shrink-0 tabular-nums text-[10px] opacity-40">{providerModels.length}</span>
 						{/if}
@@ -177,18 +188,24 @@
 							{#each providerModels as m}
 								<button
 									type="button"
-									class="flex w-full items-center gap-2 pl-7 pr-3 py-1.5 text-left text-xs transition-colors hover:bg-muted/40 {selectedIds.has(m.id) ? 'bg-primary/5' : ''}"
+									class="flex w-full items-start gap-2 pl-7 pr-3 py-2 text-left text-xs transition-colors hover:bg-muted/40 cursor-pointer {selectedIds.has(m.id) ? 'bg-primary/5 text-foreground font-semibold' : 'text-muted-foreground'}"
 									onclick={() => toggleMulti(m.id, provider)}
 								>
-									<div class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors {selectedIds.has(m.id) ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/30'}">
+									<!-- Checkbox indicator -->
+									<div class="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors {selectedIds.has(m.id) ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/30'}">
 										{#if selectedIds.has(m.id)}<Check class="h-2.5 w-2.5" />{/if}
 									</div>
-									<span class="min-w-0 flex-1 truncate font-medium">{m.model_name}</span>
-									{#if m.is_free}
-										<Badge variant="secondary" class="shrink-0 text-[9px]">Free</Badge>
-									{:else}
-										<span class="shrink-0 font-mono text-[10px] text-muted-foreground">${m.input_price_per_million}</span>
-									{/if}
+									<div class="min-w-0 flex-1">
+										<div class="flex flex-wrap items-center gap-1.5">
+											<span class="font-medium text-foreground">{m.model_name}</span>
+											{#if m.is_free}
+												<Badge variant="secondary" class="text-[9px] px-1 py-0 scale-90">Free</Badge>
+											{/if}
+										</div>
+										<div class="mt-0.5 text-[9px] text-muted-foreground font-mono">
+											{m.context_window_display} · in {formatPrice(m.input_price_per_million)} / out {formatPrice(m.output_price_per_million)} per 1M
+										</div>
+									</div>
 								</button>
 							{/each}
 						</div>
@@ -197,47 +214,69 @@
 			{/each}
 		</div>
 	{:else}
-		<!-- Single-select: flat list with provider section separators -->
-		<div class="overflow-y-auto rounded-md border {maxHeight}">
+		<!-- Accordion grouped by provider (Single-Select) -->
+		<div class="overflow-y-auto rounded-md border divide-y divide-border/50 {maxHeight}">
 			{#if allowEmpty}
 				<button
 					type="button"
-					class="flex w-full items-center gap-2 border-b px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted/50 {selectedId === '' ? 'bg-primary/5 ring-1 ring-inset ring-primary/20' : ''}"
+					class="flex w-full items-center gap-2 border-b px-3 py-2 text-left text-xs transition-colors hover:bg-muted/40 cursor-pointer {selectedId === '' ? 'bg-primary/5 text-foreground font-semibold' : 'text-muted-foreground'}"
 					onclick={() => selectSingle('')}
 				>
-					<div class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border {selectedId === '' ? 'bg-primary border-primary text-primary-foreground' : 'border-border'}">
-						{#if selectedId === ''}<Check class="h-3 w-3" />{/if}
+					<div class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border transition-colors {selectedId === '' ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/30'}">
+						{#if selectedId === ''}<div class="h-1.5 w-1.5 rounded-full bg-current"></div>{/if}
 					</div>
-					<span class="italic text-muted-foreground">{emptyLabel}</span>
+					<span class="italic font-medium">{emptyLabel}</span>
 				</button>
 			{/if}
 			{#each [...providerGroups.entries()] as [provider, providerModels]}
-				<div class="border-b last:border-0">
-					<div class="bg-muted/20 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-						{provider}
-					</div>
-					{#each providerModels as m}
-						<button
-							type="button"
-							class="flex w-full items-start gap-2 px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted/50 {selectedId === m.id ? 'bg-primary/5 ring-1 ring-inset ring-primary/20' : ''}"
-							onclick={() => selectSingle(m.id)}
-						>
-							<div class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border {selectedId === m.id ? 'bg-primary border-primary text-primary-foreground' : 'border-border'}">
-								{#if selectedId === m.id}<Check class="h-3 w-3" />{/if}
-							</div>
-							<div class="min-w-0 flex-1">
-								<div class="flex flex-wrap items-center gap-1.5">
-									<span class="font-medium">{m.model_name}</span>
-									{#if m.is_free}
-										<Badge variant="secondary" class="text-[10px]">Free</Badge>
-									{/if}
-								</div>
-								<div class="mt-0.5 text-[10px] text-muted-foreground">
-									{m.context_window_display} · in {formatPrice(m.input_price_per_million)} / out {formatPrice(m.output_price_per_million)} per 1M
-								</div>
-							</div>
-						</button>
-					{/each}
+				{@const hasActive = providerModels.some(m => m.id === selectedId)}
+				{@const expanded = isExpanded(provider)}
+				<div>
+					<!-- Provider header — click to expand/collapse -->
+					<button
+						type="button"
+						class="flex w-full items-center gap-2 bg-muted/20 px-3 py-1.5 text-left text-xs font-medium transition-colors hover:bg-muted/40 cursor-pointer {hasActive ? 'text-foreground font-semibold bg-primary/[0.02]' : 'text-muted-foreground'}"
+						onclick={() => toggleProvider(provider)}
+					>
+						<ChevronRight class="h-3 w-3 shrink-0 transition-transform duration-150 {expanded ? 'rotate-90' : ''}" />
+						<span class="min-w-0 flex-1 truncate">{provider}</span>
+						{#if hasActive}
+							<Badge variant="secondary" class="shrink-0 text-[9px] px-1.5 py-0 bg-primary/10 text-primary border-primary/20">Selected</Badge>
+						{:else}
+							<span class="shrink-0 tabular-nums text-[10px] opacity-40">{providerModels.length}</span>
+						{/if}
+					</button>
+
+					<!-- Models in this group -->
+					{#if expanded}
+						<div class="divide-y divide-border/30">
+							{#each providerModels as m}
+								<button
+									type="button"
+									class="flex w-full items-start gap-2 pl-7 pr-3 py-2 text-left text-xs transition-colors hover:bg-muted/40 cursor-pointer {selectedId === m.id ? 'bg-primary/5 text-foreground font-semibold' : 'text-muted-foreground'}"
+									onclick={() => selectSingle(m.id)}
+								>
+									<!-- Circular radio indicator -->
+									<div class="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border transition-colors {selectedId === m.id ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/30'}">
+										{#if selectedId === m.id}
+											<div class="h-1.5 w-1.5 rounded-full bg-current"></div>
+										{/if}
+									</div>
+									<div class="min-w-0 flex-1">
+										<div class="flex flex-wrap items-center gap-1.5">
+											<span class="font-medium text-foreground">{m.model_name}</span>
+											{#if m.is_free}
+												<Badge variant="secondary" class="text-[9px] px-1 py-0 scale-90">Free</Badge>
+											{/if}
+										</div>
+										<div class="mt-0.5 text-[9px] text-muted-foreground font-mono">
+											{m.context_window_display} · in {formatPrice(m.input_price_per_million)} / out {formatPrice(m.output_price_per_million)} per 1M
+										</div>
+									</div>
+								</button>
+							{/each}
+						</div>
+					{/if}
 				</div>
 			{/each}
 		</div>

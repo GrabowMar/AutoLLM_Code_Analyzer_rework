@@ -59,7 +59,7 @@
 			items: [
 				{ label: 'Automation', href: '/automation', icon: Zap },
 				{ label: 'Sample Generator', href: '/sample-generator', icon: WandSparkles },
-				{ label: 'Templates', href: '/sample-generator/templates', icon: Layers },
+				{ label: 'Templates', href: '/templates', icon: Layers },
 				{ label: 'Reports', href: '/reports', icon: FileText },
 			],
 		},
@@ -109,6 +109,7 @@
 		'/rankings': 'Rankings',
 		'/statistics': 'Statistics',
 		'/sample-generator': 'Sample Generator',
+		'/templates': 'Templates',
 		'/automation': 'Automation',
 		'/docs': 'Docs',
 		'/about': 'About',

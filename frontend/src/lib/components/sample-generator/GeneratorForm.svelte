@@ -252,7 +252,7 @@
 				<div class="space-y-2">
 					<button
 						type="button"
-						class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+						class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
 						onclick={() => (customShowAdvanced = !customShowAdvanced)}
 					>
 						<ChevronRight class="h-3.5 w-3.5 transition-transform duration-150 {customShowAdvanced ? 'rotate-90' : ''}" />
@@ -335,7 +335,7 @@
 							{#each scaffoldingTemplates as tpl}
 								<button
 									type="button"
-									class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition-colors
+									class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition-colors cursor-pointer
 										{selectedScaffoldId === tpl.id
 											? 'border-primary bg-primary/10 text-primary'
 											: 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
@@ -360,9 +360,9 @@
 						<div class="flex items-center justify-between">
 							<Label class="text-xs uppercase tracking-wide text-muted-foreground">Apps</Label>
 							<div class="flex items-center gap-2 text-[10px]">
-								<button type="button" class="text-primary hover:underline" onclick={selectAllApps}>All</button>
+								<button type="button" class="text-primary hover:underline cursor-pointer" onclick={selectAllApps}>All</button>
 								<span class="text-muted-foreground">·</span>
-								<button type="button" class="text-muted-foreground hover:text-foreground hover:underline" onclick={clearApps}>None</button>
+								<button type="button" class="text-muted-foreground hover:text-foreground hover:underline cursor-pointer" onclick={clearApps}>None</button>
 								{#if selectedAppIds.size > 0}
 									<Badge variant="secondary" class="ml-1 text-[9px]">{selectedAppIds.size}</Badge>
 								{/if}
@@ -372,13 +372,13 @@
 							<div class="flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
 								<button
 									type="button"
-									class="shrink-0 rounded px-2 py-0.5 text-[10px] font-medium transition-colors {categoryFilter === '' ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}"
+									class="shrink-0 rounded px-2 py-0.5 text-[10px] font-medium transition-colors cursor-pointer {categoryFilter === '' ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}"
 									onclick={() => (categoryFilter = '')}
 								>All</button>
 								{#each appCategories as cat}
 									<button
 										type="button"
-										class="shrink-0 rounded px-2 py-0.5 text-[10px] font-medium transition-colors {categoryFilter === cat ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}"
+										class="shrink-0 rounded px-2 py-0.5 text-[10px] font-medium transition-colors cursor-pointer {categoryFilter === cat ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}"
 										onclick={() => (categoryFilter = categoryFilter === cat ? '' : cat)}
 									>{cat}</button>
 								{/each}
@@ -397,7 +397,7 @@
 								{#each filteredAppTemplates as app}
 									<button
 										type="button"
-										class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted/40 {selectedAppIds.has(app.id) ? 'bg-primary/5' : ''}"
+										class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted/40 cursor-pointer {selectedAppIds.has(app.id) ? 'bg-primary/5' : ''}"
 										onclick={() => toggleAppTemplate(app.id)}
 									>
 										<div class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors {selectedAppIds.has(app.id) ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/40'}">
@@ -439,7 +439,7 @@
 				<div class="space-y-2">
 					<button
 						type="button"
-						class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+						class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
 						onclick={() => (scaffoldingShowAdvanced = !scaffoldingShowAdvanced)}
 					>
 						<ChevronRight class="h-3.5 w-3.5 transition-transform duration-150 {scaffoldingShowAdvanced ? 'rotate-90' : ''}" />
@@ -568,7 +568,7 @@
 				<div class="space-y-2">
 					<button
 						type="button"
-						class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+						class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
 						onclick={() => (copilotShowAdvanced = !copilotShowAdvanced)}
 					>
 						<ChevronRight class="h-3.5 w-3.5 transition-transform duration-150 {copilotShowAdvanced ? 'rotate-90' : ''}" />
