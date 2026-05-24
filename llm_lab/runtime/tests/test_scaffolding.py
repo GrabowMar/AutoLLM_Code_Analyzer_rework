@@ -19,12 +19,14 @@ def test_load_manifest_has_expected_stacks():
     assert "generic-python" in manifest["stacks"]
 
 
+@pytest.mark.django_db
 def test_resolve_stack_slug_alias():
     template = ScaffoldingTemplateFactory(slug="react-flask")
     job = GenerationJobFactory(scaffolding_template=template, mode="scaffolding")
     assert svc.resolve_stack_slug(job) == "flask-react"
 
 
+@pytest.mark.django_db
 def test_resolve_stack_slug_unknown_falls_back():
     template = ScaffoldingTemplateFactory(slug="vue-fastapi")
     job = GenerationJobFactory(scaffolding_template=template, mode="scaffolding")

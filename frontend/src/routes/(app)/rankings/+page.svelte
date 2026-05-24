@@ -377,7 +377,7 @@
 				<Button variant="outline" size="sm" disabled={page <= 1} onclick={() => page = Math.max(1, page - 1)}>
 					Prev
 				</Button>
-				<Button variant="outline" size="sm" disabled={page >= data.pagination.pages} onclick={() => page = Math.min(data.pagination.pages, page + 1)}>
+				<Button variant="outline" size="sm" disabled={page >= (data?.pagination.pages ?? 0)} onclick={() => page = Math.min(data?.pagination.pages ?? 1, page + 1)}>
 					Next
 				</Button>
 			</div>

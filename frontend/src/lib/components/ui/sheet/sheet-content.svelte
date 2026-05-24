@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { Dialog } from 'bits-ui';
 	import { cn } from '$lib/utils';
-	import { fly } from 'svelte/transition';
 	import X from '@lucide/svelte/icons/x';
 	import SheetOverlay from './sheet-overlay.svelte';
 
@@ -18,13 +17,6 @@
 		showClose?: boolean;
 	} = $props();
 
-	const flyParams: Record<string, { x?: number; y?: number }> = {
-		top: { y: -300 },
-		bottom: { y: 300 },
-		left: { x: -300 },
-		right: { x: 300 }
-	};
-
 	const sideClasses: Record<string, string> = {
 		top: 'inset-x-0 top-0 border-b',
 		bottom: 'inset-x-0 bottom-0 border-t',
@@ -36,8 +28,6 @@
 <Dialog.Portal>
 	<SheetOverlay />
 	<Dialog.Content
-		transition={fly}
-		transitionConfig={{ ...flyParams[side], duration: 250 }}
 		class={cn(
 			'fixed z-50 flex flex-col gap-4 bg-background p-6 shadow-lg',
 			sideClasses[side],

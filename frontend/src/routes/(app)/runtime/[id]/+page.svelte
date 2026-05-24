@@ -29,7 +29,7 @@
 	import { subscribe } from '$lib/api/sse';
 	import { toast } from 'svelte-sonner';
 
-	const containerId = page.params.id;
+	const containerId = page.params.id ?? '';
 
 	let container = $state<ContainerInstance | null>(null);
 	let logs = $state('');
