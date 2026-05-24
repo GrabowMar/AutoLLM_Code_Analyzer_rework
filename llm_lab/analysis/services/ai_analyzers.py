@@ -12,6 +12,7 @@ from django.conf import settings
 
 from llm_lab.analysis.services.base import AnalyzerOutput
 from llm_lab.analysis.services.base import BaseAnalyzer
+from llm_lab.analysis.services.base import ConfigField
 from llm_lab.analysis.services.base import FindingData
 from llm_lab.analysis.services.base import _safe_int
 from llm_lab.generation.services.openrouter_client import OpenRouterClient
@@ -161,11 +162,55 @@ class LLMReviewAnalyzer(BaseAnalyzer):
     analyzer_type: ClassVar[str] = "ai"
     display_name: ClassVar[str] = "AI Code Review"
     description: ClassVar[str] = "AI-powered comprehensive code review using large language models"
+    supports_live_target: ClassVar[bool] = False
+    supported_code_types: ClassVar[list[str]] = []
     default_config: ClassVar[dict[str, Any]] = {
         "model": "openai/gpt-4o-mini",
         "temperature": 0.2,
         "max_tokens": 8000,
     }
+    config_schema: ClassVar[list[ConfigField]] = [
+        ConfigField(
+            name="model",
+            type="string",
+            label="Model",
+            description="OpenRouter model ID to use for the review.",
+            default="openai/gpt-4o-mini",
+            placeholder="openai/gpt-4o-mini",
+        ),
+        ConfigField(
+            name="temperature",
+            type="number",
+            label="Temperature",
+            description="Sampling temperature (0 = deterministic, 2 = very creative).",
+            default=0.2,
+            min=0,
+            max=2,
+        ),
+        ConfigField(
+            name="max_tokens",
+            type="number",
+            label="Max tokens",
+            description="Maximum number of tokens in the LLM response.",
+            default=8000,
+            min=1000,
+            max=32000,
+        ),
+        ConfigField(
+            name="review_focus",
+            type="multiselect",
+            label="Review focus areas",
+            description="Limit the review to specific concern areas (leave empty for a full review).",
+            default=[],
+            options=[
+                {"value": "security", "label": "Security"},
+                {"value": "quality", "label": "Code quality"},
+                {"value": "performance", "label": "Performance"},
+                {"value": "style", "label": "Style & readability"},
+                {"value": "best_practice", "label": "Best practices"},
+            ],
+        ),
+    ]
 
     def check_available(self) -> tuple[bool, str]:
         api_key = getattr(settings, "OPENROUTER_API_KEY", None)

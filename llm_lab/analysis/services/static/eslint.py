@@ -12,6 +12,7 @@ from typing import ClassVar
 
 from llm_lab.analysis.services.base import AnalyzerOutput
 from llm_lab.analysis.services.base import BaseAnalyzer
+from llm_lab.analysis.services.base import ConfigField
 from llm_lab.analysis.services.base import FindingData
 from llm_lab.analysis.services.base import _extract_code
 from llm_lab.analysis.services.base import build_severity_counts
@@ -33,6 +34,30 @@ class ESLintAnalyzer(BaseAnalyzer):
     analyzer_type: ClassVar[str] = "static"
     display_name: ClassVar[str] = "ESLint Code Analyzer"
     description: ClassVar[str] = "Finds problems in JavaScript and TypeScript code."
+    supports_live_target: ClassVar[bool] = False
+    supported_code_types: ClassVar[list[str]] = ["frontend"]
+    config_schema: ClassVar[list[ConfigField]] = [
+        ConfigField(
+            name="env",
+            type="select",
+            label="Target environment",
+            description="JavaScript environment to assume when linting.",
+            default="browser",
+            options=[
+                {"value": "browser", "label": "Browser"},
+                {"value": "node", "label": "Node.js"},
+                {"value": "both", "label": "Browser + Node.js"},
+            ],
+        ),
+        ConfigField(
+            name="max_warnings",
+            type="number",
+            label="Max warnings",
+            description="Fail if more than this many warnings are reported (-1 to disable).",
+            default=-1,
+            min=-1,
+        ),
+    ]
 
     def check_available(self) -> tuple[bool, str]:
         try:

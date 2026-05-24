@@ -37,6 +37,7 @@
 	const cfg = $derived((data.config ?? {}) as Record<string, unknown>);
 	const analyzers = $derived(((cfg.analyzers as string[]) ?? []) as string[]);
 	const liveTarget = $derived((cfg.live_target as boolean) ?? false);
+	const profileName = $derived((cfg.profile_name as string) ?? null);
 
 	function isOn(slug: string): boolean {
 		return analyzers.includes(slug);
@@ -63,9 +64,14 @@
 			</div>
 		</div>
 	{/each}
+	{#if profileName}
+		<div class="mt-1 border-t border-current/10 pt-1">
+			<span class="text-[10px] text-blue-200">⬡ {profileName}</span>
+		</div>
+	{/if}
 	{#if liveTarget}
-		<div class="pt-1 mt-1 border-t border-current/10">
-			<span class="text-blue-300 text-[10px] uppercase tracking-wider">● Live target</span>
+		<div class="mt-1 border-t border-current/10 pt-1">
+			<span class="text-[10px] uppercase tracking-wider text-blue-300">● Live target</span>
 		</div>
 	{/if}
 </NodeShell>

@@ -12,6 +12,7 @@
 		type ScaffoldingTemplate,
 		type AppRequirementTemplate
 	} from '$lib/api/client';
+	import { getAnalysisProfiles, type AnalysisProfile } from '$lib/api/analysis';
 	import type { Edge } from '@xyflow/svelte';
 	import type { WorkflowNode } from '$lib/utils/pipeline-flow';
 
@@ -41,6 +42,7 @@
 	let models = $state<LLMModelSummary[]>([]);
 	let scaffoldingTemplates = $state<ScaffoldingTemplate[]>([]);
 	let appTemplates = $state<AppRequirementTemplate[]>([]);
+	let analysisProfiles = $state<AnalysisProfile[]>([]);
 
 	const selected = $derived(nodes.find((n) => n.id === selectedNodeId) ?? null);
 	const cfg = $derived(((selected?.data.config ?? {}) as Record<string, unknown>));
@@ -146,14 +148,16 @@
 
 	onMount(async () => {
 		try {
-			const [m, s, a] = await Promise.allSettled([
+			const [m, s, a, p] = await Promise.allSettled([
 				getModels({ per_page: 200 }),
 				getScaffoldingTemplates(),
-				getAppTemplates()
+				getAppTemplates(),
+				getAnalysisProfiles()
 			]);
 			if (m.status === 'fulfilled') models = m.value.items;
 			if (s.status === 'fulfilled') scaffoldingTemplates = s.value;
 			if (a.status === 'fulfilled') appTemplates = a.value;
+			if (p.status === 'fulfilled') analysisProfiles = p.value;
 		} catch {
 			/* ignore */
 		}
@@ -273,6 +277,32 @@
 					</div>
 
 				{:else if selected.data.kind === 'analyze'}
+					{#if analysisProfiles.length > 0}
+						<div class="space-y-1.5">
+							<Label class="text-xs">Profile</Label>
+							<select
+								value={(cfg.profile_id as number | null) ? String(cfg.profile_id) : ''}
+								onchange={(e) => {
+									const val = (e.target as HTMLSelectElement).value;
+									if (!val) {
+										updateConfig('profile_id', null);
+										updateConfig('profile_name', null);
+									} else {
+										const profile = analysisProfiles.find((p) => String(p.id) === val);
+										updateConfig('profile_id', profile?.id ?? null);
+										updateConfig('profile_name', profile?.name ?? null);
+									}
+								}}
+								class="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
+							>
+								<option value="">— No profile —</option>
+								{#each analysisProfiles as p (p.id)}
+									<option value={String(p.id)}>{p.name}{p.is_default ? ' (default)' : ''}</option>
+								{/each}
+							</select>
+							<p class="text-[10px] text-muted-foreground">Analyzer toggles below override profile defaults.</p>
+						</div>
+					{/if}
 					<div class="space-y-1.5">
 						<Label class="text-xs">Analyzers</Label>
 						<div class="flex flex-wrap gap-1.5">

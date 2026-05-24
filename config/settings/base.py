@@ -402,3 +402,6 @@ TRAEFIK_DYNAMIC_DIR = env("TRAEFIK_DYNAMIC_DIR", default="")
 # on this network WITHOUT host port binding; Traefik (also on the network)
 # reaches them by container name at port 8000.
 DOCKER_APPS_NETWORK = env("DOCKER_APPS_NETWORK", default="")
+
+# Maximum number of analyzer threads to run in parallel per analysis task.
+ANALYSIS_MAX_WORKERS = env.int("ANALYSIS_MAX_WORKERS", default=4)

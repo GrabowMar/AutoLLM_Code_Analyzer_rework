@@ -10,21 +10,31 @@ import ArrowRight from '@lucide/svelte/icons/arrow-right';
 import Check from '@lucide/svelte/icons/check';
 import Rocket from '@lucide/svelte/icons/rocket';
 import Loader from '@lucide/svelte/icons/loader-circle';
+import BookmarkCheck from '@lucide/svelte/icons/bookmark-check';
+import X from '@lucide/svelte/icons/x';
 import {
 	getAnalyzers,
-	getGenerationJobs,
+	getAnalysisProfiles,
 	createAnalysisTask,
 	type AnalyzerInfo,
-	type GenerationJobList,
-} from '$lib/api/client';
+	type AnalysisProfile,
+} from '$lib/api/analysis';
+import { getGenerationJobs, type GenerationJobList } from '$lib/api/client';
 import AnalysisTargetForm from '$lib/components/analysis/AnalysisTargetForm.svelte';
 import AnalyzerSelector from '$lib/components/analysis/AnalyzerSelector.svelte';
 import AnalysisConfigureForm from '$lib/components/analysis/AnalysisConfigureForm.svelte';
 import AnalysisReview from '$lib/components/analysis/AnalysisReview.svelte';
+import ProfileSelector from '$lib/components/analysis/ProfileSelector.svelte';
+import AnalyzerConfigForm from '$lib/components/analysis/AnalyzerConfigForm.svelte';
 
 let step = $state(1);
 const stepLabels = ['Select Source', 'Analyzers', 'Configure', 'Review'];
 
+// Profile
+let selectedProfile = $state<AnalysisProfile | null>(null);
+let appliedProfileBanner = $state(false);
+
+// Source
 type SourceMode = 'job' | 'paste';
 let sourceMode = $state<SourceMode>('job');
 let jobsLoading = $state(true);
@@ -44,15 +54,14 @@ const filteredJobs = $derived(
 			j.id.toLowerCase().includes(jobSearch.toLowerCase()),
 	),
 );
-
 const selectedJob = $derived(jobs.find((j) => j.id === selectedJobId));
-
 const hasSource = $derived(
 	sourceMode === 'job'
 		? selectedJobId !== null
 		: pasteBackend.trim().length > 0 || pasteFrontend.trim().length > 0,
 );
 
+// Analyzers
 let analyzersLoading = $state(true);
 let analyzersError = $state('');
 let analyzers = $state<AnalyzerInfo[]>([]);
@@ -64,69 +73,84 @@ function toggleAnalyzer(name: string) {
 	else next.add(name);
 	selectedAnalyzers = next;
 }
-
 function selectAllAnalyzers() {
 	selectedAnalyzers = new Set(analyzers.filter((a) => a.available).map((a) => a.name));
 }
-
 function clearAllAnalyzers() {
 	selectedAnalyzers = new Set();
 }
 
+// Configuration — typed (replaces raw JSON strings)
 let taskName = $state('');
 let autoStart = $state(true);
 let liveTarget = $state(false);
-let analyzerSettings = $state<Record<string, string>>({});
-let settingsErrors = $state<Record<string, string>>({});
-
-function getSettingsJson(analyzerName: string): Record<string, any> {
-	const raw = analyzerSettings[analyzerName];
-	if (!raw || !raw.trim()) {
-		delete settingsErrors[analyzerName];
-		return {};
-	}
-	try {
-		const parsed = JSON.parse(raw);
-		delete settingsErrors[analyzerName];
-		return parsed;
-	} catch (e: any) {
-		settingsErrors[analyzerName] = e.message || 'Invalid JSON';
-		return {};
-	}
-}
+let analyzerConfigs = $state<Record<string, Record<string, unknown>>>({});
+let thresholds = $state<Record<string, number | ''>>({});
+let expandedConfigs = $state(new Set<string>());
 
 const selectedAnalyzersList = $derived(analyzers.filter((a) => selectedAnalyzers.has(a.name)));
 
+function handleConfigChange(analyzerName: string, key: string, value: unknown) {
+	analyzerConfigs = {
+		...analyzerConfigs,
+		[analyzerName]: { ...(analyzerConfigs[analyzerName] ?? {}), [key]: value },
+	};
+}
+
+function toggleConfigExpand(name: string) {
+	const next = new Set(expandedConfigs);
+	if (next.has(name)) next.delete(name);
+	else next.add(name);
+	expandedConfigs = next;
+}
+
+const severities = ['critical', 'high', 'medium', 'low'] as const;
+
+// Apply profile
+function applyProfile(profile: AnalysisProfile | null) {
+	selectedProfile = profile;
+	if (profile) {
+		selectedAnalyzers = new Set(profile.analyzers);
+		analyzerConfigs = Object.fromEntries(
+			Object.entries(profile.settings).map(([k, v]) => [k, { ...v }])
+		);
+		appliedProfileBanner = true;
+	} else {
+		appliedProfileBanner = false;
+	}
+}
+
+// Launch
 let launching = $state(false);
 let launchError = $state('');
 
 async function handleLaunch() {
 	launching = true;
 	launchError = '';
-	const hasErrors = Object.keys(settingsErrors).some((k) => settingsErrors[k]);
-	if (hasErrors) {
-		launchError = 'Please fix JSON configuration errors before launching.';
-		launching = false;
-		return;
-	}
 	try {
-		const settingsMap: Record<string, any> = {};
-		for (const a of selectedAnalyzersList) {
-			settingsMap[a.name] = getSettingsJson(a.name);
+		// Build thresholds (only include values that are actually numbers)
+		const resolvedThresholds: Record<string, number> = {};
+		for (const [sev, val] of Object.entries(thresholds)) {
+			if (val !== '' && val !== undefined) resolvedThresholds[sev] = Number(val);
 		}
 
 		const task = await createAnalysisTask({
 			name: taskName || undefined,
-			generation_job_id: sourceMode === 'job' ? selectedJobId : undefined,
+			generation_job_id: sourceMode === 'job' ? (selectedJobId ?? undefined) : undefined,
 			source_code: sourceMode === 'paste' ? { backend: pasteBackend, frontend: pasteFrontend } : {},
 			analyzers: [...selectedAnalyzers],
-			settings: settingsMap,
+			settings: analyzerConfigs,
 			auto_start: autoStart,
 			live_target: sourceMode === 'job' && liveTarget ? true : undefined,
+			profile_id: selectedProfile?.id ?? null,
+			thresholds: Object.keys(resolvedThresholds).length ? resolvedThresholds : undefined,
 		});
 		await goto(`/analysis/${task.id}`);
 	} catch (err: any) {
-		launchError = err?.detail ?? err?.message ?? 'Failed to create analysis task';
+		const detail = err?.detail;
+		launchError = Array.isArray(detail)
+			? detail.join('; ')
+			: (detail ?? err?.message ?? 'Failed to create analysis task');
 	} finally {
 		launching = false;
 	}
@@ -191,6 +215,7 @@ const canAdvance = $derived.by(() => {
 
 	<div class="grid gap-4 sm:gap-6 lg:grid-cols-4">
 		<div class="space-y-6 lg:col-span-3">
+			<!-- Step progress -->
 			<div class="flex items-center gap-2 overflow-x-auto">
 				{#each stepLabels as label, i}
 					<button
@@ -213,6 +238,22 @@ const canAdvance = $derived.by(() => {
 			</div>
 
 			{#if step === 1}
+				<!-- Profile selector above source -->
+				<ProfileSelector
+					selectedProfileId={selectedProfile?.id ?? null}
+					onSelect={applyProfile}
+				/>
+
+				{#if appliedProfileBanner && selectedProfile}
+					<div class="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-400">
+						<BookmarkCheck class="h-4 w-4 shrink-0" />
+						<span>Profile <strong>{selectedProfile.name}</strong> applied — {selectedProfile.analyzers.length} analyzer{selectedProfile.analyzers.length !== 1 ? 's' : ''} pre-selected.</span>
+						<button class="ml-auto" onclick={() => { appliedProfileBanner = false; }}>
+							<X class="h-3.5 w-3.5" />
+						</button>
+					</div>
+				{/if}
+
 				<AnalysisTargetForm
 					{sourceMode}
 					{jobsLoading}
@@ -243,15 +284,72 @@ const canAdvance = $derived.by(() => {
 			{/if}
 
 			{#if step === 3}
+				<!-- Task-level configuration (keep AnalysisConfigureForm for name/auto-start/live-target) -->
 				<AnalysisConfigureForm
 					bind:taskName
 					bind:autoStart
 					bind:liveTarget
 					showLiveTargetOption={sourceMode === 'job' && selectedJobId !== null}
-					{selectedAnalyzersList}
-					bind:analyzerSettings
-					{settingsErrors}
 				/>
+
+				<!-- Typed per-analyzer config -->
+				{#if selectedAnalyzersList.length > 0}
+					<Card.Root>
+						<Card.Header>
+							<Card.Title class="text-sm">Analyzer Configuration</Card.Title>
+							<Card.Description>Expand any analyzer to adjust its settings.</Card.Description>
+						</Card.Header>
+						<Card.Content class="space-y-2">
+							{#each selectedAnalyzersList as analyzer}
+								<details
+									open={expandedConfigs.has(analyzer.name)}
+									class="rounded-md border border-border"
+									ontoggle={(e) => { if ((e.target as HTMLDetailsElement).open) expandedConfigs.add(analyzer.name); else expandedConfigs.delete(analyzer.name); expandedConfigs = new Set(expandedConfigs); }}
+								>
+									<summary class="flex cursor-pointer items-center justify-between px-3 py-2 text-sm font-medium hover:bg-muted/30 select-none">
+										<span>{analyzer.display_name}</span>
+										<Badge variant="outline" class="text-xs">{analyzer.type}</Badge>
+									</summary>
+									<div class="border-t border-border px-3 py-3">
+										<AnalyzerConfigForm
+											{analyzer}
+											config={analyzerConfigs[analyzer.name] ?? {}}
+											onConfigChange={(key, val) => handleConfigChange(analyzer.name, key, val)}
+										/>
+									</div>
+								</details>
+							{/each}
+						</Card.Content>
+					</Card.Root>
+				{/if}
+
+				<!-- Threshold configuration -->
+				<Card.Root>
+					<Card.Header>
+						<Card.Title class="text-sm">Pass / Fail Thresholds</Card.Title>
+						<Card.Description>Optionally fail the task if finding counts exceed these limits. Leave blank to skip.</Card.Description>
+					</Card.Header>
+					<Card.Content>
+						<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+							{#each severities as sev}
+								<div>
+									<label class="mb-1 block text-xs font-medium capitalize text-muted-foreground">{sev}</label>
+									<input
+										type="number"
+										min="0"
+										class="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+										placeholder="—"
+										value={thresholds[sev] ?? ''}
+										oninput={(e) => {
+											const v = (e.target as HTMLInputElement).value;
+											thresholds = { ...thresholds, [sev]: v === '' ? '' : Number(v) };
+										}}
+									/>
+								</div>
+							{/each}
+						</div>
+					</Card.Content>
+				</Card.Root>
 			{/if}
 
 			{#if step === 4}
@@ -266,9 +364,32 @@ const canAdvance = $derived.by(() => {
 					{liveTarget}
 					{launchError}
 				/>
+
+				{#if selectedProfile}
+					<div class="flex items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm">
+						<BookmarkCheck class="h-4 w-4 text-emerald-500" />
+						Profile: <strong>{selectedProfile.name}</strong>
+					</div>
+				{/if}
+
+				{#if Object.values(thresholds).some((v) => v !== '')}
+					<Card.Root>
+						<Card.Header class="pb-2"><Card.Title class="text-sm">Thresholds</Card.Title></Card.Header>
+						<Card.Content>
+							<div class="flex flex-wrap gap-2">
+								{#each severities as sev}
+									{#if thresholds[sev] !== '' && thresholds[sev] !== undefined}
+										<Badge variant="outline" class="text-xs capitalize">{sev} ≤ {thresholds[sev]}</Badge>
+									{/if}
+								{/each}
+							</div>
+						</Card.Content>
+					</Card.Root>
+				{/if}
 			{/if}
 		</div>
 
+		<!-- Sidebar -->
 		<div class="space-y-4">
 			<Card.Root>
 				<Card.Content class="p-4">
@@ -301,6 +422,15 @@ const canAdvance = $derived.by(() => {
 			<Card.Root>
 				<Card.Header><Card.Title class="text-sm">Selections</Card.Title></Card.Header>
 				<Card.Content class="space-y-3">
+					{#if selectedProfile}
+						<div>
+							<div class="mb-1 text-xs font-medium uppercase text-muted-foreground">Profile</div>
+							<span class="flex items-center gap-1.5 text-sm text-emerald-400">
+								<BookmarkCheck class="h-3.5 w-3.5" /> {selectedProfile.name}
+							</span>
+						</div>
+						<Separator />
+					{/if}
 					<div>
 						<div class="mb-1 text-xs font-medium uppercase text-muted-foreground">Source</div>
 						{#if sourceMode === 'job' && selectedJob}

@@ -3,9 +3,9 @@ from __future__ import annotations
 import factory
 from factory.django import DjangoModelFactory
 
+from llm_lab.analysis.models import AnalysisProfile
 from llm_lab.analysis.models import AnalysisResult
 from llm_lab.analysis.models import AnalysisTask
-from llm_lab.analysis.models import AnalyzerConfig
 from llm_lab.analysis.models import Finding
 from llm_lab.users.tests.factories import UserFactory
 
@@ -56,12 +56,13 @@ class FindingFactory(DjangoModelFactory):
     rule_id = factory.Sequence(lambda n: f"RULE-{n:03d}")
 
 
-class AnalyzerConfigFactory(DjangoModelFactory):
+class AnalysisProfileFactory(DjangoModelFactory):
     class Meta:
-        model = AnalyzerConfig
+        model = AnalysisProfile
 
-    name = factory.Sequence(lambda n: f"Config {n}")
-    analyzer_name = "bandit"
-    enabled = True
-    default_settings = {}
+    name = factory.Sequence(lambda n: f"Profile {n}")
     description = ""
+    analyzers = factory.LazyFunction(lambda: ["bandit", "eslint"])
+    settings = factory.LazyFunction(dict)
+    is_default = False
+    created_by = factory.SubFactory(UserFactory)

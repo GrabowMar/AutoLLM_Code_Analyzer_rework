@@ -1,6 +1,6 @@
 import uuid
 
-from django.conf import settings
+from django.conf import settings as django_settings
 from django.db import models
 
 
@@ -44,6 +44,27 @@ class AnalysisTask(models.Model):
         help_text="Which analyzers to run and their settings",
     )
 
+    # Optional link to the profile this task was created from
+    profile = models.ForeignKey(
+        "AnalysisProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tasks",
+    )
+
+    # Threshold evaluation result
+    class ThresholdStatus(models.TextChoices):
+        NOT_CONFIGURED = "not_configured", "Not configured"
+        PASSED = "passed", "Passed"
+        EXCEEDED = "exceeded", "Exceeded"
+
+    threshold_status = models.CharField(
+        max_length=20,
+        choices=ThresholdStatus.choices,
+        default=ThresholdStatus.NOT_CONFIGURED,
+    )
+
     # Results summary (aggregated after all analyzers finish)
     results_summary = models.JSONField(
         default=dict,
@@ -53,7 +74,7 @@ class AnalysisTask(models.Model):
 
     # Ownership and timestamps
     created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+        django_settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="analysis_tasks",
     )
@@ -210,6 +231,17 @@ class Finding(models.Model):
     )
     tool_specific_data = models.JSONField(default=dict, blank=True)
 
+    # Suppression (false-positive management)
+    suppressed = models.BooleanField(default=False)
+    suppression_reason = models.TextField(blank=True, default="")
+    suppressed_by = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="suppressed_findings",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -229,6 +261,8 @@ class Finding(models.Model):
             models.Index(fields=["severity"]),
             models.Index(fields=["category"]),
             models.Index(fields=["result", "severity"]),
+            models.Index(fields=["suppressed"]),
+            models.Index(fields=["result", "suppressed"]),
         ]
 
     def __str__(self) -> str:
@@ -236,27 +270,39 @@ class Finding(models.Model):
         return f"[{self.severity.upper()}] {self.title}{location}"
 
 
-class AnalyzerConfig(models.Model):
-    """Stored configuration for an analyzer that can be reused."""
+class AnalysisProfile(models.Model):
+    """Reusable named bundle of analyzers + settings, optionally set as default."""
 
-    name = models.CharField(max_length=200, unique=True)
-    analyzer_name = models.CharField(
-        max_length=100,
-        help_text="Analyzer identifier, e.g. 'bandit', 'eslint'",
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    analyzers = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of analyzer names to run, e.g. ['bandit', 'eslint']",
     )
-    enabled = models.BooleanField(default=True)
-    default_settings = models.JSONField(
+    settings = models.JSONField(
         default=dict,
         blank=True,
-        help_text="Default configuration for this analyzer",
+        help_text="Per-analyzer config overrides: {analyzer_name: {key: value}}",
     )
-    description = models.TextField(blank=True, default="")
+    is_default = models.BooleanField(
+        default=False,
+        help_text="Whether this is the user's default profile",
+    )
+    created_by = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="analysis_profiles",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["name"]
+        ordering = ["-is_default", "name"]
+        unique_together = [("created_by", "name")]
 
     def __str__(self) -> str:
-        status = "enabled" if self.enabled else "disabled"
-        return f"{self.name} ({self.analyzer_name}) [{status}]"
+        suffix = " [default]" if self.is_default else ""
+        return f"{self.name}{suffix}"

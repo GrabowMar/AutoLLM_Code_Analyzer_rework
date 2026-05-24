@@ -12,6 +12,7 @@ from typing import ClassVar
 
 from llm_lab.analysis.services.base import AnalyzerOutput
 from llm_lab.analysis.services.base import BaseAnalyzer
+from llm_lab.analysis.services.base import ConfigField
 from llm_lab.analysis.services.base import FindingData
 from llm_lab.analysis.services.base import _extract_code
 from llm_lab.analysis.services.base import build_severity_counts
@@ -40,6 +41,41 @@ class BanditAnalyzer(BaseAnalyzer):
     analyzer_type: ClassVar[str] = "static"
     display_name: ClassVar[str] = "Bandit Security Scanner"
     description: ClassVar[str] = "Finds common security issues in Python code."
+    supports_live_target: ClassVar[bool] = False
+    supported_code_types: ClassVar[list[str]] = ["backend"]
+    config_schema: ClassVar[list[ConfigField]] = [
+        ConfigField(
+            name="level",
+            type="select",
+            label="Severity threshold",
+            description="Only report issues at or above this severity level.",
+            default="LOW",
+            options=[
+                {"value": "LOW", "label": "Low"},
+                {"value": "MEDIUM", "label": "Medium"},
+                {"value": "HIGH", "label": "High"},
+            ],
+        ),
+        ConfigField(
+            name="confidence",
+            type="select",
+            label="Confidence threshold",
+            description="Only report issues at or above this confidence level.",
+            default="LOW",
+            options=[
+                {"value": "LOW", "label": "Low"},
+                {"value": "MEDIUM", "label": "Medium"},
+                {"value": "HIGH", "label": "High"},
+            ],
+        ),
+        ConfigField(
+            name="skip_tests",
+            type="boolean",
+            label="Skip test files",
+            description="Exclude test files from analysis.",
+            default=False,
+        ),
+    ]
 
     def check_available(self) -> tuple[bool, str]:
         try:

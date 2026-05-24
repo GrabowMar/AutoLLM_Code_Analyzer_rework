@@ -16,6 +16,9 @@ export interface AnalysisFinding {
   rule_id: string;
   tool_specific_data: Record<string, any>;
   analyzer_name: string;
+  suppressed: boolean;
+  suppression_reason: string;
+  suppressed_by_email: string | null;
   created_at: string;
 }
 
@@ -51,6 +54,7 @@ export interface AnalysisTask {
   id: string;
   name: string;
   status: string;
+  threshold_status: "not_configured" | "passed" | "exceeded";
   generation_job_id: string | null;
   source_code: Record<string, string>;
   configuration: Record<string, any>;
@@ -67,12 +71,14 @@ export interface AnalysisTask {
   updated_at: string;
   target_url: string | null;
   container_instance_id: string | null;
+  profile_id: number | null;
 }
 
 export interface AnalysisTaskList {
   id: string;
   name: string;
   status: string;
+  threshold_status: "not_configured" | "passed" | "exceeded";
   created_at: string;
   updated_at: string;
   generation_job_id: string | null;
@@ -83,6 +89,20 @@ export interface AnalysisTaskList {
   duration_seconds: number | null;
   target_url: string | null;
   container_instance_id: string | null;
+  profile_id: number | null;
+}
+
+export interface ConfigField {
+  name: string;
+  type: "string" | "number" | "boolean" | "select" | "multiselect";
+  label: string;
+  description: string;
+  default: unknown;
+  options: Array<{ value: string; label: string }>;
+  required: boolean;
+  min: number | null;
+  max: number | null;
+  placeholder: string;
 }
 
 export interface AnalyzerInfo {
@@ -93,6 +113,21 @@ export interface AnalyzerInfo {
   available: boolean;
   availability_message: string;
   default_config: Record<string, any>;
+  config_schema: ConfigField[];
+  supports_live_target: boolean;
+  supported_code_types: string[];
+}
+
+export interface AnalysisProfile {
+  id: number;
+  name: string;
+  description: string;
+  analyzers: string[];
+  settings: Record<string, Record<string, unknown>>;
+  is_default: boolean;
+  created_by_email: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface PaginatedAnalysisTasks {
@@ -124,10 +159,12 @@ export async function createAnalysisTask(data: {
   name?: string;
   generation_job_id?: string;
   source_code?: Record<string, string>;
-  analyzers: string[];
-  settings?: Record<string, any>;
+  analyzers?: string[];
+  settings?: Record<string, Record<string, unknown>>;
   auto_start?: boolean;
   live_target?: boolean;
+  profile_id?: number | null;
+  thresholds?: Record<string, number>;
 }): Promise<AnalysisTask> {
   const res = await apiFetch("/analysis/tasks/", {
     method: "POST",
@@ -153,6 +190,8 @@ export async function getAnalysisFindings(
     severity?: string;
     category?: string;
     analyzer?: string;
+    file_path?: string;
+    include_suppressed?: boolean;
   },
 ): Promise<PaginatedFindings> {
   const searchParams = new URLSearchParams();
@@ -161,10 +200,81 @@ export async function getAnalysisFindings(
   if (params?.severity) searchParams.set("severity", params.severity);
   if (params?.category) searchParams.set("category", params.category);
   if (params?.analyzer) searchParams.set("analyzer", params.analyzer);
+  if (params?.file_path) searchParams.set("file_path", params.file_path);
+  if (params?.include_suppressed)
+    searchParams.set("include_suppressed", "true");
   const qs = searchParams.toString();
   const res = await apiFetch(
     `/analysis/tasks/${taskId}/findings/${qs ? "?" + qs : ""}`,
   );
+  return res.json();
+}
+
+export async function suppressFinding(
+  taskId: string,
+  findingId: number,
+  reason: string = "",
+): Promise<AnalysisFinding> {
+  const res = await apiFetch(
+    `/analysis/tasks/${taskId}/findings/${findingId}/suppress/`,
+    { method: "POST", body: JSON.stringify({ reason }) },
+  );
+  return res.json();
+}
+
+export async function unsuppressFinding(
+  taskId: string,
+  findingId: number,
+): Promise<AnalysisFinding> {
+  const res = await apiFetch(
+    `/analysis/tasks/${taskId}/findings/${findingId}/unsuppress/`,
+    { method: "POST" },
+  );
+  return res.json();
+}
+
+export async function getAnalysisProfiles(): Promise<AnalysisProfile[]> {
+  const res = await apiFetch("/analysis/profiles/");
+  return res.json();
+}
+
+export async function createAnalysisProfile(data: {
+  name: string;
+  description?: string;
+  analyzers: string[];
+  settings?: Record<string, Record<string, unknown>>;
+  is_default?: boolean;
+}): Promise<AnalysisProfile> {
+  const res = await apiFetch("/analysis/profiles/", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function updateAnalysisProfile(
+  id: number,
+  data: {
+    name: string;
+    description?: string;
+    analyzers: string[];
+    settings?: Record<string, Record<string, unknown>>;
+    is_default?: boolean;
+  },
+): Promise<AnalysisProfile> {
+  const res = await apiFetch(`/analysis/profiles/${id}/`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function deleteAnalysisProfile(
+  id: number,
+): Promise<{ success: boolean }> {
+  const res = await apiFetch(`/analysis/profiles/${id}/`, {
+    method: "DELETE",
+  });
   return res.json();
 }
 

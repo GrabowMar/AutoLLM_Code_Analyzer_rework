@@ -14,6 +14,7 @@ from typing import ClassVar
 
 from llm_lab.analysis.services.base import AnalyzerOutput
 from llm_lab.analysis.services.base import BaseAnalyzer
+from llm_lab.analysis.services.base import ConfigField
 from llm_lab.analysis.services.base import FindingData
 from llm_lab.analysis.services.base import validate_target_url
 
@@ -37,6 +38,30 @@ class LighthouseAnalyzer(BaseAnalyzer):
     description: ClassVar[str] = (
         "Analyzes web application performance, accessibility, best practices, and SEO using Google Lighthouse"
     )
+    supports_live_target: ClassVar[bool] = True
+    supported_code_types: ClassVar[list[str]] = ["frontend"]
+    config_schema: ClassVar[list[ConfigField]] = [
+        ConfigField(
+            name="categories",
+            type="multiselect",
+            label="Audit categories",
+            description="Which Lighthouse audit categories to run.",
+            default=["performance", "accessibility", "best-practices", "seo"],
+            options=[
+                {"value": "performance", "label": "Performance"},
+                {"value": "accessibility", "label": "Accessibility"},
+                {"value": "best-practices", "label": "Best Practices"},
+                {"value": "seo", "label": "SEO"},
+            ],
+        ),
+        ConfigField(
+            name="throttling",
+            type="boolean",
+            label="Apply network throttling",
+            description="Simulate slow 4G network conditions during the audit.",
+            default=True,
+        ),
+    ]
 
     def check_available(self) -> tuple[bool, str]:
         if shutil.which("npx"):

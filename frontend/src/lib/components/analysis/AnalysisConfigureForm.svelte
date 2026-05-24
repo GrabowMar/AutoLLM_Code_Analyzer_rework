@@ -8,9 +8,9 @@ interface Props {
 	autoStart: boolean;
 	liveTarget: boolean;
 	showLiveTargetOption: boolean;
-	selectedAnalyzersList: AnalyzerInfo[];
-	analyzerSettings: Record<string, string>;
-	settingsErrors: Record<string, string>;
+	selectedAnalyzersList?: AnalyzerInfo[];
+	analyzerSettings?: Record<string, string>;
+	settingsErrors?: Record<string, string>;
 }
 
 let {
@@ -18,9 +18,9 @@ let {
 	autoStart = $bindable(),
 	liveTarget = $bindable(),
 	showLiveTargetOption,
-	selectedAnalyzersList,
-	analyzerSettings = $bindable(),
-	settingsErrors,
+	selectedAnalyzersList = [],
+	analyzerSettings = $bindable({}),
+	settingsErrors = {},
 }: Props = $props();
 </script>
 

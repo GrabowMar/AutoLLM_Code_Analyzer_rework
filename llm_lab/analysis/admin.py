@@ -1,8 +1,8 @@
 from django.contrib import admin
 
+from .models import AnalysisProfile
 from .models import AnalysisResult
 from .models import AnalysisTask
-from .models import AnalyzerConfig
 from .models import Finding
 
 
@@ -55,8 +55,8 @@ class FindingAdmin(admin.ModelAdmin):
     search_fields = ["title", "description", "rule_id", "file_path"]
 
 
-@admin.register(AnalyzerConfig)
-class AnalyzerConfigAdmin(admin.ModelAdmin):
-    list_display = ["name", "analyzer_name", "enabled", "created_at", "updated_at"]
-    list_filter = ["enabled", "analyzer_name"]
-    search_fields = ["name", "analyzer_name"]
+@admin.register(AnalysisProfile)
+class AnalysisProfileAdmin(admin.ModelAdmin):
+    list_display = ["name", "created_by", "is_default", "created_at", "updated_at"]
+    list_filter = ["is_default"]
+    search_fields = ["name", "description"]

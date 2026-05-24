@@ -12,6 +12,7 @@ from typing import ClassVar
 
 from llm_lab.analysis.services.base import AnalyzerOutput
 from llm_lab.analysis.services.base import BaseAnalyzer
+from llm_lab.analysis.services.base import ConfigField
 from llm_lab.analysis.services.base import FindingData
 from llm_lab.analysis.services.base import _extract_code
 from llm_lab.analysis.services.base import build_severity_counts
@@ -44,6 +45,34 @@ class PylintAnalyzer(BaseAnalyzer):
     analyzer_type: ClassVar[str] = "static"
     display_name: ClassVar[str] = "Pylint Code Quality Analyzer"
     description: ClassVar[str] = "Checks Python code for errors, style, and quality issues."
+    supports_live_target: ClassVar[bool] = False
+    supported_code_types: ClassVar[list[str]] = ["backend"]
+    config_schema: ClassVar[list[ConfigField]] = [
+        ConfigField(
+            name="disable",
+            type="multiselect",
+            label="Disable message codes",
+            description="Pylint message codes to suppress (e.g. C0114 for missing module docstring).",
+            default=[],
+            options=[
+                {"value": "C0114", "label": "C0114 — missing-module-docstring"},
+                {"value": "C0115", "label": "C0115 — missing-class-docstring"},
+                {"value": "C0116", "label": "C0116 — missing-function-docstring"},
+                {"value": "R0903", "label": "R0903 — too-few-public-methods"},
+                {"value": "W0611", "label": "W0611 — unused-import"},
+                {"value": "W0613", "label": "W0613 — unused-argument"},
+            ],
+        ),
+        ConfigField(
+            name="fail_under",
+            type="number",
+            label="Fail under score",
+            description="Fail if the Pylint score is below this value (0-10, 0 to disable).",
+            default=0,
+            min=0,
+            max=10,
+        ),
+    ]
 
     def check_available(self) -> tuple[bool, str]:
         try:

@@ -6,9 +6,9 @@ from django.db import IntegrityError
 from llm_lab.analysis.models import AnalysisResult
 from llm_lab.analysis.models import AnalysisTask
 from llm_lab.analysis.models import Finding
+from llm_lab.analysis.tests.factories import AnalysisProfileFactory
 from llm_lab.analysis.tests.factories import AnalysisResultFactory
 from llm_lab.analysis.tests.factories import AnalysisTaskFactory
-from llm_lab.analysis.tests.factories import AnalyzerConfigFactory
 from llm_lab.analysis.tests.factories import FindingFactory
 from llm_lab.generation.tests.factories import GenerationJobFactory
 
@@ -121,24 +121,16 @@ class TestFinding:
         assert findings[2].severity == "low"
 
 
-class TestAnalyzerConfig:
+class TestAnalysisProfile:
     def test_str(self):
-        config = AnalyzerConfigFactory(
-            name="Bandit Config",
-            analyzer_name="bandit",
-            enabled=True,
-        )
-        assert str(config) == "Bandit Config (bandit) [enabled]"
+        profile = AnalysisProfileFactory(name="Security Scan", is_default=False)
+        assert str(profile) == "Security Scan"
 
-    def test_str_disabled(self):
-        config = AnalyzerConfigFactory(
-            name="Disabled Config",
-            analyzer_name="eslint",
-            enabled=False,
-        )
-        assert str(config) == "Disabled Config (eslint) [disabled]"
+    def test_str_default(self):
+        profile = AnalysisProfileFactory(name="Default Profile", is_default=True)
+        assert str(profile) == "Default Profile [default]"
 
-    def test_unique_name(self):
-        AnalyzerConfigFactory(name="unique-name")
+    def test_unique_name_per_user(self):
+        p1 = AnalysisProfileFactory(name="unique-profile")
         with pytest.raises(IntegrityError):
-            AnalyzerConfigFactory(name="unique-name")
+            AnalysisProfileFactory(name="unique-profile", created_by=p1.created_by)

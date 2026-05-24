@@ -183,13 +183,14 @@ class ResultService:
     ) -> dict[str, Any]:
         """Compute aggregate summary from all results."""
         results = task.results.all()
-        all_findings = Finding.objects.filter(result__task=task)
+        active_findings = Finding.objects.filter(result__task=task, suppressed=False)
+        suppressed_count = Finding.objects.filter(result__task=task, suppressed=True).count()
 
         severity_counts = Counter(
-            all_findings.values_list("severity", flat=True),
+            active_findings.values_list("severity", flat=True),
         )
         category_counts = Counter(
-            all_findings.values_list("category", flat=True),
+            active_findings.values_list("category", flat=True),
         )
 
         by_severity: dict[str, int] = {s.value: severity_counts.get(s.value, 0) for s in Finding.Severity}
@@ -199,7 +200,7 @@ class ResultService:
         failed = 0
         by_analyzer: dict[str, dict[str, Any]] = {}
         for r in results:
-            finding_count = r.findings.count()
+            finding_count = r.findings.filter(suppressed=False).count()
             by_analyzer[r.analyzer_name] = {
                 "status": r.status,
                 "findings": finding_count,
@@ -211,7 +212,8 @@ class ResultService:
                 failed += 1
 
         return {
-            "total_findings": all_findings.count(),
+            "total_findings": active_findings.count(),
+            "suppressed_count": suppressed_count,
             "by_severity": by_severity,
             "by_category": by_category,
             "by_analyzer": by_analyzer,
@@ -239,6 +241,17 @@ class ResultService:
         else:
             task.status = AnalysisTask.Status.PARTIAL
 
+        # Evaluate thresholds against active (non-suppressed) finding counts
+        thresholds = task.configuration.get("thresholds", {})
+        if thresholds:
+            by_severity = task.results_summary.get("by_severity", {})
+            exceeded = any(by_severity.get(sev, 0) > limit for sev, limit in thresholds.items() if limit is not None)
+            task.threshold_status = (
+                AnalysisTask.ThresholdStatus.EXCEEDED if exceeded else AnalysisTask.ThresholdStatus.PASSED
+            )
+        else:
+            task.threshold_status = AnalysisTask.ThresholdStatus.NOT_CONFIGURED
+
         task.completed_at = timezone.now()
         if task.started_at:
             task.duration_seconds = _compute_duration(
@@ -248,6 +261,7 @@ class ResultService:
         task.save(
             update_fields=[
                 "status",
+                "threshold_status",
                 "results_summary",
                 "completed_at",
                 "duration_seconds",
@@ -265,6 +279,7 @@ class ResultService:
             {
                 "type": "status",
                 "status": task.status,
+                "threshold_status": task.threshold_status,
                 "updated_at": task.completed_at.isoformat() if task.completed_at else None,
             },
         )

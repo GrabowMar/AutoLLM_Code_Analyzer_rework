@@ -104,6 +104,7 @@ def dispatch_analyze(
     """Create an AnalysisTask and run it synchronously, return output."""
     import threading
 
+    from llm_lab.analysis.models import AnalysisProfile
     from llm_lab.analysis.models import AnalysisTask
     from llm_lab.analysis.services.analysis_service import AnalysisService
     from llm_lab.users.models import User
@@ -115,14 +116,29 @@ def dispatch_analyze(
         "generation_job_id",
     )
     source_code = params.get("source_code")
-    analyzers = params.get("analyzers", ["static"])
     target_url = params.get("target_url") or run_params.get("target_url")
+
+    # Resolve profile if provided; merge its analyzers/settings with explicit overrides
+    profile_id = params.get("profile_id")
+    profile = None
+    if profile_id:
+        profile = AnalysisProfile.objects.filter(id=profile_id).first()
+
+    if profile:
+        analyzers = params.get("analyzers") or profile.analyzers
+        merged_settings: dict[str, Any] = {k: dict(v) for k, v in profile.settings.items()}
+        for name, overrides in params.get("settings", {}).items():
+            merged_settings.setdefault(name, {}).update(overrides)
+    else:
+        analyzers = params.get("analyzers", [])
+        merged_settings = params.get("settings", {})
 
     configuration: dict[str, Any] = {
         "analyzers": analyzers,
-        "settings": params.get("settings", {}),
+        "settings": merged_settings,
         "live_target": target_url,
         "generation_job_id": str(generation_job_id) if generation_job_id else None,
+        "thresholds": params.get("thresholds", {}),
     }
 
     task = AnalysisTask.objects.create(
@@ -130,6 +146,7 @@ def dispatch_analyze(
         generation_job_id=generation_job_id,
         source_code=source_code,
         configuration=configuration,
+        profile=profile,
         created_by=user,
     )
 
@@ -159,6 +176,7 @@ def dispatch_analyze(
     output: dict[str, Any] = {
         "analysis_task_id": str(task.id),
         "status": task.status,
+        "threshold_status": task.threshold_status,
     }
     if exc_holder:
         output["error"] = str(exc_holder[0])

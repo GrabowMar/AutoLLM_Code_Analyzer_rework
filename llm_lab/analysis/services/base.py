@@ -11,6 +11,7 @@ from dataclasses import field
 from pathlib import Path
 from typing import Any
 from typing import ClassVar
+from typing import Literal
 
 from llm_lab.common.security import validate_target_url  # re-export
 
@@ -109,6 +110,36 @@ class AnalyzerOutput:
         return counts
 
 
+@dataclass
+class ConfigField:
+    """Describes one configurable field on an analyzer."""
+
+    name: str
+    type: Literal["string", "number", "boolean", "select", "multiselect"]
+    label: str
+    description: str = ""
+    default: Any = None
+    options: list[dict[str, str]] = field(default_factory=list)  # [{value, label}]
+    required: bool = False
+    min: float | None = None
+    max: float | None = None
+    placeholder: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "type": self.type,
+            "label": self.label,
+            "description": self.description,
+            "default": self.default,
+            "options": self.options,
+            "required": self.required,
+            "min": self.min,
+            "max": self.max,
+            "placeholder": self.placeholder,
+        }
+
+
 class BaseAnalyzer(ABC):
     """Abstract base class for all analyzers.
 
@@ -124,6 +155,9 @@ class BaseAnalyzer(ABC):
     display_name: ClassVar[str]  # "Bandit Security Scanner"
     description: ClassVar[str] = ""
     default_config: ClassVar[dict[str, Any]] = {}
+    config_schema: ClassVar[list[ConfigField]] = []
+    supports_live_target: ClassVar[bool] = False
+    supported_code_types: ClassVar[list[str]] = []
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -167,6 +201,9 @@ class BaseAnalyzer(ABC):
             "available": available,
             "availability_message": message,
             "default_config": self.default_config,
+            "config_schema": [f.to_dict() for f in self.config_schema],
+            "supports_live_target": self.supports_live_target,
+            "supported_code_types": self.supported_code_types,
         }
 
 

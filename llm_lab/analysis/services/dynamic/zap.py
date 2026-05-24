@@ -13,6 +13,7 @@ from typing import ClassVar
 
 from llm_lab.analysis.services.base import AnalyzerOutput
 from llm_lab.analysis.services.base import BaseAnalyzer
+from llm_lab.analysis.services.base import ConfigField
 from llm_lab.analysis.services.base import FindingData
 from llm_lab.analysis.services.base import _safe_int
 from llm_lab.analysis.services.base import build_severity_counts
@@ -129,6 +130,32 @@ class ZAPAnalyzer(BaseAnalyzer):
     analyzer_type: ClassVar[str] = "dynamic"
     display_name: ClassVar[str] = "OWASP ZAP Security Scanner"
     description: ClassVar[str] = "Scans web applications for security vulnerabilities using OWASP ZAP baseline scan"
+    supports_live_target: ClassVar[bool] = True
+    supported_code_types: ClassVar[list[str]] = []
+    config_schema: ClassVar[list[ConfigField]] = [
+        ConfigField(
+            name="scan_timeout_seconds",
+            type="number",
+            label="Scan timeout (seconds)",
+            description="Maximum time to wait for the ZAP scan to complete.",
+            default=120,
+            min=30,
+            max=600,
+        ),
+        ConfigField(
+            name="alert_filter",
+            type="select",
+            label="Alert severity filter",
+            description="Only report alerts at or above this risk level.",
+            default="all",
+            options=[
+                {"value": "all", "label": "All (Info and above)"},
+                {"value": "low", "label": "Low and above"},
+                {"value": "medium", "label": "Medium and above"},
+                {"value": "high", "label": "High only"},
+            ],
+        ),
+    ]
 
     def check_available(self) -> tuple[bool, str]:
         if shutil.which("docker") is None:

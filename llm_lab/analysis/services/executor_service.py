@@ -8,6 +8,7 @@ from concurrent.futures import as_completed
 from typing import TYPE_CHECKING
 from typing import Any
 
+from django.conf import settings
 from django.utils import timezone
 
 from llm_lab.analysis.models import AnalysisResult
@@ -23,7 +24,9 @@ logger = logging.getLogger(__name__)
 class ExecutorService:
     """Manages parallel analyzer execution via thread pool."""
 
-    MAX_WORKERS = 4
+    @property
+    def max_workers(self) -> int:
+        return getattr(settings, "ANALYSIS_MAX_WORKERS", 4)
 
     def __init__(self, result_service: ResultService) -> None:
         self.result_service = result_service
@@ -42,7 +45,7 @@ class ExecutorService:
         """Run all analyzers in parallel using ThreadPoolExecutor."""
         if not runnable:
             return
-        workers = min(self.MAX_WORKERS, len(runnable))
+        workers = min(self.max_workers, len(runnable))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
                 pool.submit(

@@ -10,6 +10,7 @@ from typing import ClassVar
 
 from llm_lab.analysis.services.base import AnalyzerOutput
 from llm_lab.analysis.services.base import BaseAnalyzer
+from llm_lab.analysis.services.base import ConfigField
 from llm_lab.analysis.services.base import FindingData
 from llm_lab.analysis.services.base import build_severity_counts
 from llm_lab.analysis.services.dynamic._common import _slug
@@ -80,6 +81,40 @@ class PortScanAnalyzer(BaseAnalyzer):
     analyzer_type: ClassVar[str] = "dynamic"
     display_name: ClassVar[str] = "Port Scanner"
     description: ClassVar[str] = "Scans for open ports and identifies potentially dangerous exposed services"
+    supports_live_target: ClassVar[bool] = True
+    supported_code_types: ClassVar[list[str]] = []
+    config_schema: ClassVar[list[ConfigField]] = [
+        ConfigField(
+            name="ports",
+            type="multiselect",
+            label="Ports to scan",
+            description="Select which ports to check when scanning a live target.",
+            default=[],
+            options=[
+                {"value": "21", "label": "21 — FTP"},
+                {"value": "22", "label": "22 — SSH"},
+                {"value": "23", "label": "23 — Telnet"},
+                {"value": "25", "label": "25 — SMTP"},
+                {"value": "53", "label": "53 — DNS"},
+                {"value": "80", "label": "80 — HTTP"},
+                {"value": "443", "label": "443 — HTTPS"},
+                {"value": "3306", "label": "3306 — MySQL"},
+                {"value": "5432", "label": "5432 — PostgreSQL"},
+                {"value": "6379", "label": "6379 — Redis"},
+                {"value": "8080", "label": "8080 — HTTP alt"},
+                {"value": "27017", "label": "27017 — MongoDB"},
+            ],
+        ),
+        ConfigField(
+            name="timeout",
+            type="number",
+            label="Connection timeout (seconds)",
+            description="Seconds to wait per port when probing.",
+            default=1,
+            min=0.1,
+            max=10,
+        ),
+    ]
 
     def check_available(self) -> tuple[bool, str]:
         return True, "Available (uses Python built-in socket module)"
