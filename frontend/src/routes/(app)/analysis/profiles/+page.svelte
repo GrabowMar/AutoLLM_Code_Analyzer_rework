@@ -186,8 +186,9 @@ const selectedAnalyzerInfos = $derived(
 			<!-- Name & Description -->
 			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 				<div>
-					<label class="mb-1 block text-sm font-medium">Name *</label>
+					<label for="profileName" class="mb-1 block text-sm font-medium">Name *</label>
 					<input
+						id="profileName"
 						type="text"
 						class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
 						placeholder="e.g. Quick Security Scan"
@@ -202,8 +203,9 @@ const selectedAnalyzerInfos = $derived(
 				</div>
 			</div>
 			<div>
-				<label class="mb-1 block text-sm font-medium">Description</label>
+				<label for="profileDescription" class="mb-1 block text-sm font-medium">Description</label>
 				<input
+					id="profileDescription"
 					type="text"
 					class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
 					placeholder="Optional description…"

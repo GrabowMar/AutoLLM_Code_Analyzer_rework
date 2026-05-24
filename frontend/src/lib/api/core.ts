@@ -166,7 +166,9 @@ export async function allauthFetch(
   options: RequestInit = {},
 ): Promise<Response> {
   const method = (options.method || "GET").toUpperCase();
-  await ensureCsrfCookie();
+  if (method !== "GET" && method !== "HEAD") {
+    await ensureCsrfCookie();
+  }
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),

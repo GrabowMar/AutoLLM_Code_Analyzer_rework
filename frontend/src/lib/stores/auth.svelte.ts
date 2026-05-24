@@ -46,7 +46,6 @@ function createAuth() {
     const generation = ++sessionCheckGeneration;
     isLoading = true;
     try {
-      await ensureCsrfCookie();
       const res = await fetch(`${ALLAUTH_BASE}/auth/session`, {
         credentials: "include",
       });

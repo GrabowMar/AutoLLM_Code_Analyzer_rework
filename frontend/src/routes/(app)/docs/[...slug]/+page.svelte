@@ -48,7 +48,7 @@
 	});
 
 	$effect(() => {
-		loadDoc($page.params.slug);
+		loadDoc($page.params.slug ?? '');
 	});
 
 	function formatDate(ts: number) {

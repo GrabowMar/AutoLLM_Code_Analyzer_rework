@@ -16,7 +16,6 @@
 
 		void (async () => {
 			try {
-				await ensureCsrfCookie();
 				await auth.checkSession();
 			} catch (err) {
 				if (import.meta.env.DEV) {
@@ -29,9 +28,6 @@
 
 <svelte:head>
 	<title>LLM Lab</title>
-	<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-	<meta http-equiv="Pragma" content="no-cache" />
-	<meta http-equiv="Expires" content="0" />
 </svelte:head>
 
 <ModeWatcher defaultMode="dark" />

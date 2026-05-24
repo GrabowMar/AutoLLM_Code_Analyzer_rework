@@ -25,7 +25,7 @@
 
 	async function load() {
 		try {
-			report = await getReport(page.params.id);
+			report = await getReport(page.params.id ?? '');
 			error = '';
 		} catch (e) {
 			error = (e as Error)?.message || 'Failed to load report';

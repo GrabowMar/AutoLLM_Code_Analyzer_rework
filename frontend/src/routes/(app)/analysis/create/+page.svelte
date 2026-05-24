@@ -333,8 +333,14 @@ const canAdvance = $derived.by(() => {
 						<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
 							{#each severities as sev}
 								<div>
-									<label class="mb-1 block text-xs font-medium capitalize text-muted-foreground">{sev}</label>
+									<label
+										for="threshold-{sev}"
+										class="mb-1 block text-xs font-medium capitalize text-muted-foreground"
+									>
+										{sev}
+									</label>
 									<input
+										id="threshold-{sev}"
 										type="number"
 										min="0"
 										class="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"

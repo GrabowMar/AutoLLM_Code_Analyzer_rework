@@ -19,12 +19,7 @@ import { Marked } from "marked";
 import markedAlert from "marked-alert";
 import { gfmHeadingId } from "marked-gfm-heading-id";
 import DOMPurify from "dompurify";
-import { createHighlighter, type Highlighter } from "shiki";
-import {
-  transformerNotationDiff,
-  transformerNotationHighlight,
-  transformerNotationFocus,
-} from "@shikijs/transformers";
+import type { Highlighter } from "shiki";
 
 export interface Heading {
   id: string;
@@ -84,13 +79,35 @@ const LANG_ALIASES: Record<string, string> = {
   md: "markdown",
 };
 
-let _highlighterPromise: Promise<Highlighter> | null = null;
+let _highlighterPromise: Promise<{
+  highlighter: Highlighter;
+  transformerNotationDiff: any;
+  transformerNotationHighlight: any;
+  transformerNotationFocus: any;
+}> | null = null;
 
-function getHighlighter(): Promise<Highlighter> {
+function getHighlighter(): Promise<{
+  highlighter: Highlighter;
+  transformerNotationDiff: any;
+  transformerNotationHighlight: any;
+  transformerNotationFocus: any;
+}> {
   if (!_highlighterPromise) {
-    _highlighterPromise = createHighlighter({
-      themes: ["github-light", "github-dark"],
-      langs: SHIKI_LANGS,
+    _highlighterPromise = Promise.all([
+      import("shiki"),
+      import("@shikijs/transformers"),
+    ]).then(([shiki, transformers]) => {
+      return shiki.createHighlighter({
+        themes: ["github-light", "github-dark"],
+        langs: SHIKI_LANGS,
+      }).then((highlighter) => {
+        return {
+          highlighter,
+          transformerNotationDiff: transformers.transformerNotationDiff,
+          transformerNotationHighlight: transformers.transformerNotationHighlight,
+          transformerNotationFocus: transformers.transformerNotationFocus,
+        };
+      });
     });
   }
   return _highlighterPromise;
@@ -171,7 +188,12 @@ function parseCodeMeta(rawLang: string): CodeMeta {
 
 /** Render markdown to sanitized HTML. */
 export async function renderMarkdown(raw: string): Promise<RenderedDoc> {
-  const highlighter = await getHighlighter();
+  const {
+    highlighter,
+    transformerNotationDiff,
+    transformerNotationHighlight,
+    transformerNotationFocus,
+  } = await getHighlighter();
 
   const marked = new Marked({
     gfm: true,

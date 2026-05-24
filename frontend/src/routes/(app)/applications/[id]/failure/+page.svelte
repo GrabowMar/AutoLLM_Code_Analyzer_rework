@@ -29,7 +29,7 @@ import Layers from '@lucide/svelte/icons/layers';
 import Pencil from '@lucide/svelte/icons/pencil';
 import Shield from '@lucide/svelte/icons/shield';
 
-const jobId = $derived($page.params.id);
+const jobId = $derived($page.params.id ?? '');
 let loading = $state(true);
 let job = $state<GenerationJob | null>(null);
 let artifacts = $state<GenerationArtifact[]>([]);
