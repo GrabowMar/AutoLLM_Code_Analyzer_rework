@@ -131,14 +131,71 @@ def test_validate_dsl_duplicate_step_id() -> None:
 
 
 @pytest.mark.django_db
-def test_validate_dsl_script_missing_code() -> None:
+def test_validate_dsl_script_no_required_config() -> None:
+    """Script steps default to noop in the dispatcher; nothing is required at validation."""
     config = {
         "steps": [
             {"id": "s1", "name": "S", "kind": "script", "config": {}, "depends_on": []},
         ],
     }
     errors = validate_pipeline_dsl(config)
-    assert any("code" in e for e in errors)
+    assert errors == []
+
+
+@pytest.mark.django_db
+def test_validate_dsl_unknown_kind() -> None:
+    config = {
+        "steps": [
+            {"name": "x", "kind": "magic", "config": {}, "depends_on": []},
+        ],
+    }
+    errors = validate_pipeline_dsl(config)
+    assert any("unknown kind" in e for e in errors)
+
+
+@pytest.mark.django_db
+def test_validate_dsl_depends_on_by_name() -> None:
+    """The visual editor stores depends_on as step names — must be accepted."""
+    config = {
+        "steps": [
+            {
+                "name": "gen",
+                "kind": "generate",
+                "config": {"model_id": "x", "template_slug": "y"},
+                "depends_on": [],
+            },
+            {
+                "name": "analyze",
+                "kind": "analyze",
+                "config": {"analyzers": ["bandit"]},
+                "depends_on": ["gen"],
+            },
+        ],
+    }
+    errors = validate_pipeline_dsl(config)
+    assert errors == []
+
+
+@pytest.mark.django_db
+def test_validate_dsl_duplicate_step_name() -> None:
+    config = {
+        "steps": [
+            {
+                "name": "step_1",
+                "kind": "generate",
+                "config": {"model_id": "x", "template_slug": "y"},
+                "depends_on": [],
+            },
+            {
+                "name": "step_1",
+                "kind": "wait",
+                "config": {"seconds": 5},
+                "depends_on": [],
+            },
+        ],
+    }
+    errors = validate_pipeline_dsl(config)
+    assert any("duplicate step name" in e for e in errors)
 
 
 @pytest.mark.django_db

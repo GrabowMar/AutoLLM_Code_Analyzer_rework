@@ -1,285 +1,225 @@
 <script lang="ts">
-import { onMount } from 'svelte';
-import { goto } from '$app/navigation';
-import * as Card from '$lib/components/ui/card';
-import { Badge } from '$lib/components/ui/badge';
-import { Button } from '$lib/components/ui/button';
-import { Input } from '$lib/components/ui/input';
-import Plus from '@lucide/svelte/icons/plus';
-import Eye from '@lucide/svelte/icons/eye';
-import Edit from '@lucide/svelte/icons/pencil';
-import Copy from '@lucide/svelte/icons/copy';
-import Trash2 from '@lucide/svelte/icons/trash-2';
-import Play from '@lucide/svelte/icons/play';
-import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-import Calendar from '@lucide/svelte/icons/calendar';
-import Layers from '@lucide/svelte/icons/layers';
-import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-import ChevronLeft from '@lucide/svelte/icons/chevron-left';
-import ChevronRight from '@lucide/svelte/icons/chevron-right';
-import {
-listPipelines,
-deletePipeline,
-clonePipeline,
-triggerPipelineRun,
-type PipelineListItem
-} from '$lib/api/client';
+	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
+	import Plus from '@lucide/svelte/icons/plus';
+	import Eye from '@lucide/svelte/icons/eye';
+	import Edit from '@lucide/svelte/icons/pencil';
+	import Copy from '@lucide/svelte/icons/copy';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import Play from '@lucide/svelte/icons/play';
+	import Workflow from '@lucide/svelte/icons/workflow';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import Search from '@lucide/svelte/icons/search';
+	import {
+		listPipelines,
+		deletePipeline,
+		clonePipeline,
+		triggerPipelineRun,
+		type PipelineListItem
+	} from '$lib/api/client';
 
-let pipelines = $state<PipelineListItem[]>([]);
-let total = $state(0);
-let page = $state(1);
-let pages = $state(1);
-let loading = $state(true);
-let error = $state('');
-let search = $state('');
-let statusFilter = $state('');
+	let pipelines = $state<PipelineListItem[]>([]);
+	let total = $state(0);
+	let page = $state(1);
+	let pages = $state(1);
+	let loading = $state(true);
+	let error = $state('');
+	let search = $state('');
+	let statusFilter = $state('');
 
-const statusColors: Record<string, string> = {
-draft: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
-active: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
-archived: 'bg-orange-500/15 text-orange-400 border-orange-500/30'
-};
+	const statusColors: Record<string, string> = {
+		draft: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
+		active: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
+		archived: 'bg-orange-500/15 text-orange-400 border-orange-500/30'
+	};
 
-async function load() {
-loading = true;
-error = '';
-try {
-const res = await listPipelines({
-page,
-per_page: 20,
-search: search || undefined,
-status: statusFilter || undefined
-});
-pipelines = res.items;
-total = res.total;
-pages = res.pages;
-} catch (e) {
-error = (e as Error)?.message || 'Failed to load pipelines';
-} finally {
-loading = false;
-}
-}
+	async function load() {
+		loading = true;
+		error = '';
+		try {
+			const res = await listPipelines({
+				page,
+				per_page: 20,
+				search: search || undefined,
+				status: statusFilter || undefined
+			});
+			pipelines = res.items;
+			total = res.total;
+			pages = res.pages;
+		} catch (e) {
+			error = (e as Error)?.message || 'Failed to load workflows';
+		} finally {
+			loading = false;
+		}
+	}
 
-async function remove(id: string) {
-if (!confirm('Delete this pipeline?')) return;
-try {
-await deletePipeline(id);
-await load();
-} catch (e) {
-alert('Failed to delete pipeline');
-}
-}
+	async function remove(id: string, evt: Event) {
+		evt.stopPropagation();
+		if (!confirm('Delete this workflow?')) return;
+		try {
+			await deletePipeline(id);
+			await load();
+		} catch {
+			alert('Failed to delete workflow');
+		}
+	}
 
-async function clone(id: string, name: string) {
-const newName = prompt('New pipeline name:', `${name} (copy)`);
-if (!newName) return;
-try {
-const p = await clonePipeline(id, newName);
-goto(`/automation/${p.id}`);
-} catch (e) {
-alert('Failed to clone pipeline');
-}
-}
+	async function clone(id: string, name: string, evt: Event) {
+		evt.stopPropagation();
+		const newName = prompt('New workflow name:', `${name} (copy)`);
+		if (!newName) return;
+		try {
+			const p = await clonePipeline(id, newName);
+			goto(`/automation/${p.id}`);
+		} catch {
+			alert('Failed to clone workflow');
+		}
+	}
 
-async function run(id: string) {
-if (!confirm('Trigger a new run?')) return;
-try {
-const r = await triggerPipelineRun(id);
-goto(`/automation/runs/${r.id}`);
-} catch (e) {
-alert('Failed to trigger run');
-}
-}
+	async function run(id: string, evt: Event) {
+		evt.stopPropagation();
+		try {
+			const r = await triggerPipelineRun(id);
+			goto(`/automation/runs/${r.id}`);
+		} catch (e: unknown) {
+			alert((e as { detail?: string })?.detail ?? 'Failed to trigger run');
+		}
+	}
 
-function formatDate(s: string) {
-return new Date(s).toLocaleDateString();
-}
+	function fmt(s: string) {
+		const d = new Date(s);
+		const now = Date.now();
+		const diff = now - d.getTime();
+		if (diff < 60_000) return 'just now';
+		if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+		if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+		if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`;
+		return d.toLocaleDateString();
+	}
 
-$effect(() => {
-void search;
-void statusFilter;
-page = 1;
-load();
-});
-
-onMount(load);
+	onMount(load);
 </script>
 
-<svelte:head>
-<title>Automation — LLM Eval Lab</title>
-</svelte:head>
+<svelte:head><title>Automation Workflows — LLM Eval Lab</title></svelte:head>
 
 <div class="space-y-6">
-<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-<div class="page-header min-w-0">
-<h1>Automation Pipelines</h1>
-<p>{total} pipeline{total !== 1 ? 's' : ''}</p>
-</div>
-<div class="flex flex-wrap items-center gap-2">
-<Button variant="outline" size="sm" onclick={() => goto('/automation/batches')}>
-<Layers class="mr-2 h-4 w-4" />Batches
-</Button>
-<Button variant="outline" size="sm" onclick={() => goto('/automation/schedules')}>
-<Calendar class="mr-2 h-4 w-4" />Schedules
-</Button>
-<Button variant="outline" size="sm" onclick={load}>
-<RefreshCw class="mr-2 h-4 w-4" />Refresh
-</Button>
-<Button size="sm" onclick={() => goto('/automation/create')}>
-<Plus class="mr-2 h-4 w-4" />New Pipeline
-</Button>
-</div>
-</div>
+	<div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+		<div class="page-header">
+			<h1>Workflows</h1>
+			<p>Visual, node-based automation pipelines. Compose generation, analysis and reporting steps as a workflow.</p>
+		</div>
+		<div class="flex items-center gap-2 flex-wrap">
+			<Button size="sm" onclick={() => goto('/automation/create')} class="gap-1.5">
+				<Plus class="h-4 w-4" />New Workflow
+			</Button>
+		</div>
+	</div>
 
-<!-- Filters -->
-<div class="flex flex-col gap-2 sm:flex-row sm:gap-3">
-<Input placeholder="Search pipelines..." bind:value={search} class="sm:max-w-xs" />
-<select
-bind:value={statusFilter}
-class="rounded-md border bg-background px-3 py-2 text-sm"
->
-<option value="">All statuses</option>
-<option value="draft">Draft</option>
-<option value="active">Active</option>
-<option value="archived">Archived</option>
-</select>
-</div>
+	<!-- Search + filter -->
+	<div class="flex flex-col sm:flex-row gap-2">
+		<div class="relative flex-1">
+			<Search class="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+			<Input
+				bind:value={search}
+				placeholder="Search workflows by name…"
+				class="pl-9 h-9"
+				onkeydown={(e) => { if (e.key === 'Enter') { page = 1; load(); } }}
+			/>
+		</div>
+		<select bind:value={statusFilter} onchange={() => { page = 1; load(); }} class="h-9 rounded-md border bg-background px-3 text-sm">
+			<option value="">All statuses</option>
+			<option value="draft">Draft</option>
+			<option value="active">Active</option>
+			<option value="archived">Archived</option>
+		</select>
+	</div>
 
-{#if loading}
-<Card.Root>
-<Card.Content class="flex items-center justify-center py-20">
-<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
-</Card.Content>
-</Card.Root>
-{:else if error}
-<Card.Root>
-<Card.Content class="pt-6 text-center text-destructive">{error}</Card.Content>
-</Card.Root>
-{:else if pipelines.length === 0}
-<Card.Root>
-<Card.Content class="py-16 text-center">
-<Layers class="mx-auto h-12 w-12 text-muted-foreground/50 mb-4" />
-<h3 class="text-lg font-medium mb-1">No pipelines found</h3>
-<p class="text-sm text-muted-foreground mb-4">Create your first automation pipeline to get started.</p>
-<Button size="sm" href="/automation/create">Create Pipeline</Button>
-</Card.Content>
-</Card.Root>
-{:else}
-<!-- Table (desktop) -->
-<div class="hidden md:block">
-<Card.Root>
-<Card.Content class="p-0">
-<div class="overflow-x-auto">
-<table class="w-full">
-<thead>
-<tr class="border-b bg-muted/40 sticky top-0 z-10">
-<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Name</th>
-<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Status</th>
-<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Version</th>
-<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Tags</th>
-<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Updated</th>
-<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Actions</th>
-</tr>
-</thead>
-<tbody>
-{#each pipelines as p, i (p.id)}
-<tr class="border-b transition-colors hover:bg-muted/50 group {i % 2 === 0 ? '' : 'bg-muted/15'}">
-<td class="px-3 py-2 align-top">
-<button
-class="text-left text-sm font-medium hover:underline"
-onclick={() => goto(`/automation/${p.id}`)}
->{p.name}</button>
-</td>
-<td class="px-3 py-2 align-top">
-<Badge variant="outline" class="text-[10px] {statusColors[p.status] ?? ''}">{p.status}</Badge>
-</td>
-<td class="px-3 py-2 align-top text-sm text-muted-foreground">v{p.version}</td>
-<td class="px-3 py-2 align-top">
-<div class="flex flex-wrap gap-1">
-{#each p.tags as tag}
-<Badge variant="secondary" class="text-[10px]">{tag}</Badge>
-{/each}
-</div>
-</td>
-<td class="px-3 py-2 align-top text-sm text-muted-foreground">{formatDate(p.updated_at)}</td>
-<td class="px-3 py-2">
-<div class="flex items-center justify-end gap-1">
-<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="View" onclick={() => goto(`/automation/${p.id}`)}>
-<Eye class="h-3.5 w-3.5" />
-</Button>
-<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Edit" onclick={() => goto(`/automation/${p.id}/edit`)}>
-<Edit class="h-3.5 w-3.5" />
-</Button>
-<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Clone" onclick={() => clone(p.id, p.name)}>
-<Copy class="h-3.5 w-3.5" />
-</Button>
-<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Run" onclick={() => run(p.id)}>
-<Play class="h-3.5 w-3.5" />
-</Button>
-<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Delete" onclick={() => remove(p.id)}>
-<Trash2 class="h-3.5 w-3.5 text-destructive" />
-</Button>
-</div>
-</td>
-</tr>
-{/each}
-</tbody>
-</table>
-</div>
-</Card.Content>
-</Card.Root>
-</div>
+	{#if loading}
+		<div class="flex justify-center py-20">
+			<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
+		</div>
+	{:else if error}
+		<div class="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">{error}</div>
+	{:else if pipelines.length === 0}
+		<div class="rounded-lg border border-dashed py-16 text-center">
+			<Workflow class="h-10 w-10 mx-auto text-muted-foreground" />
+			<p class="mt-3 text-sm font-medium">No workflows yet</p>
+			<p class="text-xs text-muted-foreground mt-1">Build your first node-based automation workflow.</p>
+			<Button size="sm" class="mt-4 gap-1.5" onclick={() => goto('/automation/create')}>
+				<Plus class="h-4 w-4" />Create your first workflow
+			</Button>
+		</div>
+	{:else}
+		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+			{#each pipelines as p (p.id)}
+				<button
+					type="button"
+					class="text-left rounded-lg border bg-card hover:border-primary/40 hover:shadow-md transition-all group flex flex-col focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:transition-none"
+					onclick={() => goto(`/automation/${p.id}`)}
+				>
+					<div class="p-4 flex-1 space-y-2">
+						<div class="flex items-start justify-between gap-2">
+							<h3 class="font-medium text-sm leading-tight group-hover:text-primary transition-colors line-clamp-2">{p.name}</h3>
+							<Badge variant="outline" class="text-[10px] shrink-0 {statusColors[p.status] ?? ''}">{p.status}</Badge>
+						</div>
+						{#if p.description}
+							<p class="text-xs text-muted-foreground line-clamp-2">{p.description}</p>
+						{:else}
+							<p class="text-xs text-muted-foreground italic">No description</p>
+						{/if}
+						{#if p.tags.length > 0}
+							<div class="flex flex-wrap gap-1 pt-1">
+								{#each p.tags.slice(0, 4) as tag (tag)}
+									<Badge variant="secondary" class="text-[10px] px-1.5 py-0">{tag}</Badge>
+								{/each}
+								{#if p.tags.length > 4}
+									<Badge variant="secondary" class="text-[10px] px-1.5 py-0">+{p.tags.length - 4}</Badge>
+								{/if}
+							</div>
+						{/if}
+					</div>
+					<div class="px-4 py-2 border-t bg-muted/30 flex items-center justify-between text-[11px] text-muted-foreground">
+						<span>Updated {fmt(p.updated_at)}</span>
+						<span class="font-mono">v{p.version}</span>
+					</div>
+					<div class="px-2 py-2 border-t bg-card flex items-center gap-0.5">
+						<Button variant="ghost" size="sm" class="h-10 w-10 p-0 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 touch-manipulation" title="Run" aria-label="Run workflow {p.name}" onclick={(e) => run(p.id, e)}>
+							<Play class="h-4 w-4" />
+						</Button>
+						<Button variant="ghost" size="sm" class="h-10 w-10 p-0 touch-manipulation" title="View" aria-label="View {p.name}" onclick={(e) => { e.stopPropagation(); goto(`/automation/${p.id}`); }}>
+							<Eye class="h-4 w-4" />
+						</Button>
+						<Button variant="ghost" size="sm" class="h-10 w-10 p-0 touch-manipulation" title="Edit" aria-label="Edit {p.name}" onclick={(e) => { e.stopPropagation(); goto(`/automation/${p.id}/edit`); }}>
+							<Edit class="h-4 w-4" />
+						</Button>
+						<Button variant="ghost" size="sm" class="h-10 w-10 p-0 touch-manipulation" title="Clone" aria-label="Clone {p.name}" onclick={(e) => clone(p.id, p.name, e)}>
+							<Copy class="h-4 w-4" />
+						</Button>
+						<div class="ml-auto">
+							<Button variant="ghost" size="sm" class="h-10 w-10 p-0 text-destructive hover:text-destructive touch-manipulation" title="Delete" aria-label="Delete {p.name}" onclick={(e) => remove(p.id, e)}>
+								<Trash2 class="h-4 w-4" />
+							</Button>
+						</div>
+					</div>
+				</button>
+			{/each}
+		</div>
 
-<!-- Cards (mobile) -->
-<div class="md:hidden space-y-3">
-{#each pipelines as p (p.id)}
-<div class="border rounded-lg p-3 bg-card">
-<div class="flex items-start justify-between gap-2 mb-2">
-<button class="text-left text-sm font-medium hover:underline truncate" onclick={() => goto(`/automation/${p.id}`)}>{p.name}</button>
-<Badge variant="outline" class="shrink-0 text-[10px] {statusColors[p.status] ?? ''}">{p.status}</Badge>
-</div>
-<div class="flex items-center justify-between text-xs text-muted-foreground mb-2">
-<span>v{p.version} · {formatDate(p.updated_at)}</span>
-</div>
-{#if p.tags.length > 0}
-<div class="flex flex-wrap gap-1 mb-2">
-{#each p.tags as tag}
-<Badge variant="secondary" class="text-[10px]">{tag}</Badge>
-{/each}
-</div>
-{/if}
-<div class="flex items-center justify-end gap-1 border-t pt-2">
-<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="View" onclick={() => goto(`/automation/${p.id}`)}>
-<Eye class="h-3.5 w-3.5" />
-</Button>
-<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Edit" onclick={() => goto(`/automation/${p.id}/edit`)}>
-<Edit class="h-3.5 w-3.5" />
-</Button>
-<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Clone" onclick={() => clone(p.id, p.name)}>
-<Copy class="h-3.5 w-3.5" />
-</Button>
-<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Run" onclick={() => run(p.id)}>
-<Play class="h-3.5 w-3.5" />
-</Button>
-<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Delete" onclick={() => remove(p.id)}>
-<Trash2 class="h-3.5 w-3.5 text-destructive" />
-</Button>
-</div>
-</div>
-{/each}
-</div>
-
-<!-- Pagination -->
-{#if pages > 1}
-<div class="flex justify-center gap-2">
-<Button variant="outline" size="sm" disabled={page <= 1} onclick={() => { page--; load(); }}>
-<ChevronLeft class="h-4 w-4" />
-</Button>
-<span class="px-3 py-2 text-sm">Page {page} / {pages}</span>
-<Button variant="outline" size="sm" disabled={page >= pages} onclick={() => { page++; load(); }}>
-<ChevronRight class="h-4 w-4" />
-</Button>
-</div>
-{/if}
-{/if}
+		{#if pages > 1}
+			<div class="flex justify-center items-center gap-2 pt-4">
+				<Button variant="outline" size="sm" disabled={page <= 1} onclick={() => { page--; load(); }}>
+					<ChevronLeft class="h-4 w-4" />
+				</Button>
+				<span class="px-3 text-sm text-muted-foreground">Page {page} of {pages} · {total} workflow{total === 1 ? '' : 's'}</span>
+				<Button variant="outline" size="sm" disabled={page >= pages} onclick={() => { page++; load(); }}>
+					<ChevronRight class="h-4 w-4" />
+				</Button>
+			</div>
+		{/if}
+	{/if}
 </div>

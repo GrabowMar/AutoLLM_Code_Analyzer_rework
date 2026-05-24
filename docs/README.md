@@ -11,6 +11,7 @@ Primary documentation for **ThesisAppRework**. These files are served in the web
 
 - [Architecture](ARCHITECTURE.md) — System design, components, data flow
 - [Analysis Pipeline](ANALYSIS_PIPELINE.md) — Generation → analysis workflow
+- [Automation Workflows](AUTOMATION_WORKFLOWS.md) — Visual node-based pipeline editor, DSL, run overlay
 - [Background Services](BACKGROUND_SERVICES.md) — Celery, pipeline execution, maintenance
 - [Generation Process](GENERATION_PROCESS.md) — How LLM code generation works
 

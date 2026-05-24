@@ -63,8 +63,6 @@
 			title: 'Tools',
 			items: [
 				{ label: 'Automation', href: '/automation', icon: Zap },
-				{ label: 'Batches', href: '/automation/batches', icon: Layers, subItem: true },
-				{ label: 'Schedules', href: '/automation/schedules', icon: Activity, subItem: true },
 				{ label: 'Sample Generator', href: '/sample-generator', icon: WandSparkles },
 				{ label: 'Templates', href: '/sample-generator/templates', icon: Layers },
 				{ label: 'Reports', href: '/reports', icon: FileText },
@@ -89,12 +87,6 @@
 	function isActive(href: string): boolean {
 		if (href === '/') return page.url.pathname === '/';
 		if (page.url.pathname === href) return true;
-		// For /automation, only match the pipeline sub-pages (not batches/schedules)
-		if (href === '/automation') {
-			return page.url.pathname.startsWith('/automation/') &&
-				!page.url.pathname.startsWith('/automation/batches') &&
-				!page.url.pathname.startsWith('/automation/schedules');
-		}
 		return page.url.pathname.startsWith(href + '/') || page.url.pathname === href;
 	}
 </script>

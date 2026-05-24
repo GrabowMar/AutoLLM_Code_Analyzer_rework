@@ -30,8 +30,11 @@
   },
   "dependencies": {
     "@shikijs/transformers": "^4.1.0",
+    "@types/dagre": "^0.7.54",
+    "@xyflow/svelte": "^1.5.2",
     "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",
+    "dagre": "^0.8.5",
     "dompurify": "^3.4.5",
     "marked": "^18.0.4",
     "marked-alert": "^2.1.2",
