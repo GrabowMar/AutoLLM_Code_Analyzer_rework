@@ -1,29 +1,29 @@
 {
   "slug": "realtime_chat_room",
   "name": "Chat Room",
-  "category": "Real-time",
-  "description": "Simple real-time messaging",
+  "category": "Messaging",
+  "description": "Simple polling-based chat room with message history",
   "backend_requirements": [
     "Access control: allow public read-only chat view; restrict sending messages to authenticated users",
-    "1. WebSocket endpoint at /api/ws/chat for bidirectional communication",
-    "2. Message model: id, username, text, timestamp",
-    "3. Broadcast incoming messages to all connected clients",
-    "4. Store last 50 messages in memory or SQLite",
-    "5. GET /api/messages - return recent message history for new connections"
+    "1. Message model: id, username, text, timestamp, is_active",
+    "2. GET /api/messages - return last 50 messages ordered by timestamp ascending",
+    "3. POST /api/messages - send a new message (authenticated users only); body: {username, text}",
+    "4. Store messages in SQLite; enforce max 1000 chars on text",
+    "5. GET /api/health - health check endpoint"
   ],
   "frontend_requirements": [
     "Public guest view of chat with CTA to sign in for sending messages",
-    "1. Message list showing username, text, and time",
-    "2. Input field with send button at bottom",
+    "1. Message list showing username, text, and formatted timestamp",
+    "2. Input field with send button at bottom (disabled for guests)",
     "3. Auto-scroll to newest message",
-    "4. WebSocket connection with reconnect logic",
-    "5. Show 'typing...' indicator when appropriate"
+    "4. Poll GET /api/messages every 3 seconds for new messages",
+    "5. Show message count and last updated time"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/messages",
-      "description": "Get recent chat messages",
+      "description": "Get recent chat messages (last 50, oldest first)",
       "request": null,
       "response": {
         "items": [
@@ -38,16 +38,14 @@
       }
     },
     {
-      "method": "WS",
-      "path": "/api/ws/chat",
-      "description": "WebSocket endpoint for real-time messaging",
+      "method": "POST",
+      "path": "/api/messages",
+      "description": "Send a new message (authenticated users only)",
       "request": {
-        "type": "message",
         "username": "string",
         "text": "string"
       },
       "response": {
-        "type": "message",
         "id": 1,
         "username": "string",
         "text": "string",
@@ -60,8 +58,7 @@
       "description": "Health check endpoint",
       "request": null,
       "response": {
-        "status": "healthy",
-        "service": "backend"
+        "status": "ok"
       }
     }
   ],

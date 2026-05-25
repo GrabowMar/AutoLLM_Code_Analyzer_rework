@@ -7,6 +7,7 @@ from django.urls import path
 from django.views import defaults as default_views
 
 from llm_lab.realtime.api.views import sse_stream
+from llm_lab.runtime.app_proxy import app_proxy_view
 
 from .api import api
 
@@ -17,6 +18,10 @@ urlpatterns = [
     path("users/", include("llm_lab.users.urls", namespace="users")),
     path("accounts/", include("allauth.urls")),
     path("_allauth/", include("allauth.headless.urls")),
+    # Sample-app proxy — forwards /apps/<uuid>/ to the container's host port.
+    # In production, Traefik intercepts these paths before Django sees them.
+    path("apps/<uuid:container_id>/", app_proxy_view),
+    path("apps/<uuid:container_id>/<path:subpath>", app_proxy_view),
     # Your stuff: custom urls includes go here
     # ...
     # Media files

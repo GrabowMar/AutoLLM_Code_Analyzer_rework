@@ -2,11 +2,9 @@ import factory
 from factory.django import DjangoModelFactory
 
 from llm_lab.generation.models import AppRequirementTemplate
-from llm_lab.generation.models import ContentBlock
 from llm_lab.generation.models import GenerationJob
 from llm_lab.generation.models import PromptTemplate
 from llm_lab.generation.models import ScaffoldingTemplate
-from llm_lab.generation.models import TemplateBundle
 from llm_lab.users.tests.factories import UserFactory
 
 
@@ -43,29 +41,6 @@ class PromptTemplateFactory(DjangoModelFactory):
     role = "system"
     content = "You are a helpful assistant."
     is_default = True
-
-
-class ContentBlockFactory(DjangoModelFactory):
-    class Meta:
-        model = ContentBlock
-
-    block_type = ContentBlock.BlockType.PROMPT_TONE
-    slug = factory.Sequence(lambda n: f"block-{n}")
-    version = 1
-    name = factory.Sequence(lambda n: f"Block {n}")
-    content = "Sample block content"
-    is_system = True
-
-
-class TemplateBundleFactory(DjangoModelFactory):
-    class Meta:
-        model = TemplateBundle
-
-    name = factory.Sequence(lambda n: f"Bundle {n}")
-    slug = factory.Sequence(lambda n: f"bundle-{n}")
-    scaffolding_slug = "flask-react"
-    block_refs = []
-    is_system = True
 
 
 class GenerationJobFactory(DjangoModelFactory):

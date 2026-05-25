@@ -93,11 +93,22 @@ class TestExtractFrontendCode:
         code = extract_frontend_code(content)
         assert "App" in code
 
-    def test_multiple_frontend_blocks(self) -> None:
+    def test_multiple_frontend_blocks_prefers_app_jsx(self) -> None:
+        # When a named App.jsx block is present it should win over CSS blocks;
+        # concatenating JSX + CSS into one file produces invalid JavaScript.
         content = "```jsx:App.jsx\nfunction App() {}\n```\n\n```css:styles.css\n.app { color: red; }\n```"
         code = extract_frontend_code(content)
         assert "App" in code
-        assert "color: red" in code
+        # CSS block must NOT be concatenated into the JSX output
+        assert "color: red" not in code
+
+    def test_multiple_frontend_blocks_fallback_to_first(self) -> None:
+        # When there is no App.jsx block, return the first jsx block (not all)
+        content = "```jsx:components.jsx\nfunction Widget() {}\n```\n\n```jsx:utils.jsx\nfunction helper() {}\n```"
+        code = extract_frontend_code(content)
+        assert "Widget" in code
+        # Second block should NOT be concatenated
+        assert "helper" not in code
 
     def test_fallback_raw(self) -> None:
         content = "export default function App() { return <div>Hello</div> }"

@@ -10,6 +10,7 @@
 	import Square from '@lucide/svelte/icons/square';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Layers from '@lucide/svelte/icons/layers';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
@@ -161,13 +162,8 @@
 					<Card.Header class="pb-3">
 						<div class="flex items-start justify-between gap-2">
 							<Badge class={statusColors[c.status]}>{c.status}</Badge>
-							{#if c.app_url}
-								<a
-									href={c.app_url}
-									target="_blank"
-									rel="noopener noreferrer"
-									class="text-xs text-blue-400 hover:underline"
-								>:{c.app_port}</a>
+							{#if c.app_port}
+								<span class="font-mono text-xs text-muted-foreground">:{c.app_port}</span>
 							{/if}
 						</div>
 						<Card.Title class="text-base mt-2 font-mono text-sm truncate">{c.name}</Card.Title>
@@ -176,9 +172,6 @@
 						{/if}
 					</Card.Header>
 					<Card.Content class="flex-1 text-xs text-muted-foreground space-y-1">
-						{#if c.app_port}
-							<div>Port: :{c.app_port}</div>
-						{/if}
 						<div>Created: {formatDate(c.created_at)}</div>
 						{#if c.last_error}
 							<div class="text-red-400 line-clamp-2">{c.last_error}</div>
@@ -188,6 +181,17 @@
 						<Button size="sm" variant="outline" onclick={() => goto(`/runtime/${c.id}`)}>
 							<Eye class="h-3 w-3" />
 						</Button>
+						{#if c.status === 'running' && c.app_url}
+							<a
+								href={c.app_url}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium text-blue-400 hover:bg-accent hover:text-blue-300 transition-colors"
+							>
+								<ExternalLink class="h-3 w-3" />
+								Open App
+							</a>
+						{/if}
 						{#if c.status === 'stopped' || c.status === 'failed'}
 							<Button size="sm" variant="outline" onclick={() => act(c.id, 'start')} disabled={actionLoading[c.id]}>
 								<Play class="h-3 w-3" />

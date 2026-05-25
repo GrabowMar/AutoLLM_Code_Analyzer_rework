@@ -1,9 +1,0 @@
-slug: tone-minimal
-version: 1
-block_type: prompt_tone
-name: Minimal tone
-description: Match requirement scope; avoid padding line counts or extra features
-content: |
-  ## Generation tone
-  Implement **only** what the requirements specify. Use concise, focused code.
-  Seed data counts and feature depth should match the requirement bullets exactly.

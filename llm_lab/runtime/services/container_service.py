@@ -147,7 +147,7 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
         apps_network = getattr(settings, "DOCKER_APPS_NETWORK", "")
 
         ports: dict[str, int] = {}
-        env: dict[str, str] = {}
+        env: dict[str, str] = {"APP_BASE_PATH": f"/apps/{container.id}/"}
         if container.app_port and not apps_network:
             ports["8000/tcp"] = container.app_port
 
@@ -163,7 +163,7 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
         container.status = ContainerInstance.Status.RUNNING
         container.save(update_fields=["image", "container_id", "status"])
         if container.app_port:
-            traefik_router.write_route(container.name, container.app_port)
+            traefik_router.write_route(container.name, container.app_port, str(container.id))
         action.update_progress(100)
         action.mark_completed(
             output=f"Built {tag}, container {cid}\n\n{build_log[-2000:]}",
@@ -229,7 +229,7 @@ def _do_start(action: ContainerAction, container: ContainerInstance) -> None:
         container.status = ContainerInstance.Status.RUNNING
         container.save(update_fields=["status"])
         if container.app_port:
-            traefik_router.write_route(container.name, container.app_port)
+            traefik_router.write_route(container.name, container.app_port, str(container.id))
         action.mark_completed(output="Started", exit_code=0)
         realtime.publish(
             f"runtime:{container.id}",

@@ -20,11 +20,19 @@ http:
   routers:
     app-{port}:
       entryPoints:
-        - app-{port}
-      rule: "Host(`{domain}`)"
+        - web-secure
+      rule: "Host(`{domain}`) && PathPrefix(`/apps/{container_id}`)"
       service: app-{port}
+      priority: 10
+      middlewares:
+        - strip-app-{port}
       tls:
         certResolver: letsencrypt
+  middlewares:
+    strip-app-{port}:
+      stripPrefix:
+        prefixes:
+          - /apps/{container_id}
   services:
     app-{port}:
       loadBalancer:
@@ -39,7 +47,7 @@ def _dynamic_dir() -> str:
     return getattr(settings, "TRAEFIK_DYNAMIC_DIR", "")
 
 
-def write_route(container_name: str, port: int) -> None:
+def write_route(container_name: str, port: int, container_id: str) -> None:
     """Create (or replace) the Traefik route file for this container."""
     dynamic_dir = _dynamic_dir()
     if not dynamic_dir:
@@ -51,6 +59,7 @@ def write_route(container_name: str, port: int) -> None:
         port=port,
         domain=domain,
         container_name=container_name,
+        container_id=container_id,
     )
     dest = Path(dynamic_dir) / f"app-{port}.yml"
     tmp = dest.with_suffix(".yml.tmp")

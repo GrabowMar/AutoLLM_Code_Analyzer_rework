@@ -19,12 +19,16 @@
 	import BookOpen from '@lucide/svelte/icons/book-open';
 	import Zap from '@lucide/svelte/icons/zap';
 	import Layers from '@lucide/svelte/icons/layers';
+	import Container from '@lucide/svelte/icons/container';
+	import Activity from '@lucide/svelte/icons/activity';
 	import X from '@lucide/svelte/icons/x';
+	import { onMount } from 'svelte';
 	import { Separator } from '$lib/components/ui/separator';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { getAuth } from '$lib/stores/auth.svelte';
 	import { getPreferences } from '$lib/stores/preferences.svelte';
+	import { getMe } from '$lib/api/client';
 	import { cn } from '$lib/utils';
 	import type { Component } from 'svelte';
 
@@ -42,6 +46,7 @@
 	interface NavSection {
 		title: string;
 		items: NavItem[];
+		staffOnly?: boolean;
 	}
 
 	const navSections: NavSection[] = [
@@ -61,6 +66,7 @@
 				{ label: 'Sample Generator', href: '/sample-generator', icon: WandSparkles },
 				{ label: 'Templates', href: '/templates', icon: Layers },
 				{ label: 'Reports', href: '/reports', icon: FileText },
+				{ label: 'Runtime', href: '/runtime', icon: Container },
 			],
 		},
 		{
@@ -69,6 +75,13 @@
 				{ label: 'Rankings', href: '/rankings', icon: Trophy },
 				{ label: 'Statistics', href: '/statistics', icon: ChartColumn },
 				{ label: 'Docs', href: '/docs', icon: BookOpen },
+			],
+		},
+		{
+			title: 'Admin',
+			staffOnly: true,
+			items: [
+				{ label: 'System', href: '/system', icon: Activity },
 			],
 		},
 	];
@@ -84,8 +97,18 @@
 	const authStore = getAuth();
 	const preferences = getPreferences();
 
+	let isStaff = $state(false);
 	let mobileMenuOpen = $state(false);
 	let dropdownOpen = $state(false);
+
+	onMount(async () => {
+		try {
+			const me = await getMe();
+			isStaff = me.is_staff ?? false;
+		} catch {
+			isStaff = false;
+		}
+	});
 
 	const avatarColorMap: Record<string, string> = {
 		blue: 'bg-blue-500',
@@ -111,6 +134,8 @@
 		'/sample-generator': 'Sample Generator',
 		'/templates': 'Templates',
 		'/automation': 'Automation',
+		'/runtime': 'Runtime',
+		'/system': 'System',
 		'/docs': 'Docs',
 		'/about': 'About',
 		'/privacy': 'Privacy Policy',
@@ -226,31 +251,33 @@
 			<!-- Mobile nav sections -->
 			<nav class="flex-1 overflow-y-auto py-2">
 				{#each navSections as section (section.title)}
-					<div class="px-3 pt-3 pb-1">
-						<span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/35" style="font-family: var(--font-mono);">
-							{section.title}
-						</span>
-					</div>
-					<div class="flex flex-col gap-px px-2">
-						{#each section.items as item (item.href)}
-							<a
-								href={item.href}
-								class={cn(
-									'group relative flex items-center gap-2.5 rounded px-2.5 py-2 text-[13px] transition-colors duration-150 motion-reduce:transition-none',
-									isActive(item.href)
-										? 'bg-sidebar-accent text-sidebar-primary font-medium'
-										: 'text-sidebar-foreground/65 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground'
-								)}
-								onclick={() => (mobileMenuOpen = false)}
-							>
-								{#if isActive(item.href)}
-									<span class="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-r bg-sidebar-primary"></span>
-								{/if}
-								<item.icon class="h-3.5 w-3.5 shrink-0" />
-								{item.label}
-							</a>
-						{/each}
-					</div>
+					{#if !section.staffOnly || isStaff}
+						<div class="px-3 pt-3 pb-1">
+							<span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/35" style="font-family: var(--font-mono);">
+								{section.title}
+							</span>
+						</div>
+						<div class="flex flex-col gap-px px-2">
+							{#each section.items as item (item.href)}
+								<a
+									href={item.href}
+									class={cn(
+										'group relative flex items-center gap-2.5 rounded px-2.5 py-2 text-[13px] transition-colors duration-150 motion-reduce:transition-none',
+										isActive(item.href)
+											? 'bg-sidebar-accent text-sidebar-primary font-medium'
+											: 'text-sidebar-foreground/65 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground'
+									)}
+									onclick={() => (mobileMenuOpen = false)}
+								>
+									{#if isActive(item.href)}
+										<span class="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-r bg-sidebar-primary"></span>
+									{/if}
+									<item.icon class="h-3.5 w-3.5 shrink-0" />
+									{item.label}
+								</a>
+							{/each}
+						</div>
+					{/if}
 				{/each}
 			</nav>
 

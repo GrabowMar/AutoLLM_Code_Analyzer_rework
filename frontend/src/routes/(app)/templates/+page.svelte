@@ -10,7 +10,6 @@
 		getScaffoldingTemplates,
 		getAppTemplates,
 		getPromptTemplates,
-		getTemplateBundles,
 		createScaffoldingTemplate,
 		updateScaffoldingTemplate,
 		deleteScaffoldingTemplate,
@@ -23,11 +22,9 @@
 		type ScaffoldingTemplate,
 		type AppRequirementTemplate,
 		type PromptTemplate,
-		type TemplateBundle,
 	} from '$lib/api/client';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import Layers from '@lucide/svelte/icons/layers';
-	import Package from '@lucide/svelte/icons/package';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -39,11 +36,8 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import Search from '@lucide/svelte/icons/search';
 
-	type TabId = 'scaffolding' | 'app' | 'prompt' | 'bundles';
+	type TabId = 'scaffolding' | 'app' | 'prompt';
 	let activeTab = $state<TabId>('scaffolding');
-
-	let templateBundles = $state<TemplateBundle[]>([]);
-	let bundlesLoading = $state(true);
 
 	// Scaffolding templates
 	let scaffoldingTemplates = $state<ScaffoldingTemplate[]>([]);
@@ -131,21 +125,10 @@
 		promptLoading = false;
 	}
 
-	async function loadBundles() {
-		bundlesLoading = true;
-		try {
-			templateBundles = await getTemplateBundles();
-		} catch {
-			/* ignore */
-		}
-		bundlesLoading = false;
-	}
-
 	onMount(() => {
 		loadScaffolding();
 		loadApp();
 		loadPrompt();
-		loadBundles();
 	});
 
 	function cancelAllForms() {
@@ -377,24 +360,16 @@
 			<MessageSquare class="h-4 w-4" />
 			Prompts <span class="ml-1 text-xs opacity-60 font-mono">({promptTemplates.length})</span>
 		</button>
-		<button
-			type="button"
-			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-200 whitespace-nowrap cursor-pointer {activeTab === 'bundles' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
-			onclick={() => handleTabChange('bundles')}
-		>
-			<Package class="h-4 w-4" />
-			Bundles <span class="ml-1 text-xs opacity-60 font-mono">({templateBundles.length})</span>
-		</button>
 	</div>
 
 	<!-- Master-Detail Content Grid -->
 	<div class="grid gap-6 {isEditingOrCreating ? 'lg:grid-cols-[1fr_1.2fr]' : 'grid-cols-1'}">
-		
+
 		<!-- LIST SECTION -->
 		<div class="space-y-4 {isEditingOrCreating ? 'hidden lg:block' : ''}">
-			
-			<!-- SEARCH & ACTIONS BAR (Only for CRUD tabs) -->
-			{#if activeTab !== 'bundles'}
+
+			<!-- SEARCH & ACTIONS BAR -->
+			{#if true}
 				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-muted/10 p-3 rounded-lg border">
 					<div class="relative w-full sm:w-72">
 						<Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -625,60 +600,6 @@
 				{/if}
 			{/if}
 
-			<!-- BUNDLES LIST (Read Only) -->
-			{#if activeTab === 'bundles'}
-				<div class="space-y-4">
-					<div class="p-4 bg-muted/20 border border-muted/50 rounded-xl">
-						<p class="text-xs text-muted-foreground leading-relaxed flex items-start gap-1.5">
-							<Package class="h-4 w-4 shrink-0 text-primary mt-0.5" />
-							Template bundles compose structural requirement blocks and models into reproducible generation snapshot plans.
-							Per-app bundle maps are configured technically inside <code class="bg-muted px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold">data/requirements/manifests/</code>.
-						</p>
-					</div>
-					
-					{#if bundlesLoading}
-						<div class="flex justify-center py-16">
-							<LoaderCircle class="h-6 w-6 animate-spin text-primary" />
-						</div>
-					{:else if templateBundles.length === 0}
-						<div class="py-16 text-center text-xs text-muted-foreground">
-							No bundles discovered. Run <span class="bg-muted px-1.5 py-0.5 rounded font-mono text-[10px]">seed_generation_templates</span> inside LLM Lab.
-						</div>
-					{:else}
-						<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-							{#each templateBundles as bundle (bundle.id)}
-								<div class="group relative rounded-xl border bg-card p-4 shadow-xs hover:shadow-md transition-all duration-200">
-									<div class="space-y-2">
-										<div class="flex items-start justify-between gap-1.5">
-											<div class="min-w-0">
-												<span class="font-bold text-sm block truncate text-foreground">{bundle.name}</span>
-												<span class="font-mono text-[9px] text-muted-foreground mt-0.5 block truncate">{bundle.slug}</span>
-											</div>
-										</div>
-										<p class="text-xs text-muted-foreground line-clamp-2 leading-relaxed h-8">{bundle.description || '—'}</p>
-										<div class="flex flex-wrap items-center gap-1.5 pt-2">
-											{#if bundle.is_default}
-												<Badge variant="secondary" class="text-[9px] px-1.5 py-0">Default</Badge>
-											{/if}
-											{#if bundle.is_system}
-												<Badge variant="outline" class="text-[9px] px-1.5 py-0 bg-muted/40">System</Badge>
-											{/if}
-											<Badge variant="outline" class="text-[9px] px-1.5 py-0 border-primary/20 text-primary font-mono tabular-nums bg-primary/[0.02]">
-												{bundle.block_refs?.length ?? 0} blocks
-											</Badge>
-										</div>
-										<div class="text-[9px] text-muted-foreground pt-1 border-t flex justify-between items-center font-mono">
-											<span>Stack:</span>
-											<span class="font-semibold text-foreground">{bundle.scaffolding_slug}</span>
-										</div>
-									</div>
-								</div>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			{/if}
-
 		</div>
 
 		<!-- DETAIL/EDITOR COLUMN -->
@@ -888,7 +809,7 @@
 					</Card.Root>
 				{/if}
 			</div>
-		{:else if activeTab !== 'bundles'}
+		{:else}
 			<!-- DESKTOP EMPTY STATE (Master detail placeholder when not editing) -->
 			<div class="hidden lg:flex flex-col items-center justify-center rounded-xl border border-dashed border-muted-foreground/30 p-16 text-center bg-muted/5 min-h-[360px] max-w-lg mx-auto">
 				<div class="h-10 w-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center mb-4">

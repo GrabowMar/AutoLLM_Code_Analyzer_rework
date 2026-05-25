@@ -15,49 +15,6 @@ entryPoints:
   flower:
     address: ':5555'
 
-  # Sample-app entry points — Traefik terminates TLS here and routes to the
-  # container on the llm_apps Docker network.  Ports must not be bound by the
-  # app containers themselves; they are owned exclusively by Traefik.
-  app-9001:
-    address: ':9001'
-  app-9002:
-    address: ':9002'
-  app-9003:
-    address: ':9003'
-  app-9004:
-    address: ':9004'
-  app-9005:
-    address: ':9005'
-  app-9006:
-    address: ':9006'
-  app-9007:
-    address: ':9007'
-  app-9008:
-    address: ':9008'
-  app-9009:
-    address: ':9009'
-  app-9010:
-    address: ':9010'
-  app-9011:
-    address: ':9011'
-  app-9012:
-    address: ':9012'
-  app-9013:
-    address: ':9013'
-  app-9014:
-    address: ':9014'
-  app-9015:
-    address: ':9015'
-  app-9016:
-    address: ':9016'
-  app-9017:
-    address: ':9017'
-  app-9018:
-    address: ':9018'
-  app-9019:
-    address: ':9019'
-  app-9020:
-    address: ':9020'
 
 certificatesResolvers:
   letsencrypt:

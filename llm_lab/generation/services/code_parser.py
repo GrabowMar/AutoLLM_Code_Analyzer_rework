@@ -89,7 +89,13 @@ IMPORT_TO_PACKAGE = {
     "flask_jwt_extended": "flask-jwt-extended",
     "flask_mail": "flask-mail",
     "flask_wtf": "flask-wtf",
+    "flask_limiter": "Flask-Limiter",
+    "flask_socketio": "flask-socketio",
+    "flask_caching": "Flask-Caching",
+    "flask_restful": "Flask-RESTful",
+    "flask_marshmallow": "flask-marshmallow",
     "sqlalchemy": "sqlalchemy",
+    "marshmallow_sqlalchemy": "marshmallow-sqlalchemy",
     "werkzeug": "werkzeug",
     "jwt": "pyjwt",
     "PIL": "pillow",
@@ -102,12 +108,24 @@ IMPORT_TO_PACKAGE = {
     "celery": "celery",
     "redis": "redis",
     "bcrypt": "bcrypt",
+    "passlib": "passlib",
+    "cryptography": "cryptography",
     "marshmallow": "marshmallow",
     "stripe": "stripe",
     "boto3": "boto3",
     "pandas": "pandas",
     "numpy": "numpy",
     "gunicorn": "gunicorn",
+    "dateutil": "python-dateutil",
+    "pytz": "pytz",
+    "pydantic": "pydantic",
+    "itsdangerous": "itsdangerous",
+    "arrow": "arrow",
+    "aiohttp": "aiohttp",
+    "httpx": "httpx",
+    "wtforms": "WTForms",
+    "cerberus": "cerberus",
+    "paramiko": "paramiko",
 }
 
 
@@ -173,7 +191,12 @@ def extract_python_code(raw_content: str) -> str:
 
 
 def extract_frontend_code(raw_content: str) -> str:
-    """Extract frontend code (JSX/JS/HTML) from LLM response."""
+    """Extract frontend code (JSX/JS/HTML) from LLM response.
+
+    When multiple blocks are present, prefers a block explicitly named App.jsx
+    (or App.tsx) over concatenating all blocks — concatenation produces invalid
+    JS where cross-file imports reference non-existent modules.
+    """
     blocks = extract_code_blocks(raw_content)
 
     frontend_blocks = []
@@ -188,17 +211,26 @@ def extract_frontend_code(raw_content: str) -> str:
             frontend_blocks.append(block)
 
     if not frontend_blocks:
-        return raw_content.strip() if raw_content else ""
+        if not raw_content:
+            return ""
+        # Strip leading markdown code fence — LLM responses truncated at max_tokens
+        # may have an opening ``` fence without a closing one, causing extract_code_blocks
+        # to find no complete blocks and fall through here with the fence intact.
+        stripped = re.sub(r"^```[a-zA-Z0-9_+.\-]*(?:[:\s][^\n]*)?\n", "", raw_content.strip())
+        return stripped
 
     if len(frontend_blocks) == 1:
         return frontend_blocks[0]["code"]
 
-    # Return all blocks with file markers
-    parts = []
+    # Prefer a block explicitly named App.jsx / App.tsx (the single-file target)
+    _APP_NAMES = {"app.jsx", "app.tsx", "src/app.jsx", "src/app.tsx", "frontend/src/app.jsx"}
     for block in frontend_blocks:
-        header = block["filename"] or f"file.{block['language'] or 'jsx'}"
-        parts.append(f"// === {header} ===\n{block['code']}")
-    return "\n\n".join(parts)
+        if block["filename"].lower() in _APP_NAMES:
+            return block["code"]
+
+    # Fall back to the first jsx/tsx block rather than concatenating all files,
+    # which would produce invalid JS with broken cross-file imports.
+    return frontend_blocks[0]["code"]
 
 
 def infer_python_dependencies(code: str) -> list[str]:

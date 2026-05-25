@@ -138,6 +138,8 @@ def apply_scaffold(
         is_vue = component.endswith(".vue")
         front = frontend_text or (_placeholder_frontend_vue() if is_vue else _placeholder_frontend())
         if phase == ScaffoldPhase.BUILD and frontend_text and not is_vue:
+            front = _strip_markdown_fence(front)
+            front = _fix_template_literal_quotes(front)
             front = _sanitize_lucide_imports(front)
         (src_dir / component).write_text(front, encoding="utf-8")
 
@@ -239,16 +241,190 @@ def _patch_requirements(dest: Path, backend_code: str) -> None:
 
 def _patch_backend_code(code: str) -> str:
     """Apply runtime-invariant fixes to generated Flask backend code."""
+    code = _strip_filename_header(code)
     code = _fix_sqlite_uri(code)
     code = _fix_flask_port(code)
-    return _fix_db_create_all(code)
+    code = _fix_db_create_all(code)
+    code = _fix_seed_data_call(code)
+    code = _fix_sqlalchemy_text(code)
+    return _ensure_spa_catchall(code)
+
+
+_SEED_CALL_RE = re.compile(r"^(\s+)(seed_data\(\))\s*$", re.MULTILINE)
+
+
+def _fix_seed_data_call(code: str) -> str:
+    """Wrap bare seed_data() calls in try/except.
+
+    Seed failures (e.g. IntegrityError from duplicate or invalid data) must not
+    crash the server process — the app should still start and pass the health check.
+    Already-wrapped calls are left unchanged.
+    """
+    def _wrap(m: re.Match[str]) -> str:
+        indent = m.group(1)
+        # Check if this call is already inside a try block by looking at preceding lines
+        before = code[: m.start()]
+        preceding_lines = before.rstrip().splitlines()
+        for prev_line in reversed(preceding_lines[-5:]):
+            stripped = prev_line.strip()
+            if stripped.startswith("try:"):
+                return m.group(0)  # already wrapped
+            if stripped and not stripped.startswith("#"):
+                break
+        return (
+            f"{indent}try:\n"
+            f"{indent}    seed_data()\n"
+            f"{indent}except Exception:\n"
+            f"{indent}    pass"
+        )
+
+    return _SEED_CALL_RE.sub(_wrap, code)
+
+
+_SPA_CATCHALL = """\n
+# SPA catch-all — must be the last route
+import os as _os
+import re as _re
+
+_APP_BASE_PATH = _os.environ.get('APP_BASE_PATH', '/')
+_FETCH_PROXY_HTML = (
+    '<base href="' + _APP_BASE_PATH + '">'
+    + '<script>(function(){'
+    + 'var b=document.querySelector("base[href]");'
+    + 'if(!b)return;'
+    + 'var _base=new URL(b.getAttribute("href"),location.origin).pathname;'
+    + 'if(_base.length>1&&_base[_base.length-1]==="/")_base=_base.slice(0,-1);'
+    + 'if(!_base||_base==="/")return;'
+    + 'var f=window.fetch;'
+    + 'window.fetch=function(u,o){'
+    + 'if(typeof u==="string"&&u[0]==="/"&&u[1]!=="/")u=_base+u;'
+    + 'return f.call(this,u,o)};'
+    + 'var op=XMLHttpRequest.prototype.open;'
+    + 'XMLHttpRequest.prototype.open=function(m,u){'
+    + 'if(typeof u==="string"&&u[0]==="/"&&u[1]!=="/")u=_base+u;'
+    + 'return op.apply(this,arguments)};'
+    + '})();</script>'
+)
+
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def _serve_spa(path):
+    from pathlib import Path as _Path
+    from flask import Response as _Response
+    _static = _Path(__file__).parent / 'static'
+    target = _static / path if path else None
+    if target and target.is_file():
+        return send_from_directory(str(_static), path)
+    _idx = _static / 'index.html'
+    if not _idx.exists():
+        return ('Not found', 404)
+    _html = _idx.read_text(encoding='utf-8')
+    _html = _re.sub(r'(<head[^>]*>)', lambda m: m.group(0) + _FETCH_PROXY_HTML, _html, count=1)
+    return _Response(_html, mimetype='text/html')
+"""
+
+_SA_EXECUTE_RE = re.compile(
+    r"""(\.execute\()\s*(['"])(SELECT\s+1|SELECT\s+\*\s+FROM\s+\w+\s+LIMIT\s+1)\s*\2\s*\)""",
+    re.IGNORECASE,
+)
+
+
+def _fix_sqlalchemy_text(code: str) -> str:
+    """Wrap raw SQL strings in SQLAlchemy execute() calls with text().
+
+    SQLAlchemy 2.0 requires raw string SQL to be wrapped in text(), e.g.:
+        db.session.execute('SELECT 1')  →  db.session.execute(text('SELECT 1'))
+
+    Also ensures `from sqlalchemy import text` is present when the fix applies.
+    """
+    if not _SA_EXECUTE_RE.search(code):
+        return code
+
+    # Replace .execute("SELECT 1") → .execute(text("SELECT 1"))
+    code = _SA_EXECUTE_RE.sub(
+        lambda m: f"{m.group(1)}text({m.group(2)}{m.group(3)}{m.group(2)}))",
+        code,
+    )
+
+    # Ensure text is imported
+    sa_import = re.search(r"from sqlalchemy import ([^\n]+)", code)
+    if sa_import:
+        if "text" not in sa_import.group(1):
+            code = re.sub(
+                r"(from sqlalchemy import )([^\n]+)",
+                lambda m: m.group(1) + m.group(2).rstrip() + ", text",
+                code,
+                count=1,
+            )
+    elif "import sqlalchemy" not in code:
+        code = "from sqlalchemy import text\n" + code
+
+    return code
+
+
+_SPA_MARKER_RE = re.compile(
+    r"@app\.route\(['\"]/<path:path>['\"]|defaults=\{['\"]path['\"]\s*:\s*['\"]['\"]",
+)
+
+
+def _ensure_spa_catchall(code: str) -> str:
+    """Inject Flask SPA catch-all route if the LLM omitted it.
+
+    Without this route Flask returns 404 for the React app's root path,
+    resulting in a blank container.  The injection happens before the
+    ``if __name__ == '__main__':`` block so Flask registers it last.
+    """
+    if _SPA_MARKER_RE.search(code):
+        return code
+    # Also skip if send_from_directory is referenced in a catch-all context
+    if "send_from_directory" in code and "path:path" in code:
+        return code
+
+    # Ensure send_from_directory is imported
+    if "send_from_directory" not in code:
+        code = re.sub(
+            r"(from flask import [^\n]+)",
+            lambda m: m.group(0) + ", send_from_directory"
+            if "send_from_directory" not in m.group(0)
+            else m.group(0),
+            code,
+            count=1,
+        )
+
+    # Insert catch-all before the if __name__ block, or at end of file
+    main_match = re.search(r"\nif __name__\s*==\s*['\"]__main__['\"]\s*:", code)
+    if main_match:
+        pos = main_match.start()
+        return code[:pos] + _SPA_CATCHALL + code[pos:]
+    return code.rstrip() + _SPA_CATCHALL
+
+
+_FILENAME_HEADER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*\.py\s*\n")
+
+
+def _strip_filename_header(code: str) -> str:
+    """Remove a bare filename line at the start of backend code (e.g. 'app.py').
+
+    The LLM occasionally emits the target filename as the very first line of a
+    code block instead of (or in addition to) a code fence annotation.  Python
+    then tries to evaluate it as an expression, which crashes at import time.
+    """
+    return _FILENAME_HEADER_RE.sub("", code, count=1)
 
 
 def _fix_sqlite_uri(code: str) -> str:
-    """Replace relative sqlite:/// URIs with an absolute /app/data/ path."""
+    """Replace relative sqlite:/// URIs with an absolute /app/data/ path.
+
+    Skips f-string expressions (e.g. f"sqlite:///{Path(...)}") to avoid
+    corrupting dynamically-built URIs that are already correct at runtime.
+    """
 
     def _rewrite(m: re.Match[str]) -> str:
         original_path = m.group(1)
+        if "{" in original_path:
+            # f-string expression — the URI is built at runtime, leave it alone
+            return m.group(0)
         filename = Path(original_path).name or "app.db"
         return f"sqlite:////app/data/{filename}"
 
@@ -310,15 +486,29 @@ def _fix_db_create_all(code: str) -> str:
 
 
 def _fix_flask_port(code: str) -> str:
-    """Ensure Flask listens on PORT defaulting to 8000."""
+    """Ensure Flask listens on PORT defaulting to 8000.
+
+    Patches any hardcoded port number in os.environ.get('PORT', N) and
+    app.run(...port=N...) calls — not just the Flask default of 5000.
+    """
+    # os.environ.get('PORT', N) or os.environ.get('PORT', 'N') for any N
     code = re.sub(
-        r"os\.environ\.get\(['\"]PORT['\"],\s*5000\s*\)",
+        r"os\.environ\.get\(['\"]PORT['\"],\s*'?\d+'?\s*\)",
         "os.environ.get('PORT', 8000)",
         code,
     )
+
+    # app.run(... port=<literal_int> ...) for any literal integer
+    def _fix_run(m: re.Match[str]) -> str:
+        return re.sub(
+            r"\bport\s*=\s*\d+",
+            "port=int(os.environ.get('PORT', 8000))",
+            m.group(0),
+        )
+
     return re.sub(
-        r"app\.run\(([^)]*\b)port\s*=\s*5000([^)]*)\)",
-        lambda m: f"app.run({m.group(1)}port=int(os.environ.get('PORT', 8000)){m.group(2)})",
+        r"app\.run\([^)]*\bport\s*=\s*\d+[^)]*\)",
+        _fix_run,
         code,
     )
 
@@ -334,24 +524,59 @@ def _get_valid_lucide_icons() -> frozenset[str]:
     return _valid_lucide_icons
 
 
+_MARKDOWN_FENCE_RE = re.compile(r"^```[a-zA-Z0-9_+.\-]*(?:[:\s][^\n]*)?\n", re.MULTILINE)
+
+
+def _strip_markdown_fence(code: str) -> str:
+    """Remove a leading markdown code fence line (e.g. ```jsx:App.jsx).
+
+    LLM responses truncated at max_tokens may have an opening fence with no
+    closing fence; extract_code_blocks finds no complete blocks and falls back
+    to returning raw content including the fence, which causes esbuild to fail.
+    """
+    return _MARKDOWN_FENCE_RE.sub("", code, count=1)
+
+
+# Template literal opened with backtick but closed with single/double quote.
+# Matches: `...${var}...'  (no inner quotes, no newline — single-line only)
+_TMPL_MISQUOTE_RE = re.compile(
+    r"(`[^`'\"\n]*\$\{[^}]+\}[^`'\"\n]*)(['\"])(?=\s*[,;)\]])"
+)
+
+
+def _fix_template_literal_quotes(code: str) -> str:
+    """Fix template literals whose closing quote is ' or " instead of a backtick.
+
+    esbuild fails to parse constructs like:
+        api.post(`/api/users/${id}/action')
+    because the template literal is opened with ` but closed with '.
+    """
+    return _TMPL_MISQUOTE_RE.sub(r"\1`", code)
+
+
 def _sanitize_lucide_imports(code: str) -> str:
-    """Replace unknown lucide-react icon names with a safe fallback."""
+    """Replace unknown lucide-react icon names with a safe fallback.
+
+    Fixes both the import statement AND all JSX usages of the removed names
+    so that undefined-component errors don't occur at build or render time.
+    """
     valid = _get_valid_lucide_icons()
     if not valid:
         return code
+
+    invalid_names: list[str] = []
 
     def _fix_import(match: re.Match[str]) -> str:
         prefix, names_str, suffix = match.group(1), match.group(2), match.group(3)
         names = [n.strip() for n in names_str.split(",") if n.strip()]
         fixed: list[str] = []
-        fallback_needed = False
         for name in names:
             base = name.split(" as ")[0].strip() if " as " in name else name
             if base in valid:
                 fixed.append(name)
             else:
-                fallback_needed = True
-        if fallback_needed and _LUCIDE_FALLBACK not in [n.split(" as ")[0].strip() for n in fixed]:
+                invalid_names.append(base)
+        if invalid_names and _LUCIDE_FALLBACK not in [n.split(" as ")[0].strip() for n in fixed]:
             fixed.append(_LUCIDE_FALLBACK)
         if not fixed:
             fixed = [_LUCIDE_FALLBACK]
@@ -361,7 +586,15 @@ def _sanitize_lucide_imports(code: str) -> str:
         r"(import\s*\{)([^}]+)(\}\s*from\s*['\"]lucide-react['\"])",
         re.DOTALL,
     )
-    return pattern.sub(_fix_import, code)
+    code = pattern.sub(_fix_import, code)
+
+    # Replace JSX usages of removed icon names with the fallback component
+    for bad in invalid_names:
+        escaped = re.escape(bad)
+        code = re.sub(rf"<{escaped}\b", f"<{_LUCIDE_FALLBACK}", code)
+        code = re.sub(rf"</{escaped}>", f"</{_LUCIDE_FALLBACK}>", code)
+
+    return code
 
 
 def _placeholder_backend_for_stack(stack: dict[str, Any]) -> str:
@@ -397,10 +630,30 @@ def _placeholder_fastapi() -> str:
 def _placeholder_backend() -> str:
     return (
         "import os\n"
+        "import re as _re\n"
         "from pathlib import Path\n"
-        "from flask import Flask, jsonify, send_from_directory\n\n"
+        "from flask import Flask, jsonify, send_from_directory, Response\n\n"
         "app = Flask(__name__)\n"
-        "_STATIC = Path(__file__).parent / 'static'\n\n"
+        "_STATIC = Path(__file__).parent / 'static'\n"
+        "_APP_BASE_PATH = os.environ.get('APP_BASE_PATH', '/')\n"
+        "_FETCH_PROXY_HTML = (\n"
+        "    '<base href=\"' + _APP_BASE_PATH + '\">'\n"
+        "    + '<script>(function(){'\n"
+        "    + 'var b=document.querySelector(\"base[href]\");'\n"
+        "    + 'if(!b)return;'\n"
+        "    + 'var _base=new URL(b.getAttribute(\"href\"),location.origin).pathname;'\n"
+        "    + 'if(_base.length>1&&_base[_base.length-1]===\"/\")_base=_base.slice(0,-1);'\n"
+        "    + 'if(!_base||_base===\"/\")return;'\n"
+        "    + 'var f=window.fetch;'\n"
+        "    + 'window.fetch=function(u,o){'\n"
+        "    + 'if(typeof u===\"string\"&&u[0]===\"/\"&&u[1]!==\"/\")u=_base+u;'\n"
+        "    + 'return f.call(this,u,o)};'\n"
+        "    + 'var op=XMLHttpRequest.prototype.open;'\n"
+        "    + 'XMLHttpRequest.prototype.open=function(m,u){'\n"
+        "    + 'if(typeof u===\"string\"&&u[0]===\"/\"&&u[1]!==\"/\")u=_base+u;'\n"
+        "    + 'return op.apply(this,arguments)};'\n"
+        "    + '})();</script>'\n"
+        ")\n\n"
         "@app.route('/api/health')\n"
         "def health():\n"
         "    return jsonify({'status': 'ok'})\n\n"
@@ -410,7 +663,12 @@ def _placeholder_backend() -> str:
         "    target = _STATIC / path if path else None\n"
         "    if target and target.is_file():\n"
         "        return send_from_directory(str(_STATIC), path)\n"
-        "    return send_from_directory(str(_STATIC), 'index.html')\n\n"
+        "    _idx = _STATIC / 'index.html'\n"
+        "    if not _idx.exists():\n"
+        "        return ('Not found', 404)\n"
+        "    _html = _idx.read_text(encoding='utf-8')\n"
+        "    _html = _re.sub(r'(<head[^>]*>)', lambda m: m.group(0) + _FETCH_PROXY_HTML, _html, count=1)\n"
+        "    return Response(_html, mimetype='text/html')\n\n"
         "if __name__ == '__main__':\n"
         "    port = int(os.environ.get('PORT', 8000))\n"
         "    app.run(host='0.0.0.0', port=port, debug=False)\n"

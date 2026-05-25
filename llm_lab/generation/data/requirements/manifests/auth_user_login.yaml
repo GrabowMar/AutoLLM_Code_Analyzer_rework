@@ -1,5 +1,0 @@
-app_slug: auth_user_login
-name: Auth login (standard bundle)
-description: Authentication study fixture with standard tone and Flask rules
-base_bundle_slug: system-scaffolding-standard
-extra_block_refs: []

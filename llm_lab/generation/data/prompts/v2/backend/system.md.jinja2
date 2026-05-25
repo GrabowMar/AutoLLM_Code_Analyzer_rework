@@ -18,6 +18,9 @@ Return ONE code block:
 - PyJWT for authentication, bcrypt for passwords
 - SQLite database
 
+## Available Python packages (ONLY use these — no other third-party imports)
+Flask, Flask-CORS, Flask-SQLAlchemy, Werkzeug, SQLAlchemy, bcrypt, PyJWT
+
 ## Required Features
 
 ### 1. Rich Data Models
@@ -46,6 +49,7 @@ class Item(db.Model):
 ### 2. Comprehensive Endpoints
 ```
 Public (no auth):
+  GET /api/health            -> {"status": "ok"}  [REQUIRED — container health check]
   GET /api/public/stats      -> counts, averages, recent activity
   GET /api/public/featured   -> featured/highlighted items
   GET /api/items             -> list with ?search=, ?category=, ?status=, ?sort=, ?limit=
@@ -166,6 +170,9 @@ def _serve_spa(path):
     return send_from_directory(str(_STATIC), 'index.html')
 
 if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+        seed_data()
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port, debug=False)
 ```
@@ -174,8 +181,11 @@ Rules:
 - Do NOT pass `static_folder` or `static_url_path` to `Flask()` — doing so causes Flask's built-in static handler to shadow the catch-all, breaking SPA routing
 - Every API route MUST start with `/api/`
 - `_serve_spa` must be the very last route — nothing after it
-- Database: `app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{Path(__file__).parent / 'data' / 'app.db'}"` — use this exact form with `Path(__file__).parent`; do NOT write `sqlite:///data/app.db` (Flask-SQLAlchemy 3.x resolves relative URIs against `instance_path`, not cwd, which breaks startup)
+- Database: `app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////app/data/app.db'`
+  (4 slashes = absolute path; `/app/data/` is pre-created in the Docker image)
+  Do NOT use relative paths, `sqlite:///data/app.db`, or `Path(__file__)` expressions — they break in Docker.
 - Read port from `PORT` env var with default 8000
+- Always wrap `db.create_all()` and `seed_data()` inside `with app.app_context():` under `if __name__ == '__main__':`
 
 ## Forbidden
 - `@app.before_first_request` (removed in Flask 2.3)
@@ -183,3 +193,5 @@ Rules:
 - Empty functions (`pass`, `...`)
 - Minimal implementations - be comprehensive!
 - Routes without the `/api/` prefix (except `_serve_spa`)
+- Importing packages not listed in the "Available Python packages" section above
+- Missing `/api/health` endpoint — the container health check depends on it

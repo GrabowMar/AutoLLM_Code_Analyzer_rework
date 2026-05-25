@@ -1,9 +1,0 @@
-slug: tone-standard
-version: 1
-block_type: prompt_tone
-name: Standard tone
-description: Balanced scope — comprehensive APIs without extreme line-count pressure
-content: |
-  ## Generation tone
-  Produce a **complete, production-quality** application appropriate to the requirements below.
-  Match the specified scope for seed data and feature depth; do not pad with unrelated features.

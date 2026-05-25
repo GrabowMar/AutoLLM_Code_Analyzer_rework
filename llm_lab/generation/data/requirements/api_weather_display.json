@@ -1,29 +1,30 @@
 {
   "slug": "api_weather_display",
   "name": "Weather Display",
-  "category": "API",
-  "description": "Look up current weather by city",
+  "category": "Utility",
+  "description": "Look up simulated current weather by city name",
   "backend_requirements": [
     "Access control: allow public read-only weather lookups; require auth for cache management",
-    "1. WeatherCache model: id, city (required), temperature, condition, fetched_at, expires_at",
-    "2. GET /api/weather?city=NAME - return current weather, use cached result when fresh",
-    "3. GET /api/weather/recent - return last 10 cached lookups",
-    "4. Validate: city is required and max 100 chars",
-    "5. Graceful error handling for unknown cities"
+    "1. WeatherCache model: id, city (required), temperature, condition, fetched_at, expires_at, is_active",
+    "2. GET /api/weather?city=NAME - return simulated weather data; use cached result when fresh (within 5 minutes), otherwise generate new simulated data",
+    "3. Simulated weather: pick a random realistic temperature (-10 to 40 C) and a random condition from: Sunny, Cloudy, Rainy, Windy, Snowy, Foggy, Partly Cloudy, Thunderstorm",
+    "4. GET /api/weather/recent - return last 10 cached lookups",
+    "5. Validate: city is required and max 100 chars; return 400 if missing",
+    "6. Do NOT call any external weather API - generate all data programmatically"
   ],
   "frontend_requirements": [
     "Public guest weather search with CTA to sign in for cache management",
     "1. Search input for city with 'Search' button",
-    "2. Weather card showing city, temperature, condition, last updated",
-    "3. Recent searches list (last 5)",
+    "2. Weather card showing city, temperature (C and F), condition, last updated",
+    "3. Recent searches list (last 5 from /api/weather/recent)",
     "4. Loading and error states",
-    "5. Units toggle (C/F) display-only"
+    "5. Units toggle (C/F) — display-only conversion, no extra API call"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/weather",
-      "description": "Get current weather by city (?city=)",
+      "description": "Get simulated weather by city (?city=NAME); returns cached if fresh",
       "request": null,
       "response": {
         "city": "string",
@@ -35,7 +36,7 @@
     {
       "method": "GET",
       "path": "/api/weather/recent",
-      "description": "List recent cached lookups",
+      "description": "List last 10 cached lookups",
       "request": null,
       "response": {
         "items": [
@@ -56,8 +57,7 @@
       "description": "Health check endpoint",
       "request": null,
       "response": {
-        "status": "healthy",
-        "service": "backend"
+        "status": "ok"
       }
     }
   ],

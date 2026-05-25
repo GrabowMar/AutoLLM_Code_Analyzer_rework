@@ -13,7 +13,7 @@ Return ONE code block:
 - Use **varied UI components**: cards, tables, modals, forms, stats widgets
 - Every page should feel **populated and alive**
 
-## Stack
+## Stack (ONLY use packages from this list — no others are installed)
 - React 18 with Hooks
 - react-router-dom v6 (Routes, Route, Link, useNavigate, useParams)
 - axios for API calls
@@ -22,6 +22,16 @@ Return ONE code block:
 - Tailwind CSS (dark theme)
 - clsx for conditional classes
 - date-fns for date formatting
+- recharts for charts and data visualization
+- lodash for utility functions
+- uuid for generating unique IDs
+
+## API Endpoints
+**CRITICAL**: Use ONLY the endpoints listed in the **Backend API Context** section of this prompt.
+- Do NOT invent endpoint paths or parameters
+- Do NOT use `/api/items`, `/api/public/stats`, `/api/public/featured`, or any path not in the context
+- If the context shows `/api/todos`, use `/api/todos` — match exactly
+- If the context shows a POST endpoint with specific fields, send exactly those fields
 
 ## Imports Checklist
 - **MUST** import every used component and hook from its package.
@@ -56,46 +66,46 @@ Design qualities: dark theme base, glassmorphism, gradient accents, smooth hover
 
 ## Required Pages
 
-### 1. Landing Page (/)
-- Hero section with animated gradient
-- Stats bar (4 metrics from /api/public/stats)
-- Featured items grid (6 cards from /api/public/featured)
-- Features showcase (3-4 feature cards with visual elements)
+Build pages appropriate to the app's domain. At minimum include:
+
+### 1. Landing / Home Page (/)
+- Hero section with animated gradient and app description
+- Stats bar showing key metrics (fetched from an appropriate API endpoint in the context)
+- Featured items grid (fetched from an appropriate list endpoint in the context)
+- Features showcase (3-4 feature cards)
 - Call-to-action section
 
-### 2. Browse Page (/browse)
+### 2. Browse / List Page (/browse or domain-appropriate path)
 - Search input with visual indicator
-- Category filter dropdown
-- Status filter buttons
-- Sort dropdown (newest, oldest, popular)
-- Items grid (12 items)
+- Category/status filter controls
+- Sort dropdown
+- Items grid or table (use the main list endpoint from the context)
 - Pagination controls
 - "No results" empty state
 
-### 3. Detail Page (/item/:id)
-- Full item details
-- Related items sidebar
-- Action buttons (edit, delete - if owner)
+### 3. Detail Page (/:resource/:id or domain-appropriate path)
+- Full item details (fetched from the detail/single endpoint in the context)
+- Related items or sidebar
+- Action buttons (edit, delete — use POST/DELETE endpoints from context)
 - Back navigation
 
 ### 4. Login Page (/login)
 - Centered card form
 - Username/password inputs
-- Submit button with loading state
+- Submit button with loading state (call POST /api/auth/login or equivalent from context)
 - Link to register
 
 ### 5. Dashboard (/dashboard)
 - Welcome message with user name
-- Stats overview (4 cards)
+- Stats overview (4 cards — use admin or stats endpoints from context)
 - Recent activity list
 - Quick actions section
 - User's items table with actions
 
 ### 6. Admin Panel (/admin)
-- Admin stats dashboard
-- Users table with status toggles
-- Items moderation table
-- Charts/graphs placeholder
+- Admin stats dashboard (use admin endpoints from context)
+- Data table with status toggles (use toggle endpoints from context)
+- Charts/graphs using recharts
 
 ## Component Patterns
 Create reusable components within App.jsx for:
@@ -114,3 +124,4 @@ Create reusable components within App.jsx for:
 - Empty function bodies
 - Minimal/stub implementations
 - Redirecting guests to login on landing
+- Inventing API endpoint paths not present in the Backend API Context

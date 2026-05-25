@@ -2,7 +2,7 @@ import type { Handle, HandleServerError } from "@sveltejs/kit";
 
 const API_TARGET = process.env.API_TARGET ?? "http://localhost:8001";
 
-const PROXY_PREFIXES = ["/api/", "/_allauth/", "/admin/", "/media/"];
+const PROXY_PREFIXES = ["/api/", "/_allauth/", "/admin/", "/media/", "/apps/"];
 
 function buildProxyHeaders(clientRequest: Request, clientUrl: URL): Headers {
   const headers = new Headers(clientRequest.headers);
