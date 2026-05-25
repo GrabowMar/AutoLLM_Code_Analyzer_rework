@@ -27,11 +27,17 @@
 		type DockerInfo
 	} from '$lib/api/client';
 
-	let containers = $state<ContainerInstance[]>([]);
-	let total = $state(0);
-	let loading = $state(true);
+	// Module-level cache — survives SPA navigation so revisiting shows data instantly.
+	let _cachedContainers: ContainerInstance[] = [];
+	let _cachedTotal = 0;
+	let _cachedDockerInfo: DockerInfo | null = null;
+
+	let containers = $state<ContainerInstance[]>(_cachedContainers);
+	let total = $state(_cachedTotal);
+	let loading = $state(_cachedContainers.length === 0);
+	let refreshing = $state(false);
 	let error = $state('');
-	let dockerInfo = $state<DockerInfo | null>(null);
+	let dockerInfo = $state<DockerInfo | null>(_cachedDockerInfo);
 	let statusFilter = $state<'all' | ContainerStatus>('all');
 	let actionLoading = $state<Record<string, boolean>>({});
 
@@ -44,8 +50,10 @@
 		removed: 'bg-neutral-500/15 text-neutral-400 border-neutral-500/30'
 	};
 
-	async function load() {
-		loading = true;
+	async function load(showSpinner = false) {
+		if (showSpinner) loading = true;
+		else if (_cachedContainers.length > 0) refreshing = true;
+		else loading = true;
 		error = '';
 		try {
 			const [res, info] = await Promise.all([
@@ -55,10 +63,14 @@
 			containers = res.containers;
 			total = res.pagination.total;
 			dockerInfo = info;
+			_cachedContainers = res.containers;
+			_cachedTotal = res.pagination.total;
+			_cachedDockerInfo = info;
 		} catch (e) {
 			error = (e as Error)?.message || 'Failed to load';
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -77,12 +89,14 @@
 		return new Date(s).toLocaleString();
 	}
 
+	let firstEffect = true;
 	$effect(() => {
 		void statusFilter;
+		if (firstEffect) { firstEffect = false; return; }
 		load();
 	});
 
-	onMount(load);
+	onMount(() => load());
 </script>
 
 <svelte:head>
@@ -95,8 +109,8 @@
 			<h1>Runtime</h1>
 			<p>Docker container management</p>
 		</div>
-		<Button variant="outline" size="sm" onclick={load} class="self-start">
-			<RefreshCw class="mr-2 h-4 w-4" />Refresh
+		<Button variant="outline" size="sm" onclick={() => load(true)} class="self-start" disabled={loading}>
+			<RefreshCw class="mr-2 h-4 w-4 {refreshing ? 'animate-spin' : ''}" />Refresh
 		</Button>
 	</div>
 
