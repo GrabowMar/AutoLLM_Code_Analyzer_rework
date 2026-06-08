@@ -1,4 +1,4 @@
-FROM docker.io/traefik:v3.7.1
+FROM docker.io/traefik:v3.7.4
 
 # envsubst (from gettext) renders traefik.yml and dynamic/static.yml from templates at start.
 RUN apk add --no-cache gettext \
