@@ -10,6 +10,7 @@
 	import Gift from '@lucide/svelte/icons/gift';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import Download from '@lucide/svelte/icons/download';
+	import ProviderIcon from '$lib/components/ProviderIcon.svelte';
 	import type { LLMModelDetail } from '$lib/api/client';
 	import { formatPrice, formatTokens, copyToClipboard } from './helpers';
 
@@ -47,7 +48,7 @@
 		<div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 			<div class="flex items-start gap-4">
 				<div class="flex h-12 w-12 items-center justify-center rounded-md bg-primary/10">
-					<Cpu class="h-6 w-6 text-primary" />
+					<ProviderIcon provider={model.provider} size={28} />
 				</div>
 				<div>
 					<h1 class="text-xl font-semibold">{model.model_name}</h1>

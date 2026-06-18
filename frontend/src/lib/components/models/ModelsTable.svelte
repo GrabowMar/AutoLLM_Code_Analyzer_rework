@@ -13,6 +13,7 @@ import Wrench from '@lucide/svelte/icons/wrench';
 import Radio from '@lucide/svelte/icons/radio';
 import Braces from '@lucide/svelte/icons/braces';
 import Zap from '@lucide/svelte/icons/zap';
+import ProviderIcon from '$lib/components/ProviderIcon.svelte';
 import type { LLMModelSummary, PaginatedModels } from '$lib/api/client';
 
 type SortableColumn = {
@@ -160,7 +161,7 @@ function formatTokens(n: number): string {
 								<td class="px-3 py-2">
 									<a href="/models/{model.canonical_slug}" class="flex items-center gap-2.5 group/link">
 										<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted group-hover/link:bg-primary/10 transition-colors">
-											<Cpu class="h-4 w-4 text-muted-foreground group-hover/link:text-primary transition-colors" />
+											<ProviderIcon provider={model.provider} size={20} />
 										</div>
 										<div class="min-w-0">
 											<span class="text-sm font-medium group-hover/link:text-primary transition-colors block truncate max-w-[280px]">{model.model_name}</span>
@@ -247,7 +248,7 @@ function formatTokens(n: number): string {
 							<div class="flex items-start justify-between gap-2">
 								<div class="flex items-center gap-2 min-w-0 flex-1">
 									<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-										<Cpu class="h-4 w-4 text-muted-foreground" />
+										<ProviderIcon provider={model.provider} size={20} />
 									</div>
 									<div class="min-w-0">
 										<span class="text-sm font-medium block truncate">{model.model_name}</span>
