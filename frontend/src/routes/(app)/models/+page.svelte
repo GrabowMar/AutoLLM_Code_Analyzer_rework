@@ -22,7 +22,7 @@ import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 import ModelsFiltersBar from '$lib/components/models/ModelsFiltersBar.svelte';
 import type { FilterTag } from '$lib/components/FilterBar.svelte';
 import ModelsTable from '$lib/components/models/ModelsTable.svelte';
-import ModelsPagination from '$lib/components/models/ModelsPagination.svelte';
+import PaginationBar from '$lib/components/PaginationBar.svelte';
 
 let searchQuery = $state('');
 let selectedProvider = $state('');
@@ -347,5 +347,15 @@ onMount(() => {
 		onChangeMobileSort={changeMobileSort}
 		onToggleSortDir={toggleSortDir}
 		onClearAllFilters={clearAllFilters}
+	/>
+
+	<PaginationBar
+		resultsText={data && !loading
+			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} models`
+			: ''}
+		page={data?.page}
+		pages={data?.pages}
+		onGoToPage={goToPage}
+		class="rounded-md border border-border"
 	/>
 </div>
