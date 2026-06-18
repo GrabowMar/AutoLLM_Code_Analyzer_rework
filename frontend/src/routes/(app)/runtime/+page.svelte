@@ -123,7 +123,7 @@
 
 	<Card.Root>
 		<Card.Content class="p-4 flex flex-wrap gap-3">
-			<select bind:value={statusFilter} class="rounded-md border bg-background px-3 py-1.5 text-sm">
+			<select bind:value={statusFilter} class="std-select">
 				<option value="all">All statuses</option>
 				<option value="pending">Pending</option>
 				<option value="building">Building</option>

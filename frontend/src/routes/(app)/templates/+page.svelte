@@ -352,7 +352,7 @@
 	</div>
 
 	<!-- Tabs Menu -->
-	<div class="flex gap-1 rounded-lg bg-muted p-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden flex-nowrap shadow-inner">
+	<div class="flex gap-1 rounded-md bg-muted p-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden flex-nowrap shadow-inner">
 		<button
 			type="button"
 			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-200 whitespace-nowrap cursor-pointer {activeTab === 'scaffolding' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
@@ -395,7 +395,7 @@
 			
 			<!-- SEARCH & ACTIONS BAR (Only for CRUD tabs) -->
 			{#if activeTab !== 'bundles'}
-				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-muted/10 p-3 rounded-lg border">
+				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-md border border-border bg-card p-3">
 					<div class="relative w-full sm:w-72">
 						<Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
 						{#if activeTab === 'scaffolding'}
@@ -447,7 +447,7 @@
 					<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-2 {isEditingOrCreating ? 'xl:grid-cols-1' : 'xl:grid-cols-3'}">
 						{#each filteredScaffolding as t (t.id)}
 							{@const isActive = editingScaffolding?.slug === t.slug}
-							<div class="group relative rounded-xl border bg-card text-card-foreground shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md {isActive ? 'ring-2 ring-primary bg-primary/[0.02]' : ''}">
+							<div class="group relative rounded-md border border-border bg-card text-card-foreground shadow-sm transition-all hover:border-primary/40 hover:shadow-md {isActive ? 'ring-2 ring-primary bg-primary/[0.02]' : ''}">
 								<div class="p-4 space-y-3">
 									<div class="flex items-start justify-between gap-2">
 										<div class="min-w-0">
@@ -514,7 +514,7 @@
 					<div class="space-y-2">
 						{#each filteredApp as t (t.id)}
 							{@const isActive = editingApp?.slug === t.slug}
-							<div class="group flex items-start gap-4 rounded-xl border bg-card p-4 shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md {isActive ? 'ring-2 ring-primary bg-primary/[0.02]' : ''}">
+							<div class="group flex items-start gap-4 rounded-md border border-border bg-card p-4 shadow-sm transition-all hover:border-primary/40 hover:shadow-md {isActive ? 'ring-2 ring-primary bg-primary/[0.02]' : ''}">
 								<div class="flex-1 min-w-0">
 									<div class="flex items-center flex-wrap gap-2">
 										<span class="font-bold text-sm text-foreground">{t.name}</span>
@@ -584,7 +584,7 @@
 								<div class="grid gap-3 grid-cols-1 sm:grid-cols-2 {isEditingOrCreating ? 'xl:grid-cols-1' : 'xl:grid-cols-2'}">
 									{#each templates as t (t.id)}
 										{@const isActive = editingPrompt?.slug === t.slug}
-										<div class="group relative rounded-xl border bg-card p-4 shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md {isActive ? 'ring-2 ring-primary bg-primary/[0.02]' : ''}">
+										<div class="group relative rounded-md border border-border bg-card p-4 shadow-sm transition-all hover:border-primary/40 hover:shadow-md {isActive ? 'ring-2 ring-primary bg-primary/[0.02]' : ''}">
 											<div class="space-y-3">
 												<div class="flex items-start justify-between gap-2">
 													<div class="min-w-0">
@@ -596,7 +596,7 @@
 														</div>
 													</div>
 												</div>
-												<pre class="text-[11px] text-muted-foreground bg-muted/30 p-2.5 rounded-lg border font-mono line-clamp-3 whitespace-pre-wrap leading-relaxed h-[62px]">{t.content}</pre>
+												<pre class="text-[11px] text-muted-foreground bg-muted/30 p-2.5 rounded-md border font-mono line-clamp-3 whitespace-pre-wrap leading-relaxed h-[62px]">{t.content}</pre>
 												<div class="flex gap-2 justify-end">
 													<button
 														type="button"
@@ -628,7 +628,7 @@
 			<!-- BUNDLES LIST (Read Only) -->
 			{#if activeTab === 'bundles'}
 				<div class="space-y-4">
-					<div class="p-4 bg-muted/20 border border-muted/50 rounded-xl">
+					<div class="p-4 bg-muted/20 border border-muted/50 rounded-md">
 						<p class="text-xs text-muted-foreground leading-relaxed flex items-start gap-1.5">
 							<Package class="h-4 w-4 shrink-0 text-primary mt-0.5" />
 							Template bundles compose structural requirement blocks and models into reproducible generation snapshot plans.
@@ -647,7 +647,7 @@
 					{:else}
 						<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 							{#each templateBundles as bundle (bundle.id)}
-								<div class="group relative rounded-xl border bg-card p-4 shadow-xs hover:shadow-md transition-all duration-200">
+								<div class="group relative rounded-md border border-border bg-card p-4 shadow-sm hover:border-primary/40 hover:shadow-md transition-all">
 									<div class="space-y-2">
 										<div class="flex items-start justify-between gap-1.5">
 											<div class="min-w-0">
@@ -732,7 +732,7 @@
 							</div>
 							
 							{#if scaffoldingError}
-								<div class="rounded-lg bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-400 font-medium">
+								<div class="rounded-md bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-400 font-medium">
 									{scaffoldingError}
 								</div>
 							{/if}
@@ -796,7 +796,7 @@
 							</div>
 							
 							{#if appError}
-								<div class="rounded-lg bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-400 font-medium">
+								<div class="rounded-md bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-400 font-medium">
 									{appError}
 								</div>
 							{/if}
@@ -843,14 +843,14 @@
 								</div>
 								<div class="space-y-1.5">
 									<Label class="text-xs uppercase tracking-wider text-muted-foreground">Execution Stage</Label>
-									<select bind:value={promptForm.stage} class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs transition-all hover:border-primary/45 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+									<select bind:value={promptForm.stage} class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer">
 										<option value="backend">Backend generation</option>
 										<option value="frontend">Frontend UI generation</option>
 									</select>
 								</div>
 								<div class="space-y-1.5">
 									<Label class="text-xs uppercase tracking-wider text-muted-foreground">LLM Chat Role</Label>
-									<select bind:value={promptForm.role} class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs transition-all hover:border-primary/45 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+									<select bind:value={promptForm.role} class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer">
 										<option value="system">System prompt</option>
 										<option value="user">User instruction</option>
 									</select>
@@ -860,14 +860,14 @@
 										<span>Prompt Body (Jinja2 template syntax)</span>
 									</Label>
 									<Textarea bind:value={promptForm.content} rows={12} placeholder="Write instructions using Jinja2 blocks, e.g. You are a developer building {{ name }}..." class="font-mono text-[11px] leading-relaxed bg-muted/20" />
-									<div class="p-3 bg-muted/40 rounded-lg border text-[10px] text-muted-foreground leading-relaxed">
+									<div class="p-3 bg-muted/40 rounded-md border text-[10px] text-muted-foreground leading-relaxed">
 										<strong class="text-foreground">Jinja2 variables supplied by Generator:</strong> <code class="bg-muted px-1 rounded text-primary">name</code>, <code class="bg-muted px-1 rounded text-primary">description</code>, <code class="bg-muted px-1 rounded text-primary">backend_requirements</code>, <code class="bg-muted px-1 rounded text-primary">frontend_requirements</code>, <code class="bg-muted px-1 rounded text-primary">admin_requirements</code>, <code class="bg-muted px-1 rounded text-primary">api_endpoints</code>, <code class="bg-muted px-1 rounded text-primary">data_model</code>.
 									</div>
 								</div>
 							</div>
 							
 							{#if promptError}
-								<div class="rounded-lg bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-400 font-medium">
+								<div class="rounded-md bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-400 font-medium">
 									{promptError}
 								</div>
 							{/if}
@@ -890,8 +890,8 @@
 			</div>
 		{:else if activeTab !== 'bundles'}
 			<!-- DESKTOP EMPTY STATE (Master detail placeholder when not editing) -->
-			<div class="hidden lg:flex flex-col items-center justify-center rounded-xl border border-dashed border-muted-foreground/30 p-16 text-center bg-muted/5 min-h-[360px] max-w-lg mx-auto">
-				<div class="h-10 w-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center mb-4">
+			<div class="hidden lg:flex flex-col items-center justify-center rounded-md border border-dashed border-muted-foreground/30 p-16 text-center bg-muted/5 min-h-[360px] max-w-lg mx-auto">
+				<div class="h-10 w-10 rounded-md bg-primary/10 text-primary flex items-center justify-center mb-4">
 					{#if activeTab === 'scaffolding'}
 						<Layers class="h-5 w-5" />
 					{:else if activeTab === 'app'}
