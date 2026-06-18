@@ -195,7 +195,7 @@
 					<div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
 						<div class="flex items-center gap-2">
 							<label class="text-sm font-medium" for="baseline">Baseline:</label>
-							<select id="baseline" class="h-8 rounded-md border border-input bg-background px-2 text-sm" bind:value={baseline}>
+							<select id="baseline" class="h-8 rounded-md border border-input bg-surface-1 px-2 text-sm hover:border-primary/40 focus-visible:outline-none cursor-pointer" bind:value={baseline}>
 								<option value="first">First Selected</option>
 								<option value="average">Average</option>
 								<option value="median">Median</option>
@@ -203,7 +203,7 @@
 						</div>
 						<div class="flex items-center gap-2">
 							<label class="text-sm font-medium" for="highlight">Highlight:</label>
-							<select id="highlight" class="h-8 rounded-md border border-input bg-background px-2 text-sm" bind:value={highlightSlug}>
+							<select id="highlight" class="h-8 rounded-md border border-input bg-surface-1 px-2 text-sm hover:border-primary/40 focus-visible:outline-none cursor-pointer" bind:value={highlightSlug}>
 								{#each comparedModels as model}
 									<option value={model.canonical_slug}>{model.model_name}</option>
 								{/each}

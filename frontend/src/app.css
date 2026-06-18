@@ -547,6 +547,14 @@
            cursor-pointer;
   }
 
+  /* Standalone select (matches Input component height/style) */
+  .std-select {
+    @apply h-9 rounded-md border border-input bg-surface-1 px-3 text-sm text-foreground
+           transition-colors hover:border-primary/40
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30
+           cursor-pointer;
+  }
+
   /* ── Mono-tag (for IDs, hashes, model names) ────────────────── */
   .mono-tag {
     @apply inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[11px];

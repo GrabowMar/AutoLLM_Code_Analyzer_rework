@@ -29,12 +29,12 @@
 </script>
 
 {#if loading}
-	<div class="flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm text-muted-foreground">
+	<div class="flex items-center gap-2 rounded-md border border-border px-4 py-2.5 text-sm text-muted-foreground">
 		<LoaderCircle class="h-4 w-4 animate-spin shrink-0" />
 		Checking OpenRouter API key…
 	</div>
 {:else if !status?.configured && !status?.global_fallback_available}
-	<div class="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+	<div class="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
 		<div class="flex items-start gap-2">
 			<Key class="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
 			<div>
@@ -52,7 +52,7 @@
 		</div>
 	</div>
 {:else if status?.last_validation_status === 'invalid'}
-	<div class="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm">
+	<div class="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm">
 		<div class="flex items-start gap-2">
 			<AlertTriangle class="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
 			<div>
@@ -67,7 +67,7 @@
 		</div>
 	</div>
 {:else if isValid}
-	<div class="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-2.5 text-sm">
+	<div class="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-4 py-2.5 text-sm">
 		<div class="flex flex-wrap items-center gap-2">
 			<Check class="h-4 w-4 text-emerald-500 shrink-0" />
 			<span class="text-muted-foreground">

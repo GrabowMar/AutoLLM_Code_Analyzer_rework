@@ -137,7 +137,7 @@
 			</div>
 			<div class="space-y-1">
 				<label class="text-xs font-medium" for="meta-status">Status</label>
-				<select id="meta-status" bind:value={status} class="w-full h-8 rounded-md border bg-background px-2 text-xs">
+				<select id="meta-status" bind:value={status} class="w-full h-8 rounded-md border border-input bg-surface-1 px-2 text-xs hover:border-primary/40 focus-visible:outline-none cursor-pointer">
 					<option value="draft">Draft</option>
 					<option value="active">Active</option>
 					<option value="archived">Archived</option>

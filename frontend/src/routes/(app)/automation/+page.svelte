@@ -12,9 +12,8 @@
 	import Play from '@lucide/svelte/icons/play';
 	import Workflow from '@lucide/svelte/icons/workflow';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
-	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Search from '@lucide/svelte/icons/search';
+	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import {
 		listPipelines,
 		deletePipeline,
@@ -131,7 +130,7 @@
 				onkeydown={(e) => { if (e.key === 'Enter') { page = 1; load(); } }}
 			/>
 		</div>
-		<select bind:value={statusFilter} onchange={() => { page = 1; load(); }} class="h-9 rounded-md border bg-background px-3 text-sm">
+		<select bind:value={statusFilter} onchange={() => { page = 1; load(); }} class="std-select">
 			<option value="">All statuses</option>
 			<option value="draft">Draft</option>
 			<option value="active">Active</option>
@@ -146,7 +145,7 @@
 	{:else if error}
 		<div class="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">{error}</div>
 	{:else if pipelines.length === 0}
-		<div class="rounded-lg border border-dashed py-16 text-center">
+		<div class="rounded-md border border-dashed py-16 text-center">
 			<Workflow class="h-10 w-10 mx-auto text-muted-foreground" />
 			<p class="mt-3 text-sm font-medium">No workflows yet</p>
 			<p class="text-xs text-muted-foreground mt-1">Build your first node-based automation workflow.</p>
@@ -159,7 +158,7 @@
 			{#each pipelines as p (p.id)}
 				<button
 					type="button"
-					class="text-left rounded-lg border bg-card hover:border-primary/40 hover:shadow-md transition-all group flex flex-col focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:transition-none"
+					class="text-left rounded-md border bg-card hover:border-primary/40 hover:shadow-md transition-all group flex flex-col focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 					onclick={() => goto(`/automation/${p.id}`)}
 				>
 					<div class="p-4 flex-1 space-y-2">
@@ -211,15 +210,13 @@
 		</div>
 
 		{#if pages > 1}
-			<div class="flex justify-center items-center gap-2 pt-4">
-				<Button variant="outline" size="sm" disabled={page <= 1} onclick={() => { page--; load(); }}>
-					<ChevronLeft class="h-4 w-4" />
-				</Button>
-				<span class="px-3 text-sm text-muted-foreground">Page {page} of {pages} · {total} workflow{total === 1 ? '' : 's'}</span>
-				<Button variant="outline" size="sm" disabled={page >= pages} onclick={() => { page++; load(); }}>
-					<ChevronRight class="h-4 w-4" />
-				</Button>
-			</div>
+			<PaginationBar
+				resultsText="{total} workflow{total === 1 ? '' : 's'}"
+				{page}
+				{pages}
+				onGoToPage={(p) => { page = p; load(); }}
+				class="rounded-md border border-border"
+			/>
 		{/if}
 	{/if}
 </div>

@@ -398,7 +398,7 @@
 			</div>
 			<a
 				href="/templates"
-				class="shrink-0 self-start inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+				class="shrink-0 self-start inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground bg-card hover:text-foreground hover:border-primary/40 hover:bg-accent transition-colors"
 			>
 				<Layers class="h-3.5 w-3.5" /> Manage Templates
 			</a>

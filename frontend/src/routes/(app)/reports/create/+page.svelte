@@ -161,7 +161,7 @@
 						<select
 							id="rep-model"
 							bind:value={modelId}
-							class="block w-full rounded-md border bg-background px-3 py-2 text-sm"
+							class="block w-full std-select py-2"
 						>
 							<option value="">— select a model —</option>
 							{#each models as m (m.model_id)}
@@ -175,7 +175,7 @@
 						<select
 							id="rep-tmpl"
 							bind:value={templateSlug}
-							class="block w-full rounded-md border bg-background px-3 py-2 text-sm"
+							class="block w-full std-select py-2"
 						>
 							<option value="">— select a template —</option>
 							{#each templates as t (t.slug)}
@@ -198,7 +198,7 @@
 							min="1"
 							max="365"
 							bind:value={days}
-							class="block w-full rounded-md border bg-background px-3 py-2 text-sm"
+							class="block w-full std-select py-2"
 						/>
 						<p class="text-xs text-muted-foreground">1-365 days</p>
 					</div>

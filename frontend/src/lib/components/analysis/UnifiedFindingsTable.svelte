@@ -212,11 +212,11 @@ const grouped = $derived.by<Group[]>(() => {
 			<Loader class="mr-2 h-4 w-4 animate-spin" /> Loading findings…
 		</div>
 	{:else if findings.length === 0}
-		<div class="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+		<div class="rounded-md border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
 			No findings match your filters.
 		</div>
 	{:else}
-		<div class="overflow-x-auto rounded-lg border border-border">
+		<div class="overflow-x-auto rounded-md border border-border">
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-border bg-muted/30">
