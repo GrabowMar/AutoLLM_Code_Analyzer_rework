@@ -487,6 +487,9 @@
 		resultsText={data && !loading
 			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} applications`
 			: ''}
+		page={data?.page}
+		pages={data?.pages}
+		onGoToPage={goToPage}
 		onClearAll={clearFilters}
 	>
 		{#snippet filters()}
@@ -1237,66 +1240,5 @@
 				</div>
 			{/each}
 		</div>
-
-		<!-- Pagination -->
-		{#if data && data.pages > 1}
-			{@const d = data}
-			<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-4 border-t text-sm text-muted-foreground">
-				<span class="font-mono text-xs">
-					Showing Page {d.page} of {d.pages} &middot; {d.total} applications total
-				</span>
-				<div class="flex items-center justify-center gap-1.5">
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={d.page <= 1}
-						onclick={() => goToPage(1)}
-						class="h-9 px-2 text-muted-foreground hover:text-foreground"
-					>
-						<ChevronsLeft class="h-4 w-4" />
-					</Button>
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={d.page <= 1}
-						onclick={() => goToPage(d.page - 1)}
-						class="h-9 px-2 text-muted-foreground hover:text-foreground"
-					>
-						<ChevronLeft class="h-4 w-4" />
-					</Button>
-					{#each Array.from({ length: Math.min(5, d.pages) }, (_, i) => {
-						const start = Math.max(1, Math.min(d.page - 2, d.pages - 4));
-						return start + i;
-					}).filter((p) => p <= d.pages) as p}
-						<Button
-							variant="outline"
-							size="sm"
-							class="h-9 min-w-[36px] font-mono {p === d.page ? 'bg-primary/20 border-primary/40 text-primary font-bold shadow-sm shadow-primary/10' : 'text-muted-foreground hover:text-foreground hover:border-border'}"
-							onclick={() => goToPage(p)}
-						>
-							{p}
-						</Button>
-					{/each}
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={d.page >= d.pages}
-						onclick={() => goToPage(d.page + 1)}
-						class="h-9 px-2 text-muted-foreground hover:text-foreground"
-					>
-						<ChevronRight class="h-4 w-4" />
-					</Button>
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={d.page >= d.pages}
-						onclick={() => goToPage(d.pages)}
-						class="h-9 px-2 text-muted-foreground hover:text-foreground"
-					>
-						<ChevronsRight class="h-4 w-4" />
-					</Button>
-				</div>
-			</div>
-		{/if}
 	{/if}
 </div>

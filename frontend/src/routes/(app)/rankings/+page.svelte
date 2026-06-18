@@ -225,6 +225,9 @@
 		resultsText={data
 			? `${data.statistics.total} models · ${data.statistics.free_models} free · ${data.statistics.with_benchmarks} with benchmarks`
 			: ''}
+		page={data?.pagination.page}
+		pages={data?.pagination.total_pages}
+		onGoToPage={(p) => { page = p; }}
 		onClearAll={clearAllFilters}
 	>
 		{#snippet filters()}
@@ -436,22 +439,4 @@
 			{/if}
 		</Card.Content>
 	</Card.Root>
-
-	<!-- Pagination -->
-	{#if data && data.pagination.total_pages > 1}
-		<div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-			<div>
-				Page {data.pagination.page} of {data.pagination.total_pages}
-				&middot; {data.pagination.total} models
-			</div>
-			<div class="flex gap-2">
-				<Button variant="outline" size="sm" disabled={page <= 1} onclick={() => page = Math.max(1, page - 1)}>
-					Prev
-				</Button>
-				<Button variant="outline" size="sm" disabled={page >= (data?.pagination.total_pages ?? 0)} onclick={() => page = Math.min(data?.pagination.total_pages ?? 1, page + 1)}>
-					Next
-				</Button>
-			</div>
-		</div>
-	{/if}
 </div>

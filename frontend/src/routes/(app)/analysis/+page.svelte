@@ -346,6 +346,9 @@
 		onSearchInput={handleSearchInput}
 		activeTags={activeFilters}
 		resultsText={resultsText}
+		page={currentPage}
+		pages={totalPages}
+		onGoToPage={goToPage}
 		onClearAll={() => { searchQuery = ''; statusFilter = ''; currentPage = 1; fetchTasks(); }}
 	>
 		{#snippet filters()}
@@ -652,45 +655,5 @@
 				</a>
 			{/each}
 		</div>
-
-		<!-- Pagination -->
-		{#if totalPages > 1}
-			<div class="flex flex-col items-center gap-3 sm:flex-row sm:justify-between text-sm text-muted-foreground">
-				<span>Showing {(currentPage - 1) * perPage + 1}–{Math.min(currentPage * perPage, totalTasks)} of {totalTasks}</span>
-				<div class="flex items-center gap-1">
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={currentPage <= 1}
-						onclick={() => goToPage(currentPage - 1)}
-					>
-						<ChevronLeft class="h-3.5 w-3.5 mr-1" />
-						Previous
-					</Button>
-					{#each Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-						const start = Math.max(1, Math.min(currentPage - 2, totalPages - 4));
-						return start + i;
-					}).filter(p => p <= totalPages) as page}
-						<Button
-							variant="outline"
-							size="sm"
-							class={page === currentPage ? 'bg-primary/10' : ''}
-							onclick={() => goToPage(page)}
-						>
-							{page}
-						</Button>
-					{/each}
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={currentPage >= totalPages}
-						onclick={() => goToPage(currentPage + 1)}
-					>
-						Next
-						<ChevronRight class="h-3.5 w-3.5 ml-1" />
-					</Button>
-				</div>
-			</div>
-		{/if}
 	{/if}
 </div>

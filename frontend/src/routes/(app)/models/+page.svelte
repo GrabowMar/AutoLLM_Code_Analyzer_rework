@@ -301,6 +301,12 @@ onMount(() => {
 		{providers}
 		{syncing}
 		{activeFilters}
+		resultsText={data && !loading
+			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} models`
+			: ''}
+		page={data?.page}
+		pages={data?.pages}
+		onGoToPage={goToPage}
 		onSearchInput={debouncedLoad}
 		onProviderChange={applyFilterAndReload}
 		onApplyQuickFilter={applyQuickFilter}
@@ -320,26 +326,9 @@ onMount(() => {
 		</div>
 	{/if}
 
-	<!-- Results Count -->
-	{#if data && !loading}
+	{#if data && !loading && selectedModelSlugs.size > 0}
 		<div class="flex items-center justify-between">
-			<p class="text-xs text-muted-foreground">
-				Showing {(data.page - 1) * data.per_page + 1}–{Math.min(data.page * data.per_page, data.total)} of <strong>{data.total}</strong> models
-			</p>
-			<div class="flex items-center gap-2">
-				{#if selectedModelSlugs.size > 0}
-					<Button variant="ghost" size="sm" class="h-7 px-2 text-xs" onclick={clearSelection}>Clear selection</Button>
-				{/if}
-				<select
-					class="h-7 rounded-md border border-input bg-background px-2 text-xs ring-offset-background focus:outline-none focus:ring-1 focus:ring-ring"
-					bind:value={perPage}
-					onchange={() => { currentPage = 1; load(); }}
-				>
-					<option value={25}>25 / page</option>
-					<option value={50}>50 / page</option>
-					<option value={100}>100 / page</option>
-				</select>
-			</div>
+			<Button variant="ghost" size="sm" class="h-7 px-2 text-xs" onclick={clearSelection}>Clear selection</Button>
 		</div>
 	{/if}
 
@@ -359,8 +348,4 @@ onMount(() => {
 		onToggleSortDir={toggleSortDir}
 		onClearAllFilters={clearAllFilters}
 	/>
-
-	{#if data && data.pages > 1}
-		<ModelsPagination page={data.page} pages={data.pages} onGoToPage={goToPage} />
-	{/if}
 </div>
