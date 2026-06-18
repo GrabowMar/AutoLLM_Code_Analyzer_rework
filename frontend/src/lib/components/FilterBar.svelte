@@ -47,7 +47,7 @@
 	}: Props = $props();
 
 	// On desktop, filters are expanded by default. On mobile, collapsed until toggled.
-	let filtersExpanded = $state(true);
+	let filtersExpanded = $state(false);
 
 	function handleInput(e: Event) {
 		const v = (e.target as HTMLInputElement).value;
