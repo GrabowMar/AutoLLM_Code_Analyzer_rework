@@ -4,7 +4,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
+	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Eye from '@lucide/svelte/icons/eye';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -102,6 +102,19 @@
 		return new Date(s).toLocaleString();
 	}
 
+	const activeFilters = $derived.by(() => {
+		const tags: FilterTag[] = [];
+		if (typeFilter !== 'all') {
+			tags.push({ key: 'type', label: `Type: ${typeConfig[typeFilter as ReportType]?.label ?? typeFilter}`, onRemove: () => { typeFilter = 'all'; } });
+		}
+		if (statusFilter !== 'all') {
+			tags.push({ key: 'status', label: `Status: ${statusFilter}`, onRemove: () => { statusFilter = 'all'; } });
+		}
+		return tags;
+	});
+
+	const resultsText = $derived(reports.length > 0 || !loading ? `${reports.length} of ${total} reports` : '');
+
 	$effect(() => {
 		void typeFilter;
 		void statusFilter;
@@ -144,57 +157,38 @@
 		</div>
 	</div>
 
-	<Card.Root>
-		<Card.Content class="p-3 space-y-2.5">
-			<!-- Search -->
-			<div class="relative">
-				<Search class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-				<input
-					type="search"
-					class="h-8 w-full rounded-md border border-input bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-					placeholder="Search reports by title…"
-					value={searchQuery}
-					oninput={onSearchInput}
-				/>
-			</div>
-			<!-- Type pills -->
-			<div class="flex flex-wrap items-center gap-1.5">
-				<span class="text-xs text-muted-foreground shrink-0 w-10">Type</span>
-				<button
-					class="rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {typeFilter === 'all' ? 'bg-primary text-primary-foreground border-transparent' : 'border-border hover:bg-muted'}"
-					onclick={() => { typeFilter = 'all'; }}
-				>All</button>
+	<FilterBar
+		searchPlaceholder="Search reports by title…"
+		bind:searchValue={searchQuery}
+		onSearchInput={onSearchInput}
+		activeTags={activeFilters}
+		resultsText={resultsText}
+		onClearAll={() => { typeFilter = 'all'; statusFilter = 'all'; searchQuery = ''; sortBy = 'newest'; }}
+	>
+		{#snippet filters()}
+			<div class="fb-group">
+				<span class="fb-group-label">Type</span>
+				<button class="fb-chip {typeFilter === 'all' ? 'fb-chip-on' : ''}" onclick={() => { typeFilter = 'all'; }}>All</button>
 				{#each Object.entries(typeConfig) as [k, v] (k)}
-					<button
-						class="rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {typeFilter === k ? v.color + ' border-current' : 'border-border hover:bg-muted'}"
-						onclick={() => { typeFilter = k as ReportType; }}
-					>{v.label}</button>
+					<button class="fb-chip {typeFilter === k ? 'fb-chip-indigo' : ''}" onclick={() => { typeFilter = k as ReportType; }}>{v.label}</button>
 				{/each}
 			</div>
-			<!-- Status pills + sort -->
-			<div class="flex flex-wrap items-center gap-1.5">
-				<span class="text-xs text-muted-foreground shrink-0 w-10">Status</span>
-				{#each (['all', 'pending', 'generating', 'completed', 'failed'] as const) as s}
-					{@const active = statusFilter === s}
-					{@const color = s === 'completed' ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' : s === 'generating' ? 'bg-amber-500/15 text-amber-500 border-amber-500/30' : s === 'failed' ? 'bg-red-500/15 text-red-400 border-red-500/30' : s === 'pending' ? 'bg-slate-500/15 text-slate-400 border-slate-500/30' : ''}
-					<button
-						class="rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {active ? (s === 'all' ? 'bg-primary text-primary-foreground border-transparent' : color + ' border-current') : 'border-border hover:bg-muted'}"
-						onclick={() => { statusFilter = s === 'all' ? 'all' : s as ReportStatus; }}
-					>{s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}</button>
-				{/each}
-				<div class="ml-auto flex items-center gap-1.5">
-					<ArrowDownUp class="h-3 w-3 text-muted-foreground" />
-					{#each ([['newest', 'Newest'], ['oldest', 'Oldest'], ['title', 'A–Z']] as const) as [v, label]}
-						<button
-							class="rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {sortBy === v ? 'bg-primary text-primary-foreground border-transparent' : 'border-border hover:bg-muted'}"
-							onclick={() => { sortBy = v; }}
-						>{label}</button>
-					{/each}
-					<span class="text-xs text-muted-foreground pl-2">{reports.length} / {total}</span>
+			<div class="fb-group">
+				<span class="fb-group-label">Status</span>
+				<button class="fb-chip {statusFilter === 'all' ? 'fb-chip-on' : ''}" onclick={() => { statusFilter = 'all'; }}>All</button>
+				<button class="fb-chip {statusFilter === 'pending' ? 'fb-chip-slate' : ''}" onclick={() => { statusFilter = 'pending'; }}>Pending</button>
+				<button class="fb-chip {statusFilter === 'generating' ? 'fb-chip-amber' : ''}" onclick={() => { statusFilter = 'generating'; }}>Generating</button>
+				<button class="fb-chip {statusFilter === 'completed' ? 'fb-chip-emerald' : ''}" onclick={() => { statusFilter = 'completed'; }}>Completed</button>
+				<button class="fb-chip {statusFilter === 'failed' ? 'fb-chip-red' : ''}" onclick={() => { statusFilter = 'failed'; }}>Failed</button>
+				<div class="fb-group ml-2">
+					<span class="fb-group-label">Sort</span>
+					<button class="fb-chip {sortBy === 'newest' ? 'fb-chip-on' : ''}" onclick={() => { sortBy = 'newest'; }}>Newest</button>
+					<button class="fb-chip {sortBy === 'oldest' ? 'fb-chip-on' : ''}" onclick={() => { sortBy = 'oldest'; }}>Oldest</button>
+					<button class="fb-chip {sortBy === 'title' ? 'fb-chip-on' : ''}" onclick={() => { sortBy = 'title'; }}>A–Z</button>
 				</div>
 			</div>
-		</Card.Content>
-	</Card.Root>
+		{/snippet}
+	</FilterBar>
 
 	{#if loading}
 		<Card.Root>

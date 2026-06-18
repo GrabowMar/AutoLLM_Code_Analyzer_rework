@@ -3,10 +3,9 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
+	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
 	import Trophy from '@lucide/svelte/icons/trophy';
 	import Medal from '@lucide/svelte/icons/medal';
-	import Search from '@lucide/svelte/icons/search';
 	import Download from '@lucide/svelte/icons/download';
 	import Info from '@lucide/svelte/icons/info';
 	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
@@ -106,6 +105,31 @@
 	function indexOnPage(i: number): number {
 		return (page - 1) * perPage + i + 1;
 	}
+
+	const activeFilters = $derived.by((): FilterTag[] => {
+		const tags: FilterTag[] = [];
+		if (providerFilter !== 'all') {
+			tags.push({ key: 'provider', label: `Provider: ${providerFilter}`, onRemove: () => { providerFilter = 'all'; page = 1; } });
+		}
+		if (!includeFree) {
+			tags.push({ key: 'nofree', label: 'Paid only', onRemove: () => { includeFree = true; page = 1; } });
+		}
+		if (hasBenchmarksOnly) {
+			tags.push({ key: 'bench', label: 'With benchmarks', onRemove: () => { hasBenchmarksOnly = false; page = 1; } });
+		}
+		if (searchQuery) {
+			tags.push({ key: 'search', label: `"${searchQuery}"`, onRemove: () => { searchQuery = ''; page = 1; } });
+		}
+		return tags;
+	});
+
+	function clearAllFilters() {
+		searchQuery = '';
+		providerFilter = 'all';
+		includeFree = true;
+		hasBenchmarksOnly = false;
+		page = 1;
+	}
 </script>
 
 <svelte:head>
@@ -194,40 +218,76 @@
 	</Card.Root>
 
 	<!-- Filters -->
-	<div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-		<div class="relative w-full sm:flex-1 sm:max-w-sm">
-			<Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-			<Input bind:value={searchQuery} placeholder="Search models..." class="h-9 pl-8 text-sm" />
-		</div>
-		<select bind:value={providerFilter} class="h-9 w-full sm:w-auto rounded-md border bg-background px-3 text-sm">
-			<option value="all">All Providers</option>
-			{#each providers() as p}
-				<option value={p}>{p}</option>
-			{/each}
-		</select>
-		<label class="flex items-center gap-1.5 text-xs text-muted-foreground">
-			<input type="checkbox" bind:checked={includeFree} class="rounded" />
-			Include free
-		</label>
-		<label class="flex items-center gap-1.5 text-xs text-muted-foreground">
-			<input type="checkbox" bind:checked={hasBenchmarksOnly} class="rounded" />
-			Has benchmarks
-		</label>
-		{#if selectedModels.size > 0}
-			<Badge variant="outline" class="text-xs">{selectedModels.size}/10 selected</Badge>
-			{#if selectedModels.size >= 2}
-				<Button
-					size="sm"
-					variant="outline"
-					class="h-7 gap-1 text-xs"
-					href="/models/compare?models={[...selectedModels].join(',')}"
+	<FilterBar
+		searchPlaceholder="Search models..."
+		bind:searchValue={searchQuery}
+		activeTags={activeFilters}
+		resultsText={data
+			? `${data.statistics.total} models · ${data.statistics.free_models} free · ${data.statistics.with_benchmarks} with benchmarks`
+			: ''}
+		onClearAll={clearAllFilters}
+	>
+		{#snippet filters()}
+			<!-- Row 1: Provider -->
+			<div class="fb-group">
+				<span class="fb-group-label">Provider</span>
+				<select
+					class="fb-select"
+					bind:value={providerFilter}
+					onchange={() => { page = 1; }}
 				>
-					<ArrowUpDown class="h-3 w-3" />
+					<option value="all">All Providers</option>
+					{#each providers() as p}
+						<option value={p}>{p}</option>
+					{/each}
+				</select>
+			</div>
+
+			<!-- Row 2: Options -->
+			<div class="fb-group">
+				<span class="fb-group-label">Options</span>
+				<button
+					class="fb-chip {includeFree ? '' : 'fb-chip-emerald'}"
+					onclick={() => { includeFree = !includeFree; page = 1; }}
+				>Free only</button>
+				<button
+					class="fb-chip {hasBenchmarksOnly ? 'fb-chip-blue' : ''}"
+					onclick={() => { hasBenchmarksOnly = !hasBenchmarksOnly; page = 1; }}
+				>Has Benchmarks</button>
+			</div>
+
+			<!-- Row 3: Sort -->
+			<div class="fb-group">
+				<span class="fb-group-label">Sort</span>
+				<button class="fb-chip {sortBy === 'mss' ? 'fb-chip-on' : ''}" onclick={() => toggleSort('mss')}>MSS</button>
+				<button class="fb-chip {sortBy === 'benchmark' ? 'fb-chip-on' : ''}" onclick={() => toggleSort('benchmark')}>Benchmark</button>
+				<button class="fb-chip {sortBy === 'cost_efficiency' ? 'fb-chip-on' : ''}" onclick={() => toggleSort('cost_efficiency')}>Cost</button>
+				<button class="fb-chip {sortBy === 'accessibility' ? 'fb-chip-on' : ''}" onclick={() => toggleSort('accessibility')}>Accessibility</button>
+				<button class="fb-chip {sortBy === 'adoption' ? 'fb-chip-on' : ''}" onclick={() => toggleSort('adoption')}>Adoption</button>
+			</div>
+
+			<!-- Row 4: Per page -->
+			<div class="fb-group">
+				<span class="fb-group-label">Per page</span>
+				<button class="fb-chip {perPage === 25 ? 'fb-chip-on' : ''}" onclick={() => { perPage = 25; page = 1; }}>25</button>
+				<button class="fb-chip {perPage === 50 ? 'fb-chip-on' : ''}" onclick={() => { perPage = 50; page = 1; }}>50</button>
+				<button class="fb-chip {perPage === 100 ? 'fb-chip-on' : ''}" onclick={() => { perPage = 100; page = 1; }}>100</button>
+			</div>
+		{/snippet}
+
+		{#snippet actions()}
+			{#if selectedModels.size >= 2}
+				<Button size="sm" href="/models/compare?models={[...selectedModels].join(',')}">
+					<ArrowUpDown class="mr-1.5 h-3.5 w-3.5" />
 					Compare {selectedModels.size}
 				</Button>
 			{/if}
-		{/if}
-	</div>
+			<Button variant="outline" size="sm" onclick={() => window.open(exportRankingsUrl(), '_blank')}>
+				<Download class="mr-1.5 h-3.5 w-3.5" />
+				Export CSV
+			</Button>
+		{/snippet}
+	</FilterBar>
 
 	<!-- Leaderboard -->
 	<Card.Root>
