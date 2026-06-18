@@ -96,6 +96,7 @@ export async function getModels(
     sort_dir?: "asc" | "desc";
     price_range?: string;
     context_range?: string;
+    used_in_apps?: boolean;
   } = {},
 ): Promise<PaginatedModels> {
   const q = new URLSearchParams();
@@ -109,6 +110,7 @@ export async function getModels(
   if (params.sort_dir) q.set("sort_dir", params.sort_dir);
   if (params.price_range) q.set("price_range", params.price_range);
   if (params.context_range) q.set("context_range", params.context_range);
+  if (params.used_in_apps) q.set("used_in_apps", "true");
   const qs = q.toString();
   const res = await apiFetch(`/models/${qs ? "?" + qs : ""}`);
   return res.json();

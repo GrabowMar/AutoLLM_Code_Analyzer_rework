@@ -81,28 +81,28 @@
 
 /* ─── Dark Theme (default for the app) ────────────────────────── */
 .dark {
-  --background: #0f172a; /* slate-900 */
-  --foreground: #f8fafc; /* slate-50 */
+  --background: #162233; /* lifted navy — easier on the eyes */
+  --foreground: #f1f5f9; /* slate-100 — slightly softer than pure white */
 
-  --card: #111827; /* slate-925 — slightly lifted */
-  --card-foreground: #f8fafc;
+  --card: #1a2d44; /* distinct from background — visible surface lift */
+  --card-foreground: #f1f5f9;
 
-  --popover: #111827;
-  --popover-foreground: #f8fafc;
+  --popover: #1a2d44;
+  --popover-foreground: #f1f5f9;
 
-  --surface-1: #111827;
-  --surface-2: #1e293b; /* slate-800 */
-  --surface-3: #334155; /* slate-700 */
+  --surface-1: #1a2d44;
+  --surface-2: #213550; /* clear second layer */
+  --surface-3: #2d4160; /* third layer for hover/selected states */
 
   --primary: #22c55e; /* green-500 — pops on dark */
   --primary-foreground: #052e16; /* green-950 for legible text on green */
   --primary-hover: #16a34a;
 
-  --secondary: #1e293b;
-  --secondary-foreground: #f8fafc;
+  --secondary: #213550;
+  --secondary-foreground: #f1f5f9;
 
-  --muted: #1e293b;
-  --muted-foreground: #94a3b8; /* slate-400 */
+  --muted: #1e2f47;
+  --muted-foreground: #a0b4c8; /* brighter than slate-400 for readability */
 
   --accent: #14532d; /* green-900 */
   --accent-foreground: #bbf7d0; /* green-200 */
@@ -114,8 +114,8 @@
   --warning: #f59e0b;
   --info: #3b82f6;
 
-  --border: #1e293b; /* low-contrast lines for dense data */
-  --input: #1e293b;
+  --border: #253c56; /* visible lines without harsh contrast */
+  --input: #253c56;
   --ring: #22c55e;
 
   --chart-1: #22c55e;
@@ -124,13 +124,13 @@
   --chart-4: #c084fc;
   --chart-5: #f87171;
 
-  --sidebar: #020617; /* slate-950 — deepest */
+  --sidebar: #0d1a2d; /* dark but not pitch-black */
   --sidebar-foreground: #cbd5e1;
   --sidebar-primary: #22c55e;
   --sidebar-primary-foreground: #052e16;
-  --sidebar-accent: #1e293b;
-  --sidebar-accent-foreground: #f8fafc;
-  --sidebar-border: #1e293b;
+  --sidebar-accent: #1a2c43;
+  --sidebar-accent-foreground: #f1f5f9;
+  --sidebar-border: #172538;
   --sidebar-ring: #22c55e;
 }
 

@@ -4,6 +4,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Eye from '@lucide/svelte/icons/eye';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -14,6 +15,8 @@
 	import TrendingUp from '@lucide/svelte/icons/trending-up';
 	import Layers from '@lucide/svelte/icons/layers';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import Search from '@lucide/svelte/icons/search';
+	import ArrowDownUp from '@lucide/svelte/icons/arrow-down-up';
 	import { downloadExport } from '$lib/api/export';
 	import Download from '@lucide/svelte/icons/download';
 	import {
@@ -30,6 +33,16 @@
 	let error = $state('');
 	let typeFilter = $state<'all' | ReportType>('all');
 	let statusFilter = $state<'all' | ReportStatus>('all');
+	let searchQuery = $state('');
+	let sortBy = $state<'newest' | 'oldest' | 'title'>('newest');
+
+	// Debounce search
+	let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+	function onSearchInput(e: Event) {
+		searchQuery = (e.target as HTMLInputElement).value;
+		if (searchDebounce) clearTimeout(searchDebounce);
+		searchDebounce = setTimeout(() => load(), 350);
+	}
 
 	const typeConfig: Record<ReportType, { label: string; color: string; icon: typeof Brain }> = {
 		model_analysis: { label: 'Model Analysis', color: 'bg-blue-500/15 text-blue-400 border-blue-500/30', icon: Brain },
@@ -50,11 +63,27 @@
 		loading = true;
 		error = '';
 		try {
-			const params: Record<string, ReportType | ReportStatus> = {};
+			const params: Record<string, string> = {};
 			if (typeFilter !== 'all') params.report_type = typeFilter;
 			if (statusFilter !== 'all') params.status = statusFilter;
 			const res = await getReports(params);
-			reports = res.reports;
+			let items = res.reports;
+			// Client-side search filter (title + description)
+			if (searchQuery.trim()) {
+				const q = searchQuery.toLowerCase();
+				items = items.filter(
+					(r) => r.title.toLowerCase().includes(q) || (r.description ?? '').toLowerCase().includes(q)
+				);
+			}
+			// Client-side sort
+			if (sortBy === 'newest') {
+				items = [...items].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+			} else if (sortBy === 'oldest') {
+				items = [...items].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+			} else if (sortBy === 'title') {
+				items = [...items].sort((a, b) => a.title.localeCompare(b.title));
+			}
+			reports = items;
 			total = res.pagination.total;
 		} catch (e) {
 			error = (e as Error)?.message || 'Failed to load reports';
@@ -76,6 +105,7 @@
 	$effect(() => {
 		void typeFilter;
 		void statusFilter;
+		void sortBy;
 		load();
 	});
 
@@ -115,23 +145,54 @@
 	</div>
 
 	<Card.Root>
-		<Card.Content class="p-4 flex flex-wrap gap-3">
-			<select bind:value={typeFilter} class="rounded-md border bg-background px-3 py-1.5 text-sm">
-				<option value="all">All types</option>
+		<Card.Content class="p-3 space-y-2.5">
+			<!-- Search -->
+			<div class="relative">
+				<Search class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+				<input
+					type="search"
+					class="h-8 w-full rounded-md border border-input bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+					placeholder="Search reports by title…"
+					value={searchQuery}
+					oninput={onSearchInput}
+				/>
+			</div>
+			<!-- Type pills -->
+			<div class="flex flex-wrap items-center gap-1.5">
+				<span class="text-xs text-muted-foreground shrink-0 w-10">Type</span>
+				<button
+					class="rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {typeFilter === 'all' ? 'bg-primary text-primary-foreground border-transparent' : 'border-border hover:bg-muted'}"
+					onclick={() => { typeFilter = 'all'; }}
+				>All</button>
 				{#each Object.entries(typeConfig) as [k, v] (k)}
-					<option value={k}>{v.label}</option>
+					<button
+						class="rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {typeFilter === k ? v.color + ' border-current' : 'border-border hover:bg-muted'}"
+						onclick={() => { typeFilter = k as ReportType; }}
+					>{v.label}</button>
 				{/each}
-			</select>
-			<select bind:value={statusFilter} class="rounded-md border bg-background px-3 py-1.5 text-sm">
-				<option value="all">All statuses</option>
-				<option value="pending">Pending</option>
-				<option value="generating">Generating</option>
-				<option value="completed">Completed</option>
-				<option value="failed">Failed</option>
-			</select>
-			<span class="ml-auto text-xs text-muted-foreground self-center">
-				{total} report{total === 1 ? '' : 's'}
-			</span>
+			</div>
+			<!-- Status pills + sort -->
+			<div class="flex flex-wrap items-center gap-1.5">
+				<span class="text-xs text-muted-foreground shrink-0 w-10">Status</span>
+				{#each (['all', 'pending', 'generating', 'completed', 'failed'] as const) as s}
+					{@const active = statusFilter === s}
+					{@const color = s === 'completed' ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' : s === 'generating' ? 'bg-amber-500/15 text-amber-500 border-amber-500/30' : s === 'failed' ? 'bg-red-500/15 text-red-400 border-red-500/30' : s === 'pending' ? 'bg-slate-500/15 text-slate-400 border-slate-500/30' : ''}
+					<button
+						class="rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {active ? (s === 'all' ? 'bg-primary text-primary-foreground border-transparent' : color + ' border-current') : 'border-border hover:bg-muted'}"
+						onclick={() => { statusFilter = s === 'all' ? 'all' : s as ReportStatus; }}
+					>{s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}</button>
+				{/each}
+				<div class="ml-auto flex items-center gap-1.5">
+					<ArrowDownUp class="h-3 w-3 text-muted-foreground" />
+					{#each ([['newest', 'Newest'], ['oldest', 'Oldest'], ['title', 'A–Z']] as const) as [v, label]}
+						<button
+							class="rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {sortBy === v ? 'bg-primary text-primary-foreground border-transparent' : 'border-border hover:bg-muted'}"
+							onclick={() => { sortBy = v; }}
+						>{label}</button>
+					{/each}
+					<span class="text-xs text-muted-foreground pl-2">{reports.length} / {total}</span>
+				</div>
+			</div>
 		</Card.Content>
 	</Card.Root>
 
@@ -176,7 +237,18 @@
 					<Card.Content class="flex-1 text-xs text-muted-foreground space-y-1">
 						<div>Created: {formatDate(r.created_at)}</div>
 						{#if r.status === 'generating'}
-							<div>Progress: {r.progress_percent}%</div>
+							<div class="space-y-1">
+								<div class="flex justify-between text-xs">
+									<span>Generating…</span>
+									<span class="font-mono">{r.progress_percent}%</span>
+								</div>
+								<div class="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+									<div
+										class="h-full rounded-full bg-amber-500 transition-all duration-500"
+										style="width: {r.progress_percent}%"
+									></div>
+								</div>
+							</div>
 						{/if}
 						{#if r.status === 'failed' && r.error_message}
 							<div class="text-red-400 line-clamp-2">{r.error_message}</div>

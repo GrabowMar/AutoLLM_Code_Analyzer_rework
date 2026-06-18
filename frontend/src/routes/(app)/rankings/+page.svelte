@@ -138,7 +138,7 @@
 		<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
 			<div class="kpi-card">
 				<div class="text-xs text-muted-foreground uppercase tracking-wider">Total Models</div>
-				<div class="text-2xl font-semibold font-mono tabular-nums">{data.statistics.total_models}</div>
+				<div class="text-2xl font-semibold font-mono tabular-nums">{data.statistics.total}</div>
 			</div>
 			<div class="kpi-card">
 				<div class="text-xs text-muted-foreground uppercase tracking-wider">With Benchmarks</div>
@@ -215,6 +215,17 @@
 		</label>
 		{#if selectedModels.size > 0}
 			<Badge variant="outline" class="text-xs">{selectedModels.size}/10 selected</Badge>
+			{#if selectedModels.size >= 2}
+				<Button
+					size="sm"
+					variant="outline"
+					class="h-7 gap-1 text-xs"
+					href="/models/compare?models={[...selectedModels].join(',')}"
+				>
+					<ArrowUpDown class="h-3 w-3" />
+					Compare {selectedModels.size}
+				</Button>
+			{/if}
 		{/if}
 	</div>
 
@@ -367,17 +378,17 @@
 	</Card.Root>
 
 	<!-- Pagination -->
-	{#if data && data.pagination.pages > 1}
+	{#if data && data.pagination.total_pages > 1}
 		<div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
 			<div>
-				Page {data.pagination.page} of {data.pagination.pages}
+				Page {data.pagination.page} of {data.pagination.total_pages}
 				&middot; {data.pagination.total} models
 			</div>
 			<div class="flex gap-2">
 				<Button variant="outline" size="sm" disabled={page <= 1} onclick={() => page = Math.max(1, page - 1)}>
 					Prev
 				</Button>
-				<Button variant="outline" size="sm" disabled={page >= (data?.pagination.pages ?? 0)} onclick={() => page = Math.min(data?.pagination.pages ?? 1, page + 1)}>
+				<Button variant="outline" size="sm" disabled={page >= (data?.pagination.total_pages ?? 0)} onclick={() => page = Math.min(data?.pagination.total_pages ?? 1, page + 1)}>
 					Next
 				</Button>
 			</div>

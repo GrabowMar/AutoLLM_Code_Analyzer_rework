@@ -147,63 +147,79 @@ const grouped = $derived.by<Group[]>(() => {
 
 <div class="space-y-3">
 	<!-- Filter bar -->
-	<div class="flex flex-wrap gap-2">
-		<select
-			class="h-8 rounded-md border border-input bg-background px-2 text-xs"
-			bind:value={filterAnalyzer}
-		>
-			<option value="">All analyzers</option>
-			{#each availableAnalyzers as name}
-				<option value={name}>{name}</option>
-			{/each}
-		</select>
-
-		<select
-			class="h-8 rounded-md border border-input bg-background px-2 text-xs"
-			bind:value={filterSeverity}
-		>
-			<option value="">All severities</option>
+	<div class="space-y-2">
+		<!-- Row 1: severity pills -->
+		<div class="flex flex-wrap items-center gap-1.5">
+			<span class="text-xs text-muted-foreground shrink-0">Severity</span>
+			<button
+				class="rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {filterSeverity === '' ? 'bg-primary text-primary-foreground border-transparent' : 'border-border hover:bg-muted'}"
+				onclick={() => { filterSeverity = ''; }}
+			>All</button>
 			{#each severities as s}
-				<option value={s}>{s}</option>
+				{@const colors: Record<string, string> = {
+					critical: 'bg-red-500/15 text-red-400 border-red-500/30',
+					high: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+					medium: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
+					low: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+					info: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
+				}}
+				<button
+					class="rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {filterSeverity === s ? colors[s] + ' border-current' : 'border-border hover:bg-muted'}"
+					onclick={() => { filterSeverity = s; }}
+				>{s}</button>
 			{/each}
-		</select>
+		</div>
 
-		<select
-			class="h-8 rounded-md border border-input bg-background px-2 text-xs"
-			bind:value={filterCategory}
-		>
-			<option value="">All categories</option>
-			{#each categories as c}
-				<option value={c}>{c.replace('_', ' ')}</option>
-			{/each}
-		</select>
+		<!-- Row 2: secondary filters -->
+		<div class="flex flex-wrap gap-2">
+			<select
+				class="h-8 rounded-md border border-input bg-background px-2 text-xs"
+				bind:value={filterAnalyzer}
+			>
+				<option value="">All analyzers</option>
+				{#each availableAnalyzers as name}
+					<option value={name}>{name}</option>
+				{/each}
+			</select>
 
-		<input
-			type="text"
-			class="h-8 w-40 rounded-md border border-input bg-background px-2 text-xs"
-			placeholder="Filter by file path…"
-			value={filterFilePath}
-			oninput={onFilePathInput}
-		/>
+			<select
+				class="h-8 rounded-md border border-input bg-background px-2 text-xs"
+				bind:value={filterCategory}
+			>
+				<option value="">All categories</option>
+				{#each categories as c}
+					<option value={c}>{c.replace('_', ' ')}</option>
+				{/each}
+			</select>
 
-		<label class="flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs cursor-pointer">
-			<input type="checkbox" class="rounded" bind:checked={includeSuppressed} />
-			Show suppressed
-		</label>
+			<input
+				type="text"
+				class="h-8 w-40 rounded-md border border-input bg-background px-2 text-xs"
+				placeholder="Filter by file path…"
+				value={filterFilePath}
+				oninput={onFilePathInput}
+			/>
 
-		<select
-			class="h-8 rounded-md border border-input bg-background px-2 text-xs"
-			bind:value={groupBy}
-		>
-			<option value="none">No grouping</option>
-			<option value="analyzer">Group by analyzer</option>
-			<option value="severity">Group by severity</option>
-			<option value="file">Group by file</option>
-		</select>
+			<label class="flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs cursor-pointer">
+				<input type="checkbox" class="rounded" bind:checked={includeSuppressed} />
+				Show suppressed
+			</label>
 
-		<span class="ml-auto flex h-8 items-center text-xs text-muted-foreground">
-			{total} finding{total !== 1 ? 's' : ''}
-		</span>
+			<!-- Group by pills -->
+			<div class="flex items-center gap-1 ml-auto">
+				<span class="text-xs text-muted-foreground">Group</span>
+				{#each (['none', 'severity', 'analyzer', 'file'] as const) as g}
+					<button
+						class="rounded-full px-2 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {groupBy === g ? 'bg-primary text-primary-foreground border-transparent' : 'border-border hover:bg-muted'}"
+						onclick={() => { groupBy = g; }}
+					>{g === 'none' ? '—' : g}</button>
+				{/each}
+			</div>
+
+			<span class="flex h-8 items-center text-xs text-muted-foreground">
+				{total} finding{total !== 1 ? 's' : ''}
+			</span>
+		</div>
 	</div>
 
 	<!-- Table -->

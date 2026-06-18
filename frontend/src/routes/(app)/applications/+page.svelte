@@ -49,6 +49,9 @@
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import Hammer from '@lucide/svelte/icons/hammer';
 	import Layers from '@lucide/svelte/icons/layers';
+	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
+	import ArrowUp from '@lucide/svelte/icons/arrow-up';
+	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import { goto } from '$app/navigation';
 
 	let loading = $state(true);
@@ -61,9 +64,34 @@
 	let modeFilter = $state('');
 	let statusFilter = $state('');
 	let containerFilter = $state('');
-	let sortOption = $state('created_desc');
+	let modelFilter = $state('');
+	let sortBy = $state('created_at');
+	let sortDir = $state<'asc' | 'desc'>('desc');
 	let currentPage = $state(1);
 	let perPage = $state(25);
+
+	// Derive unique models from loaded data for the model filter dropdown
+	const uniqueModels = $derived.by(() => {
+		if (!data?.items) return [];
+		const seen = new Set<string>();
+		return data.items
+			.filter((j) => j.model_name && j.model_id_str)
+			.filter((j) => {
+				if (seen.has(j.model_id_str!)) return false;
+				seen.add(j.model_id_str!);
+				return true;
+			})
+			.map((j) => ({ name: j.model_name!, id: j.model_id_str! }))
+			.sort((a, b) => a.name.localeCompare(b.name));
+	});
+
+	// Map sortBy/sortDir to backend sort_by values
+	const sortOption = $derived.by(() => {
+		if (sortBy === 'created_at') return sortDir === 'desc' ? 'created_desc' : 'created_asc';
+		if (sortBy === 'duration_seconds') return sortDir === 'desc' ? 'duration_desc' : 'duration_asc';
+		if (sortBy === 'model_name') return 'model_asc';
+		return 'created_desc';
+	});
 
 	let stats = $state<{
 		total: number;
@@ -113,6 +141,7 @@
 			if (statusFilter) params.status = statusFilter;
 			if (searchQuery) params.search = searchQuery;
 			if (containerFilter) params.container_status = containerFilter;
+			if (modelFilter) params.model_id = modelFilter;
 			if (sortOption) params.sort_by = sortOption;
 
 			const [jobsData, statsData] = await Promise.all([
@@ -214,7 +243,26 @@
 		modeFilter = '';
 		statusFilter = '';
 		containerFilter = '';
-		sortOption = 'created_desc';
+		modelFilter = '';
+		sortBy = 'created_at';
+		sortDir = 'desc';
+		currentPage = 1;
+		fetchJobs();
+	}
+
+	function toggleSort(field: string) {
+		if (sortBy === field) {
+			// model_name only has asc from backend; toggle via created fallback
+			if (field === 'model_name') {
+				sortBy = 'created_at';
+				sortDir = 'desc';
+			} else {
+				sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+			}
+		} else {
+			sortBy = field;
+			sortDir = field === 'model_name' ? 'asc' : 'desc';
+		}
 		currentPage = 1;
 		fetchJobs();
 	}
@@ -337,6 +385,17 @@
 				label: labels[containerFilter] || containerFilter,
 				clear: () => {
 					containerFilter = '';
+					applyFilters();
+				}
+			});
+		}
+		if (modelFilter) {
+			const model = uniqueModels.find((m) => m.id === modelFilter);
+			tags.push({
+				key: 'model',
+				label: `Model: ${model?.name ?? modelFilter}`,
+				clear: () => {
+					modelFilter = '';
 					applyFilters();
 				}
 			});
@@ -515,11 +574,35 @@
 			<option value="none">No Container</option>
 		</select>
 
+		{#if uniqueModels.length > 1}
+			<select
+				id="model-filter"
+				class="h-9 w-full sm:w-auto rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer transition-colors"
+				bind:value={modelFilter}
+				onchange={applyFilters}
+			>
+				<option value="">All Models</option>
+				{#each uniqueModels as model}
+					<option value={model.id}>{model.name}</option>
+				{/each}
+			</select>
+		{/if}
+
+		<!-- Mobile sort fallback -->
 		<select
 			id="sort-filter"
-			class="h-9 w-full sm:w-auto rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer transition-colors"
-			bind:value={sortOption}
-			onchange={applyFilters}
+			class="h-9 w-full sm:hidden rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer transition-colors"
+			value={sortOption}
+			onchange={(e) => {
+				const v = (e.currentTarget as HTMLSelectElement).value;
+				if (v === 'created_desc') { sortBy = 'created_at'; sortDir = 'desc'; }
+				else if (v === 'created_asc') { sortBy = 'created_at'; sortDir = 'asc'; }
+				else if (v === 'duration_desc') { sortBy = 'duration_seconds'; sortDir = 'desc'; }
+				else if (v === 'duration_asc') { sortBy = 'duration_seconds'; sortDir = 'asc'; }
+				else if (v === 'model_asc') { sortBy = 'model_name'; sortDir = 'asc'; }
+				currentPage = 1;
+				fetchJobs();
+			}}
 		>
 			<option value="created_desc">Newest First</option>
 			<option value="created_asc">Oldest First</option>
@@ -618,11 +701,50 @@
 						<table class="w-full">
 							<thead>
 								<tr class="border-b bg-muted/40 transition-colors sticky top-0 z-10">
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">Application</th>
+									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">
+										<button
+											class="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
+											onclick={() => toggleSort('created_at')}
+											aria-sort={sortBy === 'created_at' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+										>
+											Application
+											{#if sortBy === 'created_at'}
+												{#if sortDir === 'asc'}<ArrowUp class="h-3 w-3 text-primary" />{:else}<ArrowDown class="h-3 w-3 text-primary" />{/if}
+											{:else}
+												<ArrowUpDown class="h-3 w-3 opacity-30" />
+											{/if}
+										</button>
+									</th>
 									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">Job Status</th>
 									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">App / Container</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">Duration</th>
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">Created</th>
+									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">
+										<button
+											class="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
+											onclick={() => toggleSort('duration_seconds')}
+											aria-sort={sortBy === 'duration_seconds' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+										>
+											Duration
+											{#if sortBy === 'duration_seconds'}
+												{#if sortDir === 'asc'}<ArrowUp class="h-3 w-3 text-primary" />{:else}<ArrowDown class="h-3 w-3 text-primary" />{/if}
+											{:else}
+												<ArrowUpDown class="h-3 w-3 opacity-30" />
+											{/if}
+										</button>
+									</th>
+									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">
+										<button
+											class="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
+											onclick={() => toggleSort('model_name')}
+											aria-sort={sortBy === 'model_name' ? 'ascending' : 'none'}
+										>
+											Model
+											{#if sortBy === 'model_name'}
+												<ArrowUp class="h-3 w-3 text-primary" />
+											{:else}
+												<ArrowUpDown class="h-3 w-3 opacity-30" />
+											{/if}
+										</button>
+									</th>
 									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">Actions</th>
 								</tr>
 							</thead>
@@ -647,11 +769,13 @@
 													{/if}
 												</div>
 												<div class="min-w-0">
-													<a href="/applications/{job.id}" class="text-sm font-semibold hover:text-primary transition-colors block truncate max-w-[280px]" title={getDescription(job)}>
+													<a href="/applications/{job.id}" class="text-sm font-semibold hover:text-primary transition-colors block truncate max-w-[260px]" title={getDescription(job)}>
 														{getDescription(job)}
 													</a>
-													<span class="text-[11px] text-muted-foreground block truncate max-w-[280px]">
-														<span class="capitalize font-medium text-primary/80">{job.mode}</span> &middot; {job.model_name ?? '—'}
+													<span class="text-[10px] text-muted-foreground block">
+														<span class="capitalize font-medium text-primary/70">{job.mode}</span>
+														<span class="mx-1 opacity-40">&middot;</span>
+														<span class="font-mono tabular-nums">{timeAgo(job.created_at)}</span>
 													</span>
 												</div>
 											</div>
@@ -790,12 +914,13 @@
 											<span class="text-xs font-mono tabular-nums text-muted-foreground">{formatDuration(job.duration_seconds)}</span>
 										</td>
 
-										<!-- Created -->
+										<!-- Model -->
 										<td class="px-3 py-2.5 align-middle">
-											<div class="flex flex-col gap-0.5">
-												<span class="text-xs text-foreground font-medium">{timeAgo(job.created_at)}</span>
-												<span class="text-[9px] text-muted-foreground/70 font-mono tabular-nums">{new Date(job.created_at).toLocaleString()}</span>
-											</div>
+											{#if job.model_name}
+												<span class="text-xs text-foreground truncate block max-w-[160px]" title={job.model_name}>{job.model_name}</span>
+											{:else}
+												<span class="text-xs text-muted-foreground/50 italic">—</span>
+											{/if}
 										</td>
 
 										<!-- Actions -->

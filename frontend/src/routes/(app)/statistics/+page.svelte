@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
 	import BarChart3 from '@lucide/svelte/icons/bar-chart-3';
 	import TrendingUp from '@lucide/svelte/icons/trending-up';
 	import Clock from '@lucide/svelte/icons/clock';
@@ -14,21 +15,46 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import {
 		getStatisticsDashboard,
+		getStatisticsTrends,
 		type StatisticsDashboard,
+		type AnalysisTrends,
 	} from '$lib/api/client';
 
 	let data = $state<StatisticsDashboard | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
+	// Trends period selector — separate from the dashboard fetch
+	const dayOptions = [7, 14, 30, 90] as const;
+	let trendDays = $state<7 | 14 | 30 | 90>(7);
+	let trendsData = $state<AnalysisTrends | null>(null);
+	let trendsLoading = $state(false);
+
+	async function fetchTrends(days: number) {
+		trendsLoading = true;
+		try {
+			trendsData = await getStatisticsTrends(days);
+		} catch {
+			// fall back to dashboard trends
+		} finally {
+			trendsLoading = false;
+		}
+	}
+
 	onMount(async () => {
 		try {
 			data = await getStatisticsDashboard();
+			trendsData = data.trends;
 		} catch (e) {
 			error = (e as { message?: string })?.message ?? 'Failed to load statistics';
 		} finally {
 			loading = false;
 		}
+	});
+
+	$effect(() => {
+		void trendDays;
+		if (data) fetchTrends(trendDays);
 	});
 
 	const severityColors: Record<string, string> = {
@@ -78,7 +104,7 @@
 	}
 
 	let trendMax = $derived(
-		Math.max(1, ...(data?.trends.series ?? []).map((p) => p.total)),
+		Math.max(1, ...(trendsData?.series ?? data?.trends.series ?? []).map((p) => p.total)),
 	);
 	let kpis = $derived(
 		data
@@ -104,7 +130,7 @@
 						icon: Clock,
 						color: 'text-amber-500',
 						bg: 'bg-amber-500/10',
-						value: fmtDuration(data.overview.avg_analysis_seconds),
+						value: fmtDuration(data.overview.avg_analysis_duration_seconds),
 						delta: 'per analysis',
 					},
 					{
@@ -184,23 +210,42 @@
 					<div class="flex items-center gap-2">
 						<LineChart class="h-5 w-5 text-muted-foreground" />
 						<Card.Title>Analysis Trends</Card.Title>
+						<div class="ml-auto flex gap-1">
+							{#each dayOptions as d}
+								<Button
+									size="sm"
+									variant={trendDays === d ? 'default' : 'ghost'}
+									class="h-6 px-2 text-xs"
+									onclick={() => { trendDays = d; }}
+								>
+									{d}d
+								</Button>
+							{/each}
+						</div>
 					</div>
 				</Card.Header>
 				<Card.Content>
-					<div class="flex h-40 items-end gap-1.5">
-						{#each data.trends.series as point}
-							<div class="flex flex-1 flex-col items-center gap-1">
-								<div
-									class="w-full rounded-t bg-blue-500/70 transition-all"
-									style="height: {(point.total / trendMax) * 100}%"
-								></div>
-								<span class="text-[9px] text-muted-foreground">{dayLabel(point.date)}</span>
-							</div>
-						{/each}
-					</div>
-					<p class="mt-3 text-center text-xs text-muted-foreground">
-						Analyses run in last {data.trends.days} days: {data.trends.total}
-					</p>
+					{#if trendsLoading}
+						<div class="flex h-40 items-center justify-center">
+							<LoaderCircle class="h-5 w-5 animate-spin text-muted-foreground" />
+						</div>
+					{:else}
+						{@const activeTrends = trendsData ?? data.trends}
+						<div class="flex h-40 items-end gap-1.5">
+							{#each activeTrends.series as point}
+								<div class="flex flex-1 flex-col items-center gap-1" title="{point.date}: {point.total} analyses">
+									<div
+										class="w-full rounded-t bg-blue-500/70 transition-all duration-300"
+										style="height: {(point.total / trendMax) * 100}%"
+									></div>
+									<span class="text-[9px] text-muted-foreground">{dayLabel(point.date)}</span>
+								</div>
+							{/each}
+						</div>
+						<p class="mt-3 text-center text-xs text-muted-foreground">
+							Analyses run in last {activeTrends.days} days: {activeTrends.total}
+						</p>
+					{/if}
 				</Card.Content>
 			</Card.Root>
 
@@ -260,7 +305,11 @@
 									<tr class="border-b transition-colors hover:bg-muted/50 group {i % 2 === 0 ? '' : 'bg-muted/15'}">
 										<td class="px-3 py-2 align-top">
 											<div>
-												<span class="font-medium text-sm">{m.name}</span>
+												<a
+													href="/models/{m.model_id ?? ''}"
+													class="font-medium text-sm hover:text-primary hover:underline underline-offset-2 transition-colors"
+													onclick={(e) => { if (!m.model_id) e.preventDefault(); }}
+												>{m.name}</a>
 												<div class="text-[10px] text-muted-foreground">{m.provider}</div>
 											</div>
 										</td>

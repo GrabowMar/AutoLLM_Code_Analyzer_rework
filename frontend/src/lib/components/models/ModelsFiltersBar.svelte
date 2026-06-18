@@ -14,6 +14,7 @@ import Radio from '@lucide/svelte/icons/radio';
 import Braces from '@lucide/svelte/icons/braces';
 import Gift from '@lucide/svelte/icons/gift';
 import Sparkles from '@lucide/svelte/icons/sparkles';
+import AppWindow from '@lucide/svelte/icons/app-window';
 import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 
 interface ActiveFilterTag {
@@ -28,6 +29,7 @@ interface Props {
 	filterCapability: string;
 	filterPriceRange: string;
 	filterContextRange: string;
+	filterUsedInApps: boolean;
 	sortBy: string;
 	sortDir: 'asc' | 'desc';
 	providers: string[];
@@ -39,6 +41,7 @@ interface Props {
 	onToggleCapability: (value: string) => void;
 	onTogglePriceRange: (value: string) => void;
 	onToggleContextRange: (value: string) => void;
+	onToggleUsedInApps: () => void;
 	onClearAllFilters: () => void;
 	onSync: () => void;
 	onExport: (format: 'csv' | 'json') => void;
@@ -50,6 +53,7 @@ let {
 	filterCapability,
 	filterPriceRange,
 	filterContextRange,
+	filterUsedInApps,
 	sortBy,
 	sortDir,
 	providers,
@@ -61,6 +65,7 @@ let {
 	onToggleCapability,
 	onTogglePriceRange,
 	onToggleContextRange,
+	onToggleUsedInApps,
 	onClearAllFilters,
 	onSync,
 	onExport,
@@ -94,34 +99,40 @@ const contextRangeOptions = [
 <div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
 	<span class="text-xs text-muted-foreground mr-1 shrink-0">Quick:</span>
 	<button
-		class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap {filterPriceRange === 'free' ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-400' : 'border-input'}"
+		class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring {filterPriceRange === 'free' ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-400' : 'border-input'}"
 		onclick={() => onApplyQuickFilter('free')}
 	>
 		<Gift class="h-3 w-3" /> Free Models
 	</button>
 	<button
-		class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap {filterCapability === 'vision' ? 'bg-violet-500/10 border-violet-500/40 text-violet-700 dark:text-violet-400' : 'border-input'}"
+		class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring {filterCapability === 'vision' ? 'bg-violet-500/10 border-violet-500/40 text-violet-700 dark:text-violet-400' : 'border-input'}"
 		onclick={() => onApplyQuickFilter('vision')}
 	>
 		<Eye class="h-3 w-3" /> Vision
 	</button>
 	<button
-		class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap {filterCapability === 'function_calling' ? 'bg-orange-500/10 border-orange-500/40 text-orange-700 dark:text-orange-400' : 'border-input'}"
+		class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring {filterCapability === 'function_calling' ? 'bg-orange-500/10 border-orange-500/40 text-orange-700 dark:text-orange-400' : 'border-input'}"
 		onclick={() => onApplyQuickFilter('functions')}
 	>
 		<Wrench class="h-3 w-3" /> Functions
 	</button>
 	<button
-		class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap {filterContextRange === 'xlarge' ? 'bg-blue-500/10 border-blue-500/40 text-blue-700 dark:text-blue-400' : 'border-input'}"
+		class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring {filterContextRange === 'xlarge' ? 'bg-blue-500/10 border-blue-500/40 text-blue-700 dark:text-blue-400' : 'border-input'}"
 		onclick={() => onApplyQuickFilter('large-context')}
 	>
 		128K+ Context
 	</button>
 	<button
-		class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap {sortBy === 'cost_efficiency' && sortDir === 'desc' ? 'bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-400' : 'border-input'}"
+		class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring {sortBy === 'cost_efficiency' && sortDir === 'desc' ? 'bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-400' : 'border-input'}"
 		onclick={() => onApplyQuickFilter('efficient')}
 	>
 		<Sparkles class="h-3 w-3" /> Most Efficient
+	</button>
+	<button
+		class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring {filterUsedInApps ? 'bg-indigo-500/10 border-indigo-500/40 text-indigo-700 dark:text-indigo-400' : 'border-input'}"
+		onclick={onToggleUsedInApps}
+	>
+		<AppWindow class="h-3 w-3" /> Used in Apps
 	</button>
 </div>
 
@@ -172,7 +183,7 @@ const contextRangeOptions = [
 		<span class="text-xs font-semibold uppercase text-muted-foreground">Cap:</span>
 		{#each capabilityOptions as opt}
 			<button
-				class="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium transition-colors {filterCapability === opt.value ? 'bg-primary text-primary-foreground border-primary' : 'border-input hover:bg-muted'}"
+				class="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring {filterCapability === opt.value ? 'bg-primary text-primary-foreground border-primary ring-1 ring-primary/30' : 'border-input hover:bg-muted'}"
 				onclick={() => onToggleCapability(opt.value)}
 			>
 				<opt.icon class="h-3 w-3" />
@@ -185,7 +196,7 @@ const contextRangeOptions = [
 		<span class="text-xs font-semibold uppercase text-muted-foreground">Price:</span>
 		{#each priceRangeOptions as opt}
 			<button
-				class="rounded-md border px-2 py-0.5 text-xs font-medium transition-colors {filterPriceRange === opt.value ? 'bg-primary text-primary-foreground border-primary' : 'border-input hover:bg-muted'}"
+				class="rounded-md border px-2 py-0.5 text-xs font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring {filterPriceRange === opt.value ? 'bg-primary text-primary-foreground border-primary ring-1 ring-primary/30' : 'border-input hover:bg-muted'}"
 				onclick={() => onTogglePriceRange(opt.value)}
 			>
 				{opt.label}
@@ -197,7 +208,7 @@ const contextRangeOptions = [
 		<span class="text-xs font-semibold uppercase text-muted-foreground">Context:</span>
 		{#each contextRangeOptions as opt}
 			<button
-				class="rounded-md border px-2 py-0.5 text-xs font-medium transition-colors {filterContextRange === opt.value ? 'bg-primary text-primary-foreground border-primary' : 'border-input hover:bg-muted'}"
+				class="rounded-md border px-2 py-0.5 text-xs font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring {filterContextRange === opt.value ? 'bg-primary text-primary-foreground border-primary ring-1 ring-primary/30' : 'border-input hover:bg-muted'}"
 				onclick={() => onToggleContextRange(opt.value)}
 			>
 				{opt.label}
