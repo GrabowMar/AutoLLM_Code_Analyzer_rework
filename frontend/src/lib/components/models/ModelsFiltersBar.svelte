@@ -25,6 +25,10 @@
 		providers: string[];
 		syncing: boolean;
 		activeFilters: FilterTag[];
+		resultsText?: string;
+		page?: number;
+		pages?: number;
+		onGoToPage?: (p: number) => void;
 		onSearchInput: () => void;
 		onProviderChange: () => void;
 		onApplyQuickFilter: (type: string) => void;
@@ -49,6 +53,10 @@
 		providers,
 		syncing,
 		activeFilters,
+		resultsText = '',
+		page,
+		pages,
+		onGoToPage,
 		onSearchInput,
 		onProviderChange,
 		onApplyQuickFilter,
@@ -95,6 +103,10 @@
 	bind:searchValue={searchQuery}
 	onSearchInput={onSearchInput}
 	activeTags={activeFilters}
+	{resultsText}
+	{page}
+	{pages}
+	{onGoToPage}
 	onClearAll={onClearAllFilters}
 >
 	{#snippet filters()}
