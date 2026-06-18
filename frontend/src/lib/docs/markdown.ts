@@ -259,8 +259,8 @@ export async function renderMarkdown(raw: string): Promise<RenderedDoc> {
 ${titleNode}
 <span class="code-block__lang">${escapeHtml(displayLang)}</span>
 <button type="button" class="code-block__copy" data-copy="${escapeAttr(text)}" aria-label="Copy code">
-<svg class="code-block__icon code-block__icon--copy" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4 4V2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2v2a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm2 0h4a2 2 0 0 1 2 2v4h2V2H6zM2 6v8h8V6z"/></svg>
-<svg class="code-block__icon code-block__icon--check" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 1 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"/></svg>
+<svg class="code-block__icon code-block__icon--copy" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+<svg class="code-block__icon code-block__icon--check" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
 <span class="code-block__copy-label">Copy</span>
 </button>
 </figcaption>
@@ -272,7 +272,7 @@ ${titleNode}
 
   const dirty = await marked.parse(raw, { async: true });
   const clean = DOMPurify.sanitize(dirty, {
-    ADD_TAGS: ["figure", "figcaption", "svg", "path", "i"],
+    ADD_TAGS: ["figure", "figcaption", "svg", "path", "rect", "i"],
     ADD_ATTR: [
       "data-lang",
       "data-source",
@@ -288,7 +288,15 @@ ${titleNode}
       "viewBox",
       "width",
       "height",
+      "x",
+      "y",
+      "rx",
+      "ry",
       "fill",
+      "stroke",
+      "stroke-width",
+      "stroke-linecap",
+      "stroke-linejoin",
       "aria-hidden",
       "aria-label",
     ],

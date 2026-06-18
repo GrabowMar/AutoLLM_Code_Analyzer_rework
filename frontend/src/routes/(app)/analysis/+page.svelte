@@ -17,6 +17,9 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
+	import ArrowUp from '@lucide/svelte/icons/arrow-up';
+	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import { onMount } from 'svelte';
 	import {
 		getAnalysisTasks,
@@ -42,6 +45,8 @@
 	let perPage = $state(25);
 	let searchQuery = $state('');
 	let statusFilter = $state('');
+	let sortBy = $state('created_at');
+	let sortDir = $state<'asc' | 'desc'>('desc');
 	let refreshing = $state(false);
 	let cancellingIds = $state(new Set<string>());
 	let deletingIds = $state(new Set<string>());
@@ -51,6 +56,73 @@
 
 	let hasRunningTasks = $derived(tasks.some((t) => t.status === 'running' || t.status === 'pending'));
 
+	type StatusPill = {
+		value: string;
+		label: string;
+		count: (s: AnalysisStats) => number;
+		activeClass: string;
+		inactiveClass: string;
+	};
+
+	const statusPills: StatusPill[] = [
+		{
+			value: '',
+			label: 'All',
+			count: (s) => s.total_tasks,
+			activeClass: 'bg-primary/10 border-primary/30 text-primary font-semibold',
+			inactiveClass: 'border-input bg-card',
+		},
+		{
+			value: 'running',
+			label: 'Running',
+			count: (s) => s.running_tasks,
+			activeClass: 'bg-blue-500/10 border-blue-500/40 text-blue-700 dark:text-blue-400 font-semibold',
+			inactiveClass: 'border-input bg-card',
+		},
+		{
+			value: 'pending',
+			label: 'Pending',
+			count: () => 0,
+			activeClass: 'bg-zinc-500/10 border-zinc-500/40 text-zinc-700 dark:text-zinc-400 font-semibold',
+			inactiveClass: 'border-input bg-card',
+		},
+		{
+			value: 'completed',
+			label: 'Completed',
+			count: (s) => s.completed_tasks,
+			activeClass: 'bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 font-semibold',
+			inactiveClass: 'border-input bg-card',
+		},
+		{
+			value: 'partial',
+			label: 'Partial',
+			count: () => 0,
+			activeClass: 'bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-400 font-semibold',
+			inactiveClass: 'border-input bg-card',
+		},
+		{
+			value: 'failed',
+			label: 'Failed',
+			count: (s) => s.failed_tasks,
+			activeClass: 'bg-red-500/10 border-red-500/40 text-red-700 dark:text-red-400 font-semibold',
+			inactiveClass: 'border-input bg-card',
+		},
+		{
+			value: 'cancelled',
+			label: 'Cancelled',
+			count: () => 0,
+			activeClass: 'bg-zinc-500/10 border-zinc-500/40 text-zinc-700 dark:text-zinc-400 font-semibold',
+			inactiveClass: 'border-input bg-card',
+		},
+	];
+
+	type SortableCol = { key: string; label: string; align?: 'right' };
+	const sortableColumns: SortableCol[] = [
+		{ key: 'name', label: 'Name' },
+		{ key: 'created_at', label: 'Created' },
+		{ key: 'duration_seconds', label: 'Duration', align: 'right' },
+	];
+
 	async function fetchTasks() {
 		try {
 			const data: PaginatedAnalysisTasks = await getAnalysisTasks({
@@ -58,6 +130,8 @@
 				per_page: perPage,
 				status: statusFilter || undefined,
 				search: searchQuery || undefined,
+				sort_by: sortBy,
+				sort_dir: sortDir,
 			});
 			tasks = data.items;
 			totalTasks = data.total;
@@ -98,7 +172,8 @@
 		}, 300);
 	}
 
-	function handleStatusChange() {
+	function selectStatusPill(status: string) {
+		statusFilter = status;
 		currentPage = 1;
 		fetchTasks();
 	}
@@ -111,6 +186,17 @@
 	function goToPage(page: number) {
 		if (page < 1 || page > totalPages) return;
 		currentPage = page;
+		fetchTasks();
+	}
+
+	function toggleSort(field: string) {
+		if (sortBy === field) {
+			sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+		} else {
+			sortBy = field;
+			sortDir = field === 'name' ? 'asc' : 'desc';
+		}
+		currentPage = 1;
 		fetchTasks();
 	}
 
@@ -237,7 +323,32 @@
 		</div>
 	{/if}
 
-	<!-- Filters -->
+	<!-- Quick Status Pills -->
+	<div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+		<span class="text-xs text-muted-foreground mr-1 shrink-0">Status:</span>
+		{#each statusPills as pill}
+			<button
+				class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap cursor-pointer {statusFilter === pill.value ? pill.activeClass : pill.inactiveClass}"
+				onclick={() => selectStatusPill(pill.value)}
+			>
+				{#if pill.value === 'running'}
+					<span class="relative flex h-1.5 w-1.5 shrink-0">
+						<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+						<span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500"></span>
+					</span>
+				{/if}
+				{pill.label}
+				{#if stats}
+					{@const cnt = pill.count(stats)}
+					{#if cnt > 0 || pill.value === ''}
+						<span class="text-[10px] font-mono font-semibold text-muted-foreground ml-0.5">{cnt}</span>
+					{/if}
+				{/if}
+			</button>
+		{/each}
+	</div>
+
+	<!-- Search & Per-page Bar -->
 	<div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
 		<div class="relative flex-1 sm:max-w-sm">
 			<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -249,22 +360,9 @@
 				oninput={handleSearchInput}
 			/>
 		</div>
-		<div class="flex gap-2">
+		<div class="flex items-center gap-2 sm:ml-auto">
 			<select
-				class="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm sm:flex-none"
-				bind:value={statusFilter}
-				onchange={handleStatusChange}
-			>
-				<option value="">All Statuses</option>
-				<option value="running">Running</option>
-				<option value="pending">Pending</option>
-				<option value="completed">Completed</option>
-				<option value="partial">Partial</option>
-				<option value="failed">Failed</option>
-				<option value="cancelled">Cancelled</option>
-			</select>
-			<select
-				class="h-9 rounded-md border border-input bg-background px-3 text-sm"
+				class="h-9 rounded-md border border-input bg-background px-3 text-sm cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring"
 				bind:value={perPage}
 				onchange={handlePerPageChange}
 			>
@@ -310,6 +408,18 @@
 			</Card.Content>
 		</Card.Root>
 	{:else}
+		<!-- Results count -->
+		<div class="flex items-center justify-between text-xs text-muted-foreground">
+			<span>
+				Showing {(currentPage - 1) * perPage + 1}–{Math.min(currentPage * perPage, totalTasks)} of <strong class="text-foreground">{totalTasks}</strong> tasks
+			</span>
+			{#if searchQuery || statusFilter}
+				<button class="underline hover:text-foreground transition-colors" onclick={() => { searchQuery = ''; statusFilter = ''; currentPage = 1; fetchTasks(); }}>
+					Clear filters
+				</button>
+			{/if}
+		</div>
+
 		<!-- Tasks Table (desktop) -->
 		<div class="hidden md:block">
 			<Card.Root>
@@ -318,11 +428,30 @@
 						<table class="w-full">
 							<thead>
 								<tr class="border-b bg-muted/40 sticky top-0 z-10">
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Name</th>
+									{#each sortableColumns as col}
+										<th
+											class="px-3 py-2.5 text-{col.align ?? 'left'} text-xs font-medium text-muted-foreground whitespace-nowrap"
+											aria-sort={sortBy === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+										>
+											<button
+												class="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
+												onclick={() => toggleSort(col.key)}
+											>
+												{col.label}
+												{#if sortBy === col.key}
+													{#if sortDir === 'asc'}
+														<ArrowUp class="h-3 w-3 text-primary" />
+													{:else}
+														<ArrowDown class="h-3 w-3 text-primary" />
+													{/if}
+												{:else}
+													<ArrowUpDown class="h-3 w-3 opacity-30" />
+												{/if}
+											</button>
+										</th>
+									{/each}
 									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Status</th>
 									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Findings</th>
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Created</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Duration</th>
 									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Actions</th>
 								</tr>
 							</thead>
@@ -347,6 +476,14 @@
 													<span class="text-[11px] text-muted-foreground font-mono block">{task.id.slice(0, 8)}</span>
 												</div>
 											</div>
+										</td>
+										<td class="px-3 py-2">
+											<div class="flex flex-col gap-0.5">
+												<span class="text-sm text-foreground">{formatDate(task.created_at)}</span>
+											</div>
+										</td>
+										<td class="px-3 py-2 text-right">
+											<span class="text-sm font-mono tabular-nums text-muted-foreground">{formatDuration(task.duration_seconds)}</span>
 										</td>
 										<td class="px-3 py-2 align-top">
 											<Badge variant="outline" class="text-[10px] {statusColors[task.status] ?? ''}">
@@ -376,14 +513,6 @@
 											{:else}
 												<span class="text-xs text-muted-foreground">—</span>
 											{/if}
-										</td>
-										<td class="px-3 py-2">
-											<div class="flex flex-col gap-0.5">
-												<span class="text-sm text-foreground">{formatDate(task.created_at)}</span>
-											</div>
-										</td>
-										<td class="px-3 py-2 text-right">
-											<span class="text-sm font-mono tabular-nums text-muted-foreground">{formatDuration(task.duration_seconds)}</span>
 										</td>
 										<td class="px-3 py-2">
 											<!-- svelte-ignore a11y_no_static_element_interactions a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events -->

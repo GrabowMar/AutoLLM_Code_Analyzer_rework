@@ -309,6 +309,8 @@ export async function getAnalysisTasks(params?: {
   status?: string;
   search?: string;
   generation_job_id?: string;
+  sort_by?: string;
+  sort_dir?: string;
 }): Promise<PaginatedAnalysisTasks> {
   const searchParams = new URLSearchParams();
   if (params?.page) searchParams.set("page", String(params.page));
@@ -317,6 +319,8 @@ export async function getAnalysisTasks(params?: {
   if (params?.search) searchParams.set("search", params.search);
   if (params?.generation_job_id)
     searchParams.set("generation_job_id", params.generation_job_id);
+  if (params?.sort_by) searchParams.set("sort_by", params.sort_by);
+  if (params?.sort_dir) searchParams.set("sort_dir", params.sort_dir);
   const qs = searchParams.toString();
   const res = await apiFetch(`/analysis/tasks/${qs ? "?" + qs : ""}`);
   return res.json();

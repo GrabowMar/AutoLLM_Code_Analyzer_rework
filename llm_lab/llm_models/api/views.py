@@ -239,6 +239,7 @@ def list_models(
     sort_dir: str = Query("asc"),
     price_range: str = Query(""),
     context_range: str = Query(""),
+    used_in_apps: bool = Query(False),  # noqa: FBT003
 ):
     """List models with filtering, search, sorting, and pagination."""
     qs = LLMModel.objects.all()
@@ -254,6 +255,8 @@ def list_models(
         qs = _apply_price_range(qs, price_range)
     if context_range:
         qs = _apply_context_range(qs, context_range)
+    if used_in_apps:
+        qs = qs.filter(generation_jobs__isnull=False).distinct()
 
     qs = _apply_sorting(qs, sort_by, sort_dir)
 

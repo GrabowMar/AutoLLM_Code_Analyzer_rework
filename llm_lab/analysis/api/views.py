@@ -183,15 +183,13 @@ def list_tasks(
     status: str = Query(""),
     search: str = Query(""),
     generation_job_id: str = Query(""),
+    sort_by: str = Query(""),
+    sort_dir: str = Query("desc"),
 ):
-    """List analysis tasks with pagination and filters."""
-    qs = (
-        AnalysisTask.objects.filter(
-            created_by=request.auth,
-        )
-        .select_related("created_by")
-        .order_by("-created_at")
-    )
+    """List analysis tasks with pagination, filters, and sorting."""
+    qs = AnalysisTask.objects.filter(
+        created_by=request.auth,
+    ).select_related("created_by")
 
     if status:
         qs = qs.filter(status=status)
@@ -199,6 +197,15 @@ def list_tasks(
         qs = qs.filter(name__icontains=search)
     if generation_job_id:
         qs = qs.filter(generation_job_id=generation_job_id)
+
+    allowed_sort_fields = {
+        "created_at": "created_at",
+        "duration_seconds": "duration_seconds",
+        "name": "name",
+    }
+    field = allowed_sort_fields.get(sort_by, "created_at")
+    prefix = "-" if sort_dir != "asc" else ""
+    qs = qs.order_by(f"{prefix}{field}")
 
     page_qs, total, page, pages = paginate_queryset(qs, page, per_page)
 

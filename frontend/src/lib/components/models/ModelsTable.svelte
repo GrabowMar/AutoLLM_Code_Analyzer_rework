@@ -120,9 +120,12 @@ function formatTokens(n: number): string {
 								/>
 							</th>
 							{#each sortableColumns as col}
-								<th class="px-3 py-2.5 text-{col.align ?? 'left'} text-xs font-medium text-muted-foreground whitespace-nowrap">
+								<th
+									class="px-3 py-2.5 text-{col.align ?? 'left'} text-xs font-medium text-muted-foreground whitespace-nowrap"
+									aria-sort={sortBy === col.sortField ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+								>
 									<button
-										class="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+										class="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
 										onclick={() => onToggleSort(col.sortField)}
 									>
 										{col.label}

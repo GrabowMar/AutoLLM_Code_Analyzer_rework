@@ -52,6 +52,8 @@ class RankingStats(Schema):
     total: int
     with_benchmarks: int
     unique_providers: int
+    free_models: int = 0
+    avg_mss: float = 0.0
 
 
 class RankingsResponse(Schema):

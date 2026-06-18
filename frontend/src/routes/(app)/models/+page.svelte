@@ -34,6 +34,7 @@ let filterCapability = $state('');
 let filterPriceRange = $state('');
 let filterContextRange = $state('');
 let filterFreeOnly = $state(false);
+let filterUsedInApps = $state(false);
 
 let data = $state<PaginatedModels | null>(null);
 let stats = $state<ModelsStats | null>(null);
@@ -66,6 +67,9 @@ const activeFilters = $derived.by(() => {
 	if (filterFreeOnly) {
 		tags.push({ key: 'free', label: 'Free only', clear: () => { filterFreeOnly = false; applyFilterAndReload(); } });
 	}
+	if (filterUsedInApps) {
+		tags.push({ key: 'used_in_apps', label: 'Used in Apps', clear: () => { filterUsedInApps = false; applyFilterAndReload(); } });
+	}
 	if (selectedProvider) {
 		tags.push({ key: 'provider', label: `Provider: ${selectedProvider}`, clear: () => { selectedProvider = ''; applyFilterAndReload(); } });
 	}
@@ -87,6 +91,7 @@ async function load() {
 			sort_dir: sortDir,
 			price_range: filterPriceRange,
 			context_range: filterContextRange,
+			used_in_apps: filterUsedInApps,
 		});
 	} catch {
 		error = 'Failed to load models.';
@@ -117,6 +122,7 @@ function resetFilterState() {
 	filterPriceRange = '';
 	filterContextRange = '';
 	filterFreeOnly = false;
+	filterUsedInApps = false;
 	selectedProvider = '';
 	searchQuery = '';
 	sortBy = '';
@@ -136,7 +142,13 @@ function applyQuickFilter(type: string) {
 	else if (type === 'large-context') { filterContextRange = 'xlarge'; }
 	else if (type === 'efficient') { sortBy = 'cost_efficiency'; sortDir = 'desc'; }
 	else if (type === 'functions') { filterCapability = 'function_calling'; }
+	else if (type === 'used-in-apps') { filterUsedInApps = true; }
 	load();
+}
+
+function toggleUsedInApps() {
+	filterUsedInApps = !filterUsedInApps;
+	applyFilterAndReload();
 }
 
 function toggleSort(field: string) {
@@ -282,6 +294,7 @@ onMount(() => {
 		{filterCapability}
 		{filterPriceRange}
 		{filterContextRange}
+		{filterUsedInApps}
 		{sortBy}
 		{sortDir}
 		{providers}
@@ -293,6 +306,7 @@ onMount(() => {
 		onToggleCapability={toggleCapability}
 		onTogglePriceRange={togglePriceRange}
 		onToggleContextRange={toggleContextRange}
+		onToggleUsedInApps={toggleUsedInApps}
 		onClearAllFilters={clearAllFilters}
 		onSync={handleSync}
 		onExport={downloadExport}
