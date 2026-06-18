@@ -2,6 +2,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
+	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Search from '@lucide/svelte/icons/search';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -55,6 +56,21 @@
 	let pollTimer: ReturnType<typeof setInterval> | undefined;
 
 	let hasRunningTasks = $derived(tasks.some((t) => t.status === 'running' || t.status === 'pending'));
+
+	const activeFilters = $derived.by(() => {
+		const tags: FilterTag[] = [];
+		if (statusFilter) {
+			const labelMap: Record<string, string> = { running: 'Running', pending: 'Pending', completed: 'Completed', partial: 'Partial', failed: 'Failed', cancelled: 'Cancelled' };
+			tags.push({ key: 'status', label: `Status: ${labelMap[statusFilter] ?? statusFilter}`, onRemove: () => { statusFilter = ''; currentPage = 1; fetchTasks(); } });
+		}
+		return tags;
+	});
+
+	const resultsText = $derived(
+		totalTasks > 0
+			? `Showing ${(currentPage - 1) * perPage + 1}–${Math.min(currentPage * perPage, totalTasks)} of ${totalTasks} tasks`
+			: ''
+	);
 
 	type StatusPill = {
 		value: string;
@@ -323,56 +339,56 @@
 		</div>
 	{/if}
 
-	<!-- Quick Status Pills -->
-	<div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-		<span class="text-xs text-muted-foreground mr-1 shrink-0">Status:</span>
-		{#each statusPills as pill}
-			<button
-				class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap cursor-pointer {statusFilter === pill.value ? pill.activeClass : pill.inactiveClass}"
-				onclick={() => selectStatusPill(pill.value)}
-			>
-				{#if pill.value === 'running'}
+	<!-- Filter Bar -->
+	<FilterBar
+		searchPlaceholder="Search by name…"
+		bind:searchValue={searchQuery}
+		onSearchInput={handleSearchInput}
+		activeTags={activeFilters}
+		resultsText={resultsText}
+		onClearAll={() => { searchQuery = ''; statusFilter = ''; currentPage = 1; fetchTasks(); }}
+	>
+		{#snippet filters()}
+			<div class="fb-group">
+				<span class="fb-group-label">Status</span>
+				<button class="fb-chip {statusFilter === '' ? 'fb-chip-on' : ''}" onclick={() => selectStatusPill('')}>All
+					{#if stats}<span class="ml-1 font-mono text-[10px]">{stats.total_tasks}</span>{/if}
+				</button>
+				<button class="fb-chip {statusFilter === 'running' ? 'fb-chip-blue' : ''}" onclick={() => selectStatusPill('running')}>
 					<span class="relative flex h-1.5 w-1.5 shrink-0">
 						<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
 						<span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500"></span>
 					</span>
-				{/if}
-				{pill.label}
-				{#if stats}
-					{@const cnt = pill.count(stats)}
-					{#if cnt > 0 || pill.value === ''}
-						<span class="text-[10px] font-mono font-semibold text-muted-foreground ml-0.5">{cnt}</span>
-					{/if}
-				{/if}
-			</button>
-		{/each}
-	</div>
-
-	<!-- Search & Per-page Bar -->
-	<div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
-		<div class="relative flex-1 sm:max-w-sm">
-			<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-			<input
-				type="text"
-				placeholder="Search by name..."
-				class="h-9 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-				bind:value={searchQuery}
-				oninput={handleSearchInput}
-			/>
-		</div>
-		<div class="flex items-center gap-2 sm:ml-auto">
-			<select
-				class="h-9 rounded-md border border-input bg-background px-3 text-sm cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring"
-				bind:value={perPage}
-				onchange={handlePerPageChange}
-			>
-				<option value={10}>10 / page</option>
-				<option value={25}>25 / page</option>
-				<option value={50}>50 / page</option>
-				<option value={100}>100 / page</option>
-			</select>
-		</div>
-	</div>
+					Running
+					{#if stats && stats.running_tasks > 0}<span class="ml-1 font-mono text-[10px]">{stats.running_tasks}</span>{/if}
+				</button>
+				<button class="fb-chip {statusFilter === 'pending' ? 'fb-chip-slate' : ''}" onclick={() => selectStatusPill('pending')}>Pending</button>
+				<button class="fb-chip {statusFilter === 'completed' ? 'fb-chip-emerald' : ''}" onclick={() => selectStatusPill('completed')}>Completed
+					{#if stats && stats.completed_tasks > 0}<span class="ml-1 font-mono text-[10px]">{stats.completed_tasks}</span>{/if}
+				</button>
+				<button class="fb-chip {statusFilter === 'partial' ? 'fb-chip-amber' : ''}" onclick={() => selectStatusPill('partial')}>Partial</button>
+				<button class="fb-chip {statusFilter === 'failed' ? 'fb-chip-red' : ''}" onclick={() => selectStatusPill('failed')}>Failed
+					{#if stats && stats.failed_tasks > 0}<span class="ml-1 font-mono text-[10px]">{stats.failed_tasks}</span>{/if}
+				</button>
+				<button class="fb-chip {statusFilter === 'cancelled' ? 'fb-chip-slate' : ''}" onclick={() => selectStatusPill('cancelled')}>Cancelled</button>
+			</div>
+			<div class="fb-group">
+				<span class="fb-group-label">Per page</span>
+				{#each [10, 25, 50, 100] as n}
+					<button class="fb-chip {perPage === n ? 'fb-chip-on' : ''}" onclick={() => { perPage = n; currentPage = 1; fetchTasks(); }}>{n}</button>
+				{/each}
+				<div class="fb-group ml-2">
+					<span class="fb-group-label">Sort</span>
+					{#each sortableColumns as col}
+						<button
+							class="fb-chip {sortBy === col.key ? 'fb-chip-indigo' : ''}"
+							onclick={() => { if (sortBy === col.key) { sortDir = sortDir === 'asc' ? 'desc' : 'asc'; } else { sortBy = col.key; sortDir = 'desc'; } currentPage = 1; fetchTasks(); }}
+						>{col.label}{#if sortBy === col.key}<span class="ml-0.5 opacity-70">{sortDir === 'asc' ? '↑' : '↓'}</span>{/if}</button>
+					{/each}
+				</div>
+			</div>
+		{/snippet}
+	</FilterBar>
 
 	<!-- Loading -->
 	{#if loading}
@@ -408,18 +424,6 @@
 			</Card.Content>
 		</Card.Root>
 	{:else}
-		<!-- Results count -->
-		<div class="flex items-center justify-between text-xs text-muted-foreground">
-			<span>
-				Showing {(currentPage - 1) * perPage + 1}–{Math.min(currentPage * perPage, totalTasks)} of <strong class="text-foreground">{totalTasks}</strong> tasks
-			</span>
-			{#if searchQuery || statusFilter}
-				<button class="underline hover:text-foreground transition-colors" onclick={() => { searchQuery = ''; statusFilter = ''; currentPage = 1; fetchTasks(); }}>
-					Clear filters
-				</button>
-			{/if}
-		</div>
-
 		<!-- Tasks Table (desktop) -->
 		<div class="hidden md:block">
 			<Card.Root>

@@ -20,6 +20,7 @@ import Trophy from '@lucide/svelte/icons/trophy';
 import Gift from '@lucide/svelte/icons/gift';
 import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 import ModelsFiltersBar from '$lib/components/models/ModelsFiltersBar.svelte';
+import type { FilterTag } from '$lib/components/FilterBar.svelte';
 import ModelsTable from '$lib/components/models/ModelsTable.svelte';
 import ModelsPagination from '$lib/components/models/ModelsPagination.svelte';
 
@@ -51,27 +52,27 @@ const allVisibleSelected = $derived(
 );
 
 const activeFilters = $derived.by(() => {
-	const tags: { key: string; label: string; clear: () => void }[] = [];
+	const tags: FilterTag[] = [];
 	if (filterCapability) {
 		const capLabels: Record<string, string> = { vision: 'Vision', function_calling: 'Functions', streaming: 'Streaming', json_mode: 'JSON Mode' };
-		tags.push({ key: 'cap', label: capLabels[filterCapability] ?? filterCapability, clear: () => { filterCapability = ''; applyFilterAndReload(); } });
+		tags.push({ key: 'cap', label: capLabels[filterCapability] ?? filterCapability, onRemove: () => { filterCapability = ''; applyFilterAndReload(); } });
 	}
 	if (filterPriceRange) {
 		const priceLabels: Record<string, string> = { free: 'Free', low: '<$1/1M', medium: '$1–$10/1M', high: '>$10/1M' };
-		tags.push({ key: 'price', label: priceLabels[filterPriceRange] ?? filterPriceRange, clear: () => { filterPriceRange = ''; applyFilterAndReload(); } });
+		tags.push({ key: 'price', label: priceLabels[filterPriceRange] ?? filterPriceRange, onRemove: () => { filterPriceRange = ''; applyFilterAndReload(); } });
 	}
 	if (filterContextRange) {
 		const ctxLabels: Record<string, string> = { small: '<8K ctx', medium: '8K–32K ctx', large: '32K–128K ctx', xlarge: '>128K ctx' };
-		tags.push({ key: 'ctx', label: ctxLabels[filterContextRange] ?? filterContextRange, clear: () => { filterContextRange = ''; applyFilterAndReload(); } });
+		tags.push({ key: 'ctx', label: ctxLabels[filterContextRange] ?? filterContextRange, onRemove: () => { filterContextRange = ''; applyFilterAndReload(); } });
 	}
 	if (filterFreeOnly) {
-		tags.push({ key: 'free', label: 'Free only', clear: () => { filterFreeOnly = false; applyFilterAndReload(); } });
+		tags.push({ key: 'free', label: 'Free only', onRemove: () => { filterFreeOnly = false; applyFilterAndReload(); } });
 	}
 	if (filterUsedInApps) {
-		tags.push({ key: 'used_in_apps', label: 'Used in Apps', clear: () => { filterUsedInApps = false; applyFilterAndReload(); } });
+		tags.push({ key: 'used_in_apps', label: 'Used in Apps', onRemove: () => { filterUsedInApps = false; applyFilterAndReload(); } });
 	}
 	if (selectedProvider) {
-		tags.push({ key: 'provider', label: `Provider: ${selectedProvider}`, clear: () => { selectedProvider = ''; applyFilterAndReload(); } });
+		tags.push({ key: 'provider', label: `Provider: ${selectedProvider}`, onRemove: () => { selectedProvider = ''; applyFilterAndReload(); } });
 	}
 	return tags;
 });

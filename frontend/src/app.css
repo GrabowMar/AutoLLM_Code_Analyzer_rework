@@ -499,6 +499,54 @@
     @apply border-border bg-muted text-muted-foreground;
   }
 
+  /* ── Filter Bar design tokens ───────────────────────────────── */
+  /* Shell container */
+  .fb-shell {
+    @apply rounded-xl border border-border/50 bg-card shadow-sm overflow-hidden;
+  }
+  /* Filter chip — base (inactive) */
+  .fb-chip {
+    @apply inline-flex h-7 cursor-pointer select-none items-center gap-1 rounded-md border border-border/50
+           bg-background/40 px-2.5 text-xs font-medium text-muted-foreground/80
+           transition-all duration-100
+           hover:border-border hover:bg-muted/70 hover:text-foreground
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
+           active:scale-[0.97];
+  }
+  /* Chip — active (generic primary) */
+  .fb-chip-on {
+    @apply border-primary/40 bg-primary/10 text-primary hover:bg-primary/15;
+  }
+  /* Chip — active with semantic color (pass full tailwind classes) */
+  .fb-chip-blue   { @apply border-blue-500/40   bg-blue-500/10   text-blue-400   hover:bg-blue-500/15; }
+  .fb-chip-emerald{ @apply border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/15; }
+  .fb-chip-amber  { @apply border-amber-500/40  bg-amber-500/10  text-amber-500  hover:bg-amber-500/15; }
+  .fb-chip-red    { @apply border-red-500/40    bg-red-500/10    text-red-400    hover:bg-red-500/15; }
+  .fb-chip-orange { @apply border-orange-500/40 bg-orange-500/10 text-orange-400 hover:bg-orange-500/15; }
+  .fb-chip-violet { @apply border-violet-500/40 bg-violet-500/10 text-violet-400 hover:bg-violet-500/15; }
+  .fb-chip-slate  { @apply border-slate-500/40  bg-slate-500/10  text-slate-400  hover:bg-slate-500/15; }
+  .fb-chip-indigo { @apply border-indigo-500/40 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/15; }
+  /* Filter group row */
+  .fb-group {
+    @apply flex flex-wrap items-center gap-1.5;
+  }
+  /* Filter group label */
+  .fb-group-label {
+    @apply w-14 shrink-0 select-none text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60;
+  }
+  /* Active tag */
+  .fb-tag {
+    @apply inline-flex h-5 items-center gap-1 rounded-sm border border-border/50 bg-secondary
+           pl-1.5 pr-0.5 text-[11px] text-secondary-foreground;
+  }
+  /* Select inside filter bar */
+  .fb-select {
+    @apply h-7 rounded-md border border-border/50 bg-background/40 px-2 text-xs text-muted-foreground/80
+           transition-colors hover:border-border hover:text-foreground
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
+           cursor-pointer;
+  }
+
   /* ── Mono-tag (for IDs, hashes, model names) ────────────────── */
   .mono-tag {
     @apply inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[11px];

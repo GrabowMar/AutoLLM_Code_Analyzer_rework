@@ -2,7 +2,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
+	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
 	import {
 		getGenerationJobs,
 		getGenerationJobsStats,
@@ -22,7 +22,6 @@
 	} from '$lib/api/runtime';
 	import { onMount, onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import Search from '@lucide/svelte/icons/search';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Eye from '@lucide/svelte/icons/eye';
 	import Bot from '@lucide/svelte/icons/bot';
@@ -350,13 +349,13 @@
 
 	const filteredItems = $derived(data?.items ?? []);
 
-	const activeFilters = $derived.by(() => {
-		const tags: { key: string; label: string; clear: () => void }[] = [];
+	const activeFilters = $derived.by((): FilterTag[] => {
+		const tags: FilterTag[] = [];
 		if (searchQuery) {
 			tags.push({
 				key: 'search',
 				label: `Search: "${searchQuery}"`,
-				clear: () => {
+				onRemove: () => {
 					searchQuery = '';
 					applyFilters();
 				}
@@ -367,7 +366,7 @@
 			tags.push({
 				key: 'mode',
 				label: `Mode: ${labels[modeFilter] || modeFilter}`,
-				clear: () => {
+				onRemove: () => {
 					modeFilter = '';
 					applyFilters();
 				}
@@ -383,7 +382,7 @@
 			tags.push({
 				key: 'container',
 				label: labels[containerFilter] || containerFilter,
-				clear: () => {
+				onRemove: () => {
 					containerFilter = '';
 					applyFilters();
 				}
@@ -394,7 +393,7 @@
 			tags.push({
 				key: 'model',
 				label: `Model: ${model?.name ?? modelFilter}`,
-				clear: () => {
+				onRemove: () => {
 					modelFilter = '';
 					applyFilters();
 				}
@@ -480,188 +479,130 @@
 		</div>
 	{/if}
 
-	<!-- Quick Filter Presets -->
-	<div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-hide text-xs">
-		<span class="text-xs text-muted-foreground mr-1 shrink-0">Quick:</span>
-		<button
-			class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap {statusFilter === '' ? 'bg-primary/10 border-primary/30 text-primary dark:text-primary-foreground font-semibold' : 'border-input bg-card'}"
-			onclick={() => selectStatusTab('')}
-		>
-			<AppWindow class="h-3 w-3" /> All
-			{#if stats}
-				<span class="ml-1.5 text-[10px] text-muted-foreground font-semibold font-mono">{stats.total}</span>
-			{/if}
-		</button>
-		<button
-			class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap {statusFilter === 'completed' ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 font-semibold' : 'border-input bg-card'}"
-			onclick={() => selectStatusTab('completed')}
-		>
-			<CircleCheck class="h-3 w-3 text-emerald-500" /> Completed
-			{#if stats}
-				<span class="ml-1.5 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold font-mono">{stats.completed}</span>
-			{/if}
-		</button>
-		<button
-			class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap {statusFilter === 'running' ? 'bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-400 font-semibold' : 'border-input bg-card'}"
-			onclick={() => selectStatusTab('running')}
-		>
-			<span class="relative flex h-1.5 w-1.5 shrink-0">
-				<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-				<span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
-			</span>
-			Running
-			{#if stats}
-				<span class="ml-1.5 text-[10px] text-amber-600 dark:text-amber-400 font-semibold font-mono">{stats.running}</span>
-			{/if}
-		</button>
-		<button
-			class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap {statusFilter === 'failed' ? 'bg-red-500/10 border-red-500/40 text-red-700 dark:text-red-400 font-semibold' : 'border-input bg-card'}"
-			onclick={() => selectStatusTab('failed')}
-		>
-			<CircleX class="h-3 w-3 text-red-500" /> Failed
-			{#if stats}
-				<span class="ml-1.5 text-[10px] text-red-600 dark:text-red-400 font-semibold font-mono">{stats.failed}</span>
-			{/if}
-		</button>
-		<button
-			class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted shrink-0 whitespace-nowrap {statusFilter === 'pending' ? 'bg-zinc-500/10 border-zinc-500/40 text-zinc-700 dark:text-zinc-400 font-semibold' : 'border-input bg-card'}"
-			onclick={() => selectStatusTab('pending')}
-		>
-			<Clock class="h-3 w-3 text-zinc-400" /> Pending
-			{#if stats}
-				<span class="ml-1.5 text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold font-mono">{stats.pending}</span>
-			{/if}
-		</button>
-	</div>
-
-	<!-- Filters & Sort Bar -->
-	<div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
-		<!-- Search -->
-		<div class="relative w-full sm:flex-1 sm:max-w-sm">
-			<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-			<Input
-				id="search-input"
-				placeholder="Search applications..."
-				class="pl-9 h-9"
-				bind:value={searchQuery}
-				oninput={debouncedLoad}
-			/>
-		</div>
-
-		<!-- Select Filters -->
-		<select
-			id="mode-filter"
-			class="h-9 w-full sm:w-auto rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer transition-colors"
-			bind:value={modeFilter}
-			onchange={applyFilters}
-		>
-			<option value="">All Modes</option>
-			<option value="custom">Custom</option>
-			<option value="scaffolding">Scaffolding</option>
-			<option value="copilot">Copilot</option>
-		</select>
-
-		<select
-			id="container-filter"
-			class="h-9 w-full sm:w-auto rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer transition-colors"
-			bind:value={containerFilter}
-			onchange={applyFilters}
-		>
-			<option value="">All Containers</option>
-			<option value="running">Running</option>
-			<option value="stopped">Stopped</option>
-			<option value="building">Building / Provisioning</option>
-			<option value="none">No Container</option>
-		</select>
-
-		{#if uniqueModels.length > 1}
-			<select
-				id="model-filter"
-				class="h-9 w-full sm:w-auto rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer transition-colors"
-				bind:value={modelFilter}
-				onchange={applyFilters}
-			>
-				<option value="">All Models</option>
-				{#each uniqueModels as model}
-					<option value={model.id}>{model.name}</option>
-				{/each}
-			</select>
-		{/if}
-
-		<!-- Mobile sort fallback -->
-		<select
-			id="sort-filter"
-			class="h-9 w-full sm:hidden rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer transition-colors"
-			value={sortOption}
-			onchange={(e) => {
-				const v = (e.currentTarget as HTMLSelectElement).value;
-				if (v === 'created_desc') { sortBy = 'created_at'; sortDir = 'desc'; }
-				else if (v === 'created_asc') { sortBy = 'created_at'; sortDir = 'asc'; }
-				else if (v === 'duration_desc') { sortBy = 'duration_seconds'; sortDir = 'desc'; }
-				else if (v === 'duration_asc') { sortBy = 'duration_seconds'; sortDir = 'asc'; }
-				else if (v === 'model_asc') { sortBy = 'model_name'; sortDir = 'asc'; }
-				currentPage = 1;
-				fetchJobs();
-			}}
-		>
-			<option value="created_desc">Newest First</option>
-			<option value="created_asc">Oldest First</option>
-			<option value="duration_desc">Longest Duration</option>
-			<option value="duration_asc">Shortest Duration</option>
-			<option value="model_asc">Model Name (A-Z)</option>
-		</select>
-
-		<!-- Clear Filters Button -->
-		{#if hasActiveFilters}
-			<Button
-				id="clear-filters-btn"
-				variant="ghost"
-				size="sm"
-				onclick={clearFilters}
-				class="h-9 px-2 text-xs text-muted-foreground hover:text-foreground border border-transparent hover:border-border"
-			>
-				<X class="h-4 w-4 mr-1.5" />
-				Clear Filters
-			</Button>
-		{/if}
-	</div>
-
-	<!-- Active Filter Tags -->
-	{#if activeFilters.length > 0}
-		<div class="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
-			<span class="text-xs text-muted-foreground">Active:</span>
-			{#each activeFilters as tag (tag.key)}
-				<Badge variant="secondary" class="gap-1 pr-1.5 py-0.5 text-xs font-normal">
-					{tag.label}
-					<button class="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5" onclick={tag.clear}>
-						<X class="h-2.5 w-2.5" />
-					</button>
-				</Badge>
-			{/each}
-			<button class="text-xs text-muted-foreground hover:text-foreground underline ml-1" onclick={clearFilters}>Clear all</button>
-		</div>
-	{/if}
-
-	<!-- Results Count -->
-	{#if data && !loading}
-		<div class="flex items-center justify-between">
-			<p class="text-xs text-muted-foreground">
-				Showing {(data.page - 1) * data.per_page + 1}–{Math.min(data.page * data.per_page, data.total)} of <strong>{data.total}</strong> applications
-			</p>
-			<div class="flex items-center gap-2">
-				<select
-					class="h-7 rounded-md border border-input bg-background px-2 text-xs ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer transition-colors"
-					bind:value={perPage}
-					onchange={() => { currentPage = 1; fetchJobs(); }}
+	<FilterBar
+		searchPlaceholder="Search applications..."
+		bind:searchValue={searchQuery}
+		onSearchInput={() => { currentPage = 1; debouncedLoad(); }}
+		activeTags={activeFilters}
+		resultsText={data && !loading
+			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} applications`
+			: ''}
+		onClearAll={clearFilters}
+	>
+		{#snippet filters()}
+			<!-- Row 1: Status -->
+			<div class="fb-group">
+				<span class="fb-group-label">Status</span>
+				<button
+					class="fb-chip {statusFilter === '' ? 'fb-chip-on' : ''}"
+					onclick={() => selectStatusTab('')}
 				>
-					<option value={10}>10 / page</option>
-					<option value={25}>25 / page</option>
-					<option value={50}>50 / page</option>
-					<option value={100}>100 / page</option>
-				</select>
+					<AppWindow class="h-3 w-3" /> All
+					{#if stats}<span class="ml-1 font-mono text-[10px]">{stats.total}</span>{/if}
+				</button>
+				<button
+					class="fb-chip {statusFilter === 'completed' ? 'fb-chip-emerald' : ''}"
+					onclick={() => selectStatusTab('completed')}
+				>
+					<CircleCheck class="h-3 w-3" /> Completed
+					{#if stats}<span class="ml-1 font-mono text-[10px]">{stats.completed}</span>{/if}
+				</button>
+				<button
+					class="fb-chip {statusFilter === 'running' ? 'fb-chip-amber' : ''}"
+					onclick={() => selectStatusTab('running')}
+				>
+					<span class="relative flex h-1.5 w-1.5 shrink-0">
+						<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+						<span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
+					</span>
+					Running
+					{#if stats}<span class="ml-1 font-mono text-[10px]">{stats.running}</span>{/if}
+				</button>
+				<button
+					class="fb-chip {statusFilter === 'failed' ? 'fb-chip-red' : ''}"
+					onclick={() => selectStatusTab('failed')}
+				>
+					<CircleX class="h-3 w-3" /> Failed
+					{#if stats}<span class="ml-1 font-mono text-[10px]">{stats.failed}</span>{/if}
+				</button>
+				<button
+					class="fb-chip {statusFilter === 'pending' ? 'fb-chip-slate' : ''}"
+					onclick={() => selectStatusTab('pending')}
+				>
+					<Clock class="h-3 w-3" /> Pending
+					{#if stats}<span class="ml-1 font-mono text-[10px]">{stats.pending}</span>{/if}
+				</button>
 			</div>
-		</div>
-	{/if}
+
+			<!-- Row 2: Mode -->
+			<div class="fb-group">
+				<span class="fb-group-label">Mode</span>
+				<button class="fb-chip {modeFilter === '' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = ''; applyFilters(); }}>All</button>
+				<button class="fb-chip {modeFilter === 'custom' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'custom'; applyFilters(); }}>Custom</button>
+				<button class="fb-chip {modeFilter === 'scaffolding' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'scaffolding'; applyFilters(); }}>Scaffolding</button>
+				<button class="fb-chip {modeFilter === 'copilot' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'copilot'; applyFilters(); }}>Copilot</button>
+			</div>
+
+			<!-- Row 3: Container -->
+			<div class="fb-group">
+				<span class="fb-group-label">Container</span>
+				<button class="fb-chip {containerFilter === '' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = ''; applyFilters(); }}>All</button>
+				<button class="fb-chip {containerFilter === 'running' ? 'fb-chip-emerald' : ''}" onclick={() => { containerFilter = 'running'; applyFilters(); }}>Running</button>
+				<button class="fb-chip {containerFilter === 'stopped' ? 'fb-chip-slate' : ''}" onclick={() => { containerFilter = 'stopped'; applyFilters(); }}>Stopped</button>
+				<button class="fb-chip {containerFilter === 'building' ? 'fb-chip-amber' : ''}" onclick={() => { containerFilter = 'building'; applyFilters(); }}>Building</button>
+				<button class="fb-chip {containerFilter === 'none' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'none'; applyFilters(); }}>None</button>
+			</div>
+
+			<!-- Row 4: Model + Sort -->
+			<div class="fb-group flex-wrap">
+				<span class="fb-group-label">Model</span>
+				<select
+					class="fb-select"
+					bind:value={modelFilter}
+					onchange={applyFilters}
+				>
+					<option value="">All Models</option>
+					{#each uniqueModels as model}
+						<option value={model.id}>{model.name}</option>
+					{/each}
+				</select>
+				<span class="fb-group-label ml-2">Sort</span>
+				<button
+					class="fb-chip {sortBy === 'created_at' && sortDir === 'desc' ? 'fb-chip-on' : ''}"
+					onclick={() => { sortBy = 'created_at'; sortDir = 'desc'; currentPage = 1; fetchJobs(); }}
+				>Newest</button>
+				<button
+					class="fb-chip {sortBy === 'created_at' && sortDir === 'asc' ? 'fb-chip-on' : ''}"
+					onclick={() => { sortBy = 'created_at'; sortDir = 'asc'; currentPage = 1; fetchJobs(); }}
+				>Oldest</button>
+				<button
+					class="fb-chip {sortBy === 'duration_seconds' ? 'fb-chip-on' : ''}"
+					onclick={() => { sortBy = 'duration_seconds'; sortDir = 'desc'; currentPage = 1; fetchJobs(); }}
+				>Longest</button>
+				<button
+					class="fb-chip {sortBy === 'model_name' ? 'fb-chip-on' : ''}"
+					onclick={() => { sortBy = 'model_name'; sortDir = 'asc'; currentPage = 1; fetchJobs(); }}
+				>A–Z Model</button>
+			</div>
+		{/snippet}
+
+		{#snippet actions()}
+			<Button variant="outline" size="sm" onclick={refresh} disabled={refreshing}>
+				<RefreshCw class="h-3.5 w-3.5 {refreshing ? 'animate-spin' : ''}" />
+				<span class="hidden sm:inline ml-1.5">Refresh</span>
+			</Button>
+			<select
+				class="fb-select"
+				bind:value={perPage}
+				onchange={() => { currentPage = 1; fetchJobs(); }}
+			>
+				<option value={10}>10/pg</option>
+				<option value={25}>25/pg</option>
+				<option value={50}>50/pg</option>
+				<option value={100}>100/pg</option>
+			</select>
+		{/snippet}
+	</FilterBar>
 
 	<!-- Results List -->
 	{#if loading}

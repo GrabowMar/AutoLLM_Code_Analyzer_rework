@@ -1,6 +1,7 @@
 <script lang="ts">
 import { Badge } from '$lib/components/ui/badge';
 import { Button } from '$lib/components/ui/button';
+import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
 import ChevronDown from '@lucide/svelte/icons/chevron-down';
 import ChevronRight from '@lucide/svelte/icons/chevron-right';
 import EyeOff from '@lucide/svelte/icons/eye-off';
@@ -87,6 +88,18 @@ $effect(() => {
 	filterAnalyzer = initialAnalyzerFilter;
 });
 
+const activeFilters = $derived.by(() => {
+	const tags: FilterTag[] = [];
+	if (filterSeverity) tags.push({ key: 'sev', label: `Severity: ${filterSeverity}`, onRemove: () => { filterSeverity = ''; } });
+	if (filterCategory) tags.push({ key: 'cat', label: `Category: ${filterCategory.replace('_', ' ')}`, onRemove: () => { filterCategory = ''; } });
+	if (filterAnalyzer) tags.push({ key: 'anlz', label: `Analyzer: ${filterAnalyzer}`, onRemove: () => { filterAnalyzer = ''; } });
+	if (filterFilePath) tags.push({ key: 'path', label: `Path: ${filterFilePath}`, onRemove: () => { filterFilePath = ''; } });
+	if (includeSuppressed) tags.push({ key: 'supp', label: 'Show suppressed', onRemove: () => { includeSuppressed = false; } });
+	return tags;
+});
+
+const resultsText = $derived(total > 0 ? `${total} finding${total !== 1 ? 's' : ''}` : '');
+
 function onFilePathInput(e: Event) {
 	filterFilePath = (e.target as HTMLInputElement).value;
 	if (filePathDebounce) clearTimeout(filePathDebounce);
@@ -147,84 +160,55 @@ const grouped = $derived.by<Group[]>(() => {
 
 <div class="space-y-3">
 	<!-- Filter bar -->
-	<div class="space-y-2">
-		<!-- Row 1: severity pills -->
-		<div class="flex flex-wrap items-center gap-1.5">
-			<span class="text-xs text-muted-foreground shrink-0">Severity</span>
-			<button
-				class="rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {filterSeverity === '' ? 'bg-primary text-primary-foreground border-transparent' : 'border-border hover:bg-muted'}"
-				onclick={() => { filterSeverity = ''; }}
-			>All</button>
-			{#each severities as s}
-				{@const colors: Record<string, string> = {
-					critical: 'bg-red-500/15 text-red-400 border-red-500/30',
-					high: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
-					medium: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
-					low: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-					info: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
-				}}
-				<button
-					class="rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {filterSeverity === s ? colors[s] + ' border-current' : 'border-border hover:bg-muted'}"
-					onclick={() => { filterSeverity = s; }}
-				>{s}</button>
-			{/each}
-		</div>
-
-		<!-- Row 2: secondary filters -->
-		<div class="flex flex-wrap gap-2">
-			<select
-				class="h-8 rounded-md border border-input bg-background px-2 text-xs"
-				bind:value={filterAnalyzer}
-			>
-				<option value="">All analyzers</option>
-				{#each availableAnalyzers as name}
-					<option value={name}>{name}</option>
-				{/each}
-			</select>
-
-			<select
-				class="h-8 rounded-md border border-input bg-background px-2 text-xs"
-				bind:value={filterCategory}
-			>
-				<option value="">All categories</option>
-				{#each categories as c}
-					<option value={c}>{c.replace('_', ' ')}</option>
-				{/each}
-			</select>
-
-			<input
-				type="text"
-				class="h-8 w-40 rounded-md border border-input bg-background px-2 text-xs"
-				placeholder="Filter by file path…"
-				value={filterFilePath}
-				oninput={onFilePathInput}
-			/>
-
-			<label class="flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs cursor-pointer">
-				<input type="checkbox" class="rounded" bind:checked={includeSuppressed} />
-				Show suppressed
-			</label>
-
-			<!-- Group by pills -->
-			<div class="flex items-center gap-1 ml-auto">
-				<span class="text-xs text-muted-foreground">Group</span>
-				{#each (['none', 'severity', 'analyzer', 'file'] as const) as g}
-					<button
-						class="rounded-full px-2 py-0.5 text-xs font-medium cursor-pointer border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {groupBy === g ? 'bg-primary text-primary-foreground border-transparent' : 'border-border hover:bg-muted'}"
-						onclick={() => { groupBy = g; }}
-					>{g === 'none' ? '—' : g}</button>
-				{/each}
+	<FilterBar
+		searchPlaceholder="Filter by file path…"
+		bind:searchValue={filterFilePath}
+		onSearchInput={onFilePathInput}
+		activeTags={activeFilters}
+		resultsText={resultsText}
+		onClearAll={() => { filterSeverity = ''; filterCategory = ''; filterAnalyzer = ''; filterFilePath = ''; includeSuppressed = false; }}
+	>
+		{#snippet filters()}
+			<div class="fb-group">
+				<span class="fb-group-label">Severity</span>
+				<button class="fb-chip {filterSeverity === '' ? 'fb-chip-on' : ''}" onclick={() => { filterSeverity = ''; }}>All</button>
+				<button class="fb-chip {filterSeverity === 'critical' ? 'fb-chip-red' : ''}" onclick={() => { filterSeverity = 'critical'; }}>Critical</button>
+				<button class="fb-chip {filterSeverity === 'high' ? 'fb-chip-orange' : ''}" onclick={() => { filterSeverity = 'high'; }}>High</button>
+				<button class="fb-chip {filterSeverity === 'medium' ? 'fb-chip-amber' : ''}" onclick={() => { filterSeverity = 'medium'; }}>Medium</button>
+				<button class="fb-chip {filterSeverity === 'low' ? 'fb-chip-blue' : ''}" onclick={() => { filterSeverity = 'low'; }}>Low</button>
+				<button class="fb-chip {filterSeverity === 'info' ? 'fb-chip-slate' : ''}" onclick={() => { filterSeverity = 'info'; }}>Info</button>
 			</div>
-
-			<span class="flex h-8 items-center text-xs text-muted-foreground">
-				{total} finding{total !== 1 ? 's' : ''}
-			</span>
-		</div>
-	</div>
+			<div class="fb-group">
+				<span class="fb-group-label">Analyzer</span>
+				<select class="fb-select" bind:value={filterAnalyzer}>
+					<option value="">All analyzers</option>
+					{#each availableAnalyzers as name}
+						<option value={name}>{name}</option>
+					{/each}
+				</select>
+				<span class="fb-group-label ml-2">Category</span>
+				<select class="fb-select" bind:value={filterCategory}>
+					<option value="">All categories</option>
+					{#each categories as c}
+						<option value={c}>{c.replace('_', ' ')}</option>
+					{/each}
+				</select>
+				<button class="fb-chip ml-2 {includeSuppressed ? 'fb-chip-slate' : ''}" onclick={() => { includeSuppressed = !includeSuppressed; }}>Show suppressed</button>
+			</div>
+			<div class="fb-group">
+				<span class="fb-group-label">Group by</span>
+				<button class="fb-chip {groupBy === 'none' ? 'fb-chip-on' : ''}" onclick={() => { groupBy = 'none'; }}>None</button>
+				<button class="fb-chip {groupBy === 'severity' ? 'fb-chip-on' : ''}" onclick={() => { groupBy = 'severity'; }}>Severity</button>
+				<button class="fb-chip {groupBy === 'analyzer' ? 'fb-chip-on' : ''}" onclick={() => { groupBy = 'analyzer'; }}>Analyzer</button>
+				<button class="fb-chip {groupBy === 'file' ? 'fb-chip-on' : ''}" onclick={() => { groupBy = 'file'; }}>File</button>
+			</div>
+		{/snippet}
+	</FilterBar>
 
 	<!-- Table -->
 	{#if loading}
 		<div class="flex items-center justify-center py-10 text-muted-foreground">
+
 			<Loader class="mr-2 h-4 w-4 animate-spin" /> Loading findings…
 		</div>
 	{:else if findings.length === 0}
