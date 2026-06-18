@@ -26,6 +26,11 @@ interface SignupResult {
   pendingFlow?: string;
 }
 
+interface BootstrapStatus {
+  requiresBootstrap: boolean;
+  defaultEmail: string;
+}
+
 function mapUser(raw: Record<string, unknown> | undefined): AuthUser | null {
   if (!raw || typeof raw.email !== "string") return null;
   return {
@@ -184,6 +189,54 @@ function createAuth() {
     };
   }
 
+  async function getBootstrapStatus(): Promise<BootstrapStatus> {
+    const res = await fetch("/api/users/bootstrap-status/", {
+      credentials: "include",
+    });
+    const body = await parseAllauthJson(res);
+    if (!res.ok) {
+      throw body;
+    }
+    return {
+      requiresBootstrap: body.requires_bootstrap === true,
+      defaultEmail:
+        typeof body.default_email === "string" ? body.default_email : "",
+    };
+  }
+
+  async function bootstrapAdminSignup(
+    name: string,
+    password: string,
+    remember = true,
+  ): Promise<SignupResult> {
+    sessionCheckGeneration++;
+    await ensureCsrfCookie();
+    const res = await fetch("/api/users/bootstrap-admin/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": getCsrfToken(),
+      },
+      credentials: "include",
+      body: JSON.stringify({ name, password, remember }),
+    });
+    const body = await parseAllauthJson(res);
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: formatApiError(body, "Initial admin setup failed."),
+      };
+    }
+    await checkSession();
+    if (isAuthenticated && user) {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      error: "Initial admin setup succeeded, but the new session could not be loaded.",
+    };
+  }
+
   async function logout(): Promise<void> {
     try {
       await ensureCsrfCookie();
@@ -210,7 +263,9 @@ function createAuth() {
     get user() {
       return user;
     },
+    bootstrapAdminSignup,
     checkSession,
+    getBootstrapStatus,
     login,
     signup,
     logout,

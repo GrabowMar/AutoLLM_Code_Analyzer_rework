@@ -15,6 +15,51 @@ def user():
     return UserFactory.create()
 
 
+def test_bootstrap_status_without_users(client: Client):
+    response = client.get(reverse("api:bootstrap_status"))
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["requires_bootstrap"] is True
+    assert response.json()["default_email"]
+
+
+def test_bootstrap_status_with_users(client: Client, user: User):
+    response = client.get(reverse("api:bootstrap_status"))
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["requires_bootstrap"] is False
+    assert response.json()["default_email"].startswith("admin@")
+
+
+def test_create_bootstrap_admin_without_email(client: Client, settings):
+    settings.DJANGO_DOMAIN = "dev1.grabowmar.ovh"
+
+    response = client.post(
+        reverse("api:create_bootstrap_admin"),
+        data='{"name": "Bootstrap Admin", "password": "Monitor69!", "remember": true}',
+        content_type="application/json",
+    )
+
+    assert response.status_code == HTTPStatus.OK, response.json()
+    created_user = User.objects.get()
+    assert created_user.email == "admin@dev1.grabowmar.ovh"
+    assert created_user.name == "Bootstrap Admin"
+    assert created_user.is_staff is True
+    assert created_user.is_superuser is True
+    assert str(created_user.pk) == client.session["_auth_user_id"]
+
+
+def test_create_bootstrap_admin_rejected_when_user_exists(client: Client, user: User):
+    response = client.post(
+        reverse("api:create_bootstrap_admin"),
+        data='{"name": "Bootstrap Admin", "password": "Monitor69!"}',
+        content_type="application/json",
+    )
+
+    assert response.status_code == HTTPStatus.CONFLICT
+    assert response.json() == {"detail": "Bootstrap admin already exists."}
+
+
 def test_list_users_as_anonymous_user(client: Client):
     response = client.get(reverse("api:list_users"))
 
