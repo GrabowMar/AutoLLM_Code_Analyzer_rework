@@ -1,5 +1,6 @@
 from django.urls import reverse
 from ninja import ModelSchema
+from ninja import Schema
 
 from llm_lab.users.models import User
 
@@ -25,3 +26,15 @@ class UserSchema(ModelSchema):
     @staticmethod
     def resolve_is_staff(obj: User) -> bool:
         return obj.is_staff
+
+
+class BootstrapStatusSchema(Schema):
+    requires_bootstrap: bool
+    default_email: str
+
+
+class BootstrapAdminCreateSchema(Schema):
+    name: str
+    password: str
+    remember: bool = True
+    email: str | None = None

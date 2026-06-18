@@ -19,6 +19,16 @@ def test_current_user():
     assert resolve("/api/users/me/").view_name == "api:retrieve_current_user"
 
 
+def test_bootstrap_status():
+    assert reverse("api:bootstrap_status") == "/api/users/bootstrap-status/"
+    assert resolve("/api/users/bootstrap-status/").view_name == "api:bootstrap_status"
+
+
+def test_create_bootstrap_admin():
+    assert reverse("api:create_bootstrap_admin") == "/api/users/bootstrap-admin/"
+    assert resolve("/api/users/bootstrap-admin/").view_name == "api:create_bootstrap_admin"
+
+
 def test_update_user():
     assert reverse("api:update_user", kwargs={"pk": 123}) == "/api/users/123/"
     assert resolve("/api/users/123/").view_name == "api:retrieve_user"
