@@ -3,6 +3,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
+	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Search from '@lucide/svelte/icons/search';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -656,4 +657,12 @@
 			{/each}
 		</div>
 	{/if}
+
+	<PaginationBar
+		resultsText={totalTasks > 0 ? `Showing ${(currentPage - 1) * perPage + 1}–${Math.min(currentPage * perPage, totalTasks)} of ${totalTasks} tasks` : ''}
+		page={currentPage}
+		pages={totalPages}
+		onGoToPage={goToPage}
+		class="rounded-md border border-border"
+	/>
 </div>

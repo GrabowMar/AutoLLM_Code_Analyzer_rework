@@ -4,6 +4,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
+	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import Trophy from '@lucide/svelte/icons/trophy';
 	import Medal from '@lucide/svelte/icons/medal';
 	import Download from '@lucide/svelte/icons/download';
@@ -439,4 +440,14 @@
 			{/if}
 		</Card.Content>
 	</Card.Root>
+
+	<PaginationBar
+		resultsText={data
+			? `Showing ${(page - 1) * perPage + 1}–${Math.min(page * perPage, data.pagination.total)} of ${data.pagination.total} models`
+			: ''}
+		page={data?.pagination.page}
+		pages={data?.pagination.total_pages}
+		onGoToPage={(p) => { page = p; }}
+		class="rounded-md border border-border"
+	/>
 </div>

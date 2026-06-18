@@ -3,6 +3,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
+	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import {
 		getGenerationJobs,
 		getGenerationJobsStats,
@@ -1241,4 +1242,14 @@
 			{/each}
 		</div>
 	{/if}
+
+	<PaginationBar
+		resultsText={data && !loading
+			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} applications`
+			: ''}
+		page={data?.page}
+		pages={data?.pages}
+		onGoToPage={goToPage}
+		class="rounded-md border border-border"
+	/>
 </div>
