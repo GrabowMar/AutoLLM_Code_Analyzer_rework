@@ -500,50 +500,50 @@
   }
 
   /* ── Filter Bar design tokens ───────────────────────────────── */
-  /* Shell container */
+  /* Shell container — matches card styling exactly */
   .fb-shell {
-    @apply rounded-xl border border-border/50 bg-card shadow-sm overflow-hidden;
+    @apply rounded-md border border-border bg-card shadow-sm overflow-hidden;
   }
   /* Filter chip — base (inactive) */
   .fb-chip {
-    @apply inline-flex h-7 cursor-pointer select-none items-center gap-1 rounded-md border border-border/50
-           bg-background/40 px-2.5 text-xs font-medium text-muted-foreground/80
+    @apply inline-flex h-7 cursor-pointer select-none items-center gap-1 rounded-md border border-border
+           bg-card px-2.5 text-xs font-medium text-muted-foreground
            transition-all duration-100
-           hover:border-border hover:bg-muted/70 hover:text-foreground
-           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
+           hover:border-primary/40 hover:bg-accent hover:text-accent-foreground
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30
            active:scale-[0.97];
   }
   /* Chip — active (generic primary) */
   .fb-chip-on {
-    @apply border-primary/40 bg-primary/10 text-primary hover:bg-primary/15;
+    @apply border-primary/50 bg-primary/10 text-primary hover:bg-primary/15 hover:border-primary/60;
   }
-  /* Chip — active with semantic color (pass full tailwind classes) */
-  .fb-chip-blue   { @apply border-blue-500/40   bg-blue-500/10   text-blue-400   hover:bg-blue-500/15; }
-  .fb-chip-emerald{ @apply border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/15; }
-  .fb-chip-amber  { @apply border-amber-500/40  bg-amber-500/10  text-amber-500  hover:bg-amber-500/15; }
-  .fb-chip-red    { @apply border-red-500/40    bg-red-500/10    text-red-400    hover:bg-red-500/15; }
-  .fb-chip-orange { @apply border-orange-500/40 bg-orange-500/10 text-orange-400 hover:bg-orange-500/15; }
-  .fb-chip-violet { @apply border-violet-500/40 bg-violet-500/10 text-violet-400 hover:bg-violet-500/15; }
-  .fb-chip-slate  { @apply border-slate-500/40  bg-slate-500/10  text-slate-400  hover:bg-slate-500/15; }
-  .fb-chip-indigo { @apply border-indigo-500/40 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/15; }
+  /* Chip — active with semantic color */
+  .fb-chip-blue   { @apply border-blue-500/40   bg-blue-500/10   text-blue-600   dark:text-blue-400   hover:bg-blue-500/15   hover:border-blue-500/60; }
+  .fb-chip-emerald{ @apply border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/15 hover:border-emerald-500/60; }
+  .fb-chip-amber  { @apply border-amber-500/40  bg-amber-500/10  text-amber-600  dark:text-amber-500  hover:bg-amber-500/15  hover:border-amber-500/60; }
+  .fb-chip-red    { @apply border-red-500/40    bg-red-500/10    text-red-600    dark:text-red-400    hover:bg-red-500/15    hover:border-red-500/60; }
+  .fb-chip-orange { @apply border-orange-500/40 bg-orange-500/10 text-orange-600 dark:text-orange-400 hover:bg-orange-500/15 hover:border-orange-500/60; }
+  .fb-chip-violet { @apply border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/15 hover:border-violet-500/60; }
+  .fb-chip-slate  { @apply border-slate-400/40  bg-slate-500/10  text-slate-600  dark:text-slate-400  hover:bg-slate-500/15  hover:border-slate-400/60; }
+  .fb-chip-indigo { @apply border-indigo-500/40 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/15 hover:border-indigo-500/60; }
   /* Filter group row */
   .fb-group {
     @apply flex flex-wrap items-center gap-1.5;
   }
   /* Filter group label */
   .fb-group-label {
-    @apply w-14 shrink-0 select-none text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60;
+    @apply w-14 shrink-0 select-none text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70;
   }
   /* Active tag */
   .fb-tag {
-    @apply inline-flex h-5 items-center gap-1 rounded-sm border border-border/50 bg-secondary
-           pl-1.5 pr-0.5 text-[11px] text-secondary-foreground;
+    @apply inline-flex h-5 items-center gap-1 rounded border border-border/70 bg-muted
+           pl-1.5 pr-0.5 text-[11px] text-muted-foreground;
   }
   /* Select inside filter bar */
   .fb-select {
-    @apply h-7 rounded-md border border-border/50 bg-background/40 px-2 text-xs text-muted-foreground/80
-           transition-colors hover:border-border hover:text-foreground
-           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
+    @apply h-7 rounded-md border border-border bg-card px-2 text-xs text-muted-foreground
+           transition-colors hover:border-primary/40 hover:text-foreground
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30
            cursor-pointer;
   }
 
