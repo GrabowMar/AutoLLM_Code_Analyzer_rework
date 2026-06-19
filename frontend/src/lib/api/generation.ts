@@ -10,6 +10,7 @@ export interface AppRequirementTemplate {
   frontend_requirements: string[];
   admin_requirements: string[];
   api_endpoints: any[];
+  admin_api_endpoints: any[];
   data_model: Record<string, any>;
   is_default: boolean;
   created_at: string;
@@ -20,6 +21,20 @@ export interface BatchCreateResponse {
   batch_id: string;
   job_count: number;
   status: string;
+}
+
+export interface ContentBlock {
+  id: number;
+  block_type: string;
+  slug: string;
+  version: number;
+  name: string;
+  description: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  is_system: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CopilotIteration {
@@ -86,8 +101,6 @@ export interface GenerationJob {
   metrics: Record<string, any>;
   experiment_seed: number | null;
   resolved_bundle: Record<string, any>;
-  bundle_name?: string | null;
-  bundle_slug?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -155,6 +168,17 @@ export interface ScaffoldingTemplate {
   updated_at: string;
 }
 
+export interface StarterTemplatePackage {
+  slug: string;
+  name: string;
+  description: string;
+  scaffolding_count: number;
+  app_template_count: number;
+  prompt_template_count: number;
+  block_count: number;
+  bundle_count: number;
+}
+
 export async function cancelGenerationJob(
   id: string,
 ): Promise<{ success: boolean }> {
@@ -172,6 +196,7 @@ export async function createAppTemplate(data: {
   frontend_requirements?: string[];
   admin_requirements?: string[];
   api_endpoints?: Record<string, unknown>;
+  admin_api_endpoints?: any[];
   data_model?: Record<string, unknown>;
 }): Promise<AppRequirementTemplate> {
   const res = await apiFetch("/generation/app-templates/", {
@@ -222,18 +247,64 @@ export async function createPromptTemplate(data: {
   return res.json();
 }
 
+export async function getContentBlocks(): Promise<ContentBlock[]> {
+  const res = await apiFetch("/generation/blocks/");
+  return res.json();
+}
+
 export async function getTemplateBundles(): Promise<TemplateBundle[]> {
   const res = await apiFetch("/generation/bundles/");
   return res.json();
 }
 
-export async function getBundlePreview(slug: string): Promise<{
-  slug: string;
-  scaffolding_slug: string;
-  block_count: number;
-  prompt_templates: Record<string, { system: string; user: string }>;
-}> {
-  const res = await apiFetch(`/generation/bundles/${slug}/preview/`);
+export async function exportTemplatePackage(
+  data: {
+    scaffolding_slugs?: string[];
+    app_template_slugs?: string[];
+    prompt_template_slugs?: string[];
+    bundle_slugs?: string[];
+    block_refs?: { type: string; slug: string; version: number }[];
+  },
+  format: "json" | "yaml" = "json",
+): Promise<{ content: string; contentType: string }> {
+  const res = await apiFetch(`/generation/packages/export/?format=${format}`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return {
+    content: await res.text(),
+    contentType: res.headers.get("content-type") || "application/octet-stream",
+  };
+}
+
+export async function importTemplatePackage(data: {
+  package_text: string;
+  conflict_strategy?: "rename" | "overwrite" | "error";
+}): Promise<Record<string, string[]>> {
+  const res = await apiFetch("/generation/packages/import/", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function getStarterTemplatePackages(): Promise<
+  StarterTemplatePackage[]
+> {
+  const res = await apiFetch("/generation/packages/starters/");
+  return res.json();
+}
+
+export async function importStarterTemplatePackage(
+  slug: string,
+  data: {
+    conflict_strategy?: "rename" | "overwrite" | "error";
+  } = {},
+): Promise<Record<string, string[]>> {
+  const res = await apiFetch(`/generation/packages/starters/${slug}/import/`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
   return res.json();
 }
 
@@ -243,7 +314,6 @@ export async function createScaffoldingBatch(data: {
   model_ids: number[];
   temperature?: number;
   max_tokens?: number;
-  template_bundle_id?: number;
 }): Promise<BatchCreateResponse> {
   const res = await apiFetch("/generation/jobs/scaffolding/", {
     method: "POST",
@@ -279,12 +349,6 @@ export async function deleteGenerationJob(
 
 export async function deletePromptTemplate(slug: string): Promise<void> {
   await apiFetch(`/generation/prompt-templates/${slug}/`, { method: "DELETE" });
-}
-
-export async function deleteScaffoldingTemplate(slug: string): Promise<void> {
-  await apiFetch(`/generation/scaffolding-templates/${slug}/`, {
-    method: "DELETE",
-  });
 }
 
 export async function exportGenerationJob(
@@ -402,6 +466,7 @@ export async function updateAppTemplate(
     frontend_requirements: string[];
     admin_requirements: string[];
     api_endpoints: Record<string, unknown>;
+    admin_api_endpoints: any[];
     data_model: Record<string, unknown>;
   }>,
 ): Promise<AppRequirementTemplate> {
@@ -442,4 +507,10 @@ export async function updateScaffoldingTemplate(
     body: JSON.stringify(data),
   });
   return res.json();
+}
+
+export async function deleteScaffoldingTemplate(slug: string): Promise<void> {
+  await apiFetch(`/generation/scaffolding-templates/${slug}/`, {
+    method: "DELETE",
+  });
 }

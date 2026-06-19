@@ -1,0 +1,29 @@
+# {{ name }}
+
+{{ description }}
+
+## Task
+Generate `App.vue` as a **feature-rich Vue 3 application** with clear sections, strong data-fetching states, and a distinctive visual identity.
+
+## Backend API Context
+{{ backend_api_context }}
+
+## Requirements
+
+### Features
+{% for req in frontend_requirements %}
+- {{ req }}
+{% endfor %}
+
+### Admin Features
+{% for req in admin_requirements %}
+- {{ req }}
+{% endfor %}
+
+## Implementation Requirements
+- Use `<script setup>` with Composition API state.
+- Build reusable inline components or section helpers within the file.
+- Include landing, browse/list, detail, dashboard, auth, and admin experiences.
+- Add meaningful loading, empty, and error states for network requests.
+
+**GENERATE COMPLETE APP.VUE NOW.**

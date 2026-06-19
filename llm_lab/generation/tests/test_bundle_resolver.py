@@ -7,6 +7,7 @@ import pytest
 from llm_lab.generation.models import ContentBlock
 from llm_lab.generation.services.bundle_resolver import assemble_prompt_templates
 from llm_lab.generation.services.bundle_resolver import build_resolved_bundle
+from llm_lab.generation.services.bundle_resolver import get_bundle_for_app
 from llm_lab.generation.services.bundle_resolver import resolve_block_refs
 from llm_lab.generation.services.prompt_renderer import PromptRenderer
 from llm_lab.generation.tests.factories import AppRequirementTemplateFactory
@@ -101,3 +102,28 @@ def test_build_resolved_bundle_admin_api_endpoints_in_rendered_user_prompt():
     assert snapshot["seed"] == 42
     messages = PromptRenderer().render_messages_from_snapshot(snapshot, stage="backend")
     assert "/api/admin/stats" in messages[1]["content"]
+
+
+@pytest.mark.django_db
+def test_get_bundle_for_app_prefers_matching_scaffolding_default():
+    user = UserFactory()
+    app_req = AppRequirementTemplateFactory(slug="analytics_campaign_monitor")
+    TemplateBundleFactory(
+        slug="app-analytics-campaign-monitor",
+        scaffolding_slug="flask-react",
+        is_system=True,
+    )
+    fastapi_bundle = TemplateBundleFactory(
+        slug="system-fastapi-react-standard",
+        scaffolding_slug="fastapi-react",
+        is_system=True,
+        is_default=True,
+    )
+
+    bundle = get_bundle_for_app(
+        app_req,
+        user=user,
+        scaffolding_slug="fastapi-react",
+    )
+
+    assert bundle == fastapi_bundle

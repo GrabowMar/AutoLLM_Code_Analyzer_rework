@@ -71,3 +71,53 @@ bundles:
       - type: prompt_rules
         slug: rules-flask-global
         version: 1
+
+  - slug: system-fastapi-vue-standard
+    name: FastAPI + Vue standard
+    description: FastAPI backend prompts paired with Vue frontend prompts and shared FastAPI rules
+    scaffolding_slug: fastapi-vue
+    is_default: true
+    block_refs:
+      - type: prompt_stage
+        slug: fastapi-backend-system
+        version: 1
+      - type: prompt_stage
+        slug: fastapi-backend-user
+        version: 1
+      - type: prompt_stage
+        slug: vue-frontend-system
+        version: 1
+      - type: prompt_stage
+        slug: vue-frontend-user
+        version: 1
+      - type: prompt_tone
+        slug: tone-standard
+        version: 1
+      - type: prompt_rules
+        slug: rules-fastapi-global
+        version: 1
+
+  - slug: system-fastapi-react-standard
+    name: FastAPI + React standard
+    description: FastAPI backend prompts paired with the default React frontend prompts
+    scaffolding_slug: fastapi-react
+    is_default: true
+    block_refs:
+      - type: prompt_stage
+        slug: fastapi-backend-system
+        version: 1
+      - type: prompt_stage
+        slug: fastapi-backend-user
+        version: 1
+      - type: prompt_stage
+        slug: base-frontend-system
+        version: 1
+      - type: prompt_stage
+        slug: base-frontend-user
+        version: 1
+      - type: prompt_tone
+        slug: tone-standard
+        version: 1
+      - type: prompt_rules
+        slug: rules-fastapi-global
+        version: 1

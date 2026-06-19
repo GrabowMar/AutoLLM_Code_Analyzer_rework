@@ -24,6 +24,14 @@
       "frontend_component": "App.vue",
       "default_port": 8000,
       "patch_profile": "none"
+    },
+    "fastapi-react": {
+      "directory": "fastapi-react",
+      "aliases": [],
+      "has_frontend": true,
+      "frontend_component": "App.jsx",
+      "default_port": 8000,
+      "patch_profile": "none"
     }
   }
 }

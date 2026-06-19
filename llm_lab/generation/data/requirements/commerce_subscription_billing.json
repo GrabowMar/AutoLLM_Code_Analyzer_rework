@@ -1,0 +1,75 @@
+{
+  "slug": "commerce_subscription_billing",
+  "name": "Subscription Billing Console",
+  "category": "Commerce",
+  "description": "Manage customers, plans, invoices, renewals, and delinquency recovery.",
+  "backend_requirements": [
+    "Customer subscription model with plan_name, lifecycle_status, renewal_date, monthly_amount, failed_payment_count, and account_owner",
+    "Invoice model with issued_at, due_at, paid_at, amount_due, balance_remaining, and retry_state",
+    "GET /api/subscriptions with lifecycle, plan, owner, and delinquent filters plus search and pagination",
+    "POST /api/subscriptions and PUT /api/subscriptions/:id with validation for billing amounts and renewal dates",
+    "GET /api/subscriptions/:id/invoices and POST /api/invoices/:id/retry for collections workflows",
+    "GET /api/public/stats and GET /api/public/featured for MRR, churn-risk, and recent recovery summaries"
+  ],
+  "frontend_requirements": [
+    "Landing page with MRR, renewal, and delinquency stat cards",
+    "Browse page with lifecycle tabs, plan filters, and invoice health indicators",
+    "Subscription detail page with invoice history and retry actions",
+    "Dashboard with owner queues, upcoming renewals, and failed payment alerts",
+    "Admin panel for pricing oversight and delinquent account review"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/subscriptions",
+      "description": "List subscriptions with search, filters, sorting, and pagination",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/subscriptions/:id/invoices",
+      "description": "Return invoice history for a subscription",
+      "request": null,
+      "response": {
+        "subscription_id": 1,
+        "items": []
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Subscription",
+    "fields": {
+      "id": "integer primary key",
+      "customer_name": "string, required",
+      "plan_name": "string",
+      "lifecycle_status": "string (trial, active, past_due, cancelled)",
+      "renewal_date": "date",
+      "monthly_amount": "decimal",
+      "failed_payment_count": "integer",
+      "account_owner": "string",
+      "health_score": "integer",
+      "last_contacted_at": "datetime"
+    }
+  },
+  "admin_requirements": [
+    "Admin pricing dashboard with plan distribution and churn-risk breakdown",
+    "Manual retry and escalation queue for delinquent invoices"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/subscriptions",
+      "description": "Admin subscription revenue and risk dashboard",
+      "request": null,
+      "response": {
+        "items": [],
+        "mrr": 0,
+        "delinquent_accounts": 0
+      }
+    }
+  ]
+}

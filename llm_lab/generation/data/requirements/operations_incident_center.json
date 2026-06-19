@@ -1,0 +1,78 @@
+{
+  "slug": "operations_incident_center",
+  "name": "Incident Center",
+  "category": "Operations",
+  "description": "Coordinate production incidents, responders, timelines, and postmortem actions.",
+  "backend_requirements": [
+    "Incident model with severity, service_name, status, commander, opened_at, resolved_at, impact_summary, and customer_updates",
+    "Timeline event model for acknowledgements, mitigations, escalations, and recoveries",
+    "GET /api/incidents with severity, status, service, and commander filters plus search and pagination",
+    "POST /api/incidents, PUT /api/incidents/:id, and POST /api/incidents/:id/timeline for active response updates",
+    "GET /api/public/stats for open incident counts and MTTR style summary metrics",
+    "GET /api/incidents/:id/postmortem-preview to assemble a draft incident summary"
+  ],
+  "frontend_requirements": [
+    "Operations landing page with severity totals and active incident cards",
+    "Browse table with severity filters, service search, and SLA badges",
+    "Incident detail page with timeline entries and customer update feed",
+    "Responder dashboard with assigned incidents and overdue follow-ups",
+    "Admin view for incident audits and postmortem completion tracking"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/incidents",
+      "description": "List incidents with multi-field filters",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/incidents/:id/timeline",
+      "description": "Append a response timeline event",
+      "request": {
+        "event_type": "mitigation",
+        "message": "string"
+      },
+      "response": {
+        "id": 14,
+        "incident_id": 2
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Incident",
+    "fields": {
+      "id": "integer primary key",
+      "title": "string, required",
+      "service_name": "string",
+      "severity": "string (sev1, sev2, sev3, sev4)",
+      "status": "string (investigating, mitigated, monitoring, resolved)",
+      "commander": "string",
+      "impact_summary": "text",
+      "customer_updates": "json/text",
+      "opened_at": "datetime",
+      "resolved_at": "datetime nullable"
+    }
+  },
+  "admin_requirements": [
+    "Audit trail for reopened incidents and overdue postmortems",
+    "Admin metrics for average mitigation time and unresolved Sev1 incidents"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/incidents",
+      "description": "Admin incident audit dashboard",
+      "request": null,
+      "response": {
+        "items": [],
+        "sev1_open": 0,
+        "postmortems_due": 0
+      }
+    }
+  ]
+}

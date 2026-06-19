@@ -17,6 +17,7 @@ def test_load_manifest_has_expected_stacks():
     assert manifest["schema_version"] == 1
     assert "flask-react" in manifest["stacks"]
     assert "generic-python" in manifest["stacks"]
+    assert "fastapi-react" in manifest["stacks"]
 
 
 @pytest.mark.django_db
@@ -33,8 +34,22 @@ def test_resolve_stack_slug_unknown_falls_back():
     assert svc.resolve_stack_slug(job) == "generic-python"
 
 
+def test_canonical_stack_slug_passthrough():
+    assert svc.canonical_stack_slug("flask-react") == "flask-react"
+    assert svc.canonical_stack_slug("fastapi-vue") == "fastapi-vue"
+
+
+def test_canonical_stack_slug_alias():
+    assert svc.canonical_stack_slug("react-flask") == "flask-react"
+
+
+def test_canonical_stack_slug_unknown_falls_back():
+    assert svc.canonical_stack_slug("does-not-exist") == "generic-python"
+
+
 def test_stack_has_frontend():
     assert svc.stack_has_frontend("flask-react") is True
+    assert svc.stack_has_frontend("fastapi-react") is True
     assert svc.stack_has_frontend("generic-python") is False
 
 
@@ -135,3 +150,21 @@ def test_prepare_build_dir_generic_python(tmp_path: Path):
     dockerfile = (dest / "Dockerfile").read_text(encoding="utf-8")
     assert "8000" in dockerfile
     assert not (dest / "frontend").exists()
+
+
+@pytest.mark.django_db
+def test_apply_scaffold_seed_fastapi_react(tmp_path: Path):
+    template = ScaffoldingTemplateFactory(slug="fastapi-react", name="FastAPI React")
+    app_req = AppRequirementTemplateFactory(slug="campaign-monitor")
+    job = GenerationJobFactory(
+        mode="copilot",
+        scaffolding_template=template,
+        app_requirement=app_req,
+        copilot_description="Build a campaign monitor",
+    )
+    dest = tmp_path / "workspace"
+    svc.apply_scaffold(job, dest, phase=svc.ScaffoldPhase.SEED)
+
+    assert (dest / "app.py").is_file()
+    assert (dest / "frontend" / "src" / "App.jsx").is_file()
+    assert (dest / "requirements.txt").is_file()

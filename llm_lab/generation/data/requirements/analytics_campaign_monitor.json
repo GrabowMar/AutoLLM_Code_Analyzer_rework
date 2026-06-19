@@ -1,0 +1,90 @@
+{
+  "slug": "analytics_campaign_monitor",
+  "name": "Campaign Monitor",
+  "category": "Analytics",
+  "description": "Track campaign performance, budget pacing, and channel health across launches.",
+  "backend_requirements": [
+    "Campaign model with fields for channel, owner, status, daily_budget, spend_to_date, conversion_goal, launch_at, and notes",
+    "Performance snapshot model that stores impressions, clicks, conversions, and revenue per campaign day",
+    "GET /api/campaigns with search, status filter, channel filter, owner filter, sorting, and pagination",
+    "POST /api/campaigns and PUT /api/campaigns/:id with validation for budgets, launch windows, and channel values",
+    "GET /api/public/stats and GET /api/public/featured for landing page summary cards",
+    "GET /api/campaigns/:id/performance for trend summaries and pacing warnings"
+  ],
+  "frontend_requirements": [
+    "Landing page with campaign totals, spend pacing, and featured campaign cards",
+    "Browse page with channel filters, status chips, and sort controls",
+    "Campaign detail page with KPIs, timeline table, and warning badges",
+    "Dashboard page for owners showing budget alerts and recent campaign edits",
+    "Admin panel for approving paused campaigns and reviewing overspend risk"
+  ],
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/campaigns",
+      "description": "List campaigns with search, filters, sorting, and pagination",
+      "request": null,
+      "response": {
+        "items": [],
+        "total": 0,
+        "page": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/campaigns",
+      "description": "Create a new campaign",
+      "request": {
+        "name": "string",
+        "channel": "string",
+        "daily_budget": 120.0
+      },
+      "response": {
+        "id": 1,
+        "status": "draft"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/campaigns/:id/performance",
+      "description": "Return daily performance summaries and pacing alerts",
+      "request": null,
+      "response": {
+        "campaign_id": 1,
+        "snapshots": [],
+        "alerts": []
+      }
+    }
+  ],
+  "data_model": {
+    "name": "Campaign",
+    "fields": {
+      "id": "integer primary key",
+      "name": "string, required",
+      "channel": "string (search, social, email, video)",
+      "owner": "string",
+      "status": "string (draft, active, paused, completed)",
+      "daily_budget": "decimal",
+      "spend_to_date": "decimal",
+      "conversion_goal": "integer",
+      "launch_at": "datetime",
+      "notes": "text"
+    }
+  },
+  "admin_requirements": [
+    "Admin moderation queue for paused and overspending campaigns",
+    "Admin metrics for active campaigns, overspend count, and trailing conversions"
+  ],
+  "admin_api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/campaigns",
+      "description": "Admin overview of campaigns and risk metrics",
+      "request": null,
+      "response": {
+        "items": [],
+        "overspend_count": 0
+      }
+    }
+  ]
+}

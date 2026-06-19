@@ -129,13 +129,37 @@ class TemplateBundleSchema(ModelSchema):
         ]
 
 
-class TemplateBundleCreateSchema(Schema):
-    name: str
-    slug: str
-    description: str = ""
-    scaffolding_slug: str = "flask-react"
+class BundleImportSchema(Schema):
+    package_text: str
+    conflict_strategy: str = "rename"
+
+
+class TemplatePackageExportSchema(Schema):
+    scaffolding_slugs: list[str] = []
+    app_template_slugs: list[str] = []
+    prompt_template_slugs: list[str] = []
+    bundle_slugs: list[str] = []
     block_refs: list[BlockRefSchema] = []
-    llm_config: dict = {}
+
+
+class TemplatePackageImportSchema(Schema):
+    package_text: str
+    conflict_strategy: str = "rename"
+
+
+class StarterTemplatePackageSchema(Schema):
+    slug: str
+    name: str
+    description: str
+    scaffolding_count: int
+    app_template_count: int
+    prompt_template_count: int
+    block_count: int
+    bundle_count: int
+
+
+class StarterTemplatePackageImportSchema(Schema):
+    conflict_strategy: str = "rename"
 
 
 class PromptTemplateSchema(ModelSchema):

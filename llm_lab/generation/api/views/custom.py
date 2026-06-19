@@ -8,6 +8,8 @@ registration order, and otherwise would interpret "custom" / "scaffolding" /
 
 from __future__ import annotations
 
+import logging
+
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 
@@ -28,6 +30,9 @@ from llm_lab.generation.services.bundle_resolver import apply_snapshot_to_job
 from llm_lab.generation.services.bundle_resolver import get_bundle_for_app
 from llm_lab.generation.services.dispatcher import dispatch_job
 from llm_lab.llm_models.models import LLMModel
+from llm_lab.runtime.services.scaffolding import canonical_stack_slug
+
+logger = logging.getLogger(__name__)
 
 
 def _preflight_api_key(request) -> tuple[int, dict] | None:
@@ -93,9 +98,16 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
         created_by=request.auth,
     )
 
+    stack_slug = canonical_stack_slug(scaffolding.slug)
+
     job_count = 0
+    failed_count = 0
     for app_req in app_reqs:
-        job_bundle = template_bundle or get_bundle_for_app(app_req, request.auth)
+        job_bundle = template_bundle or get_bundle_for_app(
+            app_req,
+            request.auth,
+            scaffolding_slug=stack_slug,
+        )
         for model in models_qs:
             job = GenerationJob.objects.create(
                 mode=GenerationJob.Mode.SCAFFOLDING,
@@ -108,10 +120,24 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
                 temperature=payload.temperature,
                 max_tokens=payload.max_tokens,
             )
-            apply_snapshot_to_job(job)
             job_count += 1
+            try:
+                apply_snapshot_to_job(job)
+            except Exception as exc:  # noqa: BLE001 — isolate one bad job from the batch
+                logger.warning("Snapshot build failed for job %s: %s", job.id, exc)
+                job.status = GenerationJob.Status.FAILED
+                job.error_message = f"Snapshot build failed: {exc}"
+                job.save(update_fields=["status", "error_message", "updated_at"])
+                failed_count += 1
 
-    for pending_job in batch.jobs.select_related("app_requirement", "model", "template_bundle").all():
+    if failed_count:
+        batch.failed_jobs = failed_count
+        batch.save(update_fields=["failed_jobs", "updated_at"])
+
+    dispatchable = batch.jobs.select_related(
+        "app_requirement", "model", "template_bundle",
+    ).exclude(status=GenerationJob.Status.FAILED)
+    for pending_job in dispatchable:
         dispatch_job(pending_job)
 
     return BatchCreateResponseSchema(

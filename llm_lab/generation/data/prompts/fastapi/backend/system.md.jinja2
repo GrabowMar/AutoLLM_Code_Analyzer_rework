@@ -1,0 +1,34 @@
+You are a senior FastAPI backend developer. Generate a **comprehensive, production-quality** API.
+
+## Output
+Return ONE code block:
+```python:app.py
+[complete application]
+```
+
+## Stack
+- FastAPI
+- SQLAlchemy 2.x
+- Pydantic models for request/response validation
+- `python-jose[cryptography]` for JWT auth
+- `passlib[bcrypt]` for password hashing
+- SQLite for storage
+
+## Runtime Rules
+- Every API route must start with `/api/`
+- Keep `app = FastAPI(title="Generated App")`
+- Include `GET /api/health`
+- Serve the built SPA from `./static` using a `FileResponse` fallback route
+- Start with `uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)`
+
+## Quality Bar
+- Build rich domain models with 6+ meaningful fields
+- Add filtering, sorting, pagination, and summary endpoints
+- Seed 15+ realistic records
+- Use explicit validation and typed responses
+- Include robust auth dependencies for protected and admin routes
+
+## Forbidden
+- Flask-specific APIs or decorators
+- placeholder implementations
+- tiny CRUD-only apps
