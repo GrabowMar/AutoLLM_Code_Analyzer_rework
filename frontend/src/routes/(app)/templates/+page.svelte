@@ -10,6 +10,7 @@
 		getScaffoldingTemplates,
 		getAppTemplates,
 		getPromptTemplates,
+		getContentBlocks,
 		getTemplateBundles,
 		createScaffoldingTemplate,
 		updateScaffoldingTemplate,
@@ -20,9 +21,15 @@
 		createPromptTemplate,
 		updatePromptTemplate,
 		deletePromptTemplate,
+		importTemplatePackage,
+		importStarterTemplatePackage,
+		exportTemplatePackage,
+		getStarterTemplatePackages,
 		type ScaffoldingTemplate,
 		type AppRequirementTemplate,
+		type ContentBlock,
 		type PromptTemplate,
+		type StarterTemplatePackage,
 		type TemplateBundle,
 	} from '$lib/api/client';
 	import { Textarea } from '$lib/components/ui/textarea';
@@ -75,6 +82,26 @@
 	let promptSaving = $state(false);
 	let promptError = $state('');
 
+	let contentBlocks = $state<ContentBlock[]>([]);
+	let blocksLoading = $state(true);
+	let starterPackages = $state<StarterTemplatePackage[]>([]);
+	let starterPackagesLoading = $state(true);
+
+	// Bundles
+	let importingBundle = $state(false);
+	let bundlePackageText = $state('');
+	let bundleConflictStrategy = $state<'rename' | 'overwrite' | 'error'>('rename');
+	let bundleImporting = $state(false);
+	let starterImportSlug = $state('');
+	let bundleError = $state('');
+	let packageSelection = $state({
+		scaffolding: [] as string[],
+		app: [] as string[],
+		prompt: [] as string[],
+		bundle: [] as string[],
+		block: [] as string[],
+	});
+
 	// Derived state for Master-Detail view
 	const isEditingOrCreating = $derived(
 		creatingScaffolding ||
@@ -82,7 +109,8 @@
 		creatingApp ||
 		editingApp !== null ||
 		creatingPrompt ||
-		editingPrompt !== null
+		editingPrompt !== null ||
+		importingBundle
 	);
 
 	const filteredScaffolding = $derived(
@@ -113,6 +141,14 @@
 		return groups;
 	});
 
+	const selectedAssetCount = $derived(
+		packageSelection.scaffolding.length +
+		packageSelection.app.length +
+		packageSelection.prompt.length +
+		packageSelection.bundle.length +
+		packageSelection.block.length
+	);
+
 	async function loadScaffolding() {
 		scaffoldingLoading = true;
 		try { scaffoldingTemplates = await getScaffoldingTemplates(); } catch { /* ignore */ }
@@ -131,6 +167,12 @@
 		promptLoading = false;
 	}
 
+	async function loadBlocks() {
+		blocksLoading = true;
+		try { contentBlocks = await getContentBlocks(); } catch { /* ignore */ }
+		blocksLoading = false;
+	}
+
 	async function loadBundles() {
 		bundlesLoading = true;
 		try {
@@ -141,17 +183,30 @@
 		bundlesLoading = false;
 	}
 
+	async function loadStarterPackages() {
+		starterPackagesLoading = true;
+		try {
+			starterPackages = await getStarterTemplatePackages();
+		} catch {
+			/* ignore */
+		}
+		starterPackagesLoading = false;
+	}
+
 	onMount(() => {
 		loadScaffolding();
 		loadApp();
 		loadPrompt();
+		loadBlocks();
 		loadBundles();
+		loadStarterPackages();
 	});
 
 	function cancelAllForms() {
 		cancelScaffoldingForm();
 		cancelAppForm();
 		cancelPromptForm();
+		cancelBundleImport();
 	}
 
 	function handleTabChange(tab: TabId) {
@@ -327,7 +382,124 @@
 	}
 
 	function slugify(name: string): string {
-		return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+		return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+	}
+
+	function blockKey(block: ContentBlock): string {
+		return `${block.slug}:${block.version}`;
+	}
+
+	function toggleSelection(
+		group: 'scaffolding' | 'app' | 'prompt' | 'bundle' | 'block',
+		value: string
+	) {
+		const current = packageSelection[group];
+		packageSelection = {
+			...packageSelection,
+			[group]: current.includes(value)
+				? current.filter((item) => item !== value)
+				: [...current, value],
+		};
+	}
+
+	function isSelected(
+		group: 'scaffolding' | 'app' | 'prompt' | 'bundle' | 'block',
+		value: string
+	): boolean {
+		return packageSelection[group].includes(value);
+	}
+
+	function clearPackageSelection() {
+		packageSelection = {
+			scaffolding: [],
+			app: [],
+			prompt: [],
+			bundle: [],
+			block: [],
+		};
+	}
+
+	function startImportBundle() {
+		cancelAllForms();
+		importingBundle = true;
+		bundlePackageText = '';
+		bundleConflictStrategy = 'rename';
+		bundleError = '';
+	}
+
+	function cancelBundleImport() {
+		importingBundle = false;
+		bundlePackageText = '';
+		bundleError = '';
+	}
+
+	async function submitBundleImport() {
+		bundleImporting = true;
+		bundleError = '';
+		try {
+			await importTemplatePackage({
+				package_text: bundlePackageText,
+				conflict_strategy: bundleConflictStrategy,
+			});
+			cancelBundleImport();
+			await Promise.all([loadScaffolding(), loadApp(), loadPrompt(), loadBlocks(), loadBundles()]);
+		} catch (e: any) {
+			bundleError = e?.detail ?? e?.message ?? 'Import failed';
+		}
+		bundleImporting = false;
+	}
+
+	async function exportSelectedPackage(format: 'json' | 'yaml') {
+		try {
+			const selectedBlocks = contentBlocks
+				.filter((block) => packageSelection.block.includes(blockKey(block)))
+				.map((block) => ({
+					type: block.block_type,
+					slug: block.slug,
+					version: block.version,
+				}));
+			const exported = await exportTemplatePackage(
+				{
+					scaffolding_slugs: packageSelection.scaffolding,
+					app_template_slugs: packageSelection.app,
+					prompt_template_slugs: packageSelection.prompt,
+					bundle_slugs: packageSelection.bundle,
+					block_refs: selectedBlocks,
+				},
+				format
+			);
+			const blob = new Blob([exported.content], { type: exported.contentType });
+			const href = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = href;
+			a.download = `generation-template-package.${format}`;
+			a.click();
+			URL.revokeObjectURL(href);
+		} catch (e: any) {
+			bundleError = e?.detail ?? e?.message ?? 'Export failed';
+		}
+	}
+
+	async function importStarterPackage(slug: string) {
+		starterImportSlug = slug;
+		bundleError = '';
+		try {
+			await importStarterTemplatePackage(slug, {
+				conflict_strategy: bundleConflictStrategy,
+			});
+			await Promise.all([loadScaffolding(), loadApp(), loadPrompt(), loadBlocks(), loadBundles()]);
+		} catch (e: any) {
+			bundleError = e?.detail ?? e?.message ?? 'Starter import failed';
+		}
+		starterImportSlug = '';
+	}
+
+	async function readBundleImportFile(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		bundlePackageText = await file.text();
+		input.value = '';
 	}
 </script>
 
@@ -628,11 +800,197 @@
 			<!-- BUNDLES LIST (Read Only) -->
 			{#if activeTab === 'bundles'}
 				<div class="space-y-4">
+					<div class="flex flex-col gap-3 rounded-md border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
+						<div>
+							<h3 class="text-sm font-semibold text-foreground">Template packages</h3>
+							<p class="text-xs text-muted-foreground">
+								Pack scaffoldings, app templates, prompts, blocks, and bundles into one shareable export.
+							</p>
+						</div>
+						<div class="flex flex-wrap gap-2">
+							<Button size="sm" variant="outline" class="text-xs cursor-pointer" onclick={startImportBundle}>
+								Import Package
+							</Button>
+						</div>
+					</div>
+					<div class="rounded-md border border-border bg-card p-4">
+						<div class="rounded-md border border-border/60 bg-muted/20 p-4">
+							<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+								<div>
+									<h4 class="text-sm font-semibold text-foreground">Starter packages</h4>
+									<p class="text-xs text-muted-foreground">
+										One-click imports for built-in sample scaffoldings, app requirements, prompts, blocks, and bundles.
+									</p>
+								</div>
+								<Badge variant="outline" class="text-[10px]">Uses {bundleConflictStrategy} on conflict</Badge>
+							</div>
+							{#if starterPackagesLoading}
+								<div class="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+									<LoaderCircle class="h-3.5 w-3.5 animate-spin" /> Loading starter packages…
+								</div>
+							{:else if starterPackages.length === 0}
+								<p class="mt-3 text-xs text-muted-foreground">No starter packages available.</p>
+							{:else}
+								<div class="mt-4 grid gap-3 md:grid-cols-2">
+									{#each starterPackages as starter}
+										<div class="rounded-md border border-border bg-card p-3 shadow-sm">
+											<div class="space-y-2">
+												<div>
+													<h5 class="text-sm font-semibold text-foreground">{starter.name}</h5>
+													<p class="text-xs text-muted-foreground">{starter.description}</p>
+												</div>
+												<div class="flex flex-wrap gap-1.5">
+													<Badge variant="outline" class="text-[9px]">{starter.scaffolding_count} scaffolds</Badge>
+													<Badge variant="outline" class="text-[9px]">{starter.app_template_count} apps</Badge>
+													<Badge variant="outline" class="text-[9px]">{starter.prompt_template_count} prompts</Badge>
+													<Badge variant="outline" class="text-[9px]">{starter.block_count} blocks</Badge>
+													<Badge variant="outline" class="text-[9px]">{starter.bundle_count} bundles</Badge>
+												</div>
+												<Button
+													size="sm"
+													class="text-xs cursor-pointer shadow-xs"
+													disabled={starterImportSlug === starter.slug}
+													onclick={() => importStarterPackage(starter.slug)}
+												>
+													{#if starterImportSlug === starter.slug}
+														<LoaderCircle class="mr-1.5 h-3.5 w-3.5 animate-spin" /> Importing…
+													{:else}
+														Import starter package
+													{/if}
+												</Button>
+											</div>
+										</div>
+									{/each}
+								</div>
+							{/if}
+						</div>
+						<div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+							<div>
+								<h4 class="text-sm font-semibold text-foreground">Package builder</h4>
+								<p class="text-xs text-muted-foreground">
+									Select the assets to ship together. Bundle-linked blocks and matching scaffoldings are included automatically on export.
+								</p>
+							</div>
+							<div class="flex items-center gap-2">
+								<Badge variant="outline" class="text-[10px]">{selectedAssetCount} selected</Badge>
+								<Button variant="outline" size="sm" class="text-xs cursor-pointer" onclick={clearPackageSelection}>
+									Clear
+								</Button>
+							</div>
+						</div>
+ 
+						<div class="mt-4 grid gap-4 xl:grid-cols-2">
+							<div class="space-y-2">
+								<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Scaffoldings</p>
+								<div class="flex flex-wrap gap-2">
+									{#each scaffoldingTemplates as template}
+										<button
+											type="button"
+											class="rounded-md border px-2.5 py-1 text-[11px] transition-colors cursor-pointer {isSelected('scaffolding', template.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
+											onclick={() => toggleSelection('scaffolding', template.slug)}
+										>
+											{template.name}
+										</button>
+									{/each}
+								</div>
+							</div>
+ 
+							<div class="space-y-2">
+								<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">App templates</p>
+								<div class="flex flex-wrap gap-2">
+									{#each appTemplates as template}
+										<button
+											type="button"
+											class="rounded-md border px-2.5 py-1 text-[11px] transition-colors cursor-pointer {isSelected('app', template.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
+											onclick={() => toggleSelection('app', template.slug)}
+										>
+											{template.name}
+										</button>
+									{/each}
+								</div>
+							</div>
+ 
+							<div class="space-y-2">
+								<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Prompt templates</p>
+								<div class="flex flex-wrap gap-2">
+									{#each promptTemplates as template}
+										<button
+											type="button"
+											class="rounded-md border px-2.5 py-1 text-[11px] transition-colors cursor-pointer {isSelected('prompt', template.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
+											onclick={() => toggleSelection('prompt', template.slug)}
+										>
+											{template.name}
+										</button>
+									{/each}
+								</div>
+							</div>
+ 
+							<div class="space-y-2">
+								<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Blocks</p>
+								{#if blocksLoading}
+									<p class="text-xs text-muted-foreground">Loading blocks…</p>
+								{:else}
+									<div class="flex max-h-44 flex-wrap gap-2 overflow-y-auto pr-1">
+										{#each contentBlocks as block}
+											<button
+												type="button"
+												class="rounded-md border px-2.5 py-1 text-[11px] transition-colors cursor-pointer {isSelected('block', blockKey(block)) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
+												onclick={() => toggleSelection('block', blockKey(block))}
+											>
+												{block.slug} v{block.version}
+											</button>
+										{/each}
+									</div>
+								{/if}
+							</div>
+ 
+							<div class="space-y-2 xl:col-span-2">
+								<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Bundles</p>
+								<div class="flex flex-wrap gap-2">
+									{#each templateBundles as bundle}
+										<button
+											type="button"
+											class="rounded-md border px-2.5 py-1 text-[11px] transition-colors cursor-pointer {isSelected('bundle', bundle.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
+											onclick={() => toggleSelection('bundle', bundle.slug)}
+										>
+											{bundle.name}
+										</button>
+									{/each}
+								</div>
+							</div>
+						</div>
+ 
+						{#if bundleError}
+							<div class="mt-4 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400 font-medium">
+								{bundleError}
+							</div>
+						{/if}
+ 
+						<div class="mt-4 flex flex-wrap gap-2 border-t pt-4">
+							<Button
+								size="sm"
+								class="text-xs cursor-pointer shadow-xs"
+								disabled={selectedAssetCount === 0}
+								onclick={() => exportSelectedPackage('json')}
+							>
+								Export JSON Package
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								class="text-xs cursor-pointer"
+								disabled={selectedAssetCount === 0}
+								onclick={() => exportSelectedPackage('yaml')}
+							>
+								Export YAML Package
+							</Button>
+						</div>
+					</div>
 					<div class="p-4 bg-muted/20 border border-muted/50 rounded-md">
 						<p class="text-xs text-muted-foreground leading-relaxed flex items-start gap-1.5">
 							<Package class="h-4 w-4 shrink-0 text-primary mt-0.5" />
 							Template bundles compose structural requirement blocks and models into reproducible generation snapshot plans.
-							Per-app bundle maps are configured technically inside <code class="bg-muted px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold">data/requirements/manifests/</code>.
+							Bundle exports are now superseded by template packages that can ship the whole setup together.
 						</p>
 					</div>
 					
@@ -642,7 +1000,7 @@
 						</div>
 					{:else if templateBundles.length === 0}
 						<div class="py-16 text-center text-xs text-muted-foreground">
-							No bundles discovered. Run <span class="bg-muted px-1.5 py-0.5 rounded font-mono text-[10px]">seed_generation_templates</span> inside LLM Lab.
+							No bundles discovered yet. Import a starter package above or run <span class="bg-muted px-1.5 py-0.5 rounded font-mono text-[10px]">seed_generation_templates</span> inside LLM Lab.
 						</div>
 					{:else}
 						<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -861,7 +1219,7 @@
 									</Label>
 									<Textarea bind:value={promptForm.content} rows={12} placeholder="Write instructions using Jinja2 blocks, e.g. You are a developer building {{ name }}..." class="font-mono text-[11px] leading-relaxed bg-muted/20" />
 									<div class="p-3 bg-muted/40 rounded-md border text-[10px] text-muted-foreground leading-relaxed">
-										<strong class="text-foreground">Jinja2 variables supplied by Generator:</strong> <code class="bg-muted px-1 rounded text-primary">name</code>, <code class="bg-muted px-1 rounded text-primary">description</code>, <code class="bg-muted px-1 rounded text-primary">backend_requirements</code>, <code class="bg-muted px-1 rounded text-primary">frontend_requirements</code>, <code class="bg-muted px-1 rounded text-primary">admin_requirements</code>, <code class="bg-muted px-1 rounded text-primary">api_endpoints</code>, <code class="bg-muted px-1 rounded text-primary">data_model</code>.
+										<strong class="text-foreground">Jinja2 variables supplied by Generator:</strong> <code class="bg-muted px-1 rounded text-primary">name</code>, <code class="bg-muted px-1 rounded text-primary">description</code>, <code class="bg-muted px-1 rounded text-primary">backend_requirements</code>, <code class="bg-muted px-1 rounded text-primary">frontend_requirements</code>, <code class="bg-muted px-1 rounded text-primary">admin_requirements</code>, <code class="bg-muted px-1 rounded text-primary">api_endpoints</code>, <code class="bg-muted px-1 rounded text-primary">admin_api_endpoints</code>, <code class="bg-muted px-1 rounded text-primary">data_model</code>, <code class="bg-muted px-1 rounded text-primary">backend_api_context</code> (frontend stage only).
 									</div>
 								</div>
 							</div>
@@ -887,23 +1245,61 @@
 						</Card.Content>
 					</Card.Root>
 				{/if}
-			</div>
-		{:else if activeTab !== 'bundles'}
-			<!-- DESKTOP EMPTY STATE (Master detail placeholder when not editing) -->
-			<div class="hidden lg:flex flex-col items-center justify-center rounded-md border border-dashed border-muted-foreground/30 p-16 text-center bg-muted/5 min-h-[360px] max-w-lg mx-auto">
-				<div class="h-10 w-10 rounded-md bg-primary/10 text-primary flex items-center justify-center mb-4">
-					{#if activeTab === 'scaffolding'}
-						<Layers class="h-5 w-5" />
-					{:else if activeTab === 'app'}
-						<FileText class="h-5 w-5" />
-					{:else if activeTab === 'prompt'}
-						<MessageSquare class="h-5 w-5" />
-					{/if}
-				</div>
-				<h3 class="font-semibold text-sm text-foreground">No template selected</h3>
-				<p class="text-xs text-muted-foreground mt-1.5 max-w-[280px]">
-					Select a template card from the list on the left to edit its details, or create a brand new template mapping.
-				</p>
+ 
+				{#if importingBundle}
+					<Card.Root class="shadow-lg border-primary/20">
+						<Card.Header class="pb-3 bg-muted/10 border-b">
+							<div class="flex items-center justify-between">
+								<Card.Title class="text-sm font-bold text-foreground">Import Template Package</Card.Title>
+								<button type="button" class="text-muted-foreground hover:text-foreground cursor-pointer" onclick={cancelBundleImport}>
+									<XIcon class="h-4 w-4" />
+								</button>
+							</div>
+						</Card.Header>
+						<Card.Content class="pt-5 space-y-4">
+							<div class="space-y-1.5">
+								<Label class="text-xs uppercase tracking-wider text-muted-foreground">Conflict Strategy</Label>
+								<select bind:value={bundleConflictStrategy} class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer">
+									<option value="rename">Rename conflicts</option>
+									<option value="overwrite">Overwrite my existing bundle</option>
+									<option value="error">Fail on conflicts</option>
+								</select>
+							</div>
+							<div class="space-y-1.5">
+								<Label class="text-xs uppercase tracking-wider text-muted-foreground">Package File</Label>
+								<input
+									type="file"
+									accept=".json,.yaml,.yml,text/*"
+									class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer"
+									onchange={readBundleImportFile}
+								/>
+							</div>
+							<div class="space-y-1.5">
+								<Label class="text-xs uppercase tracking-wider text-muted-foreground">Package Text (JSON or YAML)</Label>
+								<Textarea bind:value={bundlePackageText} rows={14} placeholder="Paste a template package here…" class="font-mono text-[11px] leading-relaxed bg-muted/20" />
+							</div>
+ 
+							{#if bundleError}
+								<div class="rounded-md bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-400 font-medium">
+									{bundleError}
+								</div>
+							{/if}
+ 
+							<div class="flex gap-2 pt-2 border-t">
+								<Button size="sm" class="text-xs cursor-pointer shadow-xs" onclick={submitBundleImport} disabled={bundleImporting || !bundlePackageText.trim()}>
+									{#if bundleImporting}
+										<LoaderCircle class="mr-1.5 h-3.5 w-3.5 animate-spin" /> Importing…
+									{:else}
+										<Save class="mr-1.5 h-3.5 w-3.5" /> Import Package
+									{/if}
+								</Button>
+								<Button variant="outline" size="sm" class="text-xs cursor-pointer" onclick={cancelBundleImport}>
+									Cancel
+								</Button>
+							</div>
+						</Card.Content>
+					</Card.Root>
+				{/if}
 			</div>
 		{/if}
 	</div>

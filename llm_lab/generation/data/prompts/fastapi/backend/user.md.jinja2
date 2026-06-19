@@ -1,0 +1,35 @@
+# {{ name }}
+
+{{ description }}
+
+## Task
+Generate `app.py` as a **feature-rich FastAPI application** with clear structure, typed schemas, and production-grade route handling.
+
+## Requirements
+
+### Features
+{% for req in backend_requirements %}
+- {{ req }}
+{% endfor %}
+
+### Admin Features
+{% for req in admin_requirements %}
+- {{ req }}
+{% endfor %}
+
+### Data Model Context
+{{ data_model }}
+
+### API Endpoints (Minimum required)
+{{ api_endpoints }}
+
+{{ admin_api_endpoints }}
+
+## Implementation Requirements
+- Use `BaseModel` schemas for request and response bodies.
+- Build domain-specific public summary endpoints in addition to CRUD.
+- Support search plus at least 2 meaningful filters on the main list endpoint.
+- Include auth dependencies for user and admin flows.
+- Add realistic seeded data with varied statuses, timestamps, and owners.
+
+**START GENERATION NOW.**

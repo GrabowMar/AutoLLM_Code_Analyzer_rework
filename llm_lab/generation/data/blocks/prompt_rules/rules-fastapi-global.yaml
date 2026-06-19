@@ -1,0 +1,15 @@
+slug: rules-fastapi-global
+version: 1
+block_type: prompt_rules
+name: FastAPI runtime rules
+description: Shared FastAPI generation guardrails for single-container scaffoldings
+content: |
+  ## FastAPI Runtime Rules
+  - Prefix every API endpoint with `/api/`.
+  - Keep `app = FastAPI(title="Generated App")` at module scope.
+  - Include a health endpoint at `GET /api/health`.
+  - Use SQLAlchemy 2 style session access and explicit Pydantic schemas.
+  - When serving a frontend, preserve the static-file fallback route so direct page refreshes work.
+metadata:
+  stack: fastapi
+  stage: backend

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from ninja import Query
+from ninja.errors import HttpError
 
 from llm_lab.generation.api.schema import AppRequirementCreateSchema
 from llm_lab.generation.api.schema import AppRequirementTemplateSchema
@@ -16,13 +18,27 @@ from llm_lab.generation.models import AppRequirementTemplate
 from llm_lab.generation.models import PromptTemplate
 from llm_lab.generation.models import ScaffoldingTemplate
 
+
+def _visible_templates(model, user):
+    return model.objects.filter(Q(is_default=True) | Q(created_by=user))
+
+
+def _mutable_template_or_403(model, user, *, slug: str):
+    obj = get_object_or_404(_visible_templates(model, user), slug=slug)
+    if obj.created_by_id == getattr(user, "id", None):
+        return obj
+    if getattr(user, "is_staff", False) and obj.is_default:
+        return obj
+    raise HttpError(403, "You can only modify your own templates.")
+
+
 # -- Scaffolding Templates ---------------------------------------------
 
 
 @router.get("/scaffolding-templates/", response=list[ScaffoldingTemplateSchema])
 def list_scaffolding_templates(request):
     """List all scaffolding templates."""
-    return ScaffoldingTemplate.objects.all()
+    return _visible_templates(ScaffoldingTemplate, request.auth)
 
 
 @router.post("/scaffolding-templates/", response=ScaffoldingTemplateSchema)
@@ -36,7 +52,7 @@ def create_scaffolding_template(request, payload: ScaffoldingTemplateCreateSchem
 
 @router.get("/scaffolding-templates/{slug}/", response=ScaffoldingTemplateSchema)
 def get_scaffolding_template(request, slug: str):
-    return get_object_or_404(ScaffoldingTemplate, slug=slug)
+    return get_object_or_404(_visible_templates(ScaffoldingTemplate, request.auth), slug=slug)
 
 
 @router.put("/scaffolding-templates/{slug}/", response=ScaffoldingTemplateSchema)
@@ -45,7 +61,7 @@ def update_scaffolding_template(
     slug: str,
     payload: ScaffoldingTemplateCreateSchema,
 ):
-    template = get_object_or_404(ScaffoldingTemplate, slug=slug)
+    template = _mutable_template_or_403(ScaffoldingTemplate, request.auth, slug=slug)
     for attr, value in payload.dict().items():
         setattr(template, attr, value)
     template.save()
@@ -54,7 +70,7 @@ def update_scaffolding_template(
 
 @router.delete("/scaffolding-templates/{slug}/")
 def delete_scaffolding_template(request, slug: str):
-    template = get_object_or_404(ScaffoldingTemplate, slug=slug)
+    template = _mutable_template_or_403(ScaffoldingTemplate, request.auth, slug=slug)
     template.delete()
     return {"success": True}
 
@@ -65,7 +81,7 @@ def delete_scaffolding_template(request, slug: str):
 @router.get("/app-templates/", response=list[AppRequirementTemplateSchema])
 def list_app_templates(request):
     """List all app requirement templates."""
-    return AppRequirementTemplate.objects.all()
+    return _visible_templates(AppRequirementTemplate, request.auth)
 
 
 @router.post("/app-templates/", response=AppRequirementTemplateSchema)
@@ -78,12 +94,12 @@ def create_app_template(request, payload: AppRequirementCreateSchema):
 
 @router.get("/app-templates/{slug}/", response=AppRequirementTemplateSchema)
 def get_app_template(request, slug: str):
-    return get_object_or_404(AppRequirementTemplate, slug=slug)
+    return get_object_or_404(_visible_templates(AppRequirementTemplate, request.auth), slug=slug)
 
 
 @router.put("/app-templates/{slug}/", response=AppRequirementTemplateSchema)
 def update_app_template(request, slug: str, payload: AppRequirementCreateSchema):
-    template = get_object_or_404(AppRequirementTemplate, slug=slug)
+    template = _mutable_template_or_403(AppRequirementTemplate, request.auth, slug=slug)
     for attr, value in payload.dict().items():
         setattr(template, attr, value)
     template.save()
@@ -92,7 +108,7 @@ def update_app_template(request, slug: str, payload: AppRequirementCreateSchema)
 
 @router.delete("/app-templates/{slug}/")
 def delete_app_template(request, slug: str):
-    template = get_object_or_404(AppRequirementTemplate, slug=slug)
+    template = _mutable_template_or_403(AppRequirementTemplate, request.auth, slug=slug)
     template.delete()
     return {"success": True}
 
@@ -103,7 +119,7 @@ def delete_app_template(request, slug: str):
 @router.get("/prompt-templates/", response=list[PromptTemplateSchema])
 def list_prompt_templates(request, stage: str = Query(""), role: str = Query("")):
     """List prompt templates with optional filtering."""
-    qs = PromptTemplate.objects.all()
+    qs = _visible_templates(PromptTemplate, request.auth)
     if stage:
         qs = qs.filter(stage=stage)
     if role:
@@ -118,12 +134,12 @@ def create_prompt_template(request, payload: PromptTemplateCreateSchema):
 
 @router.get("/prompt-templates/{slug}/", response=PromptTemplateSchema)
 def get_prompt_template(request, slug: str):
-    return get_object_or_404(PromptTemplate, slug=slug)
+    return get_object_or_404(_visible_templates(PromptTemplate, request.auth), slug=slug)
 
 
 @router.put("/prompt-templates/{slug}/", response=PromptTemplateSchema)
 def update_prompt_template(request, slug: str, payload: PromptTemplateCreateSchema):
-    template = get_object_or_404(PromptTemplate, slug=slug)
+    template = _mutable_template_or_403(PromptTemplate, request.auth, slug=slug)
     for attr, value in payload.dict().items():
         setattr(template, attr, value)
     template.save()
@@ -132,6 +148,6 @@ def update_prompt_template(request, slug: str, payload: PromptTemplateCreateSche
 
 @router.delete("/prompt-templates/{slug}/")
 def delete_prompt_template(request, slug: str):
-    template = get_object_or_404(PromptTemplate, slug=slug)
+    template = _mutable_template_or_403(PromptTemplate, request.auth, slug=slug)
     template.delete()
     return {"success": True}

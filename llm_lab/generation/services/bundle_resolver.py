@@ -129,7 +129,9 @@ def assemble_prompt_templates(resolved_blocks: list[dict[str, Any]]) -> dict[str
                     else content
                 )
         elif btype in _APPEND_TO_SYSTEM:
-            for stage in ("backend", "frontend"):
+            target_stage = meta.get("stage")
+            stages = [target_stage] if target_stage in templates else list(templates)
+            for stage in stages:
                 system_addons[stage].append(content)
 
     for stage in ("backend", "frontend"):
@@ -146,24 +148,52 @@ def bundle_slug_for_app(app_slug: str) -> str:
     return f"app-{app_slug.replace('_', '-')}"
 
 
+def _visible_bundles(user: AbstractUser | None):
+    qs = TemplateBundle.objects.all()
+    if user and getattr(user, "is_authenticated", False):
+        return qs.filter(Q(is_system=True) | Q(created_by=user))
+    return qs.filter(is_system=True)
+
+
 def get_bundle_for_app(
     app_req: AppRequirementTemplate,
     user: AbstractUser | None = None,
+    scaffolding_slug: str | None = None,
 ) -> TemplateBundle | None:
     """Per-app pilot bundle if seeded, else system default."""
     slug = bundle_slug_for_app(app_req.slug)
-    qs = TemplateBundle.objects.filter(slug=slug)
-    if user and getattr(user, "is_authenticated", False):
-        bundle = qs.filter(Q(is_system=True) | Q(created_by=user)).first()
-    else:
-        bundle = qs.filter(is_system=True).first()
-    return bundle or get_default_bundle()
+    qs = _visible_bundles(user).filter(slug=slug)
+    if scaffolding_slug:
+        bundle = qs.filter(scaffolding_slug=scaffolding_slug).first()
+        if bundle:
+            return bundle
+        return get_default_bundle(scaffolding_slug=scaffolding_slug, user=user)
+
+    return qs.first() or get_default_bundle(user=user)
 
 
-def get_default_bundle() -> TemplateBundle | None:
+def get_default_bundle(
+    scaffolding_slug: str | None = None,
+    user: AbstractUser | None = None,
+) -> TemplateBundle | None:
+    qs = _visible_bundles(user)
+    if scaffolding_slug:
+        matching_default = qs.filter(
+            scaffolding_slug=scaffolding_slug,
+            is_default=True,
+        ).first()
+        if matching_default:
+            return matching_default
+        matching_system = qs.filter(
+            scaffolding_slug=scaffolding_slug,
+            slug__startswith="system-",
+        ).first()
+        if matching_system:
+            return matching_system
+
     return (
-        TemplateBundle.objects.filter(is_default=True, is_system=True).first()
-        or TemplateBundle.objects.filter(
+        qs.filter(is_default=True, is_system=True).first()
+        or qs.filter(
             slug="system-scaffolding-standard",
             is_system=True,
         ).first()
@@ -175,17 +205,17 @@ def resolve_bundle_for_job(
     template_bundle: TemplateBundle | None,
     scaffolding_slug: str,
     user: AbstractUser | None,
-) -> tuple[list[dict[str, Any]], str]:
-    """Return (block_refs, scaffolding_slug) for snapshot building."""
+) -> tuple[list[dict[str, Any]], str, str]:
+    """Return (block_refs, scaffolding_slug, bundle_slug) for snapshot building."""
     if template_bundle:
-        return list(template_bundle.block_refs or []), template_bundle.scaffolding_slug
+        return list(template_bundle.block_refs or []), template_bundle.scaffolding_slug, template_bundle.slug
 
-    if bundle := get_default_bundle():
-        return list(bundle.block_refs or []), bundle.scaffolding_slug
+    if bundle := get_default_bundle(scaffolding_slug=scaffolding_slug, user=user):
+        return list(bundle.block_refs or []), bundle.scaffolding_slug, bundle.slug
 
     catalog = load_catalog()
     refs = catalog.get("default_block_refs", [])
-    return refs, scaffolding_slug
+    return refs, scaffolding_slug, "catalog"
 
 
 def build_resolved_bundle(
@@ -202,7 +232,7 @@ def build_resolved_bundle(
     legacy_frontend_system: str | None = None,
 ) -> dict[str, Any]:
     """Build the full immutable snapshot dict for ``GenerationJob.resolved_bundle``."""
-    block_refs, bundle_scaffold_slug = resolve_bundle_for_job(
+    block_refs, bundle_scaffold_slug, resolved_bundle_slug = resolve_bundle_for_job(
         template_bundle=template_bundle,
         scaffolding_slug=scaffolding_slug,
         user=user,
@@ -216,7 +246,7 @@ def build_resolved_bundle(
         prompt_templates["frontend"]["system"] = legacy_frontend_system
 
     app_dict = app_requirement_to_dict(app_requirement)
-    bundle_slug = template_bundle.slug if template_bundle else "system-scaffolding-standard"
+    bundle_slug = template_bundle.slug if template_bundle else resolved_bundle_slug
 
     seed = experiment_seed if experiment_seed is not None else random.randint(0, 2_147_483_647)
 

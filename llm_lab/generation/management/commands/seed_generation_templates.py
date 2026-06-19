@@ -24,11 +24,181 @@ BLOCKS_DIR = DATA_DIR / "blocks"
 CATALOG_PATH = BLOCKS_DIR / "catalog.yaml"
 MANIFESTS_DIR = DATA_DIR / "requirements" / "manifests"
 
+SCAFFOLDING_SEEDS = [
+    {
+        "slug": "flask-react",
+        "name": "Flask + React",
+        "description": (
+            "Single-container scaffolding: Flask 3.x serves both the REST API "
+            "and a pre-built React 18 SPA (Vite + Tailwind)."
+        ),
+        "tech_stack": {
+            "frontend": "React 18 + Vite + Tailwind CSS",
+            "backend": "Flask 3.x + SQLAlchemy + JWT",
+            "database": "SQLite",
+            "runtime": "Single Docker container",
+        },
+        "substitution_vars": ["{{PROJECT_NAME}}", "{{app_port|8000}}"],
+        "is_default": True,
+    },
+    {
+        "slug": "fastapi-vue",
+        "name": "FastAPI + Vue",
+        "description": (
+            "Single-container FastAPI backend with a Vue 3 SPA. "
+            "Useful for comparing Python API generation against the Flask stack."
+        ),
+        "tech_stack": {
+            "frontend": "Vue 3 + Vite",
+            "backend": "FastAPI + SQLAlchemy + JWT",
+            "database": "SQLite",
+            "runtime": "Single Docker container",
+        },
+        "substitution_vars": ["{{PROJECT_NAME}}", "{{app_port|8000}}"],
+        "is_default": False,
+    },
+    {
+        "slug": "fastapi-react",
+        "name": "FastAPI + React",
+        "description": (
+            "Single-container FastAPI backend paired with a React 18 SPA "
+            "for stack-comparison and prompt-evaluation runs."
+        ),
+        "tech_stack": {
+            "frontend": "React 18 + Vite + Tailwind CSS",
+            "backend": "FastAPI + SQLAlchemy + JWT",
+            "database": "SQLite",
+            "runtime": "Single Docker container",
+        },
+        "substitution_vars": ["{{PROJECT_NAME}}", "{{app_port|8000}}"],
+        "is_default": False,
+    },
+]
+
+PROMPT_TEMPLATE_SEEDS = [
+    {
+        "slug": "v2-backend-system",
+        "name": "Backend System Prompt v2",
+        "stage": "backend",
+        "role": "system",
+        "description": "Default system prompt for Flask backend generation",
+        "path": "v2/backend/system.md.jinja2",
+        "is_default": True,
+    },
+    {
+        "slug": "v2-backend-user",
+        "name": "Backend User Prompt v2",
+        "stage": "backend",
+        "role": "user",
+        "description": "Default user prompt for Flask backend generation",
+        "path": "v2/backend/user.md.jinja2",
+        "is_default": True,
+    },
+    {
+        "slug": "v2-frontend-system",
+        "name": "Frontend System Prompt v2",
+        "stage": "frontend",
+        "role": "system",
+        "description": "Default system prompt for React frontend generation",
+        "path": "v2/frontend/system.md.jinja2",
+        "is_default": True,
+    },
+    {
+        "slug": "v2-frontend-user",
+        "name": "Frontend User Prompt v2",
+        "stage": "frontend",
+        "role": "user",
+        "description": "Default user prompt for React frontend generation",
+        "path": "v2/frontend/user.md.jinja2",
+        "is_default": True,
+    },
+    {
+        "slug": "fastapi-backend-system-v1",
+        "name": "FastAPI Backend System Prompt v1",
+        "stage": "backend",
+        "role": "system",
+        "description": "FastAPI-oriented system prompt for sample generation",
+        "path": "fastapi/backend/system.md.jinja2",
+        "is_default": False,
+    },
+    {
+        "slug": "fastapi-backend-user-v1",
+        "name": "FastAPI Backend User Prompt v1",
+        "stage": "backend",
+        "role": "user",
+        "description": "FastAPI-oriented user prompt for sample generation",
+        "path": "fastapi/backend/user.md.jinja2",
+        "is_default": False,
+    },
+    {
+        "slug": "vue-frontend-system-v1",
+        "name": "Vue Frontend System Prompt v1",
+        "stage": "frontend",
+        "role": "system",
+        "description": "Vue-oriented system prompt for sample generation",
+        "path": "vue/frontend/system.md.jinja2",
+        "is_default": False,
+    },
+    {
+        "slug": "vue-frontend-user-v1",
+        "name": "Vue Frontend User Prompt v1",
+        "stage": "frontend",
+        "role": "user",
+        "description": "Vue-oriented user prompt for sample generation",
+        "path": "vue/frontend/user.md.jinja2",
+        "is_default": False,
+    },
+]
+
 PROMPT_STAGE_SEEDS = [
-    ("base-backend-system", "backend", "system", "backend/system.md.jinja2"),
-    ("base-backend-user", "backend", "user", "backend/user.md.jinja2"),
-    ("base-frontend-system", "frontend", "system", "frontend/system.md.jinja2"),
-    ("base-frontend-user", "frontend", "user", "frontend/user.md.jinja2"),
+    {
+        "slug": "base-backend-system",
+        "stage": "backend",
+        "role": "system",
+        "path": "v2/backend/system.md.jinja2",
+    },
+    {
+        "slug": "base-backend-user",
+        "stage": "backend",
+        "role": "user",
+        "path": "v2/backend/user.md.jinja2",
+    },
+    {
+        "slug": "base-frontend-system",
+        "stage": "frontend",
+        "role": "system",
+        "path": "v2/frontend/system.md.jinja2",
+    },
+    {
+        "slug": "base-frontend-user",
+        "stage": "frontend",
+        "role": "user",
+        "path": "v2/frontend/user.md.jinja2",
+    },
+    {
+        "slug": "fastapi-backend-system",
+        "stage": "backend",
+        "role": "system",
+        "path": "fastapi/backend/system.md.jinja2",
+    },
+    {
+        "slug": "fastapi-backend-user",
+        "stage": "backend",
+        "role": "user",
+        "path": "fastapi/backend/user.md.jinja2",
+    },
+    {
+        "slug": "vue-frontend-system",
+        "stage": "frontend",
+        "role": "system",
+        "path": "vue/frontend/system.md.jinja2",
+    },
+    {
+        "slug": "vue-frontend-user",
+        "stage": "frontend",
+        "role": "user",
+        "path": "vue/frontend/user.md.jinja2",
+    },
 ]
 
 
@@ -42,30 +212,22 @@ class Command(BaseCommand):
         self._seed_content_blocks()
         self._seed_template_bundles()
         self._seed_app_bundles()
-        self._seed_fastapi_scaffolding()
         self.stdout.write(self.style.SUCCESS("Seeding complete."))
 
     def _seed_scaffolding(self):
-        obj, created = ScaffoldingTemplate.objects.update_or_create(
-            slug="flask-react",
-            defaults={
-                "name": "Flask + React",
-                "description": (
-                    "Single-container scaffolding: Flask 3.x serves both the REST API "
-                    "and a pre-built React 18 SPA (Vite + Tailwind)."
-                ),
-                "tech_stack": {
-                    "frontend": "React 18 + Vite + Tailwind CSS",
-                    "backend": "Flask 3.x + SQLAlchemy + JWT",
-                    "database": "SQLite",
-                    "runtime": "Single Docker container",
+        for seed in SCAFFOLDING_SEEDS:
+            obj, created = ScaffoldingTemplate.objects.update_or_create(
+                slug=seed["slug"],
+                defaults={
+                    "name": seed["name"],
+                    "description": seed["description"],
+                    "tech_stack": seed["tech_stack"],
+                    "substitution_vars": seed["substitution_vars"],
+                    "is_default": seed["is_default"],
                 },
-                "substitution_vars": ["{{PROJECT_NAME}}", "{{app_port|8000}}"],
-                "is_default": True,
-            },
-        )
-        action = "Created" if created else "Updated"
-        self.stdout.write(f"  {action} scaffolding: {obj.name}")
+            )
+            action = "Created" if created else "Updated"
+            self.stdout.write(f"  {action} scaffolding: {obj.name}")
 
     def _seed_requirements(self):
         if not REQUIREMENTS_DIR.exists():
@@ -105,68 +267,33 @@ class Command(BaseCommand):
 
     def _seed_prompts(self):
         """Legacy PromptTemplate rows (kept for admin UI compatibility)."""
-        prompts = [
-            {
-                "slug": "v2-backend-system",
-                "name": "Backend System Prompt v2",
-                "stage": "backend",
-                "role": "system",
-                "description": "Default system prompt for Flask backend generation",
-                "content": self._read_prompt_file("backend/system.md.jinja2"),
-            },
-            {
-                "slug": "v2-backend-user",
-                "name": "Backend User Prompt v2",
-                "stage": "backend",
-                "role": "user",
-                "description": "Default user prompt for Flask backend generation",
-                "content": self._read_prompt_file("backend/user.md.jinja2"),
-            },
-            {
-                "slug": "v2-frontend-system",
-                "name": "Frontend System Prompt v2",
-                "stage": "frontend",
-                "role": "system",
-                "description": "Default system prompt for React frontend generation",
-                "content": self._read_prompt_file("frontend/system.md.jinja2"),
-            },
-            {
-                "slug": "v2-frontend-user",
-                "name": "Frontend User Prompt v2",
-                "stage": "frontend",
-                "role": "user",
-                "description": "Default user prompt for React frontend generation",
-                "content": self._read_prompt_file("frontend/user.md.jinja2"),
-            },
-        ]
-
-        for data in prompts:
+        for data in PROMPT_TEMPLATE_SEEDS:
             obj, created = PromptTemplate.objects.update_or_create(
                 slug=data["slug"],
                 defaults={
                     "name": data["name"],
                     "stage": data["stage"],
                     "role": data["role"],
-                    "content": data["content"],
+                    "content": self._read_prompt_file(data["path"]),
                     "description": data["description"],
-                    "is_default": True,
+                    "is_default": data["is_default"],
                 },
             )
             action = "Created" if created else "Updated"
             self.stdout.write(f"  {action} prompt: {obj.name}")
 
     def _seed_content_blocks(self):
-        for slug, stage, role, rel_path in PROMPT_STAGE_SEEDS:
-            content = self._read_prompt_file(rel_path)
+        for seed in PROMPT_STAGE_SEEDS:
+            content = self._read_prompt_file(seed["path"])
             obj, created = ContentBlock.objects.update_or_create(
-                slug=slug,
+                slug=seed["slug"],
                 version=1,
                 defaults={
                     "block_type": ContentBlock.BlockType.PROMPT_STAGE,
-                    "name": slug.replace("-", " ").title(),
-                    "description": f"v2 {stage} {role} prompt",
+                    "name": seed["slug"].replace("-", " ").title(),
+                    "description": f"{seed['stage']} {seed['role']} prompt",
                     "content": content,
-                    "metadata": {"stage": stage, "role": role},
+                    "metadata": {"stage": seed["stage"], "role": seed["role"]},
                     "is_system": True,
                 },
             )
@@ -301,30 +428,9 @@ class Command(BaseCommand):
             action = "Created" if created else "Updated"
             self.stdout.write(f"  {action} auto app bundle: {obj.slug}")
 
-    def _seed_fastapi_scaffolding(self):
-        obj, created = ScaffoldingTemplate.objects.update_or_create(
-            slug="fastapi-vue",
-            defaults={
-                "name": "FastAPI + Vue",
-                "description": (
-                    "FastAPI backend with Vue 3 SPA (Vite). Experimental stack for research comparisons."
-                ),
-                "tech_stack": {
-                    "frontend": "Vue 3 + Vite",
-                    "backend": "FastAPI",
-                    "database": "SQLite",
-                    "runtime": "Single Docker container",
-                },
-                "substitution_vars": ["{{PROJECT_NAME}}", "{{app_port|8000}}"],
-                "is_default": False,
-            },
-        )
-        action = "Created" if created else "Updated"
-        self.stdout.write(f"  {action} scaffolding: {obj.name}")
-
     @staticmethod
     def _read_prompt_file(relative_path: str) -> str:
-        prompt_path = PROMPTS_DIR / "v2" / relative_path
+        prompt_path = PROMPTS_DIR / relative_path
         if prompt_path.exists():
             return prompt_path.read_text(encoding="utf-8")
         logger.warning("Prompt not found: %s", prompt_path)
