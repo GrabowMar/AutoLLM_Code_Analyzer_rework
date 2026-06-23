@@ -9,6 +9,8 @@ import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 import Ban from '@lucide/svelte/icons/ban';
+import Check from '@lucide/svelte/icons/check';
+import { toast } from 'svelte-sonner';
 import {
 	getRun,
 	getRunFindings,
@@ -16,8 +18,11 @@ import {
 	type AnalysisRunDetail,
 	type RunFinding,
 } from '$lib/api/runs';
-import { statusColors, severityColors } from '$lib/constants/analysis';
+import { statusColors, severityColors, severityOrder } from '$lib/constants/analysis';
 import { formatDate, statusLabel } from '$lib/utils/analysis';
+
+// Severities ordered critical→info for the summary bar / sidebar.
+const SEVERITIES = Object.keys(severityOrder) as string[];
 
 const runId = $derived($page.params.taskId ?? '');
 
@@ -101,9 +106,10 @@ async function handleCancel() {
 	cancelling = true;
 	try {
 		await cancelRun(runId);
+		toast.success('Run cancelled');
 		await fetchRun();
 	} catch {
-		// ignore
+		toast.error('Failed to cancel run');
 	} finally {
 		cancelling = false;
 	}
@@ -141,8 +147,21 @@ onMount(() => {
 </svelte:head>
 
 {#if loading}
-	<div class="flex items-center justify-center py-20">
-		<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
+	<!-- Skeleton: header + sidebar + findings rows (reserves layout) -->
+	<div class="animate-pulse motion-reduce:animate-none space-y-4">
+		<div class="flex items-center gap-2 border-b py-2.5">
+			<div class="h-7 w-7 rounded bg-muted"></div>
+			<div class="h-4 w-40 rounded bg-muted"></div>
+			<div class="h-5 w-16 rounded-full bg-muted"></div>
+		</div>
+		<div class="flex gap-4">
+			<div class="hidden w-56 shrink-0 space-y-2 md:block">
+				{#each Array(6) as _}<div class="h-7 rounded bg-muted"></div>{/each}
+			</div>
+			<div class="min-w-0 flex-1 space-y-2">
+				{#each Array(8) as _}<div class="h-10 rounded bg-muted"></div>{/each}
+			</div>
+		</div>
 	</div>
 {:else if error}
 	<div class="space-y-4">
@@ -168,7 +187,7 @@ onMount(() => {
 			<div class="min-w-0 flex-1">
 				<div class="flex flex-wrap items-center gap-1.5">
 					<h1 class="max-w-[200px] truncate text-sm font-semibold sm:max-w-xs">{run.name || 'Analysis Run'}</h1>
-					<Badge variant="outline" class="{statusColors[run.status] ?? ''} text-xs {run.status === 'running' ? 'animate-pulse' : ''}">
+					<Badge variant="outline" class="{statusColors[run.status] ?? ''} text-xs {run.status === 'running' ? 'animate-pulse motion-reduce:animate-none' : ''}">
 						{statusLabel(run.status)}
 					</Badge>
 					<span class="hidden text-xs text-muted-foreground sm:inline">
@@ -183,7 +202,7 @@ onMount(() => {
 						{cancelling ? 'Cancelling…' : 'Cancel'}
 					</Button>
 				{/if}
-				<Button variant="outline" size="icon" class="h-7 w-7" onclick={loadAll} title="Refresh">
+				<Button variant="outline" size="icon" class="h-7 w-7" onclick={loadAll} title="Refresh" aria-label="Refresh run">
 					<RefreshCw class="h-3 w-3" />
 				</Button>
 			</div>
@@ -258,14 +277,47 @@ onMount(() => {
 
 		<!-- Main findings area -->
 		<div class="min-w-0 flex-1">
+			<!-- Severity summary bar: at-a-glance triage + quick filter -->
+			{#if totalFindings > 0}
+				<div class="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter findings by severity">
+					<button
+						class="rounded-full border px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {severityFilter === '' ? 'border-primary/40 bg-primary/10 font-medium text-primary' : 'border-input hover:bg-muted/50'}"
+						aria-pressed={severityFilter === ''}
+						onclick={() => selectSeverity('')}
+					>
+						All <span class="font-mono">{totalFindings}</span>
+					</button>
+					{#each SEVERITIES as sev}
+						{#if (severityCounts[sev] ?? 0) > 0}
+							<button
+								class="rounded-full border px-2.5 py-1 text-xs capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {severityFilter === sev ? `${severityColors[sev]} font-medium` : 'border-input hover:bg-muted/50'}"
+								aria-pressed={severityFilter === sev}
+								onclick={() => selectSeverity(sev)}
+							>
+								{sev} <span class="font-mono">{severityCounts[sev]}</span>
+							</button>
+						{/if}
+					{/each}
+				</div>
+			{/if}
+
 			{#if isActive && findings.length === 0}
 				<div class="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border py-20 text-muted-foreground">
-					<LoaderCircle class="h-6 w-6 animate-spin" />
+					<LoaderCircle class="h-6 w-6 animate-spin motion-reduce:animate-none" />
 					<p class="text-sm">Analysis in progress…</p>
 				</div>
 			{:else if findings.length === 0}
 				<div class="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border py-20 text-muted-foreground">
 					<p class="text-sm">No findings{toolFilter ? ` for ${toolFilter}` : ''}{severityFilter ? ` at ${severityFilter} severity` : ''}.</p>
+					{#if toolFilter || severityFilter}
+						<Button variant="outline" size="sm" onclick={() => { toolFilter = ''; severityFilter = ''; findingsPage = 1; fetchFindings(); }}>
+							Clear filters
+						</Button>
+					{:else if totalFindings === 0 && !isActive}
+						<p class="flex items-center gap-1.5 text-xs text-emerald-500">
+							<Check class="h-3.5 w-3.5" /> This run completed with no issues.
+						</p>
+					{/if}
 				</div>
 			{:else}
 				<Card.Root>
@@ -274,11 +326,11 @@ onMount(() => {
 							<table class="w-full text-sm">
 								<thead>
 									<tr class="border-b bg-muted/40">
-										<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Severity</th>
-										<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Title</th>
-										<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Location</th>
-										<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Rule</th>
-										<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Tool</th>
+										<th scope="col" class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Severity</th>
+										<th scope="col" class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Title</th>
+										<th scope="col" class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Location</th>
+										<th scope="col" class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Rule</th>
+										<th scope="col" class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Tool</th>
 									</tr>
 								</thead>
 								<tbody>
