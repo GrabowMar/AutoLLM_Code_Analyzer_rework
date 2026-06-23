@@ -1,0 +1,33 @@
+slug: ruff
+name: Ruff
+description: >-
+  Extremely fast Python linter. Catches bugs, unused imports, style issues, and
+  many pyflakes/pycodestyle rules in a single pass.
+category: lint
+kind: container
+target_language: python
+icon: sparkles
+version: "0.6"
+install_cmd: "pip install --user 'ruff==0.6.*'"
+verify_cmd: "ruff --version"
+run_cmd: "ruff check {target} --output-format json"
+parser_key: ruff
+run_timeout: 90
+install_timeout: 180
+display_order: 20
+config_schema:
+  - name: select
+    type: string
+    label: Rule selection
+    description: Comma-separated rule codes to enable (leave blank for defaults).
+    default: ""
+    placeholder: "E,F,W"
+default_config: {}
+sample_code: |
+  import os
+  import sys
+
+
+  def add(a, b):
+      result = a + b
+      return result

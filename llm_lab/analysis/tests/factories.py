@@ -3,66 +3,74 @@ from __future__ import annotations
 import factory
 from factory.django import DjangoModelFactory
 
-from llm_lab.analysis.models import AnalysisProfile
-from llm_lab.analysis.models import AnalysisResult
-from llm_lab.analysis.models import AnalysisTask
+from llm_lab.analysis.models import AnalysisRun
+from llm_lab.analysis.models import AnalyzerTool
+from llm_lab.analysis.models import AnalyzerWorkspace
 from llm_lab.analysis.models import Finding
+from llm_lab.analysis.models import InstalledTool
+from llm_lab.analysis.models import ToolResult
 from llm_lab.users.tests.factories import UserFactory
 
 
-class AnalysisTaskFactory(DjangoModelFactory):
+class AnalyzerToolFactory(DjangoModelFactory):
     class Meta:
-        model = AnalysisTask
+        model = AnalyzerTool
+        django_get_or_create = ("slug",)
 
-    name = factory.Sequence(lambda n: f"Analysis Task {n}")
-    status = AnalysisTask.Status.PENDING
-    generation_job = None
-    source_code = {
-        "backend": (
-            "from flask import Flask\napp = Flask(__name__)\n\n@app.route('/')\ndef index():\n    return 'Hello'"
-        ),
-        "frontend": "",
-    }
-    configuration = {"analyzers": ["bandit", "eslint"], "settings": {}}
-    results_summary = {}
+    slug = factory.Sequence(lambda n: f"tool-{n}")
+    name = factory.LazyAttribute(lambda o: o.slug.title())
+    category = "lint"
+    kind = "container"
+    target_language = "python"
+    install_cmd = "pip install --user demo"
+    verify_cmd = "demo --version"
+    run_cmd = "demo {target} --json"
+    parser_key = "ruff"
+    is_enabled = True
+
+
+class AnalyzerWorkspaceFactory(DjangoModelFactory):
+    class Meta:
+        model = AnalyzerWorkspace
+
+    user = factory.SubFactory(UserFactory)
+    status = AnalyzerWorkspace.Status.READY
+
+
+class InstalledToolFactory(DjangoModelFactory):
+    class Meta:
+        model = InstalledTool
+
+    workspace = factory.SubFactory(AnalyzerWorkspaceFactory)
+    tool = factory.SubFactory(AnalyzerToolFactory)
+    status = InstalledTool.Status.INSTALLED
+
+
+class AnalysisRunFactory(DjangoModelFactory):
+    class Meta:
+        model = AnalysisRun
+
+    name = factory.Sequence(lambda n: f"run-{n}")
     created_by = factory.SubFactory(UserFactory)
+    tool_slugs = factory.LazyFunction(lambda: ["bandit"])
+    source_code = factory.LazyFunction(lambda: {"backend": "print('hi')"})
 
 
-class AnalysisResultFactory(DjangoModelFactory):
+class ToolResultFactory(DjangoModelFactory):
     class Meta:
-        model = AnalysisResult
+        model = ToolResult
 
-    task = factory.SubFactory(AnalysisTaskFactory)
-    analyzer_type = AnalysisResult.AnalyzerType.STATIC
-    analyzer_name = "bandit"
-    status = AnalysisResult.Status.COMPLETED
-    raw_output = {}
-    summary = {"total_findings": 0}
+    run = factory.SubFactory(AnalysisRunFactory)
+    tool_slug = "bandit"
+    category = "security"
+    status = ToolResult.Status.COMPLETED
 
 
 class FindingFactory(DjangoModelFactory):
     class Meta:
         model = Finding
 
-    result = factory.SubFactory(AnalysisResultFactory)
-    severity = Finding.Severity.MEDIUM
-    category = Finding.Category.SECURITY
-    confidence = Finding.Confidence.MEDIUM
+    result = factory.SubFactory(ToolResultFactory)
+    severity = "high"
+    category = "security"
     title = factory.Sequence(lambda n: f"Finding {n}")
-    description = factory.Faker("paragraph")
-    suggestion = factory.Faker("sentence")
-    file_path = "app.py"
-    line_number = factory.Faker("pyint", min_value=1, max_value=500)
-    rule_id = factory.Sequence(lambda n: f"RULE-{n:03d}")
-
-
-class AnalysisProfileFactory(DjangoModelFactory):
-    class Meta:
-        model = AnalysisProfile
-
-    name = factory.Sequence(lambda n: f"Profile {n}")
-    description = ""
-    analyzers = factory.LazyFunction(lambda: ["bandit", "eslint"])
-    settings = factory.LazyFunction(dict)
-    is_default = False
-    created_by = factory.SubFactory(UserFactory)

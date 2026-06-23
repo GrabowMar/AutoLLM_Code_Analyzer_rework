@@ -3,6 +3,8 @@ version: 1
 block_type: prompt_rules
 name: Flask global rules
 description: Runtime and ORM constraints shared across Flask stacks
+metadata:
+  stage: backend
 content: |
   ## Runtime rules
   - SQLite URI: use `sqlite:////app/data/app.db` (absolute path under /app/data)

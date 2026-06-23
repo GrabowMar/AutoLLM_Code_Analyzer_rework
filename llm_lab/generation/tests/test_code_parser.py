@@ -38,6 +38,21 @@ class TestExtractCodeBlocks:
         assert len(blocks) == 1
         assert blocks[0]["code"] == "print('hello')"
 
+    def test_inline_filename_marker_stripped(self) -> None:
+        # Some models put the filename as a bare ":app.py" line inside the block.
+        content = "```python\n:app.py\nimport os\nprint('hi')\n```"
+        blocks = extract_code_blocks(content)
+        assert len(blocks) == 1
+        assert blocks[0]["filename"] == "app.py"
+        assert blocks[0]["code"].splitlines()[0] == "import os"
+        assert ":app.py" not in blocks[0]["code"]
+
+    def test_inline_filename_marker_not_confused_with_code(self) -> None:
+        # A legit line starting with ':' (no filename) must NOT be stripped.
+        content = "```python\nx = {1: 2}\n```"
+        blocks = extract_code_blocks(content)
+        assert blocks[0]["code"] == "x = {1: 2}"
+
 
 class TestExtractPythonCode:
     """Tests for extract_python_code()."""

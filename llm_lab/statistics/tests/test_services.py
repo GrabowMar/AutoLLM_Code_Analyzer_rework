@@ -5,12 +5,13 @@ from __future__ import annotations
 import pytest
 from django.utils import timezone
 
-from llm_lab.analysis.models import AnalysisResult
-from llm_lab.analysis.models import AnalysisTask
+from llm_lab.analysis.models import AnalysisRun
 from llm_lab.analysis.models import Finding
-from llm_lab.analysis.tests.factories import AnalysisResultFactory
-from llm_lab.analysis.tests.factories import AnalysisTaskFactory
+from llm_lab.analysis.models import ToolResult
+from llm_lab.analysis.tests.factories import AnalysisRunFactory
+from llm_lab.analysis.tests.factories import AnalyzerToolFactory
 from llm_lab.analysis.tests.factories import FindingFactory
+from llm_lab.analysis.tests.factories import ToolResultFactory
 from llm_lab.generation.models import GenerationJob
 from llm_lab.generation.tests.factories import GenerationJobFactory
 from llm_lab.llm_models.tests.factories import LLMModelFactory
@@ -37,26 +38,26 @@ def _setup_data(user):
         status=GenerationJob.Status.FAILED,
     )
 
-    task = AnalysisTaskFactory(
+    task = AnalysisRunFactory(
         created_by=user,
         generation_job=jobs[0],
-        status=AnalysisTask.Status.COMPLETED,
+        status=AnalysisRun.Status.COMPLETED,
         duration_seconds=12.5,
     )
     task.completed_at = timezone.now()
     task.save(update_fields=["completed_at"])
 
-    bandit = AnalysisResultFactory(
-        task=task,
-        analyzer_name="bandit",
-        analyzer_type=AnalysisResult.AnalyzerType.STATIC,
-        status=AnalysisResult.Status.COMPLETED,
+    bandit = ToolResultFactory(
+        run=task,
+        tool_slug="bandit",
+        category="security",
+        status=ToolResult.Status.COMPLETED,
     )
-    eslint = AnalysisResultFactory(
-        task=task,
-        analyzer_name="eslint",
-        analyzer_type=AnalysisResult.AnalyzerType.STATIC,
-        status=AnalysisResult.Status.COMPLETED,
+    eslint = ToolResultFactory(
+        run=task,
+        tool_slug="eslint",
+        category="lint",
+        status=ToolResult.Status.COMPLETED,
     )
 
     FindingFactory.create_batch(
@@ -191,11 +192,17 @@ def test_get_code_generation_stats_sums_metrics():
     assert stats["total_lines_of_code"] >= 6
 
 
-def test_get_analyzer_health_uses_registry():
+def test_get_analyzer_health_uses_catalog():
+    from django.core.cache import cache
+
+    cache.clear()
+    AnalyzerToolFactory(slug="bandit", category="security", is_enabled=True)
+    AnalyzerToolFactory(slug="eslint", category="lint", is_enabled=False)
+
     health = services.get_analyzer_health()
 
-    assert "total" in health
-    assert health["total"] >= 1
+    assert health["total"] == 2
+    assert health["online"] == 1
     assert health["online"] + health["offline"] == health["total"]
 
 

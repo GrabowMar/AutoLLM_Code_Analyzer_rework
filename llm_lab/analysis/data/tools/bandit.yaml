@@ -1,0 +1,41 @@
+slug: bandit
+name: Bandit
+description: >-
+  Security-oriented static analyzer for Python. Finds common security issues
+  such as use of insecure functions, hardcoded secrets, and weak crypto.
+category: security
+kind: container
+target_language: python
+icon: shield-alert
+version: "1.7"
+install_cmd: "pip install --user 'bandit==1.7.*'"
+verify_cmd: "bandit --version"
+run_cmd: "bandit -r {target} -f json -q"
+parser_key: bandit
+run_timeout: 120
+install_timeout: 300
+display_order: 10
+config_schema:
+  - name: confidence
+    type: select
+    label: Minimum confidence
+    description: Only report issues at or above this confidence level.
+    default: low
+    options:
+      - { value: low, label: Low }
+      - { value: medium, label: Medium }
+      - { value: high, label: High }
+default_config:
+  confidence: low
+sample_code: |
+  import hashlib
+
+
+  def make_token(password):
+      # Insecure: MD5 is cryptographically broken
+      return hashlib.md5(password.encode()).hexdigest()
+
+
+  def run(cmd):
+      import subprocess
+      subprocess.call(cmd, shell=True)

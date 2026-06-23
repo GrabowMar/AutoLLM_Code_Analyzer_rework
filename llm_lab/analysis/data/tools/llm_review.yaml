@@ -1,0 +1,36 @@
+slug: llm_review
+name: AI Reviewer
+description: >-
+  An LLM-powered code reviewer (via OpenRouter) that reads the code and reports
+  security, bug, and quality findings in natural language. Requires an
+  OpenRouter API key.
+category: ai
+kind: ai
+target_language: any
+icon: bot
+version: ""
+install_cmd: ""
+verify_cmd: ""
+run_cmd: ""
+parser_key: ""
+run_timeout: 180
+install_timeout: 30
+display_order: 40
+config_schema:
+  - name: model
+    type: string
+    label: Model
+    description: OpenRouter model id for the review.
+    default: anthropic/claude-opus-4-8
+    placeholder: anthropic/claude-opus-4-8
+  - name: max_tokens
+    type: number
+    label: Max tokens
+    description: Maximum tokens for the review response.
+    default: 4000
+    min: 500
+    max: 16000
+default_config:
+  model: anthropic/claude-opus-4-8
+  max_tokens: 4000
+sample_code: ""

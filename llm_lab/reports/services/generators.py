@@ -13,7 +13,7 @@ from django.db.models import Avg
 from django.db.models import Count
 from django.utils import timezone
 
-from llm_lab.analysis.models import AnalysisTask
+from llm_lab.analysis.models import AnalysisRun
 from llm_lab.analysis.models import Finding
 from llm_lab.generation.models import AppRequirementTemplate
 from llm_lab.generation.models import GenerationJob
@@ -56,23 +56,23 @@ def _job_summary(jobs_qs) -> dict[str, Any]:
 def _findings_for_jobs(jobs_qs):
     job_ids = list(jobs_qs.values_list("id", flat=True))
     return Finding.objects.filter(
-        result__task__generation_job_id__in=job_ids,
+        result__run__generation_job_id__in=job_ids,
     )
 
 
 def _tools_for_jobs(jobs_qs) -> list[dict[str, Any]]:
     """Per-tool breakdown derived from AnalysisResult rows."""
 
-    from llm_lab.analysis.models import AnalysisResult
+    from llm_lab.analysis.models import ToolResult
 
     job_ids = list(jobs_qs.values_list("id", flat=True))
     rows = (
-        AnalysisResult.objects.filter(task__generation_job_id__in=job_ids)
-        .values("analyzer_name")
+        ToolResult.objects.filter(run__generation_job_id__in=job_ids)
+        .values("tool_slug")
         .annotate(n=Count("id"))
         .order_by("-n")
     )
-    return [{"analyzer": r["analyzer_name"], "tasks": r["n"]} for r in rows]
+    return [{"analyzer": r["tool_slug"], "tasks": r["n"]} for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -183,19 +183,19 @@ def generate_tool_analysis(config: dict[str, Any]) -> dict[str, Any]:
     """Effectiveness analysis of one (or all) analyzer(s)."""
 
     tool_name = config.get("tool_name")
-    tasks = AnalysisTask.objects.all()
+    tasks = AnalysisRun.objects.all()
     if config.get("filter_model"):
         tasks = tasks.filter(generation_job__model__model_id=config["filter_model"])
 
-    findings_qs = Finding.objects.filter(result__task__in=tasks)
+    findings_qs = Finding.objects.filter(result__run__in=tasks)
     if tool_name:
-        findings_qs = findings_qs.filter(result__analyzer_name=tool_name)
+        findings_qs = findings_qs.filter(result__tool_slug=tool_name)
 
     by_tool: dict[str, dict[str, Any]] = {}
-    for row in findings_qs.values("result__analyzer_name", "severity").annotate(
+    for row in findings_qs.values("result__tool_slug", "severity").annotate(
         n=Count("id"),
     ):
-        analyzer = row["result__analyzer_name"]
+        analyzer = row["result__tool_slug"]
         sev = (row["severity"] or "").lower()
         bucket = by_tool.setdefault(
             analyzer,
@@ -274,7 +274,7 @@ def generate_comprehensive(config: dict[str, Any]) -> dict[str, Any]:
         "platform": {
             "total_models": LLMModel.objects.count(),
             "total_jobs": GenerationJob.objects.count(),
-            "total_tasks": AnalysisTask.objects.count(),
+            "total_tasks": AnalysisRun.objects.count(),
             "total_findings": Finding.objects.count(),
         },
     }

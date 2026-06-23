@@ -11,7 +11,7 @@ import pytest
 from django.test import Client
 from django.utils import timezone
 
-from llm_lab.analysis.models import AnalysisTask
+from llm_lab.analysis.models import AnalysisRun
 from llm_lab.generation.models import GenerationJob
 from llm_lab.generation.tests.factories import GenerationJobFactory
 from llm_lab.users.tests.factories import UserFactory
@@ -229,12 +229,12 @@ def test_clear_stuck_analysis_updates_db(staff_client, db):
     user = UserFactory()
     old_time = timezone.now() - timedelta(minutes=90)
 
-    task = AnalysisTask.objects.create(
+    task = AnalysisRun.objects.create(
         name="stuck-task",
-        status=AnalysisTask.Status.RUNNING,
+        status=AnalysisRun.Status.RUNNING,
         created_by=user,
     )
-    AnalysisTask.objects.filter(pk=task.pk).update(updated_at=old_time)
+    AnalysisRun.objects.filter(pk=task.pk).update(updated_at=old_time)
 
     resp = client.post(
         "/api/system/maintenance/clear-stuck-analysis?older_than_minutes=60",
@@ -244,7 +244,7 @@ def test_clear_stuck_analysis_updates_db(staff_client, db):
     assert data["updated"] >= 1
 
     task.refresh_from_db()
-    assert task.status == AnalysisTask.Status.FAILED
+    assert task.status == AnalysisRun.Status.FAILED
 
 
 @pytest.mark.django_db

@@ -9,18 +9,18 @@ import docker
 from django.core.cache import cache
 from django.utils import timezone
 
-from llm_lab.analysis.models import AnalysisTask
+from llm_lab.analysis.models import AnalysisRun
 from llm_lab.generation.models import GenerationJob
 from llm_lab.runtime.models import ContainerInstance
 
 
 def clear_stuck_analysis_tasks(older_than_minutes: int = 60) -> int:
     threshold = timezone.now() - timedelta(minutes=older_than_minutes)
-    return AnalysisTask.objects.filter(
-        status__in=[AnalysisTask.Status.PENDING, AnalysisTask.Status.RUNNING],
+    return AnalysisRun.objects.filter(
+        status__in=[AnalysisRun.Status.PENDING, AnalysisRun.Status.RUNNING],
         updated_at__lt=threshold,
     ).update(
-        status=AnalysisTask.Status.FAILED,
+        status=AnalysisRun.Status.FAILED,
         error_message=(f"Marked failed by maintenance: stuck for >{older_than_minutes}m"),
     )
 

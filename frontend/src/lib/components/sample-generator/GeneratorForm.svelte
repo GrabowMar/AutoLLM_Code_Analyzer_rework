@@ -11,9 +11,7 @@
 		LLMModelSummary,
 		ScaffoldingTemplate,
 		AppRequirementTemplate,
-		TemplateBundle,
 	} from '$lib/api/client';
-	import BundlePicker from '$lib/components/sample-generator/BundlePicker.svelte';
 	import Play from '@lucide/svelte/icons/play';
 	import Search from '@lucide/svelte/icons/search';
 	import Check from '@lucide/svelte/icons/check';
@@ -38,7 +36,6 @@
 		model_ids: number[];
 		temperature: number;
 		max_tokens: number;
-		template_bundle_id?: number;
 	}
 
 	export interface CopilotPayload {
@@ -53,10 +50,8 @@
 		models: LLMModelSummary[];
 		modelsLoading: boolean;
 		scaffoldingTemplates: ScaffoldingTemplate[];
-		templateBundles: TemplateBundle[];
 		appTemplates: AppRequirementTemplate[];
 		scaffoldingLoading: boolean;
-		bundlesLoading: boolean;
 		customSubmitting: boolean;
 		customError: string;
 		scaffoldingSubmitting: boolean;
@@ -76,10 +71,8 @@
 		models,
 		modelsLoading,
 		scaffoldingTemplates,
-		templateBundles,
 		appTemplates,
 		scaffoldingLoading,
-		bundlesLoading,
 		customSubmitting,
 		customError,
 		scaffoldingSubmitting,
@@ -102,7 +95,6 @@
 
 	// Scaffolding form
 	let selectedScaffoldId = $state<number | ''>('');
-	let selectedBundleId = $state<number | ''>('');
 	let selectedAppIds = $state<Set<number>>(new Set());
 	let selectedModelIds = $state<Set<number>>(new Set());
 	let scaffoldingTemperature = $state(0.3);
@@ -141,10 +133,6 @@
 			const q = appSearch.toLowerCase();
 			return t.name.toLowerCase().includes(q) || (t.description ?? '').toLowerCase().includes(q);
 		})
-	);
-
-	const selectedAppSlugs = $derived(
-		appTemplates.filter((t) => selectedAppIds.has(t.id)).map((t) => t.slug),
 	);
 
 	function toggleAppTemplate(id: number) {
@@ -194,7 +182,6 @@
 			model_ids: [...selectedModelIds],
 			temperature: scaffoldingTemperature,
 			max_tokens: scaffoldingMaxTokens,
-			template_bundle_id: selectedBundleId ? (selectedBundleId as number) : undefined,
 		});
 	}
 
@@ -426,14 +413,6 @@
 						/>
 					</div>
 				</div>
-
-				<!-- Bundle (on-demand) -->
-				<BundlePicker
-					bundles={templateBundles}
-					loading={bundlesLoading}
-					bind:selectedId={selectedBundleId}
-					appSlugs={selectedAppSlugs}
-				/>
 
 				<!-- Advanced (collapsed by default) -->
 				<div class="space-y-2">

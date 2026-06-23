@@ -1,136 +1,39 @@
 from __future__ import annotations
 
 import pytest
-from django.db import IntegrityError
 
-from llm_lab.analysis.models import AnalysisResult
-from llm_lab.analysis.models import AnalysisTask
-from llm_lab.analysis.models import Finding
-from llm_lab.analysis.tests.factories import AnalysisProfileFactory
-from llm_lab.analysis.tests.factories import AnalysisResultFactory
-from llm_lab.analysis.tests.factories import AnalysisTaskFactory
-from llm_lab.analysis.tests.factories import FindingFactory
-from llm_lab.generation.tests.factories import GenerationJobFactory
+from llm_lab.analysis.models import AnalysisRun
+from llm_lab.analysis.services.base import FindingData
+from llm_lab.analysis.services.base import build_severity_counts
 
 pytestmark = pytest.mark.django_db
 
 
-class TestAnalysisTask:
-    def test_str(self):
-        task = AnalysisTaskFactory(name="My Analysis")
-        assert str(task) == "Analysis: My Analysis (pending)"
-
-    def test_str_without_name_inline(self):
-        task = AnalysisTaskFactory(name="")
-        assert str(task) == "Analysis: inline code (pending)"
-
-    def test_str_without_name_with_job(self):
-        job = GenerationJobFactory()
-        task = AnalysisTaskFactory(name="", generation_job=job)
-        assert str(task) == f"Analysis: Job {job.id} (pending)"
-
-    def test_get_code_for_analysis_from_source_code(self):
-        task = AnalysisTaskFactory(
-            source_code={"backend": "print('hello')", "frontend": "alert('hi')"},
-        )
-        code = task.get_code_for_analysis()
-        assert code["backend"] == "print('hello')"
-        assert code["frontend"] == "alert('hi')"
-
-    def test_get_code_for_analysis_from_job(self):
-        job = GenerationJobFactory(
-            result_data={
-                "backend_code": "from flask import Flask",
-                "frontend_code": "import React from 'react'",
-            },
-        )
-        task = AnalysisTaskFactory(
-            source_code={},
-            generation_job=job,
-        )
-        code = task.get_code_for_analysis()
-        assert code["backend"] == "from flask import Flask"
-        assert code["frontend"] == "import React from 'react'"
-
-    def test_get_code_for_analysis_empty(self):
-        task = AnalysisTaskFactory(
-            source_code={},
-            generation_job=None,
-        )
-        code = task.get_code_for_analysis()
-        assert code == {}
-
-    def test_default_status(self):
-        task = AnalysisTaskFactory()
-        assert task.status == AnalysisTask.Status.PENDING
+def test_run_get_code_inline(analysis_run):
+    analysis_run.source_code = {"backend": "print('x')", "empty": ""}
+    code = analysis_run.get_code_for_analysis()
+    assert code["backend"] == "print('x')"
 
 
-class TestAnalysisResult:
-    def test_str(self):
-        result = AnalysisResultFactory(
-            analyzer_name="bandit",
-            status=AnalysisResult.Status.COMPLETED,
-        )
-        expected = f"bandit (completed) → Task {result.task_id}"
-        assert str(result) == expected
-
-    def test_unique_together(self):
-        result = AnalysisResultFactory(analyzer_name="bandit")
-        with pytest.raises(IntegrityError):
-            AnalysisResultFactory(
-                task=result.task,
-                analyzer_name="bandit",
-            )
+def test_run_defaults(user):
+    run = AnalysisRun.objects.create(created_by=user, tool_slugs=["bandit"])
+    assert run.status == AnalysisRun.Status.PENDING
+    assert run.tool_slugs == ["bandit"]
 
 
-class TestFinding:
-    def test_str(self):
-        finding = FindingFactory(
-            severity=Finding.Severity.HIGH,
-            title="SQL Injection",
-            file_path="app.py",
-            line_number=42,
-        )
-        assert str(finding) == "[HIGH] SQL Injection (app.py:42)"
-
-    def test_str_without_file(self):
-        finding = FindingFactory(
-            severity=Finding.Severity.CRITICAL,
-            title="Hardcoded password",
-            file_path="",
-        )
-        assert str(finding) == "[CRITICAL] Hardcoded password"
-
-    def test_ordering(self):
-        result = AnalysisResultFactory()
-        FindingFactory(result=result, severity=Finding.Severity.LOW, title="Low issue")
-        FindingFactory(
-            result=result,
-            severity=Finding.Severity.CRITICAL,
-            title="Critical issue",
-        )
-        FindingFactory(
-            result=result,
-            severity=Finding.Severity.MEDIUM,
-            title="Medium issue",
-        )
-
-        findings = list(Finding.objects.filter(result=result))
-        assert findings[0].severity == "critical"
-        assert findings[1].severity == "medium"
-        assert findings[2].severity == "low"
+def test_finding_factory(finding):
+    assert finding.result.run is not None
+    assert finding.severity == "high"
 
 
-class TestAnalysisProfile:
-    def test_str(self):
-        profile = AnalysisProfileFactory(name="Security Scan", is_default=False)
-        assert str(profile) == "Security Scan"
-
-    def test_str_default(self):
-        profile = AnalysisProfileFactory(name="Default Profile", is_default=True)
-        assert str(profile) == "Default Profile [default]"
-
-    def test_unique_name_per_user(self):
-        p1 = AnalysisProfileFactory(name="unique-profile")
-        with pytest.raises(IntegrityError):
-            AnalysisProfileFactory(name="unique-profile", created_by=p1.created_by)
+def test_build_severity_counts():
+    counts = build_severity_counts(
+        [
+            FindingData(severity="high", category="security", title="a"),
+            FindingData(severity="high", category="security", title="b"),
+            FindingData(severity="low", category="quality", title="c"),
+        ],
+    )
+    assert counts["high"] == 2
+    assert counts["low"] == 1
+    assert counts["critical"] == 0

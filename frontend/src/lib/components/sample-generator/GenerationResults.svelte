@@ -178,12 +178,6 @@
 								<span class="text-xs">{job.scaffolding_name}</span>
 							</div>
 						{/if}
-						{#if job.bundle_name || job.bundle_slug}
-							<div class="flex justify-between text-sm">
-								<span class="text-muted-foreground">Bundle</span>
-								<span class="text-xs font-mono">{job.bundle_name ?? job.bundle_slug}</span>
-							</div>
-						{/if}
 						{#if job.experiment_seed != null}
 							<div class="flex justify-between text-sm">
 								<span class="text-muted-foreground">Seed</span>
@@ -194,6 +188,18 @@
 							<div class="flex justify-between text-sm">
 								<span class="text-muted-foreground">Model</span>
 								<span>{job.model_name}</span>
+							</div>
+						{/if}
+						{#if job.temperature != null}
+							<div class="flex justify-between text-sm">
+								<span class="text-muted-foreground">Temperature</span>
+								<span class="font-mono text-xs">{job.temperature}</span>
+							</div>
+						{/if}
+						{#if job.max_tokens != null}
+							<div class="flex justify-between text-sm">
+								<span class="text-muted-foreground">Max tokens</span>
+								<span class="font-mono text-xs">{job.max_tokens.toLocaleString()}</span>
 							</div>
 						{/if}
 						{#if job.duration_seconds !== null}

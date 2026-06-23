@@ -10,8 +10,8 @@ from http import HTTPStatus
 import pytest
 
 from llm_lab.analysis.models import Finding
-from llm_lab.analysis.tests.factories import AnalysisResultFactory
-from llm_lab.analysis.tests.factories import AnalysisTaskFactory
+from llm_lab.analysis.tests.factories import ToolResultFactory
+from llm_lab.analysis.tests.factories import AnalysisRunFactory
 from llm_lab.analysis.tests.factories import FindingFactory
 from llm_lab.generation.tests.factories import GenerationJobFactory
 from llm_lab.reports.models import Report
@@ -75,8 +75,8 @@ class TestAuthRequired:
 
 class TestFindingsCsv:
     def test_headers(self, auth_client, user):
-        task = AnalysisTaskFactory(created_by=user)
-        result = AnalysisResultFactory(task=task)
+        task = AnalysisRunFactory(created_by=user)
+        result = ToolResultFactory(run=task)
         FindingFactory(result=result)
 
         resp = auth_client.get("/api/export/findings.csv")
@@ -97,8 +97,8 @@ class TestFindingsCsv:
         ]
 
     def test_row_count(self, auth_client, user):
-        task = AnalysisTaskFactory(created_by=user)
-        result = AnalysisResultFactory(task=task)
+        task = AnalysisRunFactory(created_by=user)
+        result = ToolResultFactory(run=task)
         FindingFactory.create_batch(3, result=result)
 
         resp = auth_client.get("/api/export/findings.csv")
@@ -107,12 +107,12 @@ class TestFindingsCsv:
 
     def test_user_scoping(self, auth_client, user, other_user):
         """User should only see their own findings."""
-        my_task = AnalysisTaskFactory(created_by=user)
-        my_result = AnalysisResultFactory(task=my_task)
+        my_task = AnalysisRunFactory(created_by=user)
+        my_result = ToolResultFactory(run=my_task)
         FindingFactory.create_batch(2, result=my_result)
 
-        other_task = AnalysisTaskFactory(created_by=other_user)
-        other_result = AnalysisResultFactory(task=other_task)
+        other_task = AnalysisRunFactory(created_by=other_user)
+        other_result = ToolResultFactory(run=other_task)
         FindingFactory.create_batch(5, result=other_result)
 
         resp = auth_client.get("/api/export/findings.csv")
@@ -120,8 +120,8 @@ class TestFindingsCsv:
         assert len(rows) == 2
 
     def test_filter_by_severity(self, auth_client, user):
-        task = AnalysisTaskFactory(created_by=user)
-        result = AnalysisResultFactory(task=task)
+        task = AnalysisRunFactory(created_by=user)
+        result = ToolResultFactory(run=task)
         FindingFactory(result=result, severity=Finding.Severity.HIGH)
         FindingFactory(result=result, severity=Finding.Severity.LOW)
 
@@ -131,12 +131,12 @@ class TestFindingsCsv:
         assert rows[0][3] == "high"
 
     def test_filter_by_task_id(self, auth_client, user):
-        task1 = AnalysisTaskFactory(created_by=user)
-        result1 = AnalysisResultFactory(task=task1)
+        task1 = AnalysisRunFactory(created_by=user)
+        result1 = ToolResultFactory(run=task1)
         FindingFactory.create_batch(2, result=result1)
 
-        task2 = AnalysisTaskFactory(created_by=user)
-        result2 = AnalysisResultFactory(task=task2)
+        task2 = AnalysisRunFactory(created_by=user)
+        result2 = ToolResultFactory(run=task2)
         FindingFactory.create_batch(3, result=result2)
 
         resp = auth_client.get(f"/api/export/findings.csv?task_id={task1.id}")
@@ -149,8 +149,8 @@ class TestFindingsCsv:
 
 class TestFindingsJson:
     def test_structure(self, auth_client, user):
-        task = AnalysisTaskFactory(created_by=user)
-        result = AnalysisResultFactory(task=task)
+        task = AnalysisRunFactory(created_by=user)
+        result = ToolResultFactory(run=task)
         FindingFactory(
             result=result,
             rule_id="B101",
@@ -173,8 +173,8 @@ class TestFindingsJson:
 
     def test_limit_cap(self, auth_client, user):
         """limit param cannot exceed 50000 hard cap."""
-        task = AnalysisTaskFactory(created_by=user)
-        result = AnalysisResultFactory(task=task)
+        task = AnalysisRunFactory(created_by=user)
+        result = ToolResultFactory(run=task)
         FindingFactory.create_batch(5, result=result)
 
         resp = auth_client.get("/api/export/findings.json?limit=100000")
@@ -188,8 +188,8 @@ class TestFindingsJson:
 
 class TestFindingsSarif:
     def test_schema_structure(self, auth_client, user):
-        task = AnalysisTaskFactory(created_by=user)
-        result = AnalysisResultFactory(task=task, analyzer_name="bandit")
+        task = AnalysisRunFactory(created_by=user)
+        result = ToolResultFactory(run=task, tool_slug="bandit")
         FindingFactory(
             result=result,
             severity=Finding.Severity.HIGH,
@@ -217,9 +217,9 @@ class TestFindingsSarif:
         assert loc["physicalLocation"]["region"]["startLine"] == 42
 
     def test_sarif_groups_by_analyzer(self, auth_client, user):
-        task = AnalysisTaskFactory(created_by=user)
-        result_bandit = AnalysisResultFactory(task=task, analyzer_name="bandit")
-        result_eslint = AnalysisResultFactory(task=task, analyzer_name="eslint")
+        task = AnalysisRunFactory(created_by=user)
+        result_bandit = ToolResultFactory(run=task, tool_slug="bandit")
+        result_eslint = ToolResultFactory(run=task, tool_slug="eslint")
         FindingFactory.create_batch(2, result=result_bandit)
         FindingFactory.create_batch(3, result=result_eslint)
 
@@ -270,7 +270,7 @@ class TestGenerationJobsExport:
 
 class TestAnalysisTasksExport:
     def test_csv_headers(self, auth_client, user):
-        AnalysisTaskFactory(created_by=user)
+        AnalysisRunFactory(created_by=user)
         resp = auth_client.get("/api/export/analysis-tasks.csv")
         assert resp.status_code == HTTPStatus.OK
         headers, rows = _parse_csv(resp.content.decode())
@@ -280,7 +280,7 @@ class TestAnalysisTasksExport:
         assert len(rows) == 1
 
     def test_json_structure(self, auth_client, user):
-        AnalysisTaskFactory(created_by=user)
+        AnalysisRunFactory(created_by=user)
         resp = auth_client.get("/api/export/analysis-tasks.json")
         data = json.loads(resp.content)
         assert isinstance(data, list)

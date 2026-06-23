@@ -12,7 +12,7 @@ from django.db.models import Count
 from django.db.models import Q
 from django.db.models.functions import TruncDate
 
-from llm_lab.analysis.models import AnalysisTask
+from llm_lab.analysis.models import AnalysisRun
 from llm_lab.generation.models import GenerationJob
 from llm_lab.statistics.services.helpers import _scoped
 
@@ -37,7 +37,7 @@ def get_analysis_trends(
     start = datetime.now(tz=UTC) - timedelta(days=days - 1)
     start = start.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    tasks = _scoped(AnalysisTask.objects.all(), user, "created_by").filter(
+    tasks = _scoped(AnalysisRun.objects.all(), user, "created_by").filter(
         created_at__gte=start,
     )
     rows = (
@@ -110,7 +110,7 @@ def get_recent_activity(
         .select_related("model")
         .order_by("-created_at")[:limit]
     )
-    tasks = _scoped(AnalysisTask.objects.all(), user, "created_by").order_by(
+    tasks = _scoped(AnalysisRun.objects.all(), user, "created_by").order_by(
         "-created_at",
     )[:limit]
 

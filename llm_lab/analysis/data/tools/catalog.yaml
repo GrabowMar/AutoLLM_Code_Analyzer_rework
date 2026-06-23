@@ -1,0 +1,19 @@
+# Display metadata for the analyzer "shop". Tool definitions live in the
+# sibling *.yaml files (one per tool) and are seeded by `seed_analysis_tools`.
+catalog_schema_version: 1
+categories:
+  - slug: security
+    label: Security
+    description: Find vulnerabilities and insecure patterns.
+  - slug: lint
+    label: Lint & quality
+    description: Catch bugs, style issues, and dead code.
+  - slug: performance
+    label: Performance
+    description: Surface performance problems.
+  - slug: secrets
+    label: Secrets
+    description: Detect leaked credentials and secrets.
+  - slug: ai
+    label: AI review
+    description: LLM-assisted code review.

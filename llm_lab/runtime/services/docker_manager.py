@@ -239,14 +239,35 @@ def inspect(name: str) -> dict[str, Any]:
         return container.attrs or {}
 
 
-def exec_in(name: str, cmd: list[str], timeout_s: int = 10) -> dict[str, Any]:
-    """Run a short command inside a running container; return exit_code + output."""
+def exec_in(
+    name: str,
+    cmd: list[str] | str,
+    timeout_s: int = 10,
+    workdir: str | None = None,
+) -> dict[str, Any]:
+    """Run a command inside a running container; return exit_code + output.
+
+    ``cmd`` may be an argv list or a shell string. When *timeout_s* is given it
+    is enforced inside the container via ``timeout`` so a hung tool cannot block
+    the worker thread forever.
+    """
     try:
         c = client()
         if c is None:
             return {"error": "Docker daemon unavailable", "exit_code": -1, "output": ""}
         container = c.containers.get(name)
-        result = container.exec_run(cmd, demux=False, tty=False)
+        if isinstance(cmd, str):
+            run_cmd: list[str] = ["sh", "-c", cmd]
+        else:
+            run_cmd = list(cmd)
+        if timeout_s and timeout_s > 0:
+            run_cmd = ["timeout", "--signal=KILL", str(timeout_s), *run_cmd]
+        result = container.exec_run(
+            run_cmd,
+            demux=False,
+            tty=False,
+            workdir=workdir,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("exec_in(%s, %s) failed: %s", name, cmd, exc)
         return {"error": str(exc), "exit_code": -1, "output": ""}
@@ -254,6 +275,97 @@ def exec_in(name: str, cmd: list[str], timeout_s: int = 10) -> dict[str, Any]:
     if isinstance(out, bytes):
         out = out.decode("utf-8", errors="replace")
     return {"exit_code": int(result.exit_code or 0), "output": out or ""}
+
+
+def copy_files_in(name: str, files: dict[str, str], dest: str = "/work") -> dict[str, Any]:
+    """Write a mapping of ``{relative_path: content}`` into *dest* in a container.
+
+    Uses ``put_archive`` (the SDK equivalent of ``docker cp``). Returns
+    ``{"status": "ok"}`` or ``{"error": ...}``.
+    """
+    import io
+    import tarfile
+
+    try:
+        c = client()
+        if c is None:
+            return {"error": "Docker daemon unavailable"}
+        container = c.containers.get(name)
+        # Ensure the destination directory exists.
+        container.exec_run(["mkdir", "-p", dest])
+
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for rel_path, content in files.items():
+                safe = rel_path.lstrip("/").replace("..", "_")
+                data = (content or "").encode("utf-8")
+                info = tarfile.TarInfo(name=safe)
+                info.size = len(data)
+                info.mode = 0o644
+                tar.addfile(info, io.BytesIO(data))
+        buf.seek(0)
+        container.put_archive(dest, buf.getvalue())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("copy_files_in(%s) failed: %s", name, exc)
+        return {"error": str(exc)}
+    else:
+        return {"status": "ok"}
+
+
+def run_detached(
+    image: str,
+    name: str,
+    command: list[str] | str,
+    env: dict[str, str] | None = None,
+    container_instance_id: str = "",
+    network: str = "",
+) -> str:
+    """Start a long-lived, hardened, network-isolated container and return its id.
+
+    Used for analyzer workspaces: no ports are published, all capabilities are
+    dropped, privilege escalation is disabled and a PID limit is enforced. The
+    container stays alive running *command* (typically ``sleep infinity``) so
+    tools can be installed and executed via :func:`exec_in`.
+    """
+    c = client()
+    if c is None:
+        msg = "Docker daemon unavailable"
+        raise ConnectionError(msg)
+
+    kwargs: dict[str, Any] = {
+        "name": name,
+        "command": command,
+        "environment": env or {},
+        "detach": True,
+        "cap_drop": ["ALL"],
+        "security_opt": ["no-new-privileges"],
+        "pids_limit": 256,
+        "mem_limit": "1g",
+        "cpu_period": 100000,
+        "cpu_quota": 100000,
+        "labels": {
+            "llm_lab.managed": "true",
+            "llm_lab.kind": "analyzer-workspace",
+            "llm_lab.instance_id": container_instance_id,
+        },
+    }
+    if network:
+        kwargs["network"] = network
+    container = c.containers.run(image, **kwargs)
+    return container.id
+
+
+def image_exists(tag: str) -> bool:
+    """Return True if a local image with *tag* exists."""
+    try:
+        c = client()
+        if c is None:
+            return False
+        c.images.get(tag)
+    except Exception:  # noqa: BLE001
+        return False
+    else:
+        return True
 
 
 def health(name: str) -> dict[str, Any]:

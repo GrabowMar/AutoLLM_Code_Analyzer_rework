@@ -27,7 +27,7 @@ _TASK_HEADERS = [
 
 
 def _task_severity_counts(task: Any) -> dict[str, int]:
-    summary = task.results_summary or {}
+    summary = task.summary or {}
     if "critical" in summary or "high" in summary:
         return {
             "critical": summary.get("critical", 0),

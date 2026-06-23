@@ -12,7 +12,7 @@ from django.http import StreamingHttpResponse
 from ninja import Query
 from ninja import Router
 
-from llm_lab.analysis.models import AnalysisTask
+from llm_lab.analysis.models import AnalysisRun
 from llm_lab.analysis.models import Finding
 from llm_lab.export import services
 from llm_lab.generation.models import GenerationJob
@@ -40,13 +40,13 @@ def _findings_qs(
     limit: int,
 ) -> object:
     user = request.user  # type: ignore[attr-defined]
-    qs = Finding.objects.select_related("result__task")
+    qs = Finding.objects.select_related("result__run")
     if not user.is_staff:
-        qs = qs.filter(result__task__created_by=user)
+        qs = qs.filter(result__run__created_by=user)
     if task_id:
-        qs = qs.filter(result__task_id=task_id)
+        qs = qs.filter(result__run_id=task_id)
     if analyzer:
-        qs = qs.filter(result__analyzer_name=analyzer)
+        qs = qs.filter(result__tool_slug=analyzer)
     if severity:
         qs = qs.filter(severity=severity)
     if since:
@@ -57,8 +57,8 @@ def _findings_qs(
 def _finding_row(f: object) -> list[object]:
     return [
         str(f.id),  # type: ignore[attr-defined]
-        str(f.result.task_id),  # type: ignore[attr-defined]
-        f.result.analyzer_name,  # type: ignore[attr-defined]
+        str(f.result.run_id),  # type: ignore[attr-defined]
+        f.result.tool_slug,  # type: ignore[attr-defined]
         f.severity,  # type: ignore[attr-defined]
         f.file_path,  # type: ignore[attr-defined]
         f.line_number or "",  # type: ignore[attr-defined]
@@ -204,7 +204,7 @@ def _tasks_qs(
     limit: int,
 ) -> object:
     user = request.user  # type: ignore[attr-defined]
-    qs = AnalysisTask.objects.all()
+    qs = AnalysisRun.objects.all()
     if not user.is_staff:
         qs = qs.filter(created_by=user)
     if status:

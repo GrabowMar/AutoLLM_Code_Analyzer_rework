@@ -1,91 +1,257 @@
+"""Models for the container-based analysis engine.
+
+Architecture
+------------
+* :class:`AnalyzerTool` — a catalog ("shop") entry, seeded from
+  ``data/tools/*.yaml``.  Describes how a tool is installed into and invoked
+  inside the analyzer container, plus how its output is parsed.
+* :class:`AnalyzerWorkspace` — a per-user, long-lived container into which
+  tools are installed; backed by a :class:`runtime.ContainerInstance`.
+* :class:`InstalledTool` — a tool the user has installed into their workspace.
+* :class:`AnalysisRun` / :class:`ToolResult` / :class:`Finding` — an execution,
+  its per-tool results, and the normalized findings.
+"""
+
+from __future__ import annotations
+
 import uuid
 
-from django.conf import settings as django_settings
+from django.conf import settings
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 
-class AnalysisTask(models.Model):
-    """Top-level analysis task that orchestrates multiple analyzer runs."""
+class ToolKind(models.TextChoices):
+    CONTAINER = "container", _("Container CLI")
+    AI = "ai", _("AI reviewer")
+
+
+class ToolCategory(models.TextChoices):
+    SECURITY = "security", _("Security")
+    LINT = "lint", _("Lint / quality")
+    PERFORMANCE = "performance", _("Performance")
+    SECRETS = "secrets", _("Secrets")
+    AI = "ai", _("AI review")
+
+
+class TargetLanguage(models.TextChoices):
+    PYTHON = "python", _("Python")
+    JAVASCRIPT = "javascript", _("JavaScript / TypeScript")
+    ANY = "any", _("Any")
+
+
+class AnalyzerTool(models.Model):
+    """A catalog tool that can be installed into an analyzer workspace."""
+
+    slug = models.SlugField(_("slug"), max_length=100, unique=True)
+    name = models.CharField(_("name"), max_length=200)
+    description = models.TextField(_("description"), blank=True, default="")
+    category = models.CharField(
+        _("category"),
+        max_length=20,
+        choices=ToolCategory.choices,
+        default=ToolCategory.LINT,
+        db_index=True,
+    )
+    kind = models.CharField(
+        _("kind"),
+        max_length=20,
+        choices=ToolKind.choices,
+        default=ToolKind.CONTAINER,
+    )
+    target_language = models.CharField(
+        _("target language"),
+        max_length=20,
+        choices=TargetLanguage.choices,
+        default=TargetLanguage.ANY,
+    )
+    icon = models.CharField(_("icon"), max_length=100, blank=True, default="")
+    version = models.CharField(_("version"), max_length=50, blank=True, default="")
+
+    # Container execution (kind == container)
+    install_cmd = models.TextField(_("install command"), blank=True, default="")
+    verify_cmd = models.TextField(_("verify command"), blank=True, default="")
+    run_cmd = models.TextField(
+        _("run command"),
+        blank=True,
+        default="",
+        help_text=_("Template; '{target}' is replaced with the code path."),
+    )
+    parser_key = models.CharField(_("parser key"), max_length=50, blank=True, default="")
+
+    # Configuration surface rendered by the frontend
+    config_schema = models.JSONField(_("config schema"), default=list, blank=True)
+    default_config = models.JSONField(_("default config"), default=dict, blank=True)
+
+    # Resource / timing hints
+    run_timeout = models.PositiveIntegerField(_("run timeout (s)"), default=120)
+    install_timeout = models.PositiveIntegerField(_("install timeout (s)"), default=300)
+
+    # A sample snippet used by the "test" action
+    sample_code = models.TextField(_("sample code"), blank=True, default="")
+
+    is_system = models.BooleanField(_("system tool"), default=True)
+    is_enabled = models.BooleanField(_("enabled"), default=True, db_index=True)
+    display_order = models.IntegerField(_("display order"), default=100)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("Analyzer Tool")
+        verbose_name_plural = _("Analyzer Tools")
+        ordering = ["display_order", "name"]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.slug})"
+
+
+class AnalyzerWorkspace(models.Model):
+    """A per-user, long-lived analyzer container."""
 
     class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
-        RUNNING = "running", "Running"
-        COMPLETED = "completed", "Completed"
-        FAILED = "failed", "Failed"
-        CANCELLED = "cancelled", "Cancelled"
-        PARTIAL = "partial", "Partial"
+        ABSENT = "absent", _("Absent")
+        PROVISIONING = "provisioning", _("Provisioning")
+        READY = "ready", _("Ready")
+        STOPPED = "stopped", _("Stopped")
+        ERROR = "error", _("Error")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    name = models.CharField(max_length=300, blank=True, default="")
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="analyzer_workspace",
+    )
+    container = models.ForeignKey(
+        "runtime.ContainerInstance",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="analyzer_workspaces",
+    )
     status = models.CharField(
+        _("status"),
         max_length=20,
         choices=Status.choices,
-        default=Status.PENDING,
+        default=Status.ABSENT,
+        db_index=True,
     )
+    image = models.CharField(_("image"), max_length=300, blank=True, default="")
+    error_message = models.TextField(_("error message"), blank=True, default="")
+    last_used_at = models.DateTimeField(_("last used at"), null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
-    # Source: either a generation job or inline code
+    class Meta:
+        verbose_name = _("Analyzer Workspace")
+        verbose_name_plural = _("Analyzer Workspaces")
+
+    def __str__(self) -> str:
+        return f"workspace<{self.user_id}>"
+
+    @property
+    def container_name(self) -> str:
+        return self.container.name if self.container else ""
+
+
+class InstalledTool(models.Model):
+    """A tool installed into a user's workspace."""
+
+    class Status(models.TextChoices):
+        INSTALLING = "installing", _("Installing")
+        INSTALLED = "installed", _("Installed")
+        FAILED = "failed", _("Failed")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        AnalyzerWorkspace,
+        on_delete=models.CASCADE,
+        related_name="installed_tools",
+    )
+    tool = models.ForeignKey(
+        AnalyzerTool,
+        on_delete=models.CASCADE,
+        related_name="installations",
+    )
+    status = models.CharField(
+        _("status"),
+        max_length=20,
+        choices=Status.choices,
+        default=Status.INSTALLING,
+    )
+    installed_version = models.CharField(
+        _("installed version"),
+        max_length=100,
+        blank=True,
+        default="",
+    )
+    config = models.JSONField(_("config"), default=dict, blank=True)
+    install_log = models.TextField(_("install log"), blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("Installed Tool")
+        verbose_name_plural = _("Installed Tools")
+        unique_together = ("workspace", "tool")
+        ordering = ["tool__display_order", "tool__name"]
+
+    def __str__(self) -> str:
+        return f"{self.tool.slug}@{self.workspace_id}"
+
+
+class AnalysisRun(models.Model):
+    """A single analysis execution against some target code."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        RUNNING = "running", _("Running")
+        COMPLETED = "completed", _("Completed")
+        FAILED = "failed", _("Failed")
+        CANCELLED = "cancelled", _("Cancelled")
+        PARTIAL = "partial", _("Partial")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(_("name"), max_length=200, blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="analysis_runs",
+    )
+    workspace = models.ForeignKey(
+        AnalyzerWorkspace,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="runs",
+    )
     generation_job = models.ForeignKey(
         "generation.GenerationJob",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="analysis_tasks",
+        related_name="analysis_runs",
     )
-    source_code = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text="Inline code for analysis: {'backend': '...', 'frontend': '...'}",
-    )
-
-    # Configuration
-    configuration = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text="Which analyzers to run and their settings",
-    )
-
-    # Optional link to the profile this task was created from
-    profile = models.ForeignKey(
-        "AnalysisProfile",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="tasks",
-    )
-
-    # Threshold evaluation result
-    class ThresholdStatus(models.TextChoices):
-        NOT_CONFIGURED = "not_configured", "Not configured"
-        PASSED = "passed", "Passed"
-        EXCEEDED = "exceeded", "Exceeded"
-
-    threshold_status = models.CharField(
+    source_code = models.JSONField(_("source code"), null=True, blank=True)
+    tool_slugs = models.JSONField(_("tool slugs"), default=list, blank=True)
+    status = models.CharField(
+        _("status"),
         max_length=20,
-        choices=ThresholdStatus.choices,
-        default=ThresholdStatus.NOT_CONFIGURED,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
     )
-
-    # Results summary (aggregated after all analyzers finish)
-    results_summary = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text="Aggregated findings count by severity, overall score, etc.",
-    )
-
-    # Ownership and timestamps
-    created_by = models.ForeignKey(
-        django_settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="analysis_tasks",
-    )
-    started_at = models.DateTimeField(null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-    duration_seconds = models.FloatField(null=True, blank=True)
-    error_message = models.TextField(blank=True, default="")
+    summary = models.JSONField(_("summary"), default=dict, blank=True)
+    error_message = models.TextField(_("error message"), blank=True, default="")
+    duration_seconds = models.FloatField(_("duration (s)"), null=True, blank=True)
+    started_at = models.DateTimeField(_("started at"), null=True, blank=True)
+    completed_at = models.DateTimeField(_("completed at"), null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        verbose_name = _("Analysis Run")
+        verbose_name_plural = _("Analysis Runs")
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["created_by", "-created_at"]),
@@ -93,216 +259,102 @@ class AnalysisTask(models.Model):
         ]
 
     def __str__(self) -> str:
-        source = self.name or (f"Job {self.generation_job_id}" if self.generation_job_id else "inline code")
-        return f"Analysis: {source} ({self.status})"
+        return f"run<{self.id}>"
 
     def get_code_for_analysis(self) -> dict[str, str]:
-        """Return code to analyze from the linked job or inline source."""
+        """Resolve the code map to analyze (inline source or generation job)."""
         if self.source_code:
             return self.source_code
-
-        if self.generation_job and self.generation_job.result_data:
-            result = self.generation_job.result_data
-            return {
-                "backend": result.get("backend_code", ""),
-                "frontend": result.get("frontend_code", ""),
-            }
-
+        if self.generation_job_id:
+            data = getattr(self.generation_job, "result_data", None) or {}
+            if isinstance(data, dict):
+                return {k: v for k, v in data.items() if isinstance(v, str)}
         return {}
 
 
-class AnalysisResult(models.Model):
-    """Result from a single analyzer run within an analysis task."""
+class ToolResult(models.Model):
+    """Result of running one tool within an :class:`AnalysisRun`."""
 
     class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
-        RUNNING = "running", "Running"
-        COMPLETED = "completed", "Completed"
-        FAILED = "failed", "Failed"
-        SKIPPED = "skipped", "Skipped"
+        PENDING = "pending", _("Pending")
+        RUNNING = "running", _("Running")
+        COMPLETED = "completed", _("Completed")
+        FAILED = "failed", _("Failed")
+        SKIPPED = "skipped", _("Skipped")
 
-    class AnalyzerType(models.TextChoices):
-        STATIC = "static", "Static Analysis"
-        DYNAMIC = "dynamic", "Dynamic Analysis"
-        PERFORMANCE = "performance", "Performance Analysis"
-        AI = "ai", "AI Review"
-
-    task = models.ForeignKey(
-        AnalysisTask,
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    run = models.ForeignKey(
+        AnalysisRun,
         on_delete=models.CASCADE,
         related_name="results",
     )
-    analyzer_type = models.CharField(max_length=20, choices=AnalyzerType.choices)
-    analyzer_name = models.CharField(
-        max_length=100,
-        help_text="Specific tool name, e.g. 'bandit', 'eslint', 'zap', 'llm_review'",
-    )
+    tool_slug = models.CharField(_("tool slug"), max_length=100, db_index=True)
+    category = models.CharField(_("category"), max_length=20, blank=True, default="")
     status = models.CharField(
+        _("status"),
         max_length=20,
         choices=Status.choices,
         default=Status.PENDING,
     )
-
-    # Raw tool output
-    raw_output = models.JSONField(default=dict, blank=True)
-
-    # Parsed summary metrics
-    summary = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text="Parsed summary: score, metrics, tool version, etc.",
-    )
-
-    error_message = models.TextField(blank=True, default="")
-    started_at = models.DateTimeField(null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-    duration_seconds = models.FloatField(null=True, blank=True)
+    raw_output = models.JSONField(_("raw output"), default=dict, blank=True)
+    summary = models.JSONField(_("summary"), default=dict, blank=True)
+    error_message = models.TextField(_("error message"), blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["analyzer_type", "analyzer_name"]
-        unique_together = [("task", "analyzer_name")]
-        indexes = [
-            models.Index(fields=["task", "status"]),
-            models.Index(fields=["task", "analyzer_name"]),
-        ]
+        verbose_name = _("Tool Result")
+        verbose_name_plural = _("Tool Results")
+        unique_together = ("run", "tool_slug")
+        ordering = ["tool_slug"]
 
     def __str__(self) -> str:
-        return f"{self.analyzer_name} ({self.status}) → Task {self.task_id}"
+        return f"{self.tool_slug} ({self.status})"
 
 
 class Finding(models.Model):
-    """Individual finding/issue discovered by an analyzer."""
+    """A normalized issue produced by a tool."""
 
     class Severity(models.TextChoices):
-        CRITICAL = "critical", "Critical"
-        HIGH = "high", "High"
-        MEDIUM = "medium", "Medium"
-        LOW = "low", "Low"
-        INFO = "info", "Info"
+        CRITICAL = "critical", _("Critical")
+        HIGH = "high", _("High")
+        MEDIUM = "medium", _("Medium")
+        LOW = "low", _("Low")
+        INFO = "info", _("Info")
 
-    class Category(models.TextChoices):
-        SECURITY = "security", "Security"
-        QUALITY = "quality", "Code Quality"
-        PERFORMANCE = "performance", "Performance"
-        STYLE = "style", "Style"
-        BEST_PRACTICE = "best_practice", "Best Practice"
-        ACCESSIBILITY = "accessibility", "Accessibility"
-        SEO = "seo", "SEO"
-
-    class Confidence(models.TextChoices):
-        HIGH = "high", "High"
-        MEDIUM = "medium", "Medium"
-        LOW = "low", "Low"
-
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     result = models.ForeignKey(
-        AnalysisResult,
+        ToolResult,
         on_delete=models.CASCADE,
         related_name="findings",
     )
-    severity = models.CharField(max_length=20, choices=Severity.choices)
-    category = models.CharField(max_length=20, choices=Category.choices)
-    confidence = models.CharField(
+    severity = models.CharField(
+        _("severity"),
         max_length=20,
-        choices=Confidence.choices,
-        default=Confidence.MEDIUM,
+        choices=Severity.choices,
+        default=Severity.INFO,
+        db_index=True,
     )
-
-    title = models.CharField(max_length=500)
-    description = models.TextField(blank=True, default="")
-    suggestion = models.TextField(
-        blank=True,
-        default="",
-        help_text="Recommended fix or improvement",
-    )
-
-    # Location
-    file_path = models.CharField(max_length=500, blank=True, default="")
-    line_number = models.PositiveIntegerField(null=True, blank=True)
-    column_number = models.PositiveIntegerField(null=True, blank=True)
-    code_snippet = models.TextField(blank=True, default="")
-
-    # Tool-specific info
-    rule_id = models.CharField(
-        max_length=200,
-        blank=True,
-        default="",
-        help_text="Tool-specific rule identifier, e.g. 'B105', 'no-unused-vars'",
-    )
-    tool_specific_data = models.JSONField(default=dict, blank=True)
-
-    # Suppression (false-positive management)
-    suppressed = models.BooleanField(default=False)
-    suppression_reason = models.TextField(blank=True, default="")
-    suppressed_by = models.ForeignKey(
-        django_settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="suppressed_findings",
-    )
-
+    category = models.CharField(_("category"), max_length=50, blank=True, default="")
+    confidence = models.CharField(_("confidence"), max_length=20, blank=True, default="medium")
+    title = models.CharField(_("title"), max_length=500)
+    description = models.TextField(_("description"), blank=True, default="")
+    suggestion = models.TextField(_("suggestion"), blank=True, default="")
+    file_path = models.CharField(_("file path"), max_length=500, blank=True, default="")
+    line_number = models.IntegerField(_("line number"), null=True, blank=True)
+    column_number = models.IntegerField(_("column number"), null=True, blank=True)
+    code_snippet = models.TextField(_("code snippet"), blank=True, default="")
+    rule_id = models.CharField(_("rule id"), max_length=100, blank=True, default="")
+    tool_specific_data = models.JSONField(_("tool specific data"), default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = [
-            models.Case(
-                models.When(severity="critical", then=0),
-                models.When(severity="high", then=1),
-                models.When(severity="medium", then=2),
-                models.When(severity="low", then=3),
-                models.When(severity="info", then=4),
-                default=5,
-                output_field=models.IntegerField(),
-            ),
-            "-created_at",
-        ]
+        verbose_name = _("Finding")
+        verbose_name_plural = _("Findings")
+        ordering = ["severity", "file_path", "line_number"]
         indexes = [
             models.Index(fields=["severity"]),
-            models.Index(fields=["category"]),
-            models.Index(fields=["result", "severity"]),
-            models.Index(fields=["suppressed"]),
-            models.Index(fields=["result", "suppressed"]),
+            models.Index(fields=["rule_id"]),
         ]
 
     def __str__(self) -> str:
-        location = f" ({self.file_path}:{self.line_number})" if self.file_path else ""
-        return f"[{self.severity.upper()}] {self.title}{location}"
-
-
-class AnalysisProfile(models.Model):
-    """Reusable named bundle of analyzers + settings, optionally set as default."""
-
-    name = models.CharField(max_length=200)
-    description = models.TextField(blank=True, default="")
-    analyzers = models.JSONField(
-        default=list,
-        blank=True,
-        help_text="List of analyzer names to run, e.g. ['bandit', 'eslint']",
-    )
-    settings = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text="Per-analyzer config overrides: {analyzer_name: {key: value}}",
-    )
-    is_default = models.BooleanField(
-        default=False,
-        help_text="Whether this is the user's default profile",
-    )
-    created_by = models.ForeignKey(
-        django_settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="analysis_profiles",
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["-is_default", "name"]
-        unique_together = [("created_by", "name")]
-
-    def __str__(self) -> str:
-        suffix = " [default]" if self.is_default else ""
-        return f"{self.name}{suffix}"
+        return f"[{self.severity}] {self.title}"

@@ -7,12 +7,16 @@ from django.urls import path
 from django.views import defaults as default_views
 
 from llm_lab.realtime.api.views import sse_stream
+from llm_lab.runtime.proxy import app_proxy
 
 from .api import api
 
 urlpatterns = [
     # Django Admin, use {% url 'admin:index' %}
     path(settings.ADMIN_URL, admin.site.urls),
+    # Sample-app reverse proxy (path routing): /apps/<name>/<path>
+    path("apps/<slug:name>/", app_proxy, {"path": ""}),
+    path("apps/<slug:name>/<path:path>", app_proxy),
     # User management
     path("users/", include("llm_lab.users.urls", namespace="users")),
     path("accounts/", include("allauth.urls")),

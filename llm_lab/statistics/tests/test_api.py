@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from llm_lab.analysis.tests.factories import AnalysisTaskFactory
+from llm_lab.analysis.tests.factories import AnalysisRunFactory
 from llm_lab.generation.tests.factories import GenerationJobFactory
 from llm_lab.users.tests.factories import UserFactory
 
@@ -21,7 +21,7 @@ def auth_client(client):
 def test_dashboard_endpoint(auth_client):
     client, user = auth_client
     GenerationJobFactory(created_by=user)
-    AnalysisTaskFactory(created_by=user)
+    AnalysisRunFactory(created_by=user)
 
     res = client.get("/api/statistics/dashboard/")
 
