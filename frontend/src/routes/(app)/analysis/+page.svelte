@@ -18,12 +18,14 @@
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import { onMount } from 'svelte';
+	import { toast } from 'svelte-sonner';
 	import {
 		listRuns,
 		cancelRun,
 		deleteRun,
 		type AnalysisRunListItem,
 	} from '$lib/api/runs';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { statusColors, severityColors } from '$lib/constants/analysis';
 	import { formatDate, statusLabel } from '$lib/utils/analysis';
 
@@ -128,9 +130,11 @@
 		cancellingIds = new Set([...cancellingIds, id]);
 		try {
 			await cancelRun(id);
+			toast.success('Run cancelled');
 			await loadAll(false);
 		} catch (e) {
 			console.error('Failed to cancel run:', e);
+			toast.error('Failed to cancel run');
 		} finally {
 			const next = new Set(cancellingIds);
 			next.delete(id);
@@ -138,14 +142,31 @@
 		}
 	}
 
-	async function handleDelete(id: string) {
+	// Delete is gated behind a confirmation dialog.
+	let confirmDeleteId = $state<string | null>(null);
+	let confirmOpen = $state(false);
+	let confirmBusy = $state(false);
+
+	function askDelete(id: string) {
+		confirmDeleteId = id;
+		confirmOpen = true;
+	}
+
+	async function confirmDelete() {
+		const id = confirmDeleteId;
+		if (!id) return;
+		confirmBusy = true;
 		deletingIds = new Set([...deletingIds, id]);
 		try {
 			await deleteRun(id);
+			toast.success('Run deleted');
+			confirmOpen = false;
 			await loadAll(false);
 		} catch (e) {
 			console.error('Failed to delete run:', e);
+			toast.error('Failed to delete run');
 		} finally {
+			confirmBusy = false;
 			const next = new Set(deletingIds);
 			next.delete(id);
 			deletingIds = next;
@@ -215,9 +236,25 @@
 	</FilterBar>
 
 	{#if loading}
+		<!-- Skeleton table — reserves space to avoid layout shift -->
 		<Card.Root>
-			<Card.Content class="flex items-center justify-center py-20">
-				<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
+			<Card.Content class="p-0">
+				<div class="animate-pulse motion-reduce:animate-none divide-y divide-border">
+					<div class="flex items-center gap-3 bg-muted/40 px-3 py-2.5">
+						<div class="h-3 w-24 rounded bg-muted"></div>
+						<div class="ml-auto h-3 w-16 rounded bg-muted"></div>
+					</div>
+					{#each Array(6) as _}
+						<div class="flex items-center gap-3 px-3 py-3">
+							<div class="h-8 w-8 shrink-0 rounded-md bg-muted"></div>
+							<div class="h-3 w-40 rounded bg-muted"></div>
+							<div class="ml-auto flex items-center gap-2">
+								<div class="h-5 w-16 rounded-full bg-muted"></div>
+								<div class="h-5 w-10 rounded-full bg-muted"></div>
+							</div>
+						</div>
+					{/each}
+				</div>
 			</Card.Content>
 		</Card.Root>
 	{:else if error}
@@ -263,11 +300,12 @@
 							<tbody>
 								{#each displayedRuns as run, i (run.id)}
 									<tr
-										class="border-b transition-colors hover:bg-muted/50 group cursor-pointer {i % 2 === 0 ? '' : 'bg-muted/15'} {run.status === 'failed' ? 'bg-destructive/[0.03]' : ''}"
+										class="border-b transition-colors hover:bg-muted/50 group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset {i % 2 === 0 ? '' : 'bg-muted/15'} {run.status === 'failed' ? 'bg-destructive/[0.03]' : ''}"
 										onclick={() => window.location.href = `/analysis/${run.id}`}
 										onkeydown={(e) => { if (e.key === 'Enter') window.location.href = `/analysis/${run.id}`; }}
 										tabindex="0"
 										role="link"
+										aria-label="Open analysis run {runName(run)}"
 									>
 										<td class="px-3 py-2 align-top">
 											<div class="flex items-center gap-2.5">
@@ -294,7 +332,7 @@
 										<td class="px-3 py-2 align-top">
 											<Badge variant="outline" class="text-[10px] {statusColors[run.status] ?? ''}">
 												{#if run.status === 'running'}
-													<LoaderCircle class="mr-1 h-3 w-3 animate-spin" />
+													<LoaderCircle class="mr-1 h-3 w-3 animate-spin motion-reduce:animate-none" />
 												{:else if run.status === 'pending'}
 													<Clock class="mr-1 h-3 w-3" />
 												{:else if run.status === 'completed'}
@@ -322,22 +360,22 @@
 										</td>
 										<td class="px-3 py-2">
 											<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-											<div class="flex items-center justify-end gap-1" onclick={(e) => e.stopPropagation()}>
-												<Button variant="ghost" size="sm" class="h-7 w-7 p-0" href="/analysis/{run.id}" title="View results">
+											<div class="flex items-center justify-end gap-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+												<Button variant="ghost" size="sm" class="h-7 w-7 p-0" href="/analysis/{run.id}" title="View results" aria-label="View results">
 													<Eye class="h-3.5 w-3.5" />
 												</Button>
 												{#if run.status === 'running' || run.status === 'pending'}
-													<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Cancel" disabled={cancellingIds.has(run.id)} onclick={() => handleCancel(run.id)}>
+													<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Cancel" aria-label="Cancel run" disabled={cancellingIds.has(run.id)} onclick={() => handleCancel(run.id)}>
 														{#if cancellingIds.has(run.id)}
-															<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
+															<LoaderCircle class="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
 														{:else}
 															<StopCircle class="h-3.5 w-3.5 text-amber-400" />
 														{/if}
 													</Button>
 												{:else}
-													<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Delete" disabled={deletingIds.has(run.id)} onclick={() => handleDelete(run.id)}>
+													<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Delete" aria-label="Delete run" disabled={deletingIds.has(run.id)} onclick={() => askDelete(run.id)}>
 														{#if deletingIds.has(run.id)}
-															<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
+															<LoaderCircle class="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
 														{:else}
 															<Trash2 class="h-3.5 w-3.5 text-destructive" />
 														{/if}
@@ -386,3 +424,13 @@
 		class="rounded-md border border-border"
 	/>
 </div>
+
+<ConfirmDialog
+	bind:open={confirmOpen}
+	title="Delete analysis run?"
+	description="This permanently removes the run and all of its findings. This cannot be undone."
+	confirmLabel="Delete"
+	destructive
+	busy={confirmBusy}
+	onConfirm={confirmDelete}
+/>

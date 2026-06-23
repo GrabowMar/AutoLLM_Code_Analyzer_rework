@@ -134,16 +134,18 @@ let {
 		{:else}
 			<div class="space-y-4">
 				<div>
-					<label class="mb-1 block text-sm font-medium">Backend Code</label>
+					<label for="paste-backend" class="mb-1 block text-sm font-medium">Backend Code</label>
 					<textarea
+						id="paste-backend"
 						class="h-40 w-full rounded-md border border-input bg-background p-3 font-mono text-sm"
 						placeholder="Paste backend code here…"
 						bind:value={pasteBackend}
 					></textarea>
 				</div>
 				<div>
-					<label class="mb-1 block text-sm font-medium">Frontend Code</label>
+					<label for="paste-frontend" class="mb-1 block text-sm font-medium">Frontend Code</label>
 					<textarea
+						id="paste-frontend"
 						class="h-40 w-full rounded-md border border-input bg-background p-3 font-mono text-sm"
 						placeholder="Paste frontend code here…"
 						bind:value={pasteFrontend}

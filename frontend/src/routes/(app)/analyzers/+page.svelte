@@ -33,7 +33,32 @@
 		type InstalledTool,
 		type TestResult,
 	} from '$lib/api/analyzers';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { severityColors, statusColors } from '$lib/constants/analysis';
+
+	// Generic confirmation dialog for destructive actions (uninstall / teardown).
+	let confirmState = $state<{
+		open: boolean;
+		title: string;
+		description: string;
+		confirmLabel: string;
+		busy: boolean;
+		action: () => Promise<void>;
+	}>({ open: false, title: '', description: '', confirmLabel: 'Confirm', busy: false, action: async () => {} });
+
+	function askConfirm(opts: { title: string; description: string; confirmLabel: string; action: () => Promise<void> }) {
+		confirmState = { ...confirmState, ...opts, open: true, busy: false };
+	}
+
+	async function runConfirm() {
+		confirmState.busy = true;
+		try {
+			await confirmState.action();
+			confirmState.open = false;
+		} finally {
+			confirmState.busy = false;
+		}
+	}
 
 	type Tab = 'shop' | 'installed' | 'workspace';
 	let activeTab = $state<Tab>('shop');
@@ -185,7 +210,6 @@
 	}
 
 	async function handleDelete() {
-		if (!confirm('Tear down the workspace and remove all installed tools?')) return;
 		try {
 			workspace = await deleteWorkspace();
 			installed = [];
@@ -237,9 +261,11 @@
 	</div>
 
 	<!-- Tabs -->
-	<div class="flex gap-1 border-b">
+	<div class="flex gap-1 border-b" role="tablist" aria-label="Analyzer sections">
 		{#each [['shop', 'Shop'], ['installed', `Installed (${installed.length})`], ['workspace', 'Workspace']] as [key, label]}
 			<button
+				role="tab"
+				aria-selected={activeTab === key}
 				class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors {activeTab === key
 					? 'border-primary text-primary'
 					: 'border-transparent text-muted-foreground hover:text-foreground'}"
@@ -251,15 +277,26 @@
 	</div>
 
 	{#if loading}
-		<div class="flex items-center justify-center py-20 text-muted-foreground">
-			<Loader class="size-6 animate-spin" />
+		<!-- Skeleton tool cards -->
+		<div class="grid grid-cols-1 gap-4 animate-pulse motion-reduce:animate-none sm:grid-cols-2 lg:grid-cols-3">
+			{#each Array(6) as _}
+				<div class="rounded-lg border border-border p-4">
+					<div class="mb-2 flex items-center justify-between">
+						<div class="h-4 w-24 rounded bg-muted"></div>
+						<div class="h-4 w-14 rounded-full bg-muted"></div>
+					</div>
+					<div class="mb-1 h-3 w-full rounded bg-muted"></div>
+					<div class="mb-4 h-3 w-2/3 rounded bg-muted"></div>
+					<div class="h-8 w-full rounded bg-muted"></div>
+				</div>
+			{/each}
 		</div>
 	{:else if activeTab === 'shop'}
 		<!-- Category filter -->
 		<div class="flex flex-wrap gap-2">
 			{#each categories as cat}
 				<button
-					class="rounded-full border px-3 py-1 text-xs {categoryFilter === cat
+					class="cursor-pointer rounded-full border px-3 py-1 text-xs transition-colors {categoryFilter === cat
 						? 'bg-primary text-primary-foreground border-primary'
 						: 'text-muted-foreground hover:bg-muted'}"
 					onclick={() => (categoryFilter = cat)}
@@ -271,7 +308,7 @@
 
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 			{#each visibleCatalog as tool (tool.slug)}
-				<Card.Root class="flex flex-col">
+				<Card.Root class="flex flex-col transition-colors hover:border-primary/30">
 					<Card.Header>
 						<div class="flex items-start justify-between gap-2">
 							<Card.Title class="text-base">{tool.name}</Card.Title>
@@ -288,9 +325,14 @@
 								variant="outline"
 								size="sm"
 								disabled={busy[tool.slug]}
-								onclick={() => handleUninstall(tool.slug, tool.name)}
+								onclick={() => askConfirm({
+									title: `Uninstall ${tool.name}?`,
+									description: 'The tool will be removed from your workspace. You can reinstall it anytime.',
+									confirmLabel: 'Uninstall',
+									action: () => handleUninstall(tool.slug, tool.name),
+								})}
 							>
-								{#if busy[tool.slug]}<Loader class="size-4 animate-spin" />{:else}<Trash2 class="size-4" />{/if}
+								{#if busy[tool.slug]}<Loader class="size-4 animate-spin motion-reduce:animate-none" />{:else}<Trash2 class="size-4" />{/if}
 								Uninstall
 							</Button>
 						{:else}
@@ -299,7 +341,7 @@
 								disabled={busy[tool.slug]}
 								onclick={() => handleInstall(tool)}
 							>
-								{#if busy[tool.slug]}<Loader class="size-4 animate-spin" />{:else}<Download class="size-4" />{/if}
+								{#if busy[tool.slug]}<Loader class="size-4 animate-spin motion-reduce:animate-none" />{:else}<Download class="size-4" />{/if}
 								Install
 							</Button>
 						{/if}
@@ -336,8 +378,14 @@
 								<Button
 									variant="ghost"
 									size="sm"
+									aria-label="Uninstall {it.tool_name}"
 									disabled={busy[it.tool_slug]}
-									onclick={() => handleUninstall(it.tool_slug, it.tool_name)}
+									onclick={() => askConfirm({
+										title: `Uninstall ${it.tool_name}?`,
+										description: 'The tool will be removed from your workspace. You can reinstall it anytime.',
+										confirmLabel: 'Uninstall',
+										action: () => handleUninstall(it.tool_slug, it.tool_name),
+									})}
 								>
 									<Trash2 class="size-4" />
 								</Button>
@@ -384,7 +432,12 @@
 							<Play class="size-4" /> {workspace?.status === 'stopped' ? 'Start' : 'Provision'}
 						</Button>
 					{/if}
-					<Button variant="ghost" size="sm" onclick={handleDelete}>
+					<Button variant="ghost" size="sm" onclick={() => askConfirm({
+						title: 'Tear down workspace?',
+						description: 'This removes the workspace container and ALL installed tools. This cannot be undone.',
+						confirmLabel: 'Tear down',
+						action: handleDelete,
+					})}>
 						<Trash2 class="size-4" /> Tear down
 					</Button>
 				</div>
@@ -471,10 +524,20 @@
 
 		<Dialog.Footer>
 			<Button variant="outline" onclick={runTest} disabled={testing}>
-				{#if testing}<Loader class="size-4 animate-spin" />{:else}<Play class="size-4" />{/if}
+				{#if testing}<Loader class="size-4 animate-spin motion-reduce:animate-none" />{:else}<Play class="size-4" />{/if}
 				Test
 			</Button>
 			<Button onclick={saveConfig}>Save</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
+
+<ConfirmDialog
+	bind:open={confirmState.open}
+	title={confirmState.title}
+	description={confirmState.description}
+	confirmLabel={confirmState.confirmLabel}
+	destructive
+	busy={confirmState.busy}
+	onConfirm={runConfirm}
+/>

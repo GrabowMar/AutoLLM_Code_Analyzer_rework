@@ -13,6 +13,7 @@ import Loader from '@lucide/svelte/icons/loader-circle';
 import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 import AlertCircle from '@lucide/svelte/icons/alert-circle';
 import Store from '@lucide/svelte/icons/store';
+import { toast } from 'svelte-sonner';
 import { createRun } from '$lib/api/runs';
 import { getToolCatalog, type AnalyzerTool } from '$lib/api/analyzers';
 import { getGenerationJobs, type GenerationJobList } from '$lib/api/client';
@@ -127,12 +128,14 @@ async function handleLaunch() {
 					: undefined,
 			auto_start: autoStart,
 		});
+		toast.success(autoStart ? 'Analysis started' : 'Analysis run created');
 		await goto(`/analysis/${run.id}`);
 	} catch (err: any) {
 		const detail = err?.detail;
 		launchError = Array.isArray(detail)
 			? detail.join('; ')
 			: (detail ?? err?.message ?? 'Failed to create analysis run');
+		toast.error(launchError);
 	} finally {
 		launching = false;
 	}
@@ -176,6 +179,7 @@ const canAdvance = $derived.by(() => {
 				{#each stepLabels as label, i}
 					<button
 						class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors {step === i + 1 ? 'bg-primary/10 text-primary font-medium' : i + 1 < step ? 'text-emerald-500' : 'text-muted-foreground'}"
+						aria-current={step === i + 1 ? 'step' : undefined}
 						onclick={() => { if (i + 1 <= step) step = i + 1; }}
 					>
 						<span class="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold {step === i + 1 ? 'bg-primary text-primary-foreground' : i + 1 < step ? 'bg-emerald-500 text-white' : 'bg-muted text-muted-foreground'}">
@@ -229,8 +233,18 @@ const canAdvance = $derived.by(() => {
 					</div>
 
 					{#if toolsLoading}
-						<div class="flex items-center justify-center py-12 text-muted-foreground">
-							<Loader class="mr-2 h-4 w-4 animate-spin" /> Loading analyzers…
+						<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+							{#each Array(4) as _}
+								<div class="animate-pulse motion-reduce:animate-none rounded-lg border border-border p-4">
+									<div class="mb-3 h-4 w-28 rounded bg-muted"></div>
+									{#each Array(3) as _}
+										<div class="mb-2 flex items-center gap-2.5">
+											<div class="h-4 w-4 rounded bg-muted"></div>
+											<div class="h-3 w-40 rounded bg-muted"></div>
+										</div>
+									{/each}
+								</div>
+							{/each}
 						</div>
 					{:else if toolsError}
 						<div class="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
@@ -251,7 +265,7 @@ const canAdvance = $derived.by(() => {
 									<Card.Content>
 										<div class="space-y-2">
 											{#each group.items as tool}
-												<label class="flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors {tool.installed ? 'cursor-pointer hover:bg-muted/30' : 'cursor-not-allowed opacity-60'}">
+												<label class="flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors focus-within:ring-2 focus-within:ring-ring {tool.installed ? 'cursor-pointer hover:bg-muted/30' : 'cursor-not-allowed opacity-70'}">
 													<input
 														type="checkbox"
 														class="rounded"
@@ -265,10 +279,13 @@ const canAdvance = $derived.by(() => {
 															{#if tool.kind === 'ai'}
 																<Badge variant="outline" class="text-[10px]">AI</Badge>
 															{/if}
-															{#if !tool.installed}
-																<a href="/analyzers" class="text-[10px] text-amber-500 underline-offset-2 hover:underline">
-																	Install →
-																</a>
+															{#if tool.installed}
+																<Badge variant="outline" class="text-[10px] border-emerald-500/30 bg-emerald-500/10 text-emerald-500">
+																	<Check class="mr-0.5 h-2.5 w-2.5" /> Installed
+																</Badge>
+															{:else}
+																<Badge variant="outline" class="text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-500">Not installed</Badge>
+																<a href="/analyzers" class="text-[10px] text-amber-500 underline-offset-2 hover:underline">Install →</a>
 															{/if}
 														</div>
 														<div class="text-xs text-muted-foreground line-clamp-2">{tool.description}</div>
@@ -361,7 +378,7 @@ const canAdvance = $derived.by(() => {
 						{:else}
 							<Button size="sm" disabled={launching || installedSelectedCount === 0} onclick={handleLaunch}>
 								{#if launching}
-									<Loader class="mr-1.5 h-3.5 w-3.5 animate-spin" /> Launching…
+									<Loader class="mr-1.5 h-3.5 w-3.5 animate-spin motion-reduce:animate-none" /> Launching…
 								{:else}
 									<Rocket class="mr-1.5 h-3.5 w-3.5" /> Launch
 								{/if}
