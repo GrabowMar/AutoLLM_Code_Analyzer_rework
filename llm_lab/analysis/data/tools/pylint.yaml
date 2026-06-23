@@ -1,0 +1,26 @@
+slug: pylint
+name: Pylint
+description: >-
+  Comprehensive static analyzer for Python. Checks for errors, enforces a coding
+  standard, and looks for code smells and refactoring opportunities.
+category: lint
+kind: container
+target_language: python
+icon: badge-check
+version: "3"
+install_cmd: "pip install --user pylint"
+verify_cmd: "pylint --version"
+run_cmd: "pylint {target} -f json --exit-zero --disable=import-error"
+parser_key: pylint
+run_timeout: 180
+install_timeout: 300
+display_order: 40
+config_schema: []
+default_config: {}
+sample_code: |
+  import os
+
+
+  def add(a, b):
+      unused = 1
+      return a + b

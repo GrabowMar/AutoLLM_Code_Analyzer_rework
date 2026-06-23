@@ -25,8 +25,11 @@ logger = logging.getLogger(__name__)
 
 _EXT_BY_KEY = {
     "backend": ".py",
+    "backend_code": ".py",
     "python": ".py",
+    "content": ".py",
     "frontend": ".js",
+    "frontend_code": ".jsx",
     "javascript": ".js",
     "typescript": ".ts",
 }
@@ -83,6 +86,14 @@ def execute(run: AnalysisRun) -> AnalysisRun:
     if needs_container and run.workspace_id:
         try:
             container_name = workspace_service.require_ready_container(run.workspace)
+            # /work is reused across runs in the long-lived workspace container.
+            # Clear it first so files (and tool caches) from a previous run don't
+            # leak into this one's findings.
+            docker_manager.exec_in(
+                container_name,
+                f"find {workspace_service.WORK_DIR} -mindepth 1 -delete",
+                timeout_s=30,
+            )
             files = _materialize(code)
             if files:
                 docker_manager.copy_files_in(

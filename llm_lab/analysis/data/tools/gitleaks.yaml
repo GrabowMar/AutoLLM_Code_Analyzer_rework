@@ -1,0 +1,28 @@
+slug: gitleaks
+name: Gitleaks
+description: >-
+  Secret scanner. Detects hardcoded passwords, API keys, tokens and other
+  credentials accidentally committed into source code.
+category: secrets
+kind: container
+target_language: any
+icon: key-round
+version: "8.18"
+install_cmd: >-
+  mkdir -p /home/analyzer/.local/bin &&
+  curl -sSfL
+  https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz
+  | tar -xz -C /home/analyzer/.local/bin gitleaks
+verify_cmd: "gitleaks version"
+# Write the JSON report to a file and cat only that, sending gitleaks' banner
+# and logs to /dev/null — otherwise the ASCII banner/ANSI logs pollute stdout.
+run_cmd: "gitleaks detect --no-git --source {target} --report-format json --report-path /tmp/gitleaks-report.json --exit-code 0 --redact --no-banner --log-level error >/dev/null 2>&1; cat /tmp/gitleaks-report.json"
+parser_key: gitleaks
+run_timeout: 180
+install_timeout: 300
+display_order: 60
+config_schema: []
+default_config: {}
+sample_code: |
+  AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE"
+  AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"

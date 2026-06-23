@@ -268,6 +268,15 @@ class AnalysisRun(models.Model):
         if self.generation_job_id:
             data = getattr(self.generation_job, "result_data", None) or {}
             if isinstance(data, dict):
+                # Copilot jobs carry a real per-file map ({relpath: content}) under
+                # "files"; prefer it so files keep their true paths/extensions.
+                files = data.get("files")
+                if isinstance(files, dict):
+                    file_map = {k: v for k, v in files.items() if isinstance(v, str) and v.strip()}
+                    if file_map:
+                        return file_map
+                # Scaffolding/custom jobs: top-level string blobs
+                # (backend_code/frontend_code/content).
                 return {k: v for k, v in data.items() if isinstance(v, str)}
         return {}
 

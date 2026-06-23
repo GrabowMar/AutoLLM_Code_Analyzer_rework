@@ -76,6 +76,60 @@ def test_execute_skips_unknown_tool(monkeypatch, user):
     assert result.status == "skipped"
 
 
+def test_materialize_scaffolding_keys():
+    """Scaffolding blobs get sensible filenames/extensions (JS frontend != .py)."""
+    files = runner._materialize(
+        {"backend_code": "import os\n", "frontend_code": "const x = 1;\n", "content": "x = 1\n"},
+    )
+    assert set(files) == {"backend_code.py", "frontend_code.jsx", "content.py"}
+
+
+def test_materialize_preserves_real_paths():
+    """Copilot file maps keep their true relative paths/extensions."""
+    files = runner._materialize(
+        {"frontend/src/App.jsx": "x", "backend/app.py": "y", "/leading/slash.py": "z"},
+    )
+    assert "frontend/src/App.jsx" in files
+    assert "backend/app.py" in files
+    assert "leading/slash.py" in files  # leading slash stripped
+
+
+def test_get_code_for_analysis_from_scaffolding_job(user):
+    from llm_lab.generation.tests.factories import GenerationJobFactory
+
+    job = GenerationJobFactory(
+        created_by=user,
+        result_data={
+            "backend_code": "import os\n",
+            "frontend_code": "const x = 1;\n",
+            "backend_truncated": False,
+            "backend_files": 3,
+        },
+    )
+    run = AnalysisRunFactory(created_by=user, source_code=None, generation_job=job)
+    code = run.get_code_for_analysis()
+    assert code == {"backend_code": "import os\n", "frontend_code": "const x = 1;\n"}
+    # And materialization yields proper extensions end to end.
+    files = runner._materialize(code)
+    assert set(files) == {"backend_code.py", "frontend_code.jsx"}
+
+
+def test_get_code_for_analysis_prefers_copilot_files(user):
+    from llm_lab.generation.tests.factories import GenerationJobFactory
+
+    job = GenerationJobFactory(
+        created_by=user,
+        result_data={
+            "content": "ignored blob",
+            "backend_code": "ignored blob",
+            "files": {"backend/app.py": "print('hi')", "frontend/src/App.jsx": "x"},
+        },
+    )
+    run = AnalysisRunFactory(created_by=user, source_code=None, generation_job=job)
+    code = run.get_code_for_analysis()
+    assert code == {"backend/app.py": "print('hi')", "frontend/src/App.jsx": "x"}
+
+
 def test_execute_ai_tool(monkeypatch, user):
     AnalyzerToolFactory(slug="llm_review", kind="ai", parser_key="")
     run = AnalysisRunFactory(created_by=user, tool_slugs=["llm_review"], source_code={"backend": "x"})
