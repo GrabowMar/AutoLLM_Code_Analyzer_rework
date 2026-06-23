@@ -1,0 +1,29 @@
+slug: semgrep
+name: Semgrep
+description: >-
+  Fast multi-language static analysis (SAST). Finds security vulnerabilities,
+  bugs, and anti-patterns in Python, JavaScript, TypeScript and more using
+  community rulesets.
+category: security
+kind: container
+target_language: any
+icon: radar
+version: "1"
+install_cmd: "pip install --user 'semgrep==1.*'"
+verify_cmd: "semgrep --version"
+# Explicit rule packs (py + js/jsx) instead of `--config auto`, which semgrep
+# refuses when metrics are disabled. Packs are fetched from the registry once.
+run_cmd: "semgrep --config p/python --config p/javascript --json --quiet --metrics off --disable-version-check {target}"
+parser_key: semgrep
+run_timeout: 300
+install_timeout: 600
+display_order: 20
+config_schema: []
+default_config: {}
+sample_code: |
+  import subprocess
+
+
+  def run(user_input):
+      # Dangerous: shell=True with untrusted input
+      subprocess.run("echo " + user_input, shell=True)

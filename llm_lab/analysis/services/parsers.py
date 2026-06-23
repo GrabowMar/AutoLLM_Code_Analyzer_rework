@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 from typing import Callable
 
@@ -56,7 +57,12 @@ def _loads(raw: str) -> Any:
                 return json.loads(raw[idx:])
             except json.JSONDecodeError:
                 continue
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Tool produced no JSON (e.g. an empty scan or a CLI error banner).
+        # Treat as "no findings" rather than raising a noisy parser error.
+        return None
 
 
 @register("bandit")
@@ -126,4 +132,129 @@ def parse_eslint(raw: str) -> list[FindingData]:
                     confidence="high",
                 ),
             )
+    return findings
+
+
+@register("semgrep")
+def parse_semgrep(raw: str) -> list[FindingData]:
+    data = _loads(raw) or {}
+    sev_map = {"ERROR": "high", "WARNING": "medium", "INFO": "low"}
+    findings: list[FindingData] = []
+    for item in data.get("results", []):
+        extra = item.get("extra") or {}
+        start = item.get("start") or {}
+        end = item.get("end") or {}
+        message = extra.get("message") or item.get("check_id", "Semgrep finding")
+        findings.append(
+            FindingData(
+                severity=sev_map.get(str(extra.get("severity", "INFO")).upper(), "low"),
+                category="security",
+                title=(message.splitlines() or ["Semgrep finding"])[0][:200],
+                description=message,
+                file_path=item.get("path", ""),
+                line_number=start.get("line"),
+                column_number=start.get("col"),
+                code_snippet=(extra.get("lines") or "")[:500],
+                rule_id=item.get("check_id", ""),
+                confidence=str((extra.get("metadata") or {}).get("confidence", "medium")).lower()
+                or "medium",
+                tool_specific_data={"end_line": end.get("line")},
+            ),
+        )
+    return findings
+
+
+@register("pylint")
+def parse_pylint(raw: str) -> list[FindingData]:
+    data = _loads(raw) or []
+    sev_map = {
+        "fatal": "high",
+        "error": "high",
+        "warning": "medium",
+        "refactor": "low",
+        "convention": "low",
+        "info": "info",
+    }
+    findings: list[FindingData] = []
+    for item in data:
+        msg_type = str(item.get("type", "warning")).lower()
+        findings.append(
+            FindingData(
+                severity=sev_map.get(msg_type, "low"),
+                category="quality",
+                title=item.get("message", "Lint issue"),
+                description=item.get("message", ""),
+                file_path=item.get("path", ""),
+                line_number=item.get("line"),
+                column_number=item.get("column"),
+                rule_id=item.get("symbol") or item.get("message-id") or "",
+                confidence="high",
+                tool_specific_data={"obj": item.get("obj", "")},
+            ),
+        )
+    return findings
+
+
+_MYPY_LINE_RE = re.compile(
+    r"^(?P<file>.+?):(?P<line>\d+):(?:(?P<col>\d+):)?\s*"
+    r"(?P<level>error|warning|note):\s*(?P<msg>.*?)"
+    r"(?:\s+\[(?P<code>[\w-]+)\])?$",
+)
+
+
+@register("mypy")
+def parse_mypy(raw: str) -> list[FindingData]:
+    """Mypy has no stable JSON output; parse its ``file:line: level: msg`` text."""
+    sev_map = {"error": "medium", "warning": "low", "note": "info"}
+    findings: list[FindingData] = []
+    for line in (raw or "").splitlines():
+        line = line.rstrip()
+        if not line:
+            continue
+        m = _MYPY_LINE_RE.match(line)
+        if not m:
+            continue
+        # "note" lines are usually continuations of the preceding error.
+        if m.group("level") == "note":
+            continue
+        findings.append(
+            FindingData(
+                severity=sev_map.get(m.group("level"), "low"),
+                category="quality",
+                title=m.group("msg").strip(),
+                description=m.group("msg").strip(),
+                file_path=m.group("file"),
+                line_number=int(m.group("line")),
+                column_number=int(m.group("col")) if m.group("col") else None,
+                rule_id=m.group("code") or "",
+                confidence="high",
+            ),
+        )
+    return findings
+
+
+@register("gitleaks")
+def parse_gitleaks(raw: str) -> list[FindingData]:
+    data = _loads(raw) or []
+    if not isinstance(data, list):
+        return []
+    findings: list[FindingData] = []
+    for item in data:
+        rule = item.get("RuleID") or item.get("Rule") or "secret"
+        desc = item.get("Description") or f"Potential secret ({rule})"
+        findings.append(
+            FindingData(
+                severity="high",
+                category="secrets",
+                title=desc[:200],
+                description=desc,
+                file_path=item.get("File", ""),
+                line_number=item.get("StartLine"),
+                column_number=item.get("StartColumn"),
+                code_snippet=(item.get("Match") or item.get("Secret") or "")[:500],
+                rule_id=rule,
+                confidence="high",
+                tool_specific_data={"entropy": item.get("Entropy")},
+            ),
+        )
     return findings

@@ -10,29 +10,16 @@ import ArrowRight from '@lucide/svelte/icons/arrow-right';
 import Check from '@lucide/svelte/icons/check';
 import Rocket from '@lucide/svelte/icons/rocket';
 import Loader from '@lucide/svelte/icons/loader-circle';
-import BookmarkCheck from '@lucide/svelte/icons/bookmark-check';
-import X from '@lucide/svelte/icons/x';
-import {
-	getAnalyzers,
-	getAnalysisProfiles,
-	createAnalysisTask,
-	type AnalyzerInfo,
-	type AnalysisProfile,
-} from '$lib/api/analysis';
+import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+import AlertCircle from '@lucide/svelte/icons/alert-circle';
+import Store from '@lucide/svelte/icons/store';
+import { createRun } from '$lib/api/runs';
+import { getToolCatalog, type AnalyzerTool } from '$lib/api/analyzers';
 import { getGenerationJobs, type GenerationJobList } from '$lib/api/client';
 import AnalysisTargetForm from '$lib/components/analysis/AnalysisTargetForm.svelte';
-import AnalyzerSelector from '$lib/components/analysis/AnalyzerSelector.svelte';
-import AnalysisConfigureForm from '$lib/components/analysis/AnalysisConfigureForm.svelte';
-import AnalysisReview from '$lib/components/analysis/AnalysisReview.svelte';
-import ProfileSelector from '$lib/components/analysis/ProfileSelector.svelte';
-import AnalyzerConfigForm from '$lib/components/analysis/AnalyzerConfigForm.svelte';
 
 let step = $state(1);
-const stepLabels = ['Select Source', 'Analyzers', 'Configure', 'Review'];
-
-// Profile
-let selectedProfile = $state<AnalysisProfile | null>(null);
-let appliedProfileBanner = $state(false);
+const stepLabels = ['Select Source', 'Tools', 'Review'];
 
 // Source
 type SourceMode = 'job' | 'paste';
@@ -61,100 +48,45 @@ const hasSource = $derived(
 		: pasteBackend.trim().length > 0 || pasteFrontend.trim().length > 0,
 );
 
-// Analyzers
-let analyzersLoading = $state(true);
-let analyzersError = $state('');
-let analyzers = $state<AnalyzerInfo[]>([]);
-let selectedAnalyzers = $state(new Set<string>());
+// Tools
+let toolsLoading = $state(true);
+let toolsError = $state('');
+let tools = $state<AnalyzerTool[]>([]);
+let selectedTools = $state(new Set<string>());
 
-function toggleAnalyzer(name: string) {
-	const next = new Set(selectedAnalyzers);
-	if (next.has(name)) next.delete(name);
-	else next.add(name);
-	selectedAnalyzers = next;
-}
-function selectAllAnalyzers() {
-	selectedAnalyzers = new Set(analyzers.filter((a) => a.available).map((a) => a.name));
-}
-function clearAllAnalyzers() {
-	selectedAnalyzers = new Set();
+const categoryLabels: Record<string, string> = {
+	security: 'Security',
+	lint: 'Lint & Quality',
+	secrets: 'Secrets',
+	performance: 'Performance',
+	ai: 'AI Review',
+};
+const categoryOrder = ['security', 'lint', 'secrets', 'performance', 'ai'];
+
+const groupedTools = $derived(
+	categoryOrder
+		.map((cat) => ({ category: cat, items: tools.filter((t) => t.category === cat) }))
+		.filter((g) => g.items.length > 0),
+);
+const selectedToolsList = $derived(tools.filter((t) => selectedTools.has(t.slug)));
+const installedSelectedCount = $derived(
+	selectedToolsList.filter((t) => t.installed).length,
+);
+
+function toggleTool(slug: string) {
+	const next = new Set(selectedTools);
+	if (next.has(slug)) next.delete(slug);
+	else next.add(slug);
+	selectedTools = next;
 }
 
-// Configuration — typed (replaces raw JSON strings)
-let taskName = $state('');
+// Config
+let runName = $state('');
 let autoStart = $state(true);
-let liveTarget = $state(false);
-let analyzerConfigs = $state<Record<string, Record<string, unknown>>>({});
-let thresholds = $state<Record<string, number | ''>>({});
-let expandedConfigs = $state(new Set<string>());
-
-const selectedAnalyzersList = $derived(analyzers.filter((a) => selectedAnalyzers.has(a.name)));
-
-function handleConfigChange(analyzerName: string, key: string, value: unknown) {
-	analyzerConfigs = {
-		...analyzerConfigs,
-		[analyzerName]: { ...(analyzerConfigs[analyzerName] ?? {}), [key]: value },
-	};
-}
-
-function toggleConfigExpand(name: string) {
-	const next = new Set(expandedConfigs);
-	if (next.has(name)) next.delete(name);
-	else next.add(name);
-	expandedConfigs = next;
-}
-
-const severities = ['critical', 'high', 'medium', 'low'] as const;
-
-// Apply profile
-function applyProfile(profile: AnalysisProfile | null) {
-	selectedProfile = profile;
-	if (profile) {
-		selectedAnalyzers = new Set(profile.analyzers);
-		analyzerConfigs = Object.fromEntries(
-			Object.entries(profile.settings).map(([k, v]) => [k, { ...v }])
-		);
-		appliedProfileBanner = true;
-	} else {
-		appliedProfileBanner = false;
-	}
-}
 
 // Launch
 let launching = $state(false);
 let launchError = $state('');
-
-async function handleLaunch() {
-	launching = true;
-	launchError = '';
-	try {
-		// Build thresholds (only include values that are actually numbers)
-		const resolvedThresholds: Record<string, number> = {};
-		for (const [sev, val] of Object.entries(thresholds)) {
-			if (val !== '' && val !== undefined) resolvedThresholds[sev] = Number(val);
-		}
-
-		const task = await createAnalysisTask({
-			name: taskName || undefined,
-			generation_job_id: sourceMode === 'job' ? (selectedJobId ?? undefined) : undefined,
-			source_code: sourceMode === 'paste' ? { backend: pasteBackend, frontend: pasteFrontend } : {},
-			analyzers: [...selectedAnalyzers],
-			settings: analyzerConfigs,
-			auto_start: autoStart,
-			live_target: sourceMode === 'job' && liveTarget ? true : undefined,
-			profile_id: selectedProfile?.id ?? null,
-			thresholds: Object.keys(resolvedThresholds).length ? resolvedThresholds : undefined,
-		});
-		await goto(`/analysis/${task.id}`);
-	} catch (err: any) {
-		const detail = err?.detail;
-		launchError = Array.isArray(detail)
-			? detail.join('; ')
-			: (detail ?? err?.message ?? 'Failed to create analysis task');
-	} finally {
-		launching = false;
-	}
-}
 
 async function loadJobs() {
 	jobsLoading = true;
@@ -169,27 +101,51 @@ async function loadJobs() {
 	}
 }
 
-async function loadAnalyzers() {
-	analyzersLoading = true;
-	analyzersError = '';
+async function loadTools() {
+	toolsLoading = true;
+	toolsError = '';
 	try {
-		analyzers = await getAnalyzers();
+		tools = await getToolCatalog();
 	} catch (err: any) {
-		analyzersError = err?.detail ?? 'Failed to load analyzers';
+		toolsError = err?.detail ?? 'Failed to load analyzers';
 	} finally {
-		analyzersLoading = false;
+		toolsLoading = false;
+	}
+}
+
+async function handleLaunch() {
+	launching = true;
+	launchError = '';
+	try {
+		const run = await createRun({
+			name: runName || undefined,
+			tool_slugs: [...selectedTools],
+			generation_job_id: sourceMode === 'job' ? (selectedJobId ?? undefined) : undefined,
+			source_code:
+				sourceMode === 'paste'
+					? { backend_code: pasteBackend, frontend_code: pasteFrontend }
+					: undefined,
+			auto_start: autoStart,
+		});
+		await goto(`/analysis/${run.id}`);
+	} catch (err: any) {
+		const detail = err?.detail;
+		launchError = Array.isArray(detail)
+			? detail.join('; ')
+			: (detail ?? err?.message ?? 'Failed to create analysis run');
+	} finally {
+		launching = false;
 	}
 }
 
 onMount(() => {
 	loadJobs();
-	loadAnalyzers();
+	loadTools();
 });
 
 const canAdvance = $derived.by(() => {
 	if (step === 1) return hasSource;
-	if (step === 2) return selectedAnalyzers.size > 0;
-	if (step === 3) return true;
+	if (step === 2) return installedSelectedCount > 0;
 	return true;
 });
 </script>
@@ -202,7 +158,7 @@ const canAdvance = $derived.by(() => {
 	<div class="flex items-center gap-2 text-sm text-muted-foreground">
 		<Button variant="ghost" size="sm" href="/analysis" class="gap-1.5 px-2">
 			<ArrowLeft class="h-3.5 w-3.5" />
-			Analysis Hub
+			Analysis
 		</Button>
 		<span>/</span>
 		<span class="text-foreground font-medium">New Analysis</span>
@@ -210,7 +166,7 @@ const canAdvance = $derived.by(() => {
 
 	<div class="page-header">
 		<h1>New Analysis</h1>
-		<p>Configure and launch an analysis pipeline.</p>
+		<p>Pick a source, choose installed analyzers, and launch a run.</p>
 	</div>
 
 	<div class="grid gap-4 sm:gap-6 lg:grid-cols-4">
@@ -238,22 +194,6 @@ const canAdvance = $derived.by(() => {
 			</div>
 
 			{#if step === 1}
-				<!-- Profile selector above source -->
-				<ProfileSelector
-					selectedProfileId={selectedProfile?.id ?? null}
-					onSelect={applyProfile}
-				/>
-
-				{#if appliedProfileBanner && selectedProfile}
-					<div class="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-400">
-						<BookmarkCheck class="h-4 w-4 shrink-0" />
-						<span>Profile <strong>{selectedProfile.name}</strong> applied — {selectedProfile.analyzers.length} analyzer{selectedProfile.analyzers.length !== 1 ? 's' : ''} pre-selected.</span>
-						<button class="ml-auto" onclick={() => { appliedProfileBanner = false; }}>
-							<X class="h-3.5 w-3.5" />
-						</button>
-					</div>
-				{/if}
-
 				<AnalysisTargetForm
 					{sourceMode}
 					{jobsLoading}
@@ -271,127 +211,134 @@ const canAdvance = $derived.by(() => {
 			{/if}
 
 			{#if step === 2}
-				<AnalyzerSelector
-					{analyzersLoading}
-					{analyzersError}
-					{analyzers}
-					{selectedAnalyzers}
-					onToggleAnalyzer={toggleAnalyzer}
-					onSelectAll={selectAllAnalyzers}
-					onClearAll={clearAllAnalyzers}
-					onReload={loadAnalyzers}
-				/>
+				<div class="space-y-4">
+					<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+						<p class="text-sm text-muted-foreground">
+							Only <strong>installed</strong> analyzers can be run. Install more from the
+							<a href="/analyzers" class="text-primary underline-offset-2 hover:underline">tool shop</a>.
+						</p>
+						<div class="flex items-center gap-2">
+							<Button variant="outline" size="sm" href="/analyzers">
+								<Store class="mr-1.5 h-3 w-3" /> Shop
+							</Button>
+							<Button variant="outline" size="sm" onclick={loadTools}>
+								<RefreshCw class="mr-1.5 h-3 w-3" /> Refresh
+							</Button>
+							<Badge variant="outline">{installedSelectedCount} selected</Badge>
+						</div>
+					</div>
+
+					{#if toolsLoading}
+						<div class="flex items-center justify-center py-12 text-muted-foreground">
+							<Loader class="mr-2 h-4 w-4 animate-spin" /> Loading analyzers…
+						</div>
+					{:else if toolsError}
+						<div class="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
+							<AlertCircle class="h-4 w-4 shrink-0" />
+							{toolsError}
+							<Button variant="outline" size="sm" class="ml-auto" onclick={loadTools}>Retry</Button>
+						</div>
+					{:else}
+						<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+							{#each groupedTools as group}
+								<Card.Root>
+									<Card.Header>
+										<Card.Title class="text-sm">{categoryLabels[group.category] ?? group.category}</Card.Title>
+										<Card.Description>
+											{group.items.filter((t) => t.installed).length}/{group.items.length} installed
+										</Card.Description>
+									</Card.Header>
+									<Card.Content>
+										<div class="space-y-2">
+											{#each group.items as tool}
+												<label class="flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors {tool.installed ? 'cursor-pointer hover:bg-muted/30' : 'cursor-not-allowed opacity-60'}">
+													<input
+														type="checkbox"
+														class="rounded"
+														checked={selectedTools.has(tool.slug)}
+														disabled={!tool.installed}
+														onchange={() => toggleTool(tool.slug)}
+													/>
+													<div class="min-w-0 flex-1">
+														<div class="flex items-center gap-2">
+															<span class="text-sm font-medium">{tool.name}</span>
+															{#if tool.kind === 'ai'}
+																<Badge variant="outline" class="text-[10px]">AI</Badge>
+															{/if}
+															{#if !tool.installed}
+																<a href="/analyzers" class="text-[10px] text-amber-500 underline-offset-2 hover:underline">
+																	Install →
+																</a>
+															{/if}
+														</div>
+														<div class="text-xs text-muted-foreground line-clamp-2">{tool.description}</div>
+													</div>
+												</label>
+											{/each}
+										</div>
+									</Card.Content>
+								</Card.Root>
+							{/each}
+						</div>
+					{/if}
+				</div>
 			{/if}
 
 			{#if step === 3}
-				<!-- Task-level configuration (keep AnalysisConfigureForm for name/auto-start/live-target) -->
-				<AnalysisConfigureForm
-					bind:taskName
-					bind:autoStart
-					bind:liveTarget
-					showLiveTargetOption={sourceMode === 'job' && selectedJobId !== null}
-				/>
-
-				<!-- Typed per-analyzer config -->
-				{#if selectedAnalyzersList.length > 0}
-					<Card.Root>
-						<Card.Header>
-							<Card.Title class="text-sm">Analyzer Configuration</Card.Title>
-							<Card.Description>Expand any analyzer to adjust its settings.</Card.Description>
-						</Card.Header>
-						<Card.Content class="space-y-2">
-							{#each selectedAnalyzersList as analyzer}
-								<details
-									open={expandedConfigs.has(analyzer.name)}
-									class="rounded-md border border-border"
-									ontoggle={(e) => { if ((e.target as HTMLDetailsElement).open) expandedConfigs.add(analyzer.name); else expandedConfigs.delete(analyzer.name); expandedConfigs = new Set(expandedConfigs); }}
-								>
-									<summary class="flex cursor-pointer items-center justify-between px-3 py-2 text-sm font-medium hover:bg-muted/30 select-none">
-										<span>{analyzer.display_name}</span>
-										<Badge variant="outline" class="text-xs">{analyzer.type}</Badge>
-									</summary>
-									<div class="border-t border-border px-3 py-3">
-										<AnalyzerConfigForm
-											{analyzer}
-											config={analyzerConfigs[analyzer.name] ?? {}}
-											onConfigChange={(key, val) => handleConfigChange(analyzer.name, key, val)}
-										/>
-									</div>
-								</details>
-							{/each}
-						</Card.Content>
-					</Card.Root>
-				{/if}
-
-				<!-- Threshold configuration -->
 				<Card.Root>
 					<Card.Header>
-						<Card.Title class="text-sm">Pass / Fail Thresholds</Card.Title>
-						<Card.Description>Optionally fail the task if finding counts exceed these limits. Leave blank to skip.</Card.Description>
+						<Card.Title class="text-sm">Run Settings</Card.Title>
 					</Card.Header>
-					<Card.Content>
-						<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-							{#each severities as sev}
-								<div>
-									<label
-										for="threshold-{sev}"
-										class="mb-1 block text-xs font-medium capitalize text-muted-foreground"
-									>
-										{sev}
-									</label>
-									<input
-										id="threshold-{sev}"
-										type="number"
-										min="0"
-										class="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-										placeholder="—"
-										value={thresholds[sev] ?? ''}
-										oninput={(e) => {
-											const v = (e.target as HTMLInputElement).value;
-											thresholds = { ...thresholds, [sev]: v === '' ? '' : Number(v) };
-										}}
-									/>
-								</div>
-							{/each}
+					<Card.Content class="space-y-4">
+						<div>
+							<label for="run-name" class="mb-1 block text-sm font-medium">Run name (optional)</label>
+							<input
+								id="run-name"
+								type="text"
+								class="h-9 w-full max-w-sm rounded-md border border-input bg-background px-3 text-sm"
+								placeholder="Analysis run"
+								bind:value={runName}
+							/>
 						</div>
+						<label class="flex items-center gap-2 text-sm">
+							<input type="checkbox" class="rounded" bind:checked={autoStart} />
+							Start immediately after creation
+						</label>
 					</Card.Content>
 				</Card.Root>
-			{/if}
 
-			{#if step === 4}
-				<AnalysisReview
-					{sourceMode}
-					{selectedJob}
-					{pasteBackend}
-					{pasteFrontend}
-					{taskName}
-					{selectedAnalyzersList}
-					{autoStart}
-					{liveTarget}
-					{launchError}
-				/>
-
-				{#if selectedProfile}
-					<div class="flex items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm">
-						<BookmarkCheck class="h-4 w-4 text-emerald-500" />
-						Profile: <strong>{selectedProfile.name}</strong>
-					</div>
-				{/if}
-
-				{#if Object.values(thresholds).some((v) => v !== '')}
-					<Card.Root>
-						<Card.Header class="pb-2"><Card.Title class="text-sm">Thresholds</Card.Title></Card.Header>
-						<Card.Content>
-							<div class="flex flex-wrap gap-2">
-								{#each severities as sev}
-									{#if thresholds[sev] !== '' && thresholds[sev] !== undefined}
-										<Badge variant="outline" class="text-xs capitalize">{sev} ≤ {thresholds[sev]}</Badge>
-									{/if}
+				<Card.Root>
+					<Card.Header><Card.Title class="text-sm">Review</Card.Title></Card.Header>
+					<Card.Content class="space-y-3 text-sm">
+						<div class="flex justify-between">
+							<span class="text-muted-foreground">Source</span>
+							<span class="font-medium">
+								{#if sourceMode === 'job' && selectedJob}
+									{selectedJob.model_name ?? selectedJob.id.slice(0, 8)}
+								{:else if sourceMode === 'paste'}
+									Pasted code
+								{:else}
+									—
+								{/if}
+							</span>
+						</div>
+						<Separator />
+						<div>
+							<div class="mb-1 text-muted-foreground">Analyzers ({installedSelectedCount})</div>
+							<div class="flex flex-wrap gap-1">
+								{#each selectedToolsList.filter((t) => t.installed) as t}
+									<Badge variant="secondary" class="text-[10px]">{t.name}</Badge>
 								{/each}
 							</div>
-						</Card.Content>
-					</Card.Root>
-				{/if}
+						</div>
+						{#if launchError}
+							<div class="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-red-400">
+								<AlertCircle class="h-4 w-4 shrink-0" />
+								{launchError}
+							</div>
+						{/if}
+					</Card.Content>
+				</Card.Root>
 			{/if}
 		</div>
 
@@ -407,15 +354,14 @@ const canAdvance = $derived.by(() => {
 						<Button variant="outline" size="sm" disabled={step === 1} onclick={() => step--}>
 							<ArrowLeft class="mr-1.5 h-3.5 w-3.5" /> Back
 						</Button>
-						{#if step < 4}
+						{#if step < 3}
 							<Button size="sm" disabled={!canAdvance} onclick={() => step++}>
 								Next <ArrowRight class="ml-1.5 h-3.5 w-3.5" />
 							</Button>
 						{:else}
-							<Button size="sm" disabled={launching} onclick={handleLaunch}>
+							<Button size="sm" disabled={launching || installedSelectedCount === 0} onclick={handleLaunch}>
 								{#if launching}
-									<Loader class="mr-1.5 h-3.5 w-3.5 animate-spin" />
-									Launching…
+									<Loader class="mr-1.5 h-3.5 w-3.5 animate-spin" /> Launching…
 								{:else}
 									<Rocket class="mr-1.5 h-3.5 w-3.5" /> Launch
 								{/if}
@@ -428,15 +374,6 @@ const canAdvance = $derived.by(() => {
 			<Card.Root>
 				<Card.Header><Card.Title class="text-sm">Selections</Card.Title></Card.Header>
 				<Card.Content class="space-y-3">
-					{#if selectedProfile}
-						<div>
-							<div class="mb-1 text-xs font-medium uppercase text-muted-foreground">Profile</div>
-							<span class="flex items-center gap-1.5 text-sm text-emerald-400">
-								<BookmarkCheck class="h-3.5 w-3.5" /> {selectedProfile.name}
-							</span>
-						</div>
-						<Separator />
-					{/if}
 					<div>
 						<div class="mb-1 text-xs font-medium uppercase text-muted-foreground">Source</div>
 						{#if sourceMode === 'job' && selectedJob}
@@ -450,30 +387,18 @@ const canAdvance = $derived.by(() => {
 					<Separator />
 					<div>
 						<div class="mb-1 text-xs font-medium uppercase text-muted-foreground">
-							Analyzers ({selectedAnalyzers.size})
+							Analyzers ({installedSelectedCount})
 						</div>
-						{#if selectedAnalyzers.size > 0}
+						{#if installedSelectedCount > 0}
 							<div class="flex flex-wrap gap-1">
-								{#each selectedAnalyzersList as a}
-									<Badge variant="secondary" class="text-[10px]">{a.display_name}</Badge>
+								{#each selectedToolsList.filter((t) => t.installed) as t}
+									<Badge variant="secondary" class="text-[10px]">{t.name}</Badge>
 								{/each}
 							</div>
 						{:else}
 							<span class="text-xs italic text-muted-foreground">None selected</span>
 						{/if}
 					</div>
-				</Card.Content>
-			</Card.Root>
-
-			<Card.Root>
-				<Card.Header><Card.Title class="text-sm">Summary</Card.Title></Card.Header>
-				<Card.Content>
-					<dl class="grid grid-cols-2 gap-y-2 text-sm">
-						<dt class="text-muted-foreground">Analyzers</dt>
-						<dd class="font-mono">{selectedAnalyzers.size}</dd>
-						<dt class="text-muted-foreground">Auto-start</dt>
-						<dd class="font-mono">{autoStart ? 'Yes' : 'No'}</dd>
-					</dl>
 				</Card.Content>
 			</Card.Root>
 		</div>

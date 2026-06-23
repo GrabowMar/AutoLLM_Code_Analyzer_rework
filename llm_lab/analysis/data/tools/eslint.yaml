@@ -10,7 +10,7 @@ icon: braces
 version: "8"
 install_cmd: "npm install -g eslint@8"
 verify_cmd: "eslint --version"
-run_cmd: "eslint {target} -f json --no-eslintrc --env browser,node --parser-options=ecmaVersion:latest --rule '{\"no-undef\":\"error\",\"no-unused-vars\":\"warn\"}'"
+run_cmd: "eslint {target} --ext .js,.jsx,.cjs,.mjs -f json --no-eslintrc --env browser,node --parser-options=ecmaVersion:latest,sourceType:module,ecmaFeatures:{jsx:true} --rule '{\"no-undef\":\"error\",\"no-unused-vars\":\"warn\"}'"
 parser_key: eslint
 run_timeout: 120
 install_timeout: 300
