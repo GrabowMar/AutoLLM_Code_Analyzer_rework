@@ -148,6 +148,12 @@ export default defineConfig({
         target: apiTarget,
         changeOrigin: true,
       },
+      // Sample-app reverse proxy (path routing) — forwarded to Django, which
+      // proxies on to the app container.
+      "/apps": {
+        target: apiTarget,
+        changeOrigin: true,
+      },
     },
   },
 });

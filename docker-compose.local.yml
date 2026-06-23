@@ -13,6 +13,10 @@ services:
       - postgres
       - redis
       - mailpit
+    # Lets the app reverse-proxy (APPS_PROXY_PATH) reach a sample app's published
+    # host port at host.docker.internal:<app_port>.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /app/.venv
       - .:/app:z

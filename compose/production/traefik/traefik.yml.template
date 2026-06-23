@@ -15,51 +15,13 @@ entryPoints:
   flower:
     address: ':5555'
 
-  # Sample-app entry points — Traefik terminates TLS here and routes to the
-  # container on the llm_apps Docker network.  Ports must not be bound by the
-  # app containers themselves; they are owned exclusively by Traefik.
-  app-9001:
-    address: ':9001'
-  app-9002:
-    address: ':9002'
-  app-9003:
-    address: ':9003'
-  app-9004:
-    address: ':9004'
-  app-9005:
-    address: ':9005'
-  app-9006:
-    address: ':9006'
-  app-9007:
-    address: ':9007'
-  app-9008:
-    address: ':9008'
-  app-9009:
-    address: ':9009'
-  app-9010:
-    address: ':9010'
-  app-9011:
-    address: ':9011'
-  app-9012:
-    address: ':9012'
-  app-9013:
-    address: ':9013'
-  app-9014:
-    address: ':9014'
-  app-9015:
-    address: ':9015'
-  app-9016:
-    address: ':9016'
-  app-9017:
-    address: ':9017'
-  app-9018:
-    address: ':9018'
-  app-9019:
-    address: ':9019'
-  app-9020:
-    address: ':9020'
+# Sample apps are NOT given dedicated entry points/ports anymore.  Each app is
+# reached on the shared web-secure (:443) entry point via a unique subdomain
+# (<container_name>.<APPS_DOMAIN>) and routed to the container on the llm_apps
+# Docker network.  See dynamic/app-<name>.yml (written by Django at runtime).
 
 certificatesResolvers:
+  # HTTP-01 — used for the apex/www domain (single-host certs).
   letsencrypt:
     acme:
       email: '${LETSENCRYPT_EMAIL}'
@@ -67,9 +29,20 @@ certificatesResolvers:
       httpChallenge:
         entryPoint: web
 
+  # DNS-01 — required to issue the wildcard *.${APPS_DOMAIN} cert that fronts
+  # every sample-app subdomain.  Provider + credentials come from env
+  # (TRAEFIK_DNS_PROVIDER plus the provider's own vars, e.g. CF_DNS_API_TOKEN).
+  letsencrypt-dns:
+    acme:
+      email: '${LETSENCRYPT_EMAIL}'
+      storage: /etc/traefik/acme/acme-dns.json
+      dnsChallenge:
+        provider: '${TRAEFIK_DNS_PROVIDER}'
+
 providers:
-  # Static routes (django, frontend, flower) live in dynamic/static.yml.
-  # Per-container routes are written to dynamic/app-PORT.yml at runtime.
+  # Static routes (django, frontend, flower) + the wildcard TLS store live in
+  # dynamic/static.yml.  Per-container routes are written to
+  # dynamic/app-<name>.yml at runtime.
   file:
     directory: /etc/traefik/dynamic/
     watch: true

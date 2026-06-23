@@ -56,7 +56,11 @@ services:
     depends_on:
       - django
     env_file:
+      # .django provides DJANGO_DOMAIN, APPS_DOMAIN, LETSENCRYPT_EMAIL.
       - ./.envs/.production/.django
+      # .traefik provides the DNS-01 provider + credentials used to issue the
+      # wildcard *.APPS_DOMAIN cert (e.g. TRAEFIK_DNS_PROVIDER, CF_DNS_API_TOKEN).
+      - ./.envs/.production/.traefik
     volumes:
       - production_traefik:/etc/traefik/acme
       - production_traefik_dynamic:/etc/traefik/dynamic
@@ -67,7 +71,6 @@ services:
       - '0.0.0.0:80:80'
       - '0.0.0.0:443:443'
       - '0.0.0.0:5555:5555'
-      - '0.0.0.0:9001-9020:9001-9020'
 
   redis:
     image: docker.io/redis:7.2

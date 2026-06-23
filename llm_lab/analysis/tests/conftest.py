@@ -1,31 +1,37 @@
 from __future__ import annotations
 
 import pytest
-from ninja.testing import TestClient
+from django.test import Client
 
-from config.api import api
-from llm_lab.analysis.tests.factories import AnalysisResultFactory
-from llm_lab.analysis.tests.factories import AnalysisTaskFactory
+from llm_lab.analysis.tests.factories import AnalysisRunFactory
+from llm_lab.analysis.tests.factories import AnalyzerToolFactory
 from llm_lab.analysis.tests.factories import FindingFactory
+from llm_lab.analysis.tests.factories import ToolResultFactory
 
 
 @pytest.fixture
-def analysis_task(user):
-    return AnalysisTaskFactory(created_by=user)
+def tool(db):
+    return AnalyzerToolFactory()
 
 
 @pytest.fixture
-def analysis_result(analysis_task):
-    return AnalysisResultFactory(task=analysis_task)
+def analysis_run(db, user):
+    return AnalysisRunFactory(created_by=user)
 
 
 @pytest.fixture
-def finding(analysis_result):
-    return FindingFactory(result=analysis_result)
+def tool_result(analysis_run):
+    return ToolResultFactory(run=analysis_run)
 
 
 @pytest.fixture
-def api_client(user):
-    client = TestClient(api)
-    client.user = user
+def finding(tool_result):
+    return FindingFactory(result=tool_result)
+
+
+@pytest.fixture
+def api_client(db, user):
+    """Session-authenticated Django test client."""
+    client = Client()
+    client.force_login(user)
     return client

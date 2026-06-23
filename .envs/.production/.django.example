@@ -35,19 +35,31 @@ DJANGO_ACCOUNT_ALLOW_REGISTRATION=True
 # Browser-facing app URL (https) — used in verification and password-reset emails.
 FRONTEND_PUBLIC_ORIGIN=https://example.com
 
-# Sample-app container access (Traefik TLS termination)
+# Sample-app container access (Traefik bridge — subdomain routing)
 # ------------------------------------------------------------------------------
 # TRAEFIK_DYNAMIC_DIR and DOCKER_APPS_NETWORK are set automatically by
 # docker-compose.production.yml — do not override here unless you know what
 # you're doing.
 #
-# When TRAEFIK_DYNAMIC_DIR is set, Django writes per-container route files so
-# Traefik terminates TLS on each app's port (9001-9020) and forwards traffic
-# to the container via the llm_apps Docker network.  URLs become
-# https://<domain>:<port>/ — HTTPS on the domain's valid cert, no path prefix.
+# Each generated sample app is reached on a UNIQUE SUBDOMAIN through Traefik:
+#   https://<container_name>.<APPS_DOMAIN>/
+# Django writes a per-container route file; Traefik routes the subdomain to the
+# container over the llm_apps network (no host ports, no per-app port limit).
+# TLS is served from a single wildcard *.<APPS_DOMAIN> certificate.
 #
+# APPS_DOMAIN — base domain for app subdomains. Defaults to DJANGO_DOMAIN.
+# A DEDICATED subdomain (e.g. apps.example.com) is recommended so the wildcard
+# stays scoped; you then need DNS: *.apps.example.com -> this host.
+# (Traefik also reads this — it loads .django — to request the wildcard cert.)
+APPS_DOMAIN=apps.example.com
+
+# The wildcard *.APPS_DOMAIN TLS cert needs the Let's Encrypt DNS-01 challenge.
+# Its provider + credentials live in .envs/.production/.traefik (loaded only by
+# the Traefik container) — see .traefik.example.
+
 # CONTAINER_APP_HOST is only used when TRAEFIK_DYNAMIC_DIR is NOT set (e.g.
-# local dev without Traefik).  Leave empty to fall back to DJANGO_DOMAIN.
+# local dev without Traefik), where apps bind a host port instead.  Leave empty
+# to fall back to DJANGO_DOMAIN.
 CONTAINER_APP_HOST=
 
 

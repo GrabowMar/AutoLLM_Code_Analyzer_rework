@@ -45,16 +45,16 @@ def _local_app_stats() -> dict[str, dict[str, Any]]:
 
     sev_rows = (
         Finding.objects.exclude(
-            result__task__generation_job__model__model_id__isnull=True,
+            result__run__generation_job__model__model_id__isnull=True,
         )
         .values(
-            "result__task__generation_job__model__model_id",
+            "result__run__generation_job__model__model_id",
             "severity",
         )
         .annotate(c=Count("id"))
     )
     for r in sev_rows:
-        mid = r["result__task__generation_job__model__model_id"]
+        mid = r["result__run__generation_job__model__model_id"]
         if mid in out:
             out[mid]["findings"][r["severity"]] = int(r["c"])
 

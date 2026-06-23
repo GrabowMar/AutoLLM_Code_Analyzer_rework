@@ -62,3 +62,17 @@ http:
       loadBalancer:
         servers:
           - url: http://frontend:3000
+
+# Pre-issue the wildcard *.${APPS_DOMAIN} certificate once at startup via the
+# DNS-01 resolver and serve it from the default store.  Per-app routers use
+# ``tls: {}`` and so pick this wildcard up automatically by SNI — no per-app
+# certificate is requested.
+tls:
+  stores:
+    default:
+      defaultGeneratedCert:
+        resolver: letsencrypt-dns
+        domain:
+          main: '${APPS_DOMAIN}'
+          sans:
+            - '*.${APPS_DOMAIN}'

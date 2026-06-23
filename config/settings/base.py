@@ -146,6 +146,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # https://docs.djangoproject.com/en/dev/ref/settings/#middleware
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Route <name>.<APPS_DOMAIN> straight to the app proxy before any
+    # session/CSRF/auth processing (apps are a separate, public origin).
+    "llm_lab.runtime.middleware.AppSubdomainProxyMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -392,6 +395,34 @@ OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK = env.bool(
 # Hostname used to build public URLs for generated sample-app containers.
 # Only used when TRAEFIK_DYNAMIC_DIR is NOT set (local dev / non-Traefik).
 CONTAINER_APP_HOST = env("CONTAINER_APP_HOST", default="")
+
+# Base domain for sample-app subdomains in bridge mode.  Each app is reached at
+# https://<container_name>.<APPS_DOMAIN> through Traefik (TLS via the wildcard
+# *.<APPS_DOMAIN> cert).  Defaults to DJANGO_DOMAIN; a dedicated subdomain such
+# as "apps.example.com" is recommended so the wildcard stays scoped.
+APPS_DOMAIN = env("APPS_DOMAIN", default=DJANGO_DOMAIN)
+
+# Subdomain routing via a Django reverse-proxy (for envs without Traefik, e.g. a
+# single Caddy fronting one Django).  When True, a wildcard ``*.<APPS_DOMAIN>``
+# edge route forwards to Django, and AppSubdomainProxyMiddleware serves the app
+# at the subdomain root so /assets and /api resolve to the app.  Needs wildcard
+# DNS + a wildcard TLS cert at the edge.
+APPS_SUBDOMAIN_PROXY = env.bool("APPS_SUBDOMAIN_PROXY", default=False)
+
+# Path-based routing (no wildcard DNS/cert needed).  When True, sample apps are
+# reached at <APPS_PUBLIC_ORIGIN>/apps/<container_name>/ and Django reverse-
+# proxies that path to the app container.  NOTE: breaks SPAs that use
+# root-absolute /assets or /api (they collide with the main platform) — prefer
+# APPS_SUBDOMAIN_PROXY.  Mutually exclusive with the Traefik bridge.
+APPS_PROXY_PATH = env.bool("APPS_PROXY_PATH", default=False)
+# Browser-facing origin that fronts /apps/ (falls back to FRONTEND_PUBLIC_ORIGIN
+# then https://DJANGO_DOMAIN).
+APPS_PUBLIC_ORIGIN = env("APPS_PUBLIC_ORIGIN", default="").strip().rstrip("/")
+# Host Django uses to reach an app's published port when the app binds a host
+# port (dev). Requires the django container to resolve it — docker-compose adds
+# host.docker.internal:host-gateway.  Ignored when apps run on DOCKER_APPS_NETWORK
+# (then Django reaches them by container name).
+APPS_UPSTREAM_HOST = env("APPS_UPSTREAM_HOST", default="host.docker.internal")
 
 # When set, Django writes per-container Traefik dynamic route files here so
 # Traefik can terminate TLS on each app's dedicated port.  Must be the same

@@ -5,7 +5,6 @@
 	import {
 		getModels,
 		getScaffoldingTemplates,
-		getTemplateBundles,
 		getAppTemplates,
 		createCustomJob,
 		createScaffoldingBatch,
@@ -15,7 +14,6 @@
 		cancelGenerationJob,
 		type LLMModelSummary,
 		type ScaffoldingTemplate,
-		type TemplateBundle,
 		type AppRequirementTemplate,
 		type GenerationJob,
 		type PaginatedJobs,
@@ -45,10 +43,8 @@
 	let copilotModelId = $state<number | ''>('');
 
 	let scaffoldingTemplates = $state<ScaffoldingTemplate[]>([]);
-	let templateBundles = $state<TemplateBundle[]>([]);
 	let appTemplates = $state<AppRequirementTemplate[]>([]);
 	let scaffoldingLoading = $state(true);
-	let bundlesLoading = $state(true);
 
 	let customSubmitting = $state(false);
 	let customError = $state('');
@@ -185,17 +181,14 @@
 
 	async function loadScaffoldingData() {
 		try {
-			const [scaffolds, bundles, apps] = await Promise.all([
+			const [scaffolds, apps] = await Promise.all([
 				getScaffoldingTemplates(),
-				getTemplateBundles(),
 				getAppTemplates(),
 			]);
 			scaffoldingTemplates = scaffolds;
-			templateBundles = bundles;
 			appTemplates = apps;
 		} finally {
 			scaffoldingLoading = false;
-			bundlesLoading = false;
 		}
 	}
 
@@ -443,10 +436,8 @@
 				{models}
 				{modelsLoading}
 				{scaffoldingTemplates}
-				{templateBundles}
 				{appTemplates}
 				{scaffoldingLoading}
-				{bundlesLoading}
 				{customSubmitting}
 				{customError}
 				{scaffoldingSubmitting}

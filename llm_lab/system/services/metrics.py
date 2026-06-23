@@ -11,7 +11,7 @@ from django.db import connection
 from django.db.models import Count
 from django.utils import timezone
 
-from llm_lab.analysis.models import AnalysisTask
+from llm_lab.analysis.models import AnalysisRun
 from llm_lab.generation.models import GenerationJob
 from llm_lab.reports.models import Report
 from llm_lab.runtime.models import ContainerInstance
@@ -168,7 +168,7 @@ def app_stats() -> dict[str, Any]:
         return {"by_status": by_status, "last_24h": recent}
 
     res = {
-        "analysis_tasks": _counts(AnalysisTask),
+        "analysis_tasks": _counts(AnalysisRun),
         "generation_jobs": _counts(GenerationJob),
         "reports": _counts(Report),
         "container_instances": _counts(ContainerInstance),

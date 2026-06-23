@@ -47,13 +47,30 @@ class ContainerInstanceSchema(ModelSchema):
 
     @staticmethod
     def resolve_app_url(obj: ContainerInstance) -> str | None:
-        if not obj.app_port:
-            return None
         from django.conf import settings
 
-        if getattr(settings, "TRAEFIK_DYNAMIC_DIR", ""):
-            domain = getattr(settings, "DJANGO_DOMAIN", "localhost")
-            return f"https://{domain}:{obj.app_port}"
+        # Subdomain mode: each app at the root of its own origin
+        # (Traefik bridge, or a wildcard edge route → Django proxy).
+        if getattr(settings, "TRAEFIK_DYNAMIC_DIR", "") or getattr(settings, "APPS_SUBDOMAIN_PROXY", False):
+            if obj.status != ContainerInstance.Status.RUNNING:
+                return None
+            apps_domain = getattr(settings, "APPS_DOMAIN", "") or getattr(settings, "DJANGO_DOMAIN", "localhost")
+            return f"https://{obj.name}.{apps_domain}"
+
+        # Path mode: Django reverse-proxies <origin>/apps/<name>/ to the app.
+        if getattr(settings, "APPS_PROXY_PATH", False):
+            if obj.status != ContainerInstance.Status.RUNNING:
+                return None
+            origin = (
+                getattr(settings, "APPS_PUBLIC_ORIGIN", "")
+                or getattr(settings, "FRONTEND_PUBLIC_ORIGIN", "")
+                or f"https://{getattr(settings, 'DJANGO_DOMAIN', 'localhost')}"
+            )
+            return f"{origin.rstrip('/')}/apps/{obj.name}/"
+
+        # Local dev (no proxy): direct host-port binding.
+        if not obj.app_port:
+            return None
         host = getattr(settings, "CONTAINER_APP_HOST", "") or getattr(settings, "DJANGO_DOMAIN", "localhost")
         return f"http://{host}:{obj.app_port}"
 

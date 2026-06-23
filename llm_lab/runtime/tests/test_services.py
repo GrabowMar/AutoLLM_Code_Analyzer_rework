@@ -22,7 +22,7 @@ def _mock_docker():
     mock.ping.return_value = True
     mock.containers.get.return_value.status = "running"
     mock.containers.get.return_value.attrs = {
-        "State": {"Health": {"Status": "healthy"}},
+        "State": {"Status": "running", "Health": {"Status": "healthy"}},
     }
     mock.containers.get.return_value.logs.return_value = b"log line 1\nlog line 2\n"
     mock.containers.run.return_value.id = "deadbeef001"

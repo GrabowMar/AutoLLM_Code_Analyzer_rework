@@ -9,7 +9,7 @@ content: |
   - Keep `app = FastAPI(title="Generated App")` at module scope.
   - Include a health endpoint at `GET /api/health`.
   - Use SQLAlchemy 2 style session access and explicit Pydantic schemas.
-  - When serving a frontend, preserve the static-file fallback route so direct page refreshes work.
+  - Serve the built SPA from `/static`: mount `app.mount("/static", StaticFiles(directory="static"), name="static")` and return `FileResponse("static/index.html")` from a catch-all fallback route (so deep links / refreshes work). The frontend build is copied to `./static` and Vite uses `base: "/static/"`, so do NOT mount the SPA at `/` or hardcode `/assets`.
 metadata:
   stack: fastapi
   stage: backend

@@ -57,20 +57,27 @@ def _stack_entries(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return entries
 
 
+def canonical_stack_slug(slug: str) -> str:
+    """Map a raw scaffolding slug (canonical or alias) to its canonical stack slug."""
+    manifest = load_manifest()
+    entries = _stack_entries(manifest)
+    default = manifest.get("default_stack", "generic-python")
+
+    if slug in entries:
+        return entries[slug]["canonical_slug"]
+    logger.warning("Unknown scaffolding slug %r; using %s", slug, default)
+    return default
+
+
 def resolve_stack_slug(job: GenerationJob) -> str:
     """Resolve job scaffolding template to a canonical stack slug from the manifest."""
     manifest = load_manifest()
-    entries = _stack_entries(manifest)
     default = manifest.get("default_stack", "generic-python")
 
     if not job.scaffolding_template:
         return default
 
-    slug = job.scaffolding_template.slug
-    if slug in entries:
-        return entries[slug]["canonical_slug"]
-    logger.warning("Unknown scaffolding slug %r; using %s", slug, default)
-    return default
+    return canonical_stack_slug(job.scaffolding_template.slug)
 
 
 def get_stack_config(stack_slug: str) -> dict[str, Any]:

@@ -85,8 +85,8 @@ class Report(models.Model):
         blank=True,
         related_name="reports",
     )
-    analysis_task = models.ForeignKey(
-        "analysis.AnalysisTask",
+    analysis_run = models.ForeignKey(
+        "analysis.AnalysisRun",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

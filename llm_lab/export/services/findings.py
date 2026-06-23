@@ -38,12 +38,12 @@ def findings_csv(queryset: QuerySet[Any]) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(FINDING_HEADERS)
-    for f in queryset.select_related("result", "result__task"):
+    for f in queryset.select_related("result", "result__run"):
         writer.writerow(
             [
                 str(f.id),
-                str(f.result.task_id),
-                f.result.analyzer_name,
+                str(f.result.run_id),
+                f.result.tool_slug,
                 f.severity,
                 f.file_path,
                 f.line_number or "",
@@ -61,8 +61,8 @@ def findings_json(queryset: QuerySet[Any]) -> list[dict[str, Any]]:
     return [
         {
             "id": f.id,
-            "task_id": str(f.result.task_id),
-            "analyzer": f.result.analyzer_name,
+            "task_id": str(f.result.run_id),
+            "analyzer": f.result.tool_slug,
             "severity": f.severity,
             "file_path": f.file_path,
             "line": f.line_number,
@@ -71,15 +71,15 @@ def findings_json(queryset: QuerySet[Any]) -> list[dict[str, Any]]:
             "cwe": f.tool_specific_data.get("cwe", "") if f.tool_specific_data else "",
             "created_at": f.created_at.isoformat(),
         }
-        for f in queryset.select_related("result", "result__task")
+        for f in queryset.select_related("result", "result__run")
     ]
 
 
 def findings_sarif(queryset: QuerySet[Any]) -> dict[str, Any]:
     """Return SARIF 2.1.0 dict grouped by analyzer name."""
     by_analyzer: dict[str, list[Any]] = {}
-    for f in queryset.select_related("result", "result__task"):
-        key = f.result.analyzer_name
+    for f in queryset.select_related("result", "result__run"):
+        key = f.result.tool_slug
         by_analyzer.setdefault(key, []).append(f)
 
     runs = []

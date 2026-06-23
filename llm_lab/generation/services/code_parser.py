@@ -111,10 +111,17 @@ IMPORT_TO_PACKAGE = {
 }
 
 
+# Some models emit the filename as a bare ``:app.py`` marker on the first line
+# INSIDE the block instead of on the fence (```python\n:app.py\n...).  Left in,
+# it becomes line 1 of the source and breaks compilation, so we strip it.
+_INLINE_FILENAME_RE = re.compile(r"^[ \t]*:[ \t]*(?P<filename>[\w./-]+\.[A-Za-z0-9]+)[ \t]*$")
+
+
 def extract_code_blocks(content: str) -> list[dict[str, str]]:
     """Extract all annotated code blocks from LLM markdown output.
 
-    Supports ```python:filename.py, ```jsx:App.jsx, ```javascript:api.js etc.
+    Supports ```python:filename.py, ```jsx:App.jsx, ```javascript:api.js etc.,
+    and a ``:filename`` marker on the first line inside the block.
     Returns list of dicts with 'language', 'filename', 'code' keys.
     """
     blocks = []
@@ -126,6 +133,14 @@ def extract_code_blocks(content: str) -> list[dict[str, str]]:
         lang = (match.group("lang") or "").strip().lower()
         filename = (match.group("filename") or "").strip()
         code = (match.group(3) or "").strip()
+        # Pull a leading ``:filename`` marker out of the body so it can't end up
+        # in the source; adopt it as the filename when the fence had none.
+        first, sep, rest = code.partition("\n")
+        inline = _INLINE_FILENAME_RE.match(first)
+        if inline:
+            if not filename:
+                filename = inline.group("filename")
+            code = rest.strip()
         if code:
             blocks.append({"language": lang, "filename": filename, "code": code})
     return blocks
@@ -201,6 +216,20 @@ def extract_frontend_code(raw_content: str) -> str:
     return "\n\n".join(parts)
 
 
+# Packages required by a feature/type that has no dedicated import line.
+# Pydantic's EmailStr, for example, needs the optional ``email-validator``
+# extra at runtime even though nothing imports it directly.
+_FEATURE_DEPENDENCIES: tuple[tuple[str, str], ...] = (
+    (r"\bEmailStr\b", "email-validator"),
+)
+
+
+def _add_feature_dependencies(code: str, packages: set[str]) -> None:
+    for marker, package in _FEATURE_DEPENDENCIES:
+        if re.search(marker, code):
+            packages.add(package)
+
+
 def infer_python_dependencies(code: str) -> list[str]:
     """Infer PyPI packages from Python import statements using AST."""
     packages: set[str] = set()
@@ -209,18 +238,19 @@ def infer_python_dependencies(code: str) -> list[str]:
         tree = ast.parse(code)
     except SyntaxError:
         # Fallback to regex if AST fails
-        return _regex_infer_deps(code)
+        packages.update(_regex_infer_deps(code))
+    else:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    top = alias.name.split(".")[0]
+                    _map_import(top, packages)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    top = node.module.split(".")[0]
+                    _map_import(top, packages)
 
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                top = alias.name.split(".")[0]
-                _map_import(top, packages)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                top = node.module.split(".")[0]
-                _map_import(top, packages)
-
+    _add_feature_dependencies(code, packages)
     return sorted(packages)
 
 

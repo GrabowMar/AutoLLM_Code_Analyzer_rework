@@ -96,17 +96,29 @@ def dispatch_generate(
 # ---------------------------------------------------------------------------
 
 
+def _threshold_status(summary: dict[str, Any], thresholds: dict[str, Any]) -> str:
+    """Compare finding severity counts against optional thresholds."""
+    if not thresholds:
+        return "not_evaluated"
+    counts = (summary or {}).get("severity_counts", {})
+    for severity, limit in thresholds.items():
+        try:
+            if int(counts.get(severity, 0)) > int(limit):
+                return "failed"
+        except (TypeError, ValueError):
+            continue
+    return "passed"
+
+
 def dispatch_analyze(
     step_run: PipelineStepRun,
     params: dict[str, Any],
     run_params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Create an AnalysisTask and run it synchronously, return output."""
-    import threading
-
-    from llm_lab.analysis.models import AnalysisProfile
-    from llm_lab.analysis.models import AnalysisTask
-    from llm_lab.analysis.services.analysis_service import AnalysisService
+    """Create an AnalysisRun and run it synchronously, return output."""
+    from llm_lab.analysis.models import AnalysisRun
+    from llm_lab.analysis.services import runner
+    from llm_lab.analysis.services import workspace_service
     from llm_lab.users.models import User
 
     triggered_by = step_run.run.triggered_by
@@ -116,72 +128,39 @@ def dispatch_analyze(
         "generation_job_id",
     )
     source_code = params.get("source_code")
-    target_url = params.get("target_url") or run_params.get("target_url")
+    # Accept either the new ``tool_slugs`` or the legacy ``analyzers`` key.
+    tool_slugs = params.get("tool_slugs") or params.get("analyzers") or []
+    thresholds = params.get("thresholds", {})
 
-    # Resolve profile if provided; merge its analyzers/settings with explicit overrides
-    profile_id = params.get("profile_id")
-    profile = None
-    if profile_id:
-        profile = AnalysisProfile.objects.filter(id=profile_id).first()
-
-    if profile:
-        analyzers = params.get("analyzers") or profile.analyzers
-        merged_settings: dict[str, Any] = {k: dict(v) for k, v in profile.settings.items()}
-        for name, overrides in params.get("settings", {}).items():
-            merged_settings.setdefault(name, {}).update(overrides)
-    else:
-        analyzers = params.get("analyzers", [])
-        merged_settings = params.get("settings", {})
-
-    configuration: dict[str, Any] = {
-        "analyzers": analyzers,
-        "settings": merged_settings,
-        "live_target": target_url,
-        "generation_job_id": str(generation_job_id) if generation_job_id else None,
-        "thresholds": params.get("thresholds", {}),
-    }
-
-    task = AnalysisTask.objects.create(
+    workspace = workspace_service.get_workspace(user) if user else None
+    run = AnalysisRun.objects.create(
         name=f"Automation step {step_run.id}",
-        generation_job_id=generation_job_id,
-        source_code=source_code,
-        configuration=configuration,
-        profile=profile,
         created_by=user,
+        workspace=workspace,
+        generation_job_id=generation_job_id or None,
+        source_code=source_code,
+        tool_slugs=list(tool_slugs),
     )
 
-    # Run synchronously in this thread
-    done_event = threading.Event()
-    exc_holder: list[Exception] = []
+    error: str | None = None
+    try:
+        runner.execute(
+            AnalysisRun.objects.select_related("created_by", "workspace").get(id=run.id),
+        )
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)
 
-    def _run() -> None:
-        try:
-            service = AnalysisService()
-            service.execute(
-                AnalysisTask.objects.select_related(
-                    "generation_job",
-                    "created_by",
-                ).get(id=task.id),
-            )
-        except Exception as exc:  # noqa: BLE001
-            exc_holder.append(exc)
-        finally:
-            done_event.set()
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    done_event.wait()
-
-    task.refresh_from_db()
+    run.refresh_from_db()
     output: dict[str, Any] = {
-        "analysis_task_id": str(task.id),
-        "status": task.status,
-        "threshold_status": task.threshold_status,
+        "analysis_run_id": str(run.id),
+        "status": run.status,
+        "summary": run.summary,
+        "threshold_status": _threshold_status(run.summary, thresholds),
     }
-    if exc_holder:
-        output["error"] = str(exc_holder[0])
-    elif task.status == "failed":
-        output["error"] = task.error_message or "Analysis failed"
+    if error:
+        output["error"] = error
+    elif run.status == AnalysisRun.Status.FAILED:
+        output["error"] = run.error_message or "Analysis failed"
     return output
 
 

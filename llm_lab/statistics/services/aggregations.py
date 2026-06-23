@@ -9,10 +9,10 @@ from django.db.models import Avg
 from django.db.models import Count
 from django.db.models import Q
 
-from llm_lab.analysis.models import AnalysisResult
-from llm_lab.analysis.models import AnalysisTask
+from llm_lab.analysis.models import AnalysisRun
+from llm_lab.analysis.models import AnalyzerTool
 from llm_lab.analysis.models import Finding
-from llm_lab.analysis.services.base import AnalyzerRegistry
+from llm_lab.analysis.models import ToolResult
 from llm_lab.generation.models import GenerationJob
 from llm_lab.llm_models.models import LLMModel
 from llm_lab.statistics.services.helpers import _percent
@@ -33,11 +33,11 @@ def get_system_overview(user: AbstractBaseUser | None = None) -> dict[str, Any]:
         return cached
 
     jobs = _scoped(GenerationJob.objects.all(), user, "created_by")
-    tasks = _scoped(AnalysisTask.objects.all(), user, "created_by")
+    tasks = _scoped(AnalysisRun.objects.all(), user, "created_by")
     findings = _scoped(
         Finding.objects.all(),
         user,
-        "result__task__created_by",
+        "result__run__created_by",
     )
 
     job_counts = jobs.aggregate(
@@ -103,7 +103,7 @@ def get_severity_distribution(
     findings = _scoped(
         Finding.objects.all(),
         user,
-        "result__task__created_by",
+        "result__run__created_by",
     )
 
     raw = dict(
@@ -165,16 +165,16 @@ def get_model_comparison(
     # Bulk fetch all finding severity counts for all target models in one query!
     sev_data = (
         Finding.objects.filter(
-            result__task__generation_job__model_id__in=model_ids,
+            result__run__generation_job__model_id__in=model_ids,
         )
-        .values("result__task__generation_job__model_id", "severity")
+        .values("result__run__generation_job__model_id", "severity")
         .annotate(c=Count("id"))
     )
 
     # Map by model_id -> severity -> count
     sev_map_by_model: dict[str, dict[str, int]] = {}
     for item in sev_data:
-        m_id = item["result__task__generation_job__model_id"]
+        m_id = item["result__run__generation_job__model_id"]
         sev_map_by_model.setdefault(m_id, {})[item["severity"]] = int(item["c"])
 
     rows: list[dict[str, Any]] = []
@@ -245,13 +245,13 @@ def get_tool_effectiveness(
         return cached
 
     results = _scoped(
-        AnalysisResult.objects.all(),
+        ToolResult.objects.all(),
         user,
-        "task__created_by",
+        "run__created_by",
     )
 
     by_tool = (
-        results.values("analyzer_name", "analyzer_type")
+        results.values("tool_slug", "category")
         .annotate(
             scans=Count("id", distinct=True),
             findings=Count("findings"),
@@ -260,21 +260,21 @@ def get_tool_effectiveness(
     )
 
     by_tool_list = list(by_tool)
-    tool_names = [t["analyzer_name"] for t in by_tool_list]
+    tool_names = [t["tool_slug"] for t in by_tool_list]
 
     # Bulk fetch top rules for all tools in one grouped query!
     rules_data = (
-        Finding.objects.filter(result__analyzer_name__in=tool_names)
+        Finding.objects.filter(result__tool_slug__in=tool_names)
         .exclude(rule_id="")
-        .values("result__analyzer_name", "rule_id")
+        .values("result__tool_slug", "rule_id")
         .annotate(c=Count("id"))
-        .order_by("result__analyzer_name", "-c")
+        .order_by("result__tool_slug", "-c")
     )
 
     # Group in Python: the first rule we see for a tool name is the top rule because it's sorted by -c!
     top_rules: dict[str, str] = {}
     for item in rules_data:
-        name = item["result__analyzer_name"]
+        name = item["result__tool_slug"]
         if name not in top_rules:
             top_rules[name] = item["rule_id"]
 
@@ -284,12 +284,12 @@ def get_tool_effectiveness(
         findings = int(t["findings"]) or 0
         rows.append(
             {
-                "name": t["analyzer_name"],
-                "type": t["analyzer_type"],
+                "name": t["tool_slug"],
+                "type": t["category"],
                 "scans": scans,
                 "findings": findings,
                 "avg_per_scan": round(findings / scans, 1) if scans else 0.0,
-                "top_rule": top_rules.get(t["analyzer_name"], ""),
+                "top_rule": top_rules.get(t["tool_slug"], ""),
             },
         )
     cache.set(cache_key, rows, 15)
@@ -311,7 +311,7 @@ def get_top_findings(
     findings = _scoped(
         Finding.objects.all(),
         user,
-        "result__task__created_by",
+        "result__run__created_by",
     )
     rows = findings.values("title", "severity").annotate(count=Count("id")).order_by("-count")[:limit]
     res = [
@@ -407,31 +407,31 @@ def get_analyzer_health() -> dict[str, Any]:
     if cached is not None:
         return cached
 
-    analyzers = AnalyzerRegistry.list_available()
-    online = sum(1 for a in analyzers if a.get("available"))
+    # Health now reflects the data-driven catalog: an enabled tool is "online"
+    # (installable). Per-user runtime availability is reported by the analyzers
+    # workspace API, not here.
+    tools = list(AnalyzerTool.objects.all())
+    online = sum(1 for t in tools if t.is_enabled)
     by_type: dict[str, dict[str, int]] = {}
-    for a in analyzers:
-        bucket = by_type.setdefault(
-            a.get("type", "unknown"),
-            {"online": 0, "total": 0},
-        )
+    for t in tools:
+        bucket = by_type.setdefault(t.category, {"online": 0, "total": 0})
         bucket["total"] += 1
-        if a.get("available"):
+        if t.is_enabled:
             bucket["online"] += 1
     res = {
-        "total": len(analyzers),
+        "total": len(tools),
         "online": online,
-        "offline": len(analyzers) - online,
+        "offline": len(tools) - online,
         "by_type": by_type,
         "analyzers": [
             {
-                "name": a["name"],
-                "type": a["type"],
-                "display_name": a["display_name"],
-                "available": a["available"],
-                "message": a["availability_message"],
+                "name": t.slug,
+                "type": t.category,
+                "display_name": t.name,
+                "available": t.is_enabled,
+                "message": "Enabled" if t.is_enabled else "Disabled",
             }
-            for a in analyzers
+            for t in tools
         ],
     }
     # Cache for 5 minutes (300 seconds)

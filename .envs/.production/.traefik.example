@@ -1,0 +1,21 @@
+# Traefik DNS-01 credentials for the wildcard *.APPS_DOMAIN certificate.
+# Copy to `.envs/.production/.traefik` and fill in real values.
+# Do NOT commit the real file — it's gitignored.
+#
+# Loaded ONLY by the traefik service (see docker-compose.production.yml) so the
+# DNS API secret is not exposed to django/celery/flower containers.
+# ------------------------------------------------------------------------------
+
+# Traefik DNS provider code — see https://doc.traefik.io/traefik/https/acme/#providers
+# Required; the Traefik entrypoint refuses to start without it.
+TRAEFIK_DNS_PROVIDER=cloudflare
+
+# Provider credentials — the variable NAMES depend on TRAEFIK_DNS_PROVIDER.
+# Cloudflare (scoped API token with Zone:DNS:Edit on the apps zone):
+CF_DNS_API_TOKEN=
+#
+# Other providers use their own vars, e.g.:
+#   route53     -> AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION
+#   digitalocean-> DO_AUTH_TOKEN
+#   gandiv5     -> GANDIV5_API_KEY
+# Add whichever your provider requires here.

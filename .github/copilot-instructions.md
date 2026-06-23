@@ -35,6 +35,7 @@ uv run python manage.py <command>
 cd frontend
 npm install       # install deps
 npm run dev       # dev server (port 8080)
+npm run check     # svelte-check (type-check)
 npm run build     # production build
 ```
 
@@ -55,7 +56,7 @@ just frontend-dev         # start frontend dev server in container
 
 - `config/` — Django project config: settings (`base.py`, `local.py`, `production.py`, `test.py`), root URLconf, ASGI/WSGI, Celery app
 - `config/api.py` — Django Ninja API root. Registers routers from Django apps.
-- `llm_lab/` — Django apps directory (`APPS_DIR`). Each app lives here.
+- `llm_lab/` — Django apps directory (`APPS_DIR`). Apps: `users`, `llm_models`, `credentials`, `generation`, `runtime`, `analysis`, `reports`, `rankings`, `statistics`, `automation`, `realtime`, `tokens`, `export`, `docs`, `system`, `common`, `contrib`
 - `tests/` — Project-level tests
 
 Settings are environment-specific (`config/settings/{base,local,production,test}.py`) and use `django-environ` for env var loading.
@@ -93,6 +94,27 @@ Authentication is `SessionAuth` globally. API docs are restricted to staff.
 - Tests use `--reuse-db` and `--import-mode=importlib`
 - Test settings: `config.settings.test` (fast password hashing, in-memory email)
 
+### Realtime / SSE
+
+The `realtime` app exposes `GET /api/realtime/stream?channels=<comma-separated>` as a Server-Sent Events endpoint. Backend services publish events via `llm_lab.realtime.events.publish(channel, event_dict)` which writes to Redis pub/sub.
+
+Channel naming convention:
+- `generation:<job_id>`
+- `analysis:<task_id>`
+- `runtime:<container_id>`
+- `dashboard` (broadcast)
+
+Frontend subscription via `$lib/api/sse.ts`:
+
+```ts
+import { subscribe } from '$lib/api/sse';
+const cleanup = subscribe(['generation:42', 'dashboard'], (e) => {
+  console.log(e.type, e.data);
+});
+// on component destroy:
+cleanup();
+```
+
 ### User model
 
 Custom `User` model with email as the login field (no username). Single `name` field instead of first/last name. See `llm_lab/users/models.py`.
@@ -103,6 +125,27 @@ Custom `User` model with email as the login field (no username). Single `name` f
 - **Ruff**: Comprehensive rule set (see `pyproject.toml [tool.ruff]`). `S101` (assert) is allowed.
 - **Django version target**: 6.0 (enforced by `django-upgrade` pre-commit hook)
 - **Type hints**: mypy with `django-stubs`, strict `check_untyped_defs`
+
+## Frontend conventions
+
+### API calls
+
+`$lib/api/client.ts` is a barrel re-export. **New code should import from the domain module directly** (e.g., `$lib/api/generation`). Use `apiFetch` / `allauthFetch` from `$lib/api/core.ts` for custom calls — they handle CSRF tokens automatically. A 401 from `apiFetch` redirects to `/auth/login`.
+
+### Design system
+
+- Colors: background `#0F172A`, primary `#1E293B`, CTA `#22C55E`, text `#F8FAFC`
+- Fonts: headings Fira Code, body Fira Sans
+- Icons: **SVG only** (Heroicons/Lucide) — no emoji as icons
+- All clickable elements must have `cursor-pointer` and visible hover/focus states (150–300ms transition)
+- Breakpoints: 375 px, 768 px, 1024 px, 1440 px; respect `prefers-reduced-motion`
+- See `frontend/DESIGN_SYSTEM.md` for full spec
+
+## Branching & commits
+
+- Branch names: `<type>/<short-slug>` — e.g. `feat/ranking-export`, `fix/login-csrf`, `chore/upgrade-celery`
+- Commits: [Conventional Commits](https://www.conventionalcommits.org/) prefixes (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`)
+- Always run `just manage makemigrations --check` before pushing model changes
 
 ## Recommended MCP Servers
 

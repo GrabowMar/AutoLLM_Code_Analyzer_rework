@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import tempfile
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -160,10 +161,27 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
             network=apps_network,
         )
         container.container_id = cid
+        container.save(update_fields=["image", "container_id"])
+
+        ok, detail = _verify_running(container)
+        if not ok:
+            container.status = ContainerInstance.Status.FAILED
+            container.save(update_fields=["status"])
+            traefik_router.delete_route(container)
+            action.mark_failed(detail[-4000:])
+            realtime.publish(
+                f"runtime:{container.id}",
+                {
+                    "type": "status",
+                    "status": container.status,
+                    "updated_at": timezone.now().isoformat(),
+                },
+            )
+            return
+
         container.status = ContainerInstance.Status.RUNNING
-        container.save(update_fields=["image", "container_id", "status"])
-        if container.app_port:
-            traefik_router.write_route(container.name, container.app_port)
+        container.save(update_fields=["status"])
+        traefik_router.write_route(container)
         action.update_progress(100)
         action.mark_completed(
             output=f"Built {tag}, container {cid}\n\n{build_log[-2000:]}",
@@ -199,6 +217,46 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
         )
 
 
+def _verify_running(
+    container: ContainerInstance,
+    *,
+    settle_s: float = 2.5,
+    timeout_s: float = 10.0,
+) -> tuple[bool, str]:
+    """Confirm the container is still up shortly after start.
+
+    Many generated apps crash on boot (bad code, missing dep). ``docker run``
+    returns success regardless, so without this check we'd report a dead
+    container as RUNNING and serve a confusing 502. Returns (ok, detail); on
+    failure *detail* carries the exit code and last log lines.
+    """
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        info = docker_manager.inspect(container.name) or {}
+        if "error" in info:
+            time.sleep(0.5)
+            continue
+        state = info.get("State", {})
+        status = state.get("Status", "")
+        if status in ("exited", "dead"):
+            return False, _crash_detail(container, state)
+        if status == "running":
+            # Let an immediate crash surface, then re-check.
+            time.sleep(settle_s)
+            state2 = (docker_manager.inspect(container.name) or {}).get("State", {})
+            if state2.get("Status") == "running":
+                return True, ""
+            return False, _crash_detail(container, state2)
+        time.sleep(0.5)
+    return True, ""  # couldn't confirm a crash within the window; assume up
+
+
+def _crash_detail(container: ContainerInstance, state: dict) -> str:
+    logs = docker_manager.logs(container.name) or ""
+    code = state.get("ExitCode", "?")
+    return f"Container exited (code {code}) shortly after start — app crashed on boot.\n\n{logs[-3000:]}"
+
+
 def _write_minimal_dockerfile(path: Path) -> None:
     (path / "Dockerfile").write_text(
         "FROM python:3.11-slim\n"
@@ -225,12 +283,14 @@ def _do_start(action: ContainerAction, container: ContainerInstance) -> None:
     result = docker_manager.start(container.name)
     if "error" in result:
         action.mark_failed(result["error"])
-    else:
-        container.status = ContainerInstance.Status.RUNNING
+        return
+
+    ok, detail = _verify_running(container)
+    if not ok:
+        container.status = ContainerInstance.Status.FAILED
         container.save(update_fields=["status"])
-        if container.app_port:
-            traefik_router.write_route(container.name, container.app_port)
-        action.mark_completed(output="Started", exit_code=0)
+        traefik_router.delete_route(container)
+        action.mark_failed(detail[-4000:])
         realtime.publish(
             f"runtime:{container.id}",
             {
@@ -239,6 +299,20 @@ def _do_start(action: ContainerAction, container: ContainerInstance) -> None:
                 "updated_at": timezone.now().isoformat(),
             },
         )
+        return
+
+    container.status = ContainerInstance.Status.RUNNING
+    container.save(update_fields=["status"])
+    traefik_router.write_route(container)
+    action.mark_completed(output="Started", exit_code=0)
+    realtime.publish(
+        f"runtime:{container.id}",
+        {
+            "type": "status",
+            "status": container.status,
+            "updated_at": timezone.now().isoformat(),
+        },
+    )
 
 
 def _do_stop(action: ContainerAction, container: ContainerInstance) -> None:
@@ -248,8 +322,7 @@ def _do_stop(action: ContainerAction, container: ContainerInstance) -> None:
     else:
         container.status = ContainerInstance.Status.STOPPED
         container.save(update_fields=["status"])
-        if container.app_port:
-            traefik_router.delete_route(container.app_port)
+        traefik_router.delete_route(container)
         action.mark_completed(output="Stopped", exit_code=0)
         realtime.publish(
             f"runtime:{container.id}",
@@ -287,8 +360,7 @@ def _do_remove(action: ContainerAction, container: ContainerInstance) -> None:
     if error and not not_found:
         action.mark_failed(error)
         return
-    if container.app_port:
-        traefik_router.delete_route(container.app_port)
+    traefik_router.delete_route(container)
     port_allocator.release(container)
     container.status = ContainerInstance.Status.REMOVED
     container.save(update_fields=["status"])
@@ -324,8 +396,16 @@ def _do_health(action: ContainerAction, container: ContainerInstance) -> None:
 
 
 def build_for_job(job: GenerationJob, user: User | None) -> ContainerInstance:
-    """Create a ContainerInstance for *job* and kick off a build action."""
-    app_port = port_allocator.allocate()
+    """Create a ContainerInstance for *job* and kick off a build action.
+
+    In bridge mode (DOCKER_APPS_NETWORK set) the app is reached via a unique
+    subdomain through Traefik and needs no host port, so ``app_port`` is left
+    NULL.  In local dev (no apps network) we allocate a host port to bind.
+    """
+    from django.conf import settings
+
+    bridge_mode = bool(getattr(settings, "DOCKER_APPS_NETWORK", ""))
+    app_port = None if bridge_mode else port_allocator.allocate()
     slug = f"llm-{uuid.uuid4().hex[:8]}"
 
     instance = ContainerInstance.objects.create(
@@ -336,12 +416,13 @@ def build_for_job(job: GenerationJob, user: User | None) -> ContainerInstance:
         created_by=user,
     )
 
-    try:
-        alloc = PortAllocation.objects.get(app_port=app_port)
-        alloc.container = instance
-        alloc.save(update_fields=["container"])
-    except PortAllocation.DoesNotExist:
-        pass
+    if app_port is not None:
+        try:
+            alloc = PortAllocation.objects.get(app_port=app_port)
+            alloc.container = instance
+            alloc.save(update_fields=["container"])
+        except PortAllocation.DoesNotExist:
+            pass
 
     create_action(instance, ContainerAction.ActionType.BUILD, user)
     return instance

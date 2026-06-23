@@ -1,0 +1,25 @@
+slug: eslint
+name: ESLint
+description: >-
+  The pluggable linter for JavaScript and TypeScript. Reports problematic
+  patterns and style violations in JS/TS code.
+category: lint
+kind: container
+target_language: javascript
+icon: braces
+version: "8"
+install_cmd: "npm install -g eslint@8"
+verify_cmd: "eslint --version"
+run_cmd: "eslint {target} -f json --no-eslintrc --env browser,node --parser-options=ecmaVersion:latest --rule '{\"no-undef\":\"error\",\"no-unused-vars\":\"warn\"}'"
+parser_key: eslint
+run_timeout: 120
+install_timeout: 300
+display_order: 30
+config_schema: []
+default_config: {}
+sample_code: |
+  var unused = 42;
+
+  function greet(name) {
+    console.log("hi " + missingVar);
+  }

@@ -11,6 +11,7 @@
 	import Zap from '@lucide/svelte/icons/zap';
 	import Layers from '@lucide/svelte/icons/layers';
 	import Container from '@lucide/svelte/icons/container';
+	import ScanSearch from '@lucide/svelte/icons/scan-search';
 	import Activity from '@lucide/svelte/icons/activity';
 	import ChevronsLeft from '@lucide/svelte/icons/chevrons-left';
 	import ChevronsRight from '@lucide/svelte/icons/chevrons-right';
@@ -64,6 +65,7 @@
 			items: [
 				{ label: 'Automation', href: '/automation', icon: Zap },
 				{ label: 'Sample Generator', href: '/sample-generator', icon: WandSparkles },
+				{ label: 'Analyzers', href: '/analyzers', icon: ScanSearch },
 				{ label: 'Templates', href: '/templates', icon: Layers },
 				{ label: 'Reports', href: '/reports', icon: FileText },
 				{ label: 'Runtime', href: '/runtime', icon: Container },
