@@ -68,8 +68,8 @@ round trip.
 
 ## Adding a new Django app
 
-1. Create `llm_lab/<name>/` with `apps.py`, `models.py`, `tests/`, and
+1. Create `backend/<name>/` with `apps.py`, `models.py`, `tests/`, and
    (if exposing an API) `api/views.py` defining a `ninja.Router`.
 2. Add the app to `LOCAL_APPS` in `config/settings/base.py`.
 3. Register its router in `config/api.py`.
-4. Add factories under `llm_lab/<name>/tests/factories.py` for tests.
+4. Add factories under `backend/<name>/tests/factories.py` for tests.

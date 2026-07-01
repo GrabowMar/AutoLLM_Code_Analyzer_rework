@@ -14,11 +14,10 @@ updates:
       github-actions:
         patterns: ['*']
 
-  # Docker images — Python base images (local + docs + production)
+  # Docker images — Python base images (local + production)
   - package-ecosystem: 'docker'
     directories:
       - 'compose/local/django/'
-      - 'compose/local/docs/'
       - 'compose/production/django/'
     schedule:
       interval: 'weekly'
@@ -33,11 +32,11 @@ updates:
       docker-python:
         patterns: ['*']
 
-  # Docker images — everything else (node, postgres, redis, traefik, nginx…)
+  # Docker images — everything else (node, postgres, traefik, nginx…)
   - package-ecosystem: 'docker'
     directories:
-      - 'compose/local/node/'
-      - 'compose/production/aws/'
+      - 'compose/local/frontend/'
+      - 'compose/production/frontend/'
       - 'compose/production/postgres/'
       - 'compose/production/traefik/'
       - 'compose/production/nginx/'

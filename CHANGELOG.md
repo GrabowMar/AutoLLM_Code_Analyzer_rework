@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Renamed the `llm_lab/` Django-apps package to `backend/` for a clearer
+  top-level layout (`backend/` + `config/` + `frontend/`). Updated every
+  import, `INSTALLED_APPS` entry, migration reference, Docker image/volume
+  name, and doc/CI reference accordingly.
+- Trimmed `docs/` down to the material that actually describes this
+  codebase (`AUTOMATION_WORKFLOWS.md`, `TEMPLATE_SPECIFICATION.md`,
+  `sample-app-routing.md`, `app-layout.md`) and rewrote `docs/README.md` as
+  an accurate index.
+- Fixed `.github/dependabot.yml` directory globs that pointed at
+  directories which no longer exist (`compose/local/docs/`,
+  `compose/local/node/`, `compose/production/aws/`).
+
+### Removed
+- `docs/ARCHITECTURE.md`, `ANALYZER_GUIDE.md`, `ANALYSIS_PIPELINE.md`,
+  `BACKGROUND_SERVICES.md`, `GENERATION_PROCESS.md`, `MODELS_REFERENCE.md`,
+  `QUICKSTART.md`, `TROUBLESHOOTING.md`, `api-reference.md`,
+  `deployment-guide.md`, `development-guide.md`, `TODO.md` — these
+  described the pre-rework Flask/microservices architecture ("ThesisAppRework")
+  and no longer matched the Django + SvelteKit codebase.
+- Committed build artifacts that shouldn't have been tracked: `test.db`,
+  `test_inspect.db`, `frontend/svelte-check-output.txt`,
+  `frontend/svelte-check-full-output.txt`. Added matching `.gitignore` rules.
+
 ## [0.1.0] — 2026-05-21
 
 Initial commit on the fresh `AutoLLM_Code_Analyzer_rework` repository.

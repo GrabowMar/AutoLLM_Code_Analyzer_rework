@@ -1,1 +1,9 @@
 * text=auto
+
+# Lockfiles: keep out of GitHub language stats and mark as generated so
+# reviewers know not to hand-diff them.
+uv.lock linguist-generated=true
+frontend/package-lock.json linguist-generated=true
+
+# Auto-generated Django translation catalogs — regenerated via makemessages.
+locale/**/*.po linguist-generated=true

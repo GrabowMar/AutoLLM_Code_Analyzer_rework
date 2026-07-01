@@ -270,7 +270,7 @@ tags
 dump.rdb
 
 ### Project template
-llm_lab/media/
+backend/media/
 
 .pytest_cache/
 .ipython/
@@ -302,3 +302,15 @@ frontend/playwright-report/
 # curl / wget cookie jars (may contain session/CSRF tokens)
 cookies.txt
 **/cookies.txt
+
+# Test databases (created by the pytest suite when not using --reuse-db against Postgres)
+test.db
+test_inspect.db
+*.sqlite3
+
+# svelte-check output dumps (regenerate with `npm run check`)
+frontend/svelte-check-output.txt
+frontend/svelte-check-full-output.txt
+
+# scripts/deploy.sh writes its log next to itself when run from a checkout
+deploy.log

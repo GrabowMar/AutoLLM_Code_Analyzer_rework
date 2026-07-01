@@ -98,7 +98,7 @@ Browse at <http://localhost:8000> (frontend) and <http://localhost:8001> (Django
 Django starts in the background after attach (`/tmp/django-start.log` in the
 container). If `django-1` exits with **password authentication failed**, reset
 the Postgres volume: `docker compose -f docker-compose.local.yml down -v`, then
-`just up` (see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)).
+`just up`.
 
 If Celery or frontend are missing in Docker Desktop, from the **host** run:
 
@@ -119,8 +119,7 @@ A `Could not connect to WSL` / read-only `/root` message from Docker Desktop
 is usually harmless if Docker Engine is running. If attach dies with **exit code
 137** during “Installing VS Code Server”, give Docker Desktop **≥ 6–8 GB RAM**
 (Settings → Resources), run `docker compose -f docker-compose.local.yml down`,
-then **Rebuild and Reopen in Container**. See
-[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
+then **Rebuild and Reopen in Container**.
 
 ---
 
@@ -172,9 +171,9 @@ All Python tooling is driven via `uv`:
 
 ```bash
 uv run pre-commit run --all-files   # ruff + djlint + django-upgrade + more
-uv run ruff check llm_lab --fix     # lint only
-uv run ruff format llm_lab          # format only
-uv run mypy llm_lab                 # type-check
+uv run ruff check backend --fix     # lint only
+uv run ruff format backend          # format only
+uv run mypy backend                 # type-check
 ```
 
 Frontend:
@@ -192,18 +191,15 @@ npm run build                       # production build
 
 - `config/` — Django project (settings split by env, root URLconf, Celery
   app, Ninja API root).
-- `llm_lab/` — Django apps (one per bounded context): `users`, `llm_models`,
+- `backend/` — Django apps (one per bounded context): `users`, `llm_models`,
   `generation`, `runtime`, `analysis`, `reports`, `rankings`, `statistics`,
-  `automation`, `realtime`, `tokens`.
+  `automation`, `realtime`, `tokens`. See [`docs/app-layout.md`](docs/app-layout.md)
+  for the standard app structure and conventions.
 - `frontend/` — SvelteKit application; routes live under
   `frontend/src/routes/(auth)` and `frontend/src/routes/(app)`.
 - `compose/` — Dockerfiles and entrypoints for local + production targets.
-- `docs/` — In-depth docs: see
-  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md),
-  [`docs/QUICKSTART.md`](docs/QUICKSTART.md),
-  [`docs/GENERATION_PROCESS.md`](docs/GENERATION_PROCESS.md),
-  [`docs/ANALYSIS_PIPELINE.md`](docs/ANALYSIS_PIPELINE.md),
-  [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
+- `docs/` — In-depth docs: see [`docs/README.md`](docs/README.md) for the
+  full index.
 
 ### API conventions (Django Ninja)
 
@@ -219,7 +215,7 @@ def list_items(request):
 ```
 
 `SessionAuth` is the global default; `TokenAuth` is available for programmatic
-clients (see `llm_lab/tokens/`).
+clients (see `backend/tokens/`).
 
 ### Auth
 
@@ -234,8 +230,9 @@ auth pages at `/auth/login`, `/auth/signup`, `/auth/password/reset`,
 ## Deployment
 
 Production runs via `docker-compose.production.yml` (Traefik + Nginx +
-Gunicorn/Uvicorn + Postgres + Redis). See
-[`docs/deployment-guide.md`](docs/deployment-guide.md).
+Gunicorn/Uvicorn + Postgres + Redis). `scripts/deploy.sh` automates a
+first-time install or in-place update on a host with Docker installed —
+see the header comment in that script for configuration options.
 
 ---
 
