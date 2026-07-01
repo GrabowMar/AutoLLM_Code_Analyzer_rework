@@ -5,6 +5,26 @@
 Only the current `main` branch is supported. There are no maintained release
 branches.
 
+## Automated scanning
+
+This repo already runs CodeQL, [gitleaks](.gitleaks.toml), and Trivy
+(filesystem + container image) on every PR/push and weekly — see
+[`.github/workflows/`](.github/workflows/). If you find something these
+missed, or a false negative in their config, that's still worth reporting
+below.
+
+## Scope
+
+In scope:
+
+- The Django backend (`backend/`, `config/`) and its REST API.
+- The SvelteKit frontend (`frontend/`).
+- Docker/Compose configuration used to build and run the app
+  (`compose/`, `docker-compose.*.yml`).
+- `scripts/deploy.sh` and other deployment tooling.
+
+See "Out of scope" below for what isn't.
+
 ## Reporting a vulnerability
 
 **Please do not open a public GitHub issue for security vulnerabilities.**

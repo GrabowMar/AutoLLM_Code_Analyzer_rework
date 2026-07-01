@@ -7,6 +7,8 @@ results in real time, and produces comparative reports across models.
 
 [![CI](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml)
+[![Gitleaks](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/gitleaks.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/gitleaks.yml)
+[![Trivy](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/trivy.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/trivy.yml)
 [![Built with Cookiecutter Django](https://img.shields.io/badge/built%20with-Cookiecutter%20Django-ff69b4.svg?logo=cookiecutter)](https://github.com/cookiecutter/cookiecutter-django/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -150,6 +152,7 @@ just up                     # start everything
 just down                   # stop everything
 just logs                   # tail container logs
 just manage <cmd>           # run any manage.py command
+just frontend-install       # install frontend dependencies
 just frontend-dev           # frontend dev server (foreground)
 just frontend-build         # production frontend build
 just build                  # rebuild images
@@ -161,9 +164,14 @@ just prune                  # nuke containers + volumes
 The Django test suite runs inside the container against the dev Postgres:
 
 ```bash
-docker exec -e DATABASE_URL="postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB" \
-  app-django-1 python -m pytest -q
+docker compose -f docker-compose.local.yml exec \
+  -e DATABASE_URL="postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB" \
+  django python -m pytest -q
 ```
+
+`docker compose exec` targets the `django` service directly, so this works
+regardless of what Compose named the container (which depends on the
+directory you cloned into).
 
 ### Lint, format, type-check
 
@@ -191,10 +199,11 @@ npm run build                       # production build
 
 - `config/` — Django project (settings split by env, root URLconf, Celery
   app, Ninja API root).
-- `backend/` — Django apps (one per bounded context): `users`, `llm_models`,
-  `generation`, `runtime`, `analysis`, `reports`, `rankings`, `statistics`,
-  `automation`, `realtime`, `tokens`. See [`docs/app-layout.md`](docs/app-layout.md)
-  for the standard app structure and conventions.
+- `backend/` — Django apps (one per bounded context): `users`, `tokens`,
+  `credentials`, `llm_models`, `generation`, `analysis`, `statistics`,
+  `rankings`, `reports`, `runtime`, `realtime`, `export`, `docs`, `system`,
+  `automation`. See [`docs/app-layout.md`](docs/app-layout.md) for the
+  standard app structure and conventions.
 - `frontend/` — SvelteKit application; routes live under
   `frontend/src/routes/(auth)` and `frontend/src/routes/(app)`.
 - `compose/` — Dockerfiles and entrypoints for local + production targets.

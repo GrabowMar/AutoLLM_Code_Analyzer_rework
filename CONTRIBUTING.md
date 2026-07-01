@@ -37,7 +37,7 @@ uv run pre-commit install
 
 ```bash
 uv run pre-commit run --all-files    # ruff + djlint + django-upgrade
-docker exec app-django-1 python -m pytest -q
+docker compose -f docker-compose.local.yml exec django python -m pytest -q
 cd frontend && npm run check
 ```
 
@@ -73,3 +73,12 @@ round trip.
 2. Add the app to `LOCAL_APPS` in `config/settings/base.py`.
 3. Register its router in `config/api.py`.
 4. Add factories under `backend/<name>/tests/factories.py` for tests.
+
+See [`docs/app-layout.md`](docs/app-layout.md) for the full conventions —
+standard file layout, API/service-layer patterns, and where shared helpers
+live.
+
+## Security issues
+
+Don't open a PR or public issue for a security vulnerability — follow
+[SECURITY.md](SECURITY.md) instead.
