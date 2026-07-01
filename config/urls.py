@@ -6,8 +6,8 @@ from django.urls import include
 from django.urls import path
 from django.views import defaults as default_views
 
-from llm_lab.realtime.api.views import sse_stream
-from llm_lab.runtime.proxy import app_proxy
+from backend.realtime.api.views import sse_stream
+from backend.runtime.proxy import app_proxy
 
 from .api import api
 
@@ -18,7 +18,7 @@ urlpatterns = [
     path("apps/<slug:name>/", app_proxy, {"path": ""}),
     path("apps/<slug:name>/<path:path>", app_proxy),
     # User management
-    path("users/", include("llm_lab.users.urls", namespace="users")),
+    path("users/", include("backend.users.urls", namespace="users")),
     path("accounts/", include("allauth.urls")),
     path("_allauth/", include("allauth.headless.urls")),
     # Your stuff: custom urls includes go here

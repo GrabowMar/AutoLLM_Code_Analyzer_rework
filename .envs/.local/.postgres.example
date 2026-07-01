@@ -3,6 +3,6 @@
 # ------------------------------------------------------------------------------
 POSTGRES_HOST=postgres
 POSTGRES_PORT=5432
-POSTGRES_DB=llm_lab
+POSTGRES_DB=backend
 POSTGRES_USER=changeme
 POSTGRES_PASSWORD=changeme

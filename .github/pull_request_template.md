@@ -19,7 +19,7 @@ Thanks for the PR! Please fill in the sections below — it makes reviews faster
 
 <!--
 How did you verify the change? E.g.:
-- `uv run pytest llm_lab/<app>/tests/test_x.py`
+- `uv run pytest backend/<app>/tests/test_x.py`
 - Manual: logged in, navigated to /foo, observed bar.
 -->
 

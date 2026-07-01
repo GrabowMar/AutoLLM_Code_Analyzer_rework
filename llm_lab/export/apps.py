@@ -1,7 +1,0 @@
-from django.apps import AppConfig
-
-
-class ExportConfig(AppConfig):
-    default_auto_field = "django.db.models.BigAutoField"
-    name = "llm_lab.export"
-    verbose_name = "Export"

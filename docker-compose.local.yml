@@ -1,14 +1,14 @@
 volumes:
-  llm_lab_local_postgres_data: {}
-  llm_lab_local_postgres_data_backups: {}
-  llm_lab_local_redis_data: {}
+  backend_local_postgres_data: {}
+  backend_local_postgres_data_backups: {}
+  backend_local_redis_data: {}
 
 services:
   django: &django
     build:
       context: .
       dockerfile: ./compose/local/django/Dockerfile
-    image: llm_lab_local_django
+    image: backend_local_django
     depends_on:
       - postgres
       - redis
@@ -32,10 +32,10 @@ services:
     build:
       context: .
       dockerfile: ./compose/production/postgres/Dockerfile
-    image: llm_lab_production_postgres
+    image: backend_production_postgres
     volumes:
-      - llm_lab_local_postgres_data:/var/lib/postgresql/data
-      - llm_lab_local_postgres_data_backups:/backups
+      - backend_local_postgres_data:/var/lib/postgresql/data
+      - backend_local_postgres_data_backups:/backups
     env_file:
       - ./.envs/.local/.postgres
 
@@ -47,11 +47,11 @@ services:
   redis:
     image: docker.io/redis:7.2
     volumes:
-      - llm_lab_local_redis_data:/data
+      - backend_local_redis_data:/data
 
   celeryworker:
     <<: *django
-    image: llm_lab_local_celeryworker
+    image: backend_local_celeryworker
     depends_on:
       - redis
       - postgres
@@ -61,7 +61,7 @@ services:
 
   celerybeat:
     <<: *django
-    image: llm_lab_local_celerybeat
+    image: backend_local_celerybeat
     depends_on:
       - redis
       - postgres
@@ -71,7 +71,7 @@ services:
 
   flower:
     <<: *django
-    image: llm_lab_local_flower
+    image: backend_local_flower
     ports:
       - '5555:5555'
     command: /start-flower
@@ -80,7 +80,7 @@ services:
     build:
       context: .
       dockerfile: ./compose/local/frontend/Dockerfile
-    image: llm_lab_local_frontend
+    image: backend_local_frontend
     restart: unless-stopped
     depends_on:
       - django

@@ -24,4 +24,4 @@ __pycache__/
 htmlcov/
 *.png
 !frontend/static/**/*.png
-!llm_lab/static/**/*.png
+!backend/static/**/*.png

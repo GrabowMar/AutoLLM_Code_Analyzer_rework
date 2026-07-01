@@ -7,8 +7,8 @@ from pathlib import Path
 import environ
 
 BASE_DIR = Path(__file__).resolve(strict=True).parent.parent.parent
-# llm_lab/
-APPS_DIR = BASE_DIR / "llm_lab"
+# backend/
+APPS_DIR = BASE_DIR / "backend"
 env = environ.Env()
 
 READ_DOT_ENV_FILE = env.bool("DJANGO_READ_DOT_ENV_FILE", default=False)
@@ -81,21 +81,21 @@ THIRD_PARTY_APPS = [
 ]
 
 LOCAL_APPS = [
-    "llm_lab.users",
-    "llm_lab.tokens",
-    "llm_lab.credentials",
-    "llm_lab.llm_models",
-    "llm_lab.generation",
-    "llm_lab.analysis",
-    "llm_lab.statistics",
-    "llm_lab.rankings",
-    "llm_lab.reports",
-    "llm_lab.runtime",
-    "llm_lab.realtime",
-    "llm_lab.export",
-    "llm_lab.docs",
-    "llm_lab.system",
-    "llm_lab.automation",
+    "backend.users",
+    "backend.tokens",
+    "backend.credentials",
+    "backend.llm_models",
+    "backend.generation",
+    "backend.analysis",
+    "backend.statistics",
+    "backend.rankings",
+    "backend.reports",
+    "backend.runtime",
+    "backend.realtime",
+    "backend.export",
+    "backend.docs",
+    "backend.system",
+    "backend.automation",
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -103,7 +103,7 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 # MIGRATIONS
 # ------------------------------------------------------------------------------
 # https://docs.djangoproject.com/en/dev/ref/settings/#migration-modules
-MIGRATION_MODULES = {"sites": "llm_lab.contrib.sites.migrations"}
+MIGRATION_MODULES = {"sites": "backend.contrib.sites.migrations"}
 
 # AUTHENTICATION
 # ------------------------------------------------------------------------------
@@ -148,7 +148,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     # Route <name>.<APPS_DOMAIN> straight to the app proxy before any
     # session/CSRF/auth processing (apps are a separate, public origin).
-    "llm_lab.runtime.middleware.AppSubdomainProxyMiddleware",
+    "backend.runtime.middleware.AppSubdomainProxyMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -159,8 +159,8 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "allauth.account.middleware.AccountMiddleware",
-    "llm_lab.users.middleware.RememberMeMiddleware",
-    "llm_lab.users.middleware.ForceCsrfCookieMiddleware",
+    "backend.users.middleware.RememberMeMiddleware",
+    "backend.users.middleware.ForceCsrfCookieMiddleware",
 ]
 
 # STATIC
@@ -212,7 +212,7 @@ TEMPLATES = [
                 "django.template.context_processors.static",
                 "django.template.context_processors.tz",
                 "django.contrib.messages.context_processors.messages",
-                "llm_lab.users.context_processors.allauth_settings",
+                "backend.users.context_processors.allauth_settings",
             ],
         },
     },
@@ -339,13 +339,13 @@ ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 # https://docs.allauth.org/en/latest/account/configuration.html
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 # https://docs.allauth.org/en/latest/account/configuration.html
-ACCOUNT_ADAPTER = "llm_lab.users.adapters.AccountAdapter"
+ACCOUNT_ADAPTER = "backend.users.adapters.AccountAdapter"
 # https://docs.allauth.org/en/latest/account/forms.html
-ACCOUNT_FORMS = {"signup": "llm_lab.users.forms.UserSignupForm"}
+ACCOUNT_FORMS = {"signup": "backend.users.forms.UserSignupForm"}
 # https://docs.allauth.org/en/latest/socialaccount/configuration.html
-SOCIALACCOUNT_ADAPTER = "llm_lab.users.adapters.SocialAccountAdapter"
+SOCIALACCOUNT_ADAPTER = "backend.users.adapters.SocialAccountAdapter"
 # https://docs.allauth.org/en/latest/socialaccount/configuration.html
-SOCIALACCOUNT_FORMS = {"signup": "llm_lab.users.forms.UserSocialSignupForm"}
+SOCIALACCOUNT_FORMS = {"signup": "backend.users.forms.UserSocialSignupForm"}
 
 # django-allauth headless
 # ------------------------------------------------------------------------------

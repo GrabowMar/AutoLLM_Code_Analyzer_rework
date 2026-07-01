@@ -99,7 +99,7 @@ Toggle them in the properties panel; the node body updates live. See [ANALYZER_G
 
 ### Report types
 
-The Report node's *Report Type* selector maps directly to `llm_lab.reports.services.generators.GENERATORS`:
+The Report node's *Report Type* selector maps directly to `backend.reports.services.generators.GENERATORS`:
 
 | `report_type` | Required config | Description |
 | --- | --- | --- |
@@ -234,7 +234,7 @@ All routes live under `/api/automation/`. Authentication is the standard session
 
 - **Frontend** — SvelteKit 2 + Svelte 5, Tailwind 4, Bits UI 2. The canvas wrapper (`WorkflowCanvas.svelte`) dynamically imports the `@xyflow/svelte` bundle only in the browser; the SvelteKit pages opt out of SSR via `+page.ts` so the editor never tries to render canvas code server-side.
 - **Position storage** — node coordinates live in `step.config._position`. No backend migration was needed; dispatchers ignore the key.
-- **Engine** — see [BACKGROUND_SERVICES.md](BACKGROUND_SERVICES.md) for how the runner picks pipeline runs off Celery (or daemon-thread fallback) and processes the DAG; the per-kind dispatchers live in `llm_lab/automation/engine/dispatchers.py`.
+- **Engine** — see [BACKGROUND_SERVICES.md](BACKGROUND_SERVICES.md) for how the runner picks pipeline runs off Celery (or daemon-thread fallback) and processes the DAG; the per-kind dispatchers live in `backend/automation/engine/dispatchers.py`.
 
 ## Where to look
 
@@ -248,6 +248,6 @@ All routes live under `/api/automation/`. Authentication is the standard session
 | Hub page | `frontend/src/routes/(app)/automation/+page.svelte` |
 | Run overlay | `frontend/src/routes/(app)/automation/runs/[id]/+page.svelte` |
 | Schedules / Batches panels | `frontend/src/lib/components/workflow/{Schedules,Batches}Panel.svelte` |
-| Backend DSL validation | `llm_lab/automation/services.py::validate_pipeline_dsl` |
-| Dispatchers | `llm_lab/automation/engine/dispatchers.py` |
-| Runner DAG executor | `llm_lab/automation/engine/runner.py::execute_run` |
+| Backend DSL validation | `backend/automation/services.py::validate_pipeline_dsl` |
+| Dispatchers | `backend/automation/engine/dispatchers.py` |
+| Runner DAG executor | `backend/automation/engine/runner.py::execute_run` |

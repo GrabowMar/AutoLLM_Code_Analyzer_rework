@@ -1,0 +1,164 @@
+"""Pydantic schemas for the runtime API."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import UUID
+
+from ninja import ModelSchema
+from ninja import Schema
+
+from backend.runtime.models import ContainerAction
+from backend.runtime.models import ContainerInstance
+
+
+class ContainerInstanceSchema(ModelSchema):
+    id: UUID
+    generation_job_id: UUID | None = None
+    created_by_id: int | None = None
+    last_error: str = ""
+    app_url: str | None = None
+
+    class Meta:
+        model = ContainerInstance
+        fields = (
+            "name",
+            "image",
+            "container_id",
+            "status",
+            "app_port",
+            "health_status",
+            "last_health_check",
+            "config",
+            "metadata",
+            "created_at",
+            "updated_at",
+        )
+
+    @staticmethod
+    def resolve_last_error(obj: ContainerInstance) -> str:
+        last_failed = (
+            obj.actions.filter(status=ContainerAction.Status.FAILED)
+            .order_by("-created_at")
+            .values_list("error_message", flat=True)
+            .first()
+        )
+        return last_failed or ""
+
+    @staticmethod
+    def resolve_app_url(obj: ContainerInstance) -> str | None:
+        from django.conf import settings
+
+        # Subdomain mode: each app at the root of its own origin
+        # (Traefik bridge, or a wildcard edge route → Django proxy).
+        if getattr(settings, "TRAEFIK_DYNAMIC_DIR", "") or getattr(settings, "APPS_SUBDOMAIN_PROXY", False):
+            if obj.status != ContainerInstance.Status.RUNNING:
+                return None
+            apps_domain = getattr(settings, "APPS_DOMAIN", "") or getattr(settings, "DJANGO_DOMAIN", "localhost")
+            return f"https://{obj.name}.{apps_domain}"
+
+        # Path mode: Django reverse-proxies <origin>/apps/<name>/ to the app.
+        if getattr(settings, "APPS_PROXY_PATH", False):
+            if obj.status != ContainerInstance.Status.RUNNING:
+                return None
+            origin = (
+                getattr(settings, "APPS_PUBLIC_ORIGIN", "")
+                or getattr(settings, "FRONTEND_PUBLIC_ORIGIN", "")
+                or f"https://{getattr(settings, 'DJANGO_DOMAIN', 'localhost')}"
+            )
+            return f"{origin.rstrip('/')}/apps/{obj.name}/"
+
+        # Local dev (no proxy): direct host-port binding.
+        if not obj.app_port:
+            return None
+        host = getattr(settings, "CONTAINER_APP_HOST", "") or getattr(settings, "DJANGO_DOMAIN", "localhost")
+        return f"http://{host}:{obj.app_port}"
+
+
+class ContainerActionSchema(ModelSchema):
+    id: UUID
+    container_id: UUID | None = None
+    triggered_by_id: int | None = None
+
+    class Meta:
+        model = ContainerAction
+        fields = (
+            "action_id",
+            "action_type",
+            "status",
+            "progress_percent",
+            "output",
+            "error_message",
+            "exit_code",
+            "started_at",
+            "completed_at",
+            "created_at",
+        )
+
+
+class ContainerListResponse(Schema):
+    containers: list[ContainerInstanceSchema]
+    pagination: dict[str, int]
+
+
+class ActionListResponse(Schema):
+    actions: list[ContainerActionSchema]
+    pagination: dict[str, int]
+
+
+class DockerInfo(Schema):
+    daemon_available: bool
+    version: str | None = None
+    os: str | None = None
+    arch: str | None = None
+
+
+class ContainerHealthResponse(Schema):
+    status: str
+    health: str
+    last_check: datetime | None
+
+
+class ContainerInspectResponse(Schema):
+    image: str = ""
+    command: list[str] = []
+    state: str = ""
+    started_at: str = ""
+    finished_at: str = ""
+    env: dict[str, str] = {}
+    mounts: list[dict] = []
+    ports: dict = {}
+    error: str = ""
+
+
+class ContainerExecRequest(Schema):
+    action: str  # whitelisted key
+
+
+class ContainerExecResponse(Schema):
+    action: str
+    cmd: list[str]
+    exit_code: int
+    output: str
+    error: str = ""
+
+
+class GenericResponse(Schema):
+    success: bool
+    message: str = ""
+
+
+__all__ = [
+    "ActionListResponse",
+    "ContainerActionSchema",
+    "ContainerExecRequest",
+    "ContainerExecResponse",
+    "ContainerHealthResponse",
+    "ContainerInspectResponse",
+    "ContainerInstanceSchema",
+    "ContainerListResponse",
+    "DockerInfo",
+    "GenericResponse",
+]
+
+_ = (datetime,)

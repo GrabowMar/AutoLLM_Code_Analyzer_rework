@@ -168,11 +168,11 @@ lint.per-file-ignores."**/tests/**" = [
 lint.per-file-ignores."config/settings/local.py" = [
   "S701", # Local-dev settings intentionally enable Jinja2 autoescape=False stand-ins.
 ]
-lint.per-file-ignores."llm_lab/generation/services/copilot_workspace.py" = [
+lint.per-file-ignores."backend/generation/services/copilot_workspace.py" = [
   "S603", # git init/add/commit — fixed argv, workspace-local cwd.
   "S607", # git is resolved via PATH in the Django container.
 ]
-lint.per-file-ignores."llm_lab/runtime/scaffolding/**" = [
+lint.per-file-ignores."backend/runtime/scaffolding/**" = [
   "INP001",  # Scaffold templates are copied into generated apps, not imported as packages.
   "PLW1508", # Generated Flask apps use int env defaults by design.
   "S104",    # Generated apps bind 0.0.0.0 inside Docker.
@@ -200,7 +200,7 @@ ini_options.python_files = [
 
 [tool.coverage]
 # ==== Coverage ====
-run.include = [ "llm_lab/**" ]
+run.include = [ "backend/**" ]
 run.omit = [ "*/migrations/*", "*/tests/*" ]
 run.plugins = [ "django_coverage_plugin" ]
 

@@ -1,7 +1,7 @@
 # Template Specification
 
 > **Summary**: Requirement JSON, composable content blocks, template bundles, and frozen job snapshots for reproducible scaffolding generation.
-> **Key files**: `llm_lab/generation/data/requirements/`, `llm_lab/generation/data/blocks/`, `llm_lab/generation/services/bundle_resolver.py`
+> **Key files**: `backend/generation/data/requirements/`, `backend/generation/data/blocks/`, `backend/generation/services/bundle_resolver.py`
 > **See also**: [Generation Process](GENERATION_PROCESS.md)
 
 ## Architecture
@@ -37,7 +37,7 @@ flowchart LR
 
 ## App requirement JSON
 
-Path: `llm_lab/generation/data/requirements/{slug}.json`
+Path: `backend/generation/data/requirements/{slug}.json`
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -56,7 +56,7 @@ Health checks belong in `api_endpoints`, not a separate `control_endpoints` fiel
 
 ## Per-app manifests (pilot decomposition)
 
-Path: `llm_lab/generation/data/requirements/manifests/{app_slug}.yaml`
+Path: `backend/generation/data/requirements/manifests/{app_slug}.yaml`
 
 ```yaml
 app_slug: content_recipe_list
@@ -77,7 +77,7 @@ When creating scaffolding jobs without an explicit bundle, the API picks the per
 
 ## Content blocks
 
-Path: `llm_lab/generation/data/blocks/{type}/{slug}.yaml`
+Path: `backend/generation/data/blocks/{type}/{slug}.yaml`
 
 | `block_type` | Purpose |
 |--------------|---------|
@@ -92,7 +92,7 @@ System blocks (`is_system=true`) are seeded from git; users can add private bloc
 
 ## Template bundles
 
-Defined in `llm_lab/generation/data/blocks/catalog.yaml` and per-app manifests.
+Defined in `backend/generation/data/blocks/catalog.yaml` and per-app manifests.
 
 Default research bundle: **`system-scaffolding-standard`** (v2 stage prompts + `tone-standard` + `rules-flask-global`).
 
@@ -128,7 +128,7 @@ Frontend generation uses the snapshot; legacy jobs with empty `resolved_bundle` 
 
 ## Scaffolding stacks
 
-Registry: `llm_lab/runtime/scaffolding/manifest.json`
+Registry: `backend/runtime/scaffolding/manifest.json`
 
 | Slug | Description |
 |------|-------------|

@@ -1,9 +1,0 @@
-from __future__ import annotations
-
-from django.apps import AppConfig
-
-
-class AnalysisConfig(AppConfig):
-    default_auto_field = "django.db.models.BigAutoField"
-    name = "llm_lab.analysis"
-    verbose_name = "Analysis"

@@ -1,6 +1,6 @@
 // For format details, see https://containers.dev/implementors/json_reference/
 {
-    "name": "llm_lab_dev",
+    "name": "backend_dev",
     "initializeCommand": "cd ${localWorkspaceFolder} && python scripts/bootstrap.py",
     "dockerComposeFile": [
         "../docker-compose.local.yml"

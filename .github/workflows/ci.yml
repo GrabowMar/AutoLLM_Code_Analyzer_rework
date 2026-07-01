@@ -53,7 +53,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Run mypy
-        run: uv run mypy llm_lab
+        run: uv run mypy backend
         continue-on-error: true  # warm-up; flip to false once clean
 
   backend-tests:
