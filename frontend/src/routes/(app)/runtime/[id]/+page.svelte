@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { formatDateTime as formatDate } from '$lib/utils/formatters';
+	import { containerStatusColors as statusColors } from '$lib/constants/colors';
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -39,15 +41,6 @@
 	let error = $state('');
 	let activeTab = $state<'overview' | 'logs' | 'actions'>('overview');
 	let actionLoading = $state(false);
-
-	const statusColors: Record<ContainerStatus, string> = {
-		pending: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
-		building: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
-		running: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
-		stopped: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-		failed: 'bg-red-500/15 text-red-400 border-red-500/30',
-		removed: 'bg-neutral-500/15 text-neutral-400 border-neutral-500/30'
-	};
 
 	const actionStatusColors: Record<ActionStatus, string> = {
 		pending: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
@@ -110,11 +103,6 @@
 		} finally {
 			actionLoading = false;
 		}
-	}
-
-	function formatDate(s: string | null): string {
-		if (!s) return '—';
-		return new Date(s).toLocaleString();
 	}
 
 	$effect(() => {

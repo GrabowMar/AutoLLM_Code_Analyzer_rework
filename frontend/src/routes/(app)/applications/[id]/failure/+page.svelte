@@ -1,4 +1,5 @@
 <script lang="ts">
+import { formatDateTime as fmtDate, formatNumber as fmt } from '$lib/utils/formatters';
 import { page } from '$app/stores';
 import * as Card from '$lib/components/ui/card';
 import { Badge } from '$lib/components/ui/badge';
@@ -50,16 +51,6 @@ scaffolding: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
 copilot: 'bg-teal-500/15 text-teal-400 border-teal-500/30',
 };
 const modeIcons: Record<string, any> = { custom: Pencil, scaffolding: Layers, copilot: Bot };
-
-function fmtDate(d: string | null): string {
-if (!d) return '—';
-return new Date(d).toLocaleString();
-}
-
-function fmt(n: number | null | undefined): string {
-if (n == null) return '—';
-return n.toLocaleString();
-}
 
 function copyText(text: string, label = 'Copied') {
 navigator.clipboard.writeText(text);

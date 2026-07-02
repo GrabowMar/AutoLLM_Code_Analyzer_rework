@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatPrice } from '$lib/utils/formatters';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -108,11 +109,6 @@
 		}
 		selectedIds = s;
 		onToggleId?.(id);
-	}
-
-	function formatPrice(n: number): string {
-		if (n === 0) return 'Free';
-		return `$${n.toFixed(2)}`;
 	}
 
 	$effect(() => {

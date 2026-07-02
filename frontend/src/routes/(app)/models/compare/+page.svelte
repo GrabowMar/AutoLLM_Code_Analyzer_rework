@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatPrice, formatTokens } from '$lib/utils/formatters';
 	import { page } from '$app/stores';
 	import { getModelComparison, type LLMModelDetail, type ModelComparisonResult } from '$lib/api/client';
 	import * as Card from '$lib/components/ui/card';
@@ -58,21 +59,9 @@
 		return values[0] ?? 0;
 	}
 
-	function formatPrice(price: number): string {
-		if (price === 0) return 'Free';
-		if (price < 0.01) return `$${price.toFixed(4)}`;
-		return `$${price.toFixed(2)}`;
-	}
-
 	function formatDelta(value: number): string {
 		if (value === 0) return '0.00';
 		return `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
-	}
-
-	function formatTokens(value: number): string {
-		if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-		if (value >= 1_000) return `${(value / 1_000).toFixed(0)}K`;
-		return String(value);
 	}
 
 	function efficiencyGrade(score: number): string {

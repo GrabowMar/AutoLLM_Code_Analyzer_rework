@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { formatDateTime as formatDate } from '$lib/utils/formatters';
+	import { reportStatusColors as statusColors } from '$lib/constants/colors';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onMount, onDestroy } from 'svelte';
@@ -15,13 +17,6 @@
 	let loading = $state(true);
 	let error = $state('');
 	let timer: ReturnType<typeof setInterval> | null = null;
-
-	const statusColors: Record<ReportStatus, string> = {
-		completed: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
-		generating: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
-		pending: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
-		failed: 'bg-red-500/15 text-red-400 border-red-500/30'
-	};
 
 	async function load() {
 		try {
@@ -53,10 +48,6 @@
 		if (!confirm('Delete this report?')) return;
 		await deleteReport(report.report_id);
 		goto('/reports');
-	}
-
-	function formatDate(s: string | null): string {
-		return s ? new Date(s).toLocaleString() : '—';
 	}
 
 	function isObject(v: unknown): v is Record<string, unknown> {

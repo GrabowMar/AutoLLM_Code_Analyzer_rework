@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { formatDateTime as formatDate } from '$lib/utils/formatters';
+	import { reportStatusColors as statusColors } from '$lib/constants/colors';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import * as Card from '$lib/components/ui/card';
@@ -52,13 +54,6 @@
 		comprehensive: { label: 'Comprehensive', color: 'bg-red-500/15 text-red-400 border-red-500/30', icon: Layers }
 	};
 
-	const statusColors: Record<ReportStatus, string> = {
-		completed: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
-		generating: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
-		pending: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
-		failed: 'bg-red-500/15 text-red-400 border-red-500/30'
-	};
-
 	async function load() {
 		loading = true;
 		error = '';
@@ -96,10 +91,6 @@
 		if (!confirm('Delete this report?')) return;
 		await deleteReport(id);
 		await load();
-	}
-
-	function formatDate(s: string): string {
-		return new Date(s).toLocaleString();
 	}
 
 	const activeFilters = $derived.by(() => {

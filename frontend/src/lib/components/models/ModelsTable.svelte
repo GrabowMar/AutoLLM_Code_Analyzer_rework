@@ -1,4 +1,5 @@
 <script lang="ts">
+import { formatPrice } from '$lib/utils/formatters';
 import * as Card from '$lib/components/ui/card';
 import { Badge } from '$lib/components/ui/badge';
 import { Button } from '$lib/components/ui/button';
@@ -74,13 +75,6 @@ const capIconMap: Record<string, { icon: typeof Eye; color: string; label: strin
 	'Streaming': { icon: Radio, color: 'text-emerald-500', label: 'Streaming' },
 	'Code': { icon: Zap, color: 'text-slate-500', label: 'Code' },
 };
-
-function formatPrice(price: number): string {
-	if (price === 0) return 'Free';
-	if (price < 0) return '—';
-	if (price < 0.01) return `$${price.toFixed(4)}`;
-	return `$${price.toFixed(2)}`;
-}
 
 function efficiencyGrade(score: number): { grade: string; color: string; bg: string } {
 	if (score >= 0.9) return { grade: 'A+', color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10' };

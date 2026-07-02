@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { generationStatusColors as statusColors } from '$lib/constants/colors';
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { getAuth } from '$lib/stores/auth.svelte';
@@ -271,14 +272,6 @@
 			ring: 'group-hover:ring-violet-500/20',
 		},
 	];
-
-	const statusColors: Record<string, string> = {
-		completed: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
-		running: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
-		failed: 'bg-red-500/15 text-red-400 border-red-500/30',
-		pending: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
-		cancelled: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
-	};
 
 	const severityColors: Record<string, string> = {
 		critical: 'bg-red-500',

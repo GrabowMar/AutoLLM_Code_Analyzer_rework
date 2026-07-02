@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatDuration as formatDurationShared, formatDateTime } from '$lib/utils/formatters';
 	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { Badge } from '$lib/components/ui/badge';
@@ -357,18 +358,8 @@
 		});
 	}
 
-	function formatDuration(seconds: number | null): string {
-		if (seconds === null || seconds === undefined) return '—';
-		if (seconds < 60) return `${seconds.toFixed(0)}s`;
-		const m = Math.floor(seconds / 60);
-		const s = Math.round(seconds % 60);
-		return `${m}m ${s}s`;
-	}
-
-	function formatDate(dateStr: string | null): string {
-		if (!dateStr) return '—';
-		return new Date(dateStr).toLocaleString();
-	}
+	const formatDuration = (seconds: number | null) => formatDurationShared(seconds, 0);
+	const formatDate = formatDateTime;
 </script>
 
 <svelte:head>

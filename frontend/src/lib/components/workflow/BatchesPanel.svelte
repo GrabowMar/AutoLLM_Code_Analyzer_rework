@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { formatDateTime as fmt } from '$lib/utils/formatters';
+	import { pipelineRunStatusColors as statusColors } from '$lib/constants/colors';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import * as Card from '$lib/components/ui/card';
@@ -21,15 +23,6 @@
 		pipelineId: string;
 	}
 	let { pipelineId }: Props = $props();
-
-	const statusColors: Record<string, string> = {
-		pending: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
-		running: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-		succeeded: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
-		completed: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
-		failed: 'bg-red-500/15 text-red-400 border-red-500/30',
-		cancelled: 'bg-orange-500/15 text-orange-400 border-orange-500/30'
-	};
 
 	let batches = $state<BatchSummary[]>([]);
 	let loading = $state(true);
@@ -95,10 +88,6 @@
 		} catch {
 			alert('Failed to cancel batch');
 		}
-	}
-
-	function fmt(s: string) {
-		return new Date(s).toLocaleString();
 	}
 
 	onMount(load);

@@ -19,7 +19,7 @@ import {
 	type RunFinding,
 } from '$lib/api/runs';
 import { statusColors, severityColors, severityOrder } from '$lib/constants/analysis';
-import { formatDate, statusLabel } from '$lib/utils/analysis';
+import { formatDate, statusLabel } from '$lib/utils/formatters';
 
 // Severities ordered critical→info for the summary bar / sidebar.
 const SEVERITIES = Object.keys(severityOrder) as string[];

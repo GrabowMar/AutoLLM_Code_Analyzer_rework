@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pipelineLifecycleColors as statusColors } from '$lib/constants/colors';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { Badge } from '$lib/components/ui/badge';
@@ -30,12 +31,6 @@
 	let error = $state('');
 	let search = $state('');
 	let statusFilter = $state('');
-
-	const statusColors: Record<string, string> = {
-		draft: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
-		active: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
-		archived: 'bg-orange-500/15 text-orange-400 border-orange-500/30'
-	};
 
 	async function load() {
 		loading = true;

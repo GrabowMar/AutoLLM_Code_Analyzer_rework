@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatDateTime as fmt } from '$lib/utils/formatters';
 	import { onMount } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
@@ -75,10 +76,6 @@
 		if (!confirm('Delete this schedule?')) return;
 		await deleteSchedule(id);
 		await load();
-	}
-
-	function fmt(s: string | null) {
-		return s ? new Date(s).toLocaleString() : '—';
 	}
 
 	onMount(load);

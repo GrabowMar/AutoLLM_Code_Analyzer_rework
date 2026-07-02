@@ -27,7 +27,7 @@
 	} from '$lib/api/runs';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { statusColors, severityColors } from '$lib/constants/analysis';
-	import { formatDate, statusLabel } from '$lib/utils/analysis';
+	import { formatDate, statusLabel } from '$lib/utils/formatters';
 
 	let loading = $state(true);
 	let error = $state('');

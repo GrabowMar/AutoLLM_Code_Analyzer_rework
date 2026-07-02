@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatDuration } from '$lib/utils/formatters';
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -265,14 +266,6 @@
 		}
 		currentPage = 1;
 		fetchJobs();
-	}
-
-	function formatDuration(seconds: number | null): string {
-		if (seconds == null) return '—';
-		if (seconds < 60) return `${seconds.toFixed(1)}s`;
-		const m = Math.floor(seconds / 60);
-		const s = Math.round(seconds % 60);
-		return `${m}m ${s}s`;
 	}
 
 	function timeAgo(dateStr: string): string {
