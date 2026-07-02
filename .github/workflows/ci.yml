@@ -5,9 +5,10 @@ env:
   COMPOSE_DOCKER_CLI_BUILD: 1
 
 on:
+  # No paths-ignore here: Lint/pytest/Frontend are required status checks,
+  # so skipping them on docs-only PRs makes those PRs unmergeable.
   pull_request:
     branches: ['main']
-    paths-ignore: ['docs/**', '**.md']
 
   push:
     branches: ['main']
