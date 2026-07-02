@@ -14,6 +14,8 @@ architecture overview, and common tasks, start with the root
   template format used by code generation
 - [Sample App Routing](sample-app-routing.md) — Subdomain routing for
   generated sample apps
+- [Dev Containers](dev-containers.md) — Developing inside the Compose stack
+  with VS Code, including troubleshooting
 
 ## Contributing
 
