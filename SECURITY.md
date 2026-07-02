@@ -1,53 +1,45 @@
 # Security Policy
 
-## Supported versions
+## Reporting a vulnerability
 
-Only the current `main` branch is supported. There are no maintained release
-branches.
+**Please don't open a public GitHub issue for security problems.**
 
-## Automated scanning
+Report them privately through GitHub's
+[Security Advisories](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/security/advisories/new)
+so the issue can be triaged and fixed before public disclosure. Include:
 
-This repo already runs CodeQL, [gitleaks](.gitleaks.toml), and Trivy
-(filesystem + container image) on every PR/push and weekly — see
-[`.github/workflows/`](.github/workflows/). If you find something these
-missed, or a false negative in their config, that's still worth reporting
-below.
+- what the issue is and its impact
+- steps to reproduce or a proof of concept
+- the affected commit or branch
+- any suggested mitigation
+
+Reports are acknowledged within a few business days; the goal is a fix or
+mitigation within 30 days of confirmation, depending on complexity.
 
 ## Scope
 
 In scope:
 
-- The Django backend (`backend/`, `config/`) and its REST API.
-- The SvelteKit frontend (`frontend/`).
-- Docker/Compose configuration used to build and run the app
-  (`compose/`, `docker-compose.*.yml`).
-- `scripts/deploy.sh` and other deployment tooling.
+- the Django backend (`backend/`, `config/`) and its REST API
+- the SvelteKit frontend (`frontend/`)
+- Docker/Compose configuration (`compose/`, `docker-compose.*.yml`)
+- deployment tooling (`scripts/deploy.sh` and friends)
 
-See "Out of scope" below for what isn't.
+Out of scope:
 
-## Reporting a vulnerability
+- issues requiring physical access to a developer's machine
+- automated-scanner findings with no demonstrated impact
+- third-party services (OpenRouter, Sentry, ...) — report those to the
+  respective vendors
 
-**Please do not open a public GitHub issue for security vulnerabilities.**
+## Supported versions
 
-Instead, report them privately via GitHub's
-[Security Advisories](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/security/advisories/new)
-flow, which gives us a private channel to triage and fix the issue before
-public disclosure.
+Only the current `main` branch is supported; there are no maintained
+release branches.
 
-Please include:
+## Automated scanning
 
-- A description of the issue and its impact.
-- Steps to reproduce (or a proof-of-concept).
-- The affected commit / branch.
-- Any suggested mitigation.
-
-We will acknowledge reports within a few business days and aim to have a fix
-or mitigation in place within 30 days of confirmation, depending on
-complexity.
-
-## Out of scope
-
-- Issues that require physical access to a developer's machine.
-- Findings purely from automated scanners with no demonstrated impact.
-- Reports on third-party services (OpenRouter, Sentry, etc.) — please report
-  those to the respective vendors.
+CodeQL, [gitleaks](.gitleaks.toml), and Trivy (filesystem + image) already
+run on every PR/push and weekly — see
+[`.github/workflows/`](.github/workflows/). Something they missed, or a
+false negative in their config, is still worth reporting.
