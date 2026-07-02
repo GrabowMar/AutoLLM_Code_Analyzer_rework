@@ -68,7 +68,7 @@ def generate_report(request, payload: GenerateReportIn):
 
 @router.get("/{report_id}/", response=ReportDetailSchema)
 def get_report(request, report_id: str):
-    return get_object_or_404(Report, report_id=report_id)
+    return get_object_or_404(Report, report_id=report_id, created_by=request.auth)
 
 
 @router.get(
@@ -76,7 +76,7 @@ def get_report(request, report_id: str):
     response={200: ReportDataResponse, 400: GenericResponse},
 )
 def get_report_data(request, report_id: str):
-    report = get_object_or_404(Report, report_id=report_id)
+    report = get_object_or_404(Report, report_id=report_id, created_by=request.auth)
     if report.status != Report.Status.COMPLETED:
         return 400, {
             "success": False,
@@ -94,6 +94,6 @@ def get_report_data(request, report_id: str):
 
 @router.delete("/{report_id}/", response=GenericResponse)
 def delete_report(request, report_id: str):
-    report = get_object_or_404(Report, report_id=report_id)
+    report = get_object_or_404(Report, report_id=report_id, created_by=request.auth)
     report.delete()
     return {"success": True, "message": "deleted"}

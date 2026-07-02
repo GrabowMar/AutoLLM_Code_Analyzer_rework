@@ -111,3 +111,43 @@ def test_delete_report(auth_client):
 
 def test_unauthenticated_blocks_list(client):
     assert client.get("/api/reports/").status_code == 401
+
+
+def test_get_report_other_user_404(auth_client):
+    client, _ = auth_client
+    other = UserFactory()
+    r = Report.objects.create(
+        report_type="comprehensive",
+        title="Theirs",
+        config={},
+        created_by=other,
+        status=Report.Status.COMPLETED,
+    )
+    assert client.get(f"/api/reports/{r.report_id}/").status_code == 404
+
+
+def test_get_report_data_other_user_404(auth_client):
+    client, _ = auth_client
+    other = UserFactory()
+    r = Report.objects.create(
+        report_type="comprehensive",
+        title="Theirs",
+        config={},
+        created_by=other,
+        status=Report.Status.COMPLETED,
+        report_data={"k": "v"},
+    )
+    assert client.get(f"/api/reports/{r.report_id}/data/").status_code == 404
+
+
+def test_delete_report_other_user_404(auth_client):
+    client, _ = auth_client
+    other = UserFactory()
+    r = Report.objects.create(
+        report_type="comprehensive",
+        title="Theirs",
+        config={},
+        created_by=other,
+    )
+    assert client.delete(f"/api/reports/{r.report_id}/").status_code == 404
+    assert Report.objects.filter(id=r.id).exists()

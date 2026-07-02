@@ -297,3 +297,120 @@ def test_delete_schedule() -> None:
     client = _auth_client(user)
     res = _csrfless(client, "delete", f"{BASE}/schedules/{sched.id}/")
     assert res.status_code == 204
+
+
+@pytest.mark.django_db
+def test_get_pipeline_other_user_ok() -> None:
+    """Pipelines are shared-read by design: other users may view them."""
+    pipeline = PipelineFactory.create()
+    other = UserFactory.create()
+    client = _auth_client(other)
+    res = client.get(f"{BASE}/pipelines/{pipeline.id}/")
+    assert res.status_code == 200
+
+
+@pytest.mark.django_db
+def test_update_pipeline_not_owner_403() -> None:
+    pipeline = PipelineFactory.create()
+    other = UserFactory.create()
+    client = _auth_client(other)
+    res = _csrfless(
+        client,
+        "put",
+        f"{BASE}/pipelines/{pipeline.id}/",
+        {"name": "Hijacked"},
+    )
+    assert res.status_code == 403
+
+
+@pytest.mark.django_db
+def test_delete_pipeline_not_owner_403() -> None:
+    pipeline = PipelineFactory.create()
+    other = UserFactory.create()
+    client = _auth_client(other)
+    res = _csrfless(client, "delete", f"{BASE}/pipelines/{pipeline.id}/")
+    assert res.status_code == 403
+    assert Pipeline.objects.filter(id=pipeline.id).exists()
+
+
+@pytest.mark.django_db
+def test_clone_pipeline_not_owner_403() -> None:
+    pipeline = PipelineFactory.create()
+    other = UserFactory.create()
+    client = _auth_client(other)
+    res = _csrfless(
+        client,
+        "post",
+        f"{BASE}/pipelines/{pipeline.id}/clone/",
+        {"new_name": "Copy"},
+    )
+    assert res.status_code == 403
+
+
+@pytest.mark.django_db
+def test_trigger_run_not_owner_403() -> None:
+    pipeline = PipelineFactory.create()
+    other = UserFactory.create()
+    client = _auth_client(other)
+    res = _csrfless(client, "post", f"{BASE}/pipelines/{pipeline.id}/runs/", {"params": {}})
+    assert res.status_code == 403
+
+
+@pytest.mark.django_db
+def test_cancel_run_not_owner_403() -> None:
+    run = PipelineRunFactory.create(status="running")
+    other = UserFactory.create()
+    client = _auth_client(other)
+    res = _csrfless(client, "post", f"{BASE}/runs/{run.id}/cancel/")
+    assert res.status_code == 403
+
+
+@pytest.mark.django_db
+def test_retry_run_not_owner_403() -> None:
+    run = PipelineRunFactory.create(status="failed")
+    other = UserFactory.create()
+    client = _auth_client(other)
+    res = _csrfless(client, "post", f"{BASE}/runs/{run.id}/retry/")
+    assert res.status_code == 403
+
+
+@pytest.mark.django_db
+def test_create_schedule_other_users_pipeline_403() -> None:
+    pipeline = PipelineFactory.create()
+    other = UserFactory.create()
+    client = _auth_client(other)
+    res = _csrfless(
+        client,
+        "post",
+        f"{BASE}/schedules/",
+        {"pipeline_id": str(pipeline.id), "cron_expression": "0 * * * *", "enabled": True},
+    )
+    assert res.status_code == 403
+
+
+@pytest.mark.django_db
+def test_create_batch_other_users_pipeline_403() -> None:
+    pipeline = PipelineFactory.create()
+    other = UserFactory.create()
+    client = _auth_client(other)
+    res = _csrfless(
+        client,
+        "post",
+        f"{BASE}/batches/",
+        {"name": "B", "pipeline_id": str(pipeline.id), "matrix": {"models": ["gpt-4"]}},
+    )
+    assert res.status_code == 403
+
+
+@pytest.mark.django_db
+def test_staff_can_update_any_pipeline() -> None:
+    pipeline = PipelineFactory.create()
+    staff = UserFactory.create(is_staff=True)
+    client = _auth_client(staff)
+    res = _csrfless(
+        client,
+        "put",
+        f"{BASE}/pipelines/{pipeline.id}/",
+        {"name": "Staff edit"},
+    )
+    assert res.status_code == 200

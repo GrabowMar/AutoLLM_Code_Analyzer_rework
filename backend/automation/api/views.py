@@ -5,6 +5,7 @@ from typing import Any
 from django.http import HttpRequest
 from django.shortcuts import get_object_or_404
 from ninja import Router
+from ninja.errors import HttpError
 
 from backend.automation import services
 from backend.automation.api.schema import BatchCreateSchema
@@ -30,9 +31,24 @@ from backend.automation.models import Pipeline
 from backend.automation.models import PipelineRun
 from backend.automation.models import PipelineStep
 from backend.automation.models import Schedule
+from backend.common.ownership import get_owned_or_staff_or_403
 from backend.common.pagination import paginate_queryset
 
 router = Router(tags=["automation"])
+
+
+def _run_mutable_or_403(user: Any, run_id: str) -> PipelineRun:
+    """Fetch a run for mutation: allowed for its triggerer, pipeline owner, or staff."""
+    run = get_object_or_404(
+        PipelineRun.objects.select_related("pipeline"),
+        id=run_id,
+    )
+    user_id = getattr(user, "id", None)
+    if run.triggered_by_id == user_id:
+        return run
+    if run.pipeline.owner_id == user_id or getattr(user, "is_staff", False):
+        return run
+    raise HttpError(403, "You can only modify runs you triggered or own.")
 
 
 def _reconcile_steps(pipeline: Pipeline, steps_data: list[dict[str, Any]]) -> None:
@@ -104,7 +120,7 @@ def update_pipeline(
     pipeline_id: str,
     payload: PipelineUpdateSchema,
 ) -> Any:
-    pipeline = get_object_or_404(Pipeline, id=pipeline_id)
+    pipeline = get_owned_or_staff_or_403(Pipeline, user=request.auth, id=pipeline_id)
     update_data = payload.dict(exclude_none=True)
     new_config = update_data.get("config", pipeline.config)
     errors = services.validate_pipeline_dsl(new_config)
@@ -120,7 +136,7 @@ def update_pipeline(
 
 @router.delete("/pipelines/{pipeline_id}/", response={204: None})
 def delete_pipeline(request: HttpRequest, pipeline_id: str) -> tuple[int, None]:
-    pipeline = get_object_or_404(Pipeline, id=pipeline_id)
+    pipeline = get_owned_or_staff_or_403(Pipeline, user=request.auth, id=pipeline_id)
     pipeline.delete()
     return 204, None
 
@@ -131,7 +147,7 @@ def clone_pipeline(
     pipeline_id: str,
     payload: ClonePipelineSchema,
 ) -> Any:
-    pipeline = get_object_or_404(Pipeline, id=pipeline_id)
+    pipeline = get_owned_or_staff_or_403(Pipeline, user=request.auth, id=pipeline_id)
     new_pipeline = services.clone_pipeline(pipeline, payload.new_name)
     return 201, new_pipeline
 
@@ -142,7 +158,7 @@ def trigger_run(
     pipeline_id: str,
     payload: TriggerRunSchema,
 ) -> Any:
-    pipeline = get_object_or_404(Pipeline, id=pipeline_id)
+    pipeline = get_owned_or_staff_or_403(Pipeline, user=request.auth, id=pipeline_id)
     run = services.trigger_run(pipeline, payload.params, request.auth)
     return 202, run
 
@@ -170,7 +186,7 @@ def get_run(request: HttpRequest, run_id: str) -> PipelineRun:
 
 @router.post("/runs/{run_id}/cancel/", response={200: PipelineRunSchema})
 def cancel_run(request: HttpRequest, run_id: str) -> Any:
-    run = get_object_or_404(PipelineRun, id=run_id)
+    run = _run_mutable_or_403(request.auth, run_id)
     if run.status in ("pending", "running"):
         run.status = "cancelled"
         run.save(update_fields=["status"])
@@ -209,7 +225,7 @@ def get_run_logs(request: HttpRequest, run_id: str) -> Any:
 @router.post("/runs/{run_id}/retry/", response={202: RetryRunSchema})
 def retry_run(request: HttpRequest, run_id: str) -> Any:
     """Create a new PipelineRun reusing the same params as the original."""
-    original = get_object_or_404(PipelineRun, id=run_id)
+    original = _run_mutable_or_403(request.auth, run_id)
     new_run = services.trigger_run(original.pipeline, original.params, request.auth)
     return 202, RetryRunSchema(new_run_id=new_run.id)
 
@@ -223,7 +239,11 @@ def list_batches(request: HttpRequest, page: int = 1, per_page: int = 20) -> Any
 
 @router.post("/batches/", response={201: BatchDetailSchema})
 def create_batch(request: HttpRequest, payload: BatchCreateSchema) -> Any:
-    pipeline = get_object_or_404(Pipeline, id=payload.pipeline_id)
+    pipeline = get_owned_or_staff_or_403(
+        Pipeline,
+        user=request.auth,
+        id=payload.pipeline_id,
+    )
     batch = Batch.objects.create(
         owner=request.auth,
         name=payload.name,
@@ -266,7 +286,11 @@ def create_schedule(request: HttpRequest, payload: ScheduleCreateSchema) -> Any:
 
     if not croniter.is_valid(payload.cron_expression):
         return 400, {"valid": False, "errors": ["Invalid cron expression"]}
-    pipeline = get_object_or_404(Pipeline, id=payload.pipeline_id)
+    pipeline = get_owned_or_staff_or_403(
+        Pipeline,
+        user=request.auth,
+        id=payload.pipeline_id,
+    )
     next_run = services.next_cron_time(payload.cron_expression)
     schedule = Schedule.objects.create(
         pipeline=pipeline,
