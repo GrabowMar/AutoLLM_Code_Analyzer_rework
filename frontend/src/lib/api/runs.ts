@@ -87,7 +87,8 @@ export async function listRuns(params?: {
   if (params?.page) sp.set("page", String(params.page));
   if (params?.per_page) sp.set("per_page", String(params.per_page));
   if (params?.status) sp.set("status", params.status);
-  if (params?.generation_job_id) sp.set("generation_job_id", params.generation_job_id);
+  if (params?.generation_job_id)
+    sp.set("generation_job_id", params.generation_job_id);
   const qs = sp.toString();
   const res = await apiFetch(`/analysis/runs/${qs ? "?" + qs : ""}`);
   return res.json();
@@ -98,7 +99,9 @@ export async function getRun(runId: string): Promise<AnalysisRunDetail> {
   return res.json();
 }
 
-export async function createRun(payload: CreateRunPayload): Promise<AnalysisRunDetail> {
+export async function createRun(
+  payload: CreateRunPayload,
+): Promise<AnalysisRunDetail> {
   const res = await apiFetch("/analysis/runs/", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -107,7 +110,9 @@ export async function createRun(payload: CreateRunPayload): Promise<AnalysisRunD
 }
 
 export async function cancelRun(runId: string): Promise<AnalysisRunDetail> {
-  const res = await apiFetch(`/analysis/runs/${runId}/cancel/`, { method: "POST" });
+  const res = await apiFetch(`/analysis/runs/${runId}/cancel/`, {
+    method: "POST",
+  });
   return res.json();
 }
 
@@ -117,7 +122,12 @@ export async function deleteRun(runId: string): Promise<void> {
 
 export async function getRunFindings(
   runId: string,
-  params?: { page?: number; per_page?: number; severity?: string; tool_slug?: string },
+  params?: {
+    page?: number;
+    per_page?: number;
+    severity?: string;
+    tool_slug?: string;
+  },
 ): Promise<PaginatedRunFindings> {
   const sp = new URLSearchParams();
   if (params?.page) sp.set("page", String(params.page));
@@ -125,6 +135,8 @@ export async function getRunFindings(
   if (params?.severity) sp.set("severity", params.severity);
   if (params?.tool_slug) sp.set("tool_slug", params.tool_slug);
   const qs = sp.toString();
-  const res = await apiFetch(`/analysis/runs/${runId}/findings/${qs ? "?" + qs : ""}`);
+  const res = await apiFetch(
+    `/analysis/runs/${runId}/findings/${qs ? "?" + qs : ""}`,
+  );
   return res.json();
 }

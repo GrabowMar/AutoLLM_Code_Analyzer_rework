@@ -80,7 +80,9 @@ export async function getWorkspace(): Promise<Workspace> {
 }
 
 export async function provisionWorkspace(): Promise<Workspace> {
-  const res = await apiFetch("/analyzers/workspace/provision/", { method: "POST" });
+  const res = await apiFetch("/analyzers/workspace/provision/", {
+    method: "POST",
+  });
   return res.json();
 }
 

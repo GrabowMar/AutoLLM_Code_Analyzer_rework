@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from backend.generation.models import PromptTemplate
     from backend.generation.models import ScaffoldingTemplate
 
+
 def export_bundle_package(bundle: TemplateBundle) -> dict[str, Any]:
     return {
         "bundle_package_schema_version": BUNDLE_PACKAGE_SCHEMA_VERSION,
@@ -113,16 +114,12 @@ def export_template_package(
     }
 
 
-
-
 def dump_bundle_package(package: dict[str, Any], fmt: str) -> tuple[str, str]:
     return _dump_package(package, fmt)
 
 
 def dump_template_package(package: dict[str, Any], fmt: str) -> tuple[str, str]:
     return _dump_package(package, fmt)
-
-
 
 
 def _dump_package(package: dict[str, Any], fmt: str) -> tuple[str, str]:
@@ -208,5 +205,3 @@ def _serialize_bundle(bundle: TemplateBundle) -> dict[str, Any]:
         "block_refs": bundle.block_refs or [],
         "llm_config": bundle.llm_config or {},
     }
-
-
