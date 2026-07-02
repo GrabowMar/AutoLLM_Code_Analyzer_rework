@@ -1,0 +1,45 @@
+slug: radon
+name: Radon
+description: >-
+  Code-metrics analyzer for Python. Computes cyclomatic complexity and flags
+  functions, methods and classes that are too complex to maintain or perform
+  well.
+category: performance
+kind: container
+target_language: python
+icon: gauge
+version: "6"
+docs_url: https://radon.readthedocs.io/
+install_cmd: "pip install --user 'radon==6.*'"
+verify_cmd: "radon --version"
+# -j = JSON output, -n C = only report blocks ranked C (complexity > 10) or worse.
+run_cmd: "radon cc {target} -j -n C"
+parser_key: radon
+run_timeout: 90
+install_timeout: 180
+display_order: 10
+config_schema: []
+default_config: {}
+sample_code: |
+  def dispatch(code, a, b):
+      if code == 1:
+          return a + b
+      elif code == 2:
+          return a - b
+      elif code == 3:
+          return a * b
+      elif code == 4:
+          return a / b
+      elif code == 5:
+          return a % b
+      elif code == 6:
+          return a ** b
+      elif code == 7:
+          return -a
+      elif code == 8:
+          return abs(a) if a < 0 else a
+      elif code == 9:
+          return max(a, b) if a and b else 0
+      elif code == 10:
+          return min(a, b)
+      return None

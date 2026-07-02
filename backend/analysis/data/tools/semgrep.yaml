@@ -9,6 +9,7 @@ kind: container
 target_language: any
 icon: radar
 version: "1"
+docs_url: https://semgrep.dev/docs/
 install_cmd: "pip install --user 'semgrep==1.*'"
 verify_cmd: "semgrep --version"
 # Explicit rule packs (py + js/jsx) instead of `--config auto`, which semgrep

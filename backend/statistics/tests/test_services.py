@@ -195,9 +195,15 @@ def test_get_code_generation_stats_sums_metrics():
 def test_get_analyzer_health_uses_catalog():
     from django.core.cache import cache
 
+    from backend.analysis.models import AnalyzerTool
+
     cache.clear()
-    AnalyzerToolFactory(slug="bandit", category="security", is_enabled=True)
-    AnalyzerToolFactory(slug="eslint", category="lint", is_enabled=False)
+    # Clear the auto-seeded catalog (rolled back with the test transaction)
+    # so the exact-count assertions below hold; non-seeded slugs so the
+    # factory's django_get_or_create doesn't reuse seeded rows.
+    AnalyzerTool.objects.all().delete()
+    AnalyzerToolFactory(slug="health-a", category="security", is_enabled=True)
+    AnalyzerToolFactory(slug="health-b", category="lint", is_enabled=False)
 
     health = services.get_analyzer_health()
 

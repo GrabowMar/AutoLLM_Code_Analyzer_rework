@@ -1,0 +1,31 @@
+slug: hadolint
+name: Hadolint
+description: >-
+  Dockerfile linter. Enforces best practices such as pinned base images,
+  cleaned-up package caches and COPY over ADD.
+category: lint
+kind: container
+target_language: any
+icon: container
+version: "2.12"
+docs_url: https://github.com/hadolint/hadolint
+install_cmd: >-
+  mkdir -p /home/analyzer/.local/bin &&
+  curl -sSfL -o /home/analyzer/.local/bin/hadolint
+  https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64 &&
+  chmod +x /home/analyzer/.local/bin/hadolint
+verify_cmd: "hadolint --version"
+# hadolint takes explicit file arguments, so find Dockerfiles first; --no-fail
+# keeps the exit code at 0 and -r makes xargs a no-op when none exist.
+run_cmd: "find {target} -type f \\( -name Dockerfile -o -name 'Dockerfile.*' -o -name '*.dockerfile' \\) -print0 | xargs -0 -r hadolint -f json --no-fail"
+parser_key: hadolint
+run_timeout: 60
+install_timeout: 120
+display_order: 90
+config_schema: []
+default_config: {}
+sample_filename: Dockerfile
+sample_code: |
+  FROM python:latest
+  RUN apt-get update && apt-get install curl
+  ADD app.py /app/

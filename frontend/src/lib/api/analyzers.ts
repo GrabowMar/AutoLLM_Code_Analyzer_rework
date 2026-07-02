@@ -22,6 +22,7 @@ export interface AnalyzerTool {
   target_language: string;
   icon: string;
   version: string;
+  docs_url: string;
   config_schema: ConfigField[];
   default_config: Record<string, unknown>;
   run_timeout: number;

@@ -11,12 +11,14 @@ pytestmark = pytest.mark.django_db
 
 
 def test_list_tools(api_client):
-    AnalyzerToolFactory(slug="bandit", name="Bandit", is_enabled=True)
+    # Non-seeded slugs so the factory overrides actually apply (the catalog
+    # is auto-seeded by post_migrate).
+    AnalyzerToolFactory(slug="visible-tool", name="Visible", is_enabled=True)
     AnalyzerToolFactory(slug="hidden", is_enabled=False)
     resp = api_client.get("/api/analyzers/tools/")
     assert resp.status_code == 200
     slugs = {t["slug"] for t in resp.json()}
-    assert "bandit" in slugs
+    assert "visible-tool" in slugs
     assert "hidden" not in slugs
 
 

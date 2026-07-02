@@ -15,8 +15,10 @@ pytestmark = pytest.mark.django_db
 
 
 def test_execute_container_tool(monkeypatch, user):
+    # Non-seeded slug: the factory's django_get_or_create=("slug",) would
+    # silently return the auto-seeded "bandit" row and discard the overrides.
     AnalyzerToolFactory(
-        slug="bandit",
+        slug="bandit-fixture",
         kind="container",
         parser_key="bandit",
         run_cmd="bandit -r {target} -f json",
@@ -25,7 +27,7 @@ def test_execute_container_tool(monkeypatch, user):
     run = AnalysisRunFactory(
         created_by=user,
         workspace=workspace,
-        tool_slugs=["bandit"],
+        tool_slugs=["bandit-fixture"],
         source_code={"backend": "import hashlib"},
     )
 

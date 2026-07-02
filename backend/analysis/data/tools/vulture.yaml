@@ -1,0 +1,30 @@
+slug: vulture
+name: Vulture
+description: >-
+  Dead-code finder for Python. Detects unused functions, classes, variables
+  and imports, plus unreachable code.
+category: lint
+kind: container
+target_language: python
+icon: skull
+version: "2"
+docs_url: https://github.com/jendrikseipp/vulture
+install_cmd: "pip install --user 'vulture==2.*'"
+verify_cmd: "vulture --version"
+run_cmd: "vulture {target} --min-confidence 60"
+parser_key: vulture
+run_timeout: 90
+install_timeout: 180
+display_order: 60
+config_schema: []
+default_config: {}
+sample_code: |
+  import os
+
+
+  def never_called():
+      unused_local = 42
+      return "dead"
+
+
+  print("hello")

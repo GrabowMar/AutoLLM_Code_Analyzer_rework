@@ -8,6 +8,7 @@ kind: container
 target_language: python
 icon: shield-alert
 version: "1.7"
+docs_url: https://bandit.readthedocs.io/
 install_cmd: "pip install --user 'bandit==1.7.*'"
 verify_cmd: "bandit --version"
 run_cmd: "bandit -r {target} -f json -q"

@@ -8,6 +8,7 @@ kind: container
 target_language: any
 icon: key-round
 version: "8.18"
+docs_url: https://github.com/gitleaks/gitleaks
 install_cmd: >-
   mkdir -p /home/analyzer/.local/bin &&
   curl -sSfL

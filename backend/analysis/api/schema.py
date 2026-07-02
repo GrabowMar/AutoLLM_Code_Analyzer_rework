@@ -18,6 +18,7 @@ class AnalyzerToolSchema(Schema):
     target_language: str
     icon: str
     version: str
+    docs_url: str
     config_schema: list[dict[str, Any]]
     default_config: dict[str, Any]
     run_timeout: int

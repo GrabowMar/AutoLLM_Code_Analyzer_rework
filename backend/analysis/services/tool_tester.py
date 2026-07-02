@@ -57,9 +57,10 @@ def test_tool(
         try:
             container_name = workspace_service.require_ready_container(workspace)
             ext = ".py" if tool.target_language == "python" else ".js"
+            filename = tool.sample_filename or f"sample{ext}"
             docker_manager.copy_files_in(
                 container_name,
-                {f"sample{ext}": sample},
+                {filename: sample},
                 dest="/tmp/analyzer-test",
             )
             cmd = tool.run_cmd.replace("{target}", "/tmp/analyzer-test")

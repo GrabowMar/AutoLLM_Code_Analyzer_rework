@@ -17,6 +17,8 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import CheckCircle2 from '@lucide/svelte/icons/check-circle-2';
 	import XCircle from '@lucide/svelte/icons/circle-x';
+	import ExternalLink from '@lucide/svelte/icons/external-link';
+	import Search from '@lucide/svelte/icons/search';
 	import {
 		getToolCatalog,
 		getWorkspace,
@@ -69,6 +71,7 @@
 	let loading = $state(true);
 	let busy = $state<Record<string, boolean>>({});
 	let categoryFilter = $state('all');
+	let searchQuery = $state('');
 
 	// Config / test modal
 	let configOpen = $state(false);
@@ -93,11 +96,14 @@
 		...Array.from(new Set(catalog.map((t) => t.category))),
 	]);
 
-	const visibleCatalog = $derived(
-		categoryFilter === 'all'
-			? catalog
-			: catalog.filter((t) => t.category === categoryFilter),
-	);
+	const visibleCatalog = $derived.by(() => {
+		const q = searchQuery.trim().toLowerCase();
+		return catalog.filter(
+			(t) =>
+				(categoryFilter === 'all' || t.category === categoryFilter) &&
+				(!q || t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q)),
+		);
+	});
 
 	async function loadAll() {
 		loading = true;
@@ -292,19 +298,44 @@
 			{/each}
 		</div>
 	{:else if activeTab === 'shop'}
-		<!-- Category filter -->
-		<div class="flex flex-wrap gap-2">
-			{#each categories as cat}
-				<button
-					class="cursor-pointer rounded-full border px-3 py-1 text-xs transition-colors {categoryFilter === cat
-						? 'bg-primary text-primary-foreground border-primary'
-						: 'text-muted-foreground hover:bg-muted'}"
-					onclick={() => (categoryFilter = cat)}
-				>
-					{cat === 'all' ? 'All' : (categoryLabels[cat] ?? cat)}
-				</button>
-			{/each}
+		<!-- Category filter + search -->
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<div class="flex flex-wrap gap-2">
+				{#each categories as cat}
+					<button
+						class="cursor-pointer rounded-full border px-3 py-1 text-xs transition-colors {categoryFilter === cat
+							? 'bg-primary text-primary-foreground border-primary'
+							: 'text-muted-foreground hover:bg-muted'}"
+						onclick={() => (categoryFilter = cat)}
+					>
+						{cat === 'all' ? 'All' : (categoryLabels[cat] ?? cat)}
+					</button>
+				{/each}
+			</div>
+			<div class="relative w-full sm:w-60">
+				<Search class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+				<Input type="search" placeholder="Search tools…" class="pl-8" bind:value={searchQuery} />
+			</div>
 		</div>
+
+		{#if visibleCatalog.length === 0}
+			<div class="rounded-lg border border-dashed py-16 text-center text-muted-foreground">
+				{#if catalog.length === 0}
+					The tool catalog is empty.
+				{:else}
+					No tools match your filters.
+					<button
+						class="ml-1 text-primary underline"
+						onclick={() => {
+							searchQuery = '';
+							categoryFilter = 'all';
+						}}
+					>
+						Clear filters
+					</button>
+				{/if}
+			</div>
+		{/if}
 
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 			{#each visibleCatalog as tool (tool.slug)}
@@ -317,8 +348,19 @@
 						<Card.Description class="line-clamp-3">{tool.description}</Card.Description>
 					</Card.Header>
 					<Card.Content class="mt-auto flex items-center justify-between">
-						<span class="text-xs text-muted-foreground">
+						<span class="flex items-center gap-2 text-xs text-muted-foreground">
 							{tool.kind === 'ai' ? 'AI' : tool.target_language}{tool.version ? ` · v${tool.version}` : ''}
+							{#if tool.docs_url}
+								<a
+									href={tool.docs_url}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="inline-flex items-center gap-0.5 text-primary hover:underline"
+									aria-label="{tool.name} documentation (opens in new tab)"
+								>
+									Docs <ExternalLink class="size-3" />
+								</a>
+							{/if}
 						</span>
 						{#if isInstalled(tool.slug)}
 							<Button
@@ -451,7 +493,20 @@
 	<Dialog.Content class="max-w-lg">
 		<Dialog.Header>
 			<Dialog.Title>{activeTool?.tool_name}</Dialog.Title>
-			<Dialog.Description>Configure options and run a sample test.</Dialog.Description>
+			<Dialog.Description>
+				Configure options and run a sample test.
+				{#if activeSchema?.docs_url}
+					<a
+						href={activeSchema.docs_url}
+						target="_blank"
+						rel="noopener noreferrer"
+						class="inline-flex items-center gap-0.5 text-primary hover:underline"
+						aria-label="{activeTool?.tool_name} documentation (opens in new tab)"
+					>
+						Docs <ExternalLink class="size-3" />
+					</a>
+				{/if}
+			</Dialog.Description>
 		</Dialog.Header>
 
 		<div class="space-y-4">

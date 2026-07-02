@@ -1,0 +1,43 @@
+slug: jscpd
+name: jscpd
+description: >-
+  Copy/paste detector. Finds duplicated code blocks across 150+ languages —
+  duplication that usually signals a missing abstraction.
+category: lint
+kind: container
+target_language: any
+icon: copy
+version: "4"
+docs_url: https://github.com/kucherenko/jscpd
+install_cmd: "npm install -g jscpd@4"
+verify_cmd: "jscpd --version"
+# jscpd logs progress to stdout, so write the JSON report to a file and cat
+# only that (same pattern as gitleaks).
+run_cmd: "jscpd {target} --min-tokens 35 --reporters json --output /tmp/jscpd --silent >/dev/null 2>&1; cat /tmp/jscpd/jscpd-report.json"
+parser_key: jscpd
+run_timeout: 120
+install_timeout: 300
+display_order: 80
+config_schema: []
+default_config: {}
+# The sample is Python; without this the test action would write sample.js.
+sample_filename: sample.py
+sample_code: |
+  def compute_invoice_total(items, tax_rate, discount):
+      subtotal = 0
+      for item in items:
+          price = item["price"] * item["quantity"]
+          if item.get("taxable"):
+              price = price * (1 + tax_rate)
+          subtotal += price
+      return subtotal - discount
+
+
+  def compute_order_total(items, tax_rate, discount):
+      subtotal = 0
+      for item in items:
+          price = item["price"] * item["quantity"]
+          if item.get("taxable"):
+              price = price * (1 + tax_rate)
+          subtotal += price
+      return subtotal - discount

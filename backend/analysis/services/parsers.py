@@ -232,6 +232,196 @@ def parse_mypy(raw: str) -> list[FindingData]:
     return findings
 
 
+@register("radon")
+def parse_radon(raw: str) -> list[FindingData]:
+    """Radon ``cc -j`` output: ``{file: [block]}`` with nested methods/closures."""
+    data = _loads(raw) or {}
+    if not isinstance(data, dict):
+        return []
+    sev_map = {"C": "low", "D": "medium", "E": "high", "F": "critical"}
+    findings: list[FindingData] = []
+
+    def _walk(file_path: str, block: dict) -> None:
+        rank = str(block.get("rank", ""))
+        complexity = block.get("complexity")
+        findings.append(
+            FindingData(
+                severity=sev_map.get(rank, "low"),
+                category="performance",
+                title=(
+                    f"{block.get('type', 'block')} '{block.get('name', '?')}' has "
+                    f"cyclomatic complexity {complexity} (rank {rank})"
+                ),
+                file_path=file_path,
+                line_number=block.get("lineno"),
+                column_number=block.get("col_offset"),
+                rule_id=f"CC-{rank}" if rank else "CC",
+                confidence="high",
+                tool_specific_data={"complexity": complexity, "endline": block.get("endline")},
+            ),
+        )
+        for child in (block.get("methods") or []) + (block.get("closures") or []):
+            _walk(file_path, child)
+
+    for file_path, blocks in data.items():
+        # A file radon failed to parse maps to {"error": "..."} — skip it.
+        if not isinstance(blocks, list):
+            continue
+        for block in blocks:
+            _walk(file_path, block)
+    return findings
+
+
+_VULTURE_LINE_RE = re.compile(
+    r"^(?P<file>.+?):(?P<line>\d+): (?P<msg>.+?) \((?P<conf>\d+)% confidence\)$",
+)
+
+
+@register("vulture")
+def parse_vulture(raw: str) -> list[FindingData]:
+    """Vulture has no JSON output; parse ``file:line: msg (NN% confidence)`` text."""
+    findings: list[FindingData] = []
+    for raw_line in (raw or "").splitlines():
+        m = _VULTURE_LINE_RE.match(raw_line.rstrip())
+        if not m:
+            continue
+        msg = m.group("msg")
+        conf = int(m.group("conf"))
+        findings.append(
+            FindingData(
+                severity="medium" if msg.startswith("unreachable code") else "low",
+                category="quality",
+                title=msg,
+                description=msg,
+                file_path=m.group("file"),
+                line_number=int(m.group("line")),
+                rule_id="-".join(msg.split()[:2]).lower(),
+                confidence="high" if conf >= 90 else "medium" if conf >= 60 else "low",
+                tool_specific_data={"confidence_pct": conf},
+            ),
+        )
+    return findings
+
+
+@register("detect_secrets")
+def parse_detect_secrets(raw: str) -> list[FindingData]:
+    """detect-secrets baseline JSON: ``{"results": {path: [item]}}``."""
+    data = _loads(raw) or {}
+    if not isinstance(data, dict):
+        return []
+    findings: list[FindingData] = []
+    for path, items in (data.get("results") or {}).items():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            secret_type = item.get("type", "secret")
+            findings.append(
+                FindingData(
+                    severity="high",
+                    category="secrets",
+                    title=f"Potential secret: {secret_type}",
+                    description=f"detect-secrets flagged a {secret_type} in {path}.",
+                    file_path=item.get("filename") or path,
+                    line_number=item.get("line_number"),
+                    rule_id=secret_type,
+                    confidence="medium",
+                    tool_specific_data={
+                        "hashed_secret": item.get("hashed_secret", ""),
+                        "is_verified": item.get("is_verified", False),
+                    },
+                ),
+            )
+    return findings
+
+
+@register("jscpd")
+def parse_jscpd(raw: str) -> list[FindingData]:
+    """jscpd JSON report: ``{"duplicates": [{firstFile, secondFile, lines, …}]}``."""
+    data = _loads(raw) or {}
+    if not isinstance(data, dict):
+        return []
+    findings: list[FindingData] = []
+    for dup in data.get("duplicates") or []:
+        first = dup.get("firstFile") or {}
+        second = dup.get("secondFile") or {}
+        lines = dup.get("lines") or 0
+        findings.append(
+            FindingData(
+                severity="medium" if lines >= 25 else "low",
+                category="quality",
+                title=(
+                    f"Duplicated block ({lines} lines) also found in "
+                    f"{second.get('name', '?')}:{second.get('start')}"
+                ),
+                file_path=first.get("name", ""),
+                line_number=first.get("start"),
+                code_snippet=(dup.get("fragment") or "")[:500],
+                rule_id="duplicate-code",
+                confidence="high",
+                tool_specific_data={
+                    "tokens": dup.get("tokens"),
+                    "second_file": second.get("name", ""),
+                    "second_start": second.get("start"),
+                },
+            ),
+        )
+    return findings
+
+
+@register("hadolint")
+def parse_hadolint(raw: str) -> list[FindingData]:
+    data = _loads(raw) or []
+    if not isinstance(data, list):
+        return []
+    sev_map = {"error": "high", "warning": "medium", "info": "low", "style": "info"}
+    findings: list[FindingData] = []
+    for item in data:
+        findings.append(
+            FindingData(
+                severity=sev_map.get(str(item.get("level", "warning")).lower(), "low"),
+                category="quality",
+                title=item.get("message", "Dockerfile issue"),
+                description=item.get("message", ""),
+                file_path=item.get("file", ""),
+                line_number=item.get("line"),
+                column_number=item.get("column"),
+                rule_id=item.get("code", ""),
+                confidence="high",
+            ),
+        )
+    return findings
+
+
+_CODESPELL_LINE_RE = re.compile(
+    r"^(?P<file>.+?):(?P<line>\d+):\s+(?P<wrong>\S+) ==> (?P<right>.+)$",
+)
+
+
+@register("codespell")
+def parse_codespell(raw: str) -> list[FindingData]:
+    """codespell has no JSON output; parse ``file:line: wrong ==> right`` text."""
+    findings: list[FindingData] = []
+    for raw_line in (raw or "").splitlines():
+        m = _CODESPELL_LINE_RE.match(raw_line.rstrip())
+        if not m:
+            continue
+        wrong, right = m.group("wrong"), m.group("right")
+        findings.append(
+            FindingData(
+                severity="info",
+                category="quality",
+                title=f"Possible typo: '{wrong}'",
+                description=f"'{wrong}' looks like a misspelling.",
+                suggestion=f"Replace '{wrong}' with '{right}'",
+                file_path=m.group("file"),
+                line_number=int(m.group("line")),
+                rule_id="typo",
+                confidence="medium",
+            ),
+        )
+    return findings
+
+
 @register("gitleaks")
 def parse_gitleaks(raw: str) -> list[FindingData]:
     data = _loads(raw) or []

@@ -154,6 +154,139 @@ def test_gitleaks_parser():
     assert f.rule_id == "aws-access-token"
 
 
+def test_radon_parser_recurses_and_skips_error_entries():
+    raw = json.dumps(
+        {
+            "app.py": [
+                {
+                    "type": "class",
+                    "name": "Dispatcher",
+                    "rank": "C",
+                    "complexity": 12,
+                    "lineno": 1,
+                    "col_offset": 0,
+                    "endline": 40,
+                    "methods": [
+                        {
+                            "type": "method",
+                            "name": "dispatch",
+                            "rank": "F",
+                            "complexity": 44,
+                            "lineno": 3,
+                            "col_offset": 4,
+                            "endline": 39,
+                        },
+                    ],
+                },
+            ],
+            "broken.py": {"error": "invalid syntax"},
+        },
+    )
+    findings = parsers.parse("radon", raw)
+    assert len(findings) == 2
+    by_rule = {f.rule_id: f for f in findings}
+    assert by_rule["CC-C"].severity == "low"
+    assert by_rule["CC-F"].severity == "critical"
+    assert by_rule["CC-F"].line_number == 3
+    assert all(f.category == "performance" for f in findings)
+
+
+def test_vulture_parser_text():
+    raw = (
+        "app.py:1: unused import 'os' (90% confidence)\n"
+        "app.py:4: unused function 'never_called' (60% confidence)\n"
+        "vulture: some note line\n"
+    )
+    findings = parsers.parse("vulture", raw)
+    assert len(findings) == 2
+    assert findings[0].confidence == "high"
+    assert findings[0].rule_id == "unused-import"
+    assert findings[1].confidence == "medium"
+    assert findings[1].line_number == 4
+    assert all(f.category == "quality" for f in findings)
+
+
+def test_detect_secrets_parser():
+    raw = json.dumps(
+        {
+            "version": "1.5.0",
+            "results": {
+                "config.py": [
+                    {
+                        "type": "AWS Access Key",
+                        "filename": "config.py",
+                        "line_number": 2,
+                        "hashed_secret": "abc123",
+                        "is_verified": False,
+                    },
+                ],
+            },
+        },
+    )
+    findings = parsers.parse("detect_secrets", raw)
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.severity == "high"
+    assert f.category == "secrets"
+    assert f.rule_id == "AWS Access Key"
+    assert f.line_number == 2
+    assert f.tool_specific_data == {"hashed_secret": "abc123", "is_verified": False}
+    assert f.code_snippet == ""
+
+
+def test_jscpd_parser_truncates_fragment():
+    raw = json.dumps(
+        {
+            "duplicates": [
+                {
+                    "format": "python",
+                    "lines": 30,
+                    "tokens": 120,
+                    "fragment": "x" * 900,
+                    "firstFile": {"name": "a.py", "start": 3, "end": 32},
+                    "secondFile": {"name": "b.py", "start": 10, "end": 39},
+                },
+            ],
+            "statistics": {},
+        },
+    )
+    findings = parsers.parse("jscpd", raw)
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.severity == "medium"  # >= 25 lines
+    assert f.file_path == "a.py"
+    assert f.line_number == 3
+    assert "b.py:10" in f.title
+    assert len(f.code_snippet) == 500
+    assert f.rule_id == "duplicate-code"
+
+
+def test_hadolint_parser_level_map():
+    raw = json.dumps(
+        [
+            {"file": "Dockerfile", "line": 1, "code": "DL3007", "level": "warning", "message": "latest tag"},
+            {"file": "Dockerfile", "line": 2, "code": "DL3009", "level": "info", "message": "apt lists"},
+            {"file": "Dockerfile", "line": 3, "code": "DL4000", "level": "style", "message": "style"},
+        ],
+    )
+    findings = parsers.parse("hadolint", raw)
+    assert [f.severity for f in findings] == ["medium", "low", "info"]
+    assert findings[0].rule_id == "DL3007"
+    # Non-list payload (e.g. an error object) yields no findings.
+    assert parsers.parse("hadolint", json.dumps({"error": "x"})) == []
+
+
+def test_codespell_parser_text():
+    raw = "app.py:3:  recieve ==> receive\napp.py:7:  seperate ==> separate\n"
+    findings = parsers.parse("codespell", raw)
+    assert len(findings) == 2
+    f = findings[0]
+    assert f.severity == "info"
+    assert f.line_number == 3
+    assert f.suggestion == "Replace 'recieve' with 'receive'"
+    assert f.rule_id == "typo"
+
+
 def test_unknown_parser_returns_empty():
     assert parsers.parse("does-not-exist", "{}") == []
 
@@ -165,6 +298,6 @@ def test_parser_tolerates_leading_noise():
 
 def test_parser_tolerates_empty_and_non_json_output():
     # A tool that scanned nothing or printed a CLI error must yield [] quietly.
-    assert parsers.parse("eslint", "") == []
-    assert parsers.parse("eslint", "No files matching the pattern were found.") == []
-    assert parsers.parse("gitleaks", "") == []
+    for key in ("eslint", "gitleaks", "radon", "vulture", "detect_secrets", "jscpd", "hadolint", "codespell"):
+        assert parsers.parse(key, "") == []
+        assert parsers.parse(key, "No files matching the pattern were found.") == []

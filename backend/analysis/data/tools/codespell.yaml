@@ -1,0 +1,24 @@
+slug: codespell
+name: Codespell
+description: >-
+  Spell-checker for source code. Finds common misspellings in comments,
+  docstrings, strings and identifiers without flagging legitimate code words.
+category: lint
+kind: container
+target_language: any
+icon: spell-check
+version: "2"
+docs_url: https://github.com/codespell-project/codespell
+install_cmd: "pip install --user 'codespell==2.*'"
+verify_cmd: "codespell --version"
+run_cmd: "codespell {target} --disable-colors"
+parser_key: codespell
+run_timeout: 60
+install_timeout: 120
+display_order: 70
+config_schema: []
+default_config: {}
+sample_code: |
+  # This function will recieve a payload and seperate it into fields.
+  def process(payload):
+      return payload.split(",")

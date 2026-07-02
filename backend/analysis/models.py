@@ -67,6 +67,7 @@ class AnalyzerTool(models.Model):
     )
     icon = models.CharField(_("icon"), max_length=100, blank=True, default="")
     version = models.CharField(_("version"), max_length=50, blank=True, default="")
+    docs_url = models.URLField(_("documentation URL"), blank=True, default="")
 
     # Container execution (kind == container)
     install_cmd = models.TextField(_("install command"), blank=True, default="")
@@ -89,6 +90,13 @@ class AnalyzerTool(models.Model):
 
     # A sample snippet used by the "test" action
     sample_code = models.TextField(_("sample code"), blank=True, default="")
+    sample_filename = models.CharField(
+        _("sample filename"),
+        max_length=100,
+        blank=True,
+        default="",
+        help_text=_("Filename for the sample (for filename-sensitive tools, e.g. 'Dockerfile')."),
+    )
 
     is_system = models.BooleanField(_("system tool"), default=True)
     is_enabled = models.BooleanField(_("enabled"), default=True, db_index=True)

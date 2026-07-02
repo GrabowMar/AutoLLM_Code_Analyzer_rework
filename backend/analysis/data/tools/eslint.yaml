@@ -8,6 +8,7 @@ kind: container
 target_language: javascript
 icon: braces
 version: "8"
+docs_url: https://eslint.org/docs/latest/
 install_cmd: "npm install -g eslint@8"
 verify_cmd: "eslint --version"
 run_cmd: "eslint {target} --ext .js,.jsx,.cjs,.mjs -f json --no-eslintrc --env browser,node --parser-options=ecmaVersion:latest,sourceType:module,ecmaFeatures:{jsx:true} --rule '{\"no-undef\":\"error\",\"no-unused-vars\":\"warn\"}'"

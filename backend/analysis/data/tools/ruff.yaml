@@ -8,6 +8,7 @@ kind: container
 target_language: python
 icon: sparkles
 version: "0.6"
+docs_url: https://docs.astral.sh/ruff/
 install_cmd: "pip install --user 'ruff==0.6.*'"
 verify_cmd: "ruff --version"
 run_cmd: "ruff check {target} --output-format json"
