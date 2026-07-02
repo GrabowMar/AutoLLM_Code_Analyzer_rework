@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `scripts/deploy.sh` — one-shot install/update script for Docker hosts,
   with optional Caddy/nginx reverse-proxy configuration.
+- `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1), linked from the README
+  and CONTRIBUTING.
+- `just test` recipe running pytest in Docker with the same command as CI;
+  README, CONTRIBUTING, and the Copilot instructions now all point at it
+  instead of describing three different invocations.
+- README screenshot (`docs/images/analyzers.png`) plus header quick-links
+  (docs / report bug / request feature), Gitleaks and Trivy workflow badges,
+  and back-to-top links.
 
 ### Changed
 - **Breaking:** upgraded PostgreSQL from 17 to 18. The postgres:18 image
