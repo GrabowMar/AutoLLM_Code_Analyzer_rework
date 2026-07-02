@@ -25,6 +25,7 @@ from backend.generation.services.bundle_packages.visibility import visible_block
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
 
+
 def parse_bundle_package_text(package_text: str) -> dict[str, Any]:
     data = _parse_package_text(package_text)
     if data.get("kind") != BUNDLE_PACKAGE_KIND:
@@ -55,8 +56,6 @@ def parse_template_package_text(package_text: str) -> dict[str, Any]:
         msg = "Template package is missing a valid 'assets' section"
         raise ValueError(msg)
     return data
-
-
 
 
 def import_bundle_package(
@@ -430,8 +429,6 @@ def _parse_package_text(package_text: str) -> dict[str, Any]:
         msg = "Package must be a JSON or YAML object"
         raise ValueError(msg)
     return data
-
-
 
 
 def _validate_scaffolding_payload(raw_template: Any) -> dict[str, Any]:

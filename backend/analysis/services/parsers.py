@@ -350,8 +350,7 @@ def parse_jscpd(raw: str) -> list[FindingData]:
                 severity="medium" if lines >= 25 else "low",
                 category="quality",
                 title=(
-                    f"Duplicated block ({lines} lines) also found in "
-                    f"{second.get('name', '?')}:{second.get('start')}"
+                    f"Duplicated block ({lines} lines) also found in {second.get('name', '?')}:{second.get('start')}"
                 ),
                 file_path=first.get("name", ""),
                 line_number=first.get("start"),

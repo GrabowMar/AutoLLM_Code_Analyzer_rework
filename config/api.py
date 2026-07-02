@@ -25,6 +25,7 @@ def handle_api_error(request, exc: APIError):
         status=exc.status_code,
     )
 
+
 api.add_router("/users/", "backend.users.api.views.router")
 api.add_router("/tokens/", "backend.tokens.api.views.router")
 api.add_router("/credentials/", "backend.credentials.api.views.router")

@@ -97,17 +97,20 @@ function getHighlighter(): Promise<{
       import("shiki"),
       import("@shikijs/transformers"),
     ]).then(([shiki, transformers]) => {
-      return shiki.createHighlighter({
-        themes: ["github-light", "github-dark"],
-        langs: SHIKI_LANGS,
-      }).then((highlighter) => {
-        return {
-          highlighter,
-          transformerNotationDiff: transformers.transformerNotationDiff,
-          transformerNotationHighlight: transformers.transformerNotationHighlight,
-          transformerNotationFocus: transformers.transformerNotationFocus,
-        };
-      });
+      return shiki
+        .createHighlighter({
+          themes: ["github-light", "github-dark"],
+          langs: SHIKI_LANGS,
+        })
+        .then((highlighter) => {
+          return {
+            highlighter,
+            transformerNotationDiff: transformers.transformerNotationDiff,
+            transformerNotationHighlight:
+              transformers.transformerNotationHighlight,
+            transformerNotationFocus: transformers.transformerNotationFocus,
+          };
+        });
     });
   }
   return _highlighterPromise;
