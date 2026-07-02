@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import tempfile
-import threading
 import time
 import uuid
 from pathlib import Path
@@ -14,6 +13,7 @@ from django.db import connection
 from django.db import transaction
 from django.utils import timezone
 
+from backend.common.threading import dispatch_in_thread
 from backend.realtime import events as realtime
 from backend.runtime.models import ContainerAction
 from backend.runtime.models import ContainerInstance
@@ -27,6 +27,18 @@ if TYPE_CHECKING:
     from backend.users.models import User
 
 logger = logging.getLogger(__name__)
+
+
+def publish_container_status(container: ContainerInstance) -> None:
+    """Publish the container's current (already saved) status to subscribers."""
+    realtime.publish(
+        f"runtime:{container.id}",
+        {
+            "type": "status",
+            "status": container.status,
+            "updated_at": timezone.now().isoformat(),
+        },
+    )
 
 
 def create_action(
@@ -47,13 +59,7 @@ def create_action(
 
 
 def _dispatch(action_id) -> None:
-    thread = threading.Thread(
-        target=_execute,
-        args=(action_id,),
-        daemon=True,
-        name=f"container-action-{action_id}",
-    )
-    thread.start()
+    dispatch_in_thread(_execute, action_id, name=f"container-action-{action_id}")
 
 
 def _execute(action_id) -> None:
@@ -115,14 +121,7 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
     container.status = ContainerInstance.Status.BUILDING
     container.save(update_fields=["status"])
     action.update_progress(10)
-    realtime.publish(
-        f"runtime:{container.id}",
-        {
-            "type": "status",
-            "status": container.status,
-            "updated_at": timezone.now().isoformat(),
-        },
-    )
+    publish_container_status(container)
 
     job = container.generation_job
     tag = f"backend/{container.name}:latest"
@@ -169,14 +168,7 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
             container.save(update_fields=["status"])
             traefik_router.delete_route(container)
             action.mark_failed(detail[-4000:])
-            realtime.publish(
-                f"runtime:{container.id}",
-                {
-                    "type": "status",
-                    "status": container.status,
-                    "updated_at": timezone.now().isoformat(),
-                },
-            )
+            publish_container_status(container)
             return
 
         container.status = ContainerInstance.Status.RUNNING
@@ -187,14 +179,7 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
             output=f"Built {tag}, container {cid}\n\n{build_log[-2000:]}",
             exit_code=0,
         )
-        realtime.publish(
-            f"runtime:{container.id}",
-            {
-                "type": "status",
-                "status": container.status,
-                "updated_at": timezone.now().isoformat(),
-            },
-        )
+        publish_container_status(container)
 
     except Exception as exc:
         logger.exception("Build failed for %s", container.name)
@@ -207,14 +192,7 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
             error_detail = ""
         error_msg = error_detail or str(exc)
         action.mark_failed(error_msg[-4000:])
-        realtime.publish(
-            f"runtime:{container.id}",
-            {
-                "type": "status",
-                "status": container.status,
-                "updated_at": timezone.now().isoformat(),
-            },
-        )
+        publish_container_status(container)
 
 
 def _verify_running(
@@ -291,28 +269,14 @@ def _do_start(action: ContainerAction, container: ContainerInstance) -> None:
         container.save(update_fields=["status"])
         traefik_router.delete_route(container)
         action.mark_failed(detail[-4000:])
-        realtime.publish(
-            f"runtime:{container.id}",
-            {
-                "type": "status",
-                "status": container.status,
-                "updated_at": timezone.now().isoformat(),
-            },
-        )
+        publish_container_status(container)
         return
 
     container.status = ContainerInstance.Status.RUNNING
     container.save(update_fields=["status"])
     traefik_router.write_route(container)
     action.mark_completed(output="Started", exit_code=0)
-    realtime.publish(
-        f"runtime:{container.id}",
-        {
-            "type": "status",
-            "status": container.status,
-            "updated_at": timezone.now().isoformat(),
-        },
-    )
+    publish_container_status(container)
 
 
 def _do_stop(action: ContainerAction, container: ContainerInstance) -> None:
@@ -324,14 +288,7 @@ def _do_stop(action: ContainerAction, container: ContainerInstance) -> None:
         container.save(update_fields=["status"])
         traefik_router.delete_route(container)
         action.mark_completed(output="Stopped", exit_code=0)
-        realtime.publish(
-            f"runtime:{container.id}",
-            {
-                "type": "status",
-                "status": container.status,
-                "updated_at": timezone.now().isoformat(),
-            },
-        )
+        publish_container_status(container)
 
 
 def _do_restart(action: ContainerAction, container: ContainerInstance) -> None:
@@ -342,14 +299,7 @@ def _do_restart(action: ContainerAction, container: ContainerInstance) -> None:
         container.status = ContainerInstance.Status.RUNNING
         container.save(update_fields=["status"])
         action.mark_completed(output="Restarted", exit_code=0)
-        realtime.publish(
-            f"runtime:{container.id}",
-            {
-                "type": "status",
-                "status": container.status,
-                "updated_at": timezone.now().isoformat(),
-            },
-        )
+        publish_container_status(container)
 
 
 def _do_remove(action: ContainerAction, container: ContainerInstance) -> None:
@@ -366,14 +316,7 @@ def _do_remove(action: ContainerAction, container: ContainerInstance) -> None:
     container.save(update_fields=["status"])
     output = "Removed" if not error else "Container not found in Docker (already removed)"
     action.mark_completed(output=output, exit_code=0)
-    realtime.publish(
-        f"runtime:{container.id}",
-        {
-            "type": "status",
-            "status": container.status,
-            "updated_at": timezone.now().isoformat(),
-        },
-    )
+    publish_container_status(container)
 
 
 def _do_logs(action: ContainerAction, container: ContainerInstance) -> None:

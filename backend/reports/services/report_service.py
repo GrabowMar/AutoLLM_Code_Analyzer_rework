@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
-import threading
 from datetime import timedelta
 from typing import Any
 
 from django.db import transaction
 from django.utils import timezone
 
+from backend.common.threading import dispatch_in_thread
 from backend.reports.models import Report
 
 from .generators import GENERATORS
@@ -49,13 +49,7 @@ def create_and_dispatch(
 
 
 def _dispatch(report_id) -> None:
-    thread = threading.Thread(
-        target=_run_generation,
-        args=(report_id,),
-        daemon=True,
-        name=f"report-{report_id}",
-    )
-    thread.start()
+    dispatch_in_thread(_run_generation, report_id, name=f"report-{report_id}")
 
 
 def _run_generation(report_id) -> None:

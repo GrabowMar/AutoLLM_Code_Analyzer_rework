@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import copy
 import logging
-import threading
 from datetime import UTC
 from datetime import datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING
 from typing import Any
+
+from backend.common.threading import dispatch_in_thread
 
 if TYPE_CHECKING:
     from backend.automation.models import Pipeline
@@ -188,13 +189,11 @@ def trigger_run(pipeline: Pipeline, params: dict[str, Any], user: User) -> Pipel
 
         from backend.automation.engine.runner import execute_run
 
-        t = threading.Thread(
-            target=execute_run,
-            args=(uuid.UUID(run_id_str),),
-            daemon=True,
+        dispatch_in_thread(
+            execute_run,
+            uuid.UUID(run_id_str),
             name=f"pipeline-run-{run_id_str}",
         )
-        t.start()
         logger.info(
             "Dispatched run %s via daemon thread (Celery unavailable)",
             run_id_str,

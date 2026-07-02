@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 def dispatch_in_thread(
     target: Callable[..., Any],
     *args: Any,
+    name: str | None = None,
     **kwargs: Any,
 ) -> threading.Thread:
     """Run *target* on a started daemon thread and return the thread.
@@ -25,6 +26,7 @@ def dispatch_in_thread(
         args=args,
         kwargs=kwargs,
         daemon=True,
+        name=name,
     )
     thread.start()
     return thread
