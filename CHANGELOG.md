@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with optional Caddy/nginx reverse-proxy configuration.
 
 ### Changed
+- **Breaking:** upgraded PostgreSQL from 17 to 18. The postgres:18 image
+  moved its volume mount point from `/var/lib/postgresql/data` to
+  `/var/lib/postgresql`, and a v18 server cannot read a v17 data
+  directory. Existing deployments must dump before upgrading
+  (`docker compose exec postgres backup`), remove the old postgres data
+  volume, and `restore <backup-file>` into the fresh cluster.
 - Remade the root docs: `README.md` restructured along common
   README-template conventions (about/features/getting started/usage/
   structure/contact), `CONTRIBUTING.md` reorganized as a setup → change →
