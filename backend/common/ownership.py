@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 from typing import Any
-from typing import TypeVar
 
 from django.shortcuts import get_object_or_404
 from ninja.errors import HttpError
@@ -13,10 +12,8 @@ if TYPE_CHECKING:
     from django.db.models import Model
     from django.db.models import QuerySet
 
-M = TypeVar("M", bound="Model")
 
-
-def get_owned_or_staff_or_403(
+def get_owned_or_staff_or_403[M: Model](
     source: type[M] | QuerySet[M],
     *,
     user: Any,
