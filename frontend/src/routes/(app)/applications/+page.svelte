@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { formatDuration } from '$lib/utils/formatters';
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -11,7 +10,6 @@
 		cancelGenerationJob,
 		deleteGenerationJob,
 		retryGenerationJob,
-		type GenerationJobList,
 		type PaginatedJobs,
 	} from '$lib/api/client';
 	import {
@@ -22,37 +20,17 @@
 		removeContainer,
 		type ContainerInstance,
 	} from '$lib/api/runtime';
+	import JobsTable from '$lib/components/applications/JobsTable.svelte';
+	import JobCards from '$lib/components/applications/JobCards.svelte';
 	import { onMount, onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import Eye from '@lucide/svelte/icons/eye';
-	import Bot from '@lucide/svelte/icons/bot';
-	import Pencil from '@lucide/svelte/icons/pencil';
 	import AppWindow from '@lucide/svelte/icons/app-window';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import CircleX from '@lucide/svelte/icons/circle-x';
 	import Clock from '@lucide/svelte/icons/clock';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
-	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import ChevronsLeft from '@lucide/svelte/icons/chevrons-left';
-	import ChevronsRight from '@lucide/svelte/icons/chevrons-right';
-	import X from '@lucide/svelte/icons/x';
-	import Copy from '@lucide/svelte/icons/copy';
-	import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
-	import Ban from '@lucide/svelte/icons/ban';
-	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
-	import Play from '@lucide/svelte/icons/play';
-	import Square from '@lucide/svelte/icons/square';
-	import Server from '@lucide/svelte/icons/server';
-	import ExternalLink from '@lucide/svelte/icons/external-link';
-	import Hammer from '@lucide/svelte/icons/hammer';
-	import Layers from '@lucide/svelte/icons/layers';
-	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
-	import ArrowUp from '@lucide/svelte/icons/arrow-up';
-	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import { goto } from '$app/navigation';
 
 	let loading = $state(true);
@@ -105,23 +83,6 @@
 
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let debounceTimer: ReturnType<typeof setTimeout>;
-
-	const statusColors: Record<string, string> = {
-		completed: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30 dark:text-emerald-400 dark:border-emerald-500/20',
-		failed: 'bg-red-500/10 text-red-500 border-red-500/30 dark:text-red-400 dark:border-red-500/20',
-		running: 'bg-amber-500/10 text-amber-500 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/20',
-		pending: 'bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20',
-		cancelled: 'bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20',
-	};
-
-	const containerStatusColors: Record<string, string> = {
-		pending: 'bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20',
-		building: 'bg-amber-500/10 text-amber-500 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/20 animate-pulse',
-		running: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30 dark:text-emerald-400 dark:border-emerald-500/20',
-		stopped: 'bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20',
-		failed: 'bg-red-500/10 text-red-500 border-red-500/30 dark:text-red-400 dark:border-red-500/20',
-		removed: 'bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20',
-	};
 
 	async function fetchContainers() {
 		try {
@@ -268,24 +229,6 @@
 		fetchJobs();
 	}
 
-	function timeAgo(dateStr: string): string {
-		const diff = Date.now() - new Date(dateStr).getTime();
-		const mins = Math.floor(diff / 60000);
-		if (mins < 1) return 'just now';
-		if (mins < 60) return `${mins}m ago`;
-		const hours = Math.floor(mins / 60);
-		if (hours < 24) return `${hours}h ago`;
-		const days = Math.floor(hours / 24);
-		if (days < 30) return `${days}d ago`;
-		return new Date(dateStr).toLocaleDateString();
-	}
-
-	function getDescription(job: GenerationJobList): string {
-		if (job.template_name) return job.template_name;
-		if (job.scaffolding_name) return job.scaffolding_name;
-		return 'Untitled Application';
-	}
-
 	function copyId(id: string) {
 		navigator.clipboard.writeText(id);
 		toast.success('Copied job ID');
@@ -328,10 +271,6 @@
 		} catch {
 			toast.error('Failed to retry job');
 		}
-	}
-
-	function getAccessUrl(c: ContainerInstance) {
-		return c.app_url ?? null;
 	}
 
 	const containersByJobId = $derived(
@@ -633,606 +572,39 @@
 	{:else}
 		<!-- Table (desktop) -->
 		<div class="hidden md:block">
-			<Card.Root>
-				<Card.Content class="p-0">
-					<div class="overflow-x-auto">
-						<table class="w-full">
-							<thead>
-								<tr class="border-b bg-muted/40 transition-colors sticky top-0 z-10">
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">
-										<button
-											class="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
-											onclick={() => toggleSort('created_at')}
-											aria-sort={sortBy === 'created_at' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
-										>
-											Application
-											{#if sortBy === 'created_at'}
-												{#if sortDir === 'asc'}<ArrowUp class="h-3 w-3 text-primary" />{:else}<ArrowDown class="h-3 w-3 text-primary" />{/if}
-											{:else}
-												<ArrowUpDown class="h-3 w-3 opacity-30" />
-											{/if}
-										</button>
-									</th>
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">Job Status</th>
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">App / Container</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">
-										<button
-											class="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
-											onclick={() => toggleSort('duration_seconds')}
-											aria-sort={sortBy === 'duration_seconds' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
-										>
-											Duration
-											{#if sortBy === 'duration_seconds'}
-												{#if sortDir === 'asc'}<ArrowUp class="h-3 w-3 text-primary" />{:else}<ArrowDown class="h-3 w-3 text-primary" />{/if}
-											{:else}
-												<ArrowUpDown class="h-3 w-3 opacity-30" />
-											{/if}
-										</button>
-									</th>
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">
-										<button
-											class="inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
-											onclick={() => toggleSort('model_name')}
-											aria-sort={sortBy === 'model_name' ? 'ascending' : 'none'}
-										>
-											Model
-											{#if sortBy === 'model_name'}
-												<ArrowUp class="h-3 w-3 text-primary" />
-											{:else}
-												<ArrowUpDown class="h-3 w-3 opacity-30" />
-											{/if}
-										</button>
-									</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground tracking-wider whitespace-nowrap">Actions</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each filteredItems as job, i (job.id)}
-									{@const container = containersByJobId[job.id]}
-									{@const isBusy = containerBusy[job.id]}
-									<tr class="border-b transition-colors hover:bg-muted/50 group
-										{i % 2 === 0 ? '' : 'bg-muted/15'}
-										{job.status === 'failed' ? 'hover:bg-destructive/[0.04]' : ''}">
-
-										<!-- Application (unified) -->
-										<td class="px-3 py-2 align-middle">
-											<div class="flex items-center gap-2.5">
-												<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted group-hover:bg-primary/10 transition-colors">
-													{#if job.mode === 'custom'}
-														<Pencil class="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
-													{:else if job.mode === 'scaffolding'}
-														<Layers class="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
-													{:else if job.mode === 'copilot'}
-														<Bot class="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
-													{/if}
-												</div>
-												<div class="min-w-0">
-													<a href="/applications/{job.id}" class="text-sm font-semibold hover:text-primary transition-colors block truncate max-w-[260px]" title={getDescription(job)}>
-														{getDescription(job)}
-													</a>
-													<span class="text-[10px] text-muted-foreground block">
-														<span class="capitalize font-medium text-primary/70">{job.mode}</span>
-														<span class="mx-1 opacity-40">&middot;</span>
-														<span class="font-mono tabular-nums">{timeAgo(job.created_at)}</span>
-													</span>
-												</div>
-											</div>
-										</td>
-
-										<!-- Job Status -->
-										<td class="px-3 py-2.5 align-middle">
-											<div class="flex flex-col gap-1">
-												<Badge variant="outline" class="w-fit text-[10px] uppercase font-mono px-2 py-0.5 {statusColors[job.status] ?? ''}">
-													{#if job.status === 'running'}
-														<span class="mr-1 h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-													{/if}
-													{#if job.status === 'completed'}
-														<CircleCheck class="mr-1 h-3.5 w-3.5" />
-													{:else if job.status === 'failed'}
-														<CircleX class="mr-1 h-3.5 w-3.5" />
-													{:else if job.status === 'pending'}
-														<Clock class="mr-1 h-3.5 w-3.5" />
-													{/if}
-													{job.status}
-												</Badge>
-												{#if job.error_message}
-													<div class="flex items-center gap-1 mt-0.5">
-														<AlertTriangle class="h-3 w-3 text-destructive shrink-0" />
-														<span class="text-[10px] text-destructive truncate max-w-[160px]" title={job.error_message}>{job.error_message}</span>
-													</div>
-												{/if}
-											</div>
-										</td>
-
-										<!-- App / Container -->
-										<td class="px-3 py-2.5 align-middle">
-											{#if container}
-												<div class="flex flex-col gap-1.5">
-													<div class="flex items-center gap-2">
-														<Badge variant="outline" class="gap-1 text-[10px] uppercase font-mono px-2 py-0.5 {containerStatusColors[container.status] ?? ''}">
-															{#if container.status === 'running'}
-																<span class="relative flex h-2 w-2">
-																	<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-																	<span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-																</span>
-															{:else if container.status === 'building'}
-																<LoaderCircle class="h-3 w-3 animate-spin text-amber-400" />
-															{/if}
-															{container.status}
-														</Badge>
-														{#if container.status === 'running'}
-															<span class="text-[10px] text-muted-foreground/75 font-mono">Port {container.app_port}</span>
-														{/if}
-													</div>
-
-													{#if container.status === 'running'}
-														{@const accessUrl = getAccessUrl(container)}
-														{#if accessUrl}
-															<Button
-																id="access-app-btn-{job.id}"
-																variant="outline"
-																size="sm"
-																href={accessUrl}
-																target="_blank"
-																rel="noopener noreferrer"
-																class="h-8 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 hover:border-emerald-500/50 w-fit"
-															>
-																<ExternalLink class="h-3.5 w-3.5 mr-1.5" />
-																Access App
-															</Button>
-														{/if}
-													{:else if container.status === 'stopped'}
-														<Button
-															id="start-container-btn-{job.id}"
-															variant="outline"
-															size="sm"
-															class="h-8 text-xs gap-1.5 border-zinc-700/50 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/40 w-fit"
-															disabled={isBusy != null}
-															onclick={() => handleStartContainer(job.id, container.id)}
-														>
-															{#if isBusy === 'start'}
-																<LoaderCircle class="h-3 w-3 animate-spin" />
-																Starting...
-															{:else}
-																<Play class="h-3 w-3 fill-current" />
-																Start Container
-															{/if}
-														</Button>
-													{:else if container.status === 'failed'}
-														<div class="flex flex-col gap-1">
-															<span class="text-[10px] text-red-400 font-mono line-clamp-1" title={container.last_error}>{container.last_error || 'Container crash'}</span>
-															<Button
-																id="retry-container-btn-{job.id}"
-																variant="outline"
-																size="sm"
-																class="h-8 text-xs gap-1.5 border-red-500/20 hover:bg-amber-500/10 hover:text-amber-400 hover:border-amber-500/40 w-fit"
-																disabled={isBusy != null}
-																onclick={() => handleStartContainer(job.id, container.id)}
-															>
-																{#if isBusy === 'start'}
-																	<LoaderCircle class="h-3 w-3 animate-spin" />
-																	Starting...
-																{:else}
-																	<Play class="h-3 w-3" />
-																	Restart Container
-																{/if}
-															</Button>
-														</div>
-													{:else if container.status === 'building'}
-														<span class="text-[11px] text-amber-400/90 font-medium flex items-center gap-1.5">
-															<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-															Provisioning environment...
-														</span>
-													{/if}
-												</div>
-											{:else if job.status === 'completed'}
-												<Button
-													id="provision-app-btn-{job.id}"
-													variant="outline"
-													size="sm"
-													class="h-8 text-xs font-semibold gap-1.5 border-primary/30 text-primary hover:bg-primary/10 hover:border-primary/50 transition-all duration-200 shadow-sm w-fit"
-													disabled={isBusy != null}
-													onclick={() => handleBuildContainer(job.id)}
-												>
-													{#if isBusy === 'build'}
-														<LoaderCircle class="h-3.5 w-3.5 animate-spin mr-1.5" />
-														Building...
-													{:else}
-														<Hammer class="h-3.5 w-3.5 mr-1.5" />
-														Provision App
-													{/if}
-												</Button>
-											{:else}
-												<span class="text-xs text-muted-foreground/60 italic">Not available</span>
-											{/if}
-										</td>
-
-										<!-- Duration -->
-										<td class="px-3 py-2.5 text-right align-middle">
-											<span class="text-xs font-mono tabular-nums text-muted-foreground">{formatDuration(job.duration_seconds)}</span>
-										</td>
-
-										<!-- Model -->
-										<td class="px-3 py-2.5 align-middle">
-											{#if job.model_name}
-												<span class="text-xs text-foreground truncate block max-w-[160px]" title={job.model_name}>{job.model_name}</span>
-											{:else}
-												<span class="text-xs text-muted-foreground/50 italic">—</span>
-											{/if}
-										</td>
-
-										<!-- Actions -->
-										<td class="px-3 py-2.5 align-middle">
-											<div class="flex items-center justify-end gap-1">
-												<!-- Container quick toggle (Start/Stop) -->
-												{#if container}
-													{#if container.status === 'running'}
-														<Button
-															id="action-stop-{job.id}"
-															variant="ghost"
-															size="sm"
-															class="h-8 w-8 p-0 hover:bg-amber-500/10 hover:text-amber-400 text-muted-foreground"
-															title="Stop Container"
-															disabled={isBusy != null}
-															onclick={() => handleStopContainer(job.id, container.id)}
-														>
-															{#if isBusy === 'stop'}
-																<LoaderCircle class="h-4 w-4 animate-spin text-amber-500" />
-															{:else}
-																<Square class="h-4 w-4 fill-current text-amber-500" />
-															{/if}
-														</Button>
-													{:else if container.status === 'stopped' || container.status === 'failed'}
-														<Button
-															id="action-start-{job.id}"
-															variant="ghost"
-															size="sm"
-															class="h-8 w-8 p-0 hover:bg-emerald-500/10 hover:text-emerald-400 text-muted-foreground"
-															title="Start Container"
-															disabled={isBusy != null}
-															onclick={() => handleStartContainer(job.id, container.id)}
-														>
-															{#if isBusy === 'start'}
-																<LoaderCircle class="h-4 w-4 animate-spin text-emerald-500" />
-															{:else}
-																<Play class="h-4 w-4 fill-current text-emerald-500" />
-															{/if}
-														</Button>
-													{/if}
-
-													<!-- Remove Container -->
-													{#if container.status !== 'building' && container.status !== 'pending'}
-														<Button
-															id="action-remove-container-{job.id}"
-															variant="ghost"
-															size="sm"
-															class="h-8 w-8 p-0 hover:bg-red-500/10 hover:text-red-400 text-muted-foreground/60"
-															title="Delete Container (Preserves Code)"
-															disabled={isBusy != null}
-															onclick={() => handleRemoveContainer(job.id, container.id)}
-														>
-															{#if isBusy === 'remove'}
-																<LoaderCircle class="h-4 w-4 animate-spin text-red-500" />
-															{:else}
-																<Server class="h-4 w-4 stroke-[1.5] text-red-400/80" />
-															{/if}
-														</Button>
-													{/if}
-												{/if}
-
-												<!-- Job Details / View -->
-												<Button
-													id="action-view-{job.id}"
-													variant="ghost"
-													size="sm"
-													class="h-8 w-8 p-0 text-muted-foreground hover:text-foreground hover:bg-muted"
-													href="/applications/{job.id}"
-													title="View details"
-												>
-													<Eye class="h-4 w-4" />
-												</Button>
-
-												<!-- Retry/Failure -->
-												{#if job.status === 'failed' || job.status === 'cancelled'}
-													<Button
-														id="action-retry-{job.id}"
-														variant="ghost"
-														size="sm"
-														class="h-8 w-8 p-0 hover:bg-blue-500/10 text-muted-foreground hover:text-blue-400"
-														title="Retry job"
-														onclick={() => handleRetry(job.id)}
-													>
-														<RotateCcw class="h-4 w-4" />
-													</Button>
-												{/if}
-												{#if job.status === 'failed'}
-													<Button
-														id="action-failure-{job.id}"
-														variant="ghost"
-														size="sm"
-														class="h-8 w-8 p-0 hover:bg-red-500/10 text-muted-foreground hover:text-red-400"
-														href="/applications/{job.id}/failure"
-														title="Failure logs"
-													>
-														<AlertTriangle class="h-4 w-4 text-red-400" />
-													</Button>
-												{/if}
-
-												<!-- Cancel pending/running -->
-												{#if job.status === 'pending' || job.status === 'running'}
-													<Button
-														id="action-cancel-{job.id}"
-														variant="ghost"
-														size="sm"
-														class="h-8 w-8 p-0 hover:bg-amber-500/10 text-muted-foreground hover:text-amber-500"
-														title="Cancel job"
-														onclick={() => handleCancel(job.id)}
-													>
-														<Ban class="h-4 w-4" />
-													</Button>
-												{/if}
-
-												<!-- Copy ID -->
-												<Button
-													id="action-copy-{job.id}"
-													variant="ghost"
-													size="sm"
-													class="h-8 w-8 p-0 text-muted-foreground/60 hover:text-foreground hover:bg-muted"
-													title="Copy Job ID"
-													onclick={() => copyId(job.id)}
-												>
-													<Copy class="h-3.5 w-3.5" />
-												</Button>
-
-												<!-- Delete Job -->
-												{#if job.status !== 'running'}
-													<Button
-														id="action-delete-{job.id}"
-														variant="ghost"
-														size="sm"
-														class="h-8 w-8 p-0 hover:bg-red-500/10 text-muted-foreground hover:text-red-400"
-														title="Delete Job"
-														onclick={() => handleDelete(job.id)}
-													>
-														<Trash2 class="h-4 w-4" />
-													</Button>
-												{/if}
-											</div>
-										</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-				</Card.Content>
-			</Card.Root>
+			<JobsTable
+				jobs={filteredItems}
+				{containersByJobId}
+				{containerBusy}
+				{sortBy}
+				{sortDir}
+				onToggleSort={toggleSort}
+				onBuild={handleBuildContainer}
+				onStart={handleStartContainer}
+				onStop={handleStopContainer}
+				onRemoveContainer={handleRemoveContainer}
+				onCancel={handleCancel}
+				onDelete={handleDelete}
+				onRetry={handleRetry}
+				onCopyId={copyId}
+			/>
 		</div>
 
 		<!-- Cards (mobile) -->
-		<div class="md:hidden space-y-2.5">
-			{#each filteredItems as job (job.id)}
-				{@const container = containersByJobId[job.id]}
-				{@const isBusy = containerBusy[job.id]}
-				<div class="block rounded-lg border bg-card p-3.5 transition-colors hover:bg-muted/50 space-y-3">
-					<!-- Card Header: Mode & Time -->
-					<div class="flex items-center justify-between gap-2">
-						<div class="flex items-center gap-2.5 min-w-0 flex-1">
-							<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-								{#if job.mode === 'custom'}
-									<Pencil class="h-4 w-4 text-muted-foreground" />
-								{:else if job.mode === 'scaffolding'}
-									<Layers class="h-4 w-4 text-muted-foreground" />
-								{:else if job.mode === 'copilot'}
-									<Bot class="h-4 w-4 text-muted-foreground" />
-								{/if}
-							</div>
-							<div class="min-w-0">
-								<a href="/applications/{job.id}" class="text-sm font-semibold hover:text-primary transition-colors block truncate">{getDescription(job)}</a>
-								<span class="text-[11px] text-muted-foreground block truncate">
-									<span class="capitalize font-medium text-primary/80">{job.mode}</span> &middot; {job.model_name ?? '—'}
-								</span>
-							</div>
-						</div>
-						<div class="flex items-center gap-1.5 shrink-0 text-[11px] text-muted-foreground font-medium">
-							{timeAgo(job.created_at)}
-						</div>
-					</div>
-
-					<!-- Status Badges & Container States -->
-					<div class="grid grid-cols-2 gap-2.5 py-2.5 border-y">
-						<!-- Job Status -->
-						<div class="flex flex-col gap-1">
-							<span class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Job Status</span>
-							<Badge variant="outline" class="w-fit text-[9px] font-mono px-1.5 py-0.5 {statusColors[job.status] ?? ''}">
-								{#if job.status === 'running'}
-									<span class="mr-1 h-1 w-1 rounded-full bg-amber-500 animate-pulse"></span>
-								{/if}
-								{job.status}
-							</Badge>
-						</div>
-
-						<!-- Container / App -->
-						<div class="flex flex-col gap-1">
-							<span class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Container</span>
-							{#if container}
-								<Badge variant="outline" class="w-fit text-[9px] font-mono px-1.5 py-0.5 {containerStatusColors[container.status] ?? ''}">
-									{#if container.status === 'running'}
-										<span class="h-1 w-1 rounded-full bg-emerald-500 animate-ping mr-1"></span>
-									{/if}
-									{container.status}
-								</Badge>
-							{:else}
-								<span class="text-xs text-muted-foreground/60 italic">Not created</span>
-							{/if}
-						</div>
-					</div>
-
-					<!-- Container Actions Box -->
-					{#if container || job.status === 'completed'}
-						<div class="bg-muted/30 border rounded-lg p-2.5 space-y-2">
-							{#if container}
-								{#if container.status === 'running'}
-									{@const accessUrl = getAccessUrl(container)}
-									<div class="flex items-center justify-between gap-2 flex-wrap">
-										<span class="text-[10.5px] text-muted-foreground font-mono">Port: {container.app_port}</span>
-										{#if accessUrl}
-											<Button
-												id="mobile-access-app-btn-{job.id}"
-												variant="outline"
-												size="sm"
-												href={accessUrl}
-												target="_blank"
-												rel="noopener noreferrer"
-												class="h-8 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 hover:border-emerald-500/50"
-											>
-												<ExternalLink class="h-3 w-3 mr-1.5" />
-												Access App
-											</Button>
-										{/if}
-									</div>
-								{:else if container.status === 'stopped'}
-									<div class="flex items-center justify-between gap-2">
-										<span class="text-xs text-muted-foreground">App is stopped.</span>
-										<Button
-											id="mobile-start-btn-{job.id}"
-											variant="outline"
-											size="sm"
-											class="h-8 text-xs gap-1 hover:bg-emerald-500/10 hover:text-emerald-400 border-zinc-700/50"
-											disabled={isBusy != null}
-											onclick={() => handleStartContainer(job.id, container.id)}
-										>
-											{#if isBusy === 'start'}
-												<LoaderCircle class="h-3 w-3 animate-spin" />
-												Starting...
-											{:else}
-												<Play class="h-3 w-3 fill-current" />
-												Start App
-											{/if}
-										</Button>
-									</div>
-								{:else if container.status === 'failed'}
-									<div class="flex flex-col gap-1.5">
-										<span class="text-[10px] text-red-400 font-mono line-clamp-1">{container.last_error || 'Container failed'}</span>
-										<Button
-											id="mobile-restart-btn-{job.id}"
-											variant="outline"
-											size="sm"
-											class="h-8 text-xs gap-1 hover:bg-amber-500/10 hover:text-amber-400 border-red-500/20"
-											disabled={isBusy != null}
-											onclick={() => handleStartContainer(job.id, container.id)}
-										>
-											{#if isBusy === 'start'}
-												<LoaderCircle class="h-3 w-3 animate-spin" />
-												Starting...
-											{:else}
-												<Play class="h-3 w-3" />
-												Restart App
-											{/if}
-										</Button>
-									</div>
-								{:else if container.status === 'building'}
-									<span class="text-xs text-amber-400/90 font-medium flex items-center gap-1.5 justify-center py-1">
-										<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-										Provisioning environment...
-									</span>
-								{/if}
-							{:else if job.status === 'completed'}
-								<div class="flex items-center justify-between gap-2">
-									<span class="text-xs text-muted-foreground">No environment built.</span>
-									<Button
-										id="mobile-provision-btn-{job.id}"
-										variant="outline"
-										size="sm"
-										class="h-8 text-xs font-semibold gap-1.5 border-primary/30 text-primary hover:bg-primary/10 hover:border-primary/50"
-										disabled={isBusy != null}
-										onclick={() => handleBuildContainer(job.id)}
-									>
-										{#if isBusy === 'build'}
-											<LoaderCircle class="h-3 w-3 animate-spin mr-1.5" />
-											Building...
-										{:else}
-											<Hammer class="h-3 w-3 mr-1.5" />
-											Provision
-										{/if}
-									</Button>
-								</div>
-							{/if}
-						</div>
-					{/if}
-
-					<!-- Footer Info & Actions -->
-					<div class="flex items-center justify-between pt-3 border-t">
-						<span class="text-[11px] font-mono text-muted-foreground">{formatDuration(job.duration_seconds)}</span>
-
-						<!-- Mobile Actions Group -->
-						<div class="flex items-center gap-1">
-							{#if container}
-								{#if container.status === 'running'}
-									<Button
-										id="mobile-action-stop-{job.id}"
-										variant="ghost"
-										size="sm"
-										class="h-8 w-8 p-0 text-amber-500 hover:bg-amber-500/10"
-										title="Stop Container"
-										disabled={isBusy != null}
-										onclick={() => handleStopContainer(job.id, container.id)}
-									>
-										{#if isBusy === 'stop'}
-											<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-										{:else}
-											<Square class="h-3.5 w-3.5 fill-current" />
-										{/if}
-									</Button>
-								{/if}
-								{#if container.status !== 'building' && container.status !== 'pending'}
-									<Button
-										id="mobile-action-remove-container-{job.id}"
-										variant="ghost"
-										size="sm"
-										class="h-8 w-8 p-0 text-red-400 hover:bg-red-500/10"
-										title="Remove Container"
-										disabled={isBusy != null}
-										onclick={() => handleRemoveContainer(job.id, container.id)}
-									>
-										{#if isBusy === 'remove'}
-											<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-										{:else}
-											<Server class="h-3.5 w-3.5" />
-										{/if}
-									</Button>
-								{/if}
-							{/if}
-
-							<Button variant="ghost" size="sm" class="h-8 w-8 p-0" href="/applications/{job.id}" title="View details">
-								<Eye class="h-4 w-4" />
-							</Button>
-							{#if job.status === 'failed' || job.status === 'cancelled'}
-								<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-blue-400 hover:bg-blue-500/10" title="Retry" onclick={() => handleRetry(job.id)}>
-									<RotateCcw class="h-4 w-4" />
-								</Button>
-							{/if}
-							{#if job.status === 'failed'}
-								<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-red-400 hover:bg-red-500/10" href="/applications/{job.id}/failure" title="Failure details">
-									<AlertTriangle class="h-4 w-4" />
-								</Button>
-							{/if}
-							{#if job.status === 'pending' || job.status === 'running'}
-								<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-amber-400 hover:bg-amber-500/10" title="Cancel" onclick={() => handleCancel(job.id)}>
-									<Ban class="h-4 w-4" />
-								</Button>
-							{/if}
-							<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-muted-foreground" title="Copy ID" onclick={() => copyId(job.id)}>
-								<Copy class="h-3.5 w-3.5" />
-							</Button>
-							{#if job.status !== 'running'}
-								<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-red-400 hover:bg-red-500/10" title="Delete" onclick={() => handleDelete(job.id)}>
-									<Trash2 class="h-3.5 w-3.5" />
-								</Button>
-							{/if}
-						</div>
-					</div>
-				</div>
-			{/each}
+		<div class="md:hidden">
+			<JobCards
+				jobs={filteredItems}
+				{containersByJobId}
+				{containerBusy}
+				onBuild={handleBuildContainer}
+				onStart={handleStartContainer}
+				onStop={handleStopContainer}
+				onRemoveContainer={handleRemoveContainer}
+				onCancel={handleCancel}
+				onDelete={handleDelete}
+				onRetry={handleRetry}
+				onCopyId={copyId}
+			/>
 		</div>
 	{/if}
 

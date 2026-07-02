@@ -33,6 +33,46 @@ export const segmentBorderColors: Record<string, string> = {
   default: "",
 };
 
+// Applications-list palette: lighter /10 fills with explicit dark: variants,
+// unlike the shared /15 maps in $lib/constants/colors.
+export const jobListStatusColors: Record<string, string> = {
+  completed: "bg-emerald-500/10 text-emerald-500 border-emerald-500/30 dark:text-emerald-400 dark:border-emerald-500/20",
+  failed: "bg-red-500/10 text-red-500 border-red-500/30 dark:text-red-400 dark:border-red-500/20",
+  running: "bg-amber-500/10 text-amber-500 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/20",
+  pending: "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
+  cancelled: "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
+};
+
+export const jobListContainerStatusColors: Record<string, string> = {
+  pending: "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
+  building: "bg-amber-500/10 text-amber-500 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/20 animate-pulse",
+  running: "bg-emerald-500/10 text-emerald-500 border-emerald-500/30 dark:text-emerald-400 dark:border-emerald-500/20",
+  stopped: "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
+  failed: "bg-red-500/10 text-red-500 border-red-500/30 dark:text-red-400 dark:border-red-500/20",
+  removed: "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
+};
+
+export function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(dateStr).toLocaleDateString();
+}
+
+export function jobDescription(job: {
+  template_name?: string | null;
+  scaffolding_name?: string | null;
+}): string {
+  if (job.template_name) return job.template_name;
+  if (job.scaffolding_name) return job.scaffolding_name;
+  return "Untitled Application";
+}
+
 export function copyText(text: string, label = "Copied"): void {
   navigator.clipboard.writeText(text);
   toast.success(label);
