@@ -1,17 +1,48 @@
 <div align="center">
 
-# LLM Eval Lab
+<h1>🧪 LLM Eval Lab</h1>
 
-**Generate applications with LLMs, run them in sandboxes, and benchmark
-the code they write.**
+<p><strong>Generate applications with LLMs, run them in sandboxes, and
+benchmark the code they write.</strong></p>
 
-[![CI](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<p>
+<a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml"><img src="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml"><img src="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
+
+<p>
+<img src="https://img.shields.io/badge/Python_3.13-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+<img src="https://img.shields.io/badge/Django_6-092E20?style=for-the-badge&logo=django&logoColor=white" alt="Django">
+<img src="https://img.shields.io/badge/SvelteKit_2-FF3E00?style=for-the-badge&logo=svelte&logoColor=white" alt="SvelteKit">
+<img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript">
+<img src="https://img.shields.io/badge/Tailwind_4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
+<img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL">
+<img src="https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white" alt="Redis">
+<img src="https://img.shields.io/badge/Celery-37814A?style=for-the-badge&logo=celery&logoColor=white" alt="Celery">
+<img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
+</p>
 
 </div>
 
-## About
+<details>
+<summary>📚 Table of contents</summary>
+
+- [🔍 About](#-about)
+- [✨ Features](#-features)
+- [⚙️ How it works](#%EF%B8%8F-how-it-works)
+- [🚀 Getting started](#-getting-started)
+- [🕹️ Usage](#%EF%B8%8F-usage)
+- [🛠️ Development](#%EF%B8%8F-development)
+- [🗂️ Project structure](#%EF%B8%8F-project-structure)
+- [🤝 Contributing](#-contributing)
+- [📄 License](#-license)
+- [📫 Contact](#-contact)
+- [🙏 Acknowledgments](#-acknowledgments)
+
+</details>
+
+## 🔍 About
 
 LLM Eval Lab answers a simple question: *which model writes the best code
 for a given task?* You pick a requirement template and a set of models from
@@ -24,35 +55,36 @@ findings rather than gut feeling.
 It started as a master's-thesis project and is maintained by a single
 developer, so expect sharp edges — issues and PRs are welcome.
 
-### Features
+## ✨ Features
 
-- **Code generation** — prompt multiple LLMs with the same app template
-  and collect complete, runnable applications
-- **Sandboxed execution** — every generated app runs in its own Docker
-  container with subdomain routing
-- **14 analyzers** — ruff, bandit, semgrep, eslint, mypy, pylint,
-  gitleaks, detect-secrets, hadolint, codespell, vulture, radon, jscpd,
-  and an LLM code reviewer
-- **Reports & rankings** — findings aggregated into comparative reports,
-  statistics, and per-model rankings
-- **Automation pipelines** — a visual node-based editor to chain
-  generate → analyze → report workflows
-- **Multi-user** — email login with optional MFA, per-user OpenRouter
-  keys, API tokens for programmatic access
+| | Feature | What you get |
+| --- | --- | --- |
+| 🤖 | **Code generation** | Prompt multiple LLMs with the same app template; collect complete, runnable applications |
+| 📦 | **Sandboxed execution** | Every generated app runs in its own Docker container with subdomain routing |
+| 🔬 | **14 analyzers** | ruff, bandit, semgrep, eslint, mypy, pylint, gitleaks, detect-secrets, hadolint, codespell, vulture, radon, jscpd, and an LLM code reviewer |
+| 📊 | **Reports & rankings** | Findings aggregated into comparative reports, statistics, and per-model rankings |
+| 🔁 | **Automation pipelines** | A visual node-based editor to chain generate → analyze → report workflows |
+| 👥 | **Multi-user** | Email login with optional MFA, per-user OpenRouter keys, API tokens for programmatic access |
 
-### Built with
+## ⚙️ How it works
 
-[Django 6](https://www.djangoproject.com/) ·
-[Django Ninja](https://django-ninja.dev/) ·
-[Celery](https://docs.celeryq.dev/) ·
-[SvelteKit 2](https://svelte.dev/) ·
-[Tailwind CSS 4](https://tailwindcss.com/) ·
-[bits-ui](https://bits-ui.com/) ·
-[PostgreSQL](https://www.postgresql.org/) ·
-[Redis](https://redis.io/) ·
-Docker Compose
+```mermaid
+flowchart LR
+    T["📝 Requirement
+    template"] --> G["🤖 Generation
+    one app per model"]
+    G --> S["📦 Sandbox
+    Docker per app"]
+    S --> A["🔬 Analysis
+    14 tools"]
+    A --> R["📊 Reports
+    & rankings"]
+```
 
-## Getting started
+The whole loop can run interactively from the UI, or unattended as an
+[automation pipeline](docs/AUTOMATION_WORKFLOWS.md).
+
+## 🚀 Getting started
 
 ### Prerequisites
 
@@ -101,7 +133,7 @@ migrations, and configures Caddy or nginx for your domain. Options are
 documented in the script header; production proper uses
 `docker-compose.production.yml` (Traefik, Nginx, Gunicorn).
 
-## Usage
+## 🕹️ Usage
 
 The typical loop:
 
@@ -117,7 +149,7 @@ Repetitive experiments can be scripted as
 [automation pipelines](docs/AUTOMATION_WORKFLOWS.md) instead of clicking
 through the steps.
 
-## Development
+## 🛠️ Development
 
 ```bash
 just up / just down    # start / stop the stack
@@ -143,7 +175,7 @@ uv run mypy backend
 cd frontend && npm run check         # svelte-check
 ```
 
-### Project structure
+## 🗂️ Project structure
 
 ```
 backend/     Django apps, one per domain (generation, analysis, automation,
@@ -158,22 +190,22 @@ docs/        Deeper documentation — start at docs/README.md
 Secrets live in `.envs/` — only `*.example` templates are committed;
 `just bootstrap` creates the real files.
 
-## Contributing
+## 🤝 Contributing
 
 Bug reports, ideas, and PRs are welcome — see
 [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow. For security
 vulnerabilities, follow [SECURITY.md](SECURITY.md) instead of opening a
 public issue.
 
-## License
+## 📄 License
 
 Distributed under the MIT License — see [LICENSE](LICENSE).
 
-## Contact
+## 📫 Contact
 
 Marcin Grabowski — [@GrabowMar](https://github.com/GrabowMar)
 
-## Acknowledgments
+## 🙏 Acknowledgments
 
 - [cookiecutter-django](https://github.com/cookiecutter/cookiecutter-django)
   for the project skeleton

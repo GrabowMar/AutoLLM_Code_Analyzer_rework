@@ -3,7 +3,7 @@
 Thanks for helping out! This page covers everything you need to get a
 change from idea to merged PR.
 
-## Set up
+## 🧰 Set up
 
 ```bash
 just bootstrap         # local .env files
@@ -19,7 +19,7 @@ uv sync
 uv run pre-commit install
 ```
 
-## Make your change
+## ✏️ Make your change
 
 1. Branch off `main`, named `<type>/<short-slug>` — for example
    `feat/ranking-export`, `fix/login-csrf`, `docs/api-guide`.
@@ -28,7 +28,7 @@ uv run pre-commit install
    prefixes: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.
 3. Keep each commit — and each PR — to one logical change.
 
-## Check before you push
+## ✅ Check before you push
 
 ```bash
 uv run pre-commit run --all-files    # lint + format
@@ -39,13 +39,13 @@ cd frontend && npm run check         # svelte-check
 CI runs the same three on every PR (they are required checks), so running
 them locally just saves a round trip.
 
-## Open a PR
+## 📬 Open a PR
 
 - Fill in the PR template and link related issues with `Closes #N`.
 - Include screenshots or GIFs for UI changes.
 - CI must be green and the branch up to date with `main` before merging.
 
-## Recipes
+## 🍳 Recipes
 
 **Database changes** — add a Django migration alongside the model change;
 it must apply cleanly on a fresh DB and on the current schema. Verify with
@@ -65,7 +65,7 @@ routes in `frontend/src/routes/`. Follow the design tokens in
 
 Full conventions live in [docs/app-layout.md](docs/app-layout.md).
 
-## Security issues
+## 🔒 Security issues
 
 Never open a public issue or PR for a vulnerability — follow
 [SECURITY.md](SECURITY.md) instead.
