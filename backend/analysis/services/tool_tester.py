@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict
+from typing import TYPE_CHECKING
 from typing import Any
 
-from backend.analysis.models import AnalyzerTool
-from backend.analysis.models import AnalyzerWorkspace
 from backend.analysis.services import ai_runner
 from backend.analysis.services import parsers
 from backend.analysis.services import tool_installer
 from backend.analysis.services import workspace_service
 from backend.runtime.services import docker_manager
+
+if TYPE_CHECKING:
+    from backend.analysis.models import AnalyzerTool
+    from backend.analysis.models import AnalyzerWorkspace
 
 logger = logging.getLogger(__name__)
 

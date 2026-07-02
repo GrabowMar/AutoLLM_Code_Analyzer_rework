@@ -76,11 +76,7 @@ def _proxy(request, container: ContainerInstance, upstream_path: str, *, locatio
     if query:
         url = f"{url}?{query}"
 
-    fwd_headers = {
-        k: v
-        for k, v in request.headers.items()
-        if k.lower() not in _HOP_BY_HOP and k.lower() != "cookie"
-    }
+    fwd_headers = {k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP and k.lower() != "cookie"}
 
     try:
         upstream = requests.request(
@@ -105,9 +101,10 @@ def _proxy(request, container: ContainerInstance, upstream_path: str, *, locatio
         if lk in _HOP_BY_HOP:
             continue
         # Path mode: keep root-relative redirects inside the app's path prefix.
+        out_value = value
         if location_prefix and lk == "location" and value.startswith("/"):
-            value = f"{location_prefix}{value}"
-        response[key] = value
+            out_value = f"{location_prefix}{value}"
+        response[key] = out_value
     return response
 
 

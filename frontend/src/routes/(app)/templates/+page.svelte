@@ -561,10 +561,10 @@
 
 	<!-- Master-Detail Content Grid -->
 	<div class="grid gap-6 {isEditingOrCreating ? 'lg:grid-cols-[1fr_1.2fr]' : 'grid-cols-1'}">
-		
+
 		<!-- LIST SECTION -->
 		<div class="space-y-4 {isEditingOrCreating ? 'hidden lg:block' : ''}">
-			
+
 			<!-- SEARCH & ACTIONS BAR (Only for CRUD tabs) -->
 			{#if activeTab !== 'bundles'}
 				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-md border border-border bg-card p-3">
@@ -586,7 +586,7 @@
 							</div>
 						{/if}
 					</div>
-					
+
 					{#if activeTab === 'scaffolding'}
 						<Button size="sm" class="w-full sm:w-auto text-xs font-semibold cursor-pointer shadow-xs transition-all duration-200" onclick={startCreateScaffolding}>
 							<Plus class="mr-1.5 h-4 w-4" /> New Scaffolding
@@ -878,7 +878,7 @@
 								</Button>
 							</div>
 						</div>
- 
+
 						<div class="mt-4 grid gap-4 xl:grid-cols-2">
 							<div class="space-y-2">
 								<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Scaffoldings</p>
@@ -894,7 +894,7 @@
 									{/each}
 								</div>
 							</div>
- 
+
 							<div class="space-y-2">
 								<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">App templates</p>
 								<div class="flex flex-wrap gap-2">
@@ -909,7 +909,7 @@
 									{/each}
 								</div>
 							</div>
- 
+
 							<div class="space-y-2">
 								<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Prompt templates</p>
 								<div class="flex flex-wrap gap-2">
@@ -924,7 +924,7 @@
 									{/each}
 								</div>
 							</div>
- 
+
 							<div class="space-y-2">
 								<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Blocks</p>
 								{#if blocksLoading}
@@ -943,7 +943,7 @@
 									</div>
 								{/if}
 							</div>
- 
+
 							<div class="space-y-2 xl:col-span-2">
 								<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Bundles</p>
 								<div class="flex flex-wrap gap-2">
@@ -959,13 +959,13 @@
 								</div>
 							</div>
 						</div>
- 
+
 						{#if bundleError}
 							<div class="mt-4 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400 font-medium">
 								{bundleError}
 							</div>
 						{/if}
- 
+
 						<div class="mt-4 flex flex-wrap gap-2 border-t pt-4">
 							<Button
 								size="sm"
@@ -993,7 +993,7 @@
 							Bundle exports are now superseded by template packages that can ship the whole setup together.
 						</p>
 					</div>
-					
+
 					{#if bundlesLoading}
 						<div class="flex justify-center py-16">
 							<LoaderCircle class="h-6 w-6 animate-spin text-primary" />
@@ -1088,13 +1088,13 @@
 									<Input bind:value={scaffoldingForm.substitution_vars_csv} placeholder="e.g. APP_NAME, ADMIN_EMAIL, PORT" class="h-9 text-xs font-mono transition-all hover:border-primary/45 focus-visible:ring-primary/20" />
 								</div>
 							</div>
-							
+
 							{#if scaffoldingError}
 								<div class="rounded-md bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-400 font-medium">
 									{scaffoldingError}
 								</div>
 							{/if}
-							
+
 							<div class="flex gap-2 pt-2 border-t">
 								<Button size="sm" class="text-xs cursor-pointer shadow-xs" onclick={saveScaffolding} disabled={scaffoldingSaving || !scaffoldingForm.name || !scaffoldingForm.slug}>
 									{#if scaffoldingSaving}
@@ -1152,13 +1152,13 @@
 									<Textarea bind:value={appForm.admin_requirements} rows={3} placeholder={"e.g.\nGlobal analytics tracking dashboard\nManage and freeze user rooms"} class="font-mono text-[11px] leading-normal bg-muted/20" />
 								</div>
 							</div>
-							
+
 							{#if appError}
 								<div class="rounded-md bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-400 font-medium">
 									{appError}
 								</div>
 							{/if}
-							
+
 							<div class="flex gap-2 pt-2 border-t">
 								<Button size="sm" class="text-xs cursor-pointer shadow-xs" onclick={saveApp} disabled={appSaving || !appForm.name || !appForm.slug}>
 									{#if appSaving}
@@ -1223,13 +1223,13 @@
 									</div>
 								</div>
 							</div>
-							
+
 							{#if promptError}
 								<div class="rounded-md bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-400 font-medium">
 									{promptError}
 								</div>
 							{/if}
-							
+
 							<div class="flex gap-2 pt-2 border-t">
 								<Button size="sm" class="text-xs cursor-pointer shadow-xs" onclick={savePrompt} disabled={promptSaving || !promptForm.name || !promptForm.slug || !promptForm.content}>
 									{#if promptSaving}
@@ -1245,7 +1245,7 @@
 						</Card.Content>
 					</Card.Root>
 				{/if}
- 
+
 				{#if importingBundle}
 					<Card.Root class="shadow-lg border-primary/20">
 						<Card.Header class="pb-3 bg-muted/10 border-b">
@@ -1278,13 +1278,13 @@
 								<Label class="text-xs uppercase tracking-wider text-muted-foreground">Package Text (JSON or YAML)</Label>
 								<Textarea bind:value={bundlePackageText} rows={14} placeholder="Paste a template package here…" class="font-mono text-[11px] leading-relaxed bg-muted/20" />
 							</div>
- 
+
 							{#if bundleError}
 								<div class="rounded-md bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-400 font-medium">
 									{bundleError}
 								</div>
 							{/if}
- 
+
 							<div class="flex gap-2 pt-2 border-t">
 								<Button size="sm" class="text-xs cursor-pointer shadow-xs" onclick={submitBundleImport} disabled={bundleImporting || !bundlePackageText.trim()}>
 									{#if bundleImporting}

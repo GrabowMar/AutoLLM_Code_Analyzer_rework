@@ -319,10 +319,7 @@ class PromptRenderer:
             )
 
         if not context_parts:
-            return (
-                f"Backend code generated ({len(lines)} lines). "
-                "Use `/api/` prefix for all API calls."
-            )
+            return f"Backend code generated ({len(lines)} lines). Use `/api/` prefix for all API calls."
 
         return "\n\n".join(context_parts)
 

@@ -87,8 +87,7 @@ def validate_pipeline_dsl(config: dict[str, Any]) -> list[str]:
             errors.append(f"{prefix}: 'kind' is required")
         elif kind not in _VALID_STEP_KINDS:
             errors.append(
-                f"{prefix}: unknown kind '{kind}' "
-                f"(must be one of {sorted(_VALID_STEP_KINDS)})",
+                f"{prefix}: unknown kind '{kind}' (must be one of {sorted(_VALID_STEP_KINDS)})",
             )
         else:
             required = _REQUIRED_STEP_FIELDS.get(kind, [])

@@ -13,9 +13,9 @@ from backend.generation.api.schema import ContentBlockCreateSchema
 from backend.generation.api.schema import ContentBlockSchema
 from backend.generation.api.schema import StarterTemplatePackageImportSchema
 from backend.generation.api.schema import StarterTemplatePackageSchema
+from backend.generation.api.schema import TemplateBundleSchema
 from backend.generation.api.schema import TemplatePackageExportSchema
 from backend.generation.api.schema import TemplatePackageImportSchema
-from backend.generation.api.schema import TemplateBundleSchema
 from backend.generation.api.views._router import router
 from backend.generation.models import ContentBlock
 from backend.generation.models import TemplateBundle
@@ -78,7 +78,7 @@ def create_block(request, payload: ContentBlockCreateSchema):
         return 400, {"detail": f"Invalid Jinja2: {err}"}
     if ContentBlock.objects.filter(slug=payload.slug, version=payload.version).exists():
         return 400, {"detail": f"Block {payload.slug} v{payload.version} already exists"}
-    block = ContentBlock.objects.create(
+    return ContentBlock.objects.create(
         block_type=payload.block_type,
         slug=payload.slug,
         version=payload.version,
@@ -89,7 +89,6 @@ def create_block(request, payload: ContentBlockCreateSchema):
         is_system=False,
         created_by=request.auth,
     )
-    return block
 
 
 @router.get("/blocks/{slug}/", response=ContentBlockSchema)
@@ -111,10 +110,10 @@ def update_block(
 
     next_slug = payload.slug.strip()
     next_version = payload.version
-    if (
-        (next_slug != block.slug or next_version != block.version)
-        and ContentBlock.objects.filter(slug=next_slug, version=next_version).exists()
-    ):
+    if (next_slug != block.slug or next_version != block.version) and ContentBlock.objects.filter(
+        slug=next_slug,
+        version=next_version,
+    ).exists():
         return 400, {"detail": f"Block {next_slug} v{next_version} already exists"}
 
     block.block_type = payload.block_type
@@ -175,10 +174,7 @@ def export_package(
         app_template_slugs=payload.app_template_slugs,
         prompt_template_slugs=payload.prompt_template_slugs,
         bundle_slugs=payload.bundle_slugs,
-        block_refs=[
-            {"type": ref.type, "slug": ref.slug, "version": ref.version}
-            for ref in payload.block_refs
-        ],
+        block_refs=[{"type": ref.type, "slug": ref.slug, "version": ref.version} for ref in payload.block_refs],
     )
     asset_count = sum(len(items) for items in package.get("assets", {}).values())
     if asset_count == 0:
@@ -186,9 +182,7 @@ def export_package(
     response_payload, content_type = dump_template_package(package, fmt)
     extension = "yaml" if fmt == "yaml" else "json"
     response = HttpResponse(response_payload, content_type=content_type)
-    response["Content-Disposition"] = (
-        f'attachment; filename="generation-template-package.{extension}"'
-    )
+    response["Content-Disposition"] = f'attachment; filename="generation-template-package.{extension}"'
     return response
 
 
@@ -275,9 +269,7 @@ def export_bundle(
     payload, content_type = dump_bundle_package(package, fmt)
     extension = "yaml" if fmt == "yaml" else "json"
     response = HttpResponse(payload, content_type=content_type)
-    response["Content-Disposition"] = (
-        f'attachment; filename="{bundle.slug}.{extension}"'
-    )
+    response["Content-Disposition"] = f'attachment; filename="{bundle.slug}.{extension}"'
     return response
 
 

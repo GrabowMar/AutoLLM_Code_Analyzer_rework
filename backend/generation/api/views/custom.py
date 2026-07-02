@@ -135,7 +135,9 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
         batch.save(update_fields=["failed_jobs", "updated_at"])
 
     dispatchable = batch.jobs.select_related(
-        "app_requirement", "model", "template_bundle",
+        "app_requirement",
+        "model",
+        "template_bundle",
     ).exclude(status=GenerationJob.Status.FAILED)
     for pending_job in dispatchable:
         dispatch_job(pending_job)

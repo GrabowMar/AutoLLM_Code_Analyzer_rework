@@ -21,10 +21,7 @@ APP_NAME_PREFIX = "llm-"
 
 def _app_subdomain_label(host: str) -> str | None:
     """Return the app name if *host* is an ``llm-*`` app subdomain, else None."""
-    base = (
-        getattr(settings, "APPS_DOMAIN", "")
-        or getattr(settings, "DJANGO_DOMAIN", "")
-    ).lower()
+    base = (getattr(settings, "APPS_DOMAIN", "") or getattr(settings, "DJANGO_DOMAIN", "")).lower()
     host = (host or "").split(":")[0].lower()
     if not base or not host.endswith("." + base):
         return None

@@ -1,4 +1,5 @@
 """LLM replaces this file with the generated FastAPI application."""
+
 import os
 from pathlib import Path
 

@@ -7,7 +7,7 @@ import logging
 import re
 import shutil
 import tarfile
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
@@ -31,7 +31,7 @@ _valid_lucide_icons: frozenset[str] | None = None
 _manifest_cache: dict[str, Any] | None = None
 
 
-class ScaffoldPhase(str, Enum):
+class ScaffoldPhase(StrEnum):
     """seed: copilot workspace placeholders; build: job result code for Docker."""
 
     SEED = "seed"
@@ -429,6 +429,4 @@ def _placeholder_frontend() -> str:
 
 
 def _placeholder_frontend_vue() -> str:
-    return (
-        "<template>\n  <div class=\"p-8\">Hello</div>\n</template>\n\n<script setup></script>\n"
-    )
+    return '<template>\n  <div class="p-8">Hello</div>\n</template>\n\n<script setup></script>\n'

@@ -135,7 +135,7 @@ def extract_code_blocks(content: str) -> list[dict[str, str]]:
         code = (match.group(3) or "").strip()
         # Pull a leading ``:filename`` marker out of the body so it can't end up
         # in the source; adopt it as the filename when the fence had none.
-        first, sep, rest = code.partition("\n")
+        first, _sep, rest = code.partition("\n")
         inline = _INLINE_FILENAME_RE.match(first)
         if inline:
             if not filename:
@@ -219,9 +219,7 @@ def extract_frontend_code(raw_content: str) -> str:
 # Packages required by a feature/type that has no dedicated import line.
 # Pydantic's EmailStr, for example, needs the optional ``email-validator``
 # extra at runtime even though nothing imports it directly.
-_FEATURE_DEPENDENCIES: tuple[tuple[str, str], ...] = (
-    (r"\bEmailStr\b", "email-validator"),
-)
+_FEATURE_DEPENDENCIES: tuple[tuple[str, str], ...] = ((r"\bEmailStr\b", "email-validator"),)
 
 
 def _add_feature_dependencies(code: str, packages: set[str]) -> None:

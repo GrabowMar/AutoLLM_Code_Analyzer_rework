@@ -60,7 +60,7 @@ def _execute(run_id: str) -> None:
         return
     try:
         execute(run)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("AnalysisRun %s failed unexpectedly", run_id)
         run.status = AnalysisRun.Status.FAILED
         run.error_message = "Internal error during analysis"
@@ -236,12 +236,12 @@ def _finalize(run: AnalysisRun, statuses: list[str]) -> None:
 def _materialize(code: dict[str, str]) -> dict[str, str]:
     """Turn a semantic/file-keyed code map into ``{filename: content}``."""
     files: dict[str, str] = {}
-    for i, (key, content) in enumerate(code.items()):
+    for key, content in code.items():
         if not content or not str(content).strip():
             continue
         if "." in Path(key).name:
             filename = key
         else:
             filename = f"{key}{_EXT_BY_KEY.get(key.lower(), '.py')}"
-        files[filename.lstrip('/')] = content
+        files[filename.lstrip("/")] = content
     return files

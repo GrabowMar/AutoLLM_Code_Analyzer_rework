@@ -49,20 +49,20 @@ class AnalyzerTool(models.Model):
     category = models.CharField(
         _("category"),
         max_length=20,
-        choices=ToolCategory.choices,
+        choices=ToolCategory,
         default=ToolCategory.LINT,
         db_index=True,
     )
     kind = models.CharField(
         _("kind"),
         max_length=20,
-        choices=ToolKind.choices,
+        choices=ToolKind,
         default=ToolKind.CONTAINER,
     )
     target_language = models.CharField(
         _("target language"),
         max_length=20,
-        choices=TargetLanguage.choices,
+        choices=TargetLanguage,
         default=TargetLanguage.ANY,
     )
     icon = models.CharField(_("icon"), max_length=100, blank=True, default="")

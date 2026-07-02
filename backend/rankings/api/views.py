@@ -58,11 +58,7 @@ def list_rankings(
     providers = {r.get("provider") for r in filtered if r.get("provider")}
     with_benchmarks = sum(1 for r in filtered if (r.get("benchmark_score") or 0) > 0)
     free_models = sum(1 for r in filtered if r.get("is_free"))
-    avg_mss = (
-        sum(r.get("mss_score", 0) for r in filtered) / len(filtered)
-        if filtered
-        else 0.0
-    )
+    avg_mss = sum(r.get("mss_score", 0) for r in filtered) / len(filtered) if filtered else 0.0
 
     return {
         "count": len(paginated),

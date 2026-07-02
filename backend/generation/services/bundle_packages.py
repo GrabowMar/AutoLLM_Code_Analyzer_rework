@@ -173,9 +173,7 @@ STARTER_TEMPLATE_PACKAGES = {
             {
                 "name": "FastAPI + Vue standard",
                 "slug": "system-fastapi-vue-standard",
-                "description": (
-                    "FastAPI backend prompts paired with Vue frontend prompts and shared FastAPI rules"
-                ),
+                "description": ("FastAPI backend prompts paired with Vue frontend prompts and shared FastAPI rules"),
                 "scaffolding_slug": "fastapi-vue",
                 "block_refs": [
                     {"type": "prompt_stage", "slug": "fastapi-backend-system", "version": 1},
@@ -277,10 +275,7 @@ def build_starter_template_package(slug: str) -> dict[str, Any]:
         "starter_description": spec["description"],
         "assets": {
             "scaffolding_templates": list(spec["scaffolding_templates"]),
-            "app_templates": [
-                _load_json_data_file(relative_path)
-                for relative_path in spec["app_template_files"]
-            ],
+            "app_templates": [_load_json_data_file(relative_path) for relative_path in spec["app_template_files"]],
             "prompt_templates": [
                 {
                     "name": prompt["name"],
@@ -319,10 +314,7 @@ def export_bundle_package(bundle: TemplateBundle) -> dict[str, Any]:
         "kind": BUNDLE_PACKAGE_KIND,
         "exported_at": timezone.now().isoformat(),
         "bundle": _serialize_bundle(bundle),
-        "blocks": [
-            _serialize_block(block)
-            for block in _blocks_for_bundle_refs(bundle.block_refs or [])
-        ],
+        "blocks": [_serialize_block(block) for block in _blocks_for_bundle_refs(bundle.block_refs or [])],
     }
 
 
@@ -344,10 +336,14 @@ def export_template_package(
     bundles = list(visible_bundles_for(user).filter(slug__in=bundle_slugs).order_by("name"))
     explicit_blocks = []
     for ref in block_refs:
-        block = visible_blocks_for(user).filter(
-            slug=ref.get("slug"),
-            version=int(ref.get("version", 1)),
-        ).first()
+        block = (
+            visible_blocks_for(user)
+            .filter(
+                slug=ref.get("slug"),
+                version=int(ref.get("version", 1)),
+            )
+            .first()
+        )
         if block:
             explicit_blocks.append(block)
 
@@ -357,16 +353,18 @@ def export_template_package(
     blocks = _dedupe_blocks([*explicit_blocks, *bundle_blocks])
 
     scaffolding = list(
-        visible_scaffolding_templates_for(user)
-        .filter(slug__in=scaffolding_slugs)
-        .order_by("name"),
+        visible_scaffolding_templates_for(user).filter(slug__in=scaffolding_slugs).order_by("name"),
     )
     scaffolding_by_slug = {item.slug: item for item in scaffolding}
     for bundle in bundles:
         if bundle.scaffolding_slug and bundle.scaffolding_slug not in scaffolding_by_slug:
-            scaffold = visible_scaffolding_templates_for(user).filter(
-                slug=bundle.scaffolding_slug,
-            ).first()
+            scaffold = (
+                visible_scaffolding_templates_for(user)
+                .filter(
+                    slug=bundle.scaffolding_slug,
+                )
+                .first()
+            )
             if scaffold:
                 scaffolding_by_slug[scaffold.slug] = scaffold
 
@@ -381,9 +379,7 @@ def export_template_package(
             ],
             "app_templates": [
                 _serialize_app_template(item)
-                for item in visible_app_templates_for(user)
-                .filter(slug__in=app_template_slugs)
-                .order_by("name")
+                for item in visible_app_templates_for(user).filter(slug__in=app_template_slugs).order_by("name")
             ],
             "prompt_templates": [
                 _serialize_prompt_template(item)
@@ -403,10 +399,7 @@ def parse_bundle_package_text(package_text: str) -> dict[str, Any]:
         msg = f"Unsupported package kind: {data.get('kind')!r}"
         raise ValueError(msg)
     if data.get("bundle_package_schema_version") != BUNDLE_PACKAGE_SCHEMA_VERSION:
-        msg = (
-            "Unsupported bundle package schema version: "
-            f"{data.get('bundle_package_schema_version')!r}"
-        )
+        msg = f"Unsupported bundle package schema version: {data.get('bundle_package_schema_version')!r}"
         raise ValueError(msg)
     if not isinstance(data.get("bundle"), dict):
         msg = "Bundle package is missing a valid 'bundle' section"
@@ -423,10 +416,7 @@ def parse_template_package_text(package_text: str) -> dict[str, Any]:
         msg = f"Unsupported package kind: {data.get('kind')!r}"
         raise ValueError(msg)
     if data.get("template_package_schema_version") != TEMPLATE_PACKAGE_SCHEMA_VERSION:
-        msg = (
-            "Unsupported template package schema version: "
-            f"{data.get('template_package_schema_version')!r}"
-        )
+        msg = f"Unsupported template package schema version: {data.get('template_package_schema_version')!r}"
         raise ValueError(msg)
     assets = data.get("assets")
     if not isinstance(assets, dict):
@@ -752,10 +742,14 @@ def _import_bundle(
         if mapped:
             ref["slug"], ref["version"] = mapped
         else:
-            existing = visible_blocks_for(user).filter(
-                slug=ref["slug"],
-                version=ref["version"],
-            ).first()
+            existing = (
+                visible_blocks_for(user)
+                .filter(
+                    slug=ref["slug"],
+                    version=ref["version"],
+                )
+                .first()
+            )
             if not existing:
                 msg = f"Bundle references missing block {ref['slug']} v{ref['version']}"
                 raise ValueError(msg)
@@ -1016,8 +1010,7 @@ def _validate_block_payload(raw_block: Any) -> dict[str, Any]:
         msg = f"Block {slug} is missing content"
         raise ValueError(msg)
     return {
-        "block_type": str(raw_block.get("block_type", "")).strip()
-        or ContentBlock.BlockType.PROMPT_TONE,
+        "block_type": str(raw_block.get("block_type", "")).strip() or ContentBlock.BlockType.PROMPT_TONE,
         "slug": slug,
         "version": int(raw_block.get("version", 1)),
         "name": name,
@@ -1048,8 +1041,7 @@ def _validate_bundle_payload(raw_bundle: Any) -> dict[str, Any]:
         "name": name,
         "slug": slug,
         "description": str(raw_bundle.get("description", "")).strip(),
-        "scaffolding_slug": str(raw_bundle.get("scaffolding_slug", "flask-react")).strip()
-        or "flask-react",
+        "scaffolding_slug": str(raw_bundle.get("scaffolding_slug", "flask-react")).strip() or "flask-react",
         "block_refs": block_refs,
         "llm_config": llm_config,
     }

@@ -296,9 +296,7 @@ def export_job(request, job_id: str):
         "block_count": len(resolved.get("blocks", [])),
         "app_requirement_slug": (resolved.get("app_requirement") or {}).get("slug"),
         "template_bundle_id": job.template_bundle_id,
-        "template_bundle_slug": (
-            job.template_bundle.slug if job.template_bundle else None
-        ),
+        "template_bundle_slug": (job.template_bundle.slug if job.template_bundle else None),
     }
     return {
         "experiment": experiment,

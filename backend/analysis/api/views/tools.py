@@ -18,10 +18,7 @@ def install_state_for(user) -> dict[str, InstalledTool]:
     workspace = AnalyzerWorkspace.objects.filter(user=user).first()
     if workspace is None:
         return {}
-    return {
-        it.tool.slug: it
-        for it in workspace.installed_tools.select_related("tool").all()
-    }
+    return {it.tool.slug: it for it in workspace.installed_tools.select_related("tool").all()}
 
 
 def serialize_tool(tool: AnalyzerTool, installs: dict[str, InstalledTool]) -> dict[str, Any]:

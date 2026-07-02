@@ -95,5 +95,5 @@ def test_tool(request, slug: str, payload: TestToolSchema):
     tool = get_object_or_404(AnalyzerTool, slug=slug)
     try:
         return tool_tester.test_tool(ws, tool, payload.config)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HttpError(500, f"Test failed: {exc}") from exc

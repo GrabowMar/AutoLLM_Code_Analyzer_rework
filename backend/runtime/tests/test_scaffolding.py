@@ -120,9 +120,7 @@ def test_prepare_build_dir_writes_generated_code(tmp_path: Path):
         scaffolding_template=template,
         result_data={
             "backend_code": (
-                "from flask import Flask\napp = Flask(__name__)\n"
-                "if __name__ == '__main__':\n"
-                "    app.run(port=5000)\n"
+                "from flask import Flask\napp = Flask(__name__)\nif __name__ == '__main__':\n    app.run(port=5000)\n"
             ),
             "frontend_code": "export default function App() { return null; }",
         },

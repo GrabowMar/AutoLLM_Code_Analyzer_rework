@@ -43,7 +43,7 @@ def create_bootstrap_admin(request, data: BootstrapAdminCreateSchema):
         name=user_name,
         is_active=True,
     )
-    request._remember_me = data.remember
+    request._remember_me = data.remember  # noqa: SLF001
     get_adapter(request).login(request, user)
     return user
 

@@ -42,7 +42,7 @@ def ensure_base_image() -> tuple[bool, str]:
     logger.info("Building analyzer base image %s …", ANALYZER_IMAGE_TAG)
     try:
         docker_manager.build_image(str(_IMAGE_DIR), ANALYZER_IMAGE_TAG)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         detail = docker_manager.extract_build_error(exc) or str(exc)
         logger.exception("Analyzer base image build failed")
         return False, detail[-2000:]
@@ -103,7 +103,7 @@ def provision(user: User) -> AnalyzerWorkspace:
             container = _create_container(user)
             workspace.container = container
             workspace.save(update_fields=["container", "updated_at"])
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("Workspace provisioning failed for user %s", user.pk)
         workspace.status = AnalyzerWorkspace.Status.ERROR
         workspace.error_message = str(exc)[-1000:]

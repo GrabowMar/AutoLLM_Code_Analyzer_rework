@@ -16,7 +16,6 @@ from django.db.models import Q
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
 from backend.generation.models import TemplateBundle
-from backend.runtime.services.scaffolding import load_manifest
 from backend.runtime.services.scaffolding import resolve_stack_slug
 
 if TYPE_CHECKING:
@@ -124,9 +123,7 @@ def assemble_prompt_templates(resolved_blocks: list[dict[str, Any]]) -> dict[str
             role = meta.get("role") or "system"
             if stage in templates and role in templates[stage]:
                 templates[stage][role] = (
-                    f"{templates[stage][role]}\n\n{content}".strip()
-                    if templates[stage][role]
-                    else content
+                    f"{templates[stage][role]}\n\n{content}".strip() if templates[stage][role] else content
                 )
         elif btype in _APPEND_TO_SYSTEM:
             target_stage = meta.get("stage")
@@ -248,7 +245,8 @@ def build_resolved_bundle(
     app_dict = app_requirement_to_dict(app_requirement)
     bundle_slug = template_bundle.slug if template_bundle else resolved_bundle_slug
 
-    seed = experiment_seed if experiment_seed is not None else random.randint(0, 2_147_483_647)
+    # Reproducibility seed for an experiment run, not a crypto value.
+    seed = experiment_seed if experiment_seed is not None else random.randint(0, 2_147_483_647)  # noqa: S311
 
     llm_section: dict[str, Any] = {
         "temperature": temperature,
@@ -334,10 +332,7 @@ def _snapshot_prompt_hash(snapshot: dict[str, Any]) -> str:
     payload = {
         "prompt_templates": snapshot.get("prompt_templates"),
         "app_requirement": snapshot.get("app_requirement"),
-        "blocks": [
-            {"slug": b["slug"], "version": b["version"]}
-            for b in snapshot.get("blocks", [])
-        ],
+        "blocks": [{"slug": b["slug"], "version": b["version"]} for b in snapshot.get("blocks", [])],
         "seed": snapshot.get("seed"),
         "llm": snapshot.get("llm"),
     }

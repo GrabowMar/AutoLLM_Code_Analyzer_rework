@@ -10,9 +10,9 @@ from http import HTTPStatus
 import pytest
 
 from backend.analysis.models import Finding
-from backend.analysis.tests.factories import ToolResultFactory
 from backend.analysis.tests.factories import AnalysisRunFactory
 from backend.analysis.tests.factories import FindingFactory
+from backend.analysis.tests.factories import ToolResultFactory
 from backend.generation.tests.factories import GenerationJobFactory
 from backend.reports.models import Report
 from backend.users.tests.factories import UserFactory

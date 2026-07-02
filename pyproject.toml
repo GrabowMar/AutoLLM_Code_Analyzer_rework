@@ -71,6 +71,22 @@ override-dependencies = [
   "watchfiles==1.2.0",
 ]
 
+# ==== djLint ====
+[tool.djlint]
+profile = "django"
+include = "H017,H035"
+extend_exclude = "frontend/"
+indent = 2
+max_line_length = 119
+blank_line_after_tag = "load,extends"
+close_void_tags = true
+format_css = true
+format_js = true
+# TODO: remove T002 when fixed https://github.com/djlint/djLint/issues/687
+ignore = "H006,H016,H021,H030,H031,T002,D018"
+css.indent_size = 2
+js.indent_size = 2
+
 [tool.ruff]
 # Match djlint's max_line_length and the existing project house style.
 line-length = 119
@@ -165,8 +181,14 @@ lint.per-file-ignores."**/tests/**" = [
   "PT019",   # @patch injects mock parameters; names are intentionally unused.
   "SLF001",  # Accessing private members is sometimes necessary to test internals.
 ]
-lint.per-file-ignores."config/settings/local.py" = [
-  "S701", # Local-dev settings intentionally enable Jinja2 autoescape=False stand-ins.
+lint.per-file-ignores."backend/analysis/services/tool_tester.py" = [
+  "PT028", # `test_tool` is domain naming (the "test" action for a tool), not a pytest test.
+  "S108",  # /tmp/analyzer-test lives inside the isolated analyzer container, not host tmp.
+]
+lint.per-file-ignores."backend/generation/services/bundle_packages.py" = [
+  "TRY004", # ValueError is the intentional validation-error contract for bundle
+  # import/export callers, which catch `except ValueError` at the API
+  #          boundary (see api/views/bundles.py) to return 400s for bad input.
 ]
 lint.per-file-ignores."backend/generation/services/copilot_workspace.py" = [
   "S603", # git init/add/commit — fixed argv, workspace-local cwd.
@@ -176,6 +198,9 @@ lint.per-file-ignores."backend/runtime/scaffolding/**" = [
   "INP001",  # Scaffold templates are copied into generated apps, not imported as packages.
   "PLW1508", # Generated Flask apps use int env defaults by design.
   "S104",    # Generated apps bind 0.0.0.0 inside Docker.
+]
+lint.per-file-ignores."config/settings/local.py" = [
+  "S701", # Local-dev settings intentionally enable Jinja2 autoescape=False stand-ins.
 ]
 lint.per-file-ignores."manage.py" = [
   "EXE001", # Same as scripts — executable bit is platform-dependent in dev.
@@ -189,32 +214,17 @@ lint.isort.force-single-line = true
 [tool.pyproject-fmt]
 keep_full_version = true
 
-[tool.pytest]
-# ==== pytest ====
-ini_options.minversion = "6.0"
-ini_options.addopts = "--ds=config.settings.test --reuse-db --import-mode=importlib"
-ini_options.python_files = [
-  "tests.py",
-  "test_*.py",
-]
-
-[tool.coverage]
-# ==== Coverage ====
-run.include = [ "backend/**" ]
-run.omit = [ "*/migrations/*", "*/tests/*" ]
-run.plugins = [ "django_coverage_plugin" ]
-
 # ==== mypy ====
 [tool.mypy]
+ignore_missing_imports = true
 python_version = "3.13"
 check_untyped_defs = true
-ignore_missing_imports = true
-warn_unused_ignores = true
 warn_redundant_casts = true
-warn_unused_configs = true
+warn_unused_ignores = true
 plugins = [
   "mypy_django_plugin.main",
 ]
+warn_unused_configs = true
 overrides = [
   # Django migrations should not produce any errors:
   { module = "*.migrations.*", ignore_errors = true },
@@ -223,18 +233,17 @@ overrides = [
 [tool.django-stubs]
 django_settings_module = "config.settings.test"
 
-# ==== djLint ====
-[tool.djlint]
-blank_line_after_tag = "load,extends"
-close_void_tags = true
-extend_exclude = "frontend/"
-format_css = true
-format_js = true
-# TODO: remove T002 when fixed https://github.com/djlint/djLint/issues/687
-ignore = "H006,H016,H021,H030,H031,T002,D018"
-include = "H017,H035"
-indent = 2
-max_line_length = 119
-profile = "django"
-css.indent_size = 2
-js.indent_size = 2
+[tool.pytest]
+# ==== pytest ====
+ini_options.minversion = "6.0"
+ini_options.python_files = [
+  "test_*.py",
+  "tests.py",
+]
+ini_options.addopts = "--ds=config.settings.test --reuse-db --import-mode=importlib"
+
+[tool.coverage]
+# ==== Coverage ====
+run.include = [ "backend/**" ]
+run.omit = [ "*/migrations/*", "*/tests/*" ]
+run.plugins = [ "django_coverage_plugin" ]

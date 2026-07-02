@@ -96,10 +96,22 @@ def test_semgrep_parser():
 def test_pylint_parser_severity_map():
     raw = json.dumps(
         [
-            {"type": "error", "message": "undefined name 'foo'", "symbol": "undefined-variable",
-             "path": "app.py", "line": 3, "column": 4},
-            {"type": "convention", "message": "missing docstring", "symbol": "missing-docstring",
-             "path": "app.py", "line": 1, "column": 0},
+            {
+                "type": "error",
+                "message": "undefined name 'foo'",
+                "symbol": "undefined-variable",
+                "path": "app.py",
+                "line": 3,
+                "column": 4,
+            },
+            {
+                "type": "convention",
+                "message": "missing docstring",
+                "symbol": "missing-docstring",
+                "path": "app.py",
+                "line": 1,
+                "column": 0,
+            },
         ],
     )
     findings = parsers.parse("pylint", raw)
@@ -110,8 +122,8 @@ def test_pylint_parser_severity_map():
 
 def test_mypy_parser_text():
     raw = (
-        "backend_code.py:4:1: error: Argument 1 to \"greet\" has incompatible type "
-        "\"int\"; expected \"str\"  [arg-type]\n"
+        'backend_code.py:4:1: error: Argument 1 to "greet" has incompatible type '
+        '"int"; expected "str"  [arg-type]\n'
         "backend_code.py:4:1: note: see docs\n"
     )
     findings = parsers.parse("mypy", raw)

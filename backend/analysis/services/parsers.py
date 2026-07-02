@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
-from typing import Callable
 
 from backend.analysis.services.base import FindingData
 
@@ -35,7 +35,7 @@ def parse(parser_key: str, raw_output: str) -> list[FindingData]:
         return []
     try:
         return fn(raw_output or "")
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("Parser %r failed", parser_key)
         return []
 
@@ -156,8 +156,7 @@ def parse_semgrep(raw: str) -> list[FindingData]:
                 column_number=start.get("col"),
                 code_snippet=(extra.get("lines") or "")[:500],
                 rule_id=item.get("check_id", ""),
-                confidence=str((extra.get("metadata") or {}).get("confidence", "medium")).lower()
-                or "medium",
+                confidence=str((extra.get("metadata") or {}).get("confidence", "medium")).lower() or "medium",
                 tool_specific_data={"end_line": end.get("line")},
             ),
         )
@@ -207,8 +206,8 @@ def parse_mypy(raw: str) -> list[FindingData]:
     """Mypy has no stable JSON output; parse its ``file:line: level: msg`` text."""
     sev_map = {"error": "medium", "warning": "low", "note": "info"}
     findings: list[FindingData] = []
-    for line in (raw or "").splitlines():
-        line = line.rstrip()
+    for raw_line in (raw or "").splitlines():
+        line = raw_line.rstrip()
         if not line:
             continue
         m = _MYPY_LINE_RE.match(line)
