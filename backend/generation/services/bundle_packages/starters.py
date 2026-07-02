@@ -194,7 +194,6 @@ STARTER_TEMPLATE_PACKAGES = {
 }
 
 
-
 def list_starter_template_packages() -> list[dict[str, Any]]:
     packages: list[dict[str, Any]] = []
     for slug in sorted(STARTER_TEMPLATE_PACKAGES):
@@ -263,8 +262,6 @@ def import_starter_template_package(
     )
 
 
-
-
 def _read_data_text(relative_path: str) -> str:
     return (DATA_DIR / relative_path).read_text(encoding="utf-8")
 
@@ -296,5 +293,3 @@ def _build_starter_block(spec: dict[str, Any]) -> dict[str, Any]:
         "content": _read_data_text(spec["path"]),
         "metadata": spec.get("metadata") or {},
     }
-
-

@@ -36,20 +36,31 @@ export const segmentBorderColors: Record<string, string> = {
 // Applications-list palette: lighter /10 fills with explicit dark: variants,
 // unlike the shared /15 maps in $lib/constants/colors.
 export const jobListStatusColors: Record<string, string> = {
-  completed: "bg-emerald-500/10 text-emerald-500 border-emerald-500/30 dark:text-emerald-400 dark:border-emerald-500/20",
-  failed: "bg-red-500/10 text-red-500 border-red-500/30 dark:text-red-400 dark:border-red-500/20",
-  running: "bg-amber-500/10 text-amber-500 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/20",
-  pending: "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
-  cancelled: "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
+  completed:
+    "bg-emerald-500/10 text-emerald-500 border-emerald-500/30 dark:text-emerald-400 dark:border-emerald-500/20",
+  failed:
+    "bg-red-500/10 text-red-500 border-red-500/30 dark:text-red-400 dark:border-red-500/20",
+  running:
+    "bg-amber-500/10 text-amber-500 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/20",
+  pending:
+    "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
+  cancelled:
+    "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
 };
 
 export const jobListContainerStatusColors: Record<string, string> = {
-  pending: "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
-  building: "bg-amber-500/10 text-amber-500 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/20 animate-pulse",
-  running: "bg-emerald-500/10 text-emerald-500 border-emerald-500/30 dark:text-emerald-400 dark:border-emerald-500/20",
-  stopped: "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
-  failed: "bg-red-500/10 text-red-500 border-red-500/30 dark:text-red-400 dark:border-red-500/20",
-  removed: "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
+  pending:
+    "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
+  building:
+    "bg-amber-500/10 text-amber-500 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/20 animate-pulse",
+  running:
+    "bg-emerald-500/10 text-emerald-500 border-emerald-500/30 dark:text-emerald-400 dark:border-emerald-500/20",
+  stopped:
+    "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
+  failed:
+    "bg-red-500/10 text-red-500 border-red-500/30 dark:text-red-400 dark:border-red-500/20",
+  removed:
+    "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
 };
 
 export function timeAgo(dateStr: string): string {

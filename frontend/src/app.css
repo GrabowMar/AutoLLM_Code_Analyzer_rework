@@ -518,14 +518,30 @@
     @apply border-primary/50 bg-primary/10 text-primary hover:bg-primary/15 hover:border-primary/60;
   }
   /* Chip — active with semantic color */
-  .fb-chip-blue   { @apply border-blue-500/40   bg-blue-500/10   text-blue-600   dark:text-blue-400   hover:bg-blue-500/15   hover:border-blue-500/60; }
-  .fb-chip-emerald{ @apply border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/15 hover:border-emerald-500/60; }
-  .fb-chip-amber  { @apply border-amber-500/40  bg-amber-500/10  text-amber-600  dark:text-amber-500  hover:bg-amber-500/15  hover:border-amber-500/60; }
-  .fb-chip-red    { @apply border-red-500/40    bg-red-500/10    text-red-600    dark:text-red-400    hover:bg-red-500/15    hover:border-red-500/60; }
-  .fb-chip-orange { @apply border-orange-500/40 bg-orange-500/10 text-orange-600 dark:text-orange-400 hover:bg-orange-500/15 hover:border-orange-500/60; }
-  .fb-chip-violet { @apply border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/15 hover:border-violet-500/60; }
-  .fb-chip-slate  { @apply border-slate-400/40  bg-slate-500/10  text-slate-600  dark:text-slate-400  hover:bg-slate-500/15  hover:border-slate-400/60; }
-  .fb-chip-indigo { @apply border-indigo-500/40 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/15 hover:border-indigo-500/60; }
+  .fb-chip-blue {
+    @apply border-blue-500/40   bg-blue-500/10   text-blue-600   dark:text-blue-400   hover:bg-blue-500/15   hover:border-blue-500/60;
+  }
+  .fb-chip-emerald {
+    @apply border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/15 hover:border-emerald-500/60;
+  }
+  .fb-chip-amber {
+    @apply border-amber-500/40  bg-amber-500/10  text-amber-600  dark:text-amber-500  hover:bg-amber-500/15  hover:border-amber-500/60;
+  }
+  .fb-chip-red {
+    @apply border-red-500/40    bg-red-500/10    text-red-600    dark:text-red-400    hover:bg-red-500/15    hover:border-red-500/60;
+  }
+  .fb-chip-orange {
+    @apply border-orange-500/40 bg-orange-500/10 text-orange-600 dark:text-orange-400 hover:bg-orange-500/15 hover:border-orange-500/60;
+  }
+  .fb-chip-violet {
+    @apply border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/15 hover:border-violet-500/60;
+  }
+  .fb-chip-slate {
+    @apply border-slate-400/40  bg-slate-500/10  text-slate-600  dark:text-slate-400  hover:bg-slate-500/15  hover:border-slate-400/60;
+  }
+  .fb-chip-indigo {
+    @apply border-indigo-500/40 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/15 hover:border-indigo-500/60;
+  }
   /* Filter group row */
   .fb-group {
     @apply flex flex-wrap items-center gap-1.5;

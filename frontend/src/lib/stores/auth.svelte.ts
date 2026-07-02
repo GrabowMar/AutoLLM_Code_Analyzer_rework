@@ -233,7 +233,8 @@ function createAuth() {
     }
     return {
       ok: false,
-      error: "Initial admin setup succeeded, but the new session could not be loaded.",
+      error:
+        "Initial admin setup succeeded, but the new session could not be loaded.",
     };
   }
 

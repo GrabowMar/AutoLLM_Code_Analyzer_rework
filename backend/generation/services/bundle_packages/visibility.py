@@ -15,6 +15,7 @@ from backend.generation.models import TemplateBundle
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
 
+
 def visible_scaffolding_templates_for(user: AbstractUser | None):
     qs = ScaffoldingTemplate.objects.all()
     if user and getattr(user, "is_authenticated", False):
@@ -48,4 +49,3 @@ def visible_bundles_for(user: AbstractUser | None):
     if user and getattr(user, "is_authenticated", False):
         return qs.filter(Q(is_system=True) | Q(created_by=user))
     return qs.filter(is_system=True)
-

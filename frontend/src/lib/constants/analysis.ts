@@ -1,4 +1,4 @@
-import { analysisStatusColors, severityColors } from '$lib/constants/colors';
+import { analysisStatusColors, severityColors } from "$lib/constants/colors";
 
 /** Status → Tailwind class mappings for analysis tasks and results */
 export const statusColors = analysisStatusColors;
