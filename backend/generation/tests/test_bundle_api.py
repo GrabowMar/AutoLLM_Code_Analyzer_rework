@@ -229,10 +229,12 @@ def test_template_package_export_and_import(client):
 
     assert import_response.status_code == 200
     imported = import_response.json()
-    assert imported["scaffolding_templates"] == [scaffolding.slug]
-    assert imported["app_templates"] == [app_template.slug]
-    assert imported["prompt_templates"] == [prompt.slug]
-    assert imported["bundles"] == [bundle.slug]
+    # The importer can't see the owner's private assets, so the "rename"
+    # strategy creates their own copies under fresh slugs.
+    assert imported["scaffolding_templates"] == [f"{scaffolding.slug}-2"]
+    assert imported["app_templates"] == [f"{app_template.slug}-2"]
+    assert imported["prompt_templates"] == [f"{prompt.slug}-2"]
+    assert imported["bundles"] == [f"{bundle.slug}-2"]
 
 
 @pytest.mark.django_db

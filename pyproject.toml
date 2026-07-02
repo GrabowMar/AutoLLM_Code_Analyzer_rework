@@ -185,7 +185,7 @@ lint.per-file-ignores."backend/analysis/services/tool_tester.py" = [
   "PT028", # `test_tool` is domain naming (the "test" action for a tool), not a pytest test.
   "S108",  # /tmp/analyzer-test lives inside the isolated analyzer container, not host tmp.
 ]
-lint.per-file-ignores."backend/generation/services/bundle_packages.py" = [
+lint.per-file-ignores."backend/generation/services/bundle_packages/**" = [
   "TRY004", # ValueError is the intentional validation-error contract for bundle
   # import/export callers, which catch `except ValueError` at the API
   #          boundary (see api/views/bundles.py) to return 400s for bad input.
