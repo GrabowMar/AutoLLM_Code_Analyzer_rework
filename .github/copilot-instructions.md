@@ -12,10 +12,10 @@
 ### Python (backend)
 
 ```sh
-# Tests
-uv run pytest                                          # all tests
-uv run pytest path/to/test.py::TestClass::test_method  # single test
-uv run coverage run -m pytest && uv run coverage html  # with coverage
+# Tests — run inside Docker against the dev Postgres (same command as CI)
+just test                                          # all tests
+just test path/to/test.py::TestClass::test_method  # single test
+docker compose run --rm django sh -c "coverage run -m pytest && coverage html"  # with coverage
 
 # Linting & formatting
 uv run ruff check backend --fix   # lint

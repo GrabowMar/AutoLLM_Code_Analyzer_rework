@@ -37,6 +37,10 @@ prune *args:
 logs *args:
     @docker compose logs -f {{args}}
 
+# test: Run the backend test suite (same command as CI).
+test *args:
+    @docker compose run --rm django pytest {{args}}
+
 # manage: Executes `manage.py` command.
 manage +args:
     @docker compose run --rm django python ./manage.py {{args}}

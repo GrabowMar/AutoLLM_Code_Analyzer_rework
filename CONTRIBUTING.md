@@ -1,7 +1,8 @@
 # Contributing
 
 Thanks for helping out! This page covers everything you need to get a
-change from idea to merged PR.
+change from idea to merged PR. By participating you agree to the
+[code of conduct](CODE_OF_CONDUCT.md).
 
 ## 🧰 Set up
 
@@ -32,12 +33,13 @@ uv run pre-commit install
 
 ```bash
 uv run pre-commit run --all-files    # lint + format
-docker compose -f docker-compose.local.yml exec django python -m pytest -q
+just test                            # backend tests (pytest in Docker)
 cd frontend && npm run check         # svelte-check
 ```
 
-CI runs the same three on every PR (they are required checks), so running
-them locally just saves a round trip.
+CI runs the same checks on every PR. Lint, backend tests, and the frontend
+build gate merging; mypy and svelte-check are warm-up jobs that report but
+don't block (yet), so running everything locally just saves a round trip.
 
 ## 📬 Open a PR
 

@@ -1,3 +1,5 @@
+<a id="readme-top"></a>
+
 <div align="center">
 
 <h1>🧪 LLM Eval Lab</h1>
@@ -6,8 +8,18 @@
 benchmark the code they write.</strong></p>
 
 <p>
+<a href="docs/README.md"><strong>Explore the docs »</strong></a>
+<br>
+<a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/issues/new?template=bug_report.yml">Report a bug</a>
+·
+<a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/issues/new?template=feature_request.yml">Request a feature</a>
+</p>
+
+<p>
 <a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml"><img src="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 <a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml"><img src="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+<a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/gitleaks.yml"><img src="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/gitleaks.yml/badge.svg" alt="Gitleaks"></a>
+<a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/trivy.yml"><img src="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/trivy.yml/badge.svg" alt="Trivy"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
@@ -44,16 +56,20 @@ benchmark the code they write.</strong></p>
 
 ## 🔍 About
 
+![The analyzer tool shop — 14 installable analysis tools](docs/images/analyzers.png)
+
 LLM Eval Lab answers a simple question: *which model writes the best code
 for a given task?* You pick a requirement template and a set of models from
-[OpenRouter](https://openrouter.ai), the platform generates a complete
-application per model, runs each one in an isolated Docker container, and
-puts the code through a battery of static-analysis and security tools. The
-results feed reports and rankings, so model comparisons rest on measured
-findings rather than gut feeling.
+[OpenRouter][openrouter], the platform generates a complete application per
+model, runs each one in an isolated Docker container, and puts the code
+through a battery of static-analysis and security tools. The results feed
+reports and rankings, so model comparisons rest on measured findings rather
+than gut feeling.
 
 It started as a master's-thesis project and is maintained by a single
 developer, so expect sharp edges — issues and PRs are welcome.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## ✨ Features
 
@@ -65,6 +81,8 @@ developer, so expect sharp edges — issues and PRs are welcome.
 | 📊 | **Reports & rankings** | Findings aggregated into comparative reports, statistics, and per-model rankings |
 | 🔁 | **Automation pipelines** | A visual node-based editor to chain generate → analyze → report workflows |
 | 👥 | **Multi-user** | Email login with optional MFA, per-user OpenRouter keys, API tokens for programmatic access |
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## ⚙️ How it works
 
@@ -82,7 +100,9 @@ flowchart LR
 ```
 
 The whole loop can run interactively from the UI, or unattended as an
-[automation pipeline](docs/AUTOMATION_WORKFLOWS.md).
+[automation pipeline][pipelines-doc].
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## 🚀 Getting started
 
@@ -133,6 +153,8 @@ migrations, and configures Caddy or nginx for your domain. Options are
 documented in the script header; production proper uses
 `docker-compose.production.yml` (Traefik, Nginx, Gunicorn).
 
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
 ## 🕹️ Usage
 
 The typical loop:
@@ -146,25 +168,19 @@ The typical loop:
 4. **Compare** — open *Reports* and *Rankings* to see how the models did
 
 Repetitive experiments can be scripted as
-[automation pipelines](docs/AUTOMATION_WORKFLOWS.md) instead of clicking
-through the steps.
+[automation pipelines][pipelines-doc] instead of clicking through the steps.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## 🛠️ Development
 
 ```bash
 just up / just down    # start / stop the stack
 just logs              # tail container logs
+just test              # backend tests (pytest in Docker, same as CI)
 just manage <cmd>      # any manage.py command
 just build             # rebuild images
 just prune             # remove containers + volumes
-```
-
-Tests run inside the container against the dev Postgres:
-
-```bash
-docker compose -f docker-compose.local.yml exec \
-  -e DATABASE_URL="postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB" \
-  django python -m pytest -q
 ```
 
 Linting and type checks:
@@ -174,6 +190,8 @@ uv run pre-commit run --all-files    # ruff, djlint, prettier, and friends
 uv run mypy backend
 cd frontend && npm run check         # svelte-check
 ```
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## 🗂️ Project structure
 
@@ -190,12 +208,17 @@ docs/        Deeper documentation — start at docs/README.md
 Secrets live in `.envs/` — only `*.example` templates are committed;
 `just bootstrap` creates the real files.
 
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
 ## 🤝 Contributing
 
 Bug reports, ideas, and PRs are welcome — see
-[CONTRIBUTING.md](CONTRIBUTING.md) for the workflow. For security
-vulnerabilities, follow [SECURITY.md](SECURITY.md) instead of opening a
-public issue.
+[CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for the ground rules. For
+security vulnerabilities, follow [SECURITY.md](SECURITY.md) instead of
+opening a public issue.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## 📄 License
 
@@ -210,4 +233,9 @@ Marcin Grabowski — [@GrabowMar](https://github.com/GrabowMar)
 - [cookiecutter-django](https://github.com/cookiecutter/cookiecutter-django)
   for the project skeleton
 - [shadcn-svelte](https://shadcn-svelte.com/) / bits-ui for UI components
-- [OpenRouter](https://openrouter.ai) for unified model access
+- [OpenRouter][openrouter] for unified model access
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+[openrouter]: https://openrouter.ai
+[pipelines-doc]: docs/AUTOMATION_WORKFLOWS.md
