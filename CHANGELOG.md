@@ -12,9 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with optional Caddy/nginx reverse-proxy configuration.
 
 ### Changed
-- Rewrote the root `README.md` to be shorter and easier to follow; moved
-  the VS Code Dev Containers guide (including troubleshooting) to
-  `docs/dev-containers.md`.
+- Remade the root docs: `README.md` restructured along common
+  README-template conventions (about/features/getting started/usage/
+  structure/contact), `CONTRIBUTING.md` reorganized as a setup → change →
+  check → PR walkthrough, `SECURITY.md` reordered to lead with how to
+  report. The VS Code Dev Containers guide (including troubleshooting)
+  moved to `docs/dev-containers.md`.
 - Renamed the `llm_lab/` Django-apps package to `backend/` for a clearer
   top-level layout (`backend/` + `config/` + `frontend/`). Updated every
   import, `INSTALLED_APPS` entry, migration reference, Docker image/volume

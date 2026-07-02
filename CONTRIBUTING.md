@@ -1,84 +1,71 @@
 # Contributing
 
-Thanks for your interest in LLM Eval Lab. This guide covers the day-to-day
-workflow for working in this repo.
+Thanks for helping out! This page covers everything you need to get a
+change from idea to merged PR.
 
-## Setting up
+## 🧰 Set up
 
 ```bash
-just up                # start the full stack
-just manage migrate    # apply migrations
+just bootstrap         # local .env files
+just up                # full stack in Docker
+just manage migrate
 just manage createsuperuser
 ```
 
-Install Python tooling outside the container too — `pre-commit` runs locally:
+Install the git hooks on your machine too — they run the same checks as CI:
 
 ```bash
 uv sync
 uv run pre-commit install
 ```
 
-## Branching
+## ✏️ Make your change
 
-- `main` is always deployable; CI must be green before merging.
-- Feature work lives on branches named `<type>/<short-slug>`, e.g.
-  `feat/ranking-export`, `fix/login-csrf`, `chore/upgrade-celery`,
-  `docs/architecture-update`.
-- Dependabot owns `dependabot/**` branches — don't push to them.
+1. Branch off `main`, named `<type>/<short-slug>` — for example
+   `feat/ranking-export`, `fix/login-csrf`, `docs/api-guide`.
+   (Dependabot owns `dependabot/**`; don't push there.)
+2. Commit using [Conventional Commits](https://www.conventionalcommits.org/)
+   prefixes: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.
+3. Keep each commit — and each PR — to one logical change.
 
-## Commits
-
-- Use [Conventional Commits](https://www.conventionalcommits.org/) prefixes
-  (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`).
-- Keep commits focused and self-contained. Unrelated changes belong in
-  separate PRs.
-
-## Before you push
+## ✅ Check before you push
 
 ```bash
-uv run pre-commit run --all-files    # ruff + djlint + django-upgrade
+uv run pre-commit run --all-files    # lint + format
 docker compose -f docker-compose.local.yml exec django python -m pytest -q
-cd frontend && npm run check
+cd frontend && npm run check         # svelte-check
 ```
 
-CI runs the same checks on every PR — running them locally just saves a
-round trip.
+CI runs the same three on every PR (they are required checks), so running
+them locally just saves a round trip.
 
-## Pull requests
+## 📬 Open a PR
 
-- One PR per logical change.
-- Fill in the PR template (it appears automatically).
-- Link any related issue with `Closes #N`.
-- Screenshots / GIFs for any UI change.
-- Don't request review until CI is green.
+- Fill in the PR template and link related issues with `Closes #N`.
+- Include screenshots or GIFs for UI changes.
+- CI must be green and the branch up to date with `main` before merging.
 
-## Database changes
+## 🍳 Recipes
 
-- Always add a Django migration alongside the model change.
-- Migrations must apply cleanly on a fresh DB **and** on the current
-  production schema.
-- Run `just manage makemigrations --check` before pushing.
+**Database changes** — add a Django migration alongside the model change;
+it must apply cleanly on a fresh DB and on the current schema. Verify with
+`just manage makemigrations --check`.
 
-## Frontend changes
+**Frontend changes** — components live in `frontend/src/lib/components/`,
+routes in `frontend/src/routes/`. Follow the design tokens in
+`frontend/DESIGN_SYSTEM.md`.
 
-- Components live under `frontend/src/lib/components/`; routes under
-  `frontend/src/routes/`.
-- Run `npm run check` to catch Svelte/TS errors before pushing.
-- Respect the design tokens in `frontend/DESIGN_SYSTEM.md`.
+**New Django app** —
 
-## Adding a new Django app
+1. Create `backend/<name>/` with `apps.py`, `models.py`, `tests/`, and —
+   if it exposes an API — `api/views.py` defining a `ninja.Router`.
+2. Add it to `LOCAL_APPS` in `config/settings/base.py`.
+3. Register the router in `config/api.py`.
+4. Add test factories in `backend/<name>/tests/factories.py`.
 
-1. Create `backend/<name>/` with `apps.py`, `models.py`, `tests/`, and
-   (if exposing an API) `api/views.py` defining a `ninja.Router`.
-2. Add the app to `LOCAL_APPS` in `config/settings/base.py`.
-3. Register its router in `config/api.py`.
-4. Add factories under `backend/<name>/tests/factories.py` for tests.
+Full conventions live in [docs/app-layout.md](docs/app-layout.md).
 
-See [`docs/app-layout.md`](docs/app-layout.md) for the full conventions —
-standard file layout, API/service-layer patterns, and where shared helpers
-live.
+## 🔒 Security issues
 
-## Security issues
-
-Don't open a PR or public issue for a security vulnerability — follow
+Never open a public issue or PR for a vulnerability — follow
 [SECURITY.md](SECURITY.md) instead.
