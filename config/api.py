@@ -2,6 +2,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 from ninja import NinjaAPI
 from ninja.security import SessionAuth
 
+from backend.common.exceptions import APIError
 from backend.tokens.auth import TokenAuth
 
 api = NinjaAPI(
@@ -9,6 +10,20 @@ api = NinjaAPI(
     auth=[TokenAuth(), SessionAuth()],
     docs_decorator=staff_member_required,
 )
+
+
+# Error-handling convention: views raise ninja's HttpError (or use
+# get_object_or_404); services raise backend.common.exceptions.* so they stay
+# free of ninja imports — this handler maps those to HTTP responses. Typed
+# {4xx: schema} tuple returns are reserved for structured validation payloads
+# (e.g. automation's DslValidationResult).
+@api.exception_handler(APIError)
+def handle_api_error(request, exc: APIError):
+    return api.create_response(
+        request,
+        {"detail": exc.message},
+        status=exc.status_code,
+    )
 
 api.add_router("/users/", "backend.users.api.views.router")
 api.add_router("/tokens/", "backend.tokens.api.views.router")
