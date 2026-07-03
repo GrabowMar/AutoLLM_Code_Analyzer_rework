@@ -1,7 +1,8 @@
 # LLM Eval Lab
 
-Generate applications with LLMs, run them in sandboxes, and benchmark the
-code they write.
+Which model writes the best code for a given task? This platform finds out:
+it generates one application per model, runs each in a Docker sandbox, and
+scores the code with 14 analysis tools.
 
 [![CI](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml)
@@ -11,168 +12,128 @@ code they write.
 
 ![The analyzer tool shop — 14 installable analysis tools](docs/images/analyzers.png)
 
-LLM Eval Lab answers a simple question: *which model writes the best code
-for a given task?* You pick a requirement template and a set of models from
-[OpenRouter][openrouter], the platform generates a complete application per
-model, runs each one in an isolated Docker container, and puts the code
-through a battery of static-analysis and security tools. The results feed
-reports and rankings, so model comparisons rest on measured findings rather
-than gut feeling.
+## The idea
 
-It started as a master's-thesis project and is maintained by a single
-developer, so expect sharp edges — issues and PRs are welcome.
-Built with Django 6, SvelteKit 2, PostgreSQL, Redis, and Celery, all
-running in Docker.
+Benchmarks tell you how a model scores on puzzles; they say little about
+the quality of a full application it writes. Here the experiment is
+end-to-end: you pick a requirement template and a set of models from
+[OpenRouter][openrouter], and for each model the platform
 
-## How it works
+1. **generates** a complete application from the template
+   ([how templates work](docs/TEMPLATE_SPECIFICATION.md)),
+2. **runs it** in an isolated container with its own subdomain, so you can
+   click through the live app,
+3. **analyzes** the code with the tools you select — ruff, bandit, semgrep,
+   eslint, mypy, pylint, gitleaks, detect-secrets, hadolint, codespell,
+   vulture, radon, jscpd, and an LLM code reviewer,
+4. **aggregates** the findings and metrics into reports and per-model
+   rankings.
 
-```mermaid
-flowchart LR
-    T["Requirement<br>template"] --> G
-    M["Selected<br>models"] --> G
-    G["Generation<br>(via OpenRouter)"] --> APPS["Generated apps<br>(one per model)"]
-    APPS --> S["Sandbox<br>(Docker container<br>per app)"]
-    APPS --> A["Analysis<br>(14 tools)"]
-    A --> F["Findings<br>& metrics"]
-    F --> R["Reports<br>& rankings"]
-```
+The comparison rests on measured findings, not gut feeling. Everything runs
+from the web UI, or unattended as [automation pipelines][pipelines-doc]
+composed in a node-based editor — schedule them or fan them out over a
+parameter matrix. Multi-user support (email login, optional MFA, per-user
+OpenRouter keys, API tokens) makes a shared instance practical.
 
-1. **Template** — a requirement template describes the application to
-   build ([spec](docs/TEMPLATE_SPECIFICATION.md)); you pick one and select
-   the models to compare.
-2. **Generation** — Celery workers prompt each model through OpenRouter
-   and collect one complete, runnable application per model.
-3. **Sandbox** — each generated app runs in its own Docker container with
-   subdomain routing, so you can click through it live.
-4. **Analysis** — an analysis profile runs a selection of 14 tools against
-   the code: ruff, bandit, semgrep, eslint, mypy, pylint, gitleaks,
-   detect-secrets, hadolint, codespell, vulture, radon, jscpd, and an LLM
-   code reviewer. Finding-shaped tools report issues; metric-shaped tools
-   (radon, jscpd) report measurements.
-5. **Reports & rankings** — findings and metrics aggregate into
-   comparative reports, statistics, and per-model rankings.
+The stack: Django 6 + Celery + PostgreSQL + Redis on the backend,
+SvelteKit 2 on the frontend, everything in Docker.
 
-The whole loop runs interactively from the UI, or unattended as an
-[automation pipeline][pipelines-doc] built in a visual node-based editor.
-Multi-user support (email login, optional MFA, per-user OpenRouter keys,
-API tokens) makes it usable as a shared instance.
+This began as a master's-thesis project and is maintained by one person —
+expect sharp edges, and feel free to file issues.
 
-## Getting started
+## Run it locally
 
-### Prerequisites
-
-- Docker with the Compose plugin
-- [`just`](https://github.com/casey/just) — command runner
-- An [OpenRouter API key](https://openrouter.ai/keys) (needed for
-  generation; browsing works without one)
-
-### Install
+You need Docker (with the Compose plugin),
+[`just`](https://github.com/casey/just), and an
+[OpenRouter API key](https://openrouter.ai/keys) — the key is only needed
+for generation, browsing works without it.
 
 ```bash
 git clone https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework.git
 cd AutoLLM_Code_Analyzer_rework
-just bootstrap        # create local .env files with random secrets
-just up               # build and start the stack
+just bootstrap              # .env files with generated secrets
+just up                     # build and start the stack
 just manage migrate
 just manage createsuperuser
 ```
 
-Open <http://localhost:8000> and log in. Add your OpenRouter key in the
-UI (per user), or set `OPENROUTER_API_KEY` in `.envs/.local/.django` as a
-global fallback.
+Then open <http://localhost:8000>, log in, and add your OpenRouter key in
+the UI (or set `OPENROUTER_API_KEY` in `.envs/.local/.django` as a global
+fallback).
 
-Useful local endpoints:
-
-| URL                              | What                      |
+| URL                              | Service                   |
 | -------------------------------- | ------------------------- |
-| <http://localhost:8000>          | Frontend                  |
+| <http://localhost:8000>          | Web UI (SvelteKit)        |
 | <http://localhost:8001/admin/>   | Django admin              |
 | <http://localhost:8001/api/docs> | API docs (staff only)     |
 | <http://localhost:8025>          | Mailpit (captured emails) |
+| <http://localhost:5555>          | Flower (Celery tasks)     |
 
-Prefer developing inside the containers? See
-[docs/dev-containers.md](docs/dev-containers.md) for the VS Code setup.
+To develop inside the containers instead, see
+[docs/dev-containers.md](docs/dev-containers.md).
 
-### Deploy to a server
-
-One command on any Docker host:
+## Run it on a server
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/GrabowMar/AutoLLM_Code_Analyzer_rework/main/scripts/deploy.sh)
 ```
 
-The script clones the repo, generates env files, starts the stack, runs
-migrations, and configures Caddy or nginx for your domain. Options are
-documented in the script header; production proper uses
-`docker-compose.production.yml` (Traefik, Nginx, Gunicorn).
+The script clones the repo, generates env files, starts the production
+stack (`docker-compose.production.yml`: Traefik, Nginx, Gunicorn), runs
+migrations, and can configure Caddy or nginx for your domain. Options are
+documented in the script header.
 
-## Usage
+## Working on the code
 
-The typical loop:
-
-1. **Pick or write a template** under *Sample generator → Templates*
-2. **Generate** — select models, generate one app per model
-3. **Analyze** — run an analysis profile against the generated apps
-4. **Compare** — open *Reports* and *Rankings* to see how the models did
-
-Repetitive experiments can be scripted as
-[automation pipelines][pipelines-doc] instead of clicking through the steps.
-
-## Development
+The `justfile` is the entry point for everything:
 
 ```bash
-just up / just down    # start / stop the stack
-just logs              # tail container logs
-just test              # backend tests (pytest in Docker, same as CI)
-just manage <cmd>      # any manage.py command
-just build             # rebuild images
-just prune             # remove containers + volumes
+just up / just down     # start / stop the stack
+just logs               # tail container logs
+just test               # backend tests — pytest in Docker, same as CI
+just manage <cmd>       # any manage.py command
+just build              # rebuild images
+just prune              # remove containers and volumes
 ```
 
 Linting and type checks:
 
 ```bash
-uv run pre-commit run --all-files    # ruff, djlint, prettier, and friends
+uv run pre-commit run --all-files   # ruff, djlint, prettier, and friends
 uv run mypy backend
-cd frontend && npm run check         # svelte-check
+cd frontend && npm run check        # svelte-check
 ```
 
-## Project structure
+How the code is laid out:
 
 ```
-backend/     Django apps, one per domain (generation, analysis, automation,
-             reports, rankings, runtime, users, ...)
-config/      Settings, root URLconf, Celery app, API root
-frontend/    SvelteKit app (routes, components, API client)
-compose/     Dockerfiles for local and production targets
-scripts/     bootstrap.py (env files), deploy.sh (server install)
-docs/        Deeper documentation — start at docs/README.md
+backend/    Django apps, one per domain: generation, analysis, automation,
+            reports, rankings, runtime, users, ...
+config/     settings, root URLconf, Celery app, API root
+frontend/   SvelteKit app — routes, components, API client
+compose/    Dockerfiles for the local and production targets
+scripts/    bootstrap.py (env files), deploy.sh (server install)
+docs/       deeper documentation — start at docs/README.md
 ```
 
-Secrets live in `.envs/` — only `*.example` templates are committed;
-`just bootstrap` creates the real files.
+Secrets live in `.envs/`; only `*.example` templates are committed, and
+`just bootstrap` derives the real files from them.
 
 ## Contributing
 
-Bug reports, ideas, and PRs are welcome — see
-[CONTRIBUTING.md](CONTRIBUTING.md) for the workflow. For security
-vulnerabilities, follow [SECURITY.md](SECURITY.md) instead of opening a
-public issue.
+Bug reports, ideas, and PRs are welcome —
+[CONTRIBUTING.md](CONTRIBUTING.md) describes the workflow. Report security
+vulnerabilities privately per [SECURITY.md](SECURITY.md), not as public
+issues.
 
-## License
+## License and contact
 
-Distributed under the MIT License — see [LICENSE](LICENSE).
-
-## Contact
-
+MIT — see [LICENSE](LICENSE).
 Marcin Grabowski — [@GrabowMar](https://github.com/GrabowMar)
 
-## Acknowledgments
-
-- [cookiecutter-django](https://github.com/cookiecutter/cookiecutter-django)
-  for the project skeleton
-- [shadcn-svelte](https://shadcn-svelte.com/) / bits-ui for UI components
-- [OpenRouter][openrouter] for unified model access
+Built on [cookiecutter-django](https://github.com/cookiecutter/cookiecutter-django),
+[shadcn-svelte](https://shadcn-svelte.com/)/bits-ui, and
+[OpenRouter][openrouter].
 
 [openrouter]: https://openrouter.ai
 [pipelines-doc]: docs/AUTOMATION_WORKFLOWS.md
