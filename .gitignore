@@ -273,6 +273,7 @@ dump.rdb
 backend/media/
 
 .pytest_cache/
+.ruff_cache/
 .ipython/
 # Environment files — only *.example templates are committed.
 .env
