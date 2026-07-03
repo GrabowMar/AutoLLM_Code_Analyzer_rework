@@ -33,6 +33,7 @@ def serialize_tool(tool: AnalyzerTool, installs: dict[str, InstalledTool]) -> di
         "icon": tool.icon,
         "version": tool.version,
         "docs_url": tool.docs_url,
+        "output_kind": tool.output_kind,
         "config_schema": tool.config_schema or [],
         "default_config": tool.default_config or {},
         "run_timeout": tool.run_timeout,

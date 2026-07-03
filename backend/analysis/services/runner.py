@@ -16,12 +16,17 @@ from backend.analysis.services import ai_runner
 from backend.analysis.services import parsers
 from backend.analysis.services import workspace_service
 from backend.analysis.services.base import AnalyzerOutput
+from backend.analysis.services.base import ParsedOutput
 from backend.analysis.services.base import build_severity_counts
 from backend.common.threading import dispatch_in_thread
 from backend.realtime import events as realtime
 from backend.runtime.services import docker_manager
 
 logger = logging.getLogger(__name__)
+
+# Stored stdout is a debugging artifact (parsing happens on the full output
+# first); keep enough to be useful without bloating rows.
+_STDOUT_STORE_LIMIT = 30_000
 
 _EXT_BY_KEY = {
     "backend": ".py",
@@ -157,11 +162,12 @@ def _run_container_tool(tool: AnalyzerTool, container_name: str) -> AnalyzerOutp
     if result.get("error") and result.get("exit_code") == -1:
         return AnalyzerOutput(error=result["error"])
     raw = result.get("output", "")
-    findings = parsers.parse(tool.parser_key, raw) if tool.parser_key else []
+    parsed = parsers.parse(tool.parser_key, raw) if tool.parser_key else ParsedOutput()
     return AnalyzerOutput(
-        findings=findings,
-        raw_output={"exit_code": result.get("exit_code"), "stdout": raw[:8000]},
-        summary={"finding_count": len(findings)},
+        findings=parsed.findings,
+        metrics=parsed.metrics,
+        raw_output={"exit_code": result.get("exit_code"), "stdout": raw[:_STDOUT_STORE_LIMIT]},
+        summary={"finding_count": len(parsed.findings)},
     )
 
 
@@ -195,11 +201,12 @@ def _persist_result(result: ToolResult, output: AnalyzerOutput) -> None:
     )
     result.status = ToolResult.Status.COMPLETED
     result.raw_output = output.raw_output
+    result.metrics = output.metrics
     result.summary = {
         **output.summary,
         "severity_counts": build_severity_counts(output.findings),
     }
-    result.save(update_fields=["status", "raw_output", "summary"])
+    result.save(update_fields=["status", "raw_output", "metrics", "summary"])
 
 
 def _finalize(run: AnalysisRun, statuses: list[str]) -> None:
@@ -218,10 +225,13 @@ def _finalize(run: AnalysisRun, statuses: list[str]) -> None:
     else:
         status = AnalysisRun.Status.COMPLETED
 
+    metrics_by_tool = {slug: metrics for slug, metrics in run.results.values_list("tool_slug", "metrics") if metrics}
+
     run.status = status
     run.summary = {
         "total_findings": findings.count(),
         "severity_counts": severity_counts,
+        "metrics_by_tool": metrics_by_tool,
         "tools_run": len(statuses),
         "tools_completed": completed,
         "tools_failed": failed,

@@ -30,7 +30,7 @@ def test_tool(
     tool: AnalyzerTool,
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return ``{available, message, findings, raw_output}`` for *tool*."""
+    """Return ``{available, message, findings, metrics, raw_output}`` for *tool*."""
     sample = tool.sample_code or _DEFAULT_SAMPLES.get(tool.target_language, "")
 
     if tool.kind == "ai":
@@ -39,6 +39,7 @@ def test_tool(
             "available": not output.has_error,
             "message": output.error or "AI tool reachable",
             "findings": [asdict(f) for f in output.findings],
+            "metrics": output.metrics,
             "raw_output": output.raw_output,
         }
 
@@ -48,10 +49,12 @@ def test_tool(
             "available": False,
             "message": message,
             "findings": [],
+            "metrics": {},
             "raw_output": {},
         }
 
     findings: list[dict[str, Any]] = []
+    metrics: dict[str, Any] = {}
     raw: dict[str, Any] = {}
     if sample and tool.run_cmd:
         try:
@@ -72,13 +75,16 @@ def test_tool(
             )
             raw = {"exit_code": result.get("exit_code"), "stdout": (result.get("output") or "")[:4000]}
             if tool.parser_key:
-                findings = [asdict(f) for f in parsers.parse(tool.parser_key, result.get("output", ""))]
+                parsed = parsers.parse(tool.parser_key, result.get("output", ""))
+                findings = [asdict(f) for f in parsed.findings]
+                metrics = parsed.metrics
         except RuntimeError as exc:
-            return {"available": True, "message": str(exc), "findings": [], "raw_output": {}}
+            return {"available": True, "message": str(exc), "findings": [], "metrics": {}, "raw_output": {}}
 
     return {
         "available": True,
         "message": message or "Tool available",
         "findings": findings,
+        "metrics": metrics,
         "raw_output": raw,
     }

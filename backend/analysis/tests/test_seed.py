@@ -35,6 +35,13 @@ def test_every_container_tool_has_registered_parser():
         assert parsers.has_parser(tool.parser_key), tool.slug
 
 
+def test_output_kind_seeded_from_yaml():
+    call_command("seed_analysis_tools")
+    assert AnalyzerTool.objects.get(slug="radon").output_kind == "mixed"
+    assert AnalyzerTool.objects.get(slug="jscpd").output_kind == "mixed"
+    assert AnalyzerTool.objects.get(slug="bandit").output_kind == "findings"
+
+
 def test_performance_category_has_an_enabled_tool():
     call_command("seed_analysis_tools")
     assert AnalyzerTool.objects.filter(category="performance", is_enabled=True).exists()

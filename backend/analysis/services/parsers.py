@@ -1,7 +1,9 @@
-"""Parsers that turn raw tool output into normalized findings.
+"""Parsers that turn raw tool output into normalized findings and metrics.
 
-Each parser maps a tool's JSON (or text) output to ``list[FindingData]``.
-Parsers are looked up by the ``parser_key`` declared on a catalog tool.
+Each parser maps a tool's JSON (or text) output to ``list[FindingData]`` or,
+for tools whose output is (partly) metric-shaped, a ``ParsedOutput`` carrying
+aggregate metrics alongside any findings. Parsers are looked up by the
+``parser_key`` declared on a catalog tool.
 """
 
 from __future__ import annotations
@@ -13,31 +15,35 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.analysis.services.base import FindingData
+from backend.analysis.services.base import ParsedOutput
 
 logger = logging.getLogger(__name__)
 
-_PARSERS: dict[str, Callable[[str], list[FindingData]]] = {}
+_PARSERS: dict[str, Callable[[str], list[FindingData] | ParsedOutput]] = {}
 
 
 def register(key: str) -> Callable[[Callable], Callable]:
-    def _wrap(fn: Callable[[str], list[FindingData]]) -> Callable:
+    def _wrap(fn: Callable[[str], list[FindingData] | ParsedOutput]) -> Callable:
         _PARSERS[key] = fn
         return fn
 
     return _wrap
 
 
-def parse(parser_key: str, raw_output: str) -> list[FindingData]:
+def parse(parser_key: str, raw_output: str) -> ParsedOutput:
     """Run the parser registered for *parser_key* on *raw_output*."""
     fn = _PARSERS.get(parser_key)
     if fn is None:
         logger.warning("No parser registered for key %r", parser_key)
-        return []
+        return ParsedOutput()
     try:
-        return fn(raw_output or "")
+        result = fn(raw_output or "")
     except Exception:
         logger.exception("Parser %r failed", parser_key)
-        return []
+        return ParsedOutput()
+    if isinstance(result, ParsedOutput):
+        return result
+    return ParsedOutput(findings=result)
 
 
 def has_parser(parser_key: str) -> bool:
@@ -233,43 +239,76 @@ def parse_mypy(raw: str) -> list[FindingData]:
 
 
 @register("radon")
-def parse_radon(raw: str) -> list[FindingData]:
-    """Radon ``cc -j`` output: ``{file: [block]}`` with nested methods/closures."""
+def parse_radon(raw: str) -> ParsedOutput:
+    """Radon ``cc -j`` output: ``{file: [block]}`` with nested methods/closures.
+
+    Complexity is metric-shaped, so every block feeds the metrics; only the
+    truly pathological ranks (E/F) also become findings.
+    """
     data = _loads(raw) or {}
     if not isinstance(data, dict):
-        return []
-    sev_map = {"C": "low", "D": "medium", "E": "high", "F": "critical"}
+        return ParsedOutput()
+    sev_map = {"E": "high", "F": "critical"}
+    blocks: list[dict[str, Any]] = []
     findings: list[FindingData] = []
 
     def _walk(file_path: str, block: dict) -> None:
         rank = str(block.get("rank", ""))
         complexity = block.get("complexity")
-        findings.append(
-            FindingData(
-                severity=sev_map.get(rank, "low"),
-                category="performance",
-                title=(
-                    f"{block.get('type', 'block')} '{block.get('name', '?')}' has "
-                    f"cyclomatic complexity {complexity} (rank {rank})"
-                ),
-                file_path=file_path,
-                line_number=block.get("lineno"),
-                column_number=block.get("col_offset"),
-                rule_id=f"CC-{rank}" if rank else "CC",
-                confidence="high",
-                tool_specific_data={"complexity": complexity, "endline": block.get("endline")},
-            ),
+        blocks.append(
+            {
+                "file": file_path,
+                "name": block.get("name", "?"),
+                "type": block.get("type", "block"),
+                "line": block.get("lineno"),
+                "complexity": complexity if isinstance(complexity, int) else 0,
+                "rank": rank,
+            },
         )
+        if rank in sev_map:
+            findings.append(
+                FindingData(
+                    severity=sev_map[rank],
+                    category="performance",
+                    title=(
+                        f"{block.get('type', 'block')} '{block.get('name', '?')}' has "
+                        f"cyclomatic complexity {complexity} (rank {rank})"
+                    ),
+                    file_path=file_path,
+                    line_number=block.get("lineno"),
+                    column_number=block.get("col_offset"),
+                    rule_id=f"CC-{rank}",
+                    confidence="high",
+                    tool_specific_data={"complexity": complexity, "endline": block.get("endline")},
+                ),
+            )
         for child in (block.get("methods") or []) + (block.get("closures") or []):
             _walk(file_path, child)
 
-    for file_path, blocks in data.items():
+    for file_path, file_blocks in data.items():
         # A file radon failed to parse maps to {"error": "..."} — skip it.
-        if not isinstance(blocks, list):
+        if not isinstance(file_blocks, list):
             continue
-        for block in blocks:
+        for block in file_blocks:
             _walk(file_path, block)
-    return findings
+
+    if not blocks:
+        return ParsedOutput(findings=findings)
+
+    complexities = [b["complexity"] for b in blocks]
+    rank_distribution = dict.fromkeys("ABCDEF", 0)
+    for b in blocks:
+        if b["rank"] in rank_distribution:
+            rank_distribution[b["rank"]] += 1
+    top_functions = sorted(blocks, key=lambda b: b["complexity"], reverse=True)[:25]
+    metrics = {
+        "total_blocks": len(blocks),
+        "average_complexity": round(sum(complexities) / len(complexities), 2),
+        "max_complexity": max(complexities),
+        "rank_distribution": rank_distribution,
+        "top_functions": top_functions,
+    }
+    return ParsedOutput(findings=findings, metrics=metrics)
 
 
 _VULTURE_LINE_RE = re.compile(
@@ -335,11 +374,15 @@ def parse_detect_secrets(raw: str) -> list[FindingData]:
 
 
 @register("jscpd")
-def parse_jscpd(raw: str) -> list[FindingData]:
-    """jscpd JSON report: ``{"duplicates": [{firstFile, secondFile, lines, …}]}``."""
+def parse_jscpd(raw: str) -> ParsedOutput:
+    """jscpd JSON report: ``{"duplicates": [...], "statistics": {"total": {...}}}``.
+
+    Clones are location-anchored and stay findings; the overall duplication
+    statistics are metric-shaped and would otherwise be lost.
+    """
     data = _loads(raw) or {}
     if not isinstance(data, dict):
-        return []
+        return ParsedOutput()
     findings: list[FindingData] = []
     for dup in data.get("duplicates") or []:
         first = dup.get("firstFile") or {}
@@ -364,7 +407,22 @@ def parse_jscpd(raw: str) -> list[FindingData]:
                 },
             ),
         )
-    return findings
+
+    total = ((data.get("statistics") or {}).get("total")) or {}
+    metrics = (
+        {
+            "clones": total.get("clones", 0),
+            "duplicated_lines": total.get("duplicatedLines", 0),
+            "duplicated_tokens": total.get("duplicatedTokens", 0),
+            "total_lines": total.get("lines", 0),
+            "total_sources": total.get("sources", 0),
+            "duplication_percentage": round(float(total.get("percentage", 0.0)), 2),
+            "token_duplication_percentage": round(float(total.get("percentageTokens", 0.0)), 2),
+        }
+        if total
+        else {}
+    )
+    return ParsedOutput(findings=findings, metrics=metrics)
 
 
 @register("hadolint")

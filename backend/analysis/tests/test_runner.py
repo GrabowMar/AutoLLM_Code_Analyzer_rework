@@ -70,6 +70,50 @@ def test_execute_container_tool(monkeypatch, user):
     assert run.duration_seconds is not None
 
 
+def test_execute_metrics_tool(monkeypatch, user):
+    AnalyzerToolFactory(
+        slug="radon-fixture",
+        kind="container",
+        parser_key="radon",
+        run_cmd="radon cc {target} -j",
+    )
+    workspace = AnalyzerWorkspaceFactory(user=user)
+    run = AnalysisRunFactory(
+        created_by=user,
+        workspace=workspace,
+        tool_slugs=["radon-fixture"],
+        source_code={"backend": "def f(): pass"},
+    )
+
+    monkeypatch.setattr(runner.workspace_service, "require_ready_container", lambda ws: "cname")
+    monkeypatch.setattr(runner.docker_manager, "copy_files_in", lambda *a, **k: {"status": "ok"})
+    radon_out = json.dumps(
+        {
+            "backend.py": [
+                {"type": "function", "name": "simple", "rank": "B", "complexity": 6, "lineno": 1},
+                {"type": "function", "name": "monster", "rank": "F", "complexity": 41, "lineno": 10},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        runner.docker_manager,
+        "exec_in",
+        lambda *a, **k: {"exit_code": 0, "output": radon_out},
+    )
+
+    runner.execute(run)
+    run.refresh_from_db()
+
+    assert run.status == AnalysisRun.Status.COMPLETED
+    result = run.results.get()
+    assert result.metrics["max_complexity"] == 41
+    assert result.metrics["total_blocks"] == 2
+    assert result.metrics["rank_distribution"]["F"] == 1
+    # Only the F-rank block surfaces as a finding; the B block is metric data.
+    assert Finding.objects.filter(result__run=run).count() == 1
+    assert run.summary["metrics_by_tool"]["radon-fixture"]["average_complexity"] == 23.5
+
+
 def test_execute_skips_unknown_tool(monkeypatch, user):
     run = AnalysisRunFactory(created_by=user, tool_slugs=["ghost"], source_code={"backend": "x"})
     runner.execute(run)

@@ -211,6 +211,8 @@ class TestFindingsSarif:
         result_entry = run["results"][0]
         assert result_entry["ruleId"] == "B105"
         assert result_entry["level"] == "error"  # HIGH → error
+        # Original 5-bucket severity survives the level collapse.
+        assert result_entry["properties"]["severity"] == "high"
         assert "text" in result_entry["message"]
         loc = result_entry["locations"][0]
         assert loc["physicalLocation"]["artifactLocation"]["uri"] == "app.py"
@@ -286,6 +288,15 @@ class TestAnalysisTasksExport:
         assert isinstance(data, list)
         assert "severity_counts" in data[0]
         assert "created" in data[0]
+
+    def test_json_includes_tool_metrics(self, auth_client, user):
+        AnalysisRunFactory(
+            created_by=user,
+            summary={"metrics_by_tool": {"radon": {"average_complexity": 4.2}}},
+        )
+        resp = auth_client.get("/api/export/analysis-tasks.json")
+        data = json.loads(resp.content)
+        assert data[0]["metrics_by_tool"] == {"radon": {"average_complexity": 4.2}}
 
 
 # ── Reports ───────────────────────────────────────────────────────────────────

@@ -119,6 +119,32 @@ def test_generate_tool_analysis_empty_returns_zero():
     data = generators.generate_tool_analysis({})
     assert data["total_findings"] == 0
     assert data["tools"] == []
+    assert data["metrics_by_tool"] == {}
+
+
+def test_generate_tool_analysis_aggregates_metrics():
+    from backend.analysis.tests.factories import AnalysisRunFactory
+    from backend.analysis.tests.factories import ToolResultFactory
+
+    user = UserFactory()
+    for avg, dist in ((3.0, {"A": 4, "B": 1}), (5.0, {"A": 2, "F": 1})):
+        ToolResultFactory(
+            run=AnalysisRunFactory(created_by=user),
+            tool_slug="radon",
+            metrics={
+                "average_complexity": avg,
+                "rank_distribution": dist,
+                "top_functions": [{"name": "f", "complexity": 9}],
+            },
+        )
+
+    data = generators.generate_tool_analysis({})
+    agg = data["metrics_by_tool"]["radon"]
+    assert agg["results_with_metrics"] == 2
+    assert agg["numeric"]["average_complexity"] == {"avg": 4.0, "min": 3.0, "max": 5.0}
+    assert agg["distributions"]["rank_distribution"] == {"A": 6, "B": 1, "F": 1}
+    # Lists such as top_functions don't aggregate meaningfully and are skipped.
+    assert "top_functions" not in agg["numeric"]
 
 
 def test_generate_generation_analytics_includes_summary_and_by_model():

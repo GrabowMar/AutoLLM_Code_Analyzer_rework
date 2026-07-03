@@ -12,9 +12,11 @@ version: "6"
 docs_url: https://radon.readthedocs.io/
 install_cmd: "pip install --user 'radon==6.*'"
 verify_cmd: "radon --version"
-# -j = JSON output, -n C = only report blocks ranked C (complexity > 10) or worse.
-run_cmd: "radon cc {target} -j -n C"
+# -j = JSON output. All ranks are reported: the parser needs every block to
+# compute complexity metrics; only E/F blocks become findings.
+run_cmd: "radon cc {target} -j"
 parser_key: radon
+output_kind: mixed
 run_timeout: 90
 install_timeout: 180
 display_order: 10

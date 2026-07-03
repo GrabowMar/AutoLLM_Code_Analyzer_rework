@@ -52,6 +52,23 @@ def test_create_run_requires_tools(api_client):
     assert resp.status_code == 400
 
 
+def test_run_detail_exposes_tool_metrics(api_client, user):
+    from backend.analysis.tests.factories import AnalysisRunFactory
+    from backend.analysis.tests.factories import ToolResultFactory
+
+    run = AnalysisRunFactory(created_by=user)
+    ToolResultFactory(
+        run=run,
+        tool_slug="radon",
+        status="completed",
+        metrics={"average_complexity": 3.5, "max_complexity": 12},
+    )
+    resp = api_client.get(f"/api/analysis/runs/{run.id}/")
+    assert resp.status_code == 200
+    result = resp.json()["results"][0]
+    assert result["metrics"] == {"average_complexity": 3.5, "max_complexity": 12}
+
+
 def test_list_runs_scoped_to_user(api_client, user):
     from backend.analysis.tests.factories import AnalysisRunFactory
     from backend.users.tests.factories import UserFactory

@@ -35,6 +35,7 @@ _FIELDS = (
     "verify_cmd",
     "run_cmd",
     "parser_key",
+    "output_kind",
     "config_schema",
     "default_config",
     "run_timeout",

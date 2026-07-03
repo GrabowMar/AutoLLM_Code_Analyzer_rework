@@ -40,6 +40,12 @@ class TargetLanguage(models.TextChoices):
     ANY = "any", _("Any")
 
 
+class ToolOutputKind(models.TextChoices):
+    FINDINGS = "findings", _("Findings")
+    METRICS = "metrics", _("Metrics")
+    MIXED = "mixed", _("Findings + metrics")
+
+
 class AnalyzerTool(models.Model):
     """A catalog tool that can be installed into an analyzer workspace."""
 
@@ -79,6 +85,13 @@ class AnalyzerTool(models.Model):
         help_text=_("Template; '{target}' is replaced with the code path."),
     )
     parser_key = models.CharField(_("parser key"), max_length=50, blank=True, default="")
+    output_kind = models.CharField(
+        _("output kind"),
+        max_length=20,
+        choices=ToolOutputKind,
+        default=ToolOutputKind.FINDINGS,
+        help_text=_("Whether the tool produces discrete findings, aggregate metrics, or both."),
+    )
 
     # Configuration surface rendered by the frontend
     config_schema = models.JSONField(_("config schema"), default=list, blank=True)
@@ -315,6 +328,7 @@ class ToolResult(models.Model):
     )
     raw_output = models.JSONField(_("raw output"), default=dict, blank=True)
     summary = models.JSONField(_("summary"), default=dict, blank=True)
+    metrics = models.JSONField(_("metrics"), default=dict, blank=True)
     error_message = models.TextField(_("error message"), blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
