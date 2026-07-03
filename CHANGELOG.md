@@ -10,14 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `scripts/deploy.sh` — one-shot install/update script for Docker hosts,
   with optional Caddy/nginx reverse-proxy configuration.
-- `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1), linked from the README
-  and CONTRIBUTING.
 - `just test` recipe running pytest in Docker with the same command as CI;
   README, CONTRIBUTING, and the Copilot instructions now all point at it
   instead of describing three different invocations.
-- README screenshot (`docs/images/analyzers.png`) plus header quick-links
-  (docs / report bug / request feature), Gitleaks and Trivy workflow badges,
-  and back-to-top links.
+- README screenshot (`docs/images/analyzers.png`) plus Gitleaks and Trivy
+  workflow badges.
 
 ### Changed
 - **Breaking:** upgraded PostgreSQL from 17 to 18. The postgres:18 image
@@ -26,11 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directory. Existing deployments must dump before upgrading
   (`docker compose exec postgres backup`), remove the old postgres data
   volume, and `restore <backup-file>` into the fresh cluster.
-- Remade the root docs: `README.md` restructured along common
-  README-template conventions (about/features/getting started/usage/
-  structure/contact), `CONTRIBUTING.md` reorganized as a setup → change →
-  check → PR walkthrough, `SECURITY.md` reordered to lead with how to
-  report. The VS Code Dev Containers guide (including troubleshooting)
+- Remade the root docs: `README.md` rewritten around a Mermaid
+  how-it-works diagram (about / how it works / getting started / usage /
+  development / structure), `CONTRIBUTING.md` reorganized as a setup →
+  change → check → PR walkthrough, `SECURITY.md` reordered to lead with
+  how to report. The VS Code Dev Containers guide (including troubleshooting)
   moved to `docs/dev-containers.md`.
 - Renamed the `llm_lab/` Django-apps package to `backend/` for a clearer
   top-level layout (`backend/` + `config/` + `frontend/`). Updated every

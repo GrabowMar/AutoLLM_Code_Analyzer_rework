@@ -1,8 +1,7 @@
 # Contributing
 
 Thanks for helping out! This page covers everything you need to get a
-change from idea to merged PR. By participating you agree to the
-[code of conduct](CODE_OF_CONDUCT.md).
+change from idea to merged PR.
 
 ## 🧰 Set up
 

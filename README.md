@@ -1,60 +1,13 @@
-<a id="readme-top"></a>
+# LLM Eval Lab
 
-<div align="center">
+Generate applications with LLMs, run them in sandboxes, and benchmark the
+code they write.
 
-<h1>🧪 LLM Eval Lab</h1>
-
-<p><strong>Generate applications with LLMs, run them in sandboxes, and
-benchmark the code they write.</strong></p>
-
-<p>
-<a href="docs/README.md"><strong>Explore the docs »</strong></a>
-<br>
-<a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/issues/new?template=bug_report.yml">Report a bug</a>
-·
-<a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/issues/new?template=feature_request.yml">Request a feature</a>
-</p>
-
-<p>
-<a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml"><img src="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-<a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml"><img src="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
-<a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/gitleaks.yml"><img src="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/gitleaks.yml/badge.svg" alt="Gitleaks"></a>
-<a href="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/trivy.yml"><img src="https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/trivy.yml/badge.svg" alt="Trivy"></a>
-<a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-</p>
-
-<p>
-<img src="https://img.shields.io/badge/Python_3.13-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
-<img src="https://img.shields.io/badge/Django_6-092E20?style=for-the-badge&logo=django&logoColor=white" alt="Django">
-<img src="https://img.shields.io/badge/SvelteKit_2-FF3E00?style=for-the-badge&logo=svelte&logoColor=white" alt="SvelteKit">
-<img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript">
-<img src="https://img.shields.io/badge/Tailwind_4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
-<img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL">
-<img src="https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white" alt="Redis">
-<img src="https://img.shields.io/badge/Celery-37814A?style=for-the-badge&logo=celery&logoColor=white" alt="Celery">
-<img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
-</p>
-
-</div>
-
-<details>
-<summary>📚 Table of contents</summary>
-
-- [🔍 About](#-about)
-- [✨ Features](#-features)
-- [⚙️ How it works](#%EF%B8%8F-how-it-works)
-- [🚀 Getting started](#-getting-started)
-- [🕹️ Usage](#%EF%B8%8F-usage)
-- [🛠️ Development](#%EF%B8%8F-development)
-- [🗂️ Project structure](#%EF%B8%8F-project-structure)
-- [🤝 Contributing](#-contributing)
-- [📄 License](#-license)
-- [📫 Contact](#-contact)
-- [🙏 Acknowledgments](#-acknowledgments)
-
-</details>
-
-## 🔍 About
+[![CI](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml)
+[![Gitleaks](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/gitleaks.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/gitleaks.yml)
+[![Trivy](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/trivy.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/trivy.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ![The analyzer tool shop — 14 installable analysis tools](docs/images/analyzers.png)
 
@@ -68,43 +21,43 @@ than gut feeling.
 
 It started as a master's-thesis project and is maintained by a single
 developer, so expect sharp edges — issues and PRs are welcome.
+Built with Django 6, SvelteKit 2, PostgreSQL, Redis, and Celery, all
+running in Docker.
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## ✨ Features
-
-| | Feature | What you get |
-| --- | --- | --- |
-| 🤖 | **Code generation** | Prompt multiple LLMs with the same app template; collect complete, runnable applications |
-| 📦 | **Sandboxed execution** | Every generated app runs in its own Docker container with subdomain routing |
-| 🔬 | **14 analyzers** | ruff, bandit, semgrep, eslint, mypy, pylint, gitleaks, detect-secrets, hadolint, codespell, vulture, radon, jscpd, and an LLM code reviewer |
-| 📊 | **Reports & rankings** | Findings aggregated into comparative reports, statistics, and per-model rankings |
-| 🔁 | **Automation pipelines** | A visual node-based editor to chain generate → analyze → report workflows |
-| 👥 | **Multi-user** | Email login with optional MFA, per-user OpenRouter keys, API tokens for programmatic access |
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## ⚙️ How it works
+## How it works
 
 ```mermaid
 flowchart LR
-    T["📝 Requirement
-    template"] --> G["🤖 Generation
-    one app per model"]
-    G --> S["📦 Sandbox
-    Docker per app"]
-    S --> A["🔬 Analysis
-    14 tools"]
-    A --> R["📊 Reports
-    & rankings"]
+    T["Requirement<br>template"] --> G
+    M["Selected<br>models"] --> G
+    G["Generation<br>(via OpenRouter)"] --> APPS["Generated apps<br>(one per model)"]
+    APPS --> S["Sandbox<br>(Docker container<br>per app)"]
+    APPS --> A["Analysis<br>(14 tools)"]
+    A --> F["Findings<br>& metrics"]
+    F --> R["Reports<br>& rankings"]
 ```
 
-The whole loop can run interactively from the UI, or unattended as an
-[automation pipeline][pipelines-doc].
+1. **Template** — a requirement template describes the application to
+   build ([spec](docs/TEMPLATE_SPECIFICATION.md)); you pick one and select
+   the models to compare.
+2. **Generation** — Celery workers prompt each model through OpenRouter
+   and collect one complete, runnable application per model.
+3. **Sandbox** — each generated app runs in its own Docker container with
+   subdomain routing, so you can click through it live.
+4. **Analysis** — an analysis profile runs a selection of 14 tools against
+   the code: ruff, bandit, semgrep, eslint, mypy, pylint, gitleaks,
+   detect-secrets, hadolint, codespell, vulture, radon, jscpd, and an LLM
+   code reviewer. Finding-shaped tools report issues; metric-shaped tools
+   (radon, jscpd) report measurements.
+5. **Reports & rankings** — findings and metrics aggregate into
+   comparative reports, statistics, and per-model rankings.
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+The whole loop runs interactively from the UI, or unattended as an
+[automation pipeline][pipelines-doc] built in a visual node-based editor.
+Multi-user support (email login, optional MFA, per-user OpenRouter keys,
+API tokens) makes it usable as a shared instance.
 
-## 🚀 Getting started
+## Getting started
 
 ### Prerequisites
 
@@ -153,26 +106,19 @@ migrations, and configures Caddy or nginx for your domain. Options are
 documented in the script header; production proper uses
 `docker-compose.production.yml` (Traefik, Nginx, Gunicorn).
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## 🕹️ Usage
+## Usage
 
 The typical loop:
 
-1. **Pick or write a template** under *Sample generator → Templates* —
-   templates describe the app to build (see
-   [docs/TEMPLATE_SPECIFICATION.md](docs/TEMPLATE_SPECIFICATION.md))
+1. **Pick or write a template** under *Sample generator → Templates*
 2. **Generate** — select models, generate one app per model
-3. **Analyze** — run an analysis profile (a preset selection of the 14
-   tools) against the generated apps
+3. **Analyze** — run an analysis profile against the generated apps
 4. **Compare** — open *Reports* and *Rankings* to see how the models did
 
 Repetitive experiments can be scripted as
 [automation pipelines][pipelines-doc] instead of clicking through the steps.
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## 🛠️ Development
+## Development
 
 ```bash
 just up / just down    # start / stop the stack
@@ -191,9 +137,7 @@ uv run mypy backend
 cd frontend && npm run check         # svelte-check
 ```
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## 🗂️ Project structure
+## Project structure
 
 ```
 backend/     Django apps, one per domain (generation, analysis, automation,
@@ -208,34 +152,27 @@ docs/        Deeper documentation — start at docs/README.md
 Secrets live in `.envs/` — only `*.example` templates are committed;
 `just bootstrap` creates the real files.
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## 🤝 Contributing
+## Contributing
 
 Bug reports, ideas, and PRs are welcome — see
-[CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for the ground rules. For
-security vulnerabilities, follow [SECURITY.md](SECURITY.md) instead of
-opening a public issue.
+[CONTRIBUTING.md](CONTRIBUTING.md) for the workflow. For security
+vulnerabilities, follow [SECURITY.md](SECURITY.md) instead of opening a
+public issue.
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## 📄 License
+## License
 
 Distributed under the MIT License — see [LICENSE](LICENSE).
 
-## 📫 Contact
+## Contact
 
 Marcin Grabowski — [@GrabowMar](https://github.com/GrabowMar)
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [cookiecutter-django](https://github.com/cookiecutter/cookiecutter-django)
   for the project skeleton
 - [shadcn-svelte](https://shadcn-svelte.com/) / bits-ui for UI components
 - [OpenRouter][openrouter] for unified model access
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 [openrouter]: https://openrouter.ai
 [pipelines-doc]: docs/AUTOMATION_WORKFLOWS.md
