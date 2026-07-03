@@ -19,5 +19,5 @@ architecture overview, and common tasks, start with the root
 
 ## Contributing
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for the dev workflow, branch
-naming, and PR expectations.
+See the [Contributing](../README.md#-contributing) chapter in the root
+README for the dev workflow, branch naming, and PR expectations.

@@ -1,8 +1,11 @@
+<div align="center">
+
 # LLM Eval Lab
 
-Which model writes the best code for a given task? This platform finds out:
-it generates one application per model, runs each in a Docker sandbox, and
-scores the code with 14 analysis tools.
+**Which model writes the best code for a given task?**
+
+Generate one application per LLM, run each in a Docker sandbox,
+and score the code with 14 analysis tools.
 
 [![CI](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml)
@@ -10,9 +13,18 @@ scores the code with 14 analysis tools.
 [![Trivy](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/trivy.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/trivy.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+[Quick start](#-quick-start) ·
+[Deploy](#-deploy-to-a-server) ·
+[Development](#-development) ·
+[Contributing](#-contributing) ·
+[Security](#-security) ·
+[Docs](docs/README.md)
+
 ![The analyzer tool shop — 14 installable analysis tools](docs/images/analyzers.png)
 
-## The idea
+</div>
+
+## 💡 The idea
 
 Benchmarks tell you how a model scores on puzzles; they say little about
 the quality of a full application it writes. Here the experiment is
@@ -41,7 +53,7 @@ SvelteKit 2 on the frontend, everything in Docker.
 This began as a master's-thesis project and is maintained by one person —
 expect sharp edges, and feel free to file issues.
 
-## Run it locally
+## 🚀 Quick start
 
 You need Docker (with the Compose plugin),
 [`just`](https://github.com/casey/just), and an
@@ -72,7 +84,7 @@ fallback).
 To develop inside the containers instead, see
 [docs/dev-containers.md](docs/dev-containers.md).
 
-## Run it on a server
+## 🌍 Deploy to a server
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/GrabowMar/AutoLLM_Code_Analyzer_rework/main/scripts/deploy.sh)
@@ -83,7 +95,7 @@ stack (`docker-compose.production.yml`: Traefik, Nginx, Gunicorn), runs
 migrations, and can configure Caddy or nginx for your domain. Options are
 documented in the script header.
 
-## Working on the code
+## 🛠️ Development
 
 The `justfile` is the entry point for everything:
 
@@ -119,16 +131,37 @@ docs/       deeper documentation — start at docs/README.md
 Secrets live in `.envs/`; only `*.example` templates are committed, and
 `just bootstrap` derives the real files from them.
 
-## Contributing
+## 🤝 Contributing
 
-Bug reports, ideas, and PRs are welcome —
-[CONTRIBUTING.md](CONTRIBUTING.md) describes the workflow. Report security
-vulnerabilities privately per [SECURITY.md](SECURITY.md), not as public
-issues.
+Bug reports, ideas, and PRs are welcome. The short version:
 
-## License and contact
+- Branch off `main` as `<type>/<short-slug>` (e.g. `fix/login-csrf`) and
+  use [Conventional Commits](https://www.conventionalcommits.org/)
+  prefixes: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.
+- Install the git hooks once — they run the same checks as CI:
+  `uv sync && uv run pre-commit install`.
+- Before pushing, run the three commands from
+  [Development](#-development) above (lint, `just test`, svelte-check);
+  CI gates merging on them.
+- One logical change per PR; screenshots for UI changes.
+
+Backend conventions (app layout, routers, factories) live in
+[docs/app-layout.md](docs/app-layout.md); frontend design tokens in
+`frontend/DESIGN_SYSTEM.md`.
+
+## 🔒 Security
+
+**Don't open a public issue for a vulnerability.** Report it privately via
+[GitHub Security Advisories](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/security/advisories/new)
+with reproduction steps and the affected commit; expect an acknowledgment
+within a few business days. Only the current `main` branch is supported.
+CodeQL, gitleaks, and Trivy already scan every PR — anything they missed
+is still worth reporting.
+
+## 📄 License
 
 MIT — see [LICENSE](LICENSE).
+
 Marcin Grabowski — [@GrabowMar](https://github.com/GrabowMar)
 
 Built on [cookiecutter-django](https://github.com/cookiecutter/cookiecutter-django),
