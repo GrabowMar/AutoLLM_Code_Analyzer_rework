@@ -19,6 +19,7 @@ class AnalyzerToolSchema(Schema):
     icon: str
     version: str
     docs_url: str
+    output_kind: str = "findings"
     config_schema: list[dict[str, Any]]
     default_config: dict[str, Any]
     run_timeout: int
@@ -69,6 +70,7 @@ class TestResultSchema(Schema):
     available: bool
     message: str
     findings: list[dict[str, Any]]
+    metrics: dict[str, Any] = {}
     raw_output: dict[str, Any]
 
 
@@ -89,6 +91,7 @@ class ToolResultSchema(Schema):
     category: str
     status: str
     summary: dict[str, Any]
+    metrics: dict[str, Any] = {}
     error_message: str
 
 

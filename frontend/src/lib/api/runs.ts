@@ -10,6 +10,8 @@ export interface RunToolResult {
   status: string;
   // e.g. { severity_counts: { high: 2, ... }, total: 3 }
   summary: Record<string, any>;
+  // Aggregate tool metrics, e.g. radon's { average_complexity, rank_distribution }
+  metrics: Record<string, any>;
   error_message: string;
 }
 

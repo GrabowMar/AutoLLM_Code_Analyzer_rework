@@ -50,6 +50,29 @@ function toolFindingCount(r: { summary: Record<string, any> }): number {
 	return Object.values(counts).reduce((a, b) => a + (b ?? 0), 0);
 }
 
+// Scalar metrics per tool (skip lists/objects except rank distributions,
+// which render as a compact "A:3 B:1" row).
+const metricResults = $derived(
+	(run?.results ?? []).filter((r) => Object.keys(r.metrics ?? {}).length > 0),
+);
+
+function scalarMetrics(metrics: Record<string, any>): [string, number][] {
+	return Object.entries(metrics ?? {}).filter(
+		([, v]) => typeof v === 'number',
+	) as [string, number][];
+}
+
+function distributionRow(metrics: Record<string, any>): string {
+	const dist = Object.entries(metrics ?? {}).find(
+		([, v]) => v && typeof v === 'object' && !Array.isArray(v) && Object.values(v).every((n) => typeof n === 'number'),
+	);
+	if (!dist) return '';
+	return Object.entries(dist[1] as Record<string, number>)
+		.filter(([, n]) => n > 0)
+		.map(([k, n]) => `${k}:${n}`)
+		.join(' ');
+}
+
 async function fetchRun() {
 	try {
 		run = await getRun(runId);
@@ -261,6 +284,28 @@ onMount(() => {
 									<Badge variant="outline" class="h-4 px-1 py-0 text-[10px] {severityColors[sev] ?? ''}">{severityCounts[sev]}</Badge>
 								</button>
 							{/if}
+						{/each}
+					</div>
+				{/if}
+
+				{#if metricResults.length > 0}
+					<div class="mt-3 border-t border-border pt-3">
+						<p class="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Metrics</p>
+						{#each metricResults as r (r.id)}
+							<div class="px-2 pb-2">
+								<p class="text-xs font-medium">{r.tool_slug}</p>
+								{#each scalarMetrics(r.metrics) as [key, value] (key)}
+									<div class="flex items-center justify-between text-[11px] text-muted-foreground">
+										<span>{key.replaceAll('_', ' ')}</span>
+										<span class="font-mono">{value}</span>
+									</div>
+								{/each}
+								{#if distributionRow(r.metrics)}
+									<div class="text-[11px] text-muted-foreground">
+										<span class="font-mono">{distributionRow(r.metrics)}</span>
+									</div>
+								{/if}
+							</div>
 						{/each}
 					</div>
 				{/if}

@@ -87,6 +87,7 @@ def analysis_tasks_json(queryset: QuerySet[Any]) -> list[dict[str, Any]]:
             "status": task.status,
             "target": _task_target(task),
             "severity_counts": _task_severity_counts(task),
+            "metrics_by_tool": (task.summary or {}).get("metrics_by_tool", {}),
             "duration": task.duration_seconds,
             "created": task.created_at.isoformat(),
         }

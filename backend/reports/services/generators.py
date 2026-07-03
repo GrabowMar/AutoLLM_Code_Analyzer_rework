@@ -75,6 +75,47 @@ def _tools_for_jobs(jobs_qs) -> list[dict[str, Any]]:
     return [{"analyzer": r["tool_slug"], "tasks": r["n"]} for r in rows]
 
 
+def _aggregate_tool_metrics(results_qs) -> dict[str, Any]:
+    """Aggregate ``ToolResult.metrics`` per tool without per-tool special-casing.
+
+    Numeric top-level keys are averaged (with min/max); dict-of-numbers keys
+    (e.g. radon's ``rank_distribution``) are summed key-wise; anything else
+    (lists such as ``top_functions``) is skipped.
+    """
+
+    numeric: dict[str, dict[str, list[float]]] = {}
+    distributions: dict[str, dict[str, dict[str, float]]] = {}
+    result_counts: dict[str, int] = {}
+
+    for tool_slug, metrics in results_qs.exclude(metrics={}).values_list("tool_slug", "metrics"):
+        if not isinstance(metrics, dict):
+            continue
+        result_counts[tool_slug] = result_counts.get(tool_slug, 0) + 1
+        for key, value in metrics.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                numeric.setdefault(tool_slug, {}).setdefault(key, []).append(value)
+            elif isinstance(value, dict) and all(isinstance(v, (int, float)) for v in value.values()):
+                summed = distributions.setdefault(tool_slug, {}).setdefault(key, {})
+                for bucket, count in value.items():
+                    summed[bucket] = summed.get(bucket, 0) + count
+
+    out: dict[str, Any] = {}
+    for tool_slug, count in result_counts.items():
+        out[tool_slug] = {
+            "results_with_metrics": count,
+            "numeric": {
+                key: {
+                    "avg": round(sum(values) / len(values), 2),
+                    "min": min(values),
+                    "max": max(values),
+                }
+                for key, values in numeric.get(tool_slug, {}).items()
+            },
+            "distributions": distributions.get(tool_slug, {}),
+        }
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Generators
 # ---------------------------------------------------------------------------
@@ -97,6 +138,11 @@ def generate_model_analysis(config: dict[str, Any]) -> dict[str, Any]:
     jobs = GenerationJob.objects.filter(model=model).select_related("model")
     findings = _findings_for_jobs(jobs)
 
+    from backend.analysis.models import ToolResult
+
+    job_ids = list(jobs.values_list("id", flat=True))
+    tool_results = ToolResult.objects.filter(run__generation_job_id__in=job_ids)
+
     return {
         "model": {
             "model_id": model.model_id,
@@ -108,6 +154,7 @@ def generate_model_analysis(config: dict[str, Any]) -> dict[str, Any]:
         "findings": _severity_counts(findings),
         "total_findings": findings.count(),
         "tools": _tools_for_jobs(jobs),
+        "metrics_by_tool": _aggregate_tool_metrics(tool_results),
     }
 
 
@@ -215,9 +262,16 @@ def generate_tool_analysis(config: dict[str, Any]) -> dict[str, Any]:
         if sev in bucket["by_severity"]:
             bucket["by_severity"][sev] += row["n"]
 
+    from backend.analysis.models import ToolResult
+
+    tool_results = ToolResult.objects.filter(run__in=tasks)
+    if tool_name:
+        tool_results = tool_results.filter(tool_slug=tool_name)
+
     return {
         "tool_filter": tool_name,
         "tools": sorted(by_tool.values(), key=lambda r: r["total"], reverse=True),
+        "metrics_by_tool": _aggregate_tool_metrics(tool_results),
         "total_findings": sum(t["total"] for t in by_tool.values()),
         "total_tasks": tasks.count(),
     }

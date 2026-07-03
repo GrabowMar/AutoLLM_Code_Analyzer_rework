@@ -15,6 +15,7 @@ verify_cmd: "jscpd --version"
 # only that (same pattern as gitleaks).
 run_cmd: "jscpd {target} --min-tokens 35 --reporters json --output /tmp/jscpd --silent >/dev/null 2>&1; cat /tmp/jscpd/jscpd-report.json"
 parser_key: jscpd
+output_kind: mixed
 run_timeout: 120
 install_timeout: 300
 display_order: 80

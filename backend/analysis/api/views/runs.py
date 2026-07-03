@@ -31,6 +31,7 @@ def serialize_result(result) -> dict[str, Any]:
         "category": result.category,
         "status": result.status,
         "summary": result.summary or {},
+        "metrics": result.metrics or {},
         "error_message": result.error_message,
     }
 

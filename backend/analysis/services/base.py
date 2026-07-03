@@ -34,10 +34,24 @@ class FindingData:
 
 
 @dataclass
+class ParsedOutput:
+    """What a parser extracts from raw tool output.
+
+    Finding-shaped tools fill ``findings``; metric-shaped tools (complexity,
+    duplication, …) fill ``metrics`` with aggregate data that would be lost
+    if forced into per-finding rows. Mixed tools fill both.
+    """
+
+    findings: list[FindingData] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class AnalyzerOutput:
     """Standard output from running a single tool."""
 
     findings: list[FindingData] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
     summary: dict[str, Any] = field(default_factory=dict)
     raw_output: dict[str, Any] = field(default_factory=dict)
     error: str | None = None

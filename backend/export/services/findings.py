@@ -91,6 +91,8 @@ def findings_sarif(queryset: QuerySet[Any]) -> dict[str, Any]:
                 "level": _SARIF_LEVEL.get(f.severity, "warning"),
                 "message": {"text": f.title},
                 "locations": [],
+                # SARIF levels collapse the 5-bucket scale; keep the original.
+                "properties": {"severity": f.severity},
             }
             if f.file_path:
                 location: dict[str, Any] = {
