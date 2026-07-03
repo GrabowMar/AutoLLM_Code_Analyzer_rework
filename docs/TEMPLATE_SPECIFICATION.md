@@ -2,7 +2,6 @@
 
 > **Summary**: Requirement JSON, composable content blocks, template bundles, and frozen job snapshots for reproducible scaffolding generation.
 > **Key files**: `backend/generation/data/requirements/`, `backend/generation/data/blocks/`, `backend/generation/services/bundle_resolver.py`
-> **See also**: [Generation Process](GENERATION_PROCESS.md)
 
 ## Architecture
 
