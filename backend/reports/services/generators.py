@@ -62,22 +62,8 @@ def _job_summary(jobs_qs) -> dict[str, Any]:
 
 
 def _latest_run_ids(jobs_qs) -> list:
-    """The most recent finished run per generation job.
-
-    A job re-analyzed N times has N sets of findings for the same code;
-    summing them would double-count, so job-centric aggregations only look
-    at each job's latest completed/partial run.
-    """
-    job_ids = list(jobs_qs.values_list("id", flat=True))
-    return list(
-        AnalysisRun.objects.filter(
-            generation_job_id__in=job_ids,
-            status__in=[AnalysisRun.Status.COMPLETED, AnalysisRun.Status.PARTIAL],
-        )
-        .order_by("generation_job_id", "-created_at")
-        .distinct("generation_job_id")
-        .values_list("id", flat=True),
-    )
+    """Latest finished run per job — see AnalysisRun.latest_ids_per_job."""
+    return AnalysisRun.latest_ids_per_job(jobs_qs.values_list("id", flat=True))
 
 
 def _findings_for_jobs(jobs_qs):
