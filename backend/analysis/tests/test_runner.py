@@ -45,7 +45,7 @@ def test_execute_container_tool(monkeypatch, user):
         {
             "results": [
                 {
-                    "filename": "backend.py",
+                    "filename": "/work/backend.py",
                     "issue_severity": "HIGH",
                     "issue_confidence": "HIGH",
                     "issue_text": "md5",
@@ -66,7 +66,10 @@ def test_execute_container_tool(monkeypatch, user):
 
     assert run.status == AnalysisRun.Status.COMPLETED
     assert run.summary["total_findings"] == 1
-    assert Finding.objects.filter(result__run=run, severity="high").count() == 1
+    finding = Finding.objects.get(result__run=run, severity="high")
+    # Container tools report /work-prefixed paths; persisted findings must use
+    # the same identity as every other tool.
+    assert finding.file_path == "backend.py"
     assert run.duration_seconds is not None
 
 
@@ -194,3 +197,60 @@ def test_execute_ai_tool(monkeypatch, user):
     run.refresh_from_db()
     assert run.status == AnalysisRun.Status.COMPLETED
     assert Finding.objects.filter(result__run=run).count() == 1
+
+
+def test_ai_tool_gets_materialized_files_and_workspace_config(monkeypatch, user):
+    from backend.analysis.services.base import AnalyzerOutput
+    from backend.analysis.tests.factories import InstalledToolFactory
+
+    tool = AnalyzerToolFactory(slug="llm_review", kind="ai", parser_key="")
+    workspace = AnalyzerWorkspaceFactory(user=user)
+    InstalledToolFactory(workspace=workspace, tool=tool, config={"max_tokens": 1234})
+    run = AnalysisRunFactory(
+        created_by=user,
+        workspace=workspace,
+        tool_slugs=["llm_review"],
+        source_code={"backend_code": "import os\n"},
+    )
+
+    seen = {}
+
+    def fake_run(tool, code, config, usr):
+        seen["code"] = code
+        seen["config"] = config
+        return AnalyzerOutput(findings=[])
+
+    monkeypatch.setattr(runner.ai_runner, "run", fake_run)
+    runner.execute(run)
+
+    # The AI reviews the same filenames the container tools analyze, and the
+    # per-user tool settings actually reach the execution.
+    assert set(seen["code"]) == {"backend_code.py"}
+    assert seen["config"] == {"max_tokens": 1234}
+
+
+def test_truncated_generation_input_flagged_in_summary(monkeypatch, user):
+    from backend.analysis.services.base import AnalyzerOutput
+    from backend.generation.tests.factories import GenerationJobFactory
+
+    AnalyzerToolFactory(slug="llm_review", kind="ai", parser_key="")
+    job = GenerationJobFactory(
+        created_by=user,
+        result_data={
+            "backend_code": "import os\n",
+            "frontend_code": "const x = 1;\n",
+            "backend_truncated": False,
+            "frontend_truncated": True,
+        },
+    )
+    run = AnalysisRunFactory(
+        created_by=user,
+        tool_slugs=["llm_review"],
+        source_code=None,
+        generation_job=job,
+    )
+    monkeypatch.setattr(runner.ai_runner, "run", lambda *a, **k: AnalyzerOutput(findings=[]))
+
+    runner.execute(run)
+    run.refresh_from_db()
+    assert run.summary["truncated_inputs"] == ["frontend"]

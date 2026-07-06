@@ -27,11 +27,15 @@ DEFAULT_MODEL = "anthropic/claude-opus-4-8"
 
 _SYSTEM_PROMPT = (
     "You are a meticulous senior code reviewer. Analyze the provided code for "
-    "security vulnerabilities, bugs, and quality issues. Respond with ONLY a "
-    "JSON array of findings. Each finding is an object with keys: severity "
-    "(one of critical, high, medium, low, info), category (security, quality, "
-    "performance, style, best_practice), title, description, suggestion, "
-    "file_path, line_number, rule_id. Return [] if there are no issues."
+    "security vulnerabilities, bugs, and quality issues. The code is given as "
+    "one or more files, each introduced by a '# ===== <filename> =====' marker. "
+    "Respond with ONLY a JSON array of findings. Each finding is an object "
+    "with keys: severity (one of critical, high, medium, low, info), category "
+    "(security, quality, performance, style, best_practice), title, "
+    "description, suggestion, file_path, line_number, rule_id. file_path must "
+    "be exactly one of the provided filenames; line_number is the 1-based line "
+    "within that file, counting from the line after its marker. "
+    "Return [] if there are no issues."
 )
 
 
