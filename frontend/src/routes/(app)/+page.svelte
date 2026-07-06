@@ -264,7 +264,10 @@
 		{
 			title: 'Findings',
 			value: () => (overview ? String(overview.total_findings) : '—'),
-			subtitle: () => (overview ? `${overview.avg_findings_per_app ?? 0}/app avg` : 'Loading…'),
+			subtitle: () =>
+				overview
+					? `${overview.total_apps ? (overview.total_findings / overview.total_apps).toFixed(1) : 0}/app avg`
+					: 'Loading…',
 			change: () => (overview ? `${overview.analyses_completed} analyses` : ''),
 			icon: ShieldAlert,
 			href: '/statistics',
@@ -533,7 +536,7 @@
 											</td>
 											<td class="px-4 py-2.5" data-label="Status">
 												<span class="text-xs {a.available ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}">
-													{a.availability_message}
+													{a.message}
 												</span>
 											</td>
 										</tr>
