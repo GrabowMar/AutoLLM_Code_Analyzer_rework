@@ -125,8 +125,12 @@ def extract_code_blocks(content: str) -> list[dict[str, str]]:
     Returns list of dicts with 'language', 'filename', 'code' keys.
     """
     blocks = []
+    # The closing fence is optional (``|\Z``): a response truncated at the
+    # token limit ends mid-block, and dropping that block would make callers
+    # fall back to the raw markdown — leaking the ```lang:file header into
+    # the extracted source.
     pattern = re.compile(
-        r"```(?P<lang>[a-zA-Z0-9_+.\-]+)?(?:[ \t]*[:  ]?[ \t]*(?P<filename>[^\n\r`]+))?\s*[\r\n]+(.*?)```",
+        r"```(?P<lang>[a-zA-Z0-9_+.\-]+)?(?:[ \t]*[:  ]?[ \t]*(?P<filename>[^\n\r`]+))?\s*[\r\n]+(.*?)(?:```|\Z)",
         re.DOTALL,
     )
     for match in pattern.finditer(content or ""):

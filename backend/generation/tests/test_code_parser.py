@@ -53,6 +53,23 @@ class TestExtractCodeBlocks:
         blocks = extract_code_blocks(content)
         assert blocks[0]["code"] == "x = {1: 2}"
 
+    def test_unterminated_block_from_truncated_response(self) -> None:
+        # A response cut off at max_tokens has no closing fence; the block
+        # must still be extracted so the fence header can't leak into code.
+        content = "```jsx:App.jsx\nimport React from 'react';\nfunction App() {"
+        blocks = extract_code_blocks(content)
+        assert len(blocks) == 1
+        assert blocks[0]["language"] == "jsx"
+        assert blocks[0]["filename"] == "App.jsx"
+        assert blocks[0]["code"].startswith("import React")
+
+    def test_closed_block_followed_by_truncated_block(self) -> None:
+        content = "```python:app.py\nimport flask\n```\ntext\n```jsx:App.jsx\nconst x = 1;"
+        blocks = extract_code_blocks(content)
+        assert len(blocks) == 2
+        assert blocks[0]["code"] == "import flask"
+        assert blocks[1]["code"] == "const x = 1;"
+
 
 class TestExtractPythonCode:
     """Tests for extract_python_code()."""
@@ -118,6 +135,12 @@ class TestExtractFrontendCode:
         content = "export default function App() { return <div>Hello</div> }"
         code = extract_frontend_code(content)
         assert "App" in code
+
+    def test_truncated_response_keeps_fence_out_of_code(self) -> None:
+        content = "```jsx:App.jsx\nimport React from 'react';\nconst App = () => <div/>;"
+        code = extract_frontend_code(content)
+        assert code.startswith("import React")
+        assert "```" not in code
 
 
 class TestInferPythonDependencies:

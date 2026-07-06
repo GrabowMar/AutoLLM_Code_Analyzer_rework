@@ -58,6 +58,8 @@ def run(
     if not code_blob.strip():
         return AnalyzerOutput(summary={"message": "No code to review"})
 
+    max_tokens = int(config.get("max_tokens") or tool.default_config.get("max_tokens") or 4000)
+
     client = OpenRouterClient(api_key=api_key)
     try:
         response = client.chat_completion(
@@ -67,18 +69,27 @@ def run(
                 {"role": "user", "content": code_blob},
             ],
             temperature=0.2,
-            max_tokens=int(config.get("max_tokens", 4000)),
+            max_tokens=max_tokens,
         )
     except OpenRouterError as exc:
         logger.warning("AI review failed: %s", exc)
         return AnalyzerOutput(error=str(exc))
 
     content = OpenRouterClient.extract_content(response)
+    truncated = OpenRouterClient.is_truncated(response)
     findings = _parse_findings(content)
+    if not findings and content.strip() and _extract_json_array(content) is None:
+        # The model answered but nothing parseable came out — report a failure
+        # instead of a clean zero-finding result the user would trust.
+        reason = "response hit the max_tokens limit" if truncated else "response was not a JSON findings array"
+        return AnalyzerOutput(
+            error=f"AI review unparseable: {reason}",
+            raw_output={"model": model, "truncated": truncated, "response": content[:8000]},
+        )
     return AnalyzerOutput(
         findings=findings,
-        raw_output={"model": model, "response": content[:8000]},
-        summary={"model": model, "finding_count": len(findings)},
+        raw_output={"model": model, "truncated": truncated, "response": content[:8000]},
+        summary={"model": model, "finding_count": len(findings), "truncated": truncated},
     )
 
 
@@ -120,14 +131,38 @@ def _extract_json_array(content: str) -> list | None:
     if fence:
         content = fence.group(1)
     start = content.find("[")
+    if start == -1:
+        return None
     end = content.rfind("]")
-    if start == -1 or end == -1 or end < start:
+    if end > start:
+        try:
+            data = json.loads(content[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+        else:
+            return data if isinstance(data, list) else None
+    return _salvage_truncated_array(content[start:])
+
+
+def _salvage_truncated_array(fragment: str) -> list | None:
+    """Recover complete findings from an array cut off mid-object.
+
+    Responses that hit the max_tokens limit stop mid-JSON; the complete
+    objects before the cut are still good findings. Walk back through the
+    object closers and take the longest prefix that parses.
+    """
+    for end in range(len(fragment) - 1, 0, -1):
+        if fragment[end] != "}":
+            continue
+        try:
+            data = json.loads(fragment[: end + 1] + "]")
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, list) and data:
+            logger.warning("AI review JSON was truncated; salvaged %d findings", len(data))
+            return data
         return None
-    try:
-        data = json.loads(content[start : end + 1])
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, list) else None
+    return None
 
 
 def _as_int(value: Any) -> int | None:
