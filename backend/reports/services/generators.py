@@ -53,6 +53,9 @@ def _job_summary(jobs_qs) -> dict[str, Any]:
         for data in jobs_qs.values_list("result_data", flat=True)
         if isinstance(data, dict) and any(data.get(f"{part}_truncated") for part in ("backend", "frontend"))
     )
+    total_cost = sum(
+        float(m["cost"]) for m in jobs_qs.values_list("metrics", flat=True) if isinstance(m, dict) and m.get("cost")
+    )
     return {
         "total_jobs": total,
         "completed_jobs": completed,
@@ -63,12 +66,109 @@ def _job_summary(jobs_qs) -> dict[str, Any]:
         # Jobs whose generated code was cut off at max_tokens — their findings
         # describe incomplete apps.
         "truncated_jobs": truncated,
+        "total_cost": round(total_cost, 6),
     }
 
 
 def _latest_run_ids(jobs_qs) -> list:
     """Latest finished run per job — see AnalysisRun.latest_ids_per_job."""
     return AnalysisRun.latest_ids_per_job(jobs_qs.values_list("id", flat=True))
+
+
+def _stat(values: list[float]) -> dict[str, float]:
+    """Mean and sample stdev; stdev is 0.0 below n=2."""
+    if not values:
+        return {"mean": 0.0, "stdev": 0.0, "n": 0}
+    return {
+        "mean": round(statistics.mean(values), 4),
+        "stdev": round(statistics.stdev(values), 4) if len(values) > 1 else 0.0,
+        "n": len(values),
+    }
+
+
+def _is_truncated_job(job: GenerationJob) -> bool:
+    data = job.result_data if isinstance(job.result_data, dict) else {}
+    return any(data.get(f"{part}_truncated") for part in ("backend", "frontend"))
+
+
+def _experiment_stats(jobs_qs, *, exclude_truncated: bool = True) -> dict[str, Any]:
+    """Trial-level statistics for one model's jobs on one template.
+
+    Each completed job is one independent trial; its findings come from its
+    latest finished analysis run. Truncated generations measure the token
+    ceiling rather than the model, so they are excluded by default (but
+    reported), and stdev across trials is what makes single-run flukes —
+    e.g. an AI reviewer choosing to report 6 vs 21 findings — visible.
+    """
+    completed = [j for j in jobs_qs if j.status == GenerationJob.Status.COMPLETED]
+    truncated = [j for j in completed if _is_truncated_job(j)]
+    trials = [j for j in completed if not (exclude_truncated and _is_truncated_job(j))]
+    trial_ids = [j.id for j in trials]
+
+    run_ids = AnalysisRun.latest_ids_per_job(trial_ids)
+    run_to_job = dict(
+        AnalysisRun.objects.filter(id__in=run_ids).values_list("id", "generation_job_id"),
+    )
+    sev_by_job: dict[Any, dict[str, int]] = {}
+    for row in (
+        Finding.objects.filter(result__run_id__in=run_ids).values("result__run_id", "severity").annotate(n=Count("id"))
+    ):
+        job_id = run_to_job.get(row["result__run_id"])
+        sev_by_job.setdefault(job_id, {})[(row["severity"] or "").lower()] = row["n"]
+
+    loc_by_job = {
+        entry["job_id"]: entry["total_loc"]
+        for entry in loc_for_jobs(GenerationJob.objects.filter(id__in=trial_ids)).get("per_job", [])
+    }
+
+    analyzed_ids = set(run_to_job.values())
+    totals, crit_high, weighted, per_kloc = [], [], [], []
+    costs, durations, tokens = [], [], []
+    functional_rates, functional_passed = [], 0
+
+    for job in trials:
+        metrics = job.metrics if isinstance(job.metrics, dict) else {}
+        if metrics.get("cost"):
+            costs.append(float(metrics["cost"]))
+        duration = metrics.get("total_duration") or metrics.get("duration_seconds")
+        if duration:
+            durations.append(float(duration))
+        if metrics.get("total_tokens"):
+            tokens.append(float(metrics["total_tokens"]))
+        functional = metrics.get("functional")
+        if isinstance(functional, dict) and "pass_rate" in functional:
+            functional_rates.append(float(functional["pass_rate"]))
+            functional_passed += 1 if functional.get("passed") else 0
+
+        if job.id not in analyzed_ids:
+            continue
+        sev = sev_by_job.get(str(job.id)) or sev_by_job.get(job.id) or {}
+        total = sum(sev.values())
+        score = float(sum(SEVERITY_WEIGHTS.get(s, 0) * n for s, n in sev.items()))
+        totals.append(float(total))
+        crit_high.append(float(sev.get("critical", 0) + sev.get("high", 0)))
+        weighted.append(score)
+        loc = loc_by_job.get(str(job.id)) or loc_by_job.get(job.id) or 0
+        if loc:
+            per_kloc.append(round(score / loc * 1000, 4))
+
+    return {
+        "trials": len(trials),
+        "analyzed": len(analyzed_ids),
+        "truncated_excluded": len(truncated) if exclude_truncated else 0,
+        "findings_total": _stat(totals),
+        "critical_high": _stat(crit_high),
+        "weighted_score": _stat(weighted),
+        "weighted_per_kloc": _stat(per_kloc),
+        "cost": {**_stat(costs), "total": round(sum(costs), 6)},
+        "duration": _stat(durations),
+        "tokens": _stat(tokens),
+        "functional": {
+            "jobs_probed": len(functional_rates),
+            "jobs_passed": functional_passed,
+            "pass_rate": _stat(functional_rates),
+        },
+    }
 
 
 def _findings_for_jobs(jobs_qs):
