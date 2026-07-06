@@ -139,7 +139,7 @@
 						color: 'text-violet-500',
 						bg: 'bg-violet-500/10',
 						value: fmtNumber(data.overview.models_in_use),
-						delta: `${data.code_generation.by_provider.length} providers`,
+						delta: `${new Set(data.models.map((m) => m.provider)).size} providers`,
 					},
 				]
 			: [],

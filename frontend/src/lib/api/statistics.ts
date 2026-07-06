@@ -10,12 +10,13 @@ export interface AnalyzerHealth {
   total: number;
   online: number;
   offline: number;
+  by_type: Record<string, Record<string, number>>;
   analyzers: {
     name: string;
     type: string;
     display_name: string;
     available: boolean;
-    availability_message: string;
+    message: string;
   }[];
 }
 
@@ -29,7 +30,7 @@ export interface CodeGenerationStats {
   total_tokens: number;
   total_cost_usd: number;
   total_lines_of_code: number;
-  by_provider: { provider: string; apps: number }[];
+  unique_templates: number;
 }
 
 export interface ModelComparisonRow {
@@ -86,20 +87,22 @@ export interface StatisticsDashboard {
 }
 
 export interface StatisticsOverview {
+  total_models: number;
+  models_in_use: number;
   total_apps: number;
   apps_completed: number;
   apps_failed: number;
   apps_running: number;
+  apps_pending: number;
   apps_success_rate: number;
   total_analyses: number;
   analyses_completed: number;
   analyses_failed: number;
   analyses_running: number;
+  analyses_pending: number;
   analyses_success_rate: number;
+  avg_analysis_duration_seconds: number;
   total_findings: number;
-  avg_findings_per_app: number;
-  models_in_use: number;
-  avg_analysis_seconds: number;
 }
 
 export interface ToolEffectivenessRow {
@@ -114,12 +117,12 @@ export interface ToolEffectivenessRow {
 export interface TopFindingRow {
   title: string;
   severity: string;
-  rule_id: string;
   count: number;
 }
 
 export interface TrendPoint {
   date: string;
+  label: string;
   total: number;
   completed: number;
   failed: number;
