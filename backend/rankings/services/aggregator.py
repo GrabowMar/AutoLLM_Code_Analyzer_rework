@@ -15,7 +15,9 @@ from backend.rankings.models import BenchmarkResult
 from backend.rankings.services.scoring import compute_accessibility_score
 from backend.rankings.services.scoring import compute_adoption_score
 from backend.rankings.services.scoring import compute_benchmark_score
+from backend.rankings.services.scoring import compute_composite
 from backend.rankings.services.scoring import compute_cost_efficiency_score
+from backend.rankings.services.scoring import compute_empirical_quality
 from backend.rankings.services.scoring import compute_mss
 
 
@@ -41,7 +43,25 @@ def _local_app_stats() -> dict[str, dict[str, Any]]:
             "apps_completed": int(row["apps_completed"]),
             "avg_duration": (round(row["avg_duration"], 1) if row["avg_duration"] else 0.0),
             "findings": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "local_loc": 0,
+            "functional_pass_rate": None,
         }
+
+    # LOC + functional smoke results live in job metrics; roll both up so the
+    # empirical quality score can normalize findings by code volume.
+    functional_rates: dict[str, list[float]] = {}
+    for model_id, metrics in GenerationJob.objects.filter(
+        status="completed",
+        model__isnull=False,
+    ).values_list("model__model_id", "metrics"):
+        if model_id not in out or not isinstance(metrics, dict):
+            continue
+        out[model_id]["local_loc"] += int(metrics.get("lines_of_code") or 0)
+        functional = metrics.get("functional")
+        if isinstance(functional, dict) and "pass_rate" in functional:
+            functional_rates.setdefault(model_id, []).append(float(functional["pass_rate"]))
+    for model_id, rates in functional_rates.items():
+        out[model_id]["functional_pass_rate"] = round(sum(rates) / len(rates), 4)
 
     # Only each job's latest finished run — otherwise re-analyzing a job
     # double-counts its findings in the rollup.
@@ -101,6 +121,8 @@ def aggregate_rankings() -> list[dict[str, Any]]:
                 "findings",
                 {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             ),
+            "local_loc": local_row.get("local_loc", 0),
+            "functional_pass_rate": local_row.get("functional_pass_rate"),
         }
         # Hoist benchmark scores into entry for normalization
         entry.update(bench_row)
@@ -128,12 +150,17 @@ def aggregate_rankings() -> list[dict[str, Any]]:
         )
         entry["adoption_score"] = round(compute_adoption_score(entry), 4)
         entry["mss_score"] = compute_mss(entry)
-        # Backward-compat aliases used by old API consumers.
-        entry["composite_score"] = entry["mss_score"]
+        entry["empirical_quality_score"] = compute_empirical_quality(entry)
+        # Metadata-based MSS blended with locally measured quality; models
+        # never exercised here keep composite == MSS.
+        entry["composite_score"] = compute_composite(
+            entry["mss_score"],
+            entry["empirical_quality_score"],
+        )
 
         rows.append(entry)
 
-    rows.sort(key=lambda r: r.get("mss_score") or 0.0, reverse=True)
+    rows.sort(key=lambda r: r.get("composite_score") or 0.0, reverse=True)
     return rows
 
 

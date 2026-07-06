@@ -66,9 +66,22 @@ DOCS_SCORES = {
     "missing": 0.0,
 }
 
+# Empirical quality (from this platform's own measurements): a weighted
+# findings-per-KLOC density is squashed to 0..1, then blended with the
+# functional smoke-test pass rate. EMPIRICAL_DENSITY_CAP is the density that
+# scores zero — our 4-model URL-shortener experiment measured ~9-38/KLOC.
+SEVERITY_WEIGHTS = {"critical": 10, "high": 5, "medium": 2, "low": 1, "info": 0}
+EMPIRICAL_DENSITY_CAP = 50.0
+EMPIRICAL_FUNCTIONAL_WEIGHT = 0.4  # rest goes to findings density
+
+# When local measurements exist, composite blends them with the metadata-based
+# MSS; models we have never exercised keep composite == MSS.
+COMPOSITE_MSS_WEIGHT = 0.6
+COMPOSITE_EMPIRICAL_WEIGHT = 0.4
+
 SORT_KEY_MAP = {
     "mss": "mss_score",
-    "composite": "mss_score",
+    "composite": "composite_score",
     "adoption": "adoption_score",
     "benchmark": "benchmark_score",
     "cost": "cost_efficiency_score",
@@ -77,4 +90,5 @@ SORT_KEY_MAP = {
     "price": "price_per_million_input",
     "name": "model_name",
     "apps": "apps",
+    "empirical": "empirical_quality_score",
 }

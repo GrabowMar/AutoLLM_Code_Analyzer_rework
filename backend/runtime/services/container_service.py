@@ -174,9 +174,24 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
         container.status = ContainerInstance.Status.RUNNING
         container.save(update_fields=["status"])
         traefik_router.write_route(container)
+
+        smoke_note = ""
+        if job is not None:
+            from backend.runtime.services import smoke
+
+            try:
+                smoke_result = smoke.run_smoke(job, container)
+                smoke_note = (
+                    f"\n\nSmoke test: {'PASSED' if smoke_result.get('passed') else 'FAILED'}"
+                    f" ({smoke_result.get('endpoints_ok', 0)}/{smoke_result.get('endpoints_checked', 0)}"
+                    f" endpoints ok, health_ok={smoke_result.get('health_ok')})"
+                )
+            except Exception:
+                logger.exception("Smoke test errored for %s", container.name)
+
         action.update_progress(100)
         action.mark_completed(
-            output=f"Built {tag}, container {cid}\n\n{build_log[-2000:]}",
+            output=f"Built {tag}, container {cid}{smoke_note}\n\n{build_log[-2000:]}",
             exit_code=0,
         )
         publish_container_status(container)

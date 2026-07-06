@@ -201,12 +201,13 @@ class OpenRouterClient:
 
     @staticmethod
     def extract_usage(response: dict) -> dict:
-        """Extract token usage from a response."""
+        """Extract token usage and billed cost (USD) from a response."""
         usage = response.get("usage", {})
         return {
             "prompt_tokens": usage.get("prompt_tokens", 0),
             "completion_tokens": usage.get("completion_tokens", 0),
             "total_tokens": usage.get("total_tokens", 0),
+            "cost": float(usage.get("cost") or 0.0),
         }
 
     @staticmethod
