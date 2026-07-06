@@ -81,6 +81,63 @@ def test_generate_model_analysis_returns_aggregates():
     }
 
 
+def test_generate_model_analysis_counts_only_latest_run_per_job():
+    from backend.analysis.models import AnalysisRun
+    from backend.analysis.tests.factories import AnalysisRunFactory
+    from backend.analysis.tests.factories import ToolResultFactory
+
+    user = UserFactory()
+    model = LLMModelFactory(model_id="openai/gpt-4o", model_name="GPT-4o")
+    job = GenerationJobFactory(
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        result_data={"backend_code": "x\n"},
+    )
+
+    def run_with_findings(n, **kwargs):
+        run = AnalysisRunFactory(
+            created_by=user,
+            generation_job=job,
+            status=AnalysisRun.Status.COMPLETED,
+            **kwargs,
+        )
+        result = ToolResultFactory(run=run, tool_slug="bandit", metrics={"score": n})
+        from backend.analysis.models import Finding
+
+        for _ in range(n):
+            Finding.objects.create(result=result, severity="low", title="f")
+        return run
+
+    run_with_findings(10)  # stale earlier analysis of the same code
+    run_with_findings(3)  # latest
+
+    data = generators.generate_model_analysis({"model_id": model.model_id})
+    # Re-analyzing a job must not double-count: only the latest run counts.
+    assert data["total_findings"] == 3
+    assert data["tools"] == [{"analyzer": "bandit", "tasks": 1}]
+    assert data["metrics_by_tool"]["bandit"]["numeric"]["score"]["avg"] == 3
+
+
+def test_job_summary_reports_truncated_jobs():
+    user = UserFactory()
+    model = LLMModelFactory(model_id="openai/x")
+    GenerationJobFactory(
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        result_data={"backend_code": "x\n", "frontend_truncated": True},
+    )
+    GenerationJobFactory(
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        result_data={"backend_code": "x\n"},
+    )
+    data = generators.generate_model_analysis({"model_id": model.model_id})
+    assert data["generation"]["truncated_jobs"] == 1
+
+
 def test_generate_model_analysis_missing_id_raises():
     with pytest.raises(ValueError, match="model_id"):
         generators.generate_model_analysis({})

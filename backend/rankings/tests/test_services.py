@@ -114,6 +114,26 @@ def test_aggregate_rankings_pulls_models_with_local_stats():
     assert row["composite_score"] == row["mss_score"]
 
 
+def test_aggregate_rankings_counts_only_latest_run_per_job():
+    from backend.analysis.models import AnalysisRun
+    from backend.analysis.models import Finding
+    from backend.analysis.tests.factories import AnalysisRunFactory
+    from backend.analysis.tests.factories import ToolResultFactory
+
+    user = UserFactory()
+    model = LLMModelFactory(model_id="openai/gpt-4o", model_name="GPT-4o")
+    job = GenerationJobFactory(created_by=user, model=model, status=GenerationJob.Status.COMPLETED)
+
+    for n in (5, 2):  # stale run first, latest run second
+        run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+        result = ToolResultFactory(run=run, tool_slug="bandit")
+        for _ in range(n):
+            Finding.objects.create(result=result, severity="high", title="f")
+
+    row = next(r for r in services.aggregate_rankings() if r["model_id"] == model.model_id)
+    assert row["findings"]["high"] == 2
+
+
 def test_filter_rankings_by_provider_and_search():
     rankings = [
         {
