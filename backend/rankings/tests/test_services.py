@@ -147,15 +147,15 @@ def test_compute_empirical_quality_blends_density_and_functional():
     entry = {
         "apps_completed": 1,
         "local_loc": 1000,
-        # weighted = 2*5 + 5*1 = 15 → density 15/KLOC → density_score 0.7
+        # weighted = 2*5 + 5*1 = 15 → density 15/KLOC → density_score 0.9 (cap 150)
         "findings": {"critical": 0, "high": 2, "medium": 0, "low": 5, "info": 0},
         "functional_pass_rate": 1.0,
     }
-    # 0.6 * 0.7 + 0.4 * 1.0
-    assert compute_empirical_quality(entry) == pytest.approx(0.82)
+    # 0.6 * 0.9 + 0.4 * 1.0
+    assert compute_empirical_quality(entry) == pytest.approx(0.94)
 
     entry["functional_pass_rate"] = None
-    assert compute_empirical_quality(entry) == pytest.approx(0.7)
+    assert compute_empirical_quality(entry) == pytest.approx(0.9)
 
 
 def test_compute_composite_blend_and_fallback():

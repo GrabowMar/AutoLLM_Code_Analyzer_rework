@@ -177,7 +177,7 @@ def delete_job(request, job_id: str):
     return {"success": True}
 
 
-@router.post("/jobs/{job_id}/retry/", response=GenerationJobSchema)
+@router.post("/jobs/{job_id}/retry/", response={200: GenerationJobSchema, 400: dict})
 def retry_job(request, job_id: str):
     """Re-create a failed/cancelled job with the same parameters."""
     original = get_object_or_404(
@@ -193,14 +193,12 @@ def retry_job(request, job_id: str):
         created_by=request.auth,
     )
     if original.status not in ("failed", "cancelled"):
-        return router.create_response(
-            request,
-            {"message": "Only failed or cancelled jobs can be retried"},
-            status=400,
-        )
+        return 400, {"message": "Only failed or cancelled jobs can be retried"}
     new_job = GenerationJob.objects.create(
         mode=original.mode,
         created_by=request.auth,
+        # Keep the retry in the original batch so experiment trials stay whole.
+        batch=original.batch,
         model=original.model,
         scaffolding_template=original.scaffolding_template,
         app_requirement=original.app_requirement,

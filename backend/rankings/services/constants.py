@@ -69,9 +69,10 @@ DOCS_SCORES = {
 # Empirical quality (from this platform's own measurements): a weighted
 # findings-per-KLOC density is squashed to 0..1, then blended with the
 # functional smoke-test pass rate. EMPIRICAL_DENSITY_CAP is the density that
-# scores zero — our 4-model URL-shortener experiment measured ~9-38/KLOC.
+# scores zero — our 4-model URL-shortener experiment measured ~48-132/KLOC
+# with the full 7-tool set, so 150 spreads observed models across the scale.
 SEVERITY_WEIGHTS = {"critical": 10, "high": 5, "medium": 2, "low": 1, "info": 0}
-EMPIRICAL_DENSITY_CAP = 50.0
+EMPIRICAL_DENSITY_CAP = 150.0
 EMPIRICAL_FUNCTIONAL_WEIGHT = 0.4  # rest goes to findings density
 
 # When local measurements exist, composite blends them with the metadata-based
