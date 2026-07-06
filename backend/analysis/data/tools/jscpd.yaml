@@ -12,8 +12,12 @@ docs_url: https://github.com/kucherenko/jscpd
 install_cmd: "npm install -g jscpd@4"
 verify_cmd: "jscpd --version"
 # jscpd logs progress to stdout, so write the JSON report to a file and cat
-# only that (same pattern as gitleaks).
-run_cmd: "jscpd {target} --min-tokens 35 --reporters json --output /tmp/jscpd --silent >/dev/null 2>&1; cat /tmp/jscpd/jscpd-report.json"
+# only that (same pattern as gitleaks). The report dir outlives the run in the
+# long-lived workspace container, so remove it first — otherwise a failed run
+# would serve the previous run's report as this run's result. jscpd's default
+# --max-lines of 1000 silently skips whole generated apps, so raise both size
+# gates well past realistic generated-file sizes.
+run_cmd: "rm -rf /tmp/jscpd; jscpd {target} --min-tokens 35 --max-lines 50000 --max-size 2mb --reporters json --output /tmp/jscpd --silent >/dev/null 2>&1; cat /tmp/jscpd/jscpd-report.json"
 parser_key: jscpd
 output_kind: mixed
 run_timeout: 120
