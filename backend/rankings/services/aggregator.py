@@ -43,8 +43,15 @@ def _local_app_stats() -> dict[str, dict[str, Any]]:
             "findings": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
         }
 
+    # Only each job's latest finished run — otherwise re-analyzing a job
+    # double-counts its findings in the rollup.
+    from backend.analysis.models import AnalysisRun
+
     sev_rows = (
-        Finding.objects.exclude(
+        Finding.objects.filter(
+            result__run_id__in=AnalysisRun.latest_ids_per_job(),
+        )
+        .exclude(
             result__run__generation_job__model__model_id__isnull=True,
         )
         .values(

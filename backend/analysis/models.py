@@ -282,6 +282,24 @@ class AnalysisRun(models.Model):
     def __str__(self) -> str:
         return f"run<{self.id}>"
 
+    @classmethod
+    def latest_ids_per_job(cls, job_ids=None) -> list:
+        """The most recent finished run per generation job.
+
+        A job re-analyzed N times has N sets of findings for the same code;
+        aggregations that describe the code (reports, rankings) must count
+        each job's latest completed/partial run only, or they double-count.
+        """
+        qs = cls.objects.filter(
+            generation_job__isnull=False,
+            status__in=[cls.Status.COMPLETED, cls.Status.PARTIAL],
+        )
+        if job_ids is not None:
+            qs = qs.filter(generation_job_id__in=list(job_ids))
+        return list(
+            qs.order_by("generation_job_id", "-created_at").distinct("generation_job_id").values_list("id", flat=True),
+        )
+
     def get_code_for_analysis(self) -> dict[str, str]:
         """Resolve the code map to analyze (inline source or generation job)."""
         if self.source_code:

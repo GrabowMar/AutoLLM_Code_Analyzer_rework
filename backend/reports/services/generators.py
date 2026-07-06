@@ -43,6 +43,11 @@ def _job_summary(jobs_qs) -> dict[str, Any]:
     by_status = {row["status"]: row["n"] for row in jobs_qs.values("status").annotate(n=Count("id"))}
     completed = by_status.get(GenerationJob.Status.COMPLETED, 0)
     total = agg["total"] or 0
+    truncated = sum(
+        1
+        for data in jobs_qs.values_list("result_data", flat=True)
+        if isinstance(data, dict) and any(data.get(f"{part}_truncated") for part in ("backend", "frontend"))
+    )
     return {
         "total_jobs": total,
         "completed_jobs": completed,
@@ -50,13 +55,20 @@ def _job_summary(jobs_qs) -> dict[str, Any]:
         "success_rate": (completed / total) if total else 0.0,
         "avg_duration": float(agg["avg_duration"] or 0.0),
         "by_status": by_status,
+        # Jobs whose generated code was cut off at max_tokens — their findings
+        # describe incomplete apps.
+        "truncated_jobs": truncated,
     }
 
 
+def _latest_run_ids(jobs_qs) -> list:
+    """Latest finished run per job — see AnalysisRun.latest_ids_per_job."""
+    return AnalysisRun.latest_ids_per_job(jobs_qs.values_list("id", flat=True))
+
+
 def _findings_for_jobs(jobs_qs):
-    job_ids = list(jobs_qs.values_list("id", flat=True))
     return Finding.objects.filter(
-        result__run__generation_job_id__in=job_ids,
+        result__run_id__in=_latest_run_ids(jobs_qs),
     )
 
 
@@ -65,9 +77,8 @@ def _tools_for_jobs(jobs_qs) -> list[dict[str, Any]]:
 
     from backend.analysis.models import ToolResult
 
-    job_ids = list(jobs_qs.values_list("id", flat=True))
     rows = (
-        ToolResult.objects.filter(run__generation_job_id__in=job_ids)
+        ToolResult.objects.filter(run_id__in=_latest_run_ids(jobs_qs))
         .values("tool_slug")
         .annotate(n=Count("id"))
         .order_by("-n")
@@ -140,8 +151,7 @@ def generate_model_analysis(config: dict[str, Any]) -> dict[str, Any]:
 
     from backend.analysis.models import ToolResult
 
-    job_ids = list(jobs.values_list("id", flat=True))
-    tool_results = ToolResult.objects.filter(run__generation_job_id__in=job_ids)
+    tool_results = ToolResult.objects.filter(run_id__in=_latest_run_ids(jobs))
 
     return {
         "model": {
@@ -227,7 +237,11 @@ def generate_template_comparison(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def generate_tool_analysis(config: dict[str, Any]) -> dict[str, Any]:
-    """Effectiveness analysis of one (or all) analyzer(s)."""
+    """Effectiveness analysis of one (or all) analyzer(s).
+
+    Deliberately spans every run (not latest-per-job): this report measures
+    tool behavior across executions, not the state of any one codebase.
+    """
 
     tool_name = config.get("tool_name")
     tasks = AnalysisRun.objects.all()

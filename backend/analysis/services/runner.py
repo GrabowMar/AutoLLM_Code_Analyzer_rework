@@ -84,7 +84,10 @@ def execute(run: AnalysisRun) -> AnalysisRun:
     _publish(run)
 
     code = run.get_code_for_analysis()
+    files = _materialize(code)
+    truncated_inputs = _truncated_inputs(run)
     tools = _resolve_tools(run.tool_slugs)
+    tool_configs = _resolve_tool_configs(run)
 
     container_name = ""
     needs_container = any(t.kind == "container" for t in tools.values())
@@ -99,7 +102,6 @@ def execute(run: AnalysisRun) -> AnalysisRun:
                 f"find {workspace_service.WORK_DIR} -mindepth 1 -delete",
                 timeout_s=30,
             )
-            files = _materialize(code)
             if files:
                 docker_manager.copy_files_in(
                     container_name,
@@ -131,20 +133,45 @@ def execute(run: AnalysisRun) -> AnalysisRun:
             continue
 
         if tool.kind == "ai":
-            output = ai_runner.run(tool, code, {}, run.created_by)
+            output = ai_runner.run(tool, files, tool_configs.get(slug) or {}, run.created_by)
         else:
             output = _run_container_tool(tool, container_name)
 
         _persist_result(result, output)
         statuses.append(result.status)
 
-    _finalize(run, statuses)
+    _finalize(run, statuses, truncated_inputs)
     return run
 
 
 def _resolve_tools(slugs: list[str]) -> dict[str, AnalyzerTool]:
     qs = AnalyzerTool.objects.filter(slug__in=list(slugs))
     return {t.slug: t for t in qs}
+
+
+def _resolve_tool_configs(run: AnalysisRun) -> dict[str, dict]:
+    """Per-user tool config, keyed by slug (from the workspace's installed tools)."""
+    if not run.workspace_id:
+        return {}
+    return {it.tool.slug: it.config or {} for it in run.workspace.installed_tools.select_related("tool")}
+
+
+def _truncated_inputs(run: AnalysisRun) -> list[str]:
+    """Which parts of the analyzed code were cut off at generation time."""
+    if not run.generation_job_id:
+        return []
+    data = getattr(run.generation_job, "result_data", None) or {}
+    if not isinstance(data, dict):
+        return []
+    return [part for part in ("backend", "frontend") if data.get(f"{part}_truncated")]
+
+
+def _normalize_path(path: str) -> str:
+    """One file, one identity: container tools report /work-prefixed paths,
+    jscpd relative ones — strip the workspace prefix so findings group."""
+    path = path.strip()
+    path = path.removeprefix(workspace_service.WORK_DIR + "/")
+    return path.removeprefix("./")
 
 
 def _run_container_tool(tool: AnalyzerTool, container_name: str) -> AnalyzerOutput:
@@ -189,7 +216,7 @@ def _persist_result(result: ToolResult, output: AnalyzerOutput) -> None:
                 title=f.title[:500],
                 description=f.description,
                 suggestion=f.suggestion,
-                file_path=f.file_path[:500],
+                file_path=_normalize_path(f.file_path)[:500],
                 line_number=f.line_number,
                 column_number=f.column_number,
                 code_snippet=f.code_snippet,
@@ -209,7 +236,7 @@ def _persist_result(result: ToolResult, output: AnalyzerOutput) -> None:
     result.save(update_fields=["status", "raw_output", "metrics", "summary"])
 
 
-def _finalize(run: AnalysisRun, statuses: list[str]) -> None:
+def _finalize(run: AnalysisRun, statuses: list[str], truncated_inputs: list[str] | None = None) -> None:
     findings = Finding.objects.filter(result__run=run)
     severity_counts: dict[str, int] = {}
     for sev in findings.values_list("severity", flat=True):
@@ -236,6 +263,10 @@ def _finalize(run: AnalysisRun, statuses: list[str]) -> None:
         "tools_completed": completed,
         "tools_failed": failed,
     }
+    if truncated_inputs:
+        # The generated code was cut off at max_tokens; findings describe an
+        # incomplete app, so surface that next to them.
+        run.summary["truncated_inputs"] = truncated_inputs
     run.completed_at = timezone.now()
     if run.started_at:
         run.duration_seconds = (run.completed_at - run.started_at).total_seconds()
