@@ -252,15 +252,25 @@ def _patch_backend_code(code: str) -> str:
 
 
 def _fix_sqlite_uri(code: str) -> str:
-    """Replace relative sqlite:/// URIs with an absolute /app/data/ path."""
+    """Replace relative sqlite:/// URIs with an absolute /app/data/ path.
+
+    Models often build the URI in an f-string (``sqlite:///{Path(...) /
+    'app.db'}``); the whole ``{...}`` expression must be consumed as one
+    unit — cutting it at the first quote leaves an unbalanced brace behind
+    and the generated app dies on a SyntaxError before it can boot.
+    """
 
     def _rewrite(m: re.Match[str]) -> str:
         original_path = m.group(1)
-        filename = Path(original_path).name or "app.db"
+        if original_path.startswith("{"):
+            named = re.search(r"([\w-]+\.(?:db|sqlite3?))", original_path)
+            filename = named.group(1) if named else "app.db"
+        else:
+            filename = Path(original_path).name or "app.db"
         return f"sqlite:////app/data/{filename}"
 
     return re.sub(
-        r"sqlite:///([^'\"]+)",
+        r"sqlite:///(\{[^{}]*\}|[^'\"{}]+)",
         _rewrite,
         code,
     )

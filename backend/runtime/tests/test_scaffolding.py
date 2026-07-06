@@ -64,6 +64,24 @@ def test_fix_sqlite_uri_leaves_four_slash_absolute():
     assert svc._fix_sqlite_uri(code) == code
 
 
+def test_fix_sqlite_uri_fstring_expression_with_quotes():
+    # DeepSeek-style: quotes inside the brace expression. Cutting at the first
+    # quote used to leave an unbalanced '}' → SyntaxError on boot.
+    code = "app.config['X'] = f\"sqlite:///{Path(__file__).parent / 'data' / 'app.db'}\""
+    patched = svc._fix_sqlite_uri(code)
+    assert 'f"sqlite:////app/data/app.db"' in patched
+    assert "{" not in patched.split("=", 1)[1]
+
+
+def test_fix_sqlite_uri_fstring_variable():
+    # Haiku-style: a plain variable. Used to become /app/data/{db_path},
+    # nesting whatever absolute path the variable held.
+    code = "app.config['X'] = f'sqlite:///{db_path}'"
+    patched = svc._fix_sqlite_uri(code)
+    assert "sqlite:////app/data/app.db" in patched
+    assert "{db_path}" not in patched
+
+
 def test_fix_flask_port_replaces_5000_default():
     code = "port = int(os.environ.get('PORT', 5000))"
     assert "8000" in svc._fix_flask_port(code)

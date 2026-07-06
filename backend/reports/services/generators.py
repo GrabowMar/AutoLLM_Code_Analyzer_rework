@@ -7,6 +7,7 @@ of filesystem-stored applications.
 
 from __future__ import annotations
 
+import statistics
 from typing import Any
 
 from django.db.models import Avg
@@ -20,6 +21,10 @@ from backend.generation.models import GenerationJob
 from backend.llm_models.models import LLMModel
 
 from .loc import loc_for_jobs
+
+# Findings weighted by how much they matter for cross-model comparisons; raw
+# counts let a flood of style nits outweigh one exploitable hole.
+SEVERITY_WEIGHTS = {"critical": 10, "high": 5, "medium": 2, "low": 1, "info": 0}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -202,6 +207,7 @@ def generate_template_comparison(config: dict[str, Any]) -> dict[str, Any]:
         )
         bucket["jobs"].append(job)
 
+    exclude_truncated = bool(config.get("exclude_truncated", True))
     rows = []
     for key, bucket in by_model.items():
         sub_jobs = GenerationJob.objects.filter(
@@ -217,6 +223,7 @@ def generate_template_comparison(config: dict[str, Any]) -> dict[str, Any]:
                 "loc": loc_for_jobs(sub_jobs),
                 "findings": _severity_counts(findings),
                 "total_findings": findings.count(),
+                "stats": _experiment_stats(sub_jobs, exclude_truncated=exclude_truncated),
             },
         )
 

@@ -94,7 +94,7 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
     batch = GenerationBatch.objects.create(
         name=f"Scaffolding batch - {scaffolding.name}",
         mode="scaffolding",
-        total_jobs=app_reqs.count() * models_qs.count(),
+        total_jobs=app_reqs.count() * models_qs.count() * payload.trials,
         created_by=request.auth,
     )
 
@@ -109,26 +109,27 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
             scaffolding_slug=stack_slug,
         )
         for model in models_qs:
-            job = GenerationJob.objects.create(
-                mode=GenerationJob.Mode.SCAFFOLDING,
-                created_by=request.auth,
-                batch=batch,
-                model=model,
-                scaffolding_template=scaffolding,
-                app_requirement=app_req,
-                template_bundle=job_bundle,
-                temperature=payload.temperature,
-                max_tokens=payload.max_tokens,
-            )
-            job_count += 1
-            try:
-                apply_snapshot_to_job(job)
-            except Exception as exc:  # noqa: BLE001 — isolate one bad job from the batch
-                logger.warning("Snapshot build failed for job %s: %s", job.id, exc)
-                job.status = GenerationJob.Status.FAILED
-                job.error_message = f"Snapshot build failed: {exc}"
-                job.save(update_fields=["status", "error_message", "updated_at"])
-                failed_count += 1
+            for _trial in range(payload.trials):
+                job = GenerationJob.objects.create(
+                    mode=GenerationJob.Mode.SCAFFOLDING,
+                    created_by=request.auth,
+                    batch=batch,
+                    model=model,
+                    scaffolding_template=scaffolding,
+                    app_requirement=app_req,
+                    template_bundle=job_bundle,
+                    temperature=payload.temperature,
+                    max_tokens=payload.max_tokens,
+                )
+                job_count += 1
+                try:
+                    apply_snapshot_to_job(job)
+                except Exception as exc:  # noqa: BLE001 — isolate one bad job from the batch
+                    logger.warning("Snapshot build failed for job %s: %s", job.id, exc)
+                    job.status = GenerationJob.Status.FAILED
+                    job.error_message = f"Snapshot build failed: {exc}"
+                    job.save(update_fields=["status", "error_message", "updated_at"])
+                    failed_count += 1
 
     if failed_count:
         batch.failed_jobs = failed_count

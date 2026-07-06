@@ -108,6 +108,24 @@ def build_container_for_job(request: HttpRequest, job_id: str):
 
 
 @router.post(
+    "/jobs/{job_id}/smoke/",
+    response={200: dict, 404: GenericResponse, 409: GenericResponse},
+)
+def smoke_test_job(request: HttpRequest, job_id: str):
+    """Re-probe a job's running container (health + declared GET endpoints)."""
+    from backend.runtime.services import smoke
+
+    job = get_object_or_404(GenerationJob, id=job_id)
+    container = job.container_instances.filter(status=ContainerInstance.Status.RUNNING).order_by("-created_at").first()
+    if container is None:
+        return 409, GenericResponse(
+            success=False,
+            message="No running container for this job — build it first.",
+        )
+    return 200, smoke.run_smoke(job, container)
+
+
+@router.post(
     "/containers/{container_id}/start/",
     response={200: ContainerActionSchema, 409: GenericResponse, 503: GenericResponse},
 )
@@ -276,9 +294,9 @@ _EXEC_WHITELIST: dict[str, list[str]] = {
         "sh",
         "-c",
         (
-            "curl -sf http://127.0.0.1:8000/health 2>/dev/null "
-            "|| curl -sf http://127.0.0.1:5000/health 2>/dev/null "
-            "|| echo 'no /health endpoint'"
+            "curl -sf http://127.0.0.1:8000/api/health 2>/dev/null "
+            "|| curl -sf http://127.0.0.1:5000/api/health 2>/dev/null "
+            "|| echo 'no /api/health endpoint'"
         ),
     ],
     "structure": [
