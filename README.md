@@ -20,8 +20,6 @@ and score the code with 14 analysis tools.
 [Security](#-security) ·
 [Docs](docs/README.md)
 
-![The analyzer tool shop — 14 installable analysis tools](docs/images/analyzers.png)
-
 </div>
 
 ## 💡 The idea
@@ -32,7 +30,7 @@ end-to-end: you pick a requirement template and a set of models from
 [OpenRouter][openrouter], and for each model the platform
 
 1. **generates** a complete application from the template
-   ([how templates work](docs/TEMPLATE_SPECIFICATION.md)),
+   ([how generation works](docs/GENERATION_PROCESS.md)),
 2. **runs it** in an isolated container with its own subdomain, so you can
    click through the live app,
 3. **analyzes** the code with the tools you select — ruff, bandit, semgrep,
@@ -42,13 +40,13 @@ end-to-end: you pick a requirement template and a set of models from
    rankings.
 
 The comparison rests on measured findings, not gut feeling. Everything runs
-from the web UI, or unattended as [automation pipelines][pipelines-doc]
+from the web UI, or unattended as [automation pipelines](docs/AUTOMATION_GUIDE.md)
 composed in a node-based editor — schedule them or fan them out over a
 parameter matrix. Multi-user support (email login, optional MFA, per-user
 OpenRouter keys, API tokens) makes a shared instance practical.
 
-The stack: Django 6 + Celery + PostgreSQL + Redis on the backend,
-SvelteKit 2 on the frontend, everything in Docker.
+The stack: Django 6 + django-ninja + Celery + PostgreSQL + Redis on the
+backend, SvelteKit (Svelte 5) on the frontend, everything in Docker.
 
 This began as a master's-thesis project and is maintained by one person —
 expect sharp edges, and feel free to file issues.
@@ -63,15 +61,15 @@ for generation, browsing works without it.
 ```bash
 git clone https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework.git
 cd AutoLLM_Code_Analyzer_rework
-just bootstrap              # .env files with generated secrets
-just up                     # build and start the stack
-just manage migrate
+just bootstrap                          # .env files with generated secrets
+just build && just up                   # build and start the stack
+just manage seed_generation_templates   # scaffolding templates & prompts
 just manage createsuperuser
 ```
 
-Then open <http://localhost:8000>, log in, and add your OpenRouter key in
-the UI (or set `OPENROUTER_API_KEY` in `.envs/.local/.django` as a global
-fallback).
+Migrations run automatically when the django container starts. Open
+<http://localhost:8000>, log in, and add your OpenRouter key in the UI (or
+set `OPENROUTER_API_KEY` in `.envs/.local/.django` as a global fallback).
 
 | URL                              | Service                   |
 | -------------------------------- | ------------------------- |
@@ -81,8 +79,7 @@ fallback).
 | <http://localhost:8025>          | Mailpit (captured emails) |
 | <http://localhost:5555>          | Flower (Celery tasks)     |
 
-To develop inside the containers instead, see
-[docs/dev-containers.md](docs/dev-containers.md).
+The full walkthrough is in [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
 ## 🌍 Deploy to a server
 
@@ -90,10 +87,10 @@ To develop inside the containers instead, see
 bash <(curl -fsSL https://raw.githubusercontent.com/GrabowMar/AutoLLM_Code_Analyzer_rework/main/scripts/deploy.sh)
 ```
 
-The script clones the repo, generates env files, starts the production
-stack (`docker-compose.production.yml`: Traefik, Nginx, Gunicorn), runs
-migrations, and can configure Caddy or nginx for your domain. Options are
-documented in the script header.
+The script handles first-time installs and in-place updates behind an
+existing Caddy proxy; options are documented in the script header. For the
+full production stack (Traefik with wildcard TLS, per-app subdomains), see
+[docs/deployment-guide.md](docs/deployment-guide.md).
 
 ## 🛠️ Development
 
@@ -131,6 +128,10 @@ docs/       deeper documentation — start at docs/README.md
 Secrets live in `.envs/`; only `*.example` templates are committed, and
 `just bootstrap` derives the real files from them.
 
+Docs under `docs/` are served live by the in-app viewer at `/docs` — the
+[development guide](docs/development-guide.md) covers the workflow and the
+conventions for writing them.
+
 ## 🤝 Contributing
 
 Bug reports, ideas, and PRs are welcome. The short version:
@@ -145,8 +146,8 @@ Bug reports, ideas, and PRs are welcome. The short version:
   CI gates merging on them.
 - One logical change per PR; screenshots for UI changes.
 
-Backend conventions (app layout, routers, factories) live in
-[docs/app-layout.md](docs/app-layout.md); frontend design tokens in
+Backend conventions (app layout, routers, error handling) live in the
+[development guide](docs/development-guide.md); frontend design tokens in
 `frontend/DESIGN_SYSTEM.md`.
 
 ## 🔒 Security
@@ -169,4 +170,3 @@ Built on [cookiecutter-django](https://github.com/cookiecutter/cookiecutter-djan
 [OpenRouter][openrouter].
 
 [openrouter]: https://openrouter.ai
-[pipelines-doc]: docs/AUTOMATION_WORKFLOWS.md
