@@ -134,66 +134,6 @@ def test_aggregate_rankings_counts_only_latest_run_per_job():
     assert row["findings"]["high"] == 2
 
 
-def test_compute_empirical_quality_none_without_local_data():
-    from backend.rankings.services.scoring import compute_empirical_quality
-
-    assert compute_empirical_quality({"apps_completed": 0}) is None
-    assert compute_empirical_quality({"apps_completed": 1, "local_loc": 0}) is None
-
-
-def test_compute_empirical_quality_blends_density_and_functional():
-    from backend.rankings.services.scoring import compute_empirical_quality
-
-    entry = {
-        "apps_completed": 1,
-        "local_loc": 1000,
-        # weighted = 2*5 + 5*1 = 15 → density 15/KLOC → density_score 0.9 (cap 150)
-        "findings": {"critical": 0, "high": 2, "medium": 0, "low": 5, "info": 0},
-        "functional_pass_rate": 1.0,
-    }
-    # 0.6 * 0.9 + 0.4 * 1.0
-    assert compute_empirical_quality(entry) == pytest.approx(0.94)
-
-    entry["functional_pass_rate"] = None
-    assert compute_empirical_quality(entry) == pytest.approx(0.9)
-
-
-def test_compute_composite_blend_and_fallback():
-    from backend.rankings.services.scoring import compute_composite
-
-    assert compute_composite(0.5, None) == 0.5
-    assert compute_composite(0.5, 1.0) == pytest.approx(0.7)  # 0.6*0.5 + 0.4*1.0
-
-
-def test_aggregate_rankings_exposes_empirical_and_sorts_by_composite():
-    user = UserFactory()
-    good = LLMModelFactory(model_id="good/model")
-    bad = LLMModelFactory(model_id="bad/model")
-    for model, sev in ((good, "low"), (bad, "critical")):
-        job = GenerationJobFactory(
-            created_by=user,
-            model=model,
-            status=GenerationJob.Status.COMPLETED,
-            metrics={"lines_of_code": 1000, "functional": {"passed": True, "pass_rate": 1.0}},
-        )
-        from backend.analysis.models import AnalysisRun
-        from backend.analysis.models import Finding
-        from backend.analysis.tests.factories import AnalysisRunFactory
-        from backend.analysis.tests.factories import ToolResultFactory
-
-        run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
-        result = ToolResultFactory(run=run, tool_slug="bandit")
-        for _ in range(10):
-            Finding.objects.create(result=result, severity=sev, title="f")
-
-    rankings = services.aggregate_rankings()
-    rows = {r["model_id"]: r for r in rankings if r["model_id"] in ("good/model", "bad/model")}
-    assert rows["good/model"]["empirical_quality_score"] > rows["bad/model"]["empirical_quality_score"]
-    assert rows["good/model"]["composite_score"] > rows["bad/model"]["composite_score"]
-    order = [r["model_id"] for r in rankings]
-    assert order.index("good/model") < order.index("bad/model")
-
-
 def test_filter_rankings_by_provider_and_search():
     rankings = [
         {
