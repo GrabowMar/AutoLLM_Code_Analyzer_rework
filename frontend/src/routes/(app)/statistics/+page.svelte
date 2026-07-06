@@ -233,10 +233,10 @@
 						{@const activeTrends = trendsData ?? data.trends}
 						<div class="flex h-40 items-end gap-1.5">
 							{#each activeTrends.series as point}
-								<div class="flex flex-1 flex-col items-center gap-1" title="{point.date}: {point.total} analyses">
+								<div class="flex flex-1 flex-col items-center justify-end gap-1" title="{point.date}: {point.total} analyses">
 									<div
 										class="w-full rounded-t bg-blue-500/70 transition-all duration-300"
-										style="height: {(point.total / trendMax) * 100}%"
+										style="height: {Math.round((point.total / trendMax) * 140)}px"
 									></div>
 									<span class="text-[9px] text-muted-foreground">{dayLabel(point.date)}</span>
 								</div>
