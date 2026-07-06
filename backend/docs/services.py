@@ -29,10 +29,9 @@ CATEGORY_MAP: dict[str, str] = {
     "api": "Reference",
     "ANALYZER_GUIDE": "Reference",
     "MODELS_REFERENCE": "Reference",
-    "TEMPLATE_SPECIFICATION": "Reference",
+    "AUTOMATION_GUIDE": "Reference",
     "deployment-guide": "Operations",
     "TROUBLESHOOTING": "Operations",
-    "TODO": "Other",
 }
 DEFAULT_CATEGORY = "Other"
 

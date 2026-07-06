@@ -47,6 +47,22 @@ def _local_app_stats() -> dict[str, dict[str, Any]]:
             "functional_pass_rate": None,
         }
 
+    # LOC + functional smoke results live in job metrics; roll both up so the
+    # empirical quality score can normalize findings by code volume.
+    functional_rates: dict[str, list[float]] = {}
+    for model_id, metrics in GenerationJob.objects.filter(
+        status="completed",
+        model__isnull=False,
+    ).values_list("model__model_id", "metrics"):
+        if model_id not in out or not isinstance(metrics, dict):
+            continue
+        out[model_id]["local_loc"] += int(metrics.get("lines_of_code") or 0)
+        functional = metrics.get("functional")
+        if isinstance(functional, dict) and "pass_rate" in functional:
+            functional_rates.setdefault(model_id, []).append(float(functional["pass_rate"]))
+    for model_id, rates in functional_rates.items():
+        out[model_id]["functional_pass_rate"] = round(sum(rates) / len(rates), 4)
+
     # Only each job's latest finished run — otherwise re-analyzing a job
     # double-counts its findings in the rollup.
     from backend.analysis.models import AnalysisRun
