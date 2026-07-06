@@ -143,7 +143,7 @@ class GenerationService:
             msg = "Scaffolding mode requires an app requirement template"
             raise ValueError(msg)
 
-        total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost": 0.0}
 
         bundle = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
         backend_messages = self.renderer.render_backend_messages(
@@ -305,5 +305,6 @@ class GenerationService:
             response_payload=response,
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
+            total_cost=usage.get("cost", 0.0),
         )
         return response

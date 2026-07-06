@@ -32,6 +32,7 @@ class RankingRow(Schema):
     accessibility_score: float
     adoption_score: float
     mss_score: float
+    empirical_quality_score: float | None = None
     composite_score: float
 
     # Allow extra benchmark fields to pass through.

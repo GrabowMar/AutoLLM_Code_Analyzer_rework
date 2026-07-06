@@ -3,6 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
+from ninja import Field
 from ninja import ModelSchema
 from ninja import Schema
 
@@ -331,6 +332,9 @@ class ScaffoldingJobCreateSchema(Schema):
     temperature: float = 0.3
     max_tokens: int = 32000
     template_bundle_id: int | None = None
+    # Independent repetitions per (template × model) cell. Sampling variance
+    # between trials is the point — comparisons need n > 1.
+    trials: int = Field(1, ge=1, le=10)
 
 
 class CopilotJobCreateSchema(Schema):
