@@ -148,6 +148,7 @@ export async function createBatch(data: {
   name: string;
   description?: string;
   matrix?: Record<string, unknown>;
+  repeats?: number;
 }): Promise<BatchDetail> {
   const res = await apiFetch("/automation/batches/", {
     method: "POST",

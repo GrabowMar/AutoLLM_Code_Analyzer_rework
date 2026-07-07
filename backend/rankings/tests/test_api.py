@@ -74,7 +74,51 @@ def test_export_csv(auth_client):
     body = res.content.decode()
     assert "model_id" in body
     assert "m1" in body
+    header = body.splitlines()[0]
+    for column in (
+        "empirical_quality_score",
+        "composite_score",
+        "smoke_pass_rate",
+        "n_trials",
+        "empirical_density_stdev",
+        "findings_total_static",
+        "ai_findings_total",
+    ):
+        assert column in header
+
+
+def test_sensitivity_endpoint(auth_client):
+    from backend.analysis.models import AnalysisRun
+    from backend.analysis.models import Finding
+    from backend.analysis.tests.factories import AnalysisRunFactory
+    from backend.analysis.tests.factories import ToolResultFactory
+    from backend.generation.models import GenerationJob
+    from backend.generation.tests.factories import GenerationJobFactory
+
+    client, user = auth_client
+    model = LLMModelFactory(model_id="m1", model_name="One")
+    job = GenerationJobFactory(
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        metrics={"lines_of_code": 1000},
+    )
+    run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+    result = ToolResultFactory(run=run, tool_slug="bandit")
+    Finding.objects.create(result=result, severity="high", title="f")
+
+    res = client.get("/api/rankings/sensitivity/")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["models_evaluated"] == 1
+    assert body["baseline_ranking"][0]["model_id"] == "m1"
+    schemes = {s["scheme"] for s in body["schemes"]}
+    assert schemes == {"security_heavy", "flat", "info_included"}
+    for scheme in body["schemes"]:
+        assert -1.0 <= scheme["kendall_tau"] <= 1.0
+        assert isinstance(scheme["adjacent_swaps"], list)
 
 
 def test_unauthenticated(client):
     assert client.get("/api/rankings/").status_code == 401
+    assert client.get("/api/rankings/sensitivity/").status_code == 401

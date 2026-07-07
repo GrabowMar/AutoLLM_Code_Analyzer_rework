@@ -35,6 +35,7 @@ class SeverityBucketSchema(Schema):
 class SeverityDistributionSchema(Schema):
     total: int
     distribution: list[SeverityBucketSchema]
+    by_source: dict[str, dict[str, int]] | None = None
 
 
 class TrendPointSchema(Schema):
@@ -52,6 +53,8 @@ class TrendsSchema(Schema):
 
 
 class ModelComparisonRowSchema(Schema):
+    """Shared rankings scoring: mss/empirical/composite are 0..1 scales."""
+
     model_id: str
     name: str
     provider: str
@@ -59,12 +62,13 @@ class ModelComparisonRowSchema(Schema):
     apps_completed: int
     success_rate: float
     avg_duration_seconds: float
-    cost_efficiency: float
-    security: float
-    quality: float
-    performance: float
     mss: float
+    empirical_quality: float | None = None
+    composite: float
+    smoke_pass_rate: float | None = None
+    n_trials: int = 0
     findings: dict[str, int]
+    ai_findings: dict[str, int]
 
 
 class ToolRowSchema(Schema):

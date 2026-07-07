@@ -126,6 +126,11 @@ class AnalyzerTool(models.Model):
     def __str__(self) -> str:
         return f"{self.name} ({self.slug})"
 
+    @classmethod
+    def ai_slugs(cls) -> set[str]:
+        """Slugs of AI-kind tools, whose findings are opinions, not measurements."""
+        return set(cls.objects.filter(kind=ToolKind.AI).values_list("slug", flat=True))
+
 
 class AnalyzerWorkspace(models.Model):
     """A per-user, long-lived analyzer container."""

@@ -30,6 +30,7 @@
 	let newName = $state('');
 	let newDescription = $state('');
 	let matrixText = $state('{\n  "model_id": ["gpt-4", "claude-3"]\n}');
+	let repeatsText = $state('1');
 	let saving = $state(false);
 	let formError = $state('');
 
@@ -67,11 +68,13 @@
 				pipeline_id: pipelineId,
 				name: newName.trim(),
 				description: newDescription || undefined,
-				matrix
+				matrix,
+				repeats: Math.min(20, Math.max(1, Math.round(Number(repeatsText)) || 1))
 			});
 			showForm = false;
 			newName = '';
 			newDescription = '';
+			repeatsText = '1';
 			await load();
 		} catch (e: unknown) {
 			formError = (e as { detail?: string })?.detail ?? 'Failed to create batch';
@@ -122,6 +125,11 @@
 						class="w-full rounded-md border bg-background p-2 text-xs font-mono resize-y focus:outline-none focus:ring-1 focus:ring-ring"
 					></textarea>
 					<p class="text-[10px] text-muted-foreground">One run per combination of values. Empty for a single run.</p>
+				</div>
+				<div class="space-y-1">
+					<Label class="text-xs" for="batch-repeats">Repeats per combination</Label>
+					<Input id="batch-repeats" type="number" min="1" max="20" bind:value={repeatsText} class="h-8 text-xs w-24" />
+					<p class="text-[10px] text-muted-foreground">Independent runs per combination; each gets a "trial" param. Use &gt;1 to measure between-run variance.</p>
 				</div>
 				{#if formError}<p class="text-xs text-destructive">{formError}</p>{/if}
 				<Button size="sm" onclick={create} disabled={saving} class="w-full">

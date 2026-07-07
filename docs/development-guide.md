@@ -52,6 +52,8 @@ Django 6 project; settings in `config/settings/{base,local,production,test}.py`,
 
 Apps follow one convention: `models.py`, `api/{views,schema}.py`, `services/`, `tasks.py`, `tests/`. Views raise ninja's `HttpError`; services stay free of ninja imports and raise `backend.common.exceptions.*`, which an exception handler in `config/api.py` maps to HTTP responses.
 
+Scoring constants live in one place: `backend/rankings/services/constants.py` defines `SEVERITY_WEIGHTS` (shared by rankings, statistics, and report generators) and the `SEVERITY_WEIGHT_SCHEMES` used by the sensitivity analysis — change them there, nowhere else. The methodology itself is described in [Architecture](/docs/ARCHITECTURE).
+
 ## Frontend layout
 
 SvelteKit with Svelte 5 runes, Tailwind 4, in `frontend/`. Routes live under `src/routes/(app)/` (one directory per feature: `generation`, `analysis`, `automation`, `rankings`, …) plus auth pages. API clients are in `src/lib/api/`. In the local stack the dev server on :8000 proxies API calls to django via `API_TARGET=http://django:8000` — always develop against http://localhost:8000, not :8001.

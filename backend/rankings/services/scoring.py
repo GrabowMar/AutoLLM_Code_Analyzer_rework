@@ -115,13 +115,18 @@ def compute_mss(entry: dict[str, Any]) -> float:
     )
 
 
-def compute_empirical_quality(entry: dict[str, Any]) -> float | None:
+def compute_empirical_quality(
+    entry: dict[str, Any],
+    *,
+    severity_weights: dict[str, int] | None = None,
+) -> float | None:
     """Quality measured by this platform's own experiments, 0..1.
 
     Combines severity-weighted findings density (per KLOC of generated code,
-    lower is better) with the functional smoke-test pass rate. Returns None
-    when the model has no completed local generations — no data is not the
-    same as bad data.
+    lower is better) with the smoke-test pass rate. Returns None when the
+    model has no completed local generations — no data is not the same as
+    bad data. `severity_weights` lets the sensitivity analysis rescore under
+    alternative schemes; the default is the baseline SEVERITY_WEIGHTS.
     """
     if not entry.get("apps_completed"):
         return None
@@ -130,7 +135,8 @@ def compute_empirical_quality(entry: dict[str, Any]) -> float | None:
     if loc <= 0:
         return None
 
-    weighted = sum(SEVERITY_WEIGHTS.get(sev, 0) * (count or 0) for sev, count in findings.items())
+    weights = severity_weights or SEVERITY_WEIGHTS
+    weighted = sum(weights.get(sev, 0) * (count or 0) for sev, count in findings.items())
     density = weighted / loc * 1000
     density_score = max(0.0, 1.0 - min(density, EMPIRICAL_DENSITY_CAP) / EMPIRICAL_DENSITY_CAP)
 

@@ -248,7 +248,11 @@ def create_batch(request: HttpRequest, payload: BatchCreateSchema) -> Any:
         owner=request.auth,
         name=payload.name,
         description=payload.description,
-        config={"pipeline_id": str(pipeline.id), "matrix": payload.matrix},
+        config={
+            "pipeline_id": str(pipeline.id),
+            "matrix": payload.matrix,
+            "repeats": payload.repeats,
+        },
     )
     return 201, batch
 

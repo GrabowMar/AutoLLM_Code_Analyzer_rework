@@ -3,6 +3,7 @@
 from typing import Any
 from uuid import UUID
 
+from ninja import Field
 from ninja import ModelSchema
 from ninja import Schema
 
@@ -183,6 +184,9 @@ class BatchCreateSchema(Schema):
     name: str
     description: str = ""
     matrix: dict[str, Any] = {}
+    # Independent repetitions of every matrix combination — comparisons need
+    # n > 1 to say anything about between-run variance.
+    repeats: int = Field(1, ge=1, le=20)
 
 
 class BatchItemSchema(ModelSchema):

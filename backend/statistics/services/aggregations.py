@@ -120,7 +120,22 @@ def get_severity_distribution(
         }
         for s in severities
     ]
-    res = {"total": total, "distribution": distribution}
+    # Split deterministic-tool findings from AI-reviewer opinions so the
+    # chart can say how much of the pool is measurement vs judgment.
+    ai_slugs = AnalyzerTool.ai_slugs()
+    ai_raw = dict(
+        findings.filter(result__tool_slug__in=ai_slugs)
+        .values_list("severity")
+        .annotate(c=Count("id"))
+        .values_list("severity", "c"),
+    )
+    ai_counts = {s: int(ai_raw.get(s, 0)) for s in severities}
+    static_counts = {s: counts[s] - ai_counts[s] for s in severities}
+    res = {
+        "total": total,
+        "distribution": distribution,
+        "by_source": {"static": static_counts, "ai": ai_counts},
+    }
     cache.set(cache_key, res, 15)
     return res
 
@@ -129,105 +144,48 @@ def get_model_comparison(
     user: AbstractBaseUser | None = None,
     limit: int = 25,
 ) -> list[dict[str, Any]]:
-    """Per-model rollup: apps generated, success rate, avg duration, scores."""
+    """Per-model rollup on the shared rankings scoring (0..1 scales).
+
+    Delegates to the rankings aggregator so this page can never contradict
+    /rankings: findings are deduped to each job's latest run, AI-reviewer
+    findings are excluded from the empirical score, and MSS/empirical/
+    composite mean the same thing everywhere.
+    """
     from django.core.cache import cache
 
+    from backend.rankings.services import aggregate_rankings
+
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
-    cache_key = f"stats_models_{limit}_{u_key}"
+    cache_key = f"stats_models_v2_{limit}_{u_key}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
-    jobs = (
-        _scoped(GenerationJob.objects.all(), user, "created_by")
-        .exclude(model__isnull=True)
-        .values(
-            "model_id",
-            "model__provider",
-            "model__model_name",
-            "model__model_id",
-            "model__cost_efficiency",
-        )
-        .annotate(
-            apps=Count("id"),
-            apps_completed=Count("id", filter=Q(status="completed")),
-            avg_duration=Avg(
-                "duration_seconds",
-                filter=Q(status="completed"),
-            ),
-        )
-        .order_by("-apps")[:limit]
-    )
-
-    jobs_list = list(jobs)
-    model_ids = [j["model_id"] for j in jobs_list]
-
-    # Bulk fetch all finding severity counts for all target models in one query!
-    sev_data = (
-        Finding.objects.filter(
-            result__run__generation_job__model_id__in=model_ids,
-        )
-        .values("result__run__generation_job__model_id", "severity")
-        .annotate(c=Count("id"))
-    )
-
-    # Map by model_id -> severity -> count
-    sev_map_by_model: dict[str, dict[str, int]] = {}
-    for item in sev_data:
-        m_id = item["result__run__generation_job__model_id"]
-        sev_map_by_model.setdefault(m_id, {})[item["severity"]] = int(item["c"])
-
     rows: list[dict[str, Any]] = []
-    for j in jobs_list:
-        sev_map = sev_map_by_model.get(j["model_id"], {})
-        critical = sev_map.get("critical", 0)
-        high = sev_map.get("high", 0)
-        medium = sev_map.get("medium", 0)
-        low = sev_map.get("low", 0)
-
-        # Composite security score: 10 = perfect; deduct weighted findings.
-        weighted = critical * 5 + high * 2 + medium * 0.5 + low * 0.1
-        per_app = weighted / max(1, j["apps_completed"] or 1)
-        security = max(0.0, round(10.0 - min(per_app, 10.0), 2))
-
-        # Quality and performance heuristics from completion stats.
-        success = _percent(j["apps_completed"] or 0, j["apps"] or 0)
-        quality = round((success / 10.0), 2)  # 0..10 scale
-        performance = round(
-            min(100.0, max(0.0, 100.0 - (j["avg_duration"] or 0.0) / 6)),
-            1,
-        )
-        # Master "MSS" composite (0..100)
-        mss = round(
-            (security * 4 + quality * 3 + performance / 10 * 3),
-            1,
-        )
-
+    for r in aggregate_rankings(user=user):  # sorted by composite desc
+        if not r.get("apps"):
+            continue
         rows.append(
             {
-                "model_id": j["model__model_id"],
-                "name": j["model__model_name"],
-                "provider": j["model__provider"],
-                "apps": int(j["apps"]),
-                "apps_completed": int(j["apps_completed"]),
-                "success_rate": success,
-                "avg_duration_seconds": (round(j["avg_duration"], 1) if j["avg_duration"] else 0.0),
-                "cost_efficiency": round(j["model__cost_efficiency"] or 0.0, 3),
-                "security": security,
-                "quality": quality,
-                "performance": performance,
-                "mss": mss,
-                "findings": {
-                    "critical": critical,
-                    "high": high,
-                    "medium": medium,
-                    "low": low,
-                    "info": sev_map.get("info", 0),
-                },
+                "model_id": r["model_id"],
+                "name": r["model_name"],
+                "provider": r["provider"],
+                "apps": r["apps"],
+                "apps_completed": r["apps_completed"],
+                "success_rate": _percent(r["apps_completed"], r["apps"]),
+                "avg_duration_seconds": r["avg_duration"],
+                "mss": r["mss_score"],
+                "empirical_quality": r["empirical_quality_score"],
+                "composite": r["composite_score"],
+                "smoke_pass_rate": r["functional_pass_rate"],
+                "n_trials": r["n_trials"],
+                "findings": r["findings"],
+                "ai_findings": r["ai_findings"],
             },
         )
+        if len(rows) >= limit:
+            break
 
-    rows.sort(key=lambda r: r["mss"], reverse=True)
     cache.set(cache_key, rows, 15)
     return rows
 

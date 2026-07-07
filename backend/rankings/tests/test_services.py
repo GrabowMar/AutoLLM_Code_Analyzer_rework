@@ -270,3 +270,157 @@ def test_get_status_counts_benchmark_rows():
     assert s["total_benchmark_rows"] == 2
     assert s["models_with_benchmarks"] == 1
     assert s["benchmarks"] == {"humaneval": 1, "mbpp": 1}
+
+
+def test_kendall_tau_identity_reverse_and_single_swap():
+    assert services.kendall_tau(["a", "b", "c"], ["a", "b", "c"]) == 1.0
+    assert services.kendall_tau(["a", "b", "c"], ["c", "b", "a"]) == -1.0
+    # one discordant pair out of three: (2 - 1) / 3
+    assert services.kendall_tau(["a", "b", "c"], ["a", "c", "b"]) == pytest.approx(0.3333, abs=1e-4)
+    # fewer than two common items cannot disagree
+    assert services.kendall_tau(["a"], ["a"]) == 1.0
+
+
+def test_compute_empirical_quality_custom_weights():
+    from backend.rankings.services.scoring import compute_empirical_quality
+
+    entry = {
+        "apps_completed": 1,
+        "local_loc": 1000,
+        "findings": {"critical": 0, "high": 2, "medium": 0, "low": 5, "info": 0},
+        "functional_pass_rate": None,
+    }
+    flat = {"critical": 1, "high": 1, "medium": 1, "low": 1, "info": 0}
+    # weighted = 7 → density 7/KLOC → 1 - 7/150
+    assert compute_empirical_quality(entry, severity_weights=flat) == pytest.approx(1 - 7 / 150, abs=1e-4)
+
+
+def test_compute_weight_sensitivity_detects_adjacent_swap():
+    from backend.rankings.services.scoring import compute_empirical_quality
+
+    # crit_model: 3 criticals (weighted 30 baseline, 3 flat);
+    # low_model: 25 lows (weighted 25 in both) — order flips under "flat".
+    entries = []
+    for model_id, findings in (
+        ("crit/model", {"critical": 3, "high": 0, "medium": 0, "low": 0, "info": 0}),
+        ("low/model", {"critical": 0, "high": 0, "medium": 0, "low": 25, "info": 0}),
+    ):
+        entry = {
+            "model_id": model_id,
+            "apps_completed": 1,
+            "local_loc": 1000,
+            "findings": findings,
+            "functional_pass_rate": None,
+        }
+        entry["empirical_quality_score"] = compute_empirical_quality(entry)
+        entries.append(entry)
+
+    out = services.compute_weight_sensitivity(entries)
+
+    assert out["models_evaluated"] == 2
+    assert [r["model_id"] for r in out["baseline_ranking"]] == ["low/model", "crit/model"]
+    flat = next(s for s in out["schemes"] if s["scheme"] == "flat")
+    assert [r["model_id"] for r in flat["ranking"]] == ["crit/model", "low/model"]
+    assert flat["kendall_tau"] == -1.0
+    assert flat["adjacent_swaps"] == [("low/model", "crit/model")]
+    # a scheme that keeps the order reports stability
+    heavy = next(s for s in out["schemes"] if s["scheme"] == "security_heavy")
+    assert heavy["kendall_tau"] == 1.0
+    assert heavy["adjacent_swaps"] == []
+
+
+def test_compute_weight_sensitivity_skips_unmeasured_models():
+    out = services.compute_weight_sensitivity(
+        [{"model_id": "never/ran", "empirical_quality_score": None}],
+    )
+    assert out["models_evaluated"] == 0
+    assert out["baseline_ranking"] == []
+
+
+def test_aggregate_rankings_excludes_ai_findings_from_empirical():
+    from backend.analysis.models import AnalysisRun
+    from backend.analysis.models import Finding
+    from backend.analysis.tests.factories import AnalysisRunFactory
+    from backend.analysis.tests.factories import AnalyzerToolFactory
+    from backend.analysis.tests.factories import ToolResultFactory
+    from backend.rankings.services.scoring import compute_empirical_quality
+
+    AnalyzerToolFactory(slug="llm_review", kind="ai", category="ai")
+    user = UserFactory()
+    model = LLMModelFactory(model_id="openai/gpt-4o")
+    job = GenerationJobFactory(
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        metrics={"lines_of_code": 1000, "functional": {"passed": True, "pass_rate": 1.0}},
+    )
+    run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+    static_result = ToolResultFactory(run=run, tool_slug="bandit")
+    ai_result = ToolResultFactory(run=run, tool_slug="llm_review")
+    for _ in range(2):
+        Finding.objects.create(result=static_result, severity="high", title="f")
+    for _ in range(5):
+        Finding.objects.create(result=ai_result, severity="critical", title="opinion")
+
+    row = next(r for r in services.aggregate_rankings() if r["model_id"] == model.model_id)
+
+    assert row["findings"] == {"critical": 0, "high": 2, "medium": 0, "low": 0, "info": 0}
+    assert row["ai_findings"] == {"critical": 5, "high": 0, "medium": 0, "low": 0, "info": 0}
+    # empirical score reflects only the deterministic findings
+    expected = compute_empirical_quality(
+        {
+            "apps_completed": 1,
+            "local_loc": 1000,
+            "findings": row["findings"],
+            "functional_pass_rate": 1.0,
+        },
+    )
+    assert row["empirical_quality_score"] == pytest.approx(expected)
+
+
+def test_aggregate_rankings_reports_trial_variance():
+    from backend.analysis.models import AnalysisRun
+    from backend.analysis.models import Finding
+    from backend.analysis.tests.factories import AnalysisRunFactory
+    from backend.analysis.tests.factories import ToolResultFactory
+
+    user = UserFactory()
+    model = LLMModelFactory(model_id="openai/gpt-4o")
+    # two trials: densities 10 and 20 per KLOC, pass rates 1.0 and 0.5
+    for n_high, pass_rate in ((2, 1.0), (4, 0.5)):
+        job = GenerationJobFactory(
+            created_by=user,
+            model=model,
+            status=GenerationJob.Status.COMPLETED,
+            metrics={"lines_of_code": 1000, "functional": {"passed": True, "pass_rate": pass_rate}},
+        )
+        run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+        result = ToolResultFactory(run=run, tool_slug="bandit")
+        for _ in range(n_high):
+            Finding.objects.create(result=result, severity="high", title="f")
+
+    row = next(r for r in services.aggregate_rankings() if r["model_id"] == model.model_id)
+
+    assert row["n_trials"] == 2
+    variance = row["variance"]
+    assert variance["n_jobs"] == 2
+    assert variance["density_per_kloc_mean"] == pytest.approx(15.0)
+    assert variance["density_per_kloc_stdev"] == pytest.approx(7.0711, abs=1e-3)
+    assert variance["smoke_pass_rate_stdev"] == pytest.approx(0.3536, abs=1e-3)
+
+
+def test_aggregate_rankings_variance_none_below_two_trials():
+    user = UserFactory()
+    model = LLMModelFactory(model_id="openai/gpt-4o")
+    GenerationJobFactory(
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        metrics={"lines_of_code": 1000},
+    )
+
+    row = next(r for r in services.aggregate_rankings() if r["model_id"] == model.model_id)
+
+    # completed but never analyzed: no density samples at all
+    assert row["variance"]["n_jobs"] == 0
+    assert row["variance"]["density_per_kloc_stdev"] is None

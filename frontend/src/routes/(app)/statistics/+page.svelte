@@ -80,6 +80,11 @@
 		return 'text-red-400';
 	}
 
+	function pct01(v: number | null | undefined): string {
+		if (v == null) return '—';
+		return (v * 100).toFixed(1);
+	}
+
 	function fmtDuration(seconds: number): string {
 		if (!seconds) return '—';
 		if (seconds < 60) return `${seconds.toFixed(0)}s`;
@@ -274,6 +279,12 @@
 					</div>
 					<p class="mt-3 text-center text-xs text-muted-foreground">
 						Total findings: {data.severity.total}
+						{#if data.severity.by_source}
+							{@const aiTotal = Object.values(data.severity.by_source.ai).reduce((a, b) => a + b, 0)}
+							{#if aiTotal > 0}
+								· incl. {aiTotal} from AI review
+							{/if}
+						{/if}
 					</p>
 				</Card.Content>
 			</Card.Root>
@@ -294,10 +305,11 @@
 								<tr class="border-b bg-muted/40 sticky top-0 z-10">
 									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Model</th>
 									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Apps</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Security</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Performance</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Quality</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">MSS</th>
+									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Success %</th>
+									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Smoke pass</th>
+									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Empirical (measured)</th>
+									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">MSS (meta)</th>
+									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Composite</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -314,10 +326,18 @@
 											</div>
 										</td>
 										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs">{m.apps}</td>
-										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor(m.security)}">{m.security.toFixed(1)}</td>
-										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor(m.performance, 100)}">{m.performance}</td>
-										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor(m.quality)}">{m.quality.toFixed(1)}</td>
-										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs font-bold {scoreColor(m.mss, 100)}">{m.mss.toFixed(1)}</td>
+										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor(m.success_rate, 100)}">{m.success_rate.toFixed(0)}</td>
+										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {m.smoke_pass_rate != null ? scoreColor(m.smoke_pass_rate, 1) : ''}">{pct01(m.smoke_pass_rate)}</td>
+										<td class="px-3 py-2 text-right align-top">
+											{#if m.empirical_quality != null}
+												<span class="font-mono tabular-nums text-xs font-bold {scoreColor(m.empirical_quality, 1)}">{pct01(m.empirical_quality)}</span>
+												<span class="ml-1 text-[9px] text-muted-foreground">n={m.n_trials}</span>
+											{:else}
+												<span class="text-xs text-muted-foreground">—</span>
+											{/if}
+										</td>
+										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor(m.mss, 1)}">{pct01(m.mss)}</td>
+										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor(m.composite, 1)}">{pct01(m.composite)}</td>
 									</tr>
 								{/each}
 							</tbody>

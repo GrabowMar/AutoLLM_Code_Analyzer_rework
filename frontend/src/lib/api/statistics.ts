@@ -41,12 +41,20 @@ export interface ModelComparisonRow {
   apps_completed: number;
   success_rate: number;
   avg_duration_seconds: number;
-  cost_efficiency: number;
-  security: number;
-  quality: number;
-  performance: number;
+  // Shared rankings scoring — all 0..1 scales.
   mss: number;
+  empirical_quality: number | null;
+  composite: number;
+  smoke_pass_rate: number | null;
+  n_trials: number;
   findings: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    info: number;
+  };
+  ai_findings: {
     critical: number;
     high: number;
     medium: number;
@@ -72,6 +80,10 @@ export interface SeverityBucket {
 export interface SeverityDistribution {
   total: number;
   distribution: SeverityBucket[];
+  by_source?: {
+    static: Record<string, number>;
+    ai: Record<string, number>;
+  } | null;
 }
 
 export interface StatisticsDashboard {

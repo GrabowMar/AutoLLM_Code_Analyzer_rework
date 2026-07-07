@@ -8,6 +8,13 @@ export interface RankingFindings {
   info: number;
 }
 
+export interface RankingVariance {
+  n_jobs: number;
+  density_per_kloc_mean: number | null;
+  density_per_kloc_stdev: number | null;
+  smoke_pass_rate_stdev: number | null;
+}
+
 export interface RankingRow {
   model_id: string;
   model_name: string;
@@ -20,11 +27,16 @@ export interface RankingRow {
   apps_completed: number;
   avg_duration: number;
   findings: RankingFindings;
+  ai_findings: RankingFindings | null;
+  n_trials: number;
+  functional_pass_rate: number | null;
+  variance: RankingVariance | null;
   benchmark_score: number;
   cost_efficiency_score: number;
   accessibility_score: number;
   adoption_score: number;
   mss_score: number;
+  empirical_quality_score: number | null;
   composite_score: number;
   [key: string]: unknown;
 }
@@ -47,7 +59,9 @@ export interface RankingsPagination {
   page: number;
   per_page: number;
   total: number;
-  pages: number;
+  total_pages: number;
+  has_next: boolean;
+  has_prev: boolean;
 }
 
 export interface RankingsResponse {
@@ -58,7 +72,7 @@ export interface RankingsResponse {
 }
 
 export interface RankingsStatistics {
-  total_models: number;
+  total: number;
   with_benchmarks: number;
   free_models: number;
   avg_mss: number;
@@ -113,5 +127,29 @@ export async function getTopModels(count = 10): Promise<RankingsTopResponse> {
 
 export async function refreshRankings(): Promise<RankingsStatus> {
   const res = await apiFetch("/rankings/refresh/", { method: "POST" });
+  return res.json();
+}
+
+export interface SensitivityRankEntry {
+  model_id: string;
+  empirical_quality: number | null;
+}
+
+export interface SensitivityScheme {
+  scheme: string;
+  weights: Record<string, number>;
+  ranking: SensitivityRankEntry[];
+  kendall_tau: number;
+  adjacent_swaps: string[][];
+}
+
+export interface SensitivityResponse {
+  models_evaluated: number;
+  baseline_ranking: SensitivityRankEntry[];
+  schemes: SensitivityScheme[];
+}
+
+export async function getRankingsSensitivity(): Promise<SensitivityResponse> {
+  const res = await apiFetch("/rankings/sensitivity/");
   return res.json();
 }

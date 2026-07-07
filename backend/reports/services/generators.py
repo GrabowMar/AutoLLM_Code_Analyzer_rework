@@ -15,16 +15,18 @@ from django.db.models import Count
 from django.utils import timezone
 
 from backend.analysis.models import AnalysisRun
+from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import Finding
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import GenerationJob
 from backend.llm_models.models import LLMModel
 
-from .loc import loc_for_jobs
-
 # Findings weighted by how much they matter for cross-model comparisons; raw
-# counts let a flood of style nits outweigh one exploitable hole.
-SEVERITY_WEIGHTS = {"critical": 10, "high": 5, "medium": 2, "low": 1, "info": 0}
+# counts let a flood of style nits outweigh one exploitable hole. Shared with
+# the rankings scoring so reports and /rankings can never disagree.
+from backend.rankings.services.constants import SEVERITY_WEIGHTS
+
+from .loc import loc_for_jobs
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -97,8 +99,10 @@ def _experiment_stats(jobs_qs, *, exclude_truncated: bool = True) -> dict[str, A
     Each completed job is one independent trial; its findings come from its
     latest finished analysis run. Truncated generations measure the token
     ceiling rather than the model, so they are excluded by default (but
-    reported), and stdev across trials is what makes single-run flukes —
-    e.g. an AI reviewer choosing to report 6 vs 21 findings — visible.
+    reported), and stdev across trials is what makes single-run flukes
+    visible. Deterministic-tool findings feed the main stats; AI-reviewer
+    findings — opinions with their own run-to-run variance (reporting 6 vs
+    21 findings on the same code) — are tracked separately.
     """
     completed = [j for j in jobs_qs if j.status == GenerationJob.Status.COMPLETED]
     truncated = [j for j in completed if _is_truncated_job(j)]
@@ -109,12 +113,19 @@ def _experiment_stats(jobs_qs, *, exclude_truncated: bool = True) -> dict[str, A
     run_to_job = dict(
         AnalysisRun.objects.filter(id__in=run_ids).values_list("id", "generation_job_id"),
     )
+    ai_slugs = AnalyzerTool.ai_slugs()
     sev_by_job: dict[Any, dict[str, int]] = {}
+    ai_by_job: dict[Any, dict[str, int]] = {}
     for row in (
-        Finding.objects.filter(result__run_id__in=run_ids).values("result__run_id", "severity").annotate(n=Count("id"))
+        Finding.objects.filter(result__run_id__in=run_ids)
+        .values("result__run_id", "result__tool_slug", "severity")
+        .annotate(n=Count("id"))
     ):
         job_id = run_to_job.get(row["result__run_id"])
-        sev_by_job.setdefault(job_id, {})[(row["severity"] or "").lower()] = row["n"]
+        bucket = ai_by_job if row["result__tool_slug"] in ai_slugs else sev_by_job
+        sev = (row["severity"] or "").lower()
+        per_job = bucket.setdefault(job_id, {})
+        per_job[sev] = per_job.get(sev, 0) + row["n"]
 
     loc_by_job = {
         entry["job_id"]: entry["total_loc"]
@@ -123,6 +134,7 @@ def _experiment_stats(jobs_qs, *, exclude_truncated: bool = True) -> dict[str, A
 
     analyzed_ids = set(run_to_job.values())
     totals, crit_high, weighted, per_kloc = [], [], [], []
+    ai_totals, ai_crit_high = [], []
     costs, durations, tokens = [], [], []
     functional_rates, functional_passed = [], 0
 
@@ -151,6 +163,9 @@ def _experiment_stats(jobs_qs, *, exclude_truncated: bool = True) -> dict[str, A
         loc = loc_by_job.get(str(job.id)) or loc_by_job.get(job.id) or 0
         if loc:
             per_kloc.append(round(score / loc * 1000, 4))
+        ai_sev = ai_by_job.get(str(job.id)) or ai_by_job.get(job.id) or {}
+        ai_totals.append(float(sum(ai_sev.values())))
+        ai_crit_high.append(float(ai_sev.get("critical", 0) + ai_sev.get("high", 0)))
 
     return {
         "trials": len(trials),
@@ -160,6 +175,8 @@ def _experiment_stats(jobs_qs, *, exclude_truncated: bool = True) -> dict[str, A
         "critical_high": _stat(crit_high),
         "weighted_score": _stat(weighted),
         "weighted_per_kloc": _stat(per_kloc),
+        "ai_findings_total": _stat(ai_totals),
+        "ai_critical_high": _stat(ai_crit_high),
         "cost": {**_stat(costs), "total": round(sum(costs), 6)},
         "duration": _stat(durations),
         "tokens": _stat(tokens),
@@ -252,7 +269,10 @@ def generate_model_analysis(config: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(msg) from e
 
     jobs = GenerationJob.objects.filter(model=model).select_related("model")
-    findings = _findings_for_jobs(jobs)
+    all_findings = _findings_for_jobs(jobs)
+    ai_slugs = AnalyzerTool.ai_slugs()
+    findings = all_findings.exclude(result__tool_slug__in=ai_slugs)
+    ai_findings = all_findings.filter(result__tool_slug__in=ai_slugs)
 
     from backend.analysis.models import ToolResult
 
@@ -268,6 +288,8 @@ def generate_model_analysis(config: dict[str, Any]) -> dict[str, Any]:
         "loc": loc_for_jobs(jobs),
         "findings": _severity_counts(findings),
         "total_findings": findings.count(),
+        "ai_findings": _severity_counts(ai_findings),
+        "ai_total": ai_findings.count(),
         "tools": _tools_for_jobs(jobs),
         "metrics_by_tool": _aggregate_tool_metrics(tool_results),
     }
@@ -308,12 +330,15 @@ def generate_template_comparison(config: dict[str, Any]) -> dict[str, Any]:
         bucket["jobs"].append(job)
 
     exclude_truncated = bool(config.get("exclude_truncated", True))
+    ai_slugs = AnalyzerTool.ai_slugs()
     rows = []
     for key, bucket in by_model.items():
         sub_jobs = GenerationJob.objects.filter(
             id__in=[j.id for j in bucket["jobs"]],
         )
-        findings = _findings_for_jobs(sub_jobs)
+        all_findings = _findings_for_jobs(sub_jobs)
+        findings = all_findings.exclude(result__tool_slug__in=ai_slugs)
+        ai_findings = all_findings.filter(result__tool_slug__in=ai_slugs)
         rows.append(
             {
                 "model_id": key,
@@ -323,6 +348,8 @@ def generate_template_comparison(config: dict[str, Any]) -> dict[str, Any]:
                 "loc": loc_for_jobs(sub_jobs),
                 "findings": _severity_counts(findings),
                 "total_findings": findings.count(),
+                "ai_findings": _severity_counts(ai_findings),
+                "ai_total": ai_findings.count(),
                 "stats": _experiment_stats(sub_jobs, exclude_truncated=exclude_truncated),
             },
         )
@@ -340,7 +367,28 @@ def generate_template_comparison(config: dict[str, Any]) -> dict[str, Any]:
         },
         "models": rows,
         "total_models": len(rows),
+        "sensitivity": _template_sensitivity(rows),
     }
+
+
+def _template_sensitivity(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Rank-stability of this template's models under alternative weights."""
+
+    from backend.rankings.services import compute_empirical_quality
+    from backend.rankings.services import compute_weight_sensitivity
+
+    entries = []
+    for row in rows:
+        entry = {
+            "model_id": row["model_id"],
+            "findings": row["findings"],
+            "local_loc": row["loc"]["total_loc"],
+            "apps_completed": row["generation"]["completed_jobs"],
+            "functional_pass_rate": None,
+        }
+        entry["empirical_quality_score"] = compute_empirical_quality(entry)
+        entries.append(entry)
+    return compute_weight_sensitivity(entries)
 
 
 def generate_tool_analysis(config: dict[str, Any]) -> dict[str, Any]:
@@ -441,11 +489,15 @@ def generate_generation_analytics(config: dict[str, Any]) -> dict[str, Any]:
 def generate_comprehensive(config: dict[str, Any]) -> dict[str, Any]:
     """Platform-wide aggregate combining all report dimensions."""
 
+    from backend.rankings.services import aggregate_rankings
+    from backend.rankings.services import compute_weight_sensitivity
+
     days = int(config.get("days", 30))
     return {
         "generated_at": timezone.now().isoformat(),
         "generation_analytics": generate_generation_analytics({"days": days}),
         "tool_analysis": generate_tool_analysis({}),
+        "rankings_sensitivity": compute_weight_sensitivity(aggregate_rankings()),
         "platform": {
             "total_models": LLMModel.objects.count(),
             "total_jobs": GenerationJob.objects.count(),

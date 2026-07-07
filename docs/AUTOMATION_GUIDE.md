@@ -37,7 +37,7 @@ The `/automation` section has a node-based editor: steps are nodes, `depends_on`
 
 Triggering a run creates the `PipelineRun` plus pending step runs, then dispatches via Celery (`run_pipeline_task`) — falling back to a daemon thread if the broker is unreachable. Schedules additionally need something ticking the scheduler: Celery beat or the fallback command, see [Background services](/docs/BACKGROUND_SERVICES).
 
-Batches put the matrix in `Batch.config` (`{"pipeline_id": ..., "matrix": {"models": [...], "templates": [...]}}`) and expand to one run per combination.
+Batches put the matrix in `Batch.config` (`{"pipeline_id": ..., "matrix": {"models": [...], "templates": [...]}}`) and expand to one run per combination. An optional `"repeats": N` (1–20) runs every combination N times; with repeats > 1 each run gets a 1-based `trial` param (usable as `{{params.trial}}` in step configs). Model comparisons need n > 1 — between-run variance is the point of repeating.
 
 ## API
 

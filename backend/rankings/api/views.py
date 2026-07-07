@@ -9,6 +9,7 @@ from ninja import Router
 
 from backend.rankings import services
 from backend.rankings.api.schema import RankingsResponse
+from backend.rankings.api.schema import SensitivityResponse
 from backend.rankings.api.schema import StatusResponse
 from backend.rankings.api.schema import TopModelsResponse
 
@@ -92,6 +93,13 @@ def status(request):
     return services.get_status()
 
 
+@router.get("/sensitivity/", response=SensitivityResponse)
+def sensitivity(request):
+    """Empirical-ranking stability under alternative severity weightings."""
+
+    return services.compute_weight_sensitivity(services.aggregate_rankings())
+
+
 @router.post("/refresh/", response=StatusResponse)
 def refresh(request):
     """Recompute rankings (no-op cache refresh; aggregation is computed live)."""
@@ -108,19 +116,29 @@ def export_csv(request):
 
     rankings = services.aggregate_rankings()
     buf = io.StringIO()
+    # Identity, then the metadata decision aid (MSS + components), then the
+    # locally measured empirical columns.
     fieldnames = [
         "model_id",
         "model_name",
         "provider",
+        "is_free",
+        "context_length",
+        "price_per_million_input",
+        "price_per_million_output",
         "mss_score",
         "adoption_score",
         "benchmark_score",
         "cost_efficiency_score",
         "accessibility_score",
-        "is_free",
-        "context_length",
-        "price_per_million_input",
-        "price_per_million_output",
+        "composite_score",
+        "empirical_quality_score",
+        "smoke_pass_rate",
+        "n_trials",
+        "empirical_density_stdev",
+        "smoke_pass_rate_stdev",
+        "findings_total_static",
+        "ai_findings_total",
         "apps",
         "apps_completed",
     ]
@@ -128,6 +146,12 @@ def export_csv(request):
     writer.writeheader()
     for entry in rankings:
         row: dict[str, Any] = {k: entry.get(k) for k in fieldnames}
+        variance = entry.get("variance") or {}
+        row["smoke_pass_rate"] = entry.get("functional_pass_rate")
+        row["empirical_density_stdev"] = variance.get("density_per_kloc_stdev")
+        row["smoke_pass_rate_stdev"] = variance.get("smoke_pass_rate_stdev")
+        row["findings_total_static"] = sum((entry.get("findings") or {}).values())
+        row["ai_findings_total"] = sum((entry.get("ai_findings") or {}).values())
         writer.writerow(row)
     response = HttpResponse(buf.getvalue(), content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="model_rankings.csv"'
