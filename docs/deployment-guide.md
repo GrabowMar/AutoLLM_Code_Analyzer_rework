@@ -46,6 +46,16 @@ In production each generated app is served at `https://<container>.<APPS_DOMAIN>
 
 If a route file goes stale (e.g. after manual container surgery), `python manage.py reconcile_app_routes` rewrites them all; `sync_container_status` reconciles DB state with Docker. Both are worth a cron entry.
 
+### Without Traefik: a single reverse proxy
+
+The local compose stack can serve the same subdomain URLs through one existing edge proxy (Caddy, nginx) fronting Django:
+
+1. In `.envs/.local/.django` set `APPS_DOMAIN=<base domain>` and `APPS_SUBDOMAIN_PROXY=True`, and add `.<APPS_DOMAIN>` to `DJANGO_ALLOWED_HOSTS`.
+2. At the edge, route `*.<APPS_DOMAIN>` to Django's host port with a wildcard certificate. Wildcards need DNS-01 issuance, so use a Caddy build with your DNS provider's module (e.g. `xcaddy build --with github.com/caddy-dns/ovh`) or a certbot DNS plugin. More-specific site blocks (your main domain) keep winning over the wildcard.
+3. Django's `AppSubdomainProxyMiddleware` picks up `llm-*.<APPS_DOMAIN>` requests and reverse-proxies them to the matching app container; every other subdomain falls through untouched.
+
+Apps keep their host ports in this mode — the middleware fronts them, so it also works for containers that are already running.
+
 ## See also
 
 - [Quickstart](/docs/QUICKSTART) — the local equivalent of all this.
