@@ -46,7 +46,7 @@ class ContainerInstanceSchema(ModelSchema):
         return last_failed or ""
 
     @staticmethod
-    def resolve_app_url(obj: ContainerInstance) -> str | None:
+    def resolve_app_url(obj: ContainerInstance) -> str | None:  # noqa: PLR0911
         from django.conf import settings
 
         from backend.runtime.middleware import APP_NAME_PREFIX
