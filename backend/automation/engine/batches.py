@@ -27,8 +27,12 @@ def expand_batch(batch_id: Any) -> list[Any]:
                 "models": ["gpt-4", "claude-3"],
                 "templates": ["todo-app", "chat-app"],
                 ...
-            }
+            },
+            "repeats": 3,   # optional; independent runs per combination
         }
+
+    With ``repeats`` > 1 each combination is expanded that many times and the
+    runs get a 1-based ``trial`` param so they stay distinguishable.
 
     Returns list of PipelineRun IDs created.
     """
@@ -56,13 +60,18 @@ def expand_batch(batch_id: Any) -> list[Any]:
     keys = list(matrix.keys())
     values = [matrix[k] if isinstance(matrix[k], list) else [matrix[k]] for k in keys]
     combinations = list(itertools.product(*values))
+    repeats = max(1, int(config.get("repeats", 1) or 1))
 
     run_ids: list[Any] = []
     batch.status = Batch.Status.RUNNING
     batch.save(update_fields=["status"])
 
-    for combo in combinations:
+    for combo, trial in itertools.product(combinations, range(1, repeats + 1)):
         params = dict(zip(keys, combo, strict=False))
+        if repeats > 1:
+            # Only with actual repetition, so single-run batches and existing
+            # {{params.*}} references are untouched.
+            params["trial"] = trial
 
         run = PipelineRun.objects.create(
             pipeline=pipeline,

@@ -15,12 +15,14 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import {
 		getRankings,
+		getRankingsSensitivity,
 		exportRankingsUrl,
 		type RankingRow,
 		type RankingsResponse,
+		type SensitivityResponse,
 	} from '$lib/api/client';
 
-	type SortKey = 'mss' | 'benchmark' | 'cost_efficiency' | 'accessibility' | 'adoption';
+	type SortKey = 'mss' | 'empirical' | 'composite' | 'benchmark' | 'cost_efficiency' | 'accessibility' | 'adoption';
 
 	let searchQuery = $state('');
 	let providerFilter = $state('all');
@@ -36,6 +38,17 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let data = $state<RankingsResponse | null>(null);
+	let sensitivity = $state<SensitivityResponse | null>(null);
+	let sensitivityError = $state(false);
+
+	function toggleMethodology() {
+		showMethodology = !showMethodology;
+		if (showMethodology && !sensitivity && !sensitivityError) {
+			getRankingsSensitivity()
+				.then((s) => (sensitivity = s))
+				.catch(() => (sensitivityError = true));
+		}
+	}
 
 	let providers = $derived(() => {
 		const set = new Set<string>();
@@ -103,6 +116,20 @@
 		return v.toFixed(1);
 	}
 
+	function empiricalTitle(model: RankingRow): string {
+		const v = model.variance;
+		const parts = [`${model.n_trials} completed trial${model.n_trials === 1 ? 's — single runs are anecdotes' : 's'}`];
+		if (v?.density_per_kloc_mean != null) {
+			parts.push(`weighted findings density ${v.density_per_kloc_mean.toFixed(1)}/KLOC` +
+				(v.density_per_kloc_stdev != null ? ` (±${v.density_per_kloc_stdev.toFixed(1)} between trials)` : ''));
+		}
+		if (model.functional_pass_rate != null) {
+			parts.push(`smoke pass rate ${(model.functional_pass_rate * 100).toFixed(0)}%` +
+				(v?.smoke_pass_rate_stdev != null ? ` (±${(v.smoke_pass_rate_stdev * 100).toFixed(0)}pp)` : ''));
+		}
+		return parts.join(' · ');
+	}
+
 	function indexOnPage(i: number): number {
 		return (page - 1) * perPage + i + 1;
 	}
@@ -142,7 +169,7 @@
 	<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 		<div class="page-header min-w-0">
 			<h1>Model Rankings</h1>
-			<p>Compare model performance using the Model Scoring System (MSS).</p>
+			<p>Empirical quality measured on this platform, alongside the metadata-based MSS decision aid.</p>
 		</div>
 		<div class="flex flex-wrap gap-2">
 			<Button variant="outline" size="sm" onclick={load} disabled={loading}>
@@ -174,7 +201,7 @@
 				<div class="text-2xl font-semibold font-mono tabular-nums">{data.statistics.free_models}</div>
 			</div>
 			<div class="kpi-card">
-				<div class="text-xs text-muted-foreground uppercase tracking-wider">Avg MSS</div>
+				<div class="text-xs text-muted-foreground uppercase tracking-wider">Avg MSS (decision aid)</div>
 				<div class="text-2xl font-semibold font-mono tabular-nums">{(data.statistics.avg_mss * 100).toFixed(1)}</div>
 			</div>
 		</div>
@@ -182,26 +209,84 @@
 
 	<!-- Methodology Panel -->
 	<Card.Root class="border-blue-500/20 bg-blue-500/5">
-		<button class="flex w-full items-center gap-3 p-4 text-left text-sm" onclick={() => showMethodology = !showMethodology}>
+		<button class="flex w-full items-center gap-3 p-4 text-left text-sm" onclick={toggleMethodology}>
 			<Info class="h-4 w-4 text-blue-500 shrink-0" />
-			<span class="font-medium">MSS Methodology</span>
+			<span class="font-medium">Methodology: what is measured vs. what is opinion</span>
 			<Badge variant="outline" class="ml-auto text-[10px]">{showMethodology ? 'Hide' : 'Show'}</Badge>
 		</button>
 		{#if showMethodology}
-			<Card.Content class="pt-0 text-sm text-muted-foreground space-y-2">
-				<p>The <strong>Model Scoring System (MSS)</strong> is a weighted composite score (0–1) derived from four dimensions:</p>
-				<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-					{#each [
-						{ label: 'Adoption (35%)', desc: 'OpenRouter rank and local app generation count' },
-						{ label: 'Benchmarks (30%)', desc: 'Public coding benchmarks: HumanEval, MBPP, SWE-bench, BFCL, WebDev Elo, LiveBench, etc.' },
-						{ label: 'Cost Efficiency (20%)', desc: 'Performance per dollar + context window bonus' },
-						{ label: 'Accessibility (15%)', desc: 'License, API stability, documentation quality' },
-					] as dim}
-						<div class="rounded-lg border p-2.5">
-							<span class="text-xs font-medium text-foreground">{dim.label}</span>
-							<p class="text-[11px] text-muted-foreground">{dim.desc}</p>
+			<Card.Content class="pt-0 text-sm text-muted-foreground space-y-4">
+				<div class="space-y-2">
+					<p class="text-xs font-semibold uppercase tracking-wider text-foreground">Measurement — Empirical quality</p>
+					<p>
+						Measured on this platform: severity-weighted findings from the <strong>deterministic analysis
+						tools only</strong> (AI-reviewer findings are tracked separately and never enter this score),
+						normalized per KLOC of generated code, blended 60/40 with the <strong>smoke pass rate</strong>.
+						The smoke test probes <code>/api/health</code> plus the template's declared GET endpoints —
+						it shows the app runs, not that it is functionally correct. Scores come with the number of
+						trials (n) and between-trial spread; treat n=1 as an anecdote, not a result.
+					</p>
+				</div>
+				<div class="space-y-2">
+					<p class="text-xs font-semibold uppercase tracking-wider text-foreground">Decision aid — MSS</p>
+					<p>The <strong>Model Scoring System (MSS)</strong> is an opinionated composite of model metadata (0–1), not a measurement. Its four dimensions and weights are asserted, not derived:</p>
+					<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+						{#each [
+							{ label: 'Adoption (35%)', desc: 'OpenRouter rank and local app generation count' },
+							{ label: 'Benchmarks (30%)', desc: 'Public coding benchmarks: HumanEval, MBPP, SWE-bench, BFCL, WebDev Elo, LiveBench, etc.' },
+							{ label: 'Cost Efficiency (20%)', desc: 'Performance per dollar + context window bonus' },
+							{ label: 'Accessibility (15%)', desc: 'License, API stability, documentation quality' },
+						] as dim}
+							<div class="rounded-lg border p-2.5">
+								<span class="text-xs font-medium text-foreground">{dim.label}</span>
+								<p class="text-[11px] text-muted-foreground">{dim.desc}</p>
+							</div>
+						{/each}
+					</div>
+					<p class="text-[11px]"><strong>Composite</strong> blends MSS (60%) with empirical quality (40%) when local measurements exist; models never exercised here keep composite = MSS.</p>
+				</div>
+				<div class="space-y-2">
+					<p class="text-xs font-semibold uppercase tracking-wider text-foreground">Sensitivity — do the severity weights matter?</p>
+					<p class="text-[11px]">
+						The empirical ranking is recomputed under alternative severity weightings. Kendall's tau near 1.0
+						means the order barely depends on the chosen weights; listed pairs swap places under that scheme.
+					</p>
+					{#if sensitivity && sensitivity.models_evaluated >= 2}
+						<div class="overflow-x-auto">
+							<table class="w-full text-xs">
+								<thead>
+									<tr class="border-b text-left text-muted-foreground">
+										<th class="py-1.5 pr-3 font-medium">Scheme</th>
+										<th class="py-1.5 pr-3 font-medium">Weights (crit/high/med/low/info)</th>
+										<th class="py-1.5 pr-3 text-right font-medium">Kendall's τ</th>
+										<th class="py-1.5 font-medium">Rank swaps vs. baseline</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each sensitivity.schemes as s}
+										<tr class="border-b border-border/50">
+											<td class="py-1.5 pr-3 font-mono">{s.scheme}</td>
+											<td class="py-1.5 pr-3 font-mono tabular-nums">{s.weights.critical}/{s.weights.high}/{s.weights.medium}/{s.weights.low}/{s.weights.info}</td>
+											<td class="py-1.5 pr-3 text-right font-mono tabular-nums {s.kendall_tau >= 0.9 ? 'text-emerald-500' : s.kendall_tau >= 0.7 ? 'text-amber-500' : 'text-red-400'}">{s.kendall_tau.toFixed(2)}</td>
+											<td class="py-1.5">
+												{#if s.adjacent_swaps.length === 0}
+													<span class="text-emerald-500">none — stable</span>
+												{:else}
+													{s.adjacent_swaps.map((p) => p.join(' ⇄ ')).join(', ')}
+												{/if}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
 						</div>
-					{/each}
+					{:else if sensitivity}
+						<p class="text-[11px] italic">Fewer than two models have local measurements — run experiments on more models to compare rank stability.</p>
+					{:else if sensitivityError}
+						<p class="text-[11px] italic">Sensitivity data unavailable.</p>
+					{:else}
+						<p class="text-[11px] italic">Loading sensitivity analysis…</p>
+					{/if}
 				</div>
 				<div class="flex flex-wrap gap-2 pt-1">
 					<a href="https://www.swebench.com" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs text-blue-500 hover:underline">
@@ -264,6 +349,8 @@
 			<div class="fb-group">
 				<span class="fb-group-label">Sort</span>
 				<button class="fb-chip {sortBy === 'mss' ? 'fb-chip-on' : ''}" onclick={() => toggleSort('mss')}>MSS</button>
+				<button class="fb-chip {sortBy === 'empirical' ? 'fb-chip-on' : ''}" onclick={() => toggleSort('empirical')}>Empirical</button>
+				<button class="fb-chip {sortBy === 'composite' ? 'fb-chip-on' : ''}" onclick={() => toggleSort('composite')}>Composite</button>
 				<button class="fb-chip {sortBy === 'benchmark' ? 'fb-chip-on' : ''}" onclick={() => toggleSort('benchmark')}>Benchmark</button>
 				<button class="fb-chip {sortBy === 'cost_efficiency' ? 'fb-chip-on' : ''}" onclick={() => toggleSort('cost_efficiency')}>Cost</button>
 				<button class="fb-chip {sortBy === 'accessibility' ? 'fb-chip-on' : ''}" onclick={() => toggleSort('accessibility')}>Accessibility</button>
@@ -318,7 +405,9 @@
 								<th class="w-14 px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Rank</th>
 								<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Model</th>
 								{#each [
-									{ key: 'mss' as SortKey, label: 'MSS' },
+									{ key: 'empirical' as SortKey, label: 'Empirical (measured)' },
+									{ key: 'mss' as SortKey, label: 'MSS (meta)' },
+									{ key: 'composite' as SortKey, label: 'Composite' },
 									{ key: 'adoption' as SortKey, label: 'Adoption' },
 									{ key: 'benchmark' as SortKey, label: 'Bench' },
 									{ key: 'cost_efficiency' as SortKey, label: 'Cost-Eff.' },
@@ -361,7 +450,16 @@
 											</div>
 										</div>
 									</td>
-									<td class="px-3 py-2 text-right align-top font-mono tabular-nums font-bold {scoreColor01(model.mss_score)}">{pct(model.mss_score)}</td>
+									<td class="px-3 py-2 text-right align-top" title={empiricalTitle(model)}>
+										{#if model.empirical_quality_score != null}
+											<div class="font-mono tabular-nums font-bold {scoreColor01(model.empirical_quality_score)}">{pct(model.empirical_quality_score)}</div>
+											<div class="text-[9px] text-muted-foreground whitespace-nowrap">n={model.n_trials}{model.variance?.density_per_kloc_stdev != null ? ` · ±${model.variance.density_per_kloc_stdev.toFixed(1)}/KLOC` : ''}</div>
+										{:else}
+											<span class="text-xs text-muted-foreground">—</span>
+										{/if}
+									</td>
+									<td class="px-3 py-2 text-right align-top font-mono tabular-nums {scoreColor01(model.mss_score)}">{pct(model.mss_score)}</td>
+									<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor01(model.composite_score)}">{pct(model.composite_score)}</td>
 									<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor01(model.adoption_score)}">{pct(model.adoption_score)}</td>
 									<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor01(model.benchmark_score)}">{pct(model.benchmark_score)}</td>
 									<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor01(model.cost_efficiency_score)}">{pct(model.cost_efficiency_score)}</td>
@@ -394,13 +492,26 @@
 									<a href="/models/{encodeURIComponent(model.model_id)}" class="font-medium text-sm hover:underline truncate block">{model.model_name}</a>
 									<Badge variant="outline" class="mt-0.5 text-[10px]">{model.provider}</Badge>
 								</div>
-								<div class="text-right shrink-0">
-									<div class="text-[10px] font-medium text-muted-foreground">MSS</div>
-									<div class="text-lg font-bold font-mono {scoreColor01(model.mss_score)}">{pct(model.mss_score)}</div>
+								<div class="text-right shrink-0" title={empiricalTitle(model)}>
+									{#if model.empirical_quality_score != null}
+										<div class="text-[10px] font-medium text-muted-foreground">Empirical (n={model.n_trials})</div>
+										<div class="text-lg font-bold font-mono {scoreColor01(model.empirical_quality_score)}">{pct(model.empirical_quality_score)}</div>
+									{:else}
+										<div class="text-[10px] font-medium text-muted-foreground">MSS (meta)</div>
+										<div class="text-lg font-bold font-mono {scoreColor01(model.mss_score)}">{pct(model.mss_score)}</div>
+									{/if}
 								</div>
 							</div>
 
 							<div class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
+								<div class="flex items-center justify-between">
+									<span class="text-[10px] text-muted-foreground">MSS (meta)</span>
+									<span class="text-xs font-mono font-medium {scoreColor01(model.mss_score)}">{pct(model.mss_score)}</span>
+								</div>
+								<div class="flex items-center justify-between">
+									<span class="text-[10px] text-muted-foreground">Composite</span>
+									<span class="text-xs font-mono font-medium {scoreColor01(model.composite_score)}">{pct(model.composite_score)}</span>
+								</div>
 								<div class="flex items-center justify-between">
 									<span class="text-[10px] text-muted-foreground">Adoption</span>
 									<span class="text-xs font-mono font-medium {scoreColor01(model.adoption_score)}">{pct(model.adoption_score)}</span>

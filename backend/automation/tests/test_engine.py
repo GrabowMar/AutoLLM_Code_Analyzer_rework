@@ -528,6 +528,36 @@ class TestBatchExpansion:
         item_params = [item.params for item in items]
         assert {"models": "a", "templates": "t1"} in item_params
         assert {"models": "b", "templates": "t1"} in item_params
+        # without repeats no trial param is injected
+        assert all("trial" not in p for p in item_params)
+
+    def test_repeats_multiplies_combinations_with_trial_param(self):
+        user = UserFactory()
+        pipeline = PipelineFactory(owner=user)
+        PipelineStepFactory(
+            pipeline=pipeline,
+            name="w",
+            kind="wait",
+            config={"seconds": 0},
+        )
+
+        batch = BatchFactory(
+            owner=user,
+            config={
+                "pipeline_id": str(pipeline.id),
+                "matrix": {"models": ["a", "b"]},
+                "repeats": 3,
+            },
+        )
+
+        with patch("backend.automation.engine.batches.execute_run"):
+            run_ids = expand_batch(batch.id)
+
+        assert len(run_ids) == 6
+        item_params = [item.params for item in BatchItem.objects.filter(batch=batch)]
+        for model in ("a", "b"):
+            trials = sorted(p["trial"] for p in item_params if p["models"] == model)
+            assert trials == [1, 2, 3]
 
     def test_update_batch_status_all_succeeded(self):
         user = UserFactory()

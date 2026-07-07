@@ -113,6 +113,22 @@ def test_get_severity_distribution_returns_all_buckets():
     assert severities["info"] == 0
 
 
+def test_get_severity_distribution_splits_ai_from_static():
+    user = UserFactory()
+    AnalyzerToolFactory(slug="llm_review", kind="ai", category="ai")
+    run = AnalysisRunFactory(created_by=user, status=AnalysisRun.Status.COMPLETED)
+    static_result = ToolResultFactory(run=run, tool_slug="bandit", category="security")
+    ai_result = ToolResultFactory(run=run, tool_slug="llm_review", category="ai")
+    FindingFactory.create_batch(3, result=static_result, severity=Finding.Severity.HIGH)
+    FindingFactory.create_batch(2, result=ai_result, severity=Finding.Severity.HIGH)
+
+    payload = services.get_severity_distribution(user)
+
+    assert payload["total"] == 5
+    assert payload["by_source"]["static"]["high"] == 3
+    assert payload["by_source"]["ai"]["high"] == 2
+
+
 def test_get_analysis_trends_includes_today():
     user = UserFactory()
     _setup_data(user)
@@ -127,9 +143,11 @@ def test_get_analysis_trends_includes_today():
     assert last["total"] >= 1
 
 
-def test_get_model_comparison_scores_present():
+def test_get_model_comparison_uses_shared_rankings_scoring():
+    from backend.rankings.services import aggregate_rankings
+
     user = UserFactory()
-    _setup_data(user)
+    model = _setup_data(user)
 
     rows = services.get_model_comparison(user, limit=10)
 
@@ -138,10 +156,43 @@ def test_get_model_comparison_scores_present():
     assert row["name"] == "GPT-4o"
     assert row["apps"] == 4
     assert row["apps_completed"] == 3
-    assert 0 <= row["security"] <= 10
-    assert 0 <= row["performance"] <= 100
-    assert "findings" in row
+    assert row["success_rate"] == 75.0
+    assert 0 <= row["mss"] <= 1
     assert row["findings"]["critical"] == 2
+    assert row["ai_findings"] == {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    # no lines_of_code in metrics → no empirical measurement, composite == mss
+    assert row["empirical_quality"] is None
+    assert row["composite"] == row["mss"]
+    # the same model on /rankings must show the same numbers
+    ranking = next(r for r in aggregate_rankings(user=user) if r["model_id"] == model.model_id)
+    assert row["mss"] == ranking["mss_score"]
+    assert row["composite"] == ranking["composite_score"]
+    assert row["findings"] == ranking["findings"]
+
+
+def test_get_model_comparison_excludes_ai_findings():
+    user = UserFactory()
+    model = LLMModelFactory(provider="OpenAI", model_name="GPT-4o")
+    AnalyzerToolFactory(slug="llm_review", kind="ai", category="ai")
+    job = GenerationJobFactory(
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        metrics={"lines_of_code": 1000},
+    )
+    run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+    static_result = ToolResultFactory(run=run, tool_slug="bandit", category="security")
+    ai_result = ToolResultFactory(run=run, tool_slug="llm_review", category="ai")
+    FindingFactory.create_batch(2, result=static_result, severity=Finding.Severity.HIGH)
+    FindingFactory.create_batch(5, result=ai_result, severity=Finding.Severity.CRITICAL)
+
+    rows = services.get_model_comparison(user, limit=10)
+
+    row = rows[0]
+    assert row["findings"] == {"critical": 0, "high": 2, "medium": 0, "low": 0, "info": 0}
+    assert row["ai_findings"] == {"critical": 5, "high": 0, "medium": 0, "low": 0, "info": 0}
+    assert row["empirical_quality"] is not None
+    assert row["n_trials"] == 1
 
 
 def test_get_tool_effectiveness_per_analyzer():

@@ -66,3 +66,32 @@ A full experiment is: generate an app per model → run it → analyze it → co
 1. A generation job calls OpenRouter with the job owner's key and writes structured code artifacts.
 2. An analysis run executes the selected tools against that code and persists normalized `Finding` rows plus per-tool metrics.
 3. Statistics, rankings, and reports aggregate over findings and jobs — counting only the latest completed run per job — and everything is downloadable via the export endpoints ([API reference](/docs/api-reference)).
+
+## Scoring: measurement vs. decision aid
+
+Rankings keep two kinds of numbers strictly apart (`backend/rankings/services/`):
+
+- **Empirical quality (measured).** Severity-weighted findings from the deterministic
+  container tools only, normalized per KLOC of generated code and blended with the
+  smoke pass rate. Findings from AI-kind tools (`AnalyzerTool.kind == "ai"`, e.g. the
+  LLM reviewer) are opinions with their own run-to-run variance, so they never enter
+  this score — they are reported separately as `ai_findings`. Each score carries
+  `n_trials` and between-trial spread (stdev of per-job findings density and smoke
+  pass rate); a single completed trial is an anecdote, not a result.
+- **MSS (decision aid).** An opinionated composite of model metadata — adoption,
+  public benchmarks, cost, accessibility — with asserted weights. Useful for picking
+  a model, but not a measurement made here. **Composite** blends MSS with empirical
+  quality when local measurements exist.
+
+Because the baseline severity weights (`SEVERITY_WEIGHTS` in
+`rankings/services/constants.py`) are asserted rather than derived, the platform also
+reports a sensitivity analysis: the empirical ranking is recomputed under the
+alternative schemes in `SEVERITY_WEIGHT_SCHEMES` and compared with Kendall's tau plus
+the list of rank swaps (`GET /api/rankings/sensitivity/`, also embedded in
+template-comparison and comprehensive reports). Tau near 1.0 across schemes means the
+ordering does not hinge on the particular weight choice.
+
+The "smoke pass rate" is exactly that: `/api/health` plus the template's declared GET
+endpoints. It shows a generated app starts and responds, not that it is functionally
+correct. The statistics page's model comparison delegates to the same rankings
+aggregation, so the two pages cannot disagree.

@@ -15,6 +15,15 @@ class FindingsRollup(Schema):
     info: int = 0
 
 
+class VarianceStats(Schema):
+    """Per-trial spread of the empirical inputs (stdev is None below n=2)."""
+
+    n_jobs: int = 0
+    density_per_kloc_mean: float | None = None
+    density_per_kloc_stdev: float | None = None
+    smoke_pass_rate_stdev: float | None = None
+
+
 class RankingRow(Schema):
     model_id: str
     model_name: str
@@ -27,6 +36,10 @@ class RankingRow(Schema):
     apps_completed: int = 0
     avg_duration: float = 0.0
     findings: FindingsRollup
+    ai_findings: FindingsRollup | None = None
+    n_trials: int = 0
+    functional_pass_rate: float | None = None
+    variance: VarianceStats | None = None
     benchmark_score: float
     cost_efficiency_score: float
     accessibility_score: float
@@ -74,3 +87,22 @@ class StatusResponse(Schema):
 class TopModelsResponse(Schema):
     count: int
     models: list[dict[str, Any]]
+
+
+class SensitivityRankEntry(Schema):
+    model_id: str
+    empirical_quality: float | None = None
+
+
+class SensitivitySchemeRow(Schema):
+    scheme: str
+    weights: dict[str, int]
+    ranking: list[SensitivityRankEntry]
+    kendall_tau: float
+    adjacent_swaps: list[list[str]]
+
+
+class SensitivityResponse(Schema):
+    models_evaluated: int
+    baseline_ranking: list[SensitivityRankEntry]
+    schemes: list[SensitivitySchemeRow]

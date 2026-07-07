@@ -230,6 +230,59 @@ def test_template_comparison_functional_rollup():
     assert functional["pass_rate"]["mean"] == 0.75
 
 
+def test_template_comparison_splits_ai_findings_from_static():
+    from backend.analysis.models import AnalysisRun
+    from backend.analysis.models import Finding
+    from backend.analysis.tests.factories import AnalyzerToolFactory
+    from backend.analysis.tests.factories import ToolResultFactory
+
+    AnalyzerToolFactory(slug="llm_review", kind="ai", category="ai")
+    user = UserFactory()
+    template = AppRequirementTemplateFactory()
+    model = LLMModelFactory(model_id="m1")
+    job = _job_with_run_findings(user, model, template, ["high"] * 2)
+    run = AnalysisRun.objects.get(generation_job=job)
+    ai_result = ToolResultFactory(run=run, tool_slug="llm_review")
+    for _ in range(5):
+        Finding.objects.create(result=ai_result, severity="critical", title="opinion")
+
+    data = generators.generate_template_comparison({"template_slug": template.slug})
+
+    row = data["models"][0]
+    assert row["findings"] == {"critical": 0, "high": 2, "medium": 0, "low": 0, "info": 0}
+    assert row["total_findings"] == 2
+    assert row["ai_findings"] == {"critical": 5, "high": 0, "medium": 0, "low": 0, "info": 0}
+    assert row["ai_total"] == 5
+    stats = row["stats"]
+    assert stats["findings_total"]["mean"] == 2.0
+    assert stats["critical_high"]["mean"] == 2.0  # AI criticals not counted
+    assert stats["ai_findings_total"]["mean"] == 5.0
+    assert stats["ai_critical_high"]["mean"] == 5.0
+
+
+def test_template_comparison_includes_weight_sensitivity():
+    user = UserFactory()
+    template = AppRequirementTemplateFactory()
+    # crit-heavy vs low-heavy model on 1000 LOC each: baseline densities 30 vs
+    # 25 per KLOC rank low/m first; under "flat" (crit weight 10 → 1) the
+    # densities become 3 vs 25 and the order flips.
+    code = {"backend_code": "x\n" * 1000}
+    _job_with_run_findings(user, LLMModelFactory(model_id="crit/m"), template, ["critical"] * 3, result_data=code)
+    _job_with_run_findings(user, LLMModelFactory(model_id="low/m"), template, ["low"] * 25, result_data=code)
+
+    data = generators.generate_template_comparison({"template_slug": template.slug})
+
+    sensitivity = data["sensitivity"]
+    assert sensitivity["models_evaluated"] == 2
+    assert [r["model_id"] for r in sensitivity["baseline_ranking"]] == ["low/m", "crit/m"]
+    schemes = {s["scheme"]: s for s in sensitivity["schemes"]}
+    assert set(schemes) == {"security_heavy", "flat", "info_included"}
+    for s in schemes.values():
+        assert -1.0 <= s["kendall_tau"] <= 1.0
+    assert schemes["flat"]["kendall_tau"] == -1.0
+    assert schemes["flat"]["adjacent_swaps"] == [("low/m", "crit/m")]
+
+
 def test_generate_model_analysis_missing_id_raises():
     with pytest.raises(ValueError, match="model_id"):
         generators.generate_model_analysis({})

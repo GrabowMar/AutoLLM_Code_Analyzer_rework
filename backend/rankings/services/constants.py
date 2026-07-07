@@ -72,6 +72,18 @@ DOCS_SCORES = {
 # scores zero — our 4-model URL-shortener experiment measured ~48-132/KLOC
 # with the full 7-tool set, so 150 spreads observed models across the scale.
 SEVERITY_WEIGHTS = {"critical": 10, "high": 5, "medium": 2, "low": 1, "info": 0}
+
+# Alternative severity weightings for the rank-stability sensitivity analysis:
+# the empirical ranking is recomputed under each scheme and compared to the
+# baseline (Kendall's tau + adjacent swaps). "baseline" aliases
+# SEVERITY_WEIGHTS so the two can never drift apart.
+SEVERITY_WEIGHT_SCHEMES = {
+    "baseline": SEVERITY_WEIGHTS,
+    "security_heavy": {"critical": 10, "high": 5, "medium": 1, "low": 0, "info": 0},
+    "flat": {"critical": 1, "high": 1, "medium": 1, "low": 1, "info": 0},
+    "info_included": {"critical": 10, "high": 5, "medium": 2, "low": 1, "info": 1},
+}
+
 EMPIRICAL_DENSITY_CAP = 150.0
 EMPIRICAL_FUNCTIONAL_WEIGHT = 0.4  # rest goes to findings density
 
