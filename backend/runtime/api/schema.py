@@ -46,8 +46,16 @@ class ContainerInstanceSchema(ModelSchema):
         return last_failed or ""
 
     @staticmethod
-    def resolve_app_url(obj: ContainerInstance) -> str | None:
+    def resolve_app_url(obj: ContainerInstance) -> str | None:  # noqa: PLR0911
         from django.conf import settings
+
+        from backend.runtime.middleware import APP_NAME_PREFIX
+
+        # Only sample-app containers are routable (the subdomain middleware and
+        # Traefik routes are keyed on the llm-* name); analyzer containers etc.
+        # must not advertise a URL.
+        if not obj.name.startswith(APP_NAME_PREFIX):
+            return None
 
         # Subdomain mode: each app at the root of its own origin
         # (Traefik bridge, or a wildcard edge route → Django proxy).
