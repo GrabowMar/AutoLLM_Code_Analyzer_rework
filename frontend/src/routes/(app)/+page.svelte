@@ -4,8 +4,6 @@
 	import { toast } from 'svelte-sonner';
 	import { getAuth } from '$lib/stores/auth.svelte';
 	import {
-		getAnalysisStats,
-		getAnalysisTasks,
 		getStatisticsOverview,
 		getStatisticsRecentActivity,
 		getStatisticsAnalyzerHealth,
@@ -22,8 +20,8 @@
 		type SeverityDistribution,
 		type AnalysisTrends,
 		type GenerationJobList,
-		type AnalysisTaskList,
 	} from '$lib/api/client';
+	import { listRuns, type AnalysisRunListItem } from '$lib/api/runs';
 	import { formatApiError } from '$lib/api/core';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
@@ -114,8 +112,9 @@
 	async function loadAll() {
 		isRefreshing = true;
 		const [
-			statsResult,
-			tasksResult,
+			runsResult,
+			completedResult,
+			runningResult,
 			overviewResult,
 			activityResult,
 			healthResult,
@@ -123,8 +122,9 @@
 			trendsResult,
 			jobsResult,
 		] = await Promise.allSettled([
-			getAnalysisStats(),
-			getAnalysisTasks({ per_page: 5 }),
+			listRuns({ per_page: 5 }),
+			listRuns({ status: 'completed', per_page: 1 }),
+			listRuns({ status: 'running', per_page: 1 }),
 			getStatisticsOverview(),
 			getStatisticsRecentActivity(8),
 			getStatisticsAnalyzerHealth(),
@@ -133,23 +133,26 @@
 			getGenerationJobs({ per_page: 5 }),
 		]);
 
-		if (statsResult.status === 'fulfilled') {
-			const stats = statsResult.value;
-			analysisStatsValue = String(stats.total_tasks);
-			analysisStatsSubtitle = `${stats.completed_tasks} completed`;
-			analysisStatsChange = `${stats.running_tasks} running`;
+		if (runsResult.status === 'fulfilled') {
+			analysisStatsValue = String(runsResult.value.total);
+			analysisStatsSubtitle = completedResult.status === 'fulfilled'
+				? `${completedResult.value.total} completed`
+				: '';
+			analysisStatsChange = runningResult.status === 'fulfilled'
+				? `${runningResult.value.total} running`
+				: '';
 		} else {
 			analysisStatsValue = '—';
 			analysisStatsSubtitle = 'Unable to load';
 			analysisStatsChange = '';
 		}
 
-		recentAnalyses = tasksResult.status === 'fulfilled'
-			? tasksResult.value.items.map((task: AnalysisTaskList) => ({
-				id: task.id,
-				name: task.name,
-				status: normalizeStatus(task.status),
-				time: timeAgo(task.created_at),
+		recentAnalyses = runsResult.status === 'fulfilled'
+			? runsResult.value.items.map((run: AnalysisRunListItem) => ({
+				id: run.id,
+				name: run.name,
+				status: normalizeStatus(run.status),
+				time: timeAgo(run.created_at),
 			}))
 			: [];
 
