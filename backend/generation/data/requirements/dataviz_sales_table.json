@@ -3,6 +3,8 @@
   "name": "Sales Dashboard",
   "category": "Data Visualization",
   "description": "View and visualize sales data",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only sales view; require auth for create/update/delete",
     "1. Sale model: id, product (required), amount (decimal), quantity (integer), date (default today)",

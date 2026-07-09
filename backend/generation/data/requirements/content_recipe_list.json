@@ -3,6 +3,8 @@
   "name": "Recipe Book",
   "category": "Content",
   "description": "Save and view recipes",
+  "difficulty": "standard",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only recipes; require auth for create/update/delete",
     "1. Recipe model: id, title (required), ingredients (JSON array), instructions (text), category (optional)",

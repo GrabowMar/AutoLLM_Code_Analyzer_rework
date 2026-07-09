@@ -3,6 +3,8 @@
   "name": "Blog",
   "category": "Social",
   "description": "Write and read blog posts",
+  "difficulty": "standard",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only posts; require auth for create/update/delete",
     "1. Post model: id, title (required), content (text), author, created_at, updated_at",

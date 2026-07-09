@@ -243,6 +243,8 @@ def seed_requirements(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, 
 
     created = updated = 0
     for json_path in sorted(REQUIREMENTS_DIR.glob("*.json")):
+        if json_path.name == "schema.json":
+            continue
         try:
             data = json.loads(json_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):

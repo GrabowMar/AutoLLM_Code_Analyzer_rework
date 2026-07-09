@@ -3,6 +3,8 @@
   "name": "Base64 Converter",
   "category": "Utility",
   "description": "Encode and decode base64",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public encode/decode; restrict saved history to authenticated users",
     "1. POST /api/base64/encode - accept {text: string}, return {encoded: string}",

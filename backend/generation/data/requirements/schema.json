@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autollm-code-analyzer/generation/requirements-spec.json",
+  "title": "App requirement spec",
+  "description": "Structured requirement JSON consumed by seed_generation_templates / backend.generation.seeding.seed_requirements",
+  "type": "object",
+  "required": [
+    "slug",
+    "name",
+    "category",
+    "description",
+    "backend_requirements",
+    "frontend_requirements",
+    "api_endpoints",
+    "data_model"
+  ],
+  "properties": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(_[a-z0-9]+)*$",
+      "description": "snake_case; convention is {domain}_{app_name}, e.g. crud_todo_list"
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "category": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "difficulty": {
+      "type": "string",
+      "enum": ["basic", "standard", "advanced"]
+    },
+    "spec_schema_version": { "type": "integer", "minimum": 1 },
+    "backend_requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "frontend_requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "admin_requirements": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "api_endpoints": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/endpoint" }
+    },
+    "admin_api_endpoints": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/endpoint" }
+    },
+    "data_model": {
+      "type": "object",
+      "required": ["name", "fields"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "endpoint": {
+      "type": "object",
+      "required": ["method", "path", "description"],
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "WS"]
+        },
+        "path": { "type": "string", "pattern": "^/api/" },
+        "description": { "type": "string", "minLength": 1 },
+        "request": {},
+        "response": {}
+      }
+    }
+  }
+}

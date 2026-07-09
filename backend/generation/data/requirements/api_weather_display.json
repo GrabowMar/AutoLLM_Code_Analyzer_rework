@@ -3,6 +3,8 @@
   "name": "Weather Display",
   "category": "API",
   "description": "Look up current weather by city",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only weather lookups; require auth for cache management",
     "1. WeatherCache model: id, city (required), temperature, condition, fetched_at, expires_at",

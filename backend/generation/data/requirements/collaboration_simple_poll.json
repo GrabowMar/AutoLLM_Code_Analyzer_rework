@@ -3,6 +3,8 @@
   "name": "Quick Polls",
   "category": "Collaboration",
   "description": "Create polls and vote",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public poll voting and viewing; require auth for poll creation/deletion",
     "1. Poll model: id, question (required), created_at",

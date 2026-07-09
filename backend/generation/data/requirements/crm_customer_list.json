@@ -3,6 +3,8 @@
   "name": "Customer Directory",
   "category": "CRM",
   "description": "Manage customer contacts",
+  "difficulty": "standard",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only customer listings; require auth for create/update/delete",
     "1. Customer model: id, name (required), email (required, unique), phone, company, notes",

@@ -98,6 +98,12 @@ def test_seed_requirements_bumps_version_field_on_change():
     assert req.version == 2
 
 
+def test_seed_requirements_does_not_ingest_schema_json_as_a_spec():
+    """schema.json lives alongside the *.json specs it validates; it must not be seeded as one."""
+    seed_requirements()
+    assert not AppRequirementTemplate.objects.filter(slug="schema").exists()
+
+
 def test_seed_app_bundles_does_not_duplicate_for_every_requirement():
     """The blanket per-requirement auto-bundle generator was removed.
 

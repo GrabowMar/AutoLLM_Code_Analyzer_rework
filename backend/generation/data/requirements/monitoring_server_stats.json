@@ -3,6 +3,8 @@
   "name": "Server Monitor",
   "category": "Monitoring",
   "description": "Track server status",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only server list; require auth for create/update",
     "1. Server model: id, name (required), host, status, last_check",
