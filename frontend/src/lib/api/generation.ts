@@ -257,6 +257,18 @@ export async function getTemplateBundles(): Promise<TemplateBundle[]> {
   return res.json();
 }
 
+export interface BundlePreview {
+  slug: string;
+  scaffolding_slug: string;
+  block_count: number;
+  prompt_templates: Record<string, { system?: string; user?: string }>;
+}
+
+export async function getBundlePreview(slug: string): Promise<BundlePreview> {
+  const res = await apiFetch(`/generation/bundles/${slug}/preview/`);
+  return res.json();
+}
+
 export async function exportTemplatePackage(
   data: {
     scaffolding_slugs?: string[];

@@ -5,12 +5,12 @@ import { Badge } from '$lib/components/ui/badge';
 import { Button } from '$lib/components/ui/button';
 import ChartBar from '@lucide/svelte/icons/chart-bar';
 import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-import { getAnalysisTasks, type AnalysisTaskList } from '$lib/api/analysis';
+import { listRuns, type AnalysisRunListItem } from '$lib/api/runs';
 
 interface Props { jobId: string }
 let { jobId }: Props = $props();
 
-let tasks = $state<AnalysisTaskList[]>([]);
+let tasks = $state<AnalysisRunListItem[]>([]);
 let loading = $state(true);
 let error = $state('');
 
@@ -18,7 +18,7 @@ async function refresh() {
 	loading = true;
 	error = '';
 	try {
-		const res = await getAnalysisTasks({ generation_job_id: jobId, per_page: 50 });
+		const res = await listRuns({ generation_job_id: jobId, per_page: 50 });
 		tasks = res.items;
 	} catch (e) {
 		error = (e as Error).message ?? 'Failed to load';
@@ -45,8 +45,8 @@ const summary = $derived.by(() => {
 	return { total, done, running, failed };
 });
 
-function findingsOf(t: AnalysisTaskList): number | string {
-	const rs = t.results_summary || {};
+function findingsOf(t: AnalysisRunListItem): number | string {
+	const rs = t.summary || {};
 	if (typeof rs.total_findings === 'number') return rs.total_findings;
 	if (typeof rs.findings === 'number') return rs.findings;
 	return '—';
@@ -84,7 +84,6 @@ function findingsOf(t: AnalysisTaskList): number | string {
 								<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Task</th>
 								<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Status</th>
 								<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Findings</th>
-								<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Duration</th>
 								<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Created</th>
 								<th class="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Actions</th>
 							</tr>
@@ -95,7 +94,6 @@ function findingsOf(t: AnalysisTaskList): number | string {
 									<td class="px-3 py-2 font-medium">{t.name}</td>
 									<td class="px-3 py-2"><Badge variant="outline" class="text-xs {statusColor[t.status] ?? ''}">{t.status}</Badge></td>
 									<td class="px-3 py-2 font-mono text-xs">{findingsOf(t)}</td>
-									<td class="px-3 py-2 font-mono text-xs">{t.duration_seconds != null ? `${t.duration_seconds.toFixed(1)}s` : '—'}</td>
 									<td class="px-3 py-2 text-xs text-muted-foreground">{new Date(t.created_at).toLocaleString()}</td>
 									<td class="px-3 py-2 text-right">
 										<Button size="sm" variant="ghost" href="/analysis/{t.id}">View</Button>

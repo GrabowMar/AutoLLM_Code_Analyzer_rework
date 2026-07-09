@@ -40,8 +40,7 @@
 
 	// Debounce search
 	let searchDebounce: ReturnType<typeof setTimeout> | null = null;
-	function onSearchInput(e: Event) {
-		searchQuery = (e.target as HTMLInputElement).value;
+	function onSearchInput() {
 		if (searchDebounce) clearTimeout(searchDebounce);
 		searchDebounce = setTimeout(() => load(), 350);
 	}
