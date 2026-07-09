@@ -22,8 +22,8 @@ from backend.generation.api.schema import PaginatedJobsSchema
 from backend.generation.api.views._router import router
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
-from backend.generation.services.bundle_resolver import apply_snapshot_to_job
 from backend.generation.services.dispatcher import dispatch_job
+from backend.generation.services.job_cloning import clone_job
 
 
 @router.get("/jobs/stats/", response=dict)
@@ -177,10 +177,8 @@ def delete_job(request, job_id: str):
     return {"success": True}
 
 
-@router.post("/jobs/{job_id}/retry/", response={200: GenerationJobSchema, 400: dict})
-def retry_job(request, job_id: str):
-    """Re-create a failed/cancelled job with the same parameters."""
-    original = get_object_or_404(
+def _load_job_for_cloning(request, job_id: str) -> GenerationJob:
+    return get_object_or_404(
         GenerationJob.objects.select_related(
             "model",
             "app_requirement",
@@ -192,29 +190,9 @@ def retry_job(request, job_id: str):
         id=job_id,
         created_by=request.auth,
     )
-    if original.status not in ("failed", "cancelled"):
-        return 400, {"message": "Only failed or cancelled jobs can be retried"}
-    new_job = GenerationJob.objects.create(
-        mode=original.mode,
-        created_by=request.auth,
-        # Keep the retry in the original batch so experiment trials stay whole.
-        batch=original.batch,
-        model=original.model,
-        scaffolding_template=original.scaffolding_template,
-        app_requirement=original.app_requirement,
-        template_bundle=original.template_bundle,
-        backend_prompt_template=original.backend_prompt_template,
-        frontend_prompt_template=original.frontend_prompt_template,
-        custom_system_prompt=original.custom_system_prompt,
-        custom_user_prompt=original.custom_user_prompt,
-        temperature=original.temperature,
-        max_tokens=original.max_tokens,
-        copilot_description=original.copilot_description,
-        copilot_max_iterations=original.copilot_max_iterations,
-        copilot_use_open_source=original.copilot_use_open_source,
-    )
-    if original.mode == GenerationJob.Mode.SCAFFOLDING and original.app_requirement:
-        apply_snapshot_to_job(new_job)
+
+
+def _dispatch_and_serialize(new_job: GenerationJob) -> GenerationJobSchema:
     dispatch_job(new_job)
     return GenerationJobSchema.from_orm(
         GenerationJob.objects.select_related(
@@ -225,6 +203,52 @@ def retry_job(request, job_id: str):
             id=new_job.id,
         ),
     )
+
+
+@router.post("/jobs/{job_id}/retry/", response={200: GenerationJobSchema, 400: dict})
+def retry_job(request, job_id: str):
+    """Re-create a failed/cancelled job, re-resolving templates."""
+    original = _load_job_for_cloning(request, job_id)
+    if original.status not in ("failed", "cancelled"):
+        return 400, {"message": "Only failed or cancelled jobs can be retried"}
+    new_job = clone_job(original, request.auth, reuse_snapshot=False, new_seed=True)
+    return _dispatch_and_serialize(new_job)
+
+
+@router.post("/jobs/{job_id}/replay/", response={200: GenerationJobSchema, 400: dict})
+def replay_job(request, job_id: str):
+    """Exact replay: identical prompt snapshot and sampling seed."""
+    original = _load_job_for_cloning(request, job_id)
+    if original.status in ("pending", "running"):
+        return 400, {"message": "Job is still in progress"}
+    if not isinstance(original.resolved_bundle, dict) or not original.resolved_bundle:
+        return 400, {"message": "Job has no resolved bundle snapshot to replay"}
+    new_job = clone_job(
+        original,
+        request.auth,
+        reuse_snapshot=True,
+        new_seed=False,
+        # Replays verify reproducibility; keep them out of the trial counts.
+        keep_batch=False,
+    )
+    return _dispatch_and_serialize(new_job)
+
+
+@router.post("/jobs/{job_id}/rerun/", response={200: GenerationJobSchema, 400: dict})
+def rerun_job(request, job_id: str):
+    """One more trial: identical prompt snapshot, fresh sampling seed."""
+    original = _load_job_for_cloning(request, job_id)
+    if original.status in ("pending", "running"):
+        return 400, {"message": "Job is still in progress"}
+    if not isinstance(original.resolved_bundle, dict) or not original.resolved_bundle:
+        return 400, {"message": "Job has no resolved bundle snapshot to rerun"}
+    new_job = clone_job(original, request.auth, reuse_snapshot=True, new_seed=True)
+    if new_job.batch:
+        # An extra trial grows the batch rather than displacing a failure.
+        GenerationBatch.objects.filter(id=new_job.batch_id).update(
+            total_jobs=new_job.batch.total_jobs + 1,
+        )
+    return _dispatch_and_serialize(new_job)
 
 
 @router.get("/jobs/{job_id}/artifacts/", response=list[GenerationArtifactSchema])
@@ -289,7 +313,9 @@ def export_job(request, job_id: str):
         "bundle_slug": resolved.get("bundle_slug"),
         "scaffolding_slug": resolved.get("scaffolding_slug"),
         "seed": resolved.get("seed", job.experiment_seed),
-        "prompt_hash": resolved.get("prompt_hash"),
+        "prompt_hash": job.prompt_hash or resolved.get("prompt_hash"),
+        "run_fingerprint": resolved.get("run_fingerprint"),
+        "bundle_key": job.bundle_key,
         "llm": resolved.get("llm"),
         "block_count": len(resolved.get("blocks", [])),
         "app_requirement_slug": (resolved.get("app_requirement") or {}).get("slug"),

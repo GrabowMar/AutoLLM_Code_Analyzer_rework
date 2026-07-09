@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 from django.db.models import Q
+from django.utils import timezone
 
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-BUNDLE_SCHEMA_VERSION = 1
+BUNDLE_SCHEMA_VERSION = 2
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 BLOCKS_DIR = DATA_DIR / "blocks"
 CATALOG_PATH = BLOCKS_DIR / "catalog.yaml"
@@ -255,10 +256,19 @@ def build_resolved_bundle(
     if model:
         llm_section["model_id"] = model.id
         llm_section["model_slug"] = model.model_id
+        # Pricing/context provenance: LLMModel rows mutate in place on catalog
+        # sync, so the values in effect at job creation must be frozen here.
+        llm_section["provider"] = model.provider
+        llm_section["context_window"] = model.context_window
+        llm_section["max_output_tokens"] = model.max_output_tokens
+        llm_section["input_price_per_token"] = model.input_price_per_token
+        llm_section["output_price_per_token"] = model.output_price_per_token
+        llm_section["pricing_snapshot_at"] = timezone.now().isoformat()
 
     snapshot: dict[str, Any] = {
         "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
         "bundle_slug": bundle_slug,
+        "bundle_version": getattr(template_bundle, "version", 1) if template_bundle else 1,
         "scaffolding_slug": bundle_scaffold_slug or scaffolding_slug,
         "llm": llm_section,
         "seed": seed,
@@ -268,6 +278,7 @@ def build_resolved_bundle(
         "prompts": {},
     }
     snapshot["prompt_hash"] = _snapshot_prompt_hash(snapshot)
+    snapshot["run_fingerprint"] = run_fingerprint(snapshot)
     return snapshot
 
 
@@ -287,6 +298,7 @@ def attach_rendered_backend_prompts(
         "user": messages[1]["content"],
     }
     snapshot["prompt_hash"] = _snapshot_prompt_hash(snapshot)
+    snapshot["run_fingerprint"] = run_fingerprint(snapshot)
     return snapshot
 
 
@@ -318,26 +330,80 @@ def snapshot_for_scaffolding_job(job: GenerationJob) -> dict[str, Any]:
 
 
 def apply_snapshot_to_job(job: GenerationJob, *, save: bool = True) -> GenerationJob:
-    """Build snapshot, set ``experiment_seed`` and ``resolved_bundle`` on job."""
+    """Build snapshot; set seed, ``resolved_bundle``, and slicing keys on job."""
     snapshot = snapshot_for_scaffolding_job(job)
     job.experiment_seed = snapshot.get("seed")
     job.resolved_bundle = snapshot
+    job.prompt_hash = snapshot.get("prompt_hash") or ""
+    job.bundle_key = bundle_key_from_snapshot(snapshot)
     if save:
-        job.save(update_fields=["experiment_seed", "resolved_bundle", "updated_at"])
+        job.save(
+            update_fields=[
+                "experiment_seed",
+                "resolved_bundle",
+                "prompt_hash",
+                "bundle_key",
+                "updated_at",
+            ],
+        )
     return job
 
 
+def bundle_key_from_snapshot(snapshot: dict[str, Any]) -> str:
+    """Denormalized ``slug@version`` slicing key for a job snapshot."""
+    slug = snapshot.get("bundle_slug") or ""
+    if not slug:
+        return ""
+    return f"{slug}@{snapshot.get('bundle_version') or 1}"
+
+
 def _snapshot_prompt_hash(snapshot: dict[str, Any]) -> str:
-    """Stable hash of prompt templates + app requirement for reproducibility checks."""
+    """Stable hash of prompt templates + app requirement.
+
+    Deliberately excludes seed and llm config so jobs generated from the same
+    prompt material share a hash — this is the grouping key for comparing
+    results across models, seeds, and repeats. Per-run identity (including
+    seed/llm) lives in :func:`run_fingerprint`.
+    """
     payload = {
         "prompt_templates": snapshot.get("prompt_templates"),
         "app_requirement": snapshot.get("app_requirement"),
         "blocks": [{"slug": b["slug"], "version": b["version"]} for b in snapshot.get("blocks", [])],
-        "seed": snapshot.get("seed"),
-        "llm": snapshot.get("llm"),
     }
     encoded = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(encoded.encode()).hexdigest()[:16]
+
+
+def run_fingerprint(snapshot: dict[str, Any]) -> str:
+    """Hash of the complete run configuration (prompts + seed + llm params).
+
+    Two jobs with equal fingerprints were configured identically — an exact
+    replay should reproduce the run up to provider nondeterminism.
+    """
+    payload = {
+        "prompt_hash": snapshot.get("prompt_hash"),
+        "seed": snapshot.get("seed"),
+        "llm": {
+            k: v
+            for k, v in (snapshot.get("llm") or {}).items()
+            # pricing/context are provenance, not run configuration
+            if k in ("model_slug", "temperature", "max_tokens", "top_p")
+        },
+        "scaffolding_slug": snapshot.get("scaffolding_slug"),
+    }
+    encoded = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(encoded.encode()).hexdigest()[:16]
+
+
+def derive_experiment_seed(base_seed: int, *parts: Any) -> int:
+    """Deterministic per-run seed from an experiment base seed and cell identity.
+
+    Same (base_seed, condition, app, repeat) always yields the same seed, so
+    re-launching an experiment reproduces the exact seed matrix.
+    """
+    encoded = json.dumps([base_seed, *[str(p) for p in parts]])
+    digest = hashlib.sha256(encoded.encode()).digest()
+    return int.from_bytes(digest[:4], "big") % 2_147_483_647
 
 
 def scaffolding_slug_from_manifest(job: GenerationJob) -> str:

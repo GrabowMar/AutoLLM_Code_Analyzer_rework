@@ -382,6 +382,22 @@ class GenerationJob(models.Model):
         null=True,
         blank=True,
     )
+    prompt_hash = models.CharField(
+        _("prompt hash"),
+        max_length=16,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Hash of prompt material (templates + app spec + block versions); shared across repeats/models",
+    )
+    bundle_key = models.CharField(
+        _("bundle key"),
+        max_length=220,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text='Denormalized "bundle-slug@version" slicing key',
+    )
 
     # Custom mode
     custom_system_prompt = models.TextField(_("system prompt"), blank=True, default="")

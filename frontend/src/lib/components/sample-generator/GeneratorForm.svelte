@@ -36,6 +36,7 @@
 		model_ids: number[];
 		temperature: number;
 		max_tokens: number;
+		trials: number;
 	}
 
 	export interface CopilotPayload {
@@ -99,6 +100,7 @@
 	let selectedModelIds = $state<Set<number>>(new Set());
 	let scaffoldingTemperature = $state(0.3);
 	let scaffoldingMaxTokens = $state(32000);
+	let scaffoldingTrials = $state(1);
 	let appSearch = $state('');
 	let categoryFilter = $state('');
 
@@ -182,6 +184,7 @@
 			model_ids: [...selectedModelIds],
 			temperature: scaffoldingTemperature,
 			max_tokens: scaffoldingMaxTokens,
+			trials: scaffoldingTrials,
 		});
 	}
 
@@ -448,6 +451,18 @@
 									class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
 								/>
 							</div>
+							<div class="space-y-1.5">
+								<Label class="text-xs" for="scaffolding-trials">Repeats per Combination</Label>
+								<input
+									id="scaffolding-trials"
+									type="number"
+									bind:value={scaffoldingTrials}
+									min={1}
+									max={10}
+									class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+								/>
+								<p class="text-[10px] text-muted-foreground">Independent trials per app × model — comparisons need n &gt; 1.</p>
+							</div>
 						</div>
 					{/if}
 				</div>
@@ -476,8 +491,14 @@
 						<span class="tabular-nums {selectedAppIds.size > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}">{selectedAppIds.size}</span>
 						<span class="text-muted-foreground">apps ×</span>
 						<span class="tabular-nums {selectedModelIds.size > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}">{selectedModelIds.size}</span>
-						<span class="text-muted-foreground">models =</span>
-						<span class="tabular-nums text-base font-bold leading-none {selectedAppIds.size * selectedModelIds.size > 0 ? 'text-primary' : 'text-muted-foreground/50'}">{selectedAppIds.size * selectedModelIds.size}</span>
+						<span class="text-muted-foreground">models</span>
+						{#if scaffoldingTrials > 1}
+							<span class="text-muted-foreground">×</span>
+							<span class="tabular-nums text-foreground font-medium">{scaffoldingTrials}</span>
+							<span class="text-muted-foreground">repeats</span>
+						{/if}
+						<span class="text-muted-foreground">=</span>
+						<span class="tabular-nums text-base font-bold leading-none {selectedAppIds.size * selectedModelIds.size * scaffoldingTrials > 0 ? 'text-primary' : 'text-muted-foreground/50'}">{selectedAppIds.size * selectedModelIds.size * scaffoldingTrials}</span>
 						<span class="text-muted-foreground">jobs</span>
 					</div>
 					<Button

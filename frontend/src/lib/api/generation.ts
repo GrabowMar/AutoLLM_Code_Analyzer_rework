@@ -326,6 +326,7 @@ export async function createScaffoldingBatch(data: {
   model_ids: number[];
   temperature?: number;
   max_tokens?: number;
+  trials?: number;
 }): Promise<BatchCreateResponse> {
   const res = await apiFetch("/generation/jobs/scaffolding/", {
     method: "POST",

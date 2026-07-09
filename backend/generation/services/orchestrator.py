@@ -14,6 +14,7 @@ from backend.generation.services.aider_runner import AiderExecutionError
 from backend.generation.services.backend_scanner import BackendScanner
 from backend.generation.services.code_parser import parse_result_to_structured
 from backend.generation.services.copilot_validation import validate_python_code
+from backend.generation.services.metrics import JobMetrics
 from backend.generation.services.openrouter_client import OpenRouterClient
 from backend.generation.services.openrouter_client import OpenRouterError
 from backend.generation.services.prompt_renderer import PromptRenderer
@@ -126,12 +127,12 @@ class GenerationService:
             "truncated": truncated,
             "finish_reason": response.get("choices", [{}])[0].get("finish_reason"),
         }
-        job.metrics = {
+        job.metrics = JobMetrics(
             **usage,
-            "duration_seconds": round(elapsed, 2),
-            "model": model_id,
-            "lines_of_code": content.count("\n") + 1 if isinstance(content, str) else 0,
-        }
+            duration_seconds=round(elapsed, 2),
+            model=model_id,
+            lines_of_code=content.count("\n") + 1 if isinstance(content, str) else 0,
+        ).dump()
 
     # ── Scaffolding Mode ──────────────────────────────────────────────
 
@@ -211,16 +212,16 @@ class GenerationService:
             loc += backend_content.count("\n") + 1
         if isinstance(frontend_content, str):
             loc += frontend_content.count("\n") + 1
-        job.metrics = {
+        job.metrics = JobMetrics(
             **total_usage,
-            "backend_duration": round(backend_elapsed, 2),
-            "frontend_duration": round(frontend_elapsed, 2),
-            "total_duration": round(backend_elapsed + frontend_elapsed, 2),
-            "model": model_id,
-            "lines_of_code": loc,
-            "endpoints_found": len(scan_result.endpoints),
-            "models_found": len(scan_result.models),
-        }
+            backend_duration=round(backend_elapsed, 2),
+            frontend_duration=round(frontend_elapsed, 2),
+            total_duration=round(backend_elapsed + frontend_elapsed, 2),
+            model=model_id,
+            lines_of_code=loc,
+            endpoints_found=len(scan_result.endpoints),
+            models_found=len(scan_result.models),
+        ).dump()
 
     # ── Copilot Mode ──────────────────────────────────────────────────
 
@@ -245,15 +246,14 @@ class GenerationService:
                     if isinstance(code, str):
                         loc += code.count("\n") + 1
 
-            job.metrics = {
-                **(job.metrics or {}),
-                "duration_seconds": round(time.time() - total_start, 2),
-                "model": pick_copilot_model_id(job),
-                "iterations_used": len(iterations),
-                "final_error_count": len(iterations[-1].errors) if iterations else 0,
-                "engine": "aider",
-                "lines_of_code": loc,
-            }
+            job.metrics = JobMetrics(
+                duration_seconds=round(time.time() - total_start, 2),
+                model=pick_copilot_model_id(job),
+                iterations_used=len(iterations),
+                final_error_count=len(iterations[-1].errors) if iterations else 0,
+                engine="aider",
+                lines_of_code=loc,
+            ).dump()
         finally:
             workspace.cleanup()
 
@@ -273,12 +273,22 @@ class GenerationService:
         stage: str,
     ) -> dict:
         """Call LLM and save the artifact."""
+        llm_config = {}
+        if isinstance(job.resolved_bundle, dict):
+            llm_config = job.resolved_bundle.get("llm") or {}
+        top_p = llm_config.get("top_p")
+        seed = job.experiment_seed
+
         request_payload = {
             "model": model_id,
             "messages": messages,
             "temperature": job.temperature,
             "max_tokens": job.max_tokens,
         }
+        if top_p is not None:
+            request_payload["top_p"] = top_p
+        if seed is not None:
+            request_payload["seed"] = seed
 
         try:
             client = self._build_client_for(job)
@@ -287,6 +297,8 @@ class GenerationService:
                 messages=messages,
                 temperature=job.temperature,
                 max_tokens=job.max_tokens,
+                top_p=top_p,
+                seed=seed,
             )
         except OpenRouterError:
             GenerationArtifact.objects.create(

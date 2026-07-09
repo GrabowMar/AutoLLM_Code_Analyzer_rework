@@ -226,6 +226,8 @@ class GenerationJobSchema(ModelSchema):
             "result_data",
             "metrics",
             "experiment_seed",
+            "prompt_hash",
+            "bundle_key",
             "resolved_bundle",
             "template_bundle",
             "created_at",

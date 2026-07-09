@@ -79,6 +79,7 @@ class OpenRouterClient:
         max_tokens: int = 32000,
         top_p: float | None = None,
         frequency_penalty: float | None = None,
+        seed: int | None = None,
         timeout: int = DEFAULT_TIMEOUT,
     ) -> dict:
         """Send a chat completion request to OpenRouter.
@@ -90,6 +91,8 @@ class OpenRouterClient:
             max_tokens: Maximum tokens in the response
             top_p: Nucleus sampling parameter
             frequency_penalty: Frequency penalty parameter
+            seed: Sampling seed, forwarded to providers that support
+                deterministic sampling (best-effort reproducibility)
             timeout: Request timeout in seconds
 
         Returns:
@@ -108,6 +111,8 @@ class OpenRouterClient:
             payload["top_p"] = top_p
         if frequency_penalty is not None:
             payload["frequency_penalty"] = frequency_penalty
+        if seed is not None:
+            payload["seed"] = seed
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -134,12 +139,20 @@ class OpenRouterClient:
 
                 if response.status_code == HTTP_429_RATE_LIMITED:
                     # Rate limited — back off and retry
+                    last_error = OpenRouterError(
+                        f"Rate limited (429): {response.text[:500]}",
+                        status_code=HTTP_429_RATE_LIMITED,
+                    )
                     wait = RETRY_BACKOFF ** (attempt + 1)
                     logger.warning("Rate limited, waiting %ds", wait)
                     time.sleep(wait)
                     continue
 
                 if response.status_code >= HTTP_500_SERVER_ERROR:
+                    last_error = OpenRouterError(
+                        f"Server error {response.status_code}: {response.text[:500]}",
+                        status_code=response.status_code,
+                    )
                     wait = RETRY_BACKOFF ** (attempt + 1)
                     logger.warning(
                         "Server error %d, retrying in %ds",
@@ -166,7 +179,9 @@ class OpenRouterClient:
                     f"Request timed out after {timeout}s",
                     status_code=HTTP_408_TIMEOUT,
                 )
-                logger.warning("Timeout on attempt %d", attempt + 1)
+                wait = RETRY_BACKOFF ** (attempt + 1)
+                logger.warning("Timeout on attempt %d, retrying in %ds", attempt + 1, wait)
+                time.sleep(wait)
             except requests.exceptions.ConnectionError as exc:
                 last_error = OpenRouterError(
                     f"Connection error: {exc}",
