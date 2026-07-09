@@ -10,6 +10,8 @@ from ninja import Schema
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
 from backend.generation.models import CopilotIteration
+from backend.generation.models import Experiment
+from backend.generation.models import ExperimentCondition
 from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
@@ -413,3 +415,104 @@ class CopilotIterationSchema(ModelSchema):
             "fix_applied",
             "created_at",
         ]
+
+
+# ── Experiment schemas ────────────────────────────────────────────────
+
+
+class ExperimentConditionSchema(ModelSchema):
+    model_name: str | None = None
+    bundle_slug: str | None = None
+    bundle_version: int | None = None
+
+    class Meta:
+        model = ExperimentCondition
+        fields = [
+            "id",
+            "label",
+            "template_bundle",
+            "model",
+            "param_overrides",
+            "created_at",
+        ]
+
+    @staticmethod
+    def resolve_model_name(obj: ExperimentCondition) -> str | None:
+        return obj.model.model_name if obj.model_id else None
+
+    @staticmethod
+    def resolve_bundle_slug(obj: ExperimentCondition) -> str | None:
+        return obj.template_bundle.slug if obj.template_bundle_id else None
+
+    @staticmethod
+    def resolve_bundle_version(obj: ExperimentCondition) -> int | None:
+        return obj.template_bundle.version if obj.template_bundle_id else None
+
+
+class ExperimentConditionCreateSchema(Schema):
+    template_bundle_id: int
+    model_id: int
+    label: str = ""
+    param_overrides: dict = {}
+
+
+class ExperimentSchema(ModelSchema):
+    app_requirement_ids: list[int] = []
+    condition_count: int = 0
+
+    class Meta:
+        model = Experiment
+        fields = [
+            "id",
+            "name",
+            "slug",
+            "description",
+            "hypothesis",
+            "status",
+            "repeats",
+            "base_seed",
+            "continuation_limit",
+            "enable_repair",
+            "temperature",
+            "max_tokens",
+            "top_p",
+            "created_at",
+            "updated_at",
+        ]
+
+    @staticmethod
+    def resolve_app_requirement_ids(obj: Experiment) -> list[int]:
+        return list(obj.app_requirements.values_list("id", flat=True))
+
+    @staticmethod
+    def resolve_condition_count(obj: Experiment) -> int:
+        return obj.conditions.count()
+
+
+class ExperimentCreateSchema(Schema):
+    name: str
+    slug: str
+    description: str = ""
+    hypothesis: str = ""
+    app_requirement_ids: list[int] = []
+    repeats: int = Field(3, ge=1, le=20)
+    base_seed: int | None = None
+    continuation_limit: int = Field(1, ge=0, le=5)
+    enable_repair: bool = True
+    temperature: float = 0.3
+    max_tokens: int = 32000
+    top_p: float | None = None
+
+
+class ExperimentUpdateSchema(Schema):
+    name: str | None = None
+    description: str | None = None
+    hypothesis: str | None = None
+    app_requirement_ids: list[int] | None = None
+    repeats: int | None = Field(None, ge=1, le=20)
+    base_seed: int | None = None
+    continuation_limit: int | None = Field(None, ge=0, le=5)
+    enable_repair: bool | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    top_p: float | None = None
