@@ -95,3 +95,9 @@ The "smoke pass rate" is exactly that: `/api/health` plus the template's declare
 endpoints. It shows a generated app starts and responds, not that it is functionally
 correct. The statistics page's model comparison delegates to the same rankings
 aggregation, so the two pages cannot disagree.
+
+Every job also carries `prompt_hash`/`bundle_key`, and rankings/statistics/reports
+accept them as optional filters — a comparison across models is only valid if every
+model was generated from the same prompt version; without an explicit filter, jobs
+from different template edits on the same app are pooled together silently. See
+[Experiments](/docs/EXPERIMENTS) for running a designed, apples-to-apples comparison.

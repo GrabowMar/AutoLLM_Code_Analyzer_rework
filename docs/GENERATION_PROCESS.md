@@ -37,3 +37,7 @@ Statuses move `pending → running → completed | failed | cancelled`; errors l
 ## Running the result
 
 A completed job can be built and started as a Docker container by the runtime app — one click on the job page. Locally the app is reachable through the in-app proxy; in production it gets its own subdomain (see [Deployment guide](/docs/deployment-guide)). From there, the natural next step is an [analysis run](/docs/ANALYSIS_PIPELINE) against the same job.
+
+## Comparing results across models
+
+Every job carries `prompt_hash` (the rendered prompt material — templates + app spec + block versions, not the seed or model) and `bundle_key` (`slug@version`). Rankings, statistics, and the `template_comparison` report accept optional `prompt_hash`/`bundle_key` filters to scope a comparison to one prompt version — without this, jobs generated before and after a template edit get pooled into the same numbers. For running several models/bundles across a set of apps as one designed run, see [Experiments](/docs/EXPERIMENTS).

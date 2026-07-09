@@ -114,6 +114,75 @@ def test_aggregate_rankings_pulls_models_with_local_stats():
     assert row["composite_score"] == row["mss_score"]
 
 
+def test_aggregate_rankings_prompt_hash_filter_scopes_local_stats():
+    user = UserFactory()
+    model = LLMModelFactory(model_id="openai/gpt-4o", model_name="GPT-4o")
+    GenerationJobFactory.create_batch(
+        2,
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        prompt_hash="hash-a",
+    )
+    GenerationJobFactory.create_batch(
+        3,
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        prompt_hash="hash-b",
+    )
+
+    all_rankings = services.aggregate_rankings()
+    scoped = services.aggregate_rankings(prompt_hash="hash-a")
+
+    all_row = next(r for r in all_rankings if r["model_id"] == model.model_id)
+    scoped_row = next(r for r in scoped if r["model_id"] == model.model_id)
+    assert all_row["apps"] == 5
+    assert scoped_row["apps"] == 2
+
+
+def test_aggregate_rankings_bundle_key_filter_scopes_local_stats():
+    user = UserFactory()
+    model = LLMModelFactory(model_id="openai/gpt-4o")
+    GenerationJobFactory.create_batch(
+        2,
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        bundle_key="system-scaffolding-standard@1",
+    )
+    GenerationJobFactory.create_batch(
+        4,
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        bundle_key="system-scaffolding-standard@2",
+    )
+
+    scoped = services.aggregate_rankings(bundle_key="system-scaffolding-standard@2")
+
+    scoped_row = next(r for r in scoped if r["model_id"] == model.model_id)
+    assert scoped_row["apps"] == 4
+
+
+def test_aggregate_rankings_no_filter_matches_unfiltered_totals():
+    user = UserFactory()
+    model = LLMModelFactory(model_id="openai/gpt-4o")
+    GenerationJobFactory.create_batch(
+        3,
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+    )
+
+    unfiltered = services.aggregate_rankings()
+    explicitly_unfiltered = services.aggregate_rankings(prompt_hash=None, bundle_key=None)
+
+    row_a = next(r for r in unfiltered if r["model_id"] == model.model_id)
+    row_b = next(r for r in explicitly_unfiltered if r["model_id"] == model.model_id)
+    assert row_a["apps"] == row_b["apps"] == 3
+
+
 def test_aggregate_rankings_counts_only_latest_run_per_job():
     from backend.analysis.models import AnalysisRun
     from backend.analysis.models import Finding

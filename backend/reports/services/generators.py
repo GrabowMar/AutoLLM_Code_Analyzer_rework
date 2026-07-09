@@ -109,6 +109,10 @@ def _experiment_stats(jobs_qs, *, exclude_truncated: bool = True) -> dict[str, A
     trials = [j for j in completed if not (exclude_truncated and _is_truncated_job(j))]
     trial_ids = [j.id for j in trials]
 
+    # Trials should share one prompt version; if they don't, the stats below
+    # blend results from different templates and the reader needs to know.
+    prompt_hashes = sorted({j.prompt_hash for j in trials if j.prompt_hash})
+
     run_ids = AnalysisRun.latest_ids_per_job(trial_ids)
     run_to_job = dict(
         AnalysisRun.objects.filter(id__in=run_ids).values_list("id", "generation_job_id"),
@@ -171,6 +175,8 @@ def _experiment_stats(jobs_qs, *, exclude_truncated: bool = True) -> dict[str, A
         "trials": len(trials),
         "analyzed": len(analyzed_ids),
         "truncated_excluded": len(truncated) if exclude_truncated else 0,
+        "prompt_hashes": prompt_hashes,
+        "mixed_prompt_versions": len(prompt_hashes) > 1,
         "findings_total": _stat(totals),
         "critical_high": _stat(crit_high),
         "weighted_score": _stat(weighted),
@@ -296,7 +302,14 @@ def generate_model_analysis(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def generate_template_comparison(config: dict[str, Any]) -> dict[str, Any]:
-    """Compare models on a single application requirement template."""
+    """Compare models on a single application requirement template.
+
+    Rows are grouped by ``(model, bundle_key)`` rather than model alone —
+    jobs generated from different prompt/bundle versions on the same app
+    are not comparable, so pooling them under one "model" row would blend
+    results across template changes. Pass ``bundle_key`` or ``prompt_hash``
+    in *config* to restrict the report to one specific prompt version.
+    """
 
     template_slug = config.get("template_slug")
     if not template_slug:
@@ -313,17 +326,23 @@ def generate_template_comparison(config: dict[str, Any]) -> dict[str, Any]:
     jobs = GenerationJob.objects.filter(app_requirement=template)
     if filter_models:
         jobs = jobs.filter(model__model_id__in=filter_models)
+    if config.get("bundle_key"):
+        jobs = jobs.filter(bundle_key=config["bundle_key"])
+    if config.get("prompt_hash"):
+        jobs = jobs.filter(prompt_hash=config["prompt_hash"])
 
-    by_model: dict[str, dict[str, Any]] = {}
+    by_model_bundle: dict[tuple[str, str], dict[str, Any]] = {}
     for job in jobs.select_related("model"):
         model = job.model
-        key = model.model_id if model else "unknown"
-        bucket = by_model.setdefault(
+        model_id = model.model_id if model else "unknown"
+        key = (model_id, job.bundle_key or "")
+        bucket = by_model_bundle.setdefault(
             key,
             {
-                "model_id": key,
-                "model_name": getattr(model, "model_name", key),
+                "model_id": model_id,
+                "model_name": getattr(model, "model_name", model_id),
                 "provider": getattr(model, "provider", ""),
+                "bundle_key": job.bundle_key or "",
                 "jobs": [],
             },
         )
@@ -332,7 +351,7 @@ def generate_template_comparison(config: dict[str, Any]) -> dict[str, Any]:
     exclude_truncated = bool(config.get("exclude_truncated", True))
     ai_slugs = AnalyzerTool.ai_slugs()
     rows = []
-    for key, bucket in by_model.items():
+    for bucket in by_model_bundle.values():
         sub_jobs = GenerationJob.objects.filter(
             id__in=[j.id for j in bucket["jobs"]],
         )
@@ -341,9 +360,10 @@ def generate_template_comparison(config: dict[str, Any]) -> dict[str, Any]:
         ai_findings = all_findings.filter(result__tool_slug__in=ai_slugs)
         rows.append(
             {
-                "model_id": key,
+                "model_id": bucket["model_id"],
                 "model_name": bucket["model_name"],
                 "provider": bucket["provider"],
+                "bundle_key": bucket["bundle_key"],
                 "generation": _job_summary(sub_jobs),
                 "loc": loc_for_jobs(sub_jobs),
                 "findings": _severity_counts(findings),
@@ -359,6 +379,20 @@ def generate_template_comparison(config: dict[str, Any]) -> dict[str, Any]:
         reverse=True,
     )
 
+    bundle_keys_seen = sorted({r["bundle_key"] for r in rows if r["bundle_key"]})
+    mixed_bundle_versions = len(bundle_keys_seen) > 1
+
+    # Rank-sensitivity assumes one row per model; with mixed bundle versions
+    # take each model's first (highest success-rate) row rather than feeding
+    # duplicate model_ids into the rank-swap comparison.
+    seen_models: set[str] = set()
+    sensitivity_rows = []
+    for row in rows:
+        if row["model_id"] in seen_models:
+            continue
+        seen_models.add(row["model_id"])
+        sensitivity_rows.append(row)
+
     return {
         "template": {
             "slug": template.slug,
@@ -367,7 +401,12 @@ def generate_template_comparison(config: dict[str, Any]) -> dict[str, Any]:
         },
         "models": rows,
         "total_models": len(rows),
-        "sensitivity": _template_sensitivity(rows),
+        # More than one bundle_key here means results came from different
+        # prompt/bundle versions — filter by bundle_key for an apples-to-
+        # apples comparison instead of reading across rows.
+        "bundle_keys": bundle_keys_seen,
+        "mixed_bundle_versions": mixed_bundle_versions,
+        "sensitivity": _template_sensitivity(sensitivity_rows),
     }
 
 

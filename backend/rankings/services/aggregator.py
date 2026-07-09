@@ -36,7 +36,12 @@ def _stdev(values: list[float]) -> float | None:
     return round(pystats.stdev(values), 4)
 
 
-def _local_app_stats(user: AbstractBaseUser | None = None) -> dict[str, dict[str, Any]]:
+def _local_app_stats(
+    user: AbstractBaseUser | None = None,
+    *,
+    prompt_hash: str | None = None,
+    bundle_key: str | None = None,
+) -> dict[str, dict[str, Any]]:
     """Aggregate per-model apps generated and finding rollups.
 
     Only findings from deterministic (container) tools feed the ``findings``
@@ -44,11 +49,19 @@ def _local_app_stats(user: AbstractBaseUser | None = None) -> dict[str, dict[str
     are collected separately under ``ai_findings``. Findings are grouped per
     job (rows grow as models x jobs x severities — fine at this scale) so
     per-trial density variance can be reported alongside the totals.
+
+    ``prompt_hash``/``bundle_key`` narrow the comparison to jobs generated
+    from the same prompt material — without this, jobs from different
+    template/bundle versions on the same app are silently pooled together.
     """
 
     jobs = GenerationJob.objects.exclude(model__isnull=True)
     if user is not None and getattr(user, "is_authenticated", False):
         jobs = jobs.filter(created_by=user)
+    if prompt_hash:
+        jobs = jobs.filter(prompt_hash=prompt_hash)
+    if bundle_key:
+        jobs = jobs.filter(bundle_key=bundle_key)
 
     by_model = jobs.values("model__model_id").annotate(
         apps=Count("id"),
@@ -103,6 +116,10 @@ def _local_app_stats(user: AbstractBaseUser | None = None) -> dict[str, dict[str
     )
     if user is not None and getattr(user, "is_authenticated", False):
         base = base.filter(result__run__generation_job__created_by=user)
+    if prompt_hash:
+        base = base.filter(result__run__generation_job__prompt_hash=prompt_hash)
+    if bundle_key:
+        base = base.filter(result__run__generation_job__bundle_key=bundle_key)
 
     ai_slugs = AnalyzerTool.ai_slugs()
 
@@ -170,15 +187,22 @@ def _benchmarks_by_model() -> dict[str, dict[str, float]]:
     return out
 
 
-def aggregate_rankings(user: AbstractBaseUser | None = None) -> list[dict[str, Any]]:
+def aggregate_rankings(
+    user: AbstractBaseUser | None = None,
+    *,
+    prompt_hash: str | None = None,
+    bundle_key: str | None = None,
+) -> list[dict[str, Any]]:
     """Build the ranking list from LLMModel + benchmarks + local stats.
 
     With ``user`` given, local stats (apps, findings, empirical scores) are
     scoped to that user's generation jobs; benchmarks and metadata are global
-    either way.
+    either way. ``prompt_hash``/``bundle_key`` further narrow local stats to
+    jobs generated from one specific prompt version — comparisons across
+    models are only apples-to-apples when they used the same prompt material.
     """
 
-    local = _local_app_stats(user)
+    local = _local_app_stats(user, prompt_hash=prompt_hash, bundle_key=bundle_key)
     bench = _benchmarks_by_model()
 
     rows: list[dict[str, Any]] = []
