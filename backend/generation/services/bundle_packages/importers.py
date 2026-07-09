@@ -381,10 +381,13 @@ def _import_bundle(
         normalized_refs.append(ref)
     payload["block_refs"] = normalized_refs
 
-    existing = TemplateBundle.objects.filter(slug=payload["slug"]).first()
+    # Compare against the latest version of the slug — multiple versions can
+    # now exist, and an unordered .first() would pick an arbitrary one.
+    existing = TemplateBundle.objects.filter(slug=payload["slug"]).order_by("-version").first()
     if existing is None:
         return TemplateBundle.objects.create(
             **payload,
+            version=1,
             is_system=False,
             is_default=False,
             created_by=user,

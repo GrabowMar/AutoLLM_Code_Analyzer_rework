@@ -47,30 +47,11 @@ bundles:
         slug: rules-flask-global
         version: 1
 
-  - slug: app-content-recipe-list
-    name: Recipe list (minimal tone)
-    description: Standard v2 prompts with minimal tone for content_recipe_list
-    scaffolding_slug: flask-react
-    is_default: false
-    block_refs:
-      - type: prompt_stage
-        slug: base-backend-system
-        version: 1
-      - type: prompt_stage
-        slug: base-backend-user
-        version: 1
-      - type: prompt_stage
-        slug: base-frontend-system
-        version: 1
-      - type: prompt_stage
-        slug: base-frontend-user
-        version: 1
-      - type: prompt_tone
-        slug: tone-minimal
-        version: 1
-      - type: prompt_rules
-        slug: rules-flask-global
-        version: 1
+  # app-content-recipe-list is NOT defined here: it's a per-app override of
+  # system-scaffolding-standard, owned by
+  # requirements/manifests/content_recipe_list.yaml. Defining it in both
+  # places let them drift and made seeding non-idempotent (each seed pass
+  # picked up whichever definition ran last).
 
   - slug: system-fastapi-vue-standard
     name: FastAPI + Vue standard

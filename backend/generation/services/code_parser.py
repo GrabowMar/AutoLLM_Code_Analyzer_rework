@@ -256,6 +256,176 @@ def infer_python_dependencies(code: str) -> list[str]:
     return sorted(packages)
 
 
+_FRONTEND_LANGS = frozenset({"jsx", "tsx", "javascript", "js", "ts", "typescript", "html", "css", "vue", "svelte"})
+_FRONTEND_EXTS = (".jsx", ".tsx", ".js", ".ts", ".html", ".css", ".vue", ".svelte")
+_MAX_PATH_DEPTH = 6
+
+
+def sanitize_rel_path(name: str) -> str | None:
+    """Normalize an LLM-supplied filename to a safe relative path.
+
+    Filenames come straight from model output and are written to a Docker
+    build directory later — absolute paths, ``..`` segments, and other
+    escapes must never survive. Returns None when the name is unusable.
+    """
+    if not name:
+        return None
+    cleaned = name.strip().strip("`'\"").replace("\\", "/")
+    if not cleaned or cleaned.startswith(("/", "~")) or ":" in cleaned:
+        return None
+    parts = [p for p in cleaned.split("/") if p not in ("", ".")]
+    if not parts or len(parts) > _MAX_PATH_DEPTH:
+        return None
+    for part in parts:
+        if part == ".." or part.startswith("..") or not re.fullmatch(r"[\w.@-]+", part):
+            return None
+    filename = parts[-1]
+    if "." not in filename:
+        return None
+    return "/".join(parts)
+
+
+def _is_frontend_block(block: dict[str, str]) -> bool:
+    if block["language"] in _FRONTEND_LANGS:
+        return True
+    filename = (block["filename"] or "").lower()
+    return filename.endswith(_FRONTEND_EXTS)
+
+
+def _is_python_block(block: dict[str, str]) -> bool:
+    lang = block["language"]
+    filename = (block["filename"] or "").lower()
+    if lang == "requirements" or "requirements" in filename:
+        return False
+    return lang in ("python", "py") or lang.endswith(".py") or filename.endswith(".py")
+
+
+def _backend_entry_candidate(files: dict[str, str], entry_name: str) -> str | None:
+    """Pick the file that should become the backend entry module."""
+    if entry_name in files:
+        return entry_name
+    for common in ("app.py", "main.py"):
+        if common in files:
+            return common
+    scored = [name for name, code in files.items() if "__main__" in code or "Flask(" in code or "FastAPI(" in code]
+    if scored:
+        return scored[0]
+    return next(iter(files), None)
+
+
+def _frontend_rel_path(filename: str) -> str | None:
+    """Map an LLM frontend filename to its place under ``frontend/src/``."""
+    safe = sanitize_rel_path(filename)
+    if not safe:
+        return None
+    if safe.startswith("frontend/"):
+        return safe
+    if safe.startswith("src/"):
+        return f"frontend/{safe}"
+    if safe.startswith("public/"):
+        return f"frontend/{safe}"
+    if safe == "index.html":
+        return "frontend/index.html"
+    return f"frontend/src/{safe}"
+
+
+def parse_to_files(
+    backend_raw: str,
+    frontend_raw: str | None = None,
+    stack_config: dict | None = None,
+) -> dict:
+    """Parse raw LLM output into a per-file map, preserving multi-file output.
+
+    Backend files land at the build-dir root; frontend files under
+    ``frontend/src/`` (or their given ``frontend/``-relative path). The
+    stack's entry module (``backend_filename``) and main component
+    (``frontend_component``) are guaranteed to exist in the map so Docker
+    builds always find them.
+    """
+    stack_config = stack_config or {}
+    entry_name = stack_config.get("backend_filename", "app.py")
+    component = stack_config.get("frontend_component", "App.jsx")
+    component_path = f"frontend/src/{component}"
+
+    files: dict[str, str] = {}
+
+    # ── Backend ──
+    backend_files: dict[str, str] = {}
+    unnamed_python: list[dict[str, str]] = []
+    for block in extract_code_blocks(backend_raw or ""):
+        if not _is_python_block(block):
+            continue
+        filename = block["filename"]
+        # Some models put the filename in the fence's language slot
+        # (```app.py instead of ```python:app.py); recover it here.
+        if not filename and block["language"].endswith(".py"):
+            filename = block["language"]
+        safe = sanitize_rel_path(filename) if filename else None
+        if safe and safe.endswith(".py"):
+            if safe in backend_files:
+                backend_files[safe] += "\n\n" + block["code"]
+            else:
+                backend_files[safe] = block["code"]
+        else:
+            unnamed_python.append({"filename": "", "code": block["code"]})
+
+    if unnamed_python:
+        merged = unnamed_python[0]["code"] if len(unnamed_python) == 1 else _merge_python_files(unnamed_python)
+        if entry_name in backend_files:
+            backend_files[entry_name] += "\n\n" + merged
+        else:
+            backend_files[entry_name] = merged
+    if not backend_files and backend_raw and _looks_like_python(backend_raw):
+        backend_files[entry_name] = backend_raw.strip()
+
+    entry = _backend_entry_candidate(backend_files, entry_name)
+    if entry and entry != entry_name:
+        backend_files[entry_name] = backend_files.pop(entry)
+        entry = entry_name
+    files.update(backend_files)
+
+    # ── Frontend ──
+    frontend_count = 0
+    if frontend_raw:
+        unnamed_frontend: list[dict[str, str]] = []
+        for block in extract_code_blocks(frontend_raw):
+            if not _is_frontend_block(block):
+                continue
+            rel = _frontend_rel_path(block["filename"]) if block["filename"] else None
+            if rel:
+                if rel in files:
+                    files[rel] += "\n\n" + block["code"]
+                else:
+                    files[rel] = block["code"]
+                frontend_count += 1
+            else:
+                unnamed_frontend.append(block)
+        if unnamed_frontend:
+            merged_front = "\n\n".join(b["code"] for b in unnamed_frontend)
+            if component_path in files:
+                files[component_path] += "\n\n" + merged_front
+            else:
+                files[component_path] = merged_front
+            frontend_count += 1
+        if frontend_count and component_path not in files:
+            # Promote the closest match to the main component the scaffold imports.
+            candidates = [
+                p for p in files if p.startswith("frontend/") and p.rsplit("/", 1)[-1].lower() == component.lower()
+            ]
+            source = candidates[0] if candidates else next(p for p in files if p.startswith("frontend/"))
+            files[component_path] = files.pop(source)
+
+    all_python = "\n\n".join(backend_files.values())
+
+    return {
+        "files": files,
+        "backend_entry": entry or "",
+        "backend_dependencies": infer_python_dependencies(all_python) if all_python else [],
+        "backend_files": len(backend_files),
+        "frontend_files": frontend_count,
+    }
+
+
 def parse_result_to_structured(
     backend_raw: str,
     frontend_raw: str | None = None,
