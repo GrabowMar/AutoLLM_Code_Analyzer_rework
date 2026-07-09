@@ -13,6 +13,7 @@ from backend.generation.api.schema import ContentBlockCreateSchema
 from backend.generation.api.schema import ContentBlockSchema
 from backend.generation.api.schema import StarterTemplatePackageImportSchema
 from backend.generation.api.schema import StarterTemplatePackageSchema
+from backend.generation.api.schema import TemplateBundleCreateSchema
 from backend.generation.api.schema import TemplateBundleSchema
 from backend.generation.api.schema import TemplatePackageExportSchema
 from backend.generation.api.schema import TemplatePackageImportSchema
@@ -30,6 +31,7 @@ from backend.generation.services.bundle_packages import list_starter_template_pa
 from backend.generation.services.bundle_packages import visible_blocks_for
 from backend.generation.services.bundle_packages import visible_bundles_for
 from backend.generation.services.bundle_resolver import resolve_block_refs
+from backend.generation.services.versioning import content_hash
 
 
 def _validate_jinja(content: str) -> str | None:
@@ -55,13 +57,33 @@ def _mutable_block_or_403(user, *, slug: str, version: int) -> ContentBlock:
     raise HttpError(403, "You can only modify your own blocks.")
 
 
+def _latest_bundle_or_404(user, *, slug: str) -> TemplateBundle:
+    """Latest version of *slug* visible to *user* (any version, incl. archived, for staff)."""
+    bundle = visible_bundles_for(user).filter(slug=slug).first()
+    if not bundle:
+        raise HttpError(404, f"Bundle {slug} not found")
+    return bundle
+
+
 def _mutable_bundle_or_403(user, *, slug: str) -> TemplateBundle:
-    bundle = get_object_or_404(visible_bundles_for(user), slug=slug)
+    bundle = _latest_bundle_or_404(user, slug=slug)
     if bundle.created_by_id == getattr(user, "id", None):
         return bundle
     if getattr(user, "is_staff", False) and bundle.is_system:
         return bundle
     raise HttpError(403, "You can only modify your own bundles.")
+
+
+def _latest_bundles_by_slug(user) -> list[TemplateBundle]:
+    """Deduplicate a slug-ordered, version-descending queryset to one row per slug."""
+    seen: set[str] = set()
+    result: list[TemplateBundle] = []
+    for bundle in visible_bundles_for(user):
+        if bundle.slug in seen:
+            continue
+        seen.add(bundle.slug)
+        result.append(bundle)
+    return result
 
 
 @router.get("/blocks/", response=list[ContentBlockSchema])
@@ -136,14 +158,48 @@ def delete_block(request, slug: str, version: int = Query(1)):
 
 @router.get("/bundles/", response=list[TemplateBundleSchema])
 def list_bundles(request):
-    return visible_bundles_for(request.auth).order_by("-is_default", "name")
+    """Latest version of each bundle slug visible to the user."""
+    bundles = _latest_bundles_by_slug(request.auth)
+    return sorted(bundles, key=lambda b: (not b.is_default, b.name))
+
+
+@router.get("/bundles/{slug}/versions/", response=list[TemplateBundleSchema])
+def list_bundle_versions(request, slug: str):
+    """Full version history for one bundle slug, newest first."""
+    return visible_bundles_for(request.auth).filter(slug=slug).order_by("-version")
+
+
+def _serialize_block_refs(payload: TemplateBundleCreateSchema) -> list[dict]:
+    return [{"type": ref.type, "slug": ref.slug, "version": ref.version} for ref in payload.block_refs]
+
+
+def _bundle_content_hash(payload: TemplateBundleCreateSchema) -> str:
+    return content_hash(
+        {
+            "scaffolding_slug": payload.scaffolding_slug,
+            "block_refs": _serialize_block_refs(payload),
+            "llm_config": payload.llm_config,
+        },
+    )
 
 
 @router.post("/bundles/", response={200: TemplateBundleSchema, 400: dict})
-def create_bundle(request):
-    raise HttpError(
-        403,
-        "Manual bundle creation is disabled. Export or import template packages from existing assets instead.",
+def create_bundle(request, payload: TemplateBundleCreateSchema):
+    """Create a user-owned bundle as version 1 of a new slug."""
+    if TemplateBundle.objects.filter(slug=payload.slug).exists():
+        return 400, {"detail": f"Bundle slug {payload.slug} already exists. Use PUT to add a new version."}
+    return TemplateBundle.objects.create(
+        name=payload.name,
+        slug=payload.slug,
+        version=1,
+        description=payload.description,
+        scaffolding_slug=payload.scaffolding_slug,
+        block_refs=_serialize_block_refs(payload),
+        llm_config=payload.llm_config,
+        content_hash=_bundle_content_hash(payload),
+        is_system=False,
+        is_default=payload.is_default,
+        created_by=request.auth,
     )
 
 
@@ -237,23 +293,43 @@ def import_package_starter(
 
 @router.get("/bundles/{slug}/", response=TemplateBundleSchema)
 def get_bundle(request, slug: str):
-    return get_object_or_404(visible_bundles_for(request.auth), slug=slug)
+    """Latest version of a bundle. Use ``/bundles/{slug}/versions/`` for history."""
+    return _latest_bundle_or_404(request.auth, slug=slug)
 
 
 @router.put("/bundles/{slug}/", response={200: TemplateBundleSchema, 400: dict})
-def update_bundle(request, slug: str):
-    raise HttpError(
-        403,
-        "Manual bundle editing is disabled. Export or import template packages from existing assets instead.",
+def update_bundle(request, slug: str, payload: TemplateBundleCreateSchema):
+    """Create version+1 of *slug*. Versions are immutable — this never edits in place."""
+    current = _mutable_bundle_or_403(request.auth, slug=slug)
+    new_hash = _bundle_content_hash(payload)
+    unchanged = (
+        new_hash == current.content_hash
+        and payload.name == current.name
+        and payload.description == current.description
+    )
+    if unchanged:
+        return 400, {"detail": "No changes from the current version."}
+    return TemplateBundle.objects.create(
+        name=payload.name,
+        slug=slug,
+        version=current.version + 1,
+        description=payload.description,
+        scaffolding_slug=payload.scaffolding_slug,
+        block_refs=_serialize_block_refs(payload),
+        llm_config=payload.llm_config,
+        content_hash=new_hash,
+        is_system=current.is_system,
+        is_default=payload.is_default,
+        created_by=current.created_by,
     )
 
 
 @router.delete("/bundles/{slug}/")
 def delete_bundle(request, slug: str):
-    raise HttpError(
-        403,
-        "Manual bundle deletion is disabled. Export or import template packages from existing assets instead.",
-    )
+    """Archive every version of *slug* (kept for jobs that reference it, hidden from pickers)."""
+    _mutable_bundle_or_403(request.auth, slug=slug)
+    updated = TemplateBundle.objects.filter(slug=slug).update(is_archived=True)
+    return {"success": True, "archived_versions": updated}
 
 
 @router.get("/bundles/{slug}/export/")
@@ -262,7 +338,7 @@ def export_bundle(
     slug: str,
     fmt: str = Query("json", alias="format"),
 ):
-    bundle = get_object_or_404(visible_bundles_for(request.auth), slug=slug)
+    bundle = _latest_bundle_or_404(request.auth, slug=slug)
     if fmt not in {"json", "yaml"}:
         raise HttpError(400, "format must be 'json' or 'yaml'")
     package = export_bundle_package(bundle)
@@ -276,7 +352,7 @@ def export_bundle(
 @router.get("/bundles/{slug}/preview/", response=dict)
 def preview_bundle(request, slug: str):
     """Resolve block refs to assembled prompt templates (no app requirement context)."""
-    bundle = get_object_or_404(visible_bundles_for(request.auth), slug=slug)
+    bundle = _latest_bundle_or_404(request.auth, slug=slug)
     resolved = resolve_block_refs(list(bundle.block_refs or []), request.auth)
     from backend.generation.services.bundle_resolver import assemble_prompt_templates
 

@@ -1,0 +1,26 @@
+slug: repair-instructions
+version: 1
+block_type: validation
+name: Repair round instructions
+description: >-
+  User-message template for the single post-generation repair round: fed the
+  original file plus the validation errors it failed, asks for a corrected
+  full replacement.
+metadata:
+  role: repair_prompt
+content: |
+  The file `{{ filename }}` you generated has validation errors and must be
+  corrected. Return the file in FULL — do not describe the fix, output the
+  complete corrected file in one code block with the same filename.
+
+  ## Errors
+  {% for error in errors %}
+  - {{ error }}
+  {% endfor %}
+
+  ## File as generated
+  ```
+  {{ code }}
+  ```
+
+  Return ONLY the corrected file as a single code block.

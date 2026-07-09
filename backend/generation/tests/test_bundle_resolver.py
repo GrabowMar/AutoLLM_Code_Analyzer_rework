@@ -68,7 +68,7 @@ def test_build_resolved_bundle_admin_api_endpoints_in_rendered_user_prompt():
         admin_api_endpoints=[{"method": "GET", "path": "/api/admin/stats"}],
     )
     ContentBlockFactory(
-        slug="base-backend-user",
+        slug="test-backend-user",
         version=1,
         block_type=ContentBlock.BlockType.PROMPT_STAGE,
         content="# {{ name }}\n{{ admin_api_endpoints }}",
@@ -76,7 +76,7 @@ def test_build_resolved_bundle_admin_api_endpoints_in_rendered_user_prompt():
         is_system=True,
     )
     ContentBlockFactory(
-        slug="base-backend-system",
+        slug="test-backend-system",
         version=1,
         block_type=ContentBlock.BlockType.PROMPT_STAGE,
         content="System",
@@ -85,8 +85,8 @@ def test_build_resolved_bundle_admin_api_endpoints_in_rendered_user_prompt():
     )
     bundle = TemplateBundleFactory(
         block_refs=[
-            {"type": "prompt_stage", "slug": "base-backend-system", "version": 1},
-            {"type": "prompt_stage", "slug": "base-backend-user", "version": 1},
+            {"type": "prompt_stage", "slug": "test-backend-system", "version": 1},
+            {"type": "prompt_stage", "slug": "test-backend-user", "version": 1},
         ],
     )
     snapshot = build_resolved_bundle(
@@ -107,15 +107,18 @@ def test_build_resolved_bundle_admin_api_endpoints_in_rendered_user_prompt():
 @pytest.mark.django_db
 def test_get_bundle_for_app_prefers_matching_scaffolding_default():
     user = UserFactory()
-    app_req = AppRequirementTemplateFactory(slug="analytics_campaign_monitor")
+    # A synthetic scaffolding_slug that doesn't collide with any real seeded
+    # stack, so this test's is_default=True bundle is unambiguously "the"
+    # default for it regardless of what the real catalog seeds.
+    app_req = AppRequirementTemplateFactory(slug="test-analytics-campaign-monitor")
     TemplateBundleFactory(
-        slug="app-analytics-campaign-monitor",
-        scaffolding_slug="flask-react",
+        slug="app-test-analytics-campaign-monitor",
+        scaffolding_slug="test-other-stack",
         is_system=True,
     )
     fastapi_bundle = TemplateBundleFactory(
-        slug="system-fastapi-react-standard",
-        scaffolding_slug="fastapi-react",
+        slug="test-fastapi-react-standard",
+        scaffolding_slug="test-fastapi-stack",
         is_system=True,
         is_default=True,
     )
@@ -123,7 +126,7 @@ def test_get_bundle_for_app_prefers_matching_scaffolding_default():
     bundle = get_bundle_for_app(
         app_req,
         user=user,
-        scaffolding_slug="fastapi-react",
+        scaffolding_slug="test-fastapi-stack",
     )
 
     assert bundle == fastapi_bundle

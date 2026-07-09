@@ -34,6 +34,25 @@ def test_loc_from_job_counts_non_blank_non_comment():
     assert out["total_loc"] == 4
 
 
+def test_loc_from_job_sums_multi_file_result_by_extension():
+    user = UserFactory()
+    job = GenerationJobFactory(
+        created_by=user,
+        result_data={
+            "result_schema_version": 2,
+            "files": {
+                "app.py": "import os\n# comment\nprint('hi')\n",
+                "models.py": "import sqlalchemy\n",
+                "frontend/src/App.jsx": "export default function App() {}\n// comment\nconst x = 1;\n",
+            },
+        },
+    )
+    out = loc_mod.loc_from_job(job)
+    assert out["backend_loc"] == 3  # app.py (2) + models.py (1)
+    assert out["frontend_loc"] == 2  # App.jsx, comment line excluded
+    assert out["total_loc"] == 5
+
+
 def test_loc_for_jobs_aggregates():
     user = UserFactory()
     j1 = GenerationJobFactory(

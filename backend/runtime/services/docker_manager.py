@@ -261,7 +261,10 @@ def exec_in(
         else:
             run_cmd = list(cmd)
         if timeout_s and timeout_s > 0:
-            run_cmd = ["timeout", "--signal=KILL", str(timeout_s), *run_cmd]
+            # -s KILL (not --signal=KILL): the short form is the only one
+            # BusyBox's timeout (Alpine-based images) understands; GNU
+            # coreutils' timeout (analyzer-base) accepts both.
+            run_cmd = ["timeout", "-s", "KILL", str(timeout_s), *run_cmd]
         result = container.exec_run(
             run_cmd,
             demux=False,
@@ -353,6 +356,56 @@ def run_detached(
         kwargs["network"] = network
     container = c.containers.run(image, **kwargs)
     return container.id
+
+
+def run_once_with_files(
+    image: str,
+    files: dict[str, str],
+    command: list[str] | str,
+    *,
+    timeout_s: int = 30,
+    workdir: str = "/work",
+) -> dict[str, Any]:
+    """Copy *files* into a throwaway hardened container and run *command*.
+
+    Used for one-shot validation (e.g. syntax-checking generated code) where
+    no long-lived workspace is needed: start a network-isolated container,
+    write the files with :func:`copy_files_in`, run the check with
+    :func:`exec_in`, then remove the container. Never raises; failures come
+    back as ``{"error": ..., "exit_code": -1}``.
+    """
+    import uuid
+
+    c = client()
+    if c is None:
+        return {"error": "Docker daemon unavailable", "exit_code": -1, "output": ""}
+
+    name = f"validator-{uuid.uuid4().hex[:10]}"
+    try:
+        c.containers.run(
+            image,
+            name=name,
+            command=["sleep", str(timeout_s + 15)],
+            detach=True,
+            network_disabled=True,
+            cap_drop=["ALL"],
+            security_opt=["no-new-privileges"],
+            pids_limit=128,
+            mem_limit="512m",
+            cpu_period=100000,
+            cpu_quota=50000,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("run_once_with_files(%s) failed to start: %s", image, exc)
+        return {"error": str(exc), "exit_code": -1, "output": ""}
+
+    try:
+        copy_result = copy_files_in(name, files, dest=workdir)
+        if "error" in copy_result:
+            return {"error": copy_result["error"], "exit_code": -1, "output": ""}
+        return exec_in(name, command, timeout_s=timeout_s, workdir=workdir)
+    finally:
+        remove(name)
 
 
 def image_exists(tag: str) -> bool:

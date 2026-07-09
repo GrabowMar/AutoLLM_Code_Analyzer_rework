@@ -200,6 +200,9 @@ def _serialize_bundle(bundle: TemplateBundle) -> dict[str, Any]:
     return {
         "name": bundle.name,
         "slug": bundle.slug,
+        # Informational only: an import always starts a fresh version-1
+        # lineage under the importing user, so this isn't read back in.
+        "version": bundle.version,
         "description": bundle.description,
         "scaffolding_slug": bundle.scaffolding_slug,
         "block_refs": bundle.block_refs or [],

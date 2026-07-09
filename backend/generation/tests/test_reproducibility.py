@@ -25,7 +25,7 @@ pytestmark = pytest.mark.django_db
 
 def _make_bundle():
     ContentBlockFactory(
-        slug="base-backend-system",
+        slug="test-repro-backend-system",
         version=1,
         block_type=ContentBlock.BlockType.PROMPT_STAGE,
         content="System prompt",
@@ -33,8 +33,8 @@ def _make_bundle():
         is_system=True,
     )
     return TemplateBundleFactory(
-        slug="repro-bundle",
-        block_refs=[{"type": "prompt_stage", "slug": "base-backend-system", "version": 1}],
+        slug="test-repro-bundle",
+        block_refs=[{"type": "prompt_stage", "slug": "test-repro-backend-system", "version": 1}],
     )
 
 

@@ -81,6 +81,20 @@ class AppRequirementTemplate(models.Model):
         default=list,
         blank=True,
     )
+    difficulty = models.CharField(
+        _("difficulty"),
+        max_length=20,
+        choices=[("basic", _("Basic")), ("standard", _("Standard")), ("advanced", _("Advanced"))],
+        blank=True,
+        default="",
+    )
+    version = models.PositiveIntegerField(
+        _("version"),
+        default=1,
+        help_text="Bumped by the seeder when the spec content changes; single mutable row per slug",
+    )
+    content_hash = models.CharField(_("content hash"), max_length=64, blank=True, default="")
+    spec_schema_version = models.PositiveIntegerField(_("spec schema version"), default=1)
     is_default = models.BooleanField(_("system default"), default=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -170,6 +184,7 @@ class ContentBlock(models.Model):
         blank=True,
         help_text='e.g. {"stage": "backend", "role": "system"} for prompt_stage blocks',
     )
+    content_hash = models.CharField(_("content hash"), max_length=64, blank=True, default="")
     is_system = models.BooleanField(
         _("system block"),
         default=False,
@@ -205,7 +220,18 @@ class TemplateBundle(models.Model):
     """Ordered set of content blocks + scaffold slug for reproducible runs."""
 
     name = models.CharField(_("name"), max_length=200)
-    slug = models.SlugField(_("slug"), max_length=200, unique=True)
+    slug = models.SlugField(_("slug"), max_length=200)
+    version = models.PositiveIntegerField(
+        _("version"),
+        default=1,
+        help_text="Versions are immutable: editing a bundle creates version+1",
+    )
+    content_hash = models.CharField(_("content hash"), max_length=64, blank=True, default="")
+    is_archived = models.BooleanField(
+        _("archived"),
+        default=False,
+        help_text="Hidden from pickers but kept for jobs that reference it",
+    )
     description = models.TextField(_("description"), blank=True, default="")
     scaffolding_slug = models.SlugField(
         _("scaffolding slug"),
@@ -240,10 +266,16 @@ class TemplateBundle(models.Model):
     class Meta:
         verbose_name = _("Template Bundle")
         verbose_name_plural = _("Template Bundles")
-        ordering = ["-is_default", "-is_system", "name"]
+        ordering = ["-is_default", "-is_system", "name", "-version"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["slug", "version"],
+                name="generation_templatebundle_slug_version_uniq",
+            ),
+        ]
 
     def __str__(self) -> str:
-        return self.name
+        return f"{self.name} v{self.version}"
 
 
 class GenerationBatch(models.Model):

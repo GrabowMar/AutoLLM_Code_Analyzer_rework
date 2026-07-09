@@ -147,7 +147,8 @@ def bundle_slug_for_app(app_slug: str) -> str:
 
 
 def _visible_bundles(user: AbstractUser | None):
-    qs = TemplateBundle.objects.all()
+    """Non-archived bundles visible to *user*, latest version of each slug first."""
+    qs = TemplateBundle.objects.filter(is_archived=False).order_by("slug", "-version")
     if user and getattr(user, "is_authenticated", False):
         return qs.filter(Q(is_system=True) | Q(created_by=user))
     return qs.filter(is_system=True)
@@ -158,7 +159,7 @@ def get_bundle_for_app(
     user: AbstractUser | None = None,
     scaffolding_slug: str | None = None,
 ) -> TemplateBundle | None:
-    """Per-app pilot bundle if seeded, else system default."""
+    """Latest version of the per-app pilot bundle if seeded, else system default."""
     slug = bundle_slug_for_app(app_req.slug)
     qs = _visible_bundles(user).filter(slug=slug)
     if scaffolding_slug:
@@ -174,6 +175,7 @@ def get_default_bundle(
     scaffolding_slug: str | None = None,
     user: AbstractUser | None = None,
 ) -> TemplateBundle | None:
+    """Latest version of the applicable default bundle."""
     qs = _visible_bundles(user)
     if scaffolding_slug:
         matching_default = qs.filter(
@@ -203,17 +205,22 @@ def resolve_bundle_for_job(
     template_bundle: TemplateBundle | None,
     scaffolding_slug: str,
     user: AbstractUser | None,
-) -> tuple[list[dict[str, Any]], str, str]:
-    """Return (block_refs, scaffolding_slug, bundle_slug) for snapshot building."""
+) -> tuple[list[dict[str, Any]], str, str, int]:
+    """Return (block_refs, scaffolding_slug, bundle_slug, bundle_version) for snapshot building."""
     if template_bundle:
-        return list(template_bundle.block_refs or []), template_bundle.scaffolding_slug, template_bundle.slug
+        return (
+            list(template_bundle.block_refs or []),
+            template_bundle.scaffolding_slug,
+            template_bundle.slug,
+            template_bundle.version,
+        )
 
     if bundle := get_default_bundle(scaffolding_slug=scaffolding_slug, user=user):
-        return list(bundle.block_refs or []), bundle.scaffolding_slug, bundle.slug
+        return list(bundle.block_refs or []), bundle.scaffolding_slug, bundle.slug, bundle.version
 
     catalog = load_catalog()
     refs = catalog.get("default_block_refs", [])
-    return refs, scaffolding_slug, "catalog"
+    return refs, scaffolding_slug, "catalog", 1
 
 
 def build_resolved_bundle(
@@ -230,7 +237,7 @@ def build_resolved_bundle(
     legacy_frontend_system: str | None = None,
 ) -> dict[str, Any]:
     """Build the full immutable snapshot dict for ``GenerationJob.resolved_bundle``."""
-    block_refs, bundle_scaffold_slug, resolved_bundle_slug = resolve_bundle_for_job(
+    block_refs, bundle_scaffold_slug, resolved_bundle_slug, resolved_bundle_version = resolve_bundle_for_job(
         template_bundle=template_bundle,
         scaffolding_slug=scaffolding_slug,
         user=user,
@@ -268,7 +275,7 @@ def build_resolved_bundle(
     snapshot: dict[str, Any] = {
         "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
         "bundle_slug": bundle_slug,
-        "bundle_version": getattr(template_bundle, "version", 1) if template_bundle else 1,
+        "bundle_version": resolved_bundle_version,
         "scaffolding_slug": bundle_scaffold_slug or scaffolding_slug,
         "llm": llm_section,
         "seed": seed,

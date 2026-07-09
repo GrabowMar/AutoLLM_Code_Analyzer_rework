@@ -34,14 +34,11 @@ just up
 | flower | http://localhost:5555 | Celery dashboard (credentials from bootstrap) |
 | postgres, redis, celeryworker, celerybeat | internal | Database, broker, background workers |
 
-On startup the django container runs `python manage.py migrate` automatically, and the analyzer tool catalog seeds itself after every migrate. Two things are **not** automatic:
+On startup the django container runs `python manage.py migrate` automatically, and both the analyzer tool catalog and the generation templates (scaffolding, requirements, prompts, bundles) seed themselves after every migrate. One thing is **not** automatic:
 
 ```bash
-just manage seed_generation_templates   # scaffolding templates, requirements, prompts, bundles
 just manage createsuperuser
 ```
-
-Without the template seed, only the free-form "custom" generation mode has anything to offer.
 
 ## First run
 

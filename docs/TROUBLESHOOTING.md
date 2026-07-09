@@ -42,7 +42,7 @@ The catalog isn't seeded — it syncs from OpenRouter on demand. Open the Models
 
 ## Generation UI offers almost nothing
 
-`just manage seed_generation_templates` was never run — only the free-form custom mode works without it. See [Quickstart](/docs/QUICKSTART).
+Generation templates seed automatically after every migrate. If the UI still looks empty, check the django container logs for a "Generation template seeding failed" warning — malformed YAML/JSON under `backend/generation/data/` is caught and logged, not raised, so migrate still succeeds but seeding silently no-ops. Fix the data file and run `just manage seed_generation_templates` to retry. See [Quickstart](/docs/QUICKSTART).
 
 ## Production: a generated app's subdomain doesn't resolve
 
