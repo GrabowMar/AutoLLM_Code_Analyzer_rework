@@ -117,6 +117,66 @@ def apply_scaffold(
     _apply_substitutions(dest_path, job, stack)
 
     result = job.result_data or {}
+    files = result.get("files")
+    if phase == ScaffoldPhase.BUILD and result.get("result_schema_version") == 2 and isinstance(files, dict) and files:
+        _materialize_files(dest_path, stack, files, result)
+    else:
+        _materialize_legacy(dest_path, stack, phase, result)
+
+    return dest_path
+
+
+def _materialize_files(
+    dest_path: Path,
+    stack: dict[str, Any],
+    files: dict[str, str],
+    result: dict[str, Any],
+) -> None:
+    """Write a multi-file ``result_data["files"]`` map (result_schema_version 2)."""
+    backend_name = stack.get("backend_filename", "app.py")
+    entry = result.get("backend_entry") or backend_name
+    is_flask = stack.get("patch_profile") == "flask"
+    component = stack.get("frontend_component", "App.jsx")
+    is_vue = component.endswith(".vue")
+
+    backend_python: list[str] = []
+    for src_path, content in files.items():
+        text = content
+        # The entry file always lands at the stack's canonical filename,
+        # regardless of what the model called it.
+        out_path = backend_name if src_path == entry else src_path
+        if src_path == entry and is_flask:
+            text = _patch_backend_code(text)
+        if not out_path.startswith("frontend/") and out_path.endswith(".py"):
+            backend_python.append(text)
+        elif out_path.startswith("frontend/") and out_path.endswith((".jsx", ".tsx")) and not is_vue:
+            text = _sanitize_lucide_imports(text)
+
+        target = dest_path / out_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+
+    if not (dest_path / backend_name).is_file():
+        (dest_path / backend_name).write_text(_placeholder_backend_for_stack(stack), encoding="utf-8")
+
+    _patch_requirements(dest_path, "\n\n".join(backend_python))
+
+    if stack.get("has_frontend"):
+        src_dir = dest_path / "frontend" / "src"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        component_path = dest_path / "frontend" / "src" / component
+        if not component_path.is_file():
+            front = _placeholder_frontend_vue() if is_vue else _placeholder_frontend()
+            component_path.write_text(front, encoding="utf-8")
+
+
+def _materialize_legacy(
+    dest_path: Path,
+    stack: dict[str, Any],
+    phase: ScaffoldPhase,
+    result: dict[str, Any],
+) -> None:
+    """Write single-string ``backend_code``/``frontend_code`` (pre-v2 jobs, copilot seed)."""
     backend_code = result.get("backend_code", "")
     frontend_code = result.get("frontend_code", "")
 
@@ -147,8 +207,6 @@ def apply_scaffold(
         if phase == ScaffoldPhase.BUILD and frontend_text and not is_vue:
             front = _sanitize_lucide_imports(front)
         (src_dir / component).write_text(front, encoding="utf-8")
-
-    return dest_path
 
 
 def prepare_build_dir(job: GenerationJob, dest_path: Path) -> Path:

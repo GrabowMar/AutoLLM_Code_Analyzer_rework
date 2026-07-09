@@ -169,6 +169,75 @@ def test_prepare_build_dir_generic_python(tmp_path: Path):
 
 
 @pytest.mark.django_db
+def test_prepare_build_dir_multi_file_writes_all_files(tmp_path: Path):
+    template = ScaffoldingTemplateFactory(slug="flask-react")
+    job = GenerationJobFactory(
+        mode="scaffolding",
+        scaffolding_template=template,
+        result_data={
+            "result_schema_version": 2,
+            "backend_entry": "app.py",
+            "files": {
+                "app.py": (
+                    "from models import db\nfrom flask import Flask\n"
+                    "app = Flask(__name__)\nif __name__ == '__main__':\n    app.run(port=5000)\n"
+                ),
+                "models.py": "import yaml\ndb = None\n",
+                "frontend/src/App.jsx": "export default function App() { return null; }",
+                "frontend/src/api.js": "export const base = '/api';",
+            },
+        },
+    )
+    dest = tmp_path / "build"
+    svc.prepare_build_dir(job, dest)
+
+    app_py = (dest / "app.py").read_text(encoding="utf-8")
+    assert "8000" in app_py  # entry file gets the flask patch profile applied
+    assert (dest / "models.py").read_text(encoding="utf-8") == "import yaml\ndb = None\n"
+    assert (dest / "frontend" / "src" / "App.jsx").read_text(encoding="utf-8").startswith("export")
+    assert (dest / "frontend" / "src" / "api.js").is_file()
+
+    requirements = (dest / "requirements.txt").read_text(encoding="utf-8")
+    assert "pyyaml" in requirements.lower()  # dependency inferred from every python file, not just the entry
+
+
+@pytest.mark.django_db
+def test_prepare_build_dir_multi_file_renames_non_canonical_entry(tmp_path: Path):
+    """The backend entry can arrive under any name; it always lands at the stack's canonical filename."""
+    template = ScaffoldingTemplateFactory(slug="flask-react")
+    job = GenerationJobFactory(
+        mode="scaffolding",
+        scaffolding_template=template,
+        result_data={
+            "result_schema_version": 2,
+            "backend_entry": "main.py",
+            "files": {"main.py": "from flask import Flask\napp = Flask(__name__)\n"},
+        },
+    )
+    dest = tmp_path / "build"
+    svc.prepare_build_dir(job, dest)
+
+    assert (dest / "app.py").is_file()
+    assert not (dest / "main.py").exists()
+
+
+@pytest.mark.django_db
+def test_prepare_build_dir_multi_file_falls_back_to_placeholder_when_files_empty(tmp_path: Path):
+    template = ScaffoldingTemplateFactory(slug="flask-react")
+    job = GenerationJobFactory(
+        mode="scaffolding",
+        scaffolding_template=template,
+        result_data={"result_schema_version": 2, "files": {}},
+    )
+    dest = tmp_path / "build"
+    svc.prepare_build_dir(job, dest)
+
+    # Empty files map isn't truthy, so this takes the legacy branch and still
+    # produces a bootable placeholder rather than an empty build dir.
+    assert (dest / "app.py").is_file()
+
+
+@pytest.mark.django_db
 def test_apply_scaffold_seed_fastapi_react(tmp_path: Path):
     template = ScaffoldingTemplateFactory(slug="fastapi-react", name="FastAPI React")
     app_req = AppRequirementTemplateFactory(slug="campaign-monitor")

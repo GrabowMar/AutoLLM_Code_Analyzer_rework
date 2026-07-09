@@ -9,6 +9,19 @@ if TYPE_CHECKING:
     from backend.generation.models import GenerationJob
 
 
+_COMMENT_PREFIX_BY_EXT = {
+    ".py": "#",
+    ".jsx": "//",
+    ".tsx": "//",
+    ".js": "//",
+    ".ts": "//",
+    ".vue": "//",
+    ".svelte": "//",
+    ".css": "/*",
+    ".html": "<!--",
+}
+
+
 def _count_lines(text: str | None, comment_prefix: str = "#") -> int:
     if not text:
         return 0
@@ -19,6 +32,23 @@ def loc_from_job(job: GenerationJob) -> dict[str, int]:
     """Count non-empty, non-comment lines from a job's generated code."""
 
     data = job.result_data or {}
+    files = data.get("files")
+    if isinstance(files, dict) and files:
+        backend_loc = 0
+        frontend_loc = 0
+        for rel_path, content in files.items():
+            ext = "." + rel_path.rsplit(".", 1)[-1] if "." in rel_path else ""
+            lines = _count_lines(content, _COMMENT_PREFIX_BY_EXT.get(ext, "#"))
+            if rel_path.startswith("frontend/"):
+                frontend_loc += lines
+            else:
+                backend_loc += lines
+        return {
+            "backend_loc": backend_loc,
+            "frontend_loc": frontend_loc,
+            "total_loc": backend_loc + frontend_loc,
+        }
+
     backend = data.get("backend_code") or data.get("backend") or ""
     frontend = data.get("frontend_code") or data.get("frontend") or ""
     backend_loc = _count_lines(backend, "#") if backend else 0
