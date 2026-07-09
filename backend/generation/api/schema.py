@@ -119,6 +119,8 @@ class TemplateBundleSchema(ModelSchema):
             "id",
             "name",
             "slug",
+            "version",
+            "is_archived",
             "description",
             "scaffolding_slug",
             "block_refs",
@@ -128,6 +130,16 @@ class TemplateBundleSchema(ModelSchema):
             "created_at",
             "updated_at",
         ]
+
+
+class TemplateBundleCreateSchema(Schema):
+    name: str
+    slug: str
+    description: str = ""
+    scaffolding_slug: str = "flask-react"
+    block_refs: list[BlockRefSchema] = []
+    llm_config: dict = {}
+    is_default: bool = False
 
 
 class BundleImportSchema(Schema):

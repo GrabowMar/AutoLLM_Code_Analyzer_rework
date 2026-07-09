@@ -263,6 +263,10 @@ def test_build_repair_prompt_renders_errors_and_code():
     from backend.generation.models import ContentBlock
     from backend.generation.tests.factories import ContentBlockFactory
 
+    # Auto-seeding already provides a "repair-instructions" v1 block from
+    # data/blocks/validation/repair-instructions.yaml; replace it with
+    # controlled test content instead of asserting against real prose.
+    ContentBlock.objects.filter(slug="repair-instructions", version=1).delete()
     ContentBlockFactory(
         slug="repair-instructions",
         version=1,

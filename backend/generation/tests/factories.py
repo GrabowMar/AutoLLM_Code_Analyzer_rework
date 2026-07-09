@@ -13,6 +13,10 @@ from backend.users.tests.factories import UserFactory
 class ScaffoldingTemplateFactory(DjangoModelFactory):
     class Meta:
         model = ScaffoldingTemplate
+        # slug is globally unique and auto-seeding already populates the real
+        # canonical stack slugs (flask-react, fastapi-vue, fastapi-react);
+        # reuse the existing row instead of colliding with it.
+        django_get_or_create = ("slug",)
 
     name = factory.Sequence(lambda n: f"Scaffolding {n}")
     slug = factory.Sequence(lambda n: f"scaffolding-{n}")
