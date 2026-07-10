@@ -3,6 +3,8 @@
   "name": "Audio Player",
   "category": "Media",
   "description": "Play and manage audio tracks",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only tracks; require auth for upload/delete",
     "1. Track model: id, title (required), artist, url (required), duration",

@@ -3,6 +3,8 @@
   "name": "Todo List",
   "category": "Productivity",
   "description": "Track personal tasks",
+  "difficulty": "standard",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only todos; require auth for create/update/delete",
     "1. Todo model: id, title (required), description, priority, completed, created_at",

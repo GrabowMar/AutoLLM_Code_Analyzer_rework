@@ -3,6 +3,8 @@
   "name": "Expense Tracker",
   "category": "Finance",
   "description": "Track your expenses",
+  "difficulty": "standard",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only expense summaries; require auth for personal expense CRUD",
     "1. Expense model: id, amount (decimal, required), category (required), description, date",

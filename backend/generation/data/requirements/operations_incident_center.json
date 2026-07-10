@@ -3,6 +3,8 @@
   "name": "Incident Center",
   "category": "Operations",
   "description": "Coordinate production incidents, responders, timelines, and postmortem actions.",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Incident model with severity, service_name, status, commander, opened_at, resolved_at, impact_summary, and customer_updates",
     "Timeline event model for acknowledgements, mitigations, escalations, and recoveries",

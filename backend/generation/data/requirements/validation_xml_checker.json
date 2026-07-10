@@ -3,6 +3,8 @@
   "name": "XML Validator",
   "category": "Validation",
   "description": "Validate XML syntax",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public validation; restrict history listing to authenticated users",
     "1. POST /api/validate/xml - accept {xml: string}",

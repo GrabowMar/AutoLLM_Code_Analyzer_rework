@@ -3,6 +3,8 @@
   "name": "User Login",
   "category": "Auth",
   "description": "Register and sign in users",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: public registration/login; require auth for profile access",
     "1. User model: id, email (required, unique), password_hash, is_admin, created_at",

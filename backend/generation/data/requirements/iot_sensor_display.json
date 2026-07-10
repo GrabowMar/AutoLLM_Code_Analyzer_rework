@@ -3,6 +3,8 @@
   "name": "Sensor Dashboard",
   "category": "IoT",
   "description": "Display live sensor readings",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only sensor data; require auth for registering sensors and posting readings",
     "1. Sensor model: id, name (required), location, unit, last_value, last_updated",

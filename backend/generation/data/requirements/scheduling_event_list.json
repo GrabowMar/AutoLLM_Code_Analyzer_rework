@@ -3,6 +3,8 @@
   "name": "Event Calendar",
   "category": "Scheduling",
   "description": "Track events by date",
+  "difficulty": "standard",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only event listings; require auth for create/update/delete",
     "1. Event model: id, title (required), date (required), time, description, location",

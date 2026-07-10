@@ -3,6 +3,8 @@
   "name": "Subscription Billing Console",
   "category": "Commerce",
   "description": "Manage customers, plans, invoices, renewals, and delinquency recovery.",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Customer subscription model with plan_name, lifecycle_status, renewal_date, monthly_amount, failed_payment_count, and account_owner",
     "Invoice model with issued_at, due_at, paid_at, amount_due, balance_remaining, and retry_state",
