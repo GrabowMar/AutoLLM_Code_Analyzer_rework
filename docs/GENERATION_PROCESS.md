@@ -19,11 +19,13 @@ Scaffolding is the mode used for comparable model benchmarks — every model get
 Auto-seeded from `backend/generation/data/` after every `migrate` (`backend/generation/seeding.py`, `apps.py`); `just manage seed_generation_templates` re-runs it manually:
 
 - **ScaffoldingTemplate** — a tech stack skeleton (seeds: `flask-react`, `fastapi-vue`, `fastapi-react`).
-- **AppRequirementTemplate** — what to build, as structured requirement JSON (`data/requirements/`, 34 specs like `crud_todo_list`). One mutable row per slug; `version`/`content_hash` bump when the spec content changes.
+- **AppRequirementTemplate** — what to build, as structured requirement JSON (`data/requirements/`, 33 specs like `crud_todo_list`, validated against `data/requirements/schema.json`). One mutable row per slug; `version`/`content_hash` bump when the spec content changes. Each spec carries a `difficulty` tier (`basic`/`standard`/`advanced`) inferred from endpoint/field counts — a coarse research-metadata signal, not a hard guarantee.
 - **PromptTemplate** (legacy, admin-UI only) and **ContentBlock** — the prompt text and reusable fragments (`data/prompts/`, `data/blocks/`), assembled with Jinja2 by `prompt_renderer.py`. `ContentBlock` is versioned by content hash: editing a source file creates a new `(slug, version)` row rather than overwriting the one a past job's `resolved_bundle` snapshot points to.
 - **TemplateBundle** — a versioned, ordered set of content blocks + scaffold slug, editable through the API (`POST` creates v1, `PUT` creates v1+1, `DELETE` archives — versions are immutable) or importable/exportable as packages (`generation/services/bundle_packages/`).
 
 Under pytest's `--reuse-db`, the seeding signal only fires when the test DB is (re)created — `data/` changes need `pytest --create-db` to take effect.
+
+`manage.py lint_generation_data` validates every requirement spec against `schema.json` and checks stack parity: every stack in `runtime/scaffolding/manifest.json` with `has_frontend: true` must have a system bundle in `blocks/catalog.yaml` covering all four prompt-stage slots (backend/frontend × system/user). It's a pure data check — no DB access, no seeding required first.
 
 ## Job lifecycle
 

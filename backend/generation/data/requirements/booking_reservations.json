@@ -3,6 +3,8 @@
   "name": "Reservation System",
   "category": "Booking",
   "description": "Book time slots or rooms",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only reservation listings; require auth for create/update/delete",
     "1. Reservation model: id, name (required), email (required), date (required), time (HH:MM format), party_size (integer)",

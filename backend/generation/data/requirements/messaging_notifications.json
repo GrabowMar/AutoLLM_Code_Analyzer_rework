@@ -3,6 +3,8 @@
   "name": "Notification Center",
   "category": "Messaging",
   "description": "View and manage notifications",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only notifications; require auth for creation",
     "1. Notification model: id, message (required), type (info/warning/error), read (boolean), created_at",

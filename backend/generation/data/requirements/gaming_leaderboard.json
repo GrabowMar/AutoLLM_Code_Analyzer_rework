@@ -3,6 +3,8 @@
   "name": "Leaderboard",
   "category": "Gaming",
   "description": "Track player scores",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only leaderboard; require auth for score submissions",
     "1. Score model: id, player_name (required), score (integer, required), achieved_at",

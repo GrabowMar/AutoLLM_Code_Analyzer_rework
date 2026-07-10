@@ -233,6 +233,7 @@ def build_resolved_bundle(
     max_tokens: int,
     user: AbstractUser | None,
     experiment_seed: int | None = None,
+    top_p: float | None = None,
     legacy_backend_system: str | None = None,
     legacy_frontend_system: str | None = None,
 ) -> dict[str, Any]:
@@ -260,6 +261,8 @@ def build_resolved_bundle(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    if top_p is not None:
+        llm_section["top_p"] = top_p
     if model:
         llm_section["model_id"] = model.id
         llm_section["model_slug"] = model.model_id
@@ -328,6 +331,7 @@ def snapshot_for_scaffolding_job(job: GenerationJob) -> dict[str, Any]:
         max_tokens=job.max_tokens,
         user=job.created_by,
         experiment_seed=job.experiment_seed,
+        top_p=job.top_p,
         legacy_backend_system=legacy_backend,
         legacy_frontend_system=legacy_frontend,
     )

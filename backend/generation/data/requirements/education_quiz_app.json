@@ -3,6 +3,8 @@
   "name": "Quiz Application",
   "category": "Education",
   "description": "Take multiple choice quizzes",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public quiz taking; restrict quiz creation and results history to authenticated users",
     "1. Question model: id, question_text (required), options (JSON array), correct_answer (integer index)",

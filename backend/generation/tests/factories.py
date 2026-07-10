@@ -3,10 +3,13 @@ from factory.django import DjangoModelFactory
 
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
+from backend.generation.models import Experiment
+from backend.generation.models import ExperimentCondition
 from backend.generation.models import GenerationJob
 from backend.generation.models import PromptTemplate
 from backend.generation.models import ScaffoldingTemplate
 from backend.generation.models import TemplateBundle
+from backend.llm_models.tests.factories import LLMModelFactory
 from backend.users.tests.factories import UserFactory
 
 
@@ -80,3 +83,22 @@ class GenerationJobFactory(DjangoModelFactory):
     created_by = factory.SubFactory(UserFactory)
     custom_system_prompt = "You are a senior developer."
     custom_user_prompt = "Build a todo app."
+
+
+class ExperimentFactory(DjangoModelFactory):
+    class Meta:
+        model = Experiment
+
+    name = factory.Sequence(lambda n: f"Experiment {n}")
+    slug = factory.Sequence(lambda n: f"experiment-{n}")
+    created_by = factory.SubFactory(UserFactory)
+    repeats = 2
+
+
+class ExperimentConditionFactory(DjangoModelFactory):
+    class Meta:
+        model = ExperimentCondition
+
+    experiment = factory.SubFactory(ExperimentFactory)
+    template_bundle = factory.SubFactory(TemplateBundleFactory)
+    model = factory.SubFactory(LLMModelFactory)

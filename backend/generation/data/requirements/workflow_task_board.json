@@ -3,6 +3,8 @@
   "name": "Kanban Board",
   "category": "Workflow",
   "description": "Visual task workflow",
+  "difficulty": "standard",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "1. Task model: id, title (required), description, status (todo/in_progress/done), priority",
     "2. CRUD endpoints: GET /api/tasks, POST, PUT, DELETE",

@@ -3,6 +3,8 @@
   "name": "Campaign Monitor",
   "category": "Analytics",
   "description": "Track campaign performance, budget pacing, and channel health across launches.",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Campaign model with fields for channel, owner, status, daily_budget, spend_to_date, conversion_goal, launch_at, and notes",
     "Performance snapshot model that stores impressions, clicks, conversions, and revenue per campaign day",

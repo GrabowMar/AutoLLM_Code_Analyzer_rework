@@ -5,6 +5,7 @@
 	import BarChart3 from '@lucide/svelte/icons/bar-chart-3';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import WandSparkles from '@lucide/svelte/icons/wand-sparkles';
+	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import Trophy from '@lucide/svelte/icons/trophy';
 	import ChartColumn from '@lucide/svelte/icons/chart-column';
 	import BookOpen from '@lucide/svelte/icons/book-open';
@@ -65,6 +66,7 @@
 			items: [
 				{ label: 'Automation', href: '/automation', icon: Zap },
 				{ label: 'Sample Generator', href: '/sample-generator', icon: WandSparkles },
+				{ label: 'Experiments', href: '/experiments', icon: GitCompareArrows },
 				{ label: 'Analyzers', href: '/analyzers', icon: ScanSearch },
 				{ label: 'Templates', href: '/templates', icon: Layers },
 				{ label: 'Reports', href: '/reports', icon: FileText },
