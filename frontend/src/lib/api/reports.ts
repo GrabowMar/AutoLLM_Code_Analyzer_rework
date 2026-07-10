@@ -7,7 +7,8 @@ export type ReportType =
   | "template_comparison"
   | "tool_analysis"
   | "generation_analytics"
-  | "comprehensive";
+  | "comprehensive"
+  | "experiment_report";
 
 export interface GenerateReportPayload {
   report_type: ReportType;

@@ -195,6 +195,33 @@ def test_get_model_comparison_prompt_hash_filter_scopes_apps():
     assert next(r for r in scoped_rows if r["model_id"] == model.model_id)["apps"] == 2
 
 
+def test_get_model_comparison_experiment_id_filter_scopes_apps():
+    from backend.generation.tests.factories import ExperimentFactory
+
+    user = UserFactory()
+    model = LLMModelFactory(provider="OpenAI", model_name="GPT-4o")
+    experiment = ExperimentFactory(created_by=user)
+    GenerationJobFactory.create_batch(
+        2,
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        experiment=experiment,
+    )
+    GenerationJobFactory.create_batch(
+        5,
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+    )
+
+    all_rows = services.get_model_comparison(user, limit=10)
+    scoped_rows = services.get_model_comparison(user, limit=10, experiment_id=str(experiment.id))
+
+    assert next(r for r in all_rows if r["model_id"] == model.model_id)["apps"] == 7
+    assert next(r for r in scoped_rows if r["model_id"] == model.model_id)["apps"] == 2
+
+
 def test_get_model_comparison_excludes_ai_findings():
     user = UserFactory()
     model = LLMModelFactory(provider="OpenAI", model_name="GPT-4o")

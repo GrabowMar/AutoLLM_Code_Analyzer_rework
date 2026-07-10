@@ -32,11 +32,16 @@ def list_rankings(
     has_benchmarks: bool = False,
     prompt_hash: str | None = None,
     bundle_key: str | None = None,
+    experiment_id: str | None = None,
 ):
     per_page = min(max(per_page, 10), 100)
     page = max(page, 1)
 
-    rankings = services.aggregate_rankings(prompt_hash=prompt_hash, bundle_key=bundle_key)
+    rankings = services.aggregate_rankings(
+        prompt_hash=prompt_hash,
+        bundle_key=bundle_key,
+        experiment_id=experiment_id,
+    )
     filtered = services.filter_rankings(
         rankings,
         max_price=max_price,
