@@ -131,7 +131,9 @@ export async function updateExperiment(
   return res.json();
 }
 
-export async function deleteExperiment(id: string): Promise<{ success: boolean }> {
+export async function deleteExperiment(
+  id: string,
+): Promise<{ success: boolean }> {
   const res = await apiFetch(`/generation/experiments/${id}/`, {
     method: "DELETE",
   });
@@ -148,7 +150,9 @@ export async function archiveExperiment(id: string): Promise<Experiment> {
 export async function listConditions(
   experimentId: string,
 ): Promise<ExperimentCondition[]> {
-  const res = await apiFetch(`/generation/experiments/${experimentId}/conditions/`);
+  const res = await apiFetch(
+    `/generation/experiments/${experimentId}/conditions/`,
+  );
   return res.json();
 }
 
@@ -156,10 +160,13 @@ export async function createCondition(
   experimentId: string,
   data: CreateConditionPayload,
 ): Promise<ExperimentCondition> {
-  const res = await apiFetch(`/generation/experiments/${experimentId}/conditions/`, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
+  const res = await apiFetch(
+    `/generation/experiments/${experimentId}/conditions/`,
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    },
+  );
   return res.json();
 }
 
@@ -174,7 +181,9 @@ export async function deleteCondition(
   return res.json();
 }
 
-export async function previewExperiment(id: string): Promise<ExperimentPreview> {
+export async function previewExperiment(
+  id: string,
+): Promise<ExperimentPreview> {
   const res = await apiFetch(`/generation/experiments/${id}/preview/`, {
     method: "POST",
   });
@@ -195,7 +204,9 @@ export async function getExperimentStatus(
   return res.json();
 }
 
-export async function exportExperiment(id: string): Promise<Record<string, unknown>> {
+export async function exportExperiment(
+  id: string,
+): Promise<Record<string, unknown>> {
   const res = await apiFetch(`/generation/experiments/${id}/export/`);
   return res.json();
 }
