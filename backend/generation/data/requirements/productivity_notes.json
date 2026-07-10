@@ -3,6 +3,8 @@
   "name": "Notes",
   "category": "Productivity",
   "description": "Create and organize notes",
+  "difficulty": "standard",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only notes; require auth for create/update/delete",
     "1. Note model: id, title (required), content, tags, created_at",

@@ -3,6 +3,8 @@
   "name": "Store Finder",
   "category": "Geolocation",
   "description": "Find stores by location",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only store browsing; require auth for create/update/delete",
     "1. Store model: id, name, address, latitude, longitude, phone",

@@ -3,6 +3,8 @@
   "name": "Chat Room",
   "category": "Real-time",
   "description": "Simple real-time messaging",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only chat view; restrict sending messages to authenticated users",
     "1. WebSocket endpoint at /api/ws/chat for bidirectional communication",

@@ -3,6 +3,8 @@
   "name": "Appointments",
   "category": "Healthcare",
   "description": "Schedule and manage appointments",
+  "difficulty": "standard",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only appointment listings; require auth for create/update/delete",
     "1. Appointment model: id, patient_name (required), date, time, reason, status",

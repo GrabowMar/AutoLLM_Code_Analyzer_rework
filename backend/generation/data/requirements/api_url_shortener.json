@@ -3,6 +3,8 @@
   "name": "URL Shortener",
   "category": "API Integration",
   "description": "Create short URLs",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "1. POST /api/shorten - accept long URL, generate 6-character random code",
     "2. URL model: id, original_url, short_code (unique), created_at, click_count",

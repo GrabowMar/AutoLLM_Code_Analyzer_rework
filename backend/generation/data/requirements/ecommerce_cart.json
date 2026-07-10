@@ -3,6 +3,8 @@
   "name": "Shopping Cart",
   "category": "E-commerce",
   "description": "Browse products and manage a cart",
+  "difficulty": "basic",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public product browsing; require auth for cart management",
     "1. Product model: id, name (required), price (decimal), image_url, stock",

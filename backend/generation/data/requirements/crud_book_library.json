@@ -3,6 +3,8 @@
   "name": "Book Library",
   "category": "CRUD",
   "description": "Track your book collection",
+  "difficulty": "standard",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "1. Book model: id, title (required), author (required), year (integer, optional), isbn (optional)",
     "2. CRUD endpoints: GET /api/books, POST /api/books, PUT /api/books/:id, DELETE /api/books/:id",

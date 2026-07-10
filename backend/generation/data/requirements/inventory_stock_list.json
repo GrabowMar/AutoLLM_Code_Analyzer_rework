@@ -3,6 +3,8 @@
   "name": "Inventory",
   "category": "Inventory",
   "description": "Track stock levels",
+  "difficulty": "standard",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only inventory; require auth for create/update/delete",
     "1. Item model: id, name (required), sku, quantity, location",

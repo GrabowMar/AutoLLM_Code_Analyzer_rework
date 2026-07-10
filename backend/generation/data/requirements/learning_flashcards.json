@@ -3,6 +3,8 @@
   "name": "Flashcards",
   "category": "Learning",
   "description": "Create and study flashcards",
+  "difficulty": "standard",
+  "spec_schema_version": 2,
   "backend_requirements": [
     "Access control: allow public read-only flashcards; require auth for create/update/delete",
     "1. Flashcard model: id, question (required), answer (required), deck",
