@@ -278,6 +278,119 @@ class TemplateBundle(models.Model):
         return f"{self.name} v{self.version}"
 
 
+class Experiment(models.Model):
+    """A designed run: apps x conditions x repeats, with a reproducibility seed."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", _("Draft")
+        RUNNING = "running", _("Running")
+        COMPLETED = "completed", _("Completed")
+        ARCHIVED = "archived", _("Archived")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(_("name"), max_length=200)
+    slug = models.SlugField(_("slug"), max_length=200)
+    description = models.TextField(_("description"), blank=True, default="")
+    hypothesis = models.TextField(
+        _("hypothesis"),
+        blank=True,
+        default="",
+        help_text="What this experiment is meant to show, for the eventual report",
+    )
+    status = models.CharField(
+        _("status"),
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+    )
+    app_requirements = models.ManyToManyField(
+        AppRequirementTemplate,
+        related_name="experiments",
+        blank=True,
+    )
+    repeats = models.PositiveIntegerField(
+        _("repeats"),
+        default=3,
+        help_text="Independent trials per (condition, app) cell",
+    )
+    base_seed = models.PositiveIntegerField(
+        _("base seed"),
+        null=True,
+        blank=True,
+        help_text="Set for deterministic seed derivation across launches; unset = random per run",
+    )
+    continuation_limit = models.PositiveSmallIntegerField(_("continuation limit"), default=1)
+    enable_repair = models.BooleanField(_("enable repair round"), default=True)
+    temperature = models.FloatField(_("default temperature"), default=0.3)
+    max_tokens = models.PositiveIntegerField(_("default max tokens"), default=32000)
+    top_p = models.FloatField(_("default top p"), null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="experiments",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("Experiment")
+        verbose_name_plural = _("Experiments")
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["created_by", "slug"],
+                name="generation_experiment_owner_slug_uniq",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ExperimentCondition(models.Model):
+    """One cell of the model x template-bundle matrix for an :class:`Experiment`."""
+
+    experiment = models.ForeignKey(
+        Experiment,
+        on_delete=models.CASCADE,
+        related_name="conditions",
+    )
+    label = models.CharField(_("label"), max_length=200, blank=True, default="")
+    template_bundle = models.ForeignKey(
+        TemplateBundle,
+        on_delete=models.PROTECT,
+        related_name="experiment_conditions",
+    )
+    model = models.ForeignKey(
+        "llm_models.LLMModel",
+        on_delete=models.PROTECT,
+        related_name="experiment_conditions",
+    )
+    param_overrides = models.JSONField(
+        _("param overrides"),
+        default=dict,
+        blank=True,
+        help_text="Per-condition temperature/max_tokens/top_p overrides of the experiment defaults",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("Experiment Condition")
+        verbose_name_plural = _("Experiment Conditions")
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["experiment", "template_bundle", "model"],
+                name="generation_experimentcondition_uniq",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.label or f"{self.model_id} / {self.template_bundle.slug}"
+
+
 class GenerationBatch(models.Model):
     """Groups multiple generation jobs together."""
 
@@ -431,6 +544,28 @@ class GenerationJob(models.Model):
         help_text='Denormalized "bundle-slug@version" slicing key',
     )
 
+    # Experiment membership (a job is one run/cell of a designed experiment)
+    experiment = models.ForeignKey(
+        "Experiment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="jobs",
+    )
+    condition = models.ForeignKey(
+        "ExperimentCondition",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="jobs",
+    )
+    repeat_index = models.PositiveIntegerField(
+        _("repeat index"),
+        null=True,
+        blank=True,
+        help_text="0-based trial number within this job's (condition, app) cell",
+    )
+
     # Custom mode
     custom_system_prompt = models.TextField(_("system prompt"), blank=True, default="")
     custom_user_prompt = models.TextField(_("user prompt"), blank=True, default="")
@@ -438,6 +573,7 @@ class GenerationJob(models.Model):
     # Shared LLM parameters
     temperature = models.FloatField(_("temperature"), default=0.3)
     max_tokens = models.PositiveIntegerField(_("max tokens"), default=32000)
+    top_p = models.FloatField(_("top p"), null=True, blank=True)
 
     # Copilot mode
     copilot_description = models.TextField(
