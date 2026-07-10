@@ -47,12 +47,14 @@ def get_models(
     limit: int = Query(25, ge=1, le=100),
     prompt_hash: str | None = None,
     bundle_key: str | None = None,
+    experiment_id: str | None = None,
 ):
     return services.get_model_comparison(
         request.auth,
         limit=limit,
         prompt_hash=prompt_hash,
         bundle_key=bundle_key,
+        experiment_id=experiment_id,
     )
 
 

@@ -495,6 +495,67 @@ def test_generate_comprehensive_returns_platform_metrics():
     assert data["platform"]["total_models"] >= 2
 
 
+def test_generate_experiment_report_missing_id_raises():
+    with pytest.raises(ValueError, match="experiment_id required"):
+        generators.generate_experiment_report({})
+
+
+def test_generate_experiment_report_unknown_id_raises():
+    with pytest.raises(ValueError, match="Experiment not found"):
+        generators.generate_experiment_report({"experiment_id": "00000000-0000-0000-0000-000000000000"})
+
+
+def test_generate_experiment_report_malformed_id_raises():
+    with pytest.raises(ValueError, match="Experiment not found"):
+        generators.generate_experiment_report({"experiment_id": "not-a-uuid"})
+
+
+def test_generate_experiment_report_per_condition_stats_and_deltas():
+    from backend.generation.tests.factories import ExperimentConditionFactory
+    from backend.generation.tests.factories import ExperimentFactory
+    from backend.generation.tests.factories import TemplateBundleFactory
+
+    user = UserFactory()
+    template = AppRequirementTemplateFactory()
+    experiment = ExperimentFactory(created_by=user)
+    model_a = LLMModelFactory(model_id="m-a")
+    model_b = LLMModelFactory(model_id="m-b")
+    bundle = TemplateBundleFactory()
+    condition_a = ExperimentConditionFactory(experiment=experiment, model=model_a, template_bundle=bundle)
+    condition_b = ExperimentConditionFactory(experiment=experiment, model=model_b, template_bundle=bundle)
+
+    job_a = _job_with_run_findings(user, model_a, template, ["high"])
+    job_a.experiment = experiment
+    job_a.condition = condition_a
+    job_a.save(update_fields=["experiment", "condition"])
+
+    job_b = _job_with_run_findings(user, model_b, template, ["high"] * 3)
+    job_b.experiment = experiment
+    job_b.condition = condition_b
+    job_b.save(update_fields=["experiment", "condition"])
+
+    data = generators.generate_experiment_report({"experiment_id": str(experiment.id)})
+
+    assert data["experiment"]["id"] == str(experiment.id)
+    assert data["total_conditions"] == 2
+    by_condition = {row["condition_id"]: row for row in data["conditions"]}
+    assert by_condition[condition_a.id]["model_id"] == "m-a"
+    assert by_condition[condition_a.id]["stats"]["trials"] == 1
+    assert by_condition[condition_b.id]["model_id"] == "m-b"
+    assert by_condition[condition_b.id]["stats"]["trials"] == 1
+
+    assert len(data["comparisons"]) == 1
+    comparison = data["comparisons"][0]
+    delta = comparison["deltas"]["findings_total"]
+    assert delta["a"] == 1.0
+    assert delta["b"] == 3.0
+    assert delta["delta"] == 2.0
+
+
+def test_generate_experiment_report_registered_in_generators():
+    assert generators.GENERATORS["experiment_report"] is generators.generate_experiment_report
+
+
 @pytest.mark.django_db(transaction=True)
 def test_create_and_dispatch_generates_report():
     user = UserFactory()

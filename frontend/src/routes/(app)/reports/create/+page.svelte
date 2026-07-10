@@ -10,6 +10,7 @@
 	import Wrench from '@lucide/svelte/icons/wrench';
 	import TrendingUp from '@lucide/svelte/icons/trending-up';
 	import Layers from '@lucide/svelte/icons/layers';
+	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import {
@@ -20,6 +21,7 @@
 		type AppRequirementTemplate,
 		type ReportType
 	} from '$lib/api/client';
+	import { listExperiments, type Experiment } from '$lib/api/experiments';
 
 	const reportTypes: {
 		key: ReportType;
@@ -31,7 +33,8 @@
 		{ key: 'template_comparison', label: 'Template Comparison', description: 'Compare model performance on the same app template.', icon: GitCompareArrows },
 		{ key: 'tool_analysis', label: 'Tool Analysis', description: 'Findings breakdown across analyzers / security tools.', icon: Wrench },
 		{ key: 'generation_analytics', label: 'Generation Analytics', description: 'Throughput and success rate over a time window.', icon: TrendingUp },
-		{ key: 'comprehensive', label: 'Comprehensive', description: 'Platform-wide rollup of generation, analysis, and tools.', icon: Layers }
+		{ key: 'comprehensive', label: 'Comprehensive', description: 'Platform-wide rollup of generation, analysis, and tools.', icon: Layers },
+		{ key: 'experiment_report', label: 'Experiment Report', description: 'Per-condition stats and pairwise A/B deltas for one designed experiment.', icon: FlaskConical }
 	];
 
 	let step = $state<1 | 2>(1);
@@ -42,20 +45,24 @@
 	let templateSlug = $state('');
 	let toolName = $state('');
 	let days = $state(30);
+	let experimentId = $state('');
 	let submitting = $state(false);
 	let error = $state('');
 
 	let models = $state<LLMModelSummary[]>([]);
 	let templates = $state<AppRequirementTemplate[]>([]);
+	let experiments = $state<Experiment[]>([]);
 
 	onMount(async () => {
 		try {
-			const [m, t] = await Promise.all([
+			const [m, t, ex] = await Promise.all([
 				getModels({ per_page: 100 }),
-				getAppTemplates()
+				getAppTemplates(),
+				listExperiments()
 			]);
 			models = m.items;
 			templates = t;
+			experiments = ex;
 		} catch {
 			// non-fatal
 		}
@@ -88,6 +95,13 @@
 		}
 		if (selectedType === 'generation_analytics' || selectedType === 'comprehensive') {
 			config.days = Number(days) || 30;
+		}
+		if (selectedType === 'experiment_report') {
+			if (!experimentId) {
+				error = 'Pick an experiment';
+				return;
+			}
+			config.experiment_id = experimentId;
 		}
 		submitting = true;
 		error = '';
@@ -201,6 +215,20 @@
 							class="block w-full std-select py-2"
 						/>
 						<p class="text-xs text-muted-foreground">1-365 days</p>
+					</div>
+				{:else if selectedType === 'experiment_report'}
+					<div class="space-y-2">
+						<label for="rep-experiment" class="text-sm font-medium">Experiment</label>
+						<select
+							id="rep-experiment"
+							bind:value={experimentId}
+							class="block w-full std-select py-2"
+						>
+							<option value="">— select an experiment —</option>
+							{#each experiments as ex (ex.id)}
+								<option value={ex.id}>{ex.name}</option>
+							{/each}
+						</select>
 					</div>
 				{/if}
 

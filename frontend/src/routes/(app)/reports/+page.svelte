@@ -16,6 +16,7 @@
 	import Wrench from '@lucide/svelte/icons/wrench';
 	import TrendingUp from '@lucide/svelte/icons/trending-up';
 	import Layers from '@lucide/svelte/icons/layers';
+	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Search from '@lucide/svelte/icons/search';
 	import ArrowDownUp from '@lucide/svelte/icons/arrow-down-up';
@@ -50,7 +51,8 @@
 		template_comparison: { label: 'Template Comparison', color: 'bg-purple-500/15 text-purple-400 border-purple-500/30', icon: GitCompareArrows },
 		tool_analysis: { label: 'Tool Analysis', color: 'bg-teal-500/15 text-teal-400 border-teal-500/30', icon: Wrench },
 		generation_analytics: { label: 'Generation Analytics', color: 'bg-orange-500/15 text-orange-400 border-orange-500/30', icon: TrendingUp },
-		comprehensive: { label: 'Comprehensive', color: 'bg-red-500/15 text-red-400 border-red-500/30', icon: Layers }
+		comprehensive: { label: 'Comprehensive', color: 'bg-red-500/15 text-red-400 border-red-500/30', icon: Layers },
+		experiment_report: { label: 'Experiment Report', color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', icon: FlaskConical }
 	};
 
 	async function load() {

@@ -525,6 +525,128 @@ def generate_generation_analytics(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_DELTA_METRICS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("weighted_per_kloc", ("stats", "weighted_per_kloc", "mean")),
+    ("findings_total", ("stats", "findings_total", "mean")),
+    ("critical_high", ("stats", "critical_high", "mean")),
+    ("functional_pass_rate", ("stats", "functional", "pass_rate", "mean")),
+    ("cost", ("stats", "cost", "mean")),
+    ("duration", ("stats", "duration", "mean")),
+)
+
+
+def _dig(row: dict[str, Any], path: tuple[str, ...]) -> float | None:
+    node: Any = row
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return None
+        node = node[key]
+    return node if isinstance(node, (int, float)) else None
+
+
+def _pairwise_condition_deltas(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every unordered condition pair, diffed on the headline trial metrics.
+
+    A raw side-by-side of per-condition stats leaves the reader to compute
+    "how much did switching from A to B change things" by hand; this does it
+    once for every metric ``_experiment_stats`` tracks so a model swap or a
+    bundle edit's effect is visible directly instead of read off two columns.
+    """
+
+    comparisons = []
+    for i in range(len(rows)):
+        for j in range(i + 1, len(rows)):
+            a, b = rows[i], rows[j]
+            deltas: dict[str, Any] = {}
+            for metric_name, path in _DELTA_METRICS:
+                va, vb = _dig(a, path), _dig(b, path)
+                if va is None or vb is None:
+                    deltas[metric_name] = None
+                    continue
+                diff = round(vb - va, 4)
+                deltas[metric_name] = {
+                    "a": va,
+                    "b": vb,
+                    "delta": diff,
+                    "pct_change": round((diff / va) * 100, 2) if va else None,
+                }
+            comparisons.append(
+                {
+                    "condition_a": {"id": a["condition_id"], "label": a["label"]},
+                    "condition_b": {"id": b["condition_id"], "label": b["label"]},
+                    "deltas": deltas,
+                },
+            )
+    return comparisons
+
+
+def generate_experiment_report(config: dict[str, Any]) -> dict[str, Any]:
+    """Per-condition stats and pairwise A/B deltas for one designed experiment.
+
+    Each :class:`ExperimentCondition` is one arm of the model x bundle matrix;
+    this reuses ``_experiment_stats`` per condition's jobs (same trial-level
+    statistics as ``template_comparison`` and ``/rankings``), then diffs every
+    condition pair so an A/B swap surfaces without hand-computing it from the
+    per-condition numbers.
+    """
+
+    from django.core.exceptions import ValidationError
+
+    from backend.generation.models import Experiment
+
+    experiment_id = config.get("experiment_id")
+    if not experiment_id:
+        msg = "experiment_id required for experiment_report report"
+        raise ValueError(msg)
+
+    try:
+        experiment = Experiment.objects.get(id=experiment_id)
+    except (Experiment.DoesNotExist, ValidationError) as e:
+        msg = f"Experiment not found: {experiment_id}"
+        raise ValueError(msg) from e
+
+    exclude_truncated = bool(config.get("exclude_truncated", True))
+    ai_slugs = AnalyzerTool.ai_slugs()
+
+    conditions = list(experiment.conditions.select_related("model", "template_bundle"))
+    rows = []
+    for condition in conditions:
+        jobs = GenerationJob.objects.filter(experiment=experiment, condition=condition)
+        all_findings = _findings_for_jobs(jobs)
+        findings = all_findings.exclude(result__tool_slug__in=ai_slugs)
+        ai_findings = all_findings.filter(result__tool_slug__in=ai_slugs)
+        rows.append(
+            {
+                "condition_id": condition.id,
+                "label": condition.label or f"{condition.model.model_id} / {condition.template_bundle.slug}",
+                "model_id": condition.model.model_id,
+                "model_name": condition.model.model_name,
+                "bundle_key": f"{condition.template_bundle.slug}@{condition.template_bundle.version}",
+                "generation": _job_summary(jobs),
+                "loc": loc_for_jobs(jobs),
+                "findings": _severity_counts(findings),
+                "total_findings": findings.count(),
+                "ai_findings": _severity_counts(ai_findings),
+                "ai_total": ai_findings.count(),
+                "stats": _experiment_stats(jobs, exclude_truncated=exclude_truncated),
+            },
+        )
+
+    return {
+        "experiment": {
+            "id": str(experiment.id),
+            "name": experiment.name,
+            "slug": experiment.slug,
+            "hypothesis": experiment.hypothesis,
+            "status": experiment.status,
+            "repeats": experiment.repeats,
+        },
+        "conditions": rows,
+        "total_conditions": len(rows),
+        "comparisons": _pairwise_condition_deltas(rows),
+    }
+
+
 def generate_comprehensive(config: dict[str, Any]) -> dict[str, Any]:
     """Platform-wide aggregate combining all report dimensions."""
 
@@ -552,4 +674,5 @@ GENERATORS = {
     "tool_analysis": generate_tool_analysis,
     "generation_analytics": generate_generation_analytics,
     "comprehensive": generate_comprehensive,
+    "experiment_report": generate_experiment_report,
 }

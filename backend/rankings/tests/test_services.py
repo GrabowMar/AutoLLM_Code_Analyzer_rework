@@ -165,6 +165,35 @@ def test_aggregate_rankings_bundle_key_filter_scopes_local_stats():
     assert scoped_row["apps"] == 4
 
 
+def test_aggregate_rankings_experiment_id_filter_scopes_local_stats():
+    from backend.generation.tests.factories import ExperimentFactory
+
+    user = UserFactory()
+    model = LLMModelFactory(model_id="openai/gpt-4o")
+    experiment = ExperimentFactory(created_by=user)
+    GenerationJobFactory.create_batch(
+        2,
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        experiment=experiment,
+    )
+    GenerationJobFactory.create_batch(
+        5,
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+    )
+
+    all_rankings = services.aggregate_rankings()
+    scoped = services.aggregate_rankings(experiment_id=str(experiment.id))
+
+    all_row = next(r for r in all_rankings if r["model_id"] == model.model_id)
+    scoped_row = next(r for r in scoped if r["model_id"] == model.model_id)
+    assert all_row["apps"] == 7
+    assert scoped_row["apps"] == 2
+
+
 def test_aggregate_rankings_no_filter_matches_unfiltered_totals():
     user = UserFactory()
     model = LLMModelFactory(model_id="openai/gpt-4o")

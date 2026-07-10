@@ -22,9 +22,11 @@ With `base_seed` set, each cell's seed is derived deterministically from `(base_
 
 ## Comparing results across conditions
 
-Every `GenerationJob` carries `prompt_hash` (hashes the rendered prompt material — templates + app spec + block versions, not the seed or model) and `bundle_key` (`slug@version`). Rankings, statistics, and reports accept optional `prompt_hash`/`bundle_key` query params to scope a comparison to jobs generated from the *same* prompt version — without this, jobs from different template edits on the same app get silently pooled, which confounds a model comparison with a prompt comparison.
+Every `GenerationJob` carries `prompt_hash` (hashes the rendered prompt material — templates + app spec + block versions, not the seed or model) and `bundle_key` (`slug@version`). Rankings, statistics, and reports accept optional `prompt_hash`/`bundle_key` query params to scope a comparison to jobs generated from the *same* prompt version — without this, jobs from different template edits on the same app get silently pooled, which confounds a model comparison with a prompt comparison. Jobs also carry `experiment`/`condition` FKs once launched from an experiment, so the same endpoints also accept `experiment_id` to scope directly to one designed run without knowing its prompt_hash/bundle_key up front.
 
 The `template_comparison` report groups rows by `(model, bundle_key)` rather than by model alone, so a template that changed mid-experiment shows up as separate rows instead of blended stats; `mixed_bundle_versions` and `mixed_prompt_versions` flags on the report/stats payloads make this visible even when you didn't explicitly filter.
+
+The `experiment_report` report type (`config: {"experiment_id": ...}`) is purpose-built for one designed experiment: one row of trial-level stats per `ExperimentCondition` (reusing the same stats `template_comparison` uses), plus every condition pair diffed on the headline metrics (findings density, critical/high count, functional pass rate, cost, duration) so an A/B swap between two conditions surfaces as a delta instead of two columns to eyeball.
 
 ## Frontend
 

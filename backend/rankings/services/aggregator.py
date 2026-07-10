@@ -41,6 +41,7 @@ def _local_app_stats(
     *,
     prompt_hash: str | None = None,
     bundle_key: str | None = None,
+    experiment_id: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Aggregate per-model apps generated and finding rollups.
 
@@ -53,6 +54,8 @@ def _local_app_stats(
     ``prompt_hash``/``bundle_key`` narrow the comparison to jobs generated
     from the same prompt material — without this, jobs from different
     template/bundle versions on the same app are silently pooled together.
+    ``experiment_id`` narrows to one designed experiment's jobs directly,
+    without needing to know its prompt_hash/bundle_key in advance.
     """
 
     jobs = GenerationJob.objects.exclude(model__isnull=True)
@@ -62,6 +65,8 @@ def _local_app_stats(
         jobs = jobs.filter(prompt_hash=prompt_hash)
     if bundle_key:
         jobs = jobs.filter(bundle_key=bundle_key)
+    if experiment_id:
+        jobs = jobs.filter(experiment_id=experiment_id)
 
     by_model = jobs.values("model__model_id").annotate(
         apps=Count("id"),
@@ -120,6 +125,8 @@ def _local_app_stats(
         base = base.filter(result__run__generation_job__prompt_hash=prompt_hash)
     if bundle_key:
         base = base.filter(result__run__generation_job__bundle_key=bundle_key)
+    if experiment_id:
+        base = base.filter(result__run__generation_job__experiment_id=experiment_id)
 
     ai_slugs = AnalyzerTool.ai_slugs()
 
@@ -192,17 +199,19 @@ def aggregate_rankings(
     *,
     prompt_hash: str | None = None,
     bundle_key: str | None = None,
+    experiment_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build the ranking list from LLMModel + benchmarks + local stats.
 
     With ``user`` given, local stats (apps, findings, empirical scores) are
     scoped to that user's generation jobs; benchmarks and metadata are global
-    either way. ``prompt_hash``/``bundle_key`` further narrow local stats to
-    jobs generated from one specific prompt version — comparisons across
-    models are only apples-to-apples when they used the same prompt material.
+    either way. ``prompt_hash``/``bundle_key``/``experiment_id`` further narrow
+    local stats to jobs generated from one specific prompt version or designed
+    experiment — comparisons across models are only apples-to-apples when they
+    used the same prompt material.
     """
 
-    local = _local_app_stats(user, prompt_hash=prompt_hash, bundle_key=bundle_key)
+    local = _local_app_stats(user, prompt_hash=prompt_hash, bundle_key=bundle_key, experiment_id=experiment_id)
     bench = _benchmarks_by_model()
 
     rows: list[dict[str, Any]] = []
