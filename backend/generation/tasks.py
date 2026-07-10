@@ -23,7 +23,6 @@ def run_generation_job(self, job_id: str) -> dict:
         job = GenerationJob.objects.select_related(
             "model",
             "app_requirement",
-            "scaffolding_template",
             "backend_prompt_template",
             "frontend_prompt_template",
             "batch",

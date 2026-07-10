@@ -25,38 +25,6 @@ STARTER_TEMPLATE_PACKAGES = {
             "Imports FastAPI + React/Vue scaffoldings, three richer sample app requirements, "
             "stack-specific prompts, and ready-to-use bundles."
         ),
-        "scaffolding_templates": [
-            {
-                "name": "FastAPI + Vue",
-                "slug": "fastapi-vue",
-                "description": (
-                    "Single-container FastAPI backend with a Vue 3 SPA. "
-                    "Useful for comparing Python API generation against the Flask stack."
-                ),
-                "tech_stack": {
-                    "frontend": "Vue 3 + Vite",
-                    "backend": "FastAPI + SQLAlchemy + JWT",
-                    "database": "SQLite",
-                    "runtime": "Single Docker container",
-                },
-                "substitution_vars": ["{{PROJECT_NAME}}", "{{app_port|8000}}"],
-            },
-            {
-                "name": "FastAPI + React",
-                "slug": "fastapi-react",
-                "description": (
-                    "Single-container FastAPI backend paired with a React 18 SPA "
-                    "for stack-comparison and prompt-evaluation runs."
-                ),
-                "tech_stack": {
-                    "frontend": "React 18 + Vite + Tailwind CSS",
-                    "backend": "FastAPI + SQLAlchemy + JWT",
-                    "database": "SQLite",
-                    "runtime": "Single Docker container",
-                },
-                "substitution_vars": ["{{PROJECT_NAME}}", "{{app_port|8000}}"],
-            },
-        ],
         "app_template_files": [
             "requirements/analytics_campaign_monitor.json",
             "requirements/operations_incident_center.json",
@@ -204,7 +172,6 @@ def list_starter_template_packages() -> list[dict[str, Any]]:
                 "slug": slug,
                 "name": str(package.get("starter_name", slug)),
                 "description": str(package.get("starter_description", "")),
-                "scaffolding_count": len(assets.get("scaffolding_templates", [])),
                 "app_template_count": len(assets.get("app_templates", [])),
                 "prompt_template_count": len(assets.get("prompt_templates", [])),
                 "block_count": len(assets.get("blocks", [])),
@@ -228,7 +195,6 @@ def build_starter_template_package(slug: str) -> dict[str, Any]:
         "starter_name": spec["name"],
         "starter_description": spec["description"],
         "assets": {
-            "scaffolding_templates": list(spec["scaffolding_templates"]),
             "app_templates": [_load_json_data_file(relative_path) for relative_path in spec["app_template_files"]],
             "prompt_templates": [
                 {

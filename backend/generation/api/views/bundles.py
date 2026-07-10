@@ -226,7 +226,6 @@ def export_package(
         raise HttpError(400, "format must be 'json' or 'yaml'")
     package = export_template_package(
         user=request.auth,
-        scaffolding_slugs=payload.scaffolding_slugs,
         app_template_slugs=payload.app_template_slugs,
         prompt_template_slugs=payload.prompt_template_slugs,
         bundle_slugs=payload.bundle_slugs,
@@ -253,7 +252,6 @@ def import_package(request, payload: TemplatePackageImportSchema):
     except ValueError as exc:
         return 400, {"detail": str(exc)}
     return {
-        "scaffolding_templates": [item.slug for item in imported["scaffolding_templates"]],
         "app_templates": [item.slug for item in imported["app_templates"]],
         "prompt_templates": [item.slug for item in imported["prompt_templates"]],
         "blocks": [f"{item.slug}:{item.version}" for item in imported["blocks"]],
@@ -283,7 +281,6 @@ def import_package_starter(
     except ValueError as exc:
         return 400, {"detail": str(exc)}
     return {
-        "scaffolding_templates": [item.slug for item in imported["scaffolding_templates"]],
         "app_templates": [item.slug for item in imported["app_templates"]],
         "prompt_templates": [item.slug for item in imported["prompt_templates"]],
         "blocks": [f"{item.slug}:{item.version}" for item in imported["blocks"]],

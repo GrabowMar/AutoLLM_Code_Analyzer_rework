@@ -6,7 +6,6 @@ from django.core.management import call_command
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
 from backend.generation.models import PromptTemplate
-from backend.generation.models import ScaffoldingTemplate
 from backend.generation.models import TemplateBundle
 
 
@@ -17,12 +16,6 @@ def test_seed_generation_templates_creates_sample_content():
     command_result = call_command("seed_generation_templates", stdout=out)
 
     assert command_result is None
-    assert (
-        ScaffoldingTemplate.objects.filter(
-            slug__in=["flask-react", "fastapi-vue", "fastapi-react"],
-        ).count()
-        == 3
-    )
     assert (
         AppRequirementTemplate.objects.filter(
             slug__in=[

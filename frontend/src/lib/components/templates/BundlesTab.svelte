@@ -9,7 +9,6 @@
 		type AppRequirementTemplate,
 		type ContentBlock,
 		type PromptTemplate,
-		type ScaffoldingTemplate,
 		type StarterTemplatePackage,
 		type TemplateBundle,
 	} from '$lib/api/client';
@@ -19,7 +18,6 @@
 		bundlesLoading: boolean;
 		starterPackages: StarterTemplatePackage[];
 		starterPackagesLoading: boolean;
-		scaffoldingTemplates: ScaffoldingTemplate[];
 		appTemplates: AppRequirementTemplate[];
 		promptTemplates: PromptTemplate[];
 		contentBlocks: ContentBlock[];
@@ -33,7 +31,6 @@
 		bundlesLoading,
 		starterPackages,
 		starterPackagesLoading,
-		scaffoldingTemplates,
 		appTemplates,
 		promptTemplates,
 		contentBlocks,
@@ -46,7 +43,6 @@
 	let starterImportSlug = $state('');
 	let error = $state('');
 	let packageSelection = $state({
-		scaffolding: [] as string[],
 		app: [] as string[],
 		prompt: [] as string[],
 		bundle: [] as string[],
@@ -54,7 +50,6 @@
 	});
 
 	const selectedAssetCount = $derived(
-		packageSelection.scaffolding.length +
 		packageSelection.app.length +
 		packageSelection.prompt.length +
 		packageSelection.bundle.length +
@@ -66,7 +61,7 @@
 	}
 
 	function toggleSelection(
-		group: 'scaffolding' | 'app' | 'prompt' | 'bundle' | 'block',
+		group: 'app' | 'prompt' | 'bundle' | 'block',
 		value: string
 	) {
 		const current = packageSelection[group];
@@ -79,7 +74,7 @@
 	}
 
 	function isSelected(
-		group: 'scaffolding' | 'app' | 'prompt' | 'bundle' | 'block',
+		group: 'app' | 'prompt' | 'bundle' | 'block',
 		value: string
 	): boolean {
 		return packageSelection[group].includes(value);
@@ -87,7 +82,6 @@
 
 	function clearPackageSelection() {
 		packageSelection = {
-			scaffolding: [],
 			app: [],
 			prompt: [],
 			bundle: [],
@@ -106,7 +100,6 @@
 				}));
 			const exported = await exportTemplatePackage(
 				{
-					scaffolding_slugs: packageSelection.scaffolding,
 					app_template_slugs: packageSelection.app,
 					prompt_template_slugs: packageSelection.prompt,
 					bundle_slugs: packageSelection.bundle,
@@ -146,7 +139,7 @@
 		<div>
 			<h3 class="text-sm font-semibold text-foreground">Template packages</h3>
 			<p class="text-xs text-muted-foreground">
-				Pack scaffoldings, app templates, prompts, blocks, and bundles into one shareable export.
+				Pack app templates, prompts, blocks, and bundles into one shareable export.
 			</p>
 		</div>
 		<div class="flex flex-wrap gap-2">
@@ -161,7 +154,7 @@
 				<div>
 					<h4 class="text-sm font-semibold text-foreground">Starter packages</h4>
 					<p class="text-xs text-muted-foreground">
-						One-click imports for built-in sample scaffoldings, app requirements, prompts, blocks, and bundles.
+						One-click imports for built-in sample app requirements, prompts, blocks, and bundles.
 					</p>
 				</div>
 				<Badge variant="outline" class="text-[10px]">Uses {conflictStrategy} on conflict</Badge>
@@ -182,7 +175,6 @@
 									<p class="text-xs text-muted-foreground">{starter.description}</p>
 								</div>
 								<div class="flex flex-wrap gap-1.5">
-									<Badge variant="outline" class="text-[9px]">{starter.scaffolding_count} scaffolds</Badge>
 									<Badge variant="outline" class="text-[9px]">{starter.app_template_count} apps</Badge>
 									<Badge variant="outline" class="text-[9px]">{starter.prompt_template_count} prompts</Badge>
 									<Badge variant="outline" class="text-[9px]">{starter.block_count} blocks</Badge>
@@ -210,7 +202,7 @@
 			<div>
 				<h4 class="text-sm font-semibold text-foreground">Package builder</h4>
 				<p class="text-xs text-muted-foreground">
-					Select the assets to ship together. Bundle-linked blocks and matching scaffoldings are included automatically on export.
+					Select the assets to ship together. Bundle-linked blocks are included automatically on export.
 				</p>
 			</div>
 			<div class="flex items-center gap-2">
@@ -222,21 +214,6 @@
 		</div>
 
 		<div class="mt-4 grid gap-4 xl:grid-cols-2">
-			<div class="space-y-2">
-				<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Scaffoldings</p>
-				<div class="flex flex-wrap gap-2">
-					{#each scaffoldingTemplates as template}
-						<button
-							type="button"
-							class="rounded-md border px-2.5 py-1 text-[11px] transition-colors cursor-pointer {isSelected('scaffolding', template.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
-							onclick={() => toggleSelection('scaffolding', template.slug)}
-						>
-							{template.name}
-						</button>
-					{/each}
-				</div>
-			</div>
-
 			<div class="space-y-2">
 				<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">App templates</p>
 				<div class="flex flex-wrap gap-2">

@@ -6,7 +6,6 @@ import json
 import logging
 import re
 import shutil
-import tarfile
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -69,15 +68,20 @@ def canonical_stack_slug(slug: str) -> str:
     return default
 
 
+def is_known_stack_slug(slug: str) -> bool:
+    """Whether *slug* is a canonical stack slug or alias in the manifest."""
+    return slug in _stack_entries(load_manifest())
+
+
 def resolve_stack_slug(job: GenerationJob) -> str:
-    """Resolve job scaffolding template to a canonical stack slug from the manifest."""
+    """Resolve a job's stack slug to a canonical stack slug from the manifest."""
     manifest = load_manifest()
     default = manifest.get("default_stack", "generic-python")
 
-    if not job.scaffolding_template:
+    if not job.stack_slug:
         return default
 
-    return canonical_stack_slug(job.scaffolding_template.slug)
+    return canonical_stack_slug(job.stack_slug)
 
 
 def get_stack_config(stack_slug: str) -> dict[str, Any]:
@@ -108,11 +112,8 @@ def apply_scaffold(
     stack_slug = resolve_stack_slug(job)
     stack = get_stack_config(stack_slug)
 
-    if _apply_template_archive(job, dest_path):
-        pass
-    else:
-        template_dir = _TEMPLATES_DIR / stack["directory"]
-        _copy_template_dir(template_dir, dest_path)
+    template_dir = _TEMPLATES_DIR / stack["directory"]
+    _copy_template_dir(template_dir, dest_path)
 
     _apply_substitutions(dest_path, job, stack)
 
@@ -214,19 +215,6 @@ def prepare_build_dir(job: GenerationJob, dest_path: Path) -> Path:
     return apply_scaffold(job, dest_path, phase=ScaffoldPhase.BUILD)
 
 
-def _apply_template_archive(job: GenerationJob, dest_path: Path) -> bool:
-    """Extract ``template_archive`` when present. Returns True if archive was applied."""
-    template = job.scaffolding_template
-    if not template or not template.template_archive:
-        return False
-    archive_path = Path(template.template_archive.path)
-    if not archive_path.is_file():
-        return False
-    with tarfile.open(archive_path, "r:gz") as tar:
-        tar.extractall(path=dest_path, filter="data")
-    return True
-
-
 def _apply_substitutions(dest: Path, job: GenerationJob, stack: dict[str, Any]) -> None:
     manifest = load_manifest()
     rel_paths = manifest.get("substitution_files", [".env.example"])
@@ -246,8 +234,8 @@ def _build_substitution_context(job: GenerationJob, stack: dict[str, Any]) -> di
     port = str(stack.get("default_port", 8000))
     if job.app_requirement_id and job.app_requirement:
         project_name = job.app_requirement.slug
-    elif job.scaffolding_template:
-        project_name = job.scaffolding_template.slug
+    elif job.stack_slug:
+        project_name = job.stack_slug
     else:
         project_name = "app"
     return {

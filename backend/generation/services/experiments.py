@@ -17,7 +17,6 @@ from typing import Any
 from backend.generation.models import Experiment
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
-from backend.generation.models import ScaffoldingTemplate
 from backend.generation.services.bundle_resolver import apply_snapshot_to_job
 from backend.generation.services.bundle_resolver import derive_experiment_seed
 from backend.generation.services.dispatcher import dispatch_job
@@ -148,18 +147,6 @@ def launch_experiment(experiment: Experiment, user: AbstractUser) -> GenerationB
         created_by=user,
     )
 
-    # ScaffoldingTemplate.slug rows are seeded with canonical stack slugs
-    # (flask-react, fastapi-vue, fastapi-react); resolve_stack_slug() reads
-    # job.scaffolding_template, not the bundle, so it must be set here or
-    # every experiment job would silently fall back to the default stack.
-    stack_cache: dict[str, ScaffoldingTemplate | None] = {}
-
-    def _stack_for(scaffolding_slug: str) -> ScaffoldingTemplate | None:
-        canonical = canonical_stack_slug(scaffolding_slug)
-        if canonical not in stack_cache:
-            stack_cache[canonical] = ScaffoldingTemplate.objects.filter(slug=canonical).first()
-        return stack_cache[canonical]
-
     created_jobs: list[GenerationJob] = []
     failed_count = 0
     for cell in pending_cells:
@@ -177,7 +164,7 @@ def launch_experiment(experiment: Experiment, user: AbstractUser) -> GenerationB
             condition=condition,
             repeat_index=cell.repeat_index,
             model=condition.model,
-            scaffolding_template=_stack_for(condition.template_bundle.scaffolding_slug),
+            stack_slug=canonical_stack_slug(condition.template_bundle.scaffolding_slug),
             app_requirement=app_req,
             template_bundle=condition.template_bundle,
             temperature=temperature,

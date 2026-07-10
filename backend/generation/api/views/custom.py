@@ -12,6 +12,7 @@ import logging
 
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from ninja.errors import HttpError
 
 from backend.credentials.services.resolver import MissingApiKeyError
 from backend.credentials.services.resolver import has_resolvable_key
@@ -24,13 +25,13 @@ from backend.generation.api.views._router import router
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
-from backend.generation.models import ScaffoldingTemplate
 from backend.generation.models import TemplateBundle
 from backend.generation.services.bundle_resolver import apply_snapshot_to_job
 from backend.generation.services.bundle_resolver import get_bundle_for_app
 from backend.generation.services.dispatcher import dispatch_job
 from backend.llm_models.models import LLMModel
 from backend.runtime.services.scaffolding import canonical_stack_slug
+from backend.runtime.services.scaffolding import is_known_stack_slug
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +74,8 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
     err = _preflight_api_key(request)
     if err is not None:
         return err
-    scaffolding = get_object_or_404(
-        ScaffoldingTemplate,
-        id=payload.scaffolding_template_id,
-    )
+    if not is_known_stack_slug(payload.stack_slug):
+        raise HttpError(404, f"Unknown stack slug: {payload.stack_slug}")
     app_reqs = AppRequirementTemplate.objects.filter(
         id__in=payload.app_requirement_ids,
     )
@@ -91,14 +90,14 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
             id=payload.template_bundle_id,
         )
 
+    stack_slug = canonical_stack_slug(payload.stack_slug)
+
     batch = GenerationBatch.objects.create(
-        name=f"Scaffolding batch - {scaffolding.name}",
+        name=f"Scaffolding batch - {stack_slug}",
         mode="scaffolding",
         total_jobs=app_reqs.count() * models_qs.count() * payload.trials,
         created_by=request.auth,
     )
-
-    stack_slug = canonical_stack_slug(scaffolding.slug)
 
     job_count = 0
     failed_count = 0
@@ -115,7 +114,7 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
                     created_by=request.auth,
                     batch=batch,
                     model=model,
-                    scaffolding_template=scaffolding,
+                    stack_slug=stack_slug,
                     app_requirement=app_req,
                     template_bundle=job_bundle,
                     temperature=payload.temperature,
@@ -159,18 +158,17 @@ def create_copilot_job(request, payload: CopilotJobCreateSchema):
     model = None
     if payload.model_id:
         model = get_object_or_404(LLMModel, id=payload.model_id)
-    scaffolding = None
-    if payload.scaffolding_template_id:
-        scaffolding = get_object_or_404(
-            ScaffoldingTemplate,
-            id=payload.scaffolding_template_id,
-        )
+    stack_slug = ""
+    if payload.stack_slug:
+        if not is_known_stack_slug(payload.stack_slug):
+            raise HttpError(404, f"Unknown stack slug: {payload.stack_slug}")
+        stack_slug = canonical_stack_slug(payload.stack_slug)
 
     job = GenerationJob.objects.create(
         mode=GenerationJob.Mode.COPILOT,
         created_by=request.auth,
         model=model,
-        scaffolding_template=scaffolding,
+        stack_slug=stack_slug,
         copilot_description=payload.description,
         copilot_max_iterations=payload.max_iterations,
         copilot_use_open_source=payload.use_open_source,

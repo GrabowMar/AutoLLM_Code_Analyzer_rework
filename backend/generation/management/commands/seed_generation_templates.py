@@ -1,4 +1,4 @@
-"""Seed scaffolding, requirements, prompts, content blocks, and template bundles.
+"""Seed requirements, prompts, content blocks, and template bundles.
 
 Thin wrapper around :func:`backend.generation.seeding.seed_all`, which also
 runs automatically after every ``migrate``.
@@ -12,7 +12,7 @@ from backend.generation.seeding import seed_all
 
 
 class Command(BaseCommand):
-    help = "Seed scaffolding, requirements, prompts, content blocks, and template bundles"
+    help = "Seed requirements, prompts, content blocks, and template bundles"
 
     def handle(self, *args, **options) -> None:
         results = seed_all(log=self.stdout.write)

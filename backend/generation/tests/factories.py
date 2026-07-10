@@ -7,25 +7,9 @@ from backend.generation.models import Experiment
 from backend.generation.models import ExperimentCondition
 from backend.generation.models import GenerationJob
 from backend.generation.models import PromptTemplate
-from backend.generation.models import ScaffoldingTemplate
 from backend.generation.models import TemplateBundle
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.users.tests.factories import UserFactory
-
-
-class ScaffoldingTemplateFactory(DjangoModelFactory):
-    class Meta:
-        model = ScaffoldingTemplate
-        # slug is globally unique and auto-seeding already populates the real
-        # canonical stack slugs (flask-react, fastapi-vue, fastapi-react);
-        # reuse the existing row instead of colliding with it.
-        django_get_or_create = ("slug",)
-
-    name = factory.Sequence(lambda n: f"Scaffolding {n}")
-    slug = factory.Sequence(lambda n: f"scaffolding-{n}")
-    description = factory.Faker("sentence")
-    tech_stack = {"frontend": "React 18", "backend": "Flask 3.x"}
-    is_default = True
 
 
 class AppRequirementTemplateFactory(DjangoModelFactory):

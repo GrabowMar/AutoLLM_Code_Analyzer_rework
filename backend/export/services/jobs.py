@@ -29,11 +29,8 @@ def _job_tokens(job: Any) -> int | str:
 
 
 def _job_template(job: Any) -> str:
-    if job.scaffolding_template_id:
-        try:
-            return job.scaffolding_template.name
-        except AttributeError:
-            return str(job.scaffolding_template_id)
+    if job.stack_slug:
+        return job.stack_slug
     if job.app_requirement_id:
         try:
             return job.app_requirement.name
@@ -48,7 +45,6 @@ def generation_jobs_csv(queryset: QuerySet[Any]) -> str:
     writer.writerow(_JOB_HEADERS)
     for job in queryset.select_related(
         "model",
-        "scaffolding_template",
         "app_requirement",
     ):
         writer.writerow(
@@ -80,7 +76,6 @@ def generation_jobs_json(queryset: QuerySet[Any]) -> list[dict[str, Any]]:
         }
         for job in queryset.select_related(
             "model",
-            "scaffolding_template",
             "app_requirement",
         )
     ]

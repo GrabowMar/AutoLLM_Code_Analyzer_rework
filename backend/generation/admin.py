@@ -6,15 +6,6 @@ from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
 from backend.generation.models import PromptTemplate
-from backend.generation.models import ScaffoldingTemplate
-
-
-@admin.register(ScaffoldingTemplate)
-class ScaffoldingTemplateAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "is_default", "created_at"]
-    list_filter = ["is_default"]
-    search_fields = ["name", "slug"]
-    prepopulated_fields = {"slug": ("name",)}
 
 
 @admin.register(AppRequirementTemplate)

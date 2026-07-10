@@ -11,12 +11,11 @@ from backend.generation.api.schema import AppRequirementCreateSchema
 from backend.generation.api.schema import AppRequirementTemplateSchema
 from backend.generation.api.schema import PromptTemplateCreateSchema
 from backend.generation.api.schema import PromptTemplateSchema
-from backend.generation.api.schema import ScaffoldingTemplateCreateSchema
-from backend.generation.api.schema import ScaffoldingTemplateSchema
+from backend.generation.api.schema import StackSchema
 from backend.generation.api.views._router import router
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import PromptTemplate
-from backend.generation.models import ScaffoldingTemplate
+from backend.runtime.services.scaffolding import load_manifest
 
 
 def _visible_templates(model, user):
@@ -32,47 +31,22 @@ def _mutable_template_or_403(model, user, *, slug: str):
     raise HttpError(403, "You can only modify your own templates.")
 
 
-# -- Scaffolding Templates ---------------------------------------------
+# -- Stacks (static scaffolding skeletons from runtime/scaffolding/manifest.json) --
 
 
-@router.get("/scaffolding-templates/", response=list[ScaffoldingTemplateSchema])
-def list_scaffolding_templates(request):
-    """List all scaffolding templates."""
-    return _visible_templates(ScaffoldingTemplate, request.auth)
+@router.get("/stacks/", response=list[StackSchema])
+def list_stacks(request):
+    """List the stack skeletons available for scaffolding-mode jobs.
 
-
-@router.post("/scaffolding-templates/", response=ScaffoldingTemplateSchema)
-def create_scaffolding_template(request, payload: ScaffoldingTemplateCreateSchema):
-    """Create a new scaffolding template."""
-    return ScaffoldingTemplate.objects.create(
-        **payload.dict(),
-        created_by=request.auth,
-    )
-
-
-@router.get("/scaffolding-templates/{slug}/", response=ScaffoldingTemplateSchema)
-def get_scaffolding_template(request, slug: str):
-    return get_object_or_404(_visible_templates(ScaffoldingTemplate, request.auth), slug=slug)
-
-
-@router.put("/scaffolding-templates/{slug}/", response=ScaffoldingTemplateSchema)
-def update_scaffolding_template(
-    request,
-    slug: str,
-    payload: ScaffoldingTemplateCreateSchema,
-):
-    template = _mutable_template_or_403(ScaffoldingTemplate, request.auth, slug=slug)
-    for attr, value in payload.dict().items():
-        setattr(template, attr, value)
-    template.save()
-    return template
-
-
-@router.delete("/scaffolding-templates/{slug}/")
-def delete_scaffolding_template(request, slug: str):
-    template = _mutable_template_or_403(ScaffoldingTemplate, request.auth, slug=slug)
-    template.delete()
-    return {"success": True}
+    Stacks are code shipped with the app (``runtime/scaffolding/<dir>``), not
+    database rows — there is nothing per-user or per-install to create/edit
+    here, unlike the (removed) ``ScaffoldingTemplate`` model this replaces.
+    """
+    manifest = load_manifest()
+    return [
+        {"slug": slug, "has_frontend": bool(config.get("has_frontend")), "aliases": config.get("aliases", [])}
+        for slug, config in manifest.get("stacks", {}).items()
+    ]
 
 
 # -- App Requirement Templates ------------------------------------------

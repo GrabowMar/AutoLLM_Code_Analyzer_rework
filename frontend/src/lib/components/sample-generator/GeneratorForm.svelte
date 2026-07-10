@@ -9,7 +9,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import type {
 		LLMModelSummary,
-		ScaffoldingTemplate,
+		Stack,
 		AppRequirementTemplate,
 	} from '$lib/api/client';
 	import Play from '@lucide/svelte/icons/play';
@@ -31,7 +31,7 @@
 	}
 
 	export interface ScaffoldingPayload {
-		scaffolding_template_id: number;
+		stack_slug: string;
 		app_requirement_ids: number[];
 		model_ids: number[];
 		temperature: number;
@@ -50,7 +50,7 @@
 		activeTab: TabId;
 		models: LLMModelSummary[];
 		modelsLoading: boolean;
-		scaffoldingTemplates: ScaffoldingTemplate[];
+		stacks: Stack[];
 		appTemplates: AppRequirementTemplate[];
 		scaffoldingLoading: boolean;
 		customSubmitting: boolean;
@@ -71,7 +71,7 @@
 		activeTab,
 		models,
 		modelsLoading,
-		scaffoldingTemplates,
+		stacks,
 		appTemplates,
 		scaffoldingLoading,
 		customSubmitting,
@@ -95,7 +95,7 @@
 	let customMaxTokens = $state(32000);
 
 	// Scaffolding form
-	let selectedScaffoldId = $state<number | ''>('');
+	let selectedStackSlug = $state('');
 	let selectedAppIds = $state<Set<number>>(new Set());
 	let selectedModelIds = $state<Set<number>>(new Set());
 	let scaffoldingTemperature = $state(0.3);
@@ -114,13 +114,12 @@
 	let scaffoldingShowAdvanced = $state(false);
 	let copilotShowAdvanced = $state(false);
 
-	let lastDefaultedScaffoldKey = $state<string>('');
+	let lastDefaultedStackKey = $state<string>('');
 	$effect(() => {
-		const key = scaffoldingTemplates.map(s => s.id).join(',');
-		if (key && key !== lastDefaultedScaffoldKey && selectedScaffoldId === '') {
-			const def = scaffoldingTemplates.find(s => s.is_default);
-			selectedScaffoldId = def ? def.id : scaffoldingTemplates[0].id;
-			lastDefaultedScaffoldKey = key;
+		const key = stacks.map(s => s.slug).join(',');
+		if (key && key !== lastDefaultedStackKey && selectedStackSlug === '') {
+			selectedStackSlug = stacks[0].slug;
+			lastDefaultedStackKey = key;
 		}
 	});
 
@@ -177,9 +176,9 @@
 	}
 
 	function submitScaffolding() {
-		if (!selectedScaffoldId || selectedAppIds.size === 0 || selectedModelIds.size === 0) return;
+		if (!selectedStackSlug || selectedAppIds.size === 0 || selectedModelIds.size === 0) return;
 		onSubmitScaffolding({
-			scaffolding_template_id: selectedScaffoldId as number,
+			stack_slug: selectedStackSlug,
 			app_requirement_ids: [...selectedAppIds],
 			model_ids: [...selectedModelIds],
 			temperature: scaffoldingTemperature,
@@ -318,22 +317,22 @@
 						<div class="flex items-center gap-2 text-sm text-muted-foreground">
 							<LoaderCircle class="h-3.5 w-3.5 animate-spin" /> Loading…
 						</div>
-					{:else if scaffoldingTemplates.length === 0}
-						<p class="text-sm text-muted-foreground">No scaffolding templates found.</p>
+					{:else if stacks.length === 0}
+						<p class="text-sm text-muted-foreground">No stacks found.</p>
 					{:else}
 						<div class="flex flex-wrap gap-2">
-							{#each scaffoldingTemplates as tpl}
+							{#each stacks as stack}
 								<button
 									type="button"
 									class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition-colors cursor-pointer
-										{selectedScaffoldId === tpl.id
+										{selectedStackSlug === stack.slug
 											? 'border-primary bg-primary/10 text-primary'
 											: 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
-									onclick={() => (selectedScaffoldId = tpl.id)}
+									onclick={() => (selectedStackSlug = stack.slug)}
 								>
-									{tpl.name}
-									{#if tpl.is_default && selectedScaffoldId !== tpl.id}
-										<span class="text-[9px] opacity-60">default</span>
+									{stack.slug}
+									{#if !stack.has_frontend}
+										<span class="text-[9px] opacity-60">backend-only</span>
 									{/if}
 								</button>
 							{/each}
@@ -504,7 +503,7 @@
 					<Button
 						class="ml-auto"
 						onclick={submitScaffolding}
-						disabled={scaffoldingSubmitting || !selectedScaffoldId || selectedAppIds.size === 0 || selectedModelIds.size === 0}
+						disabled={scaffoldingSubmitting || !selectedStackSlug || selectedAppIds.size === 0 || selectedModelIds.size === 0}
 						title={selectedAppIds.size === 0 ? 'Select at least one app' : selectedModelIds.size === 0 ? 'Select at least one model' : undefined}
 					>
 						{#if scaffoldingSubmitting}

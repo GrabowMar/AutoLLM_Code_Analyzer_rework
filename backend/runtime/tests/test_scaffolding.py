@@ -8,7 +8,6 @@ import pytest
 
 from backend.generation.tests.factories import AppRequirementTemplateFactory
 from backend.generation.tests.factories import GenerationJobFactory
-from backend.generation.tests.factories import ScaffoldingTemplateFactory
 from backend.runtime.services import scaffolding as svc
 
 
@@ -22,15 +21,13 @@ def test_load_manifest_has_expected_stacks():
 
 @pytest.mark.django_db
 def test_resolve_stack_slug_alias():
-    template = ScaffoldingTemplateFactory(slug="react-flask")
-    job = GenerationJobFactory(scaffolding_template=template, mode="scaffolding")
+    job = GenerationJobFactory(stack_slug="react-flask", mode="scaffolding")
     assert svc.resolve_stack_slug(job) == "flask-react"
 
 
 @pytest.mark.django_db
 def test_resolve_stack_slug_unknown_falls_back():
-    template = ScaffoldingTemplateFactory(slug="vue-fastapi")
-    job = GenerationJobFactory(scaffolding_template=template, mode="scaffolding")
+    job = GenerationJobFactory(stack_slug="vue-fastapi", mode="scaffolding")
     assert svc.resolve_stack_slug(job) == "generic-python"
 
 
@@ -109,11 +106,10 @@ def test_render_substitutions_with_default():
 
 @pytest.mark.django_db
 def test_apply_scaffold_seed_flask_react(tmp_path: Path):
-    template = ScaffoldingTemplateFactory(slug="flask-react", name="Flask React")
     app_req = AppRequirementTemplateFactory(slug="demo-app")
     job = GenerationJobFactory(
         mode="copilot",
-        scaffolding_template=template,
+        stack_slug="flask-react",
         app_requirement=app_req,
         copilot_description="Build a demo",
     )
@@ -132,10 +128,9 @@ def test_apply_scaffold_seed_flask_react(tmp_path: Path):
 
 @pytest.mark.django_db
 def test_prepare_build_dir_writes_generated_code(tmp_path: Path):
-    template = ScaffoldingTemplateFactory(slug="flask-react")
     job = GenerationJobFactory(
         mode="scaffolding",
-        scaffolding_template=template,
+        stack_slug="flask-react",
         result_data={
             "backend_code": (
                 "from flask import Flask\napp = Flask(__name__)\nif __name__ == '__main__':\n    app.run(port=5000)\n"
@@ -155,7 +150,6 @@ def test_prepare_build_dir_writes_generated_code(tmp_path: Path):
 def test_prepare_build_dir_generic_python(tmp_path: Path):
     job = GenerationJobFactory(
         mode="scaffolding",
-        scaffolding_template=None,
         result_data={"backend_code": "from flask import Flask\napp = Flask(__name__)\n"},
     )
     dest = tmp_path / "build"
@@ -170,10 +164,9 @@ def test_prepare_build_dir_generic_python(tmp_path: Path):
 
 @pytest.mark.django_db
 def test_prepare_build_dir_multi_file_writes_all_files(tmp_path: Path):
-    template = ScaffoldingTemplateFactory(slug="flask-react")
     job = GenerationJobFactory(
         mode="scaffolding",
-        scaffolding_template=template,
+        stack_slug="flask-react",
         result_data={
             "result_schema_version": 2,
             "backend_entry": "app.py",
@@ -204,10 +197,9 @@ def test_prepare_build_dir_multi_file_writes_all_files(tmp_path: Path):
 @pytest.mark.django_db
 def test_prepare_build_dir_multi_file_renames_non_canonical_entry(tmp_path: Path):
     """The backend entry can arrive under any name; it always lands at the stack's canonical filename."""
-    template = ScaffoldingTemplateFactory(slug="flask-react")
     job = GenerationJobFactory(
         mode="scaffolding",
-        scaffolding_template=template,
+        stack_slug="flask-react",
         result_data={
             "result_schema_version": 2,
             "backend_entry": "main.py",
@@ -223,10 +215,9 @@ def test_prepare_build_dir_multi_file_renames_non_canonical_entry(tmp_path: Path
 
 @pytest.mark.django_db
 def test_prepare_build_dir_multi_file_falls_back_to_placeholder_when_files_empty(tmp_path: Path):
-    template = ScaffoldingTemplateFactory(slug="flask-react")
     job = GenerationJobFactory(
         mode="scaffolding",
-        scaffolding_template=template,
+        stack_slug="flask-react",
         result_data={"result_schema_version": 2, "files": {}},
     )
     dest = tmp_path / "build"
@@ -239,11 +230,10 @@ def test_prepare_build_dir_multi_file_falls_back_to_placeholder_when_files_empty
 
 @pytest.mark.django_db
 def test_apply_scaffold_seed_fastapi_react(tmp_path: Path):
-    template = ScaffoldingTemplateFactory(slug="fastapi-react", name="FastAPI React")
     app_req = AppRequirementTemplateFactory(slug="campaign-monitor")
     job = GenerationJobFactory(
         mode="copilot",
-        scaffolding_template=template,
+        stack_slug="fastapi-react",
         app_requirement=app_req,
         copilot_description="Build a campaign monitor",
     )

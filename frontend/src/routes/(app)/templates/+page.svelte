@@ -3,14 +3,11 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import {
-		getScaffoldingTemplates,
+		getStacks,
 		getAppTemplates,
 		getPromptTemplates,
 		getContentBlocks,
 		getTemplateBundles,
-		createScaffoldingTemplate,
-		updateScaffoldingTemplate,
-		deleteScaffoldingTemplate,
 		createAppTemplate,
 		updateAppTemplate,
 		deleteAppTemplate,
@@ -19,17 +16,16 @@
 		deletePromptTemplate,
 		importTemplatePackage,
 		getStarterTemplatePackages,
-		type ScaffoldingTemplate,
+		type Stack,
 		type AppRequirementTemplate,
 		type ContentBlock,
 		type PromptTemplate,
 		type StarterTemplatePackage,
 		type TemplateBundle,
 	} from '$lib/api/client';
-	import ScaffoldingList from '$lib/components/templates/ScaffoldingList.svelte';
+	import StacksList from '$lib/components/templates/StacksList.svelte';
 	import AppTemplateList from '$lib/components/templates/AppTemplateList.svelte';
 	import PromptTemplateList from '$lib/components/templates/PromptTemplateList.svelte';
-	import ScaffoldingForm from '$lib/components/templates/ScaffoldingForm.svelte';
 	import AppTemplateForm from '$lib/components/templates/AppTemplateForm.svelte';
 	import PromptTemplateForm from '$lib/components/templates/PromptTemplateForm.svelte';
 	import BundlesTab from '$lib/components/templates/BundlesTab.svelte';
@@ -48,15 +44,10 @@
 	let templateBundles = $state<TemplateBundle[]>([]);
 	let bundlesLoading = $state(true);
 
-	// Scaffolding templates
-	let scaffoldingTemplates = $state<ScaffoldingTemplate[]>([]);
-	let scaffoldingLoading = $state(true);
-	let scaffoldingSearch = $state('');
-	let editingScaffolding = $state<ScaffoldingTemplate | null>(null);
-	let creatingScaffolding = $state(false);
-	let scaffoldingForm = $state({ name: '', slug: '', description: '', tech_stack_json: '{}', substitution_vars_csv: '' });
-	let scaffoldingSaving = $state(false);
-	let scaffoldingError = $state('');
+	// Stacks (read-only, from the runtime scaffolding manifest)
+	let stacks = $state<Stack[]>([]);
+	let stacksLoading = $state(true);
+	let stackSearch = $state('');
 
 	// App templates
 	let appTemplates = $state<AppRequirementTemplate[]>([]);
@@ -92,8 +83,6 @@
 
 	// Derived state for Master-Detail view
 	const isEditingOrCreating = $derived(
-		creatingScaffolding ||
-		editingScaffolding !== null ||
 		creatingApp ||
 		editingApp !== null ||
 		creatingPrompt ||
@@ -101,9 +90,9 @@
 		importingBundle
 	);
 
-	const filteredScaffolding = $derived(
-		scaffoldingTemplates.filter(t =>
-			!scaffoldingSearch || t.name.toLowerCase().includes(scaffoldingSearch.toLowerCase()) || t.slug.includes(scaffoldingSearch.toLowerCase())
+	const filteredStacks = $derived(
+		stacks.filter(s =>
+			!stackSearch || s.slug.includes(stackSearch.toLowerCase()) || s.aliases.some(a => a.includes(stackSearch.toLowerCase()))
 		)
 	);
 
@@ -129,10 +118,10 @@
 		return groups;
 	});
 
-	async function loadScaffolding() {
-		scaffoldingLoading = true;
-		try { scaffoldingTemplates = await getScaffoldingTemplates(); } catch { /* ignore */ }
-		scaffoldingLoading = false;
+	async function loadStacks() {
+		stacksLoading = true;
+		try { stacks = await getStacks(); } catch { /* ignore */ }
+		stacksLoading = false;
 	}
 
 	async function loadApp() {
@@ -174,11 +163,11 @@
 	}
 
 	async function refreshAllAssets() {
-		await Promise.all([loadScaffolding(), loadApp(), loadPrompt(), loadBlocks(), loadBundles()]);
+		await Promise.all([loadApp(), loadPrompt(), loadBlocks(), loadBundles()]);
 	}
 
 	onMount(() => {
-		loadScaffolding();
+		loadStacks();
 		loadApp();
 		loadPrompt();
 		loadBlocks();
@@ -187,7 +176,6 @@
 	});
 
 	function cancelAllForms() {
-		cancelScaffoldingForm();
 		cancelAppForm();
 		cancelPromptForm();
 		cancelBundleImport();
@@ -196,64 +184,6 @@
 	function handleTabChange(tab: TabId) {
 		cancelAllForms();
 		activeTab = tab;
-	}
-
-	// ── Scaffolding CRUD ────────────────────────────────────────
-
-	function startCreateScaffolding() {
-		cancelAllForms();
-		creatingScaffolding = true;
-		scaffoldingForm = { name: '', slug: '', description: '', tech_stack_json: '{}', substitution_vars_csv: '' };
-		scaffoldingError = '';
-	}
-
-	function startEditScaffolding(t: ScaffoldingTemplate) {
-		cancelAllForms();
-		editingScaffolding = t;
-		scaffoldingForm = {
-			name: t.name,
-			slug: t.slug,
-			description: t.description,
-			tech_stack_json: JSON.stringify(t.tech_stack || {}, null, 2),
-			substitution_vars_csv: (t.substitution_vars || []).join(', '),
-		};
-		scaffoldingError = '';
-	}
-
-	function cancelScaffoldingForm() {
-		creatingScaffolding = false;
-		editingScaffolding = null;
-		scaffoldingError = '';
-	}
-
-	async function saveScaffolding() {
-		scaffoldingSaving = true;
-		scaffoldingError = '';
-		try {
-			let tech_stack = {};
-			try { tech_stack = JSON.parse(scaffoldingForm.tech_stack_json); } catch { scaffoldingError = 'Invalid JSON for tech stack'; scaffoldingSaving = false; return; }
-			const vars = scaffoldingForm.substitution_vars_csv.split(',').map(s => s.trim()).filter(Boolean);
-			const data = { name: scaffoldingForm.name, slug: scaffoldingForm.slug, description: scaffoldingForm.description, tech_stack, substitution_vars: vars };
-			if (editingScaffolding) {
-				await updateScaffoldingTemplate(editingScaffolding.slug, data);
-			} else {
-				await createScaffoldingTemplate(data);
-			}
-			cancelScaffoldingForm();
-			await loadScaffolding();
-		} catch (e: any) {
-			scaffoldingError = e?.message || 'Save failed';
-		}
-		scaffoldingSaving = false;
-	}
-
-	async function deleteScaffolding(t: ScaffoldingTemplate) {
-		if (!confirm(`Delete scaffolding template "${t.name}"?`)) return;
-		try {
-			await deleteScaffoldingTemplate(t.slug);
-			if (editingScaffolding?.slug === t.slug) cancelScaffoldingForm();
-			await loadScaffolding();
-		} catch { /* ignore */ }
 	}
 
 	// ── App CRUD ────────────────────────────────────────────────
@@ -426,7 +356,7 @@
 			onclick={() => handleTabChange('scaffolding')}
 		>
 			<Layers class="h-4 w-4" />
-			Scaffolding <span class="ml-1 text-xs opacity-60 font-mono">({scaffoldingTemplates.length})</span>
+			Stacks <span class="ml-1 text-xs opacity-60 font-mono">({stacks.length})</span>
 		</button>
 		<button
 			type="button"
@@ -466,7 +396,7 @@
 					<div class="relative w-full sm:w-72">
 						<Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
 						{#if activeTab === 'scaffolding'}
-							<Input bind:value={scaffoldingSearch} placeholder="Search scaffolding…" class="pl-9 h-9 text-xs transition-all hover:border-primary/45 focus-visible:ring-primary/20" />
+							<Input bind:value={stackSearch} placeholder="Search stacks…" class="pl-9 h-9 text-xs transition-all hover:border-primary/45 focus-visible:ring-primary/20" />
 						{:else if activeTab === 'app'}
 							<Input bind:value={appSearch} placeholder="Search app requirements…" class="pl-9 h-9 text-xs transition-all hover:border-primary/45 focus-visible:ring-primary/20" />
 						{:else if activeTab === 'prompt'}
@@ -482,11 +412,7 @@
 						{/if}
 					</div>
 
-					{#if activeTab === 'scaffolding'}
-						<Button size="sm" class="w-full sm:w-auto text-xs font-semibold cursor-pointer shadow-xs transition-all duration-200" onclick={startCreateScaffolding}>
-							<Plus class="mr-1.5 h-4 w-4" /> New Scaffolding
-						</Button>
-					{:else if activeTab === 'app'}
+					{#if activeTab === 'app'}
 						<Button size="sm" class="w-full sm:w-auto text-xs font-semibold cursor-pointer shadow-xs transition-all duration-200" onclick={startCreateApp}>
 							<Plus class="mr-1.5 h-4 w-4" /> New App Template
 						</Button>
@@ -499,13 +425,10 @@
 			{/if}
 
 			{#if activeTab === 'scaffolding'}
-				<ScaffoldingList
-					templates={filteredScaffolding}
-					loading={scaffoldingLoading}
+				<StacksList
+					stacks={filteredStacks}
+					loading={stacksLoading}
 					compact={isEditingOrCreating}
-					activeSlug={editingScaffolding?.slug ?? null}
-					onEdit={startEditScaffolding}
-					onDelete={deleteScaffolding}
 				/>
 			{/if}
 
@@ -537,7 +460,6 @@
 					{bundlesLoading}
 					{starterPackages}
 					{starterPackagesLoading}
-					{scaffoldingTemplates}
 					{appTemplates}
 					{promptTemplates}
 					{contentBlocks}
@@ -561,17 +483,6 @@
 				>
 					<ArrowLeft class="h-4 w-4" /> Back to templates list
 				</button>
-
-				{#if creatingScaffolding || editingScaffolding}
-					<ScaffoldingForm
-						bind:form={scaffoldingForm}
-						isEdit={editingScaffolding !== null}
-						saving={scaffoldingSaving}
-						error={scaffoldingError}
-						onSave={saveScaffolding}
-						onCancel={cancelScaffoldingForm}
-					/>
-				{/if}
 
 				{#if creatingApp || editingApp}
 					<AppTemplateForm

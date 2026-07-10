@@ -56,7 +56,6 @@ def list_jobs(
     qs = GenerationJob.objects.filter(created_by=request.auth).select_related(
         "model",
         "app_requirement",
-        "scaffolding_template",
         "template_bundle",
     )
     if mode:
@@ -91,7 +90,7 @@ def list_jobs(
             | Q(model__model_name__icontains=search)
             | Q(model__model_id__icontains=search)
             | Q(app_requirement__name__icontains=search)
-            | Q(scaffolding_template__name__icontains=search),
+            | Q(stack_slug__icontains=search),
         )
 
     # Sorting
@@ -115,7 +114,7 @@ def list_jobs(
             model_name=job.model.model_name if job.model else None,
             model_id_str=job.model.model_id if job.model else None,
             template_name=(job.app_requirement.name if job.app_requirement else None),
-            scaffolding_name=(job.scaffolding_template.name if job.scaffolding_template else None),
+            stack_slug=job.stack_slug,
             started_at=job.started_at,
             completed_at=job.completed_at,
             duration_seconds=job.duration_seconds,
@@ -140,7 +139,6 @@ def get_job(request, job_id: str):
         GenerationJob.objects.select_related(
             "model",
             "app_requirement",
-            "scaffolding_template",
             "template_bundle",
             "batch",
             "created_by",
@@ -182,7 +180,6 @@ def _load_job_for_cloning(request, job_id: str) -> GenerationJob:
         GenerationJob.objects.select_related(
             "model",
             "app_requirement",
-            "scaffolding_template",
             "template_bundle",
             "backend_prompt_template",
             "frontend_prompt_template",
@@ -198,7 +195,6 @@ def _dispatch_and_serialize(new_job: GenerationJob) -> GenerationJobSchema:
         GenerationJob.objects.select_related(
             "model",
             "app_requirement",
-            "scaffolding_template",
         ).get(
             id=new_job.id,
         ),
@@ -273,7 +269,6 @@ def export_job(request, job_id: str):
         GenerationJob.objects.select_related(
             "model",
             "app_requirement",
-            "scaffolding_template",
             "template_bundle",
             "batch",
             "created_by",
@@ -354,7 +349,6 @@ def get_batch_jobs(request, batch_id: str):
     jobs = batch.jobs.select_related(
         "model",
         "app_requirement",
-        "scaffolding_template",
     )
     return [
         GenerationJobListSchema(
@@ -364,7 +358,7 @@ def get_batch_jobs(request, batch_id: str):
             model_name=job.model.model_name if job.model else None,
             model_id_str=job.model.model_id if job.model else None,
             template_name=(job.app_requirement.name if job.app_requirement else None),
-            scaffolding_name=(job.scaffolding_template.name if job.scaffolding_template else None),
+            stack_slug=job.stack_slug,
             started_at=job.started_at,
             completed_at=job.completed_at,
             duration_seconds=job.duration_seconds,

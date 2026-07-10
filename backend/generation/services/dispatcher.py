@@ -23,7 +23,6 @@ def dispatch_job(job: GenerationJob) -> None:
                 "model",
                 "created_by",
                 "app_requirement",
-                "scaffolding_template",
                 "backend_prompt_template",
                 "frontend_prompt_template",
                 "batch",

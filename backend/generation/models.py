@@ -7,51 +7,6 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 
-class ScaffoldingTemplate(models.Model):
-    """Docker infrastructure template (e.g., react-flask, vue-fastapi)."""
-
-    name = models.CharField(_("name"), max_length=200)
-    slug = models.SlugField(_("slug"), max_length=200, unique=True)
-    description = models.TextField(_("description"), blank=True, default="")
-    tech_stack = models.JSONField(
-        _("tech stack"),
-        default=dict,
-        blank=True,
-        help_text='e.g. {"frontend": "React 18", "backend": "Flask 3.x"}',
-    )
-    template_archive = models.FileField(
-        _("template archive"),
-        upload_to="scaffolding/",
-        blank=True,
-        help_text=".tar.gz of the scaffolding directory",
-    )
-    substitution_vars = models.JSONField(
-        _("substitution variables"),
-        default=list,
-        blank=True,
-        help_text="List of {{var}} placeholders available in the template",
-    )
-    is_default = models.BooleanField(_("system default"), default=False)
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="scaffolding_templates",
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = _("Scaffolding Template")
-        verbose_name_plural = _("Scaffolding Templates")
-        ordering = ["-is_default", "name"]
-
-    def __str__(self) -> str:
-        return self.name
-
-
 class AppRequirementTemplate(models.Model):
     """Application specification template (e.g., todo app, blog platform)."""
 
@@ -481,12 +436,12 @@ class GenerationJob(models.Model):
     )
 
     # Scaffolding mode
-    scaffolding_template = models.ForeignKey(
-        ScaffoldingTemplate,
-        on_delete=models.SET_NULL,
-        null=True,
+    stack_slug = models.CharField(
+        _("stack slug"),
+        max_length=100,
         blank=True,
-        related_name="jobs",
+        default="",
+        help_text="Canonical or alias slug from runtime/scaffolding/manifest.json",
     )
     app_requirement = models.ForeignKey(
         AppRequirementTemplate,

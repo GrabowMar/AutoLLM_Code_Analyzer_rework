@@ -19,14 +19,12 @@ from backend.generation.services.bundle_packages.visibility import visible_app_t
 from backend.generation.services.bundle_packages.visibility import visible_blocks_for
 from backend.generation.services.bundle_packages.visibility import visible_bundles_for
 from backend.generation.services.bundle_packages.visibility import visible_prompt_templates_for
-from backend.generation.services.bundle_packages.visibility import visible_scaffolding_templates_for
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
 
     from backend.generation.models import AppRequirementTemplate
     from backend.generation.models import PromptTemplate
-    from backend.generation.models import ScaffoldingTemplate
 
 
 def export_bundle_package(bundle: TemplateBundle) -> dict[str, Any]:
@@ -42,13 +40,11 @@ def export_bundle_package(bundle: TemplateBundle) -> dict[str, Any]:
 def export_template_package(
     *,
     user: AbstractUser,
-    scaffolding_slugs: list[str] | None = None,
     app_template_slugs: list[str] | None = None,
     prompt_template_slugs: list[str] | None = None,
     bundle_slugs: list[str] | None = None,
     block_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    scaffolding_slugs = scaffolding_slugs or []
     app_template_slugs = app_template_slugs or []
     prompt_template_slugs = prompt_template_slugs or []
     bundle_slugs = bundle_slugs or []
@@ -73,31 +69,11 @@ def export_template_package(
     )
     blocks = _dedupe_blocks([*explicit_blocks, *bundle_blocks])
 
-    scaffolding = list(
-        visible_scaffolding_templates_for(user).filter(slug__in=scaffolding_slugs).order_by("name"),
-    )
-    scaffolding_by_slug = {item.slug: item for item in scaffolding}
-    for bundle in bundles:
-        if bundle.scaffolding_slug and bundle.scaffolding_slug not in scaffolding_by_slug:
-            scaffold = (
-                visible_scaffolding_templates_for(user)
-                .filter(
-                    slug=bundle.scaffolding_slug,
-                )
-                .first()
-            )
-            if scaffold:
-                scaffolding_by_slug[scaffold.slug] = scaffold
-
     return {
         "template_package_schema_version": TEMPLATE_PACKAGE_SCHEMA_VERSION,
         "kind": TEMPLATE_PACKAGE_KIND,
         "exported_at": timezone.now().isoformat(),
         "assets": {
-            "scaffolding_templates": [
-                _serialize_scaffolding(item)
-                for item in sorted(scaffolding_by_slug.values(), key=lambda value: value.name)
-            ],
             "app_templates": [
                 _serialize_app_template(item)
                 for item in visible_app_templates_for(user).filter(slug__in=app_template_slugs).order_by("name")
@@ -145,16 +121,6 @@ def _dedupe_blocks(blocks: list[ContentBlock]) -> list[ContentBlock]:
     for block in blocks:
         unique[(block.slug, block.version)] = block
     return sorted(unique.values(), key=lambda item: (item.block_type, item.slug, item.version))
-
-
-def _serialize_scaffolding(template: ScaffoldingTemplate) -> dict[str, Any]:
-    return {
-        "name": template.name,
-        "slug": template.slug,
-        "description": template.description,
-        "tech_stack": template.tech_stack or {},
-        "substitution_vars": template.substitution_vars or [],
-    }
 
 
 def _serialize_app_template(template: AppRequirementTemplate) -> dict[str, Any]:

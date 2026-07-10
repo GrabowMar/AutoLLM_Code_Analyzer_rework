@@ -320,12 +320,7 @@ def get_code_generation_stats(
     total_tokens = 0
     total_cost = 0.0
     total_loc = 0
-    unique_templates = (
-        jobs.exclude(scaffolding_template__isnull=True)
-        .values_list("scaffolding_template_id", flat=True)
-        .distinct()
-        .count()
-    )
+    unique_templates = jobs.exclude(stack_slug="").values_list("stack_slug", flat=True).distinct().count()
     for j in completed.iterator():
         metrics = j.metrics or {}
         total_tokens += int(metrics.get("total_tokens", 0) or 0)

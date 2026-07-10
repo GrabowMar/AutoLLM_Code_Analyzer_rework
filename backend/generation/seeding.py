@@ -36,57 +36,6 @@ PROMPTS_DIR = DATA_DIR / "prompts"
 BLOCKS_DIR = DATA_DIR / "blocks"
 CATALOG_PATH = BLOCKS_DIR / "catalog.yaml"
 
-SCAFFOLDING_SEEDS = [
-    {
-        "slug": "flask-react",
-        "name": "Flask + React",
-        "description": (
-            "Single-container scaffolding: Flask 3.x serves both the REST API "
-            "and a pre-built React 18 SPA (Vite + Tailwind)."
-        ),
-        "tech_stack": {
-            "frontend": "React 18 + Vite + Tailwind CSS",
-            "backend": "Flask 3.x + SQLAlchemy + JWT",
-            "database": "SQLite",
-            "runtime": "Single Docker container",
-        },
-        "substitution_vars": ["{{PROJECT_NAME}}", "{{app_port|8000}}"],
-        "is_default": True,
-    },
-    {
-        "slug": "fastapi-vue",
-        "name": "FastAPI + Vue",
-        "description": (
-            "Single-container FastAPI backend with a Vue 3 SPA. "
-            "Useful for comparing Python API generation against the Flask stack."
-        ),
-        "tech_stack": {
-            "frontend": "Vue 3 + Vite",
-            "backend": "FastAPI + SQLAlchemy + JWT",
-            "database": "SQLite",
-            "runtime": "Single Docker container",
-        },
-        "substitution_vars": ["{{PROJECT_NAME}}", "{{app_port|8000}}"],
-        "is_default": False,
-    },
-    {
-        "slug": "fastapi-react",
-        "name": "FastAPI + React",
-        "description": (
-            "Single-container FastAPI backend paired with a React 18 SPA "
-            "for stack-comparison and prompt-evaluation runs."
-        ),
-        "tech_stack": {
-            "frontend": "React 18 + Vite + Tailwind CSS",
-            "backend": "FastAPI + SQLAlchemy + JWT",
-            "database": "SQLite",
-            "runtime": "Single Docker container",
-        },
-        "substitution_vars": ["{{PROJECT_NAME}}", "{{app_port|8000}}"],
-        "is_default": False,
-    },
-]
-
 # Legacy PromptTemplate rows, kept only for admin-UI compatibility until that
 # model is removed; not content-hash versioned.
 PROMPT_TEMPLATE_SEEDS = [
@@ -189,29 +138,6 @@ def _read_prompt_file(relative_path: str) -> str:
         return path.read_text(encoding="utf-8")
     logger.warning("Prompt not found: %s", path)
     return ""
-
-
-def seed_scaffolding(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, int]:
-    """Upsert the (soon-removed) ``ScaffoldingTemplate`` catalog rows. Not versioned."""
-    from backend.generation.models import ScaffoldingTemplate
-
-    created = updated = 0
-    for seed in SCAFFOLDING_SEEDS:
-        obj, was_created = ScaffoldingTemplate.objects.using(using).update_or_create(
-            slug=seed["slug"],
-            defaults={
-                "name": seed["name"],
-                "description": seed["description"],
-                "tech_stack": seed["tech_stack"],
-                "substitution_vars": seed["substitution_vars"],
-                "is_default": seed["is_default"],
-            },
-        )
-        created += was_created
-        updated += not was_created
-        if log:
-            log(f"  {'Created' if was_created else 'Updated'} scaffolding: {obj.name}")
-    return created, updated
 
 
 def _requirement_hash_payload(data: dict[str, Any]) -> dict[str, Any]:
@@ -559,7 +485,6 @@ def seed_prompt_templates(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[i
 def seed_all(*, using: str = DEFAULT_DB_ALIAS, log=None) -> dict[str, tuple[int, int]]:
     """Run every seeder in dependency order (bundles reference blocks by slug+version)."""
     return {
-        "scaffolding": seed_scaffolding(using=using, log=log),
         "requirements": seed_requirements(using=using, log=log),
         "prompt_templates": seed_prompt_templates(using=using, log=log),
         "content_blocks": seed_content_blocks(using=using, log=log),

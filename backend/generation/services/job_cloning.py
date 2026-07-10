@@ -37,7 +37,7 @@ def clone_job(
         # Keep the clone in the original batch so experiment trials stay whole.
         batch=original.batch if keep_batch else None,
         model=original.model,
-        scaffolding_template=original.scaffolding_template,
+        stack_slug=original.stack_slug,
         app_requirement=original.app_requirement,
         template_bundle=original.template_bundle,
         backend_prompt_template=original.backend_prompt_template,

@@ -16,34 +16,17 @@ from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
 from backend.generation.models import PromptTemplate
-from backend.generation.models import ScaffoldingTemplate
 from backend.generation.models import TemplateBundle
 
 # ── Template schemas ──────────────────────────────────────────────────
 
 
-class ScaffoldingTemplateSchema(ModelSchema):
-    class Meta:
-        model = ScaffoldingTemplate
-        fields = [
-            "id",
-            "name",
-            "slug",
-            "description",
-            "tech_stack",
-            "substitution_vars",
-            "is_default",
-            "created_at",
-            "updated_at",
-        ]
+class StackSchema(Schema):
+    """A stack skeleton from runtime/scaffolding/manifest.json."""
 
-
-class ScaffoldingTemplateCreateSchema(Schema):
-    name: str
     slug: str
-    description: str = ""
-    tech_stack: dict = {}
-    substitution_vars: list = []
+    has_frontend: bool
+    aliases: list[str] = []
 
 
 class AppRequirementTemplateSchema(ModelSchema):
@@ -150,7 +133,6 @@ class BundleImportSchema(Schema):
 
 
 class TemplatePackageExportSchema(Schema):
-    scaffolding_slugs: list[str] = []
     app_template_slugs: list[str] = []
     prompt_template_slugs: list[str] = []
     bundle_slugs: list[str] = []
@@ -166,7 +148,6 @@ class StarterTemplatePackageSchema(Schema):
     slug: str
     name: str
     description: str
-    scaffolding_count: int
     app_template_count: int
     prompt_template_count: int
     block_count: int
@@ -213,7 +194,6 @@ class GenerationJobSchema(ModelSchema):
     batch_id: UUID | None = None
     batch_name: str | None = None
     template_name: str | None = None
-    scaffolding_name: str | None = None
     bundle_name: str | None = None
     bundle_slug: str | None = None
     created_by_email: str | None = None
@@ -224,6 +204,7 @@ class GenerationJobSchema(ModelSchema):
             "id",
             "mode",
             "status",
+            "stack_slug",
             "temperature",
             "max_tokens",
             "custom_system_prompt",
@@ -279,12 +260,6 @@ class GenerationJobSchema(ModelSchema):
         return None
 
     @staticmethod
-    def resolve_scaffolding_name(obj: GenerationJob) -> str | None:
-        if obj.scaffolding_template:
-            return obj.scaffolding_template.name
-        return None
-
-    @staticmethod
     def resolve_bundle_name(obj: GenerationJob) -> str | None:
         if obj.template_bundle:
             return obj.template_bundle.name
@@ -313,7 +288,7 @@ class GenerationJobListSchema(Schema):
     model_name: str | None = None
     model_id_str: str | None = None
     template_name: str | None = None
-    scaffolding_name: str | None = None
+    stack_slug: str = ""
     started_at: datetime | None = None
     completed_at: datetime | None = None
     duration_seconds: float | None = None
@@ -342,7 +317,7 @@ class CustomJobCreateSchema(Schema):
 class ScaffoldingJobCreateSchema(Schema):
     """Create scaffolding mode generation job(s)."""
 
-    scaffolding_template_id: int
+    stack_slug: str
     app_requirement_ids: list[int]
     model_ids: list[int]
     temperature: float = 0.3
@@ -358,7 +333,7 @@ class CopilotJobCreateSchema(Schema):
 
     description: str
     model_id: int | None = None
-    scaffolding_template_id: int | None = None
+    stack_slug: str | None = None
     max_iterations: int = 5
     use_open_source: bool = True
 

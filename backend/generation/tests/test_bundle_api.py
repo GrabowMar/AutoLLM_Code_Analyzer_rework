@@ -8,7 +8,6 @@ from django.test import Client
 from backend.generation.tests.factories import AppRequirementTemplateFactory
 from backend.generation.tests.factories import ContentBlockFactory
 from backend.generation.tests.factories import PromptTemplateFactory
-from backend.generation.tests.factories import ScaffoldingTemplateFactory
 from backend.generation.tests.factories import TemplateBundleFactory
 from backend.users.tests.factories import UserFactory
 
@@ -165,11 +164,6 @@ blocks:
 def test_template_package_export_and_import(client):
     owner = UserFactory()
     client.force_login(owner)
-    scaffolding = ScaffoldingTemplateFactory(
-        is_default=False,
-        created_by=owner,
-        slug="shared-stack",
-    )
     app_template = AppRequirementTemplateFactory(
         is_default=False,
         created_by=owner,
@@ -190,7 +184,7 @@ def test_template_package_export_and_import(client):
         is_default=False,
         created_by=owner,
         slug="shared-bundle-export",
-        scaffolding_slug=scaffolding.slug,
+        scaffolding_slug="shared-stack",
         block_refs=[{"type": block.block_type, "slug": block.slug, "version": block.version}],
     )
 
@@ -198,7 +192,6 @@ def test_template_package_export_and_import(client):
         "/api/generation/packages/export/?format=json",
         data=json.dumps(
             {
-                "scaffolding_slugs": [scaffolding.slug],
                 "app_template_slugs": [app_template.slug],
                 "prompt_template_slugs": [prompt.slug],
                 "bundle_slugs": [bundle.slug],
@@ -232,7 +225,6 @@ def test_template_package_export_and_import(client):
     imported = import_response.json()
     # The importer can't see the owner's private assets, so the "rename"
     # strategy creates their own copies under fresh slugs.
-    assert imported["scaffolding_templates"] == [f"{scaffolding.slug}-2"]
     assert imported["app_templates"] == [f"{app_template.slug}-2"]
     assert imported["prompt_templates"] == [f"{prompt.slug}-2"]
     assert imported["bundles"] == [f"{bundle.slug}-2"]
@@ -510,7 +502,5 @@ def test_list_and_import_starter_package(client):
     # The real seeded catalog (auto-seeded post-migrate) already has these
     # slugs, so "rename" mangles them with a numeric suffix — check the
     # renamed copies were created, not the exact unsuffixed names.
-    assert all(slug.startswith("fastapi-vue") for slug in payload["scaffolding_templates"][:1])
-    assert all(slug.startswith("fastapi-react") for slug in payload["scaffolding_templates"][1:])
     assert any(slug.startswith("analytics_campaign_monitor") for slug in payload["app_templates"])
     assert any(slug.startswith("system-fastapi-react-standard") for slug in payload["bundles"])

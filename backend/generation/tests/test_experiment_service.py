@@ -8,7 +8,6 @@ import pytest
 
 from backend.generation.models import Experiment
 from backend.generation.models import GenerationJob
-from backend.generation.models import ScaffoldingTemplate
 from backend.generation.models import TemplateBundle
 from backend.generation.services import experiments as experiments_svc
 from backend.generation.services.bundle_resolver import derive_experiment_seed
@@ -93,14 +92,13 @@ class TestLaunchExperiment:
         assert GenerationJob.objects.filter(experiment=experiment).count() == 4
         assert dispatch.call_count == 4
 
-    def test_launch_sets_scaffolding_template_from_bundle_stack(self, experiment, condition, user):
-        """resolve_stack_slug() reads job.scaffolding_template — must not be null."""
+    def test_launch_sets_stack_slug_from_bundle(self, experiment, condition, user):
+        """resolve_stack_slug() reads job.stack_slug — must not be blank."""
         with mock.patch("backend.generation.services.experiments.dispatch_job"):
             experiments_svc.launch_experiment(experiment, user)
 
         jobs = GenerationJob.objects.filter(experiment=experiment)
-        expected = ScaffoldingTemplate.objects.get(slug="flask-react")
-        assert all(job.scaffolding_template_id == expected.id for job in jobs)
+        assert all(job.stack_slug == "flask-react" for job in jobs)
 
     def test_launch_marks_experiment_running(self, experiment, condition, user):
         assert experiment.status == Experiment.Status.DRAFT

@@ -6,10 +6,10 @@
 	import Settings from '@lucide/svelte/icons/settings';
 	import {
 		getModels,
-		getScaffoldingTemplates,
+		getStacks,
 		getAppTemplates,
 		type LLMModelSummary,
-		type ScaffoldingTemplate,
+		type Stack,
 		type AppRequirementTemplate
 	} from '$lib/api/client';
 	import { getAnalysisProfiles, type AnalysisProfile } from '$lib/api/analysis';
@@ -40,7 +40,7 @@
 	];
 
 	let models = $state<LLMModelSummary[]>([]);
-	let scaffoldingTemplates = $state<ScaffoldingTemplate[]>([]);
+	let stacks = $state<Stack[]>([]);
 	let appTemplates = $state<AppRequirementTemplate[]>([]);
 	let analysisProfiles = $state<AnalysisProfile[]>([]);
 
@@ -150,12 +150,12 @@
 		try {
 			const [m, s, a, p] = await Promise.allSettled([
 				getModels({ per_page: 200 }),
-				getScaffoldingTemplates(),
+				getStacks(),
 				getAppTemplates(),
 				getAnalysisProfiles()
 			]);
 			if (m.status === 'fulfilled') models = m.value.items;
-			if (s.status === 'fulfilled') scaffoldingTemplates = s.value;
+			if (s.status === 'fulfilled') stacks = s.value;
 			if (a.status === 'fulfilled') appTemplates = a.value;
 			if (p.status === 'fulfilled') analysisProfiles = p.value;
 		} catch {
@@ -245,7 +245,7 @@
 						>
 							<option value="">— Select template —</option>
 							<optgroup label="Scaffolding">
-								{#each scaffoldingTemplates as t (t.slug)}<option value={t.slug}>{t.name}</option>{/each}
+								{#each stacks as s (s.slug)}<option value={s.slug}>{s.slug}</option>{/each}
 							</optgroup>
 							<optgroup label="App requirements">
 								{#each appTemplates as t (t.slug)}<option value={t.slug}>{t.name}</option>{/each}

@@ -5,7 +5,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import {
 		getModels,
-		getScaffoldingTemplates,
+		getStacks,
 		getAppTemplates,
 		createCustomJob,
 		createScaffoldingBatch,
@@ -14,7 +14,7 @@
 		getGenerationJob,
 		cancelGenerationJob,
 		type LLMModelSummary,
-		type ScaffoldingTemplate,
+		type Stack,
 		type AppRequirementTemplate,
 		type GenerationJob,
 		type PaginatedJobs,
@@ -43,7 +43,7 @@
 	let customModelId = $state<number | ''>('');
 	let copilotModelId = $state<number | ''>('');
 
-	let scaffoldingTemplates = $state<ScaffoldingTemplate[]>([]);
+	let stacks = $state<Stack[]>([]);
 	let appTemplates = $state<AppRequirementTemplate[]>([]);
 	let scaffoldingLoading = $state(true);
 
@@ -182,11 +182,11 @@
 
 	async function loadScaffoldingData() {
 		try {
-			const [scaffolds, apps] = await Promise.all([
-				getScaffoldingTemplates(),
+			const [stackList, apps] = await Promise.all([
+				getStacks(),
 				getAppTemplates(),
 			]);
-			scaffoldingTemplates = scaffolds;
+			stacks = stackList;
 			appTemplates = apps;
 		} finally {
 			scaffoldingLoading = false;
@@ -426,7 +426,7 @@
 				activeTab={activeTab}
 				{models}
 				{modelsLoading}
-				{scaffoldingTemplates}
+				{stacks}
 				{appTemplates}
 				{scaffoldingLoading}
 				{customSubmitting}

@@ -13,7 +13,6 @@ from django.utils.text import slugify
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
 from backend.generation.models import PromptTemplate
-from backend.generation.models import ScaffoldingTemplate
 from backend.generation.models import TemplateBundle
 from backend.generation.services.bundle_packages.constants import ALLOWED_CONFLICT_STRATEGIES
 from backend.generation.services.bundle_packages.constants import BUNDLE_PACKAGE_KIND
@@ -105,10 +104,8 @@ def _import_assets(
         msg = f"Unsupported conflict strategy: {conflict_strategy}"
         raise ValueError(msg)
 
-    scaffolding_map: dict[str, str] = {}
     block_ref_map: dict[tuple[str, int], tuple[str, int]] = {}
     imported: dict[str, list[Any]] = {
-        "scaffolding_templates": [],
         "app_templates": [],
         "prompt_templates": [],
         "blocks": [],
@@ -116,15 +113,6 @@ def _import_assets(
     }
 
     with transaction.atomic():
-        for raw_scaffolding in assets.get("scaffolding_templates", []):
-            template = _import_scaffolding_template(
-                raw_scaffolding,
-                user=user,
-                conflict_strategy=conflict_strategy,
-            )
-            scaffolding_map[str(raw_scaffolding.get("slug", "")).strip()] = template.slug
-            imported["scaffolding_templates"].append(template)
-
         for raw_app in assets.get("app_templates", []):
             template = _import_app_template(
                 raw_app,
@@ -158,54 +146,10 @@ def _import_assets(
                 user=user,
                 conflict_strategy=conflict_strategy,
                 block_ref_map=block_ref_map,
-                scaffolding_map=scaffolding_map,
             )
             imported["bundles"].append(bundle)
 
     return imported
-
-
-def _import_scaffolding_template(
-    raw_template: Any,
-    *,
-    user: AbstractUser,
-    conflict_strategy: str,
-) -> ScaffoldingTemplate:
-    payload = _validate_scaffolding_payload(raw_template)
-    existing = ScaffoldingTemplate.objects.filter(slug=payload["slug"]).first()
-    if existing is None:
-        return ScaffoldingTemplate.objects.create(
-            **payload,
-            is_default=False,
-            created_by=user,
-        )
-
-    if _scaffolding_matches(existing, payload) and _is_visible_defaultish(existing, user):
-        return existing
-
-    if conflict_strategy == "overwrite" and existing.created_by_id == user.id:
-        _assign_fields(existing, payload)
-        existing.save(
-            update_fields=[
-                "name",
-                "description",
-                "tech_stack",
-                "substitution_vars",
-                "updated_at",
-            ],
-        )
-        return existing
-
-    if conflict_strategy == "error":
-        msg = f"Scaffolding template conflict for slug {payload['slug']}"
-        raise ValueError(msg)
-
-    payload["slug"] = _unique_slug(ScaffoldingTemplate, payload["slug"])
-    return ScaffoldingTemplate.objects.create(
-        **payload,
-        is_default=False,
-        created_by=user,
-    )
 
 
 def _import_app_template(
@@ -353,13 +297,8 @@ def _import_bundle(
     user: AbstractUser,
     conflict_strategy: str,
     block_ref_map: dict[tuple[str, int], tuple[str, int]],
-    scaffolding_map: dict[str, str],
 ) -> TemplateBundle:
     payload = _validate_bundle_payload(raw_bundle)
-    payload["scaffolding_slug"] = scaffolding_map.get(
-        payload["scaffolding_slug"],
-        payload["scaffolding_slug"],
-    )
     normalized_refs = []
     for raw_ref in payload["block_refs"]:
         ref = _validate_block_ref(raw_ref)
@@ -432,32 +371,6 @@ def _parse_package_text(package_text: str) -> dict[str, Any]:
         msg = "Package must be a JSON or YAML object"
         raise ValueError(msg)
     return data
-
-
-def _validate_scaffolding_payload(raw_template: Any) -> dict[str, Any]:
-    if not isinstance(raw_template, dict):
-        msg = "Scaffolding template must be an object"
-        raise ValueError(msg)
-    slug = str(raw_template.get("slug", "")).strip()
-    name = str(raw_template.get("name", "")).strip()
-    if not slug or not name:
-        msg = "Scaffolding template requires name and slug"
-        raise ValueError(msg)
-    tech_stack = raw_template.get("tech_stack") or {}
-    substitution_vars = raw_template.get("substitution_vars") or []
-    if not isinstance(tech_stack, dict):
-        msg = f"Scaffolding {slug} has invalid tech_stack"
-        raise ValueError(msg)
-    if not isinstance(substitution_vars, list):
-        msg = f"Scaffolding {slug} has invalid substitution_vars"
-        raise ValueError(msg)
-    return {
-        "name": name,
-        "slug": slug,
-        "description": str(raw_template.get("description", "")).strip(),
-        "tech_stack": tech_stack,
-        "substitution_vars": substitution_vars,
-    }
 
 
 def _validate_app_template_payload(raw_template: Any) -> dict[str, Any]:
@@ -583,15 +496,6 @@ def _is_visible_defaultish(instance: Any, user: AbstractUser) -> bool:
 
 def _is_visible_systemish(instance: Any, user: AbstractUser) -> bool:
     return bool(getattr(instance, "is_system", False) or instance.created_by_id == user.id)
-
-
-def _scaffolding_matches(existing: ScaffoldingTemplate, payload: dict[str, Any]) -> bool:
-    return (
-        existing.name == payload["name"]
-        and existing.description == payload["description"]
-        and (existing.tech_stack or {}) == payload["tech_stack"]
-        and (existing.substitution_vars or []) == payload["substitution_vars"]
-    )
 
 
 def _app_template_matches(existing: AppRequirementTemplate, payload: dict[str, Any]) -> bool:

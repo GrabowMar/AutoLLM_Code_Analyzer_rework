@@ -156,23 +156,16 @@ export interface TemplateBundle {
   updated_at: string;
 }
 
-export interface ScaffoldingTemplate {
-  id: number;
-  name: string;
+export interface Stack {
   slug: string;
-  description: string;
-  tech_stack: Record<string, string>;
-  substitution_vars: string[];
-  is_default: boolean;
-  created_at: string;
-  updated_at: string;
+  has_frontend: boolean;
+  aliases: string[];
 }
 
 export interface StarterTemplatePackage {
   slug: string;
   name: string;
   description: string;
-  scaffolding_count: number;
   app_template_count: number;
   prompt_template_count: number;
   block_count: number;
@@ -271,7 +264,6 @@ export async function getBundlePreview(slug: string): Promise<BundlePreview> {
 
 export async function exportTemplatePackage(
   data: {
-    scaffolding_slugs?: string[];
     app_template_slugs?: string[];
     prompt_template_slugs?: string[];
     bundle_slugs?: string[];
@@ -321,7 +313,7 @@ export async function importStarterTemplatePackage(
 }
 
 export async function createScaffoldingBatch(data: {
-  scaffolding_template_id: number;
+  stack_slug: string;
   app_requirement_ids: number[];
   model_ids: number[];
   temperature?: number;
@@ -329,20 +321,6 @@ export async function createScaffoldingBatch(data: {
   trials?: number;
 }): Promise<BatchCreateResponse> {
   const res = await apiFetch("/generation/jobs/scaffolding/", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-  return res.json();
-}
-
-export async function createScaffoldingTemplate(data: {
-  name: string;
-  slug: string;
-  description?: string;
-  tech_stack?: Record<string, string>;
-  substitution_vars?: string[];
-}): Promise<ScaffoldingTemplate> {
-  const res = await apiFetch("/generation/scaffolding-templates/", {
     method: "POST",
     body: JSON.stringify(data),
   });
@@ -456,10 +434,8 @@ export async function getPromptTemplates(
   return res.json();
 }
 
-export async function getScaffoldingTemplates(): Promise<
-  ScaffoldingTemplate[]
-> {
-  const res = await apiFetch("/generation/scaffolding-templates/");
+export async function getStacks(): Promise<Stack[]> {
+  const res = await apiFetch("/generation/stacks/");
   return res.json();
 }
 
@@ -506,24 +482,4 @@ export async function updatePromptTemplate(
   return res.json();
 }
 
-export async function updateScaffoldingTemplate(
-  slug: string,
-  data: Partial<{
-    name: string;
-    description: string;
-    tech_stack: Record<string, string>;
-    substitution_vars: string[];
-  }>,
-): Promise<ScaffoldingTemplate> {
-  const res = await apiFetch(`/generation/scaffolding-templates/${slug}/`, {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
-  return res.json();
-}
 
-export async function deleteScaffoldingTemplate(slug: string): Promise<void> {
-  await apiFetch(`/generation/scaffolding-templates/${slug}/`, {
-    method: "DELETE",
-  });
-}

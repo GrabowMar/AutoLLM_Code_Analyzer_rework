@@ -10,7 +10,6 @@ from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
 from backend.generation.services.openrouter_client import OpenRouterClient
 from backend.generation.tests.factories import AppRequirementTemplateFactory
-from backend.generation.tests.factories import ScaffoldingTemplateFactory
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.users.tests.factories import UserFactory
 
@@ -25,11 +24,10 @@ def auth_client(client):
 
 
 def _create_scaffolding_batch(client, *, trials: int | None = None, **overrides):
-    scaffolding = ScaffoldingTemplateFactory()
     app_req = AppRequirementTemplateFactory()
     models = [LLMModelFactory(), LLMModelFactory()]
     payload = {
-        "scaffolding_template_id": scaffolding.id,
+        "stack_slug": "flask-react",
         "app_requirement_ids": [app_req.id],
         "model_ids": [m.id for m in models],
         **overrides,
