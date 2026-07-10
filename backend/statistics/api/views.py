@@ -42,8 +42,18 @@ def get_trends(request, days: int = Query(7, ge=1, le=90)):
 
 
 @router.get("/models/", response=list[ModelComparisonRowSchema])
-def get_models(request, limit: int = Query(25, ge=1, le=100)):
-    return services.get_model_comparison(request.auth, limit=limit)
+def get_models(
+    request,
+    limit: int = Query(25, ge=1, le=100),
+    prompt_hash: str | None = None,
+    bundle_key: str | None = None,
+):
+    return services.get_model_comparison(
+        request.auth,
+        limit=limit,
+        prompt_hash=prompt_hash,
+        bundle_key=bundle_key,
+    )
 
 
 @router.get("/tools/", response=list[ToolRowSchema])

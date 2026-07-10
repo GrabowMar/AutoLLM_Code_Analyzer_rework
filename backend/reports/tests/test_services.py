@@ -157,7 +157,17 @@ def test_job_summary_reports_truncated_jobs():
     assert data["generation"]["truncated_jobs"] == 1
 
 
-def _job_with_run_findings(user, model, template, severities, *, result_data=None, metrics=None):
+def _job_with_run_findings(
+    user,
+    model,
+    template,
+    severities,
+    *,
+    result_data=None,
+    metrics=None,
+    bundle_key="",
+    prompt_hash="",
+):
     from backend.analysis.models import AnalysisRun
     from backend.analysis.models import Finding
     from backend.analysis.tests.factories import AnalysisRunFactory
@@ -170,6 +180,8 @@ def _job_with_run_findings(user, model, template, severities, *, result_data=Non
         status=GenerationJob.Status.COMPLETED,
         result_data=result_data or {"backend_code": "x\n" * 100},
         metrics=metrics or {},
+        bundle_key=bundle_key,
+        prompt_hash=prompt_hash,
     )
     run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
     result = ToolResultFactory(run=run, tool_slug="bandit")
@@ -221,6 +233,93 @@ def test_template_comparison_excludes_truncated_trials_by_default():
         {"template_slug": template.slug, "exclude_truncated": False},
     )
     assert included["models"][0]["stats"]["trials"] == 2
+
+
+def test_template_comparison_groups_by_model_and_bundle_key():
+    """Jobs from different prompt/bundle versions must not be pooled into one row."""
+    user = UserFactory()
+    template = AppRequirementTemplateFactory()
+    model = LLMModelFactory(model_id="m1")
+    _job_with_run_findings(user, model, template, ["high"], bundle_key="bundle-a@1")
+    _job_with_run_findings(user, model, template, ["high"] * 3, bundle_key="bundle-a@2")
+
+    data = generators.generate_template_comparison({"template_slug": template.slug})
+
+    assert data["total_models"] == 2
+    assert set(data["bundle_keys"]) == {"bundle-a@1", "bundle-a@2"}
+    assert data["mixed_bundle_versions"] is True
+    assert {row["bundle_key"] for row in data["models"]} == {"bundle-a@1", "bundle-a@2"}
+    assert all(row["model_id"] == "m1" for row in data["models"])
+
+
+def test_template_comparison_bundle_key_filter_isolates_one_version():
+    user = UserFactory()
+    template = AppRequirementTemplateFactory()
+    model = LLMModelFactory(model_id="m1")
+    _job_with_run_findings(user, model, template, ["high"], bundle_key="bundle-a@1")
+    _job_with_run_findings(user, model, template, ["high"] * 3, bundle_key="bundle-a@2")
+
+    data = generators.generate_template_comparison(
+        {"template_slug": template.slug, "bundle_key": "bundle-a@1"},
+    )
+
+    assert data["total_models"] == 1
+    assert data["models"][0]["bundle_key"] == "bundle-a@1"
+    assert data["mixed_bundle_versions"] is False
+
+
+def test_template_comparison_prompt_hash_filter_isolates_one_version():
+    user = UserFactory()
+    template = AppRequirementTemplateFactory()
+    model = LLMModelFactory(model_id="m1")
+    _job_with_run_findings(user, model, template, ["high"], prompt_hash="hash-a")
+    _job_with_run_findings(user, model, template, ["high"] * 3, prompt_hash="hash-b")
+
+    data = generators.generate_template_comparison(
+        {"template_slug": template.slug, "prompt_hash": "hash-a"},
+    )
+
+    assert data["total_models"] == 1
+    assert data["models"][0]["stats"]["trials"] == 1
+
+
+def test_template_comparison_single_bundle_key_not_flagged_mixed():
+    user = UserFactory()
+    template = AppRequirementTemplateFactory()
+    model = LLMModelFactory(model_id="m1")
+    _job_with_run_findings(user, model, template, ["high"], bundle_key="bundle-a@1")
+
+    data = generators.generate_template_comparison({"template_slug": template.slug})
+
+    assert data["mixed_bundle_versions"] is False
+    assert data["bundle_keys"] == ["bundle-a@1"]
+
+
+def test_experiment_stats_reports_mixed_prompt_hashes():
+    user = UserFactory()
+    template = AppRequirementTemplateFactory()
+    model = LLMModelFactory(model_id="m1")
+    job_a = _job_with_run_findings(user, model, template, ["high"], prompt_hash="hash-a")
+    job_b = _job_with_run_findings(user, model, template, ["high"], prompt_hash="hash-b")
+
+    jobs_qs = GenerationJob.objects.filter(id__in=[job_a.id, job_b.id])
+    stats = generators._experiment_stats(jobs_qs)
+
+    assert stats["prompt_hashes"] == ["hash-a", "hash-b"]
+    assert stats["mixed_prompt_versions"] is True
+
+
+def test_experiment_stats_single_prompt_hash_not_mixed():
+    user = UserFactory()
+    template = AppRequirementTemplateFactory()
+    model = LLMModelFactory(model_id="m1")
+    job = _job_with_run_findings(user, model, template, ["high"], prompt_hash="hash-a")
+
+    jobs_qs = GenerationJob.objects.filter(id=job.id)
+    stats = generators._experiment_stats(jobs_qs)
+
+    assert stats["prompt_hashes"] == ["hash-a"]
+    assert stats["mixed_prompt_versions"] is False
 
 
 def test_template_comparison_functional_rollup():

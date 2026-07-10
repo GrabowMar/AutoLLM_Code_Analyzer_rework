@@ -24,6 +24,7 @@ CATEGORY_MAP: dict[str, str] = {
     "ANALYSIS_PIPELINE": "Architecture",
     "BACKGROUND_SERVICES": "Architecture",
     "GENERATION_PROCESS": "Architecture",
+    "EXPERIMENTS": "Architecture",
     "architecture": "Architecture",
     "api-reference": "Reference",
     "api": "Reference",

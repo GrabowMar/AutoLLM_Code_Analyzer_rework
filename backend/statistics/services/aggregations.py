@@ -143,26 +143,30 @@ def get_severity_distribution(
 def get_model_comparison(
     user: AbstractBaseUser | None = None,
     limit: int = 25,
+    *,
+    prompt_hash: str | None = None,
+    bundle_key: str | None = None,
 ) -> list[dict[str, Any]]:
     """Per-model rollup on the shared rankings scoring (0..1 scales).
 
     Delegates to the rankings aggregator so this page can never contradict
     /rankings: findings are deduped to each job's latest run, AI-reviewer
     findings are excluded from the empirical score, and MSS/empirical/
-    composite mean the same thing everywhere.
+    composite mean the same thing everywhere. ``prompt_hash``/``bundle_key``
+    narrow the comparison to one prompt version — see aggregate_rankings.
     """
     from django.core.cache import cache
 
     from backend.rankings.services import aggregate_rankings
 
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
-    cache_key = f"stats_models_v2_{limit}_{u_key}"
+    cache_key = f"stats_models_v2_{limit}_{u_key}_{prompt_hash or ''}_{bundle_key or ''}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
     rows: list[dict[str, Any]] = []
-    for r in aggregate_rankings(user=user):  # sorted by composite desc
+    for r in aggregate_rankings(user=user, prompt_hash=prompt_hash, bundle_key=bundle_key):  # sorted by composite desc
         if not r.get("apps"):
             continue
         rows.append(
