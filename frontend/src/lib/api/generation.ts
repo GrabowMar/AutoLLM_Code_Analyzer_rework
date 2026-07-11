@@ -481,5 +481,3 @@ export async function updatePromptTemplate(
   });
   return res.json();
 }
-
-
