@@ -17,10 +17,10 @@ from typing import Any
 from backend.generation.models import Experiment
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
-from backend.generation.services.profile_resolver import apply_snapshot_to_job
-from backend.generation.services.profile_resolver import derive_experiment_seed
 from backend.generation.services.dispatcher import dispatch_job
 from backend.generation.services.openrouter_client import OpenRouterClient
+from backend.generation.services.profile_resolver import apply_snapshot_to_job
+from backend.generation.services.profile_resolver import derive_experiment_seed
 from backend.runtime.services.scaffolding import canonical_stack_slug
 
 if TYPE_CHECKING:

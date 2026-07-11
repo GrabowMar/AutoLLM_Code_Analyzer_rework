@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING
 from typing import Any
 
 import jinja2
 
-from backend.generation.models import AppRequirementTemplate
+if TYPE_CHECKING:
+    from backend.generation.models import AppRequirementTemplate
 
 logger = logging.getLogger(__name__)
 

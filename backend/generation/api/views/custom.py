@@ -26,9 +26,9 @@ from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
 from backend.generation.models import GenerationProfile
+from backend.generation.services.dispatcher import dispatch_job
 from backend.generation.services.profile_resolver import apply_snapshot_to_job
 from backend.generation.services.profile_resolver import get_profile_for_app
-from backend.generation.services.dispatcher import dispatch_job
 from backend.llm_models.models import LLMModel
 from backend.runtime.services.scaffolding import canonical_stack_slug
 from backend.runtime.services.scaffolding import is_known_stack_slug

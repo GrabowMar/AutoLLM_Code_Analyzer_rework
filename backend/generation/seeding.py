@@ -355,8 +355,12 @@ def seed_app_profiles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, 
             continue
 
         # "base_bundle_slug"/"bundle_slug" are the pre-rename manifest keys.
-        base_slug = manifest.get("base_profile_slug") or manifest.get("base_bundle_slug") or "system-scaffolding-standard"
-        base = GenerationProfile.objects.using(using).filter(slug=base_slug, is_system=True).order_by("-version").first()
+        base_slug = (
+            manifest.get("base_profile_slug") or manifest.get("base_bundle_slug") or "system-scaffolding-standard"
+        )
+        base = (
+            GenerationProfile.objects.using(using).filter(slug=base_slug, is_system=True).order_by("-version").first()
+        )
         if not base:
             if log:
                 log(f"  Skip {yaml_path.name}: base profile {base_slug} missing")
@@ -367,7 +371,9 @@ def seed_app_profiles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, 
             if extra not in refs:
                 refs.append(extra)
 
-        profile_slug = manifest.get("profile_slug") or manifest.get("bundle_slug") or f"app-{app_slug.replace('_', '-')}"
+        profile_slug = (
+            manifest.get("profile_slug") or manifest.get("bundle_slug") or f"app-{app_slug.replace('_', '-')}"
+        )
         c, u = _upsert_profile_version(
             GenerationProfile,
             using,

@@ -417,5 +417,3 @@ export async function updateAppTemplate(
   });
   return res.json();
 }
-
-

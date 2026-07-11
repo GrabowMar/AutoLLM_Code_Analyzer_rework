@@ -7,12 +7,12 @@ import pytest
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
 from backend.generation.models import GenerationProfile
-from backend.generation.seeding import _upsert_profile_version
 from backend.generation.seeding import _upsert_content_block_version
+from backend.generation.seeding import _upsert_profile_version
 from backend.generation.seeding import seed_all
 from backend.generation.seeding import seed_content_blocks
-from backend.generation.seeding import seed_requirements
 from backend.generation.seeding import seed_profiles
+from backend.generation.seeding import seed_requirements
 
 pytestmark = pytest.mark.django_db
 
