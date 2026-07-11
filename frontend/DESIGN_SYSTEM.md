@@ -11,14 +11,14 @@ validator-checked, not eyeballed).
 Tokens live in `src/app.css` (`:root` light / `.dark`); Tailwind v4 reads them via
 `@theme inline`.
 
-| Role            | Light     | Dark      |
-| --------------- | --------- | --------- |
-| Primary / CTA   | `#16a34a` | `#22c55e` |
-| Accent 2 (cyan) | `#0e7490` | `#22d3ee` |
+| Role              | Light     | Dark      |
+| ----------------- | --------- | --------- |
+| Primary / CTA     | `#16a34a` | `#22c55e` |
+| Accent 2 (cyan)   | `#0e7490` | `#22d3ee` |
 | Accent 3 (violet) | `#6d28d9` | `#a78bfa` |
-| Background      | `#f8fafc` | `#162233` |
-| Card            | `#ffffff` | `#1a2d44` |
-| Text            | `#0f172a` | `#f1f5f9` |
+| Background        | `#f8fafc` | `#162233` |
+| Card              | `#ffffff` | `#1a2d44` |
+| Text              | `#0f172a` | `#f1f5f9` |
 
 - Green stays the only action color. Cyan/violet are supporting accents (icon
   tints, gradients, KPI chips) — never buttons.

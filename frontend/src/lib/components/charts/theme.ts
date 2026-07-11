@@ -9,8 +9,8 @@
 
 /** Categorical slot for the nth series (1-based, max 5 — never cycle hues). */
 export function seriesColor(n: number): string {
-	const slot = Math.min(Math.max(n, 1), 5);
-	return `var(--chart-${slot})`;
+  const slot = Math.min(Math.max(n, 1), 5);
+  return `var(--chart-${slot})`;
 }
 
 /**
@@ -18,15 +18,15 @@ export function seriesColor(n: number): string {
  * `$lib/constants/colors.ts` (severityColors). Keep in sync with that map.
  */
 export const severityChartColors: Record<string, string> = {
-	critical: '#ef4444', // red-500
-	high: '#f97316', // orange-500
-	medium: '#f59e0b', // amber-500
-	low: '#3b82f6', // blue-500
-	info: '#94a3b8', // slate-400
+  critical: "#ef4444", // red-500
+  high: "#f97316", // orange-500
+  medium: "#f59e0b", // amber-500
+  low: "#3b82f6", // blue-500
+  info: "#94a3b8", // slate-400
 };
 
 /** Run-status series colors (completed/failed trend lines). */
 export const statusSeriesColors = {
-	completed: 'var(--success)',
-	failed: 'var(--destructive)',
+  completed: "var(--success)",
+  failed: "var(--destructive)",
 } as const;

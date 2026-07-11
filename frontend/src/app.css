@@ -82,17 +82,14 @@
   --chart-5: #e11d48; /* rose-600 */
 
   /* Glow, glass, gradients */
-  --glow-primary:
-    0 0 0 1px color-mix(in oklab, var(--primary) 25%, transparent),
+  --glow-primary: 0 0 0 1px color-mix(in oklab, var(--primary) 25%, transparent),
     0 4px 20px -6px color-mix(in oklab, var(--primary) 30%, transparent);
-  --glow-accent:
-    0 0 0 1px color-mix(in oklab, var(--accent-2) 25%, transparent),
+  --glow-accent: 0 0 0 1px color-mix(in oklab, var(--accent-2) 25%, transparent),
     0 4px 20px -6px color-mix(in oklab, var(--accent-2) 30%, transparent);
   --glass-bg: color-mix(in oklab, var(--card) 78%, transparent);
   --glass-border: color-mix(in oklab, var(--border) 80%, transparent);
   --gradient-brand: linear-gradient(135deg, var(--primary), var(--accent-2));
-  --gradient-panel:
-    radial-gradient(
+  --gradient-panel: radial-gradient(
       42rem 18rem at 105% -20%,
       color-mix(in oklab, var(--primary) 6%, transparent),
       transparent 60%
@@ -166,17 +163,14 @@
   --chart-4: #d97706;
   --chart-5: #f43f5e; /* rose-500 */
 
-  --glow-primary:
-    0 0 0 1px color-mix(in oklab, var(--primary) 40%, transparent),
+  --glow-primary: 0 0 0 1px color-mix(in oklab, var(--primary) 40%, transparent),
     0 4px 24px -6px color-mix(in oklab, var(--primary) 45%, transparent);
-  --glow-accent:
-    0 0 0 1px color-mix(in oklab, var(--accent-2) 35%, transparent),
+  --glow-accent: 0 0 0 1px color-mix(in oklab, var(--accent-2) 35%, transparent),
     0 4px 24px -6px color-mix(in oklab, var(--accent-2) 40%, transparent);
   --glass-bg: color-mix(in oklab, var(--card) 65%, transparent);
   --glass-border: color-mix(in oklab, var(--accent-2) 12%, var(--border));
   --gradient-brand: linear-gradient(135deg, var(--primary), var(--accent-2));
-  --gradient-panel:
-    radial-gradient(
+  --gradient-panel: radial-gradient(
       42rem 18rem at 105% -20%,
       color-mix(in oklab, var(--primary) 10%, transparent),
       transparent 60%
