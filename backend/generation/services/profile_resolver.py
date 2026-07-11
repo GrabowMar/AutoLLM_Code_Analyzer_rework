@@ -17,6 +17,8 @@ from django.utils import timezone
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
 from backend.generation.models import GenerationProfile
+from backend.generation.services.llm_params import SAMPLING_KEYS
+from backend.generation.services.llm_params import merge_llm_params
 from backend.runtime.services.scaffolding import resolve_stack_slug
 
 if TYPE_CHECKING:
@@ -27,7 +29,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-BUNDLE_SCHEMA_VERSION = 2
+BUNDLE_SCHEMA_VERSION = 3
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 BLOCKS_DIR = DATA_DIR / "blocks"
 CATALOG_PATH = BLOCKS_DIR / "catalog.yaml"
@@ -205,22 +207,29 @@ def resolve_profile_for_job(
     profile: GenerationProfile | None,
     scaffolding_slug: str,
     user: AbstractUser | None,
-) -> tuple[list[dict[str, Any]], str, str, int]:
-    """Return (block_refs, scaffolding_slug, bundle_slug, bundle_version) for snapshot building."""
+) -> tuple[list[dict[str, Any]], str, str, int, dict[str, Any]]:
+    """Return (block_refs, scaffolding_slug, bundle_slug, bundle_version, llm_config)."""
     if profile:
         return (
             list(profile.block_refs or []),
             profile.scaffolding_slug,
             profile.slug,
             profile.version,
+            dict(profile.llm_config or {}),
         )
 
     if profile := get_default_profile(scaffolding_slug=scaffolding_slug, user=user):
-        return list(profile.block_refs or []), profile.scaffolding_slug, profile.slug, profile.version
+        return (
+            list(profile.block_refs or []),
+            profile.scaffolding_slug,
+            profile.slug,
+            profile.version,
+            dict(profile.llm_config or {}),
+        )
 
     catalog = load_catalog()
     refs = catalog.get("default_block_refs", [])
-    return refs, scaffolding_slug, "catalog", 1
+    return refs, scaffolding_slug, "catalog", 1, {}
 
 
 def build_resolved_snapshot(
@@ -234,12 +243,22 @@ def build_resolved_snapshot(
     user: AbstractUser | None,
     experiment_seed: int | None = None,
     top_p: float | None = None,
+    llm_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the full immutable snapshot dict for ``GenerationJob.resolved_bundle``."""
-    block_refs, bundle_scaffold_slug, resolved_bundle_slug, resolved_bundle_version = resolve_profile_for_job(
-        profile=profile,
-        scaffolding_slug=scaffolding_slug,
-        user=user,
+    """Build the full immutable snapshot dict for ``GenerationJob.resolved_bundle``.
+
+    The llm section layers sampling params bottom-up: legacy job columns
+    (temperature/max_tokens/top_p) → profile ``llm_config`` → per-run
+    ``llm_overrides`` (which already include any experiment/condition layers,
+    collapsed at job creation). Model pricing provenance is attached on top
+    under non-sampling keys.
+    """
+    block_refs, bundle_scaffold_slug, resolved_bundle_slug, resolved_bundle_version, profile_llm = (
+        resolve_profile_for_job(
+            profile=profile,
+            scaffolding_slug=scaffolding_slug,
+            user=user,
+        )
     )
     resolved_blocks = resolve_block_refs(block_refs, user)
     prompt_templates = assemble_prompt_templates(resolved_blocks)
@@ -250,23 +269,11 @@ def build_resolved_snapshot(
     # Reproducibility seed for an experiment run, not a crypto value.
     seed = experiment_seed if experiment_seed is not None else random.randint(0, 2_147_483_647)  # noqa: S311
 
-    llm_section: dict[str, Any] = {
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
+    base_params: dict[str, Any] = {"temperature": temperature, "max_tokens": max_tokens}
     if top_p is not None:
-        llm_section["top_p"] = top_p
-    if model:
-        llm_section["model_id"] = model.id
-        llm_section["model_slug"] = model.model_id
-        # Pricing/context provenance: LLMModel rows mutate in place on catalog
-        # sync, so the values in effect at job creation must be frozen here.
-        llm_section["provider"] = model.provider
-        llm_section["context_window"] = model.context_window
-        llm_section["max_output_tokens"] = model.max_output_tokens
-        llm_section["input_price_per_token"] = model.input_price_per_token
-        llm_section["output_price_per_token"] = model.output_price_per_token
-        llm_section["pricing_snapshot_at"] = timezone.now().isoformat()
+        base_params["top_p"] = top_p
+    llm_section = merge_llm_params(base_params, profile_llm, llm_overrides)
+    _attach_model_provenance(llm_section, model)
 
     snapshot: dict[str, Any] = {
         "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
@@ -274,6 +281,7 @@ def build_resolved_snapshot(
         "bundle_version": resolved_bundle_version,
         "scaffolding_slug": bundle_scaffold_slug or scaffolding_slug,
         "llm": llm_section,
+        "llm_overrides": dict(llm_overrides or {}),
         "seed": seed,
         "blocks": resolved_blocks,
         "app_requirement": app_dict,
@@ -283,6 +291,46 @@ def build_resolved_snapshot(
     snapshot["prompt_hash"] = _snapshot_prompt_hash(snapshot)
     snapshot["run_fingerprint"] = run_fingerprint(snapshot)
     return snapshot
+
+
+def _attach_model_provenance(llm_section: dict[str, Any], model: LLMModel | None) -> None:
+    """Freeze the model's pricing/context values into the llm section.
+
+    LLMModel rows mutate in place on catalog sync, so the values in effect at
+    job creation must be captured here. ("provider" is reserved for OpenRouter
+    routing prefs since snapshot schema v3 — provenance uses model_provider.)
+    """
+    if not model:
+        return
+    llm_section["model_id"] = model.id
+    llm_section["model_slug"] = model.model_id
+    llm_section["model_provider"] = model.provider
+    llm_section["context_window"] = model.context_window
+    llm_section["max_output_tokens"] = model.max_output_tokens
+    llm_section["input_price_per_token"] = model.input_price_per_token
+    llm_section["output_price_per_token"] = model.output_price_per_token
+    llm_section["pricing_snapshot_at"] = timezone.now().isoformat()
+
+
+def build_custom_snapshot(
+    *,
+    model: LLMModel | None,
+    temperature: float,
+    max_tokens: int,
+    llm_overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Minimal ``resolved_bundle`` for custom-mode jobs: just the frozen llm section.
+
+    Custom jobs have no blocks or app spec, but freezing the merged sampling
+    params here lets execution read one path for every mode.
+    """
+    llm_section = merge_llm_params({"temperature": temperature, "max_tokens": max_tokens}, llm_overrides)
+    _attach_model_provenance(llm_section, model)
+    return {
+        "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
+        "llm": llm_section,
+        "llm_overrides": dict(llm_overrides or {}),
+    }
 
 
 def attach_rendered_backend_prompts(
@@ -323,6 +371,7 @@ def snapshot_for_scaffolding_job(job: GenerationJob) -> dict[str, Any]:
         user=job.created_by,
         experiment_seed=job.experiment_seed,
         top_p=job.top_p,
+        llm_overrides=job.llm_params or {},
     )
     from backend.generation.services.prompt_renderer import PromptRenderer
 
@@ -387,7 +436,7 @@ def run_fingerprint(snapshot: dict[str, Any]) -> str:
             k: v
             for k, v in (snapshot.get("llm") or {}).items()
             # pricing/context are provenance, not run configuration
-            if k in ("model_slug", "temperature", "max_tokens", "top_p")
+            if k in ("model_slug", *SAMPLING_KEYS)
         },
         "scaffolding_slug": snapshot.get("scaffolding_slug"),
     }

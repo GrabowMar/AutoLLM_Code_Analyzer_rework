@@ -237,9 +237,12 @@ class Experiment(models.Model):
     )
     continuation_limit = models.PositiveSmallIntegerField(_("continuation limit"), default=1)
     enable_repair = models.BooleanField(_("enable repair round"), default=True)
-    temperature = models.FloatField(_("default temperature"), default=0.3)
-    max_tokens = models.PositiveIntegerField(_("default max tokens"), default=32000)
-    top_p = models.FloatField(_("default top p"), null=True, blank=True)
+    llm_defaults = models.JSONField(
+        _("LLM defaults"),
+        default=dict,
+        blank=True,
+        help_text="Sampling params applied to every condition unless overridden (see llm_params.SAMPLING_KEYS)",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -287,7 +290,7 @@ class ExperimentCondition(models.Model):
         _("param overrides"),
         default=dict,
         blank=True,
-        help_text="Per-condition temperature/max_tokens/top_p overrides of the experiment defaults",
+        help_text="Per-condition sampling-param overrides of the experiment llm_defaults",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -478,10 +481,18 @@ class GenerationJob(models.Model):
     custom_system_prompt = models.TextField(_("system prompt"), blank=True, default="")
     custom_user_prompt = models.TextField(_("user prompt"), blank=True, default="")
 
-    # Shared LLM parameters
+    # Shared LLM parameters. temperature/max_tokens/top_p are the legacy base
+    # layer (kept as fallback for pre-snapshot jobs); llm_params holds the
+    # per-run overrides that win over the profile's llm_config in the frozen
+    # snapshot (see services/llm_params.py for the precedence chain).
     temperature = models.FloatField(_("temperature"), default=0.3)
     max_tokens = models.PositiveIntegerField(_("max tokens"), default=32000)
     top_p = models.FloatField(_("top p"), null=True, blank=True)
+    llm_params = models.JSONField(
+        _("LLM param overrides"),
+        default=dict,
+        blank=True,
+    )
 
     # Copilot mode
     copilot_description = models.TextField(

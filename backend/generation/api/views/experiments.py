@@ -22,6 +22,7 @@ from backend.generation.services.experiments import experiment_status
 from backend.generation.services.experiments import export_experiment
 from backend.generation.services.experiments import launch_experiment
 from backend.generation.services.experiments import preview_experiment
+from backend.generation.services.llm_params import validate_llm_params
 from backend.llm_models.models import LLMModel
 
 
@@ -32,6 +33,13 @@ def _owned_experiment_or_404(user, experiment_id: str) -> Experiment:
 def _draft_or_400(experiment: Experiment) -> None:
     if experiment.status != Experiment.Status.DRAFT:
         raise HttpError(400, "Only draft experiments can be edited. Archive and clone to make changes.")
+
+
+def _validated(params: dict | None) -> dict:
+    try:
+        return validate_llm_params(params or {})
+    except ValueError as exc:
+        raise HttpError(400, str(exc)) from exc
 
 
 @router.get("/experiments/", response=list[ExperimentSchema])
@@ -52,9 +60,7 @@ def create_experiment(request, payload: ExperimentCreateSchema):
         base_seed=payload.base_seed,
         continuation_limit=payload.continuation_limit,
         enable_repair=payload.enable_repair,
-        temperature=payload.temperature,
-        max_tokens=payload.max_tokens,
-        top_p=payload.top_p,
+        llm_defaults=_validated(payload.llm_defaults.as_params() if payload.llm_defaults else {}),
         created_by=request.auth,
     )
     if payload.app_requirement_ids:
@@ -75,6 +81,8 @@ def update_experiment(request, experiment_id: str, payload: ExperimentUpdateSche
 
     data = payload.dict(exclude_unset=True)
     app_ids = data.pop("app_requirement_ids", None)
+    if "llm_defaults" in data:
+        data["llm_defaults"] = _validated(data["llm_defaults"])
     for field, value in data.items():
         setattr(experiment, field, value)
     experiment.save()
@@ -111,16 +119,16 @@ def create_condition(request, experiment_id: str, payload: ExperimentConditionCr
     experiment = _owned_experiment_or_404(request.auth, experiment_id)
     _draft_or_400(experiment)
 
-    bundle = get_object_or_404(GenerationProfile, id=payload.profile_id, is_archived=False)
+    profile = get_object_or_404(GenerationProfile, id=payload.profile_id, is_archived=False)
     model = get_object_or_404(LLMModel, id=payload.model_id)
-    if experiment.conditions.filter(profile=bundle, model=model).exists():
-        return 400, {"detail": "This experiment already has a condition for that bundle + model."}
+    if experiment.conditions.filter(profile=profile, model=model).exists():
+        return 400, {"detail": "This experiment already has a condition for that profile + model."}
     return ExperimentCondition.objects.create(
         experiment=experiment,
         label=payload.label,
-        profile=bundle,
+        profile=profile,
         model=model,
-        param_overrides=payload.param_overrides,
+        param_overrides=_validated(payload.param_overrides),
     )
 
 

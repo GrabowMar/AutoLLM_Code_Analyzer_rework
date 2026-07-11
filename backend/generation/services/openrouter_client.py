@@ -6,6 +6,8 @@ import time
 import requests
 from django.conf import settings
 
+from backend.generation.services.llm_params import SAMPLING_KEYS
+
 logger = logging.getLogger(__name__)
 
 OPENROUTER_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -80,6 +82,7 @@ class OpenRouterClient:
         top_p: float | None = None,
         frequency_penalty: float | None = None,
         seed: int | None = None,
+        params: dict | None = None,
         timeout: int = DEFAULT_TIMEOUT,
     ) -> dict:
         """Send a chat completion request to OpenRouter.
@@ -93,6 +96,9 @@ class OpenRouterClient:
             frequency_penalty: Frequency penalty parameter
             seed: Sampling seed, forwarded to providers that support
                 deterministic sampling (best-effort reproducibility)
+            params: Additional sampling params (validated against
+                ``llm_params.SAMPLING_KEYS`` upstream); wins over the
+                individual kwargs above
             timeout: Request timeout in seconds
 
         Returns:
@@ -113,6 +119,9 @@ class OpenRouterClient:
             payload["frequency_penalty"] = frequency_penalty
         if seed is not None:
             payload["seed"] = seed
+        payload.update(
+            {key: value for key, value in (params or {}).items() if key in SAMPLING_KEYS and value is not None},
+        )
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",

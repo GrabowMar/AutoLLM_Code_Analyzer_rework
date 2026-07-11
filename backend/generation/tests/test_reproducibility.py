@@ -8,11 +8,11 @@ import pytest
 
 from backend.generation.models import ContentBlock
 from backend.generation.models import GenerationJob
+from backend.generation.services.job_cloning import clone_job
+from backend.generation.services.openrouter_client import OpenRouterClient
 from backend.generation.services.profile_resolver import build_resolved_snapshot
 from backend.generation.services.profile_resolver import bundle_key_from_snapshot
 from backend.generation.services.profile_resolver import derive_experiment_seed
-from backend.generation.services.job_cloning import clone_job
-from backend.generation.services.openrouter_client import OpenRouterClient
 from backend.generation.tests.factories import AppRequirementTemplateFactory
 from backend.generation.tests.factories import ContentBlockFactory
 from backend.generation.tests.factories import GenerationJobFactory

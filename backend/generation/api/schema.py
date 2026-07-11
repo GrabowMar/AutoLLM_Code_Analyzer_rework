@@ -96,6 +96,31 @@ class BlockRefSchema(Schema):
     version: int = 1
 
 
+class LLMParamsSchema(Schema):
+    """OpenRouter sampling params; every field optional (None = inherit).
+
+    Validated by ``services.llm_params.validate_llm_params`` in the views —
+    this schema only shapes the payload.
+    """
+
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    min_p: float | None = None
+    max_tokens: int | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    repetition_penalty: float | None = None
+    stop: list[str] | None = None
+    response_format: dict | None = None
+    provider: dict | None = None
+    reasoning: dict | None = None
+
+    def as_params(self) -> dict:
+        """Plain dict with unset fields dropped."""
+        return {k: v for k, v in self.dict().items() if v is not None}
+
+
 class GenerationProfileSchema(ModelSchema):
     class Meta:
         model = GenerationProfile
@@ -177,6 +202,7 @@ class GenerationJobSchema(ModelSchema):
             "stack_slug",
             "temperature",
             "max_tokens",
+            "llm_params",
             "custom_system_prompt",
             "custom_user_prompt",
             "copilot_description",
@@ -210,6 +236,20 @@ class GenerationJobSchema(ModelSchema):
         if obj.model:
             return obj.model.model_id
         return None
+
+    @staticmethod
+    def resolve_temperature(obj: GenerationJob) -> float:
+        """Effective value: the frozen snapshot wins over the legacy column."""
+        resolved = obj.resolved_bundle if isinstance(obj.resolved_bundle, dict) else {}
+        value = (resolved.get("llm") or {}).get("temperature")
+        return value if value is not None else obj.temperature
+
+    @staticmethod
+    def resolve_max_tokens(obj: GenerationJob) -> int:
+        """Effective value: the frozen snapshot wins over the legacy column."""
+        resolved = obj.resolved_bundle if isinstance(obj.resolved_bundle, dict) else {}
+        value = (resolved.get("llm") or {}).get("max_tokens")
+        return value if value is not None else obj.max_tokens
 
     @staticmethod
     def resolve_batch_id(obj: GenerationJob) -> UUID | None:
@@ -282,6 +322,8 @@ class CustomJobCreateSchema(Schema):
     user_prompt: str
     temperature: float = 0.3
     max_tokens: int = 32000
+    llm_params: LLMParamsSchema | None = None
+    seed: int | None = None
 
 
 class ScaffoldingJobCreateSchema(Schema):
@@ -293,6 +335,7 @@ class ScaffoldingJobCreateSchema(Schema):
     temperature: float = 0.3
     max_tokens: int = 32000
     profile_id: int | None = None
+    llm_params: LLMParamsSchema | None = None
     # Independent repetitions per (template × model) cell. Sampling variance
     # between trials is the point — comparisons need n > 1.
     trials: int = Field(1, ge=1, le=10)
@@ -418,9 +461,7 @@ class ExperimentSchema(ModelSchema):
             "base_seed",
             "continuation_limit",
             "enable_repair",
-            "temperature",
-            "max_tokens",
-            "top_p",
+            "llm_defaults",
             "created_at",
             "updated_at",
         ]
@@ -444,9 +485,7 @@ class ExperimentCreateSchema(Schema):
     base_seed: int | None = None
     continuation_limit: int = Field(1, ge=0, le=5)
     enable_repair: bool = True
-    temperature: float = 0.3
-    max_tokens: int = 32000
-    top_p: float | None = None
+    llm_defaults: LLMParamsSchema | None = None
 
 
 class ExperimentUpdateSchema(Schema):
@@ -458,6 +497,4 @@ class ExperimentUpdateSchema(Schema):
     base_seed: int | None = None
     continuation_limit: int | None = Field(None, ge=0, le=5)
     enable_repair: bool | None = None
-    temperature: float | None = None
-    max_tokens: int | None = None
-    top_p: float | None = None
+    llm_defaults: LLMParamsSchema | None = None
