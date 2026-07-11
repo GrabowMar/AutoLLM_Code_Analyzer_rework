@@ -157,7 +157,7 @@
 							</div>
 						{:else if container.status === 'failed'}
 							<div class="flex flex-col gap-1.5">
-								<span class="text-[10px] text-red-400 font-mono line-clamp-1">{container.last_error || 'Container failed'}</span>
+								<span class="text-[10px] text-destructive font-mono line-clamp-1">{container.last_error || 'Container failed'}</span>
 								<Button
 									id="mobile-restart-btn-{job.id}"
 									variant="outline"
@@ -234,7 +234,7 @@
 								id="mobile-action-remove-container-{job.id}"
 								variant="ghost"
 								size="sm"
-								class="h-8 w-8 p-0 text-red-400 hover:bg-red-500/10"
+								class="h-8 w-8 p-0 text-destructive hover:bg-destructive/10"
 								title="Remove Container"
 								disabled={isBusy != null}
 								onclick={() => onRemoveContainer(job.id, container.id)}
@@ -257,7 +257,7 @@
 						</Button>
 					{/if}
 					{#if job.status === 'failed'}
-						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-red-400 hover:bg-red-500/10" href="/applications/{job.id}/failure" title="Failure details">
+						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-destructive hover:bg-destructive/10" href="/applications/{job.id}/failure" title="Failure details">
 							<AlertTriangle class="h-4 w-4" />
 						</Button>
 					{/if}
@@ -270,7 +270,7 @@
 						<Copy class="h-3.5 w-3.5" />
 					</Button>
 					{#if job.status !== 'running'}
-						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-red-400 hover:bg-red-500/10" title="Delete" onclick={() => onDelete(job.id)}>
+						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-destructive hover:bg-destructive/10" title="Delete" onclick={() => onDelete(job.id)}>
 							<Trash2 class="h-3.5 w-3.5" />
 						</Button>
 					{/if}

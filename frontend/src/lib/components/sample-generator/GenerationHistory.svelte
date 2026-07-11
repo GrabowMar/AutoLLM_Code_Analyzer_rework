@@ -210,7 +210,7 @@
 												{#if expandedJob.error_message}
 													<div class="md:col-span-2">
 														<span class="text-muted-foreground">Error:</span>
-														<span class="ml-1 text-red-400">{expandedJob.error_message}</span>
+														<span class="ml-1 text-destructive">{expandedJob.error_message}</span>
 													</div>
 												{/if}
 												{#if expandedJob.temperature}

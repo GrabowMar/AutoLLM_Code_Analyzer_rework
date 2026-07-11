@@ -66,7 +66,7 @@
 		{:else if runStatus === 'succeeded'}
 			<CheckCircle class="h-4 w-4 text-emerald-400" />
 		{:else if runStatus === 'failed'}
-			<AlertCircle class="h-4 w-4 text-red-400" />
+			<AlertCircle class="h-4 w-4 text-destructive" />
 		{:else if runStatus === 'cancelled'}
 			<XCircle class="h-4 w-4 text-orange-400" />
 		{:else if runStatus === 'pending'}

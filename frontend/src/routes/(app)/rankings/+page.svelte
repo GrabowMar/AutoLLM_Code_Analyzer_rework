@@ -102,7 +102,7 @@
 		if (v >= 0.8) return 'text-emerald-500';
 		if (v >= 0.6) return 'text-amber-500';
 		if (v >= 0.4) return 'text-yellow-500';
-		return 'text-red-400';
+		return 'text-destructive';
 	}
 
 	function pct(v: number | null | undefined): string {
@@ -267,7 +267,7 @@
 										<tr class="border-b border-border/50">
 											<td class="py-1.5 pr-3 font-mono">{s.scheme}</td>
 											<td class="py-1.5 pr-3 font-mono tabular-nums">{s.weights.critical}/{s.weights.high}/{s.weights.medium}/{s.weights.low}/{s.weights.info}</td>
-											<td class="py-1.5 pr-3 text-right font-mono tabular-nums {s.kendall_tau >= 0.9 ? 'text-emerald-500' : s.kendall_tau >= 0.7 ? 'text-amber-500' : 'text-red-400'}">{s.kendall_tau.toFixed(2)}</td>
+											<td class="py-1.5 pr-3 text-right font-mono tabular-nums {s.kendall_tau >= 0.9 ? 'text-emerald-500' : s.kendall_tau >= 0.7 ? 'text-amber-500' : 'text-destructive'}">{s.kendall_tau.toFixed(2)}</td>
 											<td class="py-1.5">
 												{#if s.adjacent_swaps.length === 0}
 													<span class="text-emerald-500">none — stable</span>

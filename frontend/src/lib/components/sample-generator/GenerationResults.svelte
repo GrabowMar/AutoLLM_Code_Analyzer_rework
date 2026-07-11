@@ -116,7 +116,7 @@
 						{/if}
 						{#if job.error_message}
 							<div
-								class="rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-400 mt-2"
+								class="rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive mt-2"
 							>
 								{job.error_message}
 							</div>
@@ -215,7 +215,7 @@
 							</div>
 						{/if}
 						{#if job.error_message}
-							<div class="rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-400">
+							<div class="rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive">
 								{job.error_message}
 							</div>
 						{/if}
@@ -269,7 +269,7 @@
 										variant="outline"
 										class="ml-auto text-[9px] {it.build_success
 											? 'text-emerald-500'
-											: 'text-red-400'}"
+											: 'text-destructive'}"
 									>
 										{it.build_success ? 'build ok' : 'build fail'}
 									</Badge>
@@ -279,7 +279,7 @@
 										{#if it.errors_detected?.length}
 											<ul class="space-y-1">
 												{#each it.errors_detected as err}
-													<li class="flex items-start gap-1.5 text-red-400/90">
+													<li class="flex items-start gap-1.5 text-destructive/90">
 														<CircleX class="h-3 w-3 shrink-0 mt-0.5" />
 														<span>{err}</span>
 													</li>

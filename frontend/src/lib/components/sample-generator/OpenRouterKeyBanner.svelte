@@ -54,9 +54,9 @@
 {:else if status?.last_validation_status === 'invalid'}
 	<div class="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm">
 		<div class="flex items-start gap-2">
-			<AlertTriangle class="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
+			<AlertTriangle class="h-4 w-4 shrink-0 text-destructive mt-0.5" />
 			<div>
-				<p class="font-medium text-red-400">OpenRouter key invalid</p>
+				<p class="font-medium text-destructive">OpenRouter key invalid</p>
 				{#if status.last_validation_message}
 					<p class="mt-1 text-xs text-muted-foreground">{status.last_validation_message}</p>
 				{/if}

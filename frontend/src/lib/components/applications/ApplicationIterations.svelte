@@ -21,7 +21,7 @@ let { iterations }: Props = $props();
 		{#each iterations as it}
 			<div class="relative mb-4">
 				<!-- Timeline dot -->
-				<div class="absolute -left-6 top-4 w-5 h-5 rounded-full border-2 flex items-center justify-center text-[10px] font-bold {it.build_success ? 'border-emerald-500 bg-emerald-500/20 text-emerald-400' : 'border-red-500 bg-red-500/20 text-red-400'}">
+				<div class="absolute -left-6 top-4 w-5 h-5 rounded-full border-2 flex items-center justify-center text-[10px] font-bold {it.build_success ? 'border-emerald-500 bg-emerald-500/20 text-emerald-400' : 'border-red-500 bg-red-500/20 text-destructive'}">
 					{it.iteration_number}
 				</div>
 
@@ -44,8 +44,8 @@ let { iterations }: Props = $props();
 								<ul class="space-y-1">
 									{#each it.errors_detected as err}
 										<li class="flex items-start gap-2 text-xs">
-											<CircleX class="h-3.5 w-3.5 text-red-400 shrink-0 mt-0.5" />
-											<span class="text-red-400/90">{err}</span>
+											<CircleX class="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+											<span class="text-destructive/90">{err}</span>
 										</li>
 									{/each}
 								</ul>

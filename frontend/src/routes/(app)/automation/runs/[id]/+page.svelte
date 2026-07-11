@@ -296,7 +296,7 @@
 											{#if sr.status === 'succeeded'}
 												<CheckCircle class="h-5 w-5 text-emerald-500 shrink-0" />
 											{:else if sr.status === 'failed'}
-												<AlertCircle class="h-5 w-5 text-red-400 shrink-0" />
+												<AlertCircle class="h-5 w-5 text-destructive shrink-0" />
 											{:else if sr.status === 'running'}
 												<LoaderCircle class="h-5 w-5 text-blue-400 animate-spin shrink-0" />
 											{:else if sr.status === 'cancelled'}

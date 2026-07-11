@@ -334,18 +334,9 @@
 
 <div class="space-y-6">
 	<!-- Header -->
-	<div class="flex items-center justify-between">
-		<div class="page-header w-full">
-			<div class="flex items-center gap-3">
-				<a href="/sample-generator" class="text-muted-foreground hover:text-foreground transition-all duration-200" title="Back to Sample Generator">
-					<ArrowLeft class="h-5 w-5" />
-				</a>
-				<div>
-					<h1 class="text-2xl font-bold tracking-tight">Template Management</h1>
-					<p class="text-sm text-muted-foreground">Create, edit, and orchestrate templates for sample generation.</p>
-				</div>
-			</div>
-		</div>
+	<div class="page-header min-w-0">
+		<h1>Template Management</h1>
+		<p>Create, edit, and orchestrate templates for sample generation.</p>
 	</div>
 
 	<!-- Tabs Menu -->

@@ -8,7 +8,6 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
 	import { toast } from 'svelte-sonner';
-	import ScanSearch from '@lucide/svelte/icons/scan-search';
 	import Download from '@lucide/svelte/icons/download';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Loader from '@lucide/svelte/icons/loader-circle';
@@ -251,15 +250,12 @@
 <svelte:head><title>Analyzers - LLM Lab</title></svelte:head>
 
 <div class="space-y-6">
-	<div class="page-header flex items-center justify-between">
-		<div class="flex items-center gap-3">
-			<ScanSearch class="size-7 text-primary" />
-			<div>
-				<h1 class="text-2xl font-semibold">Analyzers</h1>
-				<p class="text-sm text-muted-foreground">
-					Browse the tool shop, install tools into your analyzer workspace, configure and test them.
-				</p>
-			</div>
+	<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+		<div class="page-header min-w-0">
+			<h1>Analyzers</h1>
+			<p>
+				Browse the tool shop, install tools into your analyzer workspace, configure and test them.
+			</p>
 		</div>
 		<Button variant="outline" size="sm" onclick={loadAll}>
 			<RefreshCw class="size-4" /> Refresh
@@ -284,28 +280,19 @@
 
 	{#if loading}
 		<!-- Skeleton tool cards -->
-		<div class="grid grid-cols-1 gap-4 animate-pulse motion-reduce:animate-none sm:grid-cols-2 lg:grid-cols-3">
-			{#each Array(6) as _}
-				<div class="rounded-lg border border-border p-4">
-					<div class="mb-2 flex items-center justify-between">
-						<div class="h-4 w-24 rounded bg-muted"></div>
-						<div class="h-4 w-14 rounded-full bg-muted"></div>
-					</div>
-					<div class="mb-1 h-3 w-full rounded bg-muted"></div>
-					<div class="mb-4 h-3 w-2/3 rounded bg-muted"></div>
-					<div class="h-8 w-full rounded bg-muted"></div>
-				</div>
+		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-hidden="true">
+			{#each Array(6) as _, i (i)}
+				<div class="skeleton h-36"></div>
 			{/each}
 		</div>
 	{:else if activeTab === 'shop'}
 		<!-- Category filter + search -->
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="flex flex-wrap gap-2">
-				{#each categories as cat}
+				{#each categories as cat (cat)}
 					<button
-						class="cursor-pointer rounded-full border px-3 py-1 text-xs transition-colors {categoryFilter === cat
-							? 'bg-primary text-primary-foreground border-primary'
-							: 'text-muted-foreground hover:bg-muted'}"
+						class="fb-chip {categoryFilter === cat ? 'fb-chip-on' : ''}"
+						aria-pressed={categoryFilter === cat}
 						onclick={() => (categoryFilter = cat)}
 					>
 						{cat === 'all' ? 'All' : (categoryLabels[cat] ?? cat)}
@@ -319,7 +306,7 @@
 		</div>
 
 		{#if visibleCatalog.length === 0}
-			<div class="rounded-lg border border-dashed py-16 text-center text-muted-foreground">
+			<div class="empty-state rounded-md border border-dashed text-sm text-muted-foreground">
 				{#if catalog.length === 0}
 					The tool catalog is empty.
 				{:else}
@@ -393,8 +380,12 @@
 		</div>
 	{:else if activeTab === 'installed'}
 		{#if installed.length === 0}
-			<div class="rounded-lg border border-dashed py-16 text-center text-muted-foreground">
-				No tools installed yet. Visit the <button class="text-primary underline" onclick={() => (activeTab = 'shop')}>Shop</button> to add some.
+			<div class="empty-state rounded-md border border-dashed text-sm text-muted-foreground">
+				<p>
+					No tools installed yet. Visit the
+					<button class="text-primary underline" onclick={() => (activeTab = 'shop')}>Shop</button>
+					to add some.
+				</p>
 			</div>
 		{:else}
 			<div class="space-y-3">
@@ -410,7 +401,7 @@
 									{/if}
 								</div>
 								{#if it.status === 'failed' && it.install_log}
-									<p class="mt-1 text-xs text-red-400 line-clamp-2">{it.install_log}</p>
+									<p class="mt-1 text-xs text-destructive line-clamp-2">{it.install_log}</p>
 								{/if}
 							</div>
 							<div class="flex shrink-0 gap-2">
@@ -459,7 +450,7 @@
 					<div class="text-sm text-muted-foreground">Container: <code>{workspace.container_name}</code></div>
 				{/if}
 				{#if workspace?.error_message}
-					<p class="text-sm text-red-400">{workspace.error_message}</p>
+					<p class="text-sm text-destructive">{workspace.error_message}</p>
 				{/if}
 				<div class="text-sm text-muted-foreground">
 					{workspace?.installed_count ?? 0} tool(s) installed
@@ -523,7 +514,7 @@
 							</div>
 						{:else if field.type === 'select'}
 							<select
-								class="w-full rounded-md border bg-background px-3 py-2 text-sm"
+								class="std-select w-full"
 								value={configDraft[field.name] ?? field.default}
 								onchange={(e) =>
 									(configDraft = { ...configDraft, [field.name]: e.currentTarget.value })}
@@ -556,7 +547,7 @@
 						{#if testResult.available}
 							<CheckCircle2 class="size-4 text-emerald-500" /> Available
 						{:else}
-							<XCircle class="size-4 text-red-400" /> Unavailable
+							<XCircle class="size-4 text-destructive" /> Unavailable
 						{/if}
 					</div>
 					<p class="mt-1 text-xs text-muted-foreground">{testResult.message}</p>

@@ -154,7 +154,7 @@
 				</Button>
 			{/if}
 			{#if container?.status === 'failed'}
-				<span class="text-xs text-red-400 self-center" title={container.last_error}>
+				<span class="text-xs text-destructive self-center" title={container.last_error}>
 					⚠ Build failed{container.last_error ? `: ${container.last_error}` : ''}
 				</span>
 			{/if}
@@ -181,7 +181,7 @@
 			</Card.Content>
 		</Card.Root>
 	{:else if error}
-		<Card.Root><Card.Content class="p-6 text-red-400 text-sm">{error}</Card.Content></Card.Root>
+		<Card.Root><Card.Content class="p-6 text-destructive text-sm">{error}</Card.Content></Card.Root>
 	{:else if container}
 		<!-- Tabs -->
 		<div class="flex gap-1 border-b border-border">
@@ -235,9 +235,9 @@
 				</Card.Root>
 				{#if container.last_error}
 					<Card.Root>
-						<Card.Header><Card.Title class="text-sm text-red-400">Error</Card.Title></Card.Header>
+						<Card.Header><Card.Title class="text-sm text-destructive">Error</Card.Title></Card.Header>
 						<Card.Content>
-							<p class="text-xs text-red-400">{container.last_error}</p>
+							<p class="text-xs text-destructive">{container.last_error}</p>
 						</Card.Content>
 					</Card.Root>
 				{/if}
@@ -283,7 +283,7 @@
 									</div>
 								{/if}
 								{#if a.error_message}
-									<p class="text-xs text-red-400 mt-2">{a.error_message}</p>
+									<p class="text-xs text-destructive mt-2">{a.error_message}</p>
 								{/if}
 								{#if a.log_output}
 									<pre class="mt-2 text-xs font-mono bg-muted/40 rounded p-2 overflow-auto max-h-32 whitespace-pre-wrap">{a.log_output}</pre>

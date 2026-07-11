@@ -62,7 +62,7 @@ function findingsOf(t: AnalysisRunListItem): number | string {
 					<Badge variant="outline">Total {summary.total}</Badge>
 					<Badge variant="outline" class="bg-emerald-500/10 text-emerald-400 border-emerald-500/30">Done {summary.done}</Badge>
 					<Badge variant="outline" class="bg-amber-500/10 text-amber-400 border-amber-500/30">Running {summary.running}</Badge>
-					<Badge variant="outline" class="bg-red-500/10 text-red-400 border-red-500/30">Failed {summary.failed}</Badge>
+					<Badge variant="outline" class="bg-destructive/10 text-destructive border-destructive/30">Failed {summary.failed}</Badge>
 				</div>
 				<Button size="sm" variant="outline" onclick={refresh} class="ml-auto">
 					<RefreshCw class="h-3.5 w-3.5 mr-1.5" /> Refresh
@@ -73,7 +73,7 @@ function findingsOf(t: AnalysisRunListItem): number | string {
 			{#if loading}
 				<p class="text-sm text-muted-foreground">Loading…</p>
 			{:else if error}
-				<p class="text-sm text-red-400">{error}</p>
+				<p class="text-sm text-destructive">{error}</p>
 			{:else if tasks.length === 0}
 				<p class="text-sm text-muted-foreground italic">No analyses yet for this application.</p>
 			{:else}

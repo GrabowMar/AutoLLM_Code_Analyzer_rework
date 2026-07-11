@@ -168,7 +168,7 @@
 		</Badge>
 
 		{#if container.status === 'failed' && container.last_error}
-			<span class="text-xs text-red-400 truncate max-w-[260px]" title={container.last_error}>
+			<span class="text-xs text-destructive truncate max-w-[260px]" title={container.last_error}>
 				⚠ {container.last_error}
 			</span>
 		{/if}
@@ -220,7 +220,7 @@
 				size={btnSize}
 				onclick={onRemove}
 				disabled={!!busy}
-				class="border-red-500/30 text-red-400 hover:bg-red-500/10"
+				class="border-destructive/30 text-destructive hover:bg-destructive/10"
 				title="Remove container"
 			>
 				{#if busy === 'remove'}<LoaderCircle class="{iconCls} animate-spin {showLabels ? 'sm:mr-1.5' : ''}" />

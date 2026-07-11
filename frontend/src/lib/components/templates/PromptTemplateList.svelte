@@ -64,7 +64,7 @@
 									{#if !t.is_default}
 										<button
 											type="button"
-											class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium border border-red-500/20 rounded hover:bg-red-500/10 transition-colors cursor-pointer text-red-400 hover:text-red-300"
+											class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium border border-red-500/20 rounded hover:bg-destructive/10 transition-colors cursor-pointer text-destructive hover:text-red-300"
 											onclick={() => onDelete(t)}
 										>
 											<Trash2 class="h-3 w-3" /> Delete

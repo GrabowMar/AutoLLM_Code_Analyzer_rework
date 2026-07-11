@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
+	import { experimentRunStatusColors as statusColors } from '$lib/constants/colors';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import ModelSelector from '$lib/components/sample-generator/ModelSelector.svelte';
@@ -54,14 +55,6 @@
 
 	let status = $state<ExperimentStatusReport | null>(null);
 	let statusPolling = $state(false);
-
-	const statusColors: Record<string, string> = {
-		pending: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
-		running: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-		completed: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
-		failed: 'bg-red-500/15 text-red-400 border-red-500/30',
-		cancelled: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
-	};
 
 	onMount(load);
 
@@ -176,7 +169,11 @@
 	}
 </script>
 
-<div class="mx-auto max-w-4xl space-y-6 p-6">
+<svelte:head>
+	<title>Experiment - LLM Lab</title>
+</svelte:head>
+
+<div class="mx-auto max-w-4xl space-y-6">
 	<Button variant="ghost" size="sm" onclick={() => goto('/experiments')}>
 		<ArrowLeft class="h-4 w-4" />
 		Back to experiments
@@ -185,7 +182,7 @@
 	{#if loading}
 		<div class="flex justify-center py-16"><LoaderCircle class="h-6 w-6 animate-spin text-muted-foreground" /></div>
 	{:else if error && !experiment}
-		<div class="rounded-md bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">{error}</div>
+		<div class="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>
 	{:else if experiment}
 		<div class="flex items-start justify-between gap-4">
 			<div>
@@ -227,7 +224,7 @@
 		</div>
 
 		{#if error}
-			<div class="rounded-md bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">{error}</div>
+			<div class="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>
 		{/if}
 
 		<Card.Root>
@@ -250,7 +247,7 @@
 								{#if experiment.status === 'draft'}
 									<button
 										type="button"
-										class="text-muted-foreground hover:text-red-400"
+										class="text-muted-foreground hover:text-destructive"
 										onclick={() => removeCondition(cond.id)}
 										aria-label="Remove condition"
 									>
@@ -325,7 +322,7 @@
 					{/if}
 
 					{#if launchError}
-						<div class="rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-400">
+						<div class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
 							{launchError}
 						</div>
 					{/if}

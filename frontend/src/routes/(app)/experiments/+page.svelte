@@ -5,20 +5,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { listExperiments, type Experiment } from '$lib/api/experiments';
+	import { experimentLifecycleColors as statusColors } from '$lib/constants/colors';
 	import Plus from '@lucide/svelte/icons/plus';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 
 	let experiments = $state<Experiment[]>([]);
 	let loading = $state(true);
 	let error = $state('');
-
-	const statusColors: Record<string, string> = {
-		draft: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
-		running: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-		completed: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
-		archived: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
-	};
 
 	onMount(load);
 
@@ -35,29 +28,33 @@
 	}
 </script>
 
-<div class="space-y-6 p-6">
-	<div class="flex items-center justify-between">
-		<div>
-			<h1 class="text-2xl font-semibold tracking-tight">Experiments</h1>
-			<p class="text-sm text-muted-foreground">
-				Designed runs: apps × models × prompt bundles × repeats, with a reproducibility seed.
-			</p>
+<svelte:head>
+	<title>Experiments - LLM Lab</title>
+</svelte:head>
+
+<div class="space-y-6">
+	<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+		<div class="page-header min-w-0">
+			<h1>Experiments</h1>
+			<p>Designed runs: apps × models × prompt bundles × repeats, with a reproducibility seed.</p>
 		</div>
-		<Button onclick={() => goto('/experiments/create')}>
+		<Button href="/experiments/create" size="sm">
 			<Plus class="h-4 w-4" />
 			New experiment
 		</Button>
 	</div>
 
 	{#if error}
-		<div class="rounded-md bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">
+		<div
+			class="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+		>
 			{error}
 		</div>
 	{/if}
 
 	{#if loading}
-		<div class="flex items-center justify-center py-16 text-muted-foreground">
-			<LoaderCircle class="h-5 w-5 animate-spin" />
+		<div class="flex items-center justify-center py-16">
+			<span class="loading-mono">loading experiments</span>
 		</div>
 	{:else if experiments.length === 0}
 		<Card.Root>

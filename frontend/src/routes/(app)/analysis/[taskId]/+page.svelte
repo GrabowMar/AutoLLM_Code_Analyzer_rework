@@ -193,8 +193,8 @@ onMount(() => {
 		</Button>
 		<Card.Root class="border-red-500/20">
 			<Card.Content class="p-8 text-center">
-				<AlertTriangle class="mx-auto mb-4 h-10 w-10 text-red-400" />
-				<h2 class="mb-2 text-lg font-semibold text-red-400">Run Not Found</h2>
+				<AlertTriangle class="mx-auto mb-4 h-10 w-10 text-destructive" />
+				<h2 class="mb-2 text-lg font-semibold text-destructive">Run Not Found</h2>
 				<p class="text-sm text-muted-foreground">{error}</p>
 				<Button variant="outline" size="sm" href="/analysis" class="mt-4">Back to Analysis</Button>
 			</Card.Content>
@@ -233,7 +233,7 @@ onMount(() => {
 	</div>
 
 	{#if run.error_message}
-		<div class="mb-4 rounded-md bg-red-500/10 p-3 text-sm text-red-400">
+		<div class="mb-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
 			<strong>Error:</strong> {run.error_message}
 		</div>
 	{/if}
