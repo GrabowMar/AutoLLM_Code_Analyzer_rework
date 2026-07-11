@@ -17,7 +17,7 @@ from backend.generation.api.views._router import router
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import Experiment
 from backend.generation.models import ExperimentCondition
-from backend.generation.models import TemplateBundle
+from backend.generation.models import GenerationProfile
 from backend.generation.services.experiments import experiment_status
 from backend.generation.services.experiments import export_experiment
 from backend.generation.services.experiments import launch_experiment
@@ -103,7 +103,7 @@ def archive_experiment(request, experiment_id: str):
 @router.get("/experiments/{experiment_id}/conditions/", response=list[ExperimentConditionSchema])
 def list_conditions(request, experiment_id: str):
     experiment = _owned_experiment_or_404(request.auth, experiment_id)
-    return experiment.conditions.select_related("model", "template_bundle")
+    return experiment.conditions.select_related("model", "profile")
 
 
 @router.post("/experiments/{experiment_id}/conditions/", response={200: ExperimentConditionSchema, 400: dict})
@@ -111,14 +111,14 @@ def create_condition(request, experiment_id: str, payload: ExperimentConditionCr
     experiment = _owned_experiment_or_404(request.auth, experiment_id)
     _draft_or_400(experiment)
 
-    bundle = get_object_or_404(TemplateBundle, id=payload.template_bundle_id, is_archived=False)
+    bundle = get_object_or_404(GenerationProfile, id=payload.profile_id, is_archived=False)
     model = get_object_or_404(LLMModel, id=payload.model_id)
-    if experiment.conditions.filter(template_bundle=bundle, model=model).exists():
+    if experiment.conditions.filter(profile=bundle, model=model).exists():
         return 400, {"detail": "This experiment already has a condition for that bundle + model."}
     return ExperimentCondition.objects.create(
         experiment=experiment,
         label=payload.label,
-        template_bundle=bundle,
+        profile=bundle,
         model=model,
         param_overrides=payload.param_overrides,
     )

@@ -48,13 +48,13 @@ def list_stacks(request):
 # -- App Requirement Templates ------------------------------------------
 
 
-@router.get("/app-templates/", response=list[AppRequirementTemplateSchema])
+@router.get("/app-specs/", response=list[AppRequirementTemplateSchema])
 def list_app_templates(request):
     """List all app requirement templates."""
     return _visible_templates(AppRequirementTemplate, request.auth)
 
 
-@router.post("/app-templates/", response=AppRequirementTemplateSchema)
+@router.post("/app-specs/", response=AppRequirementTemplateSchema)
 def create_app_template(request, payload: AppRequirementCreateSchema):
     return AppRequirementTemplate.objects.create(
         **payload.dict(),
@@ -62,12 +62,12 @@ def create_app_template(request, payload: AppRequirementCreateSchema):
     )
 
 
-@router.get("/app-templates/{slug}/", response=AppRequirementTemplateSchema)
+@router.get("/app-specs/{slug}/", response=AppRequirementTemplateSchema)
 def get_app_template(request, slug: str):
     return get_object_or_404(_visible_templates(AppRequirementTemplate, request.auth), slug=slug)
 
 
-@router.put("/app-templates/{slug}/", response=AppRequirementTemplateSchema)
+@router.put("/app-specs/{slug}/", response=AppRequirementTemplateSchema)
 def update_app_template(request, slug: str, payload: AppRequirementCreateSchema):
     template = _mutable_template_or_403(AppRequirementTemplate, request.auth, slug=slug)
     for attr, value in payload.dict().items():
@@ -76,7 +76,7 @@ def update_app_template(request, slug: str, payload: AppRequirementCreateSchema)
     return template
 
 
-@router.delete("/app-templates/{slug}/")
+@router.delete("/app-specs/{slug}/")
 def delete_app_template(request, slug: str):
     template = _mutable_template_or_403(AppRequirementTemplate, request.auth, slug=slug)
     template.delete()

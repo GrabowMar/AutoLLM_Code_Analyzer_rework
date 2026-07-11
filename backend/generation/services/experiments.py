@@ -17,10 +17,10 @@ from typing import Any
 from backend.generation.models import Experiment
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
-from backend.generation.services.bundle_resolver import apply_snapshot_to_job
-from backend.generation.services.bundle_resolver import derive_experiment_seed
 from backend.generation.services.dispatcher import dispatch_job
 from backend.generation.services.openrouter_client import OpenRouterClient
+from backend.generation.services.profile_resolver import apply_snapshot_to_job
+from backend.generation.services.profile_resolver import derive_experiment_seed
 from backend.runtime.services.scaffolding import canonical_stack_slug
 
 if TYPE_CHECKING:
@@ -49,7 +49,7 @@ class MatrixCell:
 
 def expand_matrix(experiment: Experiment) -> list[MatrixCell]:
     """Every (condition, app, repeat) cell the experiment's config implies."""
-    conditions = list(experiment.conditions.select_related("template_bundle", "model"))
+    conditions = list(experiment.conditions.select_related("profile", "model"))
     apps = list(experiment.app_requirements.all())
     return [
         MatrixCell(condition=condition, app_requirement=app, repeat_index=repeat)
@@ -89,7 +89,7 @@ def _estimate_cell_cost(cell: MatrixCell) -> float:
 def preview_experiment(experiment: Experiment) -> dict[str, Any]:
     """Matrix size + rough cost estimate, without creating any jobs."""
     cells = expand_matrix(experiment)
-    conditions = list(experiment.conditions.select_related("template_bundle", "model"))
+    conditions = list(experiment.conditions.select_related("profile", "model"))
     apps = list(experiment.app_requirements.all())
 
     per_condition: list[dict[str, Any]] = []
@@ -100,10 +100,10 @@ def preview_experiment(experiment: Experiment) -> dict[str, Any]:
         per_condition.append(
             {
                 "condition_id": condition.id,
-                "label": condition.label or f"{condition.model.model_name} / {condition.template_bundle.slug}",
+                "label": condition.label or f"{condition.model.model_name} / {condition.profile.slug}",
                 "model": condition.model.model_name,
-                "bundle_slug": condition.template_bundle.slug,
-                "bundle_version": condition.template_bundle.version,
+                "bundle_slug": condition.profile.slug,
+                "bundle_version": condition.profile.version,
                 "jobs": len(apps) * experiment.repeats,
                 "estimated_cost": round(cost, 4),
             },
@@ -164,9 +164,9 @@ def launch_experiment(experiment: Experiment, user: AbstractUser) -> GenerationB
             condition=condition,
             repeat_index=cell.repeat_index,
             model=condition.model,
-            stack_slug=canonical_stack_slug(condition.template_bundle.scaffolding_slug),
+            stack_slug=canonical_stack_slug(condition.profile.scaffolding_slug),
             app_requirement=app_req,
-            template_bundle=condition.template_bundle,
+            profile=condition.profile,
             temperature=temperature,
             max_tokens=max_tokens,
             top_p=top_p,
@@ -246,7 +246,7 @@ def export_experiment(experiment: Experiment) -> dict[str, Any]:
         experiment.jobs.select_related(
             "condition",
             "condition__model",
-            "condition__template_bundle",
+            "condition__profile",
             "app_requirement",
         ),
     )
@@ -272,11 +272,11 @@ def export_experiment(experiment: Experiment) -> dict[str, Any]:
                 "id": c.id,
                 "label": c.label,
                 "model": c.model.model_id,
-                "bundle_slug": c.template_bundle.slug,
-                "bundle_version": c.template_bundle.version,
+                "bundle_slug": c.profile.slug,
+                "bundle_version": c.profile.version,
                 "param_overrides": c.param_overrides,
             }
-            for c in experiment.conditions.select_related("model", "template_bundle")
+            for c in experiment.conditions.select_related("model", "profile")
         ],
         "app_requirements": [a.slug for a in experiment.app_requirements.all()],
         "jobs": [

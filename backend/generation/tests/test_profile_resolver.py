@@ -5,14 +5,14 @@ from __future__ import annotations
 import pytest
 
 from backend.generation.models import ContentBlock
-from backend.generation.services.bundle_resolver import assemble_prompt_templates
-from backend.generation.services.bundle_resolver import build_resolved_bundle
-from backend.generation.services.bundle_resolver import get_bundle_for_app
-from backend.generation.services.bundle_resolver import resolve_block_refs
+from backend.generation.services.profile_resolver import assemble_prompt_templates
+from backend.generation.services.profile_resolver import build_resolved_snapshot
+from backend.generation.services.profile_resolver import get_profile_for_app
+from backend.generation.services.profile_resolver import resolve_block_refs
 from backend.generation.services.prompt_renderer import PromptRenderer
 from backend.generation.tests.factories import AppRequirementTemplateFactory
 from backend.generation.tests.factories import ContentBlockFactory
-from backend.generation.tests.factories import TemplateBundleFactory
+from backend.generation.tests.factories import GenerationProfileFactory
 from backend.users.tests.factories import UserFactory
 
 
@@ -62,7 +62,7 @@ def test_assemble_prompt_templates_merges_tone_into_system():
 
 
 @pytest.mark.django_db
-def test_build_resolved_bundle_admin_api_endpoints_in_rendered_user_prompt():
+def test_build_resolved_snapshot_admin_api_endpoints_in_rendered_user_prompt():
     user = UserFactory()
     app_req = AppRequirementTemplateFactory(
         admin_api_endpoints=[{"method": "GET", "path": "/api/admin/stats"}],
@@ -83,15 +83,15 @@ def test_build_resolved_bundle_admin_api_endpoints_in_rendered_user_prompt():
         metadata={"stage": "backend", "role": "system"},
         is_system=True,
     )
-    bundle = TemplateBundleFactory(
+    bundle = GenerationProfileFactory(
         block_refs=[
             {"type": "prompt_stage", "slug": "test-backend-system", "version": 1},
             {"type": "prompt_stage", "slug": "test-backend-user", "version": 1},
         ],
     )
-    snapshot = build_resolved_bundle(
+    snapshot = build_resolved_snapshot(
         app_requirement=app_req,
-        template_bundle=bundle,
+        profile=bundle,
         scaffolding_slug="flask-react",
         model=None,
         temperature=0.3,
@@ -105,25 +105,25 @@ def test_build_resolved_bundle_admin_api_endpoints_in_rendered_user_prompt():
 
 
 @pytest.mark.django_db
-def test_get_bundle_for_app_prefers_matching_scaffolding_default():
+def test_get_profile_for_app_prefers_matching_scaffolding_default():
     user = UserFactory()
     # A synthetic scaffolding_slug that doesn't collide with any real seeded
     # stack, so this test's is_default=True bundle is unambiguously "the"
     # default for it regardless of what the real catalog seeds.
     app_req = AppRequirementTemplateFactory(slug="test-analytics-campaign-monitor")
-    TemplateBundleFactory(
+    GenerationProfileFactory(
         slug="app-test-analytics-campaign-monitor",
         scaffolding_slug="test-other-stack",
         is_system=True,
     )
-    fastapi_bundle = TemplateBundleFactory(
+    fastapi_bundle = GenerationProfileFactory(
         slug="test-fastapi-react-standard",
         scaffolding_slug="test-fastapi-stack",
         is_system=True,
         is_default=True,
     )
 
-    bundle = get_bundle_for_app(
+    bundle = get_profile_for_app(
         app_req,
         user=user,
         scaffolding_slug="test-fastapi-stack",

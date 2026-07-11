@@ -25,10 +25,10 @@ from backend.generation.api.views._router import router
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
-from backend.generation.models import TemplateBundle
-from backend.generation.services.bundle_resolver import apply_snapshot_to_job
-from backend.generation.services.bundle_resolver import get_bundle_for_app
+from backend.generation.models import GenerationProfile
 from backend.generation.services.dispatcher import dispatch_job
+from backend.generation.services.profile_resolver import apply_snapshot_to_job
+from backend.generation.services.profile_resolver import get_profile_for_app
 from backend.llm_models.models import LLMModel
 from backend.runtime.services.scaffolding import canonical_stack_slug
 from backend.runtime.services.scaffolding import is_known_stack_slug
@@ -81,13 +81,13 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
     )
     models_qs = LLMModel.objects.filter(id__in=payload.model_ids)
 
-    template_bundle = None
-    if payload.template_bundle_id:
-        template_bundle = get_object_or_404(
-            TemplateBundle.objects.filter(
+    profile = None
+    if payload.profile_id:
+        profile = get_object_or_404(
+            GenerationProfile.objects.filter(
                 Q(is_system=True) | Q(created_by=request.auth),
             ),
-            id=payload.template_bundle_id,
+            id=payload.profile_id,
         )
 
     stack_slug = canonical_stack_slug(payload.stack_slug)
@@ -102,7 +102,7 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
     job_count = 0
     failed_count = 0
     for app_req in app_reqs:
-        job_bundle = template_bundle or get_bundle_for_app(
+        job_bundle = profile or get_profile_for_app(
             app_req,
             request.auth,
             scaffolding_slug=stack_slug,
@@ -116,7 +116,7 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
                     model=model,
                     stack_slug=stack_slug,
                     app_requirement=app_req,
-                    template_bundle=job_bundle,
+                    profile=job_bundle,
                     temperature=payload.temperature,
                     max_tokens=payload.max_tokens,
                 )
@@ -137,7 +137,7 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
     dispatchable = batch.jobs.select_related(
         "app_requirement",
         "model",
-        "template_bundle",
+        "profile",
     ).exclude(status=GenerationJob.Status.FAILED)
     for pending_job in dispatchable:
         dispatch_job(pending_job)

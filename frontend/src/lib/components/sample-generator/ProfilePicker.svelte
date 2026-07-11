@@ -1,45 +1,45 @@
 <script lang="ts">
 	import { Badge } from '$lib/components/ui/badge';
-	import type { TemplateBundle } from '$lib/api/client';
-	import { getBundlePreview } from '$lib/api/generation';
+	import type { GenerationProfile } from '$lib/api/client';
+	import { getProfilePreview } from '$lib/api/generation';
 	import Check from '@lucide/svelte/icons/check';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 
 	interface Props {
-		bundles: TemplateBundle[];
+		profiles: GenerationProfile[];
 		loading?: boolean;
 		selectedId: number | '';
 		appSlugs?: string[];
 	}
 
-	let { bundles, loading = false, selectedId = $bindable('' as number | ''), appSlugs = [] }: Props = $props();
+	let { profiles, loading = false, selectedId = $bindable('' as number | ''), appSlugs = [] }: Props = $props();
 
 	let open = $state(false);
 	let previewLoading = $state(false);
 	let previewError = $state('');
 	let previewStages = $state<Record<string, { system: number; user: number }> | null>(null);
 
-	const suggestedBundle = $derived.by(() => {
+	const suggestedProfile = $derived.by(() => {
 		if (appSlugs.length !== 1) return null;
 		const dash = appSlugs[0].replace(/_/g, '-');
-		return bundles.find((b) => b.slug === `app-${dash}`) ?? null;
+		return profiles.find((p) => p.slug === `app-${dash}`) ?? null;
 	});
 
 	$effect(() => {
-		if (suggestedBundle && selectedId === '' && bundles.length > 0) {
-			selectedId = suggestedBundle.id;
+		if (suggestedProfile && selectedId === '' && profiles.length > 0) {
+			selectedId = suggestedProfile.id;
 		}
 	});
 
-	const selected = $derived(bundles.find((b) => b.id === selectedId));
+	const selected = $derived(profiles.find((p) => p.id === selectedId));
 
 	async function loadPreview(slug: string) {
 		previewLoading = true;
 		previewError = '';
 		previewStages = null;
 		try {
-			const data = await getBundlePreview(slug);
+			const data = await getProfilePreview(slug);
 			const templates = data.prompt_templates as Record<string, { system?: string; user?: string }>;
 			previewStages = {
 				backend: {
@@ -75,7 +75,7 @@
 <div class="space-y-1">
 	<!-- Compact trigger row -->
 	<div class="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2">
-		<span class="text-xs font-medium text-muted-foreground shrink-0">Bundle</span>
+		<span class="text-xs font-medium text-muted-foreground shrink-0">Profile</span>
 		{#if loading}
 			<LoaderCircle class="h-3 w-3 animate-spin text-muted-foreground" />
 		{:else if selected}
@@ -83,7 +83,7 @@
 			{#if selected.is_default}
 				<Badge variant="secondary" class="text-[9px] shrink-0">Default</Badge>
 			{/if}
-			{#if suggestedBundle?.id === selected.id}
+			{#if suggestedProfile?.id === selected.id}
 				<Badge variant="outline" class="text-[9px] text-primary border-primary/30 shrink-0">Suggested</Badge>
 			{/if}
 			<span class="text-[10px] text-muted-foreground shrink-0">{selected.block_refs?.length ?? 0} blocks</span>
@@ -91,11 +91,11 @@
 			<span class="text-sm text-muted-foreground">Using default</span>
 		{/if}
 
-		{#if suggestedBundle && suggestedBundle.id !== selectedId}
+		{#if suggestedProfile && suggestedProfile.id !== selectedId}
 			<button
 				type="button"
 				class="ml-1 text-[10px] text-primary hover:underline shrink-0 cursor-pointer"
-				onclick={() => select(suggestedBundle!.id)}
+				onclick={() => select(suggestedProfile!.id)}
 			>Use suggested</button>
 		{/if}
 
@@ -124,23 +124,23 @@
 				<span class="ml-1 text-muted-foreground">(no override)</span>
 			</button>
 			<div class="max-h-52 overflow-y-auto divide-y">
-				{#each bundles as bundle}
+				{#each profiles as profile}
 					<button
 						type="button"
-						class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/50 transition-colors cursor-pointer {selectedId === bundle.id ? 'bg-primary/5' : ''}"
-						onclick={() => select(bundle.id)}
+						class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/50 transition-colors cursor-pointer {selectedId === profile.id ? 'bg-primary/5' : ''}"
+						onclick={() => select(profile.id)}
 					>
 						<div class="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-							{#if selectedId === bundle.id}<Check class="h-3 w-3 text-primary" />{/if}
+							{#if selectedId === profile.id}<Check class="h-3 w-3 text-primary" />{/if}
 						</div>
-						<span class="font-medium truncate">{bundle.name}</span>
-						{#if bundle.is_default}
+						<span class="font-medium truncate">{profile.name}</span>
+						{#if profile.is_default}
 							<Badge variant="secondary" class="text-[9px] shrink-0">Default</Badge>
 						{/if}
-						{#if suggestedBundle?.id === bundle.id}
+						{#if suggestedProfile?.id === profile.id}
 							<Badge variant="outline" class="text-[9px] text-primary border-primary/30 shrink-0">Suggested</Badge>
 						{/if}
-						<span class="ml-auto text-[10px] text-muted-foreground shrink-0 tabular-nums">{bundle.block_refs?.length ?? 0} blocks</span>
+						<span class="ml-auto text-[10px] text-muted-foreground shrink-0 tabular-nums">{profile.block_refs?.length ?? 0} blocks</span>
 					</button>
 				{/each}
 			</div>

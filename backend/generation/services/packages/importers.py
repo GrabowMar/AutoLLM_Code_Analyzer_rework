@@ -13,13 +13,13 @@ from django.utils.text import slugify
 
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
-from backend.generation.models import TemplateBundle
-from backend.generation.services.bundle_packages.constants import ALLOWED_CONFLICT_STRATEGIES
-from backend.generation.services.bundle_packages.constants import BUNDLE_PACKAGE_KIND
-from backend.generation.services.bundle_packages.constants import BUNDLE_PACKAGE_SCHEMA_VERSION
-from backend.generation.services.bundle_packages.constants import TEMPLATE_PACKAGE_KIND
-from backend.generation.services.bundle_packages.constants import TEMPLATE_PACKAGE_SCHEMA_VERSION
-from backend.generation.services.bundle_packages.visibility import visible_blocks_for
+from backend.generation.models import GenerationProfile
+from backend.generation.services.packages.constants import ALLOWED_CONFLICT_STRATEGIES
+from backend.generation.services.packages.constants import BUNDLE_PACKAGE_KIND
+from backend.generation.services.packages.constants import BUNDLE_PACKAGE_SCHEMA_VERSION
+from backend.generation.services.packages.constants import TEMPLATE_PACKAGE_KIND
+from backend.generation.services.packages.constants import TEMPLATE_PACKAGE_SCHEMA_VERSION
+from backend.generation.services.packages.visibility import visible_blocks_for
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
@@ -64,7 +64,7 @@ def import_bundle_package(
     package_text: str,
     user: AbstractUser,
     conflict_strategy: str = "rename",
-) -> TemplateBundle:
+) -> GenerationProfile:
     package = parse_bundle_package_text(package_text)
     imported = _import_assets(
         assets={
@@ -254,7 +254,7 @@ def _import_bundle(
     user: AbstractUser,
     conflict_strategy: str,
     block_ref_map: dict[tuple[str, int], tuple[str, int]],
-) -> TemplateBundle:
+) -> GenerationProfile:
     payload = _validate_bundle_payload(raw_bundle)
     normalized_refs = []
     for raw_ref in payload["block_refs"]:
@@ -279,9 +279,9 @@ def _import_bundle(
 
     # Compare against the latest version of the slug — multiple versions can
     # now exist, and an unordered .first() would pick an arbitrary one.
-    existing = TemplateBundle.objects.filter(slug=payload["slug"]).order_by("-version").first()
+    existing = GenerationProfile.objects.filter(slug=payload["slug"]).order_by("-version").first()
     if existing is None:
-        return TemplateBundle.objects.create(
+        return GenerationProfile.objects.create(
             **payload,
             version=1,
             is_system=False,
@@ -310,8 +310,8 @@ def _import_bundle(
         msg = f"Bundle conflict for slug {payload['slug']}"
         raise ValueError(msg)
 
-    payload["slug"] = _unique_slug(TemplateBundle, payload["slug"])
-    return TemplateBundle.objects.create(
+    payload["slug"] = _unique_slug(GenerationProfile, payload["slug"])
+    return GenerationProfile.objects.create(
         **payload,
         is_system=False,
         is_default=False,
@@ -459,7 +459,7 @@ def _block_matches(existing: ContentBlock, payload: dict[str, Any]) -> bool:
     )
 
 
-def _bundle_matches(existing: TemplateBundle, payload: dict[str, Any]) -> bool:
+def _bundle_matches(existing: GenerationProfile, payload: dict[str, Any]) -> bool:
     return (
         existing.name == payload["name"]
         and existing.description == payload["description"]

@@ -15,7 +15,7 @@ from backend.generation.models import ExperimentCondition
 from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
-from backend.generation.models import TemplateBundle
+from backend.generation.models import GenerationProfile
 
 # ── Template schemas ──────────────────────────────────────────────────
 
@@ -96,9 +96,9 @@ class BlockRefSchema(Schema):
     version: int = 1
 
 
-class TemplateBundleSchema(ModelSchema):
+class GenerationProfileSchema(ModelSchema):
     class Meta:
-        model = TemplateBundle
+        model = GenerationProfile
         fields = [
             "id",
             "name",
@@ -116,7 +116,7 @@ class TemplateBundleSchema(ModelSchema):
         ]
 
 
-class TemplateBundleCreateSchema(Schema):
+class GenerationProfileCreateSchema(Schema):
     name: str
     slug: str
     description: str = ""
@@ -194,7 +194,7 @@ class GenerationJobSchema(ModelSchema):
             "prompt_hash",
             "bundle_key",
             "resolved_bundle",
-            "template_bundle",
+            "profile",
             "created_at",
             "updated_at",
         ]
@@ -231,16 +231,16 @@ class GenerationJobSchema(ModelSchema):
 
     @staticmethod
     def resolve_bundle_name(obj: GenerationJob) -> str | None:
-        if obj.template_bundle:
-            return obj.template_bundle.name
+        if obj.profile:
+            return obj.profile.name
         resolved = obj.resolved_bundle if isinstance(obj.resolved_bundle, dict) else {}
         slug = resolved.get("bundle_slug")
         return slug.replace("-", " ").title() if slug else None
 
     @staticmethod
     def resolve_bundle_slug(obj: GenerationJob) -> str | None:
-        if obj.template_bundle:
-            return obj.template_bundle.slug
+        if obj.profile:
+            return obj.profile.slug
         resolved = obj.resolved_bundle if isinstance(obj.resolved_bundle, dict) else {}
         return resolved.get("bundle_slug")
 
@@ -292,7 +292,7 @@ class ScaffoldingJobCreateSchema(Schema):
     model_ids: list[int]
     temperature: float = 0.3
     max_tokens: int = 32000
-    template_bundle_id: int | None = None
+    profile_id: int | None = None
     # Independent repetitions per (template × model) cell. Sampling variance
     # between trials is the point — comparisons need n > 1.
     trials: int = Field(1, ge=1, le=10)
@@ -375,7 +375,7 @@ class ExperimentConditionSchema(ModelSchema):
         fields = [
             "id",
             "label",
-            "template_bundle",
+            "profile",
             "model",
             "param_overrides",
             "created_at",
@@ -387,15 +387,15 @@ class ExperimentConditionSchema(ModelSchema):
 
     @staticmethod
     def resolve_bundle_slug(obj: ExperimentCondition) -> str | None:
-        return obj.template_bundle.slug if obj.template_bundle_id else None
+        return obj.profile.slug if obj.profile_id else None
 
     @staticmethod
     def resolve_bundle_version(obj: ExperimentCondition) -> int | None:
-        return obj.template_bundle.version if obj.template_bundle_id else None
+        return obj.profile.version if obj.profile_id else None
 
 
 class ExperimentConditionCreateSchema(Schema):
-    template_bundle_id: int
+    profile_id: int
     model_id: int
     label: str = ""
     param_overrides: dict = {}

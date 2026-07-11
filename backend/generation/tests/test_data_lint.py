@@ -85,7 +85,7 @@ def test_lint_requirement_specs_ignores_schema_json_itself(tmp_path, monkeypatch
     assert data_lint.lint_requirement_specs() == []
 
 
-def test_lint_stack_parity_catches_missing_bundle_for_frontend_stack(tmp_path, monkeypatch):
+def test_lint_stack_parity_catches_missing_profile_for_frontend_stack(tmp_path, monkeypatch):
     fake_manifest = {"stacks": {"some-new-stack": {"has_frontend": True}}}
     catalog_path = tmp_path / "catalog.yaml"
     catalog_path.write_text("bundles: []\n", encoding="utf-8")
@@ -96,7 +96,7 @@ def test_lint_stack_parity_catches_missing_bundle_for_frontend_stack(tmp_path, m
 
     assert len(errors) == 1
     assert "some-new-stack" in errors[0]
-    assert "no system bundle" in errors[0]
+    assert "no system profile" in errors[0]
 
 
 def test_lint_stack_parity_catches_incomplete_stage_coverage(tmp_path, monkeypatch):
@@ -104,7 +104,7 @@ def test_lint_stack_parity_catches_incomplete_stage_coverage(tmp_path, monkeypat
     catalog_path = tmp_path / "catalog.yaml"
     catalog_path.write_text(
         """
-bundles:
+profiles:
   - slug: incomplete-bundle
     scaffolding_slug: some-stack
     block_refs:

@@ -3,7 +3,7 @@
 Mirrors :mod:`backend.analysis.seeding`: idempotent, content-hash aware, and
 never raises out of the ``post_migrate`` signal (see ``apps.py``).
 
-Content blocks, template bundles, and app requirements are versioned by
+Content blocks, generation profiles, and app requirements are versioned by
 content hash — see :mod:`backend.generation.services.versioning`. A source
 file's ``version:`` key (where present) is not authoritative; the seeder
 decides the next version by comparing content hashes against what's already
@@ -255,8 +255,8 @@ def _load_catalog() -> dict[str, Any]:
     return yaml.safe_load(CATALOG_PATH.read_text(encoding="utf-8")) or {}
 
 
-def _upsert_bundle_version(
-    TemplateBundleModel: Any,  # noqa: N803
+def _upsert_profile_version(
+    GenerationProfileModel: Any,  # noqa: N803
     using: str,
     *,
     slug: str,
@@ -268,11 +268,11 @@ def _upsert_bundle_version(
     llm_config: dict[str, Any] | None = None,
     log=None,
 ) -> tuple[int, int]:
-    """Create a new bundle version if its behavior-defining fields changed."""
+    """Create a new profile version if its behavior-defining fields changed."""
     llm_config = llm_config or {}
     new_hash = content_hash({"scaffolding_slug": scaffolding_slug, "block_refs": block_refs, "llm_config": llm_config})
 
-    latest = TemplateBundleModel.objects.using(using).filter(slug=slug, is_system=True).order_by("-version").first()
+    latest = GenerationProfileModel.objects.using(using).filter(slug=slug, is_system=True).order_by("-version").first()
 
     if latest and latest.content_hash == new_hash:
         changed = latest.name != name or latest.description != description or latest.is_default != is_default
@@ -282,11 +282,11 @@ def _upsert_bundle_version(
             latest.is_default = is_default
             latest.save(update_fields=["name", "description", "is_default", "updated_at"])
         if log:
-            log(f"  Up to date bundle: {slug} v{latest.version}")
+            log(f"  Up to date profile: {slug} v{latest.version}")
         return 0, int(changed)
 
     next_version = (latest.version + 1) if latest else 1
-    TemplateBundleModel.objects.using(using).create(
+    GenerationProfileModel.objects.using(using).create(
         name=name,
         slug=slug,
         version=next_version,
@@ -300,26 +300,28 @@ def _upsert_bundle_version(
     )
     action = "Created" if latest is None else f"Bumped to v{next_version}"
     if log:
-        log(f"  {action} bundle: {slug}")
+        log(f"  {action} profile: {slug}")
     return int(latest is None), int(latest is not None)
 
 
-def seed_template_bundles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, int]:
-    """Version-aware upsert of system ``TemplateBundle`` rows from ``blocks/catalog.yaml``."""
-    from backend.generation.models import TemplateBundle
+def seed_profiles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, int]:
+    """Version-aware upsert of system ``GenerationProfile`` rows from ``blocks/catalog.yaml``."""
+    from backend.generation.models import GenerationProfile
 
     catalog = _load_catalog()
     created = updated = 0
-    for bundle_data in catalog.get("bundles", []):
-        c, u = _upsert_bundle_version(
-            TemplateBundle,
+    # "bundles" is the pre-rename catalog key; accept it for older files.
+    profile_entries = catalog.get("profiles", catalog.get("bundles", []))
+    for profile_data in profile_entries:
+        c, u = _upsert_profile_version(
+            GenerationProfile,
             using,
-            slug=bundle_data["slug"],
-            name=bundle_data.get("name", bundle_data["slug"]),
-            description=bundle_data.get("description", ""),
-            scaffolding_slug=bundle_data.get("scaffolding_slug", "flask-react"),
-            block_refs=bundle_data.get("block_refs", []),
-            is_default=bundle_data.get("is_default", False),
+            slug=profile_data["slug"],
+            name=profile_data.get("name", profile_data["slug"]),
+            description=profile_data.get("description", ""),
+            scaffolding_slug=profile_data.get("scaffolding_slug", "flask-react"),
+            block_refs=profile_data.get("block_refs", []),
+            is_default=profile_data.get("is_default", False),
             log=log,
         )
         created += c
@@ -327,15 +329,15 @@ def seed_template_bundles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[i
     return created, updated
 
 
-def seed_app_bundles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, int]:
-    """Version-aware upsert of per-app pilot bundles from ``requirements/manifests/*.yaml``.
+def seed_app_profiles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, int]:
+    """Version-aware upsert of per-app pilot profiles from ``requirements/manifests/*.yaml``.
 
-    Deliberately does NOT auto-generate an ``app-{slug}`` bundle for every
+    Deliberately does NOT auto-generate an ``app-{slug}`` profile for every
     requirement — apps without a real manifest fall back to the system
-    default bundle at resolve time (see ``bundle_resolver.get_bundle_for_app``)
+    default profile at resolve time (see ``profile_resolver.get_profile_for_app``)
     instead of carrying a near-duplicate row.
     """
-    from backend.generation.models import TemplateBundle
+    from backend.generation.models import GenerationProfile
 
     if not MANIFESTS_DIR.exists():
         return 0, 0
@@ -352,11 +354,16 @@ def seed_app_bundles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, i
         if not app_slug:
             continue
 
-        base_slug = manifest.get("base_bundle_slug", "system-scaffolding-standard")
-        base = TemplateBundle.objects.using(using).filter(slug=base_slug, is_system=True).order_by("-version").first()
+        # "base_bundle_slug"/"bundle_slug" are the pre-rename manifest keys.
+        base_slug = (
+            manifest.get("base_profile_slug") or manifest.get("base_bundle_slug") or "system-scaffolding-standard"
+        )
+        base = (
+            GenerationProfile.objects.using(using).filter(slug=base_slug, is_system=True).order_by("-version").first()
+        )
         if not base:
             if log:
-                log(f"  Skip {yaml_path.name}: base bundle {base_slug} missing")
+                log(f"  Skip {yaml_path.name}: base profile {base_slug} missing")
             continue
 
         refs = list(base.block_refs or [])
@@ -364,12 +371,14 @@ def seed_app_bundles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, i
             if extra not in refs:
                 refs.append(extra)
 
-        bundle_slug = manifest.get("bundle_slug") or f"app-{app_slug.replace('_', '-')}"
-        c, u = _upsert_bundle_version(
-            TemplateBundle,
+        profile_slug = (
+            manifest.get("profile_slug") or manifest.get("bundle_slug") or f"app-{app_slug.replace('_', '-')}"
+        )
+        c, u = _upsert_profile_version(
+            GenerationProfile,
             using,
-            slug=bundle_slug,
-            name=manifest.get("name", bundle_slug),
+            slug=profile_slug,
+            name=manifest.get("name", profile_slug),
             description=manifest.get("description", ""),
             scaffolding_slug=manifest.get("scaffolding_slug", base.scaffolding_slug),
             block_refs=refs,
@@ -382,10 +391,10 @@ def seed_app_bundles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, i
 
 
 def seed_all(*, using: str = DEFAULT_DB_ALIAS, log=None) -> dict[str, tuple[int, int]]:
-    """Run every seeder in dependency order (bundles reference blocks by slug+version)."""
+    """Run every seeder in dependency order (profiles reference blocks by slug+version)."""
     return {
         "requirements": seed_requirements(using=using, log=log),
         "content_blocks": seed_content_blocks(using=using, log=log),
-        "template_bundles": seed_template_bundles(using=using, log=log),
-        "app_bundles": seed_app_bundles(using=using, log=log),
+        "profiles": seed_profiles(using=using, log=log),
+        "app_profiles": seed_app_profiles(using=using, log=log),
     }

@@ -128,7 +128,7 @@ export interface PaginatedJobs {
   pages: number;
 }
 
-export interface TemplateBundle {
+export interface GenerationProfile {
   id: number;
   name: string;
   slug: string;
@@ -177,7 +177,7 @@ export async function createAppTemplate(data: {
   admin_api_endpoints?: any[];
   data_model?: Record<string, unknown>;
 }): Promise<AppRequirementTemplate> {
-  const res = await apiFetch("/generation/app-templates/", {
+  const res = await apiFetch("/generation/app-specs/", {
     method: "POST",
     body: JSON.stringify(data),
   });
@@ -216,20 +216,20 @@ export async function getContentBlocks(): Promise<ContentBlock[]> {
   return res.json();
 }
 
-export async function getTemplateBundles(): Promise<TemplateBundle[]> {
-  const res = await apiFetch("/generation/bundles/");
+export async function getGenerationProfiles(): Promise<GenerationProfile[]> {
+  const res = await apiFetch("/generation/profiles/");
   return res.json();
 }
 
-export interface BundlePreview {
+export interface ProfilePreview {
   slug: string;
   scaffolding_slug: string;
   block_count: number;
   prompt_templates: Record<string, { system?: string; user?: string }>;
 }
 
-export async function getBundlePreview(slug: string): Promise<BundlePreview> {
-  const res = await apiFetch(`/generation/bundles/${slug}/preview/`);
+export async function getProfilePreview(slug: string): Promise<ProfilePreview> {
+  const res = await apiFetch(`/generation/profiles/${slug}/preview/`);
   return res.json();
 }
 
@@ -298,7 +298,7 @@ export async function createScaffoldingBatch(data: {
 }
 
 export async function deleteAppTemplate(slug: string): Promise<void> {
-  await apiFetch(`/generation/app-templates/${slug}/`, { method: "DELETE" });
+  await apiFetch(`/generation/app-specs/${slug}/`, { method: "DELETE" });
 }
 
 export async function deleteGenerationJob(
@@ -316,7 +316,7 @@ export async function exportGenerationJob(
 }
 
 export async function getAppTemplates(): Promise<AppRequirementTemplate[]> {
-  const res = await apiFetch("/generation/app-templates/");
+  const res = await apiFetch("/generation/app-specs/");
   return res.json();
 }
 
@@ -411,7 +411,7 @@ export async function updateAppTemplate(
     data_model: Record<string, unknown>;
   }>,
 ): Promise<AppRequirementTemplate> {
-  const res = await apiFetch(`/generation/app-templates/${slug}/`, {
+  const res = await apiFetch(`/generation/app-specs/${slug}/`, {
     method: "PUT",
     body: JSON.stringify(data),
   });

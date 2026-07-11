@@ -25,7 +25,7 @@ export interface Experiment {
 export interface ExperimentCondition {
   id: number;
   label: string;
-  template_bundle: number;
+  profile: number;
   model: number;
   model_name: string | null;
   bundle_slug: string | null;
@@ -94,7 +94,7 @@ export interface CreateExperimentPayload {
 export type UpdateExperimentPayload = Partial<CreateExperimentPayload>;
 
 export interface CreateConditionPayload {
-  template_bundle_id: number;
+  profile_id: number;
   model_id: number;
   label?: string;
   param_overrides?: Record<string, unknown>;

@@ -6,13 +6,13 @@ import pytest
 
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
-from backend.generation.models import TemplateBundle
-from backend.generation.seeding import _upsert_bundle_version
+from backend.generation.models import GenerationProfile
 from backend.generation.seeding import _upsert_content_block_version
+from backend.generation.seeding import _upsert_profile_version
 from backend.generation.seeding import seed_all
 from backend.generation.seeding import seed_content_blocks
+from backend.generation.seeding import seed_profiles
 from backend.generation.seeding import seed_requirements
-from backend.generation.seeding import seed_template_bundles
 
 pytestmark = pytest.mark.django_db
 
@@ -21,13 +21,13 @@ def test_seed_all_is_idempotent():
     """Running the full seeder twice must not create duplicate versions."""
     seed_all()
     block_count = ContentBlock.objects.count()
-    bundle_count = TemplateBundle.objects.count()
+    bundle_count = GenerationProfile.objects.count()
     requirement_count = AppRequirementTemplate.objects.count()
 
     seed_all()
 
     assert ContentBlock.objects.count() == block_count
-    assert TemplateBundle.objects.count() == bundle_count
+    assert GenerationProfile.objects.count() == bundle_count
     assert AppRequirementTemplate.objects.count() == requirement_count
 
 
@@ -67,18 +67,18 @@ def test_seed_content_blocks_cosmetic_change_does_not_bump_version():
     assert refreshed.description != "a manually edited description"
 
 
-def test_seed_template_bundles_bumps_version_on_block_refs_change():
-    seed_template_bundles()
-    bundle = TemplateBundle.objects.filter(slug="system-scaffolding-standard").order_by("-version").first()
+def test_seed_profiles_bumps_version_on_block_refs_change():
+    seed_profiles()
+    bundle = GenerationProfile.objects.filter(slug="system-scaffolding-standard").order_by("-version").first()
     assert bundle is not None
     original_version = bundle.version
 
     bundle.content_hash = "stale-hash"
     bundle.save(update_fields=["content_hash"])
 
-    seed_template_bundles()
+    seed_profiles()
 
-    versions = list(TemplateBundle.objects.filter(slug="system-scaffolding-standard").order_by("version"))
+    versions = list(GenerationProfile.objects.filter(slug="system-scaffolding-standard").order_by("version"))
     assert len(versions) == 2
     assert versions[1].version == original_version + 1
 
@@ -104,7 +104,7 @@ def test_seed_requirements_does_not_ingest_schema_json_as_a_spec():
     assert not AppRequirementTemplate.objects.filter(slug="schema").exists()
 
 
-def test_seed_app_bundles_does_not_duplicate_for_every_requirement():
+def test_seed_app_profiles_does_not_duplicate_for_every_requirement():
     """The blanket per-requirement auto-bundle generator was removed.
 
     Only apps with a real manifest under requirements/manifests/ get a
@@ -113,7 +113,7 @@ def test_seed_app_bundles_does_not_duplicate_for_every_requirement():
     """
     seed_all()
     app_bundle_slugs = set(
-        TemplateBundle.objects.filter(slug__startswith="app-", is_system=True).values_list("slug", flat=True),
+        GenerationProfile.objects.filter(slug__startswith="app-", is_system=True).values_list("slug", flat=True),
     )
     # Real manifests (see backend/generation/data/requirements/manifests/).
     assert "app-crud-todo-list" in app_bundle_slugs
@@ -149,9 +149,9 @@ def test_upsert_content_block_version_reuses_unchanged_content():
     assert ContentBlock.objects.filter(slug="stable-block").count() == 1
 
 
-def test_upsert_bundle_version_creates_v1_for_new_slug():
-    created, updated = _upsert_bundle_version(
-        TemplateBundle,
+def test_upsert_profile_version_creates_v1_for_new_slug():
+    created, updated = _upsert_profile_version(
+        GenerationProfile,
         "default",
         slug="brand-new-bundle",
         name="New Bundle",
@@ -162,4 +162,4 @@ def test_upsert_bundle_version_creates_v1_for_new_slug():
         log=None,
     )
     assert (created, updated) == (1, 0)
-    assert TemplateBundle.objects.get(slug="brand-new-bundle", version=1)
+    assert GenerationProfile.objects.get(slug="brand-new-bundle", version=1)

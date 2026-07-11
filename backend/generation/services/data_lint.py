@@ -55,30 +55,31 @@ def lint_requirement_specs() -> list[str]:
 
 
 def lint_stack_parity() -> list[str]:
-    """Every ``has_frontend`` stack must have a catalog bundle with full stage coverage."""
+    """Every ``has_frontend`` stack must have a catalog profile with full stage coverage."""
     errors: list[str] = []
     manifest = load_manifest()
     catalog = yaml.safe_load(CATALOG_PATH.read_text(encoding="utf-8")) or {}
-    bundles = catalog.get("bundles", [])
+    # "bundles" is the pre-rename catalog key; accept it for older files.
+    profiles = catalog.get("profiles", catalog.get("bundles", []))
     stage_role = _slug_stage_role_map()
 
     for stack_slug, config in manifest.get("stacks", {}).items():
         if not config.get("has_frontend"):
             continue
-        matching = [b for b in bundles if b.get("scaffolding_slug") == stack_slug]
+        matching = [p for p in profiles if p.get("scaffolding_slug") == stack_slug]
         if not matching:
-            errors.append(f"stack {stack_slug!r}: no system bundle in catalog.yaml")
+            errors.append(f"stack {stack_slug!r}: no system profile in catalog.yaml")
             continue
-        for bundle in matching:
+        for profile in matching:
             covered = {
                 stage_role[ref["slug"]]
-                for ref in bundle.get("block_refs", [])
+                for ref in profile.get("block_refs", [])
                 if ref.get("type") == "prompt_stage" and ref.get("slug") in stage_role
             }
             missing = _REQUIRED_STAGE_ROLE_PAIRS - covered
             if missing:
                 errors.append(
-                    f"bundle {bundle['slug']!r} (stack {stack_slug!r}): "
+                    f"profile {profile['slug']!r} (stack {stack_slug!r}): "
                     f"missing prompt_stage coverage for {sorted(missing)}",
                 )
 

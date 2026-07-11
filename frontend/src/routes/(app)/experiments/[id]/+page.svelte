@@ -7,9 +7,9 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import ModelSelector from '$lib/components/sample-generator/ModelSelector.svelte';
-	import BundlePicker from '$lib/components/sample-generator/BundlePicker.svelte';
+	import ProfilePicker from '$lib/components/sample-generator/ProfilePicker.svelte';
 	import { getModels } from '$lib/api/models';
-	import { getTemplateBundles, type TemplateBundle } from '$lib/api/generation';
+	import { getGenerationProfiles, type GenerationProfile } from '$lib/api/generation';
 	import type { LLMModelSummary } from '$lib/api/client';
 	import {
 		getExperiment,
@@ -43,9 +43,9 @@
 	let error = $state('');
 
 	let models = $state<LLMModelSummary[]>([]);
-	let bundles = $state<TemplateBundle[]>([]);
+	let profiles = $state<GenerationProfile[]>([]);
 	let newConditionModelId = $state<number | ''>('');
-	let newConditionBundleId = $state<number | ''>('');
+	let newConditionProfileId = $state<number | ''>('');
 	let addingCondition = $state(false);
 
 	let previewing = $state(false);
@@ -62,16 +62,16 @@
 		loading = true;
 		error = '';
 		try {
-			const [exp, conds, modelsRes, bundlesRes] = await Promise.all([
+			const [exp, conds, modelsRes, profilesRes] = await Promise.all([
 				getExperiment(experimentId),
 				listConditions(experimentId),
 				getModels({ per_page: 100 }),
-				getTemplateBundles(),
+				getGenerationProfiles(),
 			]);
 			experiment = exp;
 			conditions = conds;
 			models = modelsRes.items;
-			bundles = bundlesRes;
+			profiles = profilesRes;
 			if (exp.status !== 'draft') {
 				await refreshStatus();
 			}
@@ -92,17 +92,17 @@
 	}
 
 	async function addCondition() {
-		if (!newConditionModelId || !newConditionBundleId) return;
+		if (!newConditionModelId || !newConditionProfileId) return;
 		addingCondition = true;
 		error = '';
 		try {
 			const cond = await createCondition(experimentId, {
 				model_id: newConditionModelId as number,
-				template_bundle_id: newConditionBundleId as number,
+				profile_id: newConditionProfileId as number,
 			});
 			conditions = [...conditions, cond];
 			newConditionModelId = '';
-			newConditionBundleId = '';
+			newConditionProfileId = '';
 			previewResult = null;
 		} catch (err: any) {
 			error = err?.detail ?? err?.message ?? 'Failed to add condition';
@@ -231,7 +231,7 @@
 			<Card.Header class="pb-3">
 				<div class="flex items-center justify-between">
 					<Card.Title>Conditions</Card.Title>
-					<span class="text-xs text-muted-foreground">model × prompt bundle</span>
+					<span class="text-xs text-muted-foreground">model × profile</span>
 				</div>
 			</Card.Header>
 			<Card.Content class="space-y-3">
@@ -258,7 +258,7 @@
 						{/each}
 					</div>
 				{:else}
-					<p class="text-sm text-muted-foreground">No conditions yet — add at least one model × bundle pair.</p>
+					<p class="text-sm text-muted-foreground">No conditions yet — add at least one model × profile pair.</p>
 				{/if}
 
 				{#if experiment.status === 'draft'}
@@ -268,13 +268,13 @@
 							<ModelSelector {models} mode="single" bind:selectedId={newConditionModelId} maxHeight="max-h-48" />
 						</div>
 						<div class="space-y-1">
-							<span class="text-xs text-muted-foreground">Prompt bundle</span>
-							<BundlePicker {bundles} bind:selectedId={newConditionBundleId} />
+							<span class="text-xs text-muted-foreground">Profile</span>
+							<ProfilePicker {profiles} bind:selectedId={newConditionProfileId} />
 						</div>
 						<div class="flex items-end">
 							<Button
 								size="sm"
-								disabled={!newConditionModelId || !newConditionBundleId || addingCondition}
+								disabled={!newConditionModelId || !newConditionProfileId || addingCondition}
 								onclick={addCondition}
 							>
 								<Plus class="h-3.5 w-3.5" />

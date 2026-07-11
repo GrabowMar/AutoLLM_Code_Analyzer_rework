@@ -10,7 +10,7 @@ import pytest
 from backend.generation.models import Experiment
 from backend.generation.models import ExperimentCondition
 from backend.generation.models import GenerationJob
-from backend.generation.models import TemplateBundle
+from backend.generation.models import GenerationProfile
 from backend.generation.tests.factories import AppRequirementTemplateFactory
 from backend.generation.tests.factories import ExperimentConditionFactory
 from backend.generation.tests.factories import ExperimentFactory
@@ -20,8 +20,8 @@ from backend.users.tests.factories import UserFactory
 pytestmark = pytest.mark.django_db
 
 
-def _flask_bundle() -> TemplateBundle:
-    return TemplateBundle.objects.filter(slug="system-scaffolding-standard").order_by("-version").first()
+def _flask_bundle() -> GenerationProfile:
+    return GenerationProfile.objects.filter(slug="system-scaffolding-standard").order_by("-version").first()
 
 
 @pytest.fixture
@@ -144,7 +144,7 @@ def test_create_condition(auth_client):
 
     res = client.post(
         f"/api/generation/experiments/{exp.id}/conditions/",
-        data=json.dumps({"template_bundle_id": bundle.id, "model_id": model.id, "label": "gpt-4o / standard"}),
+        data=json.dumps({"profile_id": bundle.id, "model_id": model.id, "label": "gpt-4o / standard"}),
         content_type="application/json",
     )
 
@@ -158,11 +158,11 @@ def test_create_condition_rejects_duplicate_bundle_model_pair(auth_client):
     exp = ExperimentFactory(created_by=user)
     bundle = _flask_bundle()
     model = LLMModelFactory()
-    ExperimentConditionFactory(experiment=exp, template_bundle=bundle, model=model)
+    ExperimentConditionFactory(experiment=exp, profile=bundle, model=model)
 
     res = client.post(
         f"/api/generation/experiments/{exp.id}/conditions/",
-        data=json.dumps({"template_bundle_id": bundle.id, "model_id": model.id}),
+        data=json.dumps({"profile_id": bundle.id, "model_id": model.id}),
         content_type="application/json",
     )
 
@@ -172,7 +172,7 @@ def test_create_condition_rejects_duplicate_bundle_model_pair(auth_client):
 def test_delete_condition(auth_client):
     client, user = auth_client
     exp = ExperimentFactory(created_by=user)
-    cond = ExperimentConditionFactory(experiment=exp, template_bundle=_flask_bundle())
+    cond = ExperimentConditionFactory(experiment=exp, profile=_flask_bundle())
 
     res = client.delete(f"/api/generation/experiments/{exp.id}/conditions/{cond.id}/")
 
@@ -184,7 +184,7 @@ def test_preview_experiment(auth_client):
     client, user = auth_client
     exp = ExperimentFactory(created_by=user, repeats=2)
     exp.app_requirements.add(AppRequirementTemplateFactory())
-    ExperimentConditionFactory(experiment=exp, template_bundle=_flask_bundle(), model=LLMModelFactory())
+    ExperimentConditionFactory(experiment=exp, profile=_flask_bundle(), model=LLMModelFactory())
 
     res = client.post(f"/api/generation/experiments/{exp.id}/preview/")
 
@@ -197,7 +197,7 @@ def test_launch_requires_api_key(auth_client):
     client, user = auth_client
     exp = ExperimentFactory(created_by=user)
     exp.app_requirements.add(AppRequirementTemplateFactory())
-    ExperimentConditionFactory(experiment=exp, template_bundle=_flask_bundle(), model=LLMModelFactory())
+    ExperimentConditionFactory(experiment=exp, profile=_flask_bundle(), model=LLMModelFactory())
 
     with mock.patch("backend.generation.api.views.experiments.has_resolvable_key", return_value=False):
         res = client.post(f"/api/generation/experiments/{exp.id}/launch/")
@@ -221,7 +221,7 @@ def test_launch_requires_conditions(auth_client):
 def test_launch_requires_app_requirements(auth_client):
     client, user = auth_client
     exp = ExperimentFactory(created_by=user)
-    ExperimentConditionFactory(experiment=exp, template_bundle=_flask_bundle(), model=LLMModelFactory())
+    ExperimentConditionFactory(experiment=exp, profile=_flask_bundle(), model=LLMModelFactory())
 
     with mock.patch("backend.generation.api.views.experiments.has_resolvable_key", return_value=True):
         res = client.post(f"/api/generation/experiments/{exp.id}/launch/")
@@ -234,7 +234,7 @@ def test_launch_creates_jobs_and_dispatches(auth_client):
     client, user = auth_client
     exp = ExperimentFactory(created_by=user, repeats=1)
     exp.app_requirements.add(AppRequirementTemplateFactory())
-    ExperimentConditionFactory(experiment=exp, template_bundle=_flask_bundle(), model=LLMModelFactory())
+    ExperimentConditionFactory(experiment=exp, profile=_flask_bundle(), model=LLMModelFactory())
 
     with (
         mock.patch("backend.generation.api.views.experiments.has_resolvable_key", return_value=True),
@@ -253,7 +253,7 @@ def test_status_endpoint(auth_client):
     client, user = auth_client
     exp = ExperimentFactory(created_by=user, repeats=1)
     exp.app_requirements.add(AppRequirementTemplateFactory())
-    ExperimentConditionFactory(experiment=exp, template_bundle=_flask_bundle(), model=LLMModelFactory())
+    ExperimentConditionFactory(experiment=exp, profile=_flask_bundle(), model=LLMModelFactory())
 
     with (
         mock.patch("backend.generation.api.views.experiments.has_resolvable_key", return_value=True),

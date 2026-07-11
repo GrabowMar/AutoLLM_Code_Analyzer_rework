@@ -513,16 +513,16 @@ def test_generate_experiment_report_malformed_id_raises():
 def test_generate_experiment_report_per_condition_stats_and_deltas():
     from backend.generation.tests.factories import ExperimentConditionFactory
     from backend.generation.tests.factories import ExperimentFactory
-    from backend.generation.tests.factories import TemplateBundleFactory
+    from backend.generation.tests.factories import GenerationProfileFactory
 
     user = UserFactory()
     template = AppRequirementTemplateFactory()
     experiment = ExperimentFactory(created_by=user)
     model_a = LLMModelFactory(model_id="m-a")
     model_b = LLMModelFactory(model_id="m-b")
-    bundle = TemplateBundleFactory()
-    condition_a = ExperimentConditionFactory(experiment=experiment, model=model_a, template_bundle=bundle)
-    condition_b = ExperimentConditionFactory(experiment=experiment, model=model_b, template_bundle=bundle)
+    bundle = GenerationProfileFactory()
+    condition_a = ExperimentConditionFactory(experiment=experiment, model=model_a, profile=bundle)
+    condition_b = ExperimentConditionFactory(experiment=experiment, model=model_b, profile=bundle)
 
     job_a = _job_with_run_findings(user, model_a, template, ["high"])
     job_a.experiment = experiment

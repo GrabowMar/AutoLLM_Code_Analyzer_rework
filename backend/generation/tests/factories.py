@@ -6,7 +6,7 @@ from backend.generation.models import ContentBlock
 from backend.generation.models import Experiment
 from backend.generation.models import ExperimentCondition
 from backend.generation.models import GenerationJob
-from backend.generation.models import TemplateBundle
+from backend.generation.models import GenerationProfile
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.users.tests.factories import UserFactory
 
@@ -35,9 +35,9 @@ class ContentBlockFactory(DjangoModelFactory):
     is_system = True
 
 
-class TemplateBundleFactory(DjangoModelFactory):
+class GenerationProfileFactory(DjangoModelFactory):
     class Meta:
-        model = TemplateBundle
+        model = GenerationProfile
 
     name = factory.Sequence(lambda n: f"Bundle {n}")
     slug = factory.Sequence(lambda n: f"bundle-{n}")
@@ -71,5 +71,5 @@ class ExperimentConditionFactory(DjangoModelFactory):
         model = ExperimentCondition
 
     experiment = factory.SubFactory(ExperimentFactory)
-    template_bundle = factory.SubFactory(TemplateBundleFactory)
+    profile = factory.SubFactory(GenerationProfileFactory)
     model = factory.SubFactory(LLMModelFactory)

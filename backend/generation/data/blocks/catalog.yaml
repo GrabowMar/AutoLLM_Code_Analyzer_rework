@@ -21,7 +21,7 @@ default_block_refs:
     slug: rules-flask-global
     version: 1
 
-bundles:
+profiles:
   - slug: system-scaffolding-standard
     name: Standard scaffolding (v2 prompts)
     description: Default research bundle — v2 stage prompts, standard tone, Flask rules

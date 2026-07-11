@@ -56,7 +56,7 @@ def list_jobs(
     qs = GenerationJob.objects.filter(created_by=request.auth).select_related(
         "model",
         "app_requirement",
-        "template_bundle",
+        "profile",
     )
     if mode:
         qs = qs.filter(mode=mode)
@@ -139,7 +139,7 @@ def get_job(request, job_id: str):
         GenerationJob.objects.select_related(
             "model",
             "app_requirement",
-            "template_bundle",
+            "profile",
             "batch",
             "created_by",
         ),
@@ -180,7 +180,7 @@ def _load_job_for_cloning(request, job_id: str) -> GenerationJob:
         GenerationJob.objects.select_related(
             "model",
             "app_requirement",
-            "template_bundle",
+            "profile",
         ),
         id=job_id,
         created_by=request.auth,
@@ -267,7 +267,7 @@ def export_job(request, job_id: str):
         GenerationJob.objects.select_related(
             "model",
             "app_requirement",
-            "template_bundle",
+            "profile",
             "batch",
             "created_by",
         ),
@@ -312,8 +312,8 @@ def export_job(request, job_id: str):
         "llm": resolved.get("llm"),
         "block_count": len(resolved.get("blocks", [])),
         "app_requirement_slug": (resolved.get("app_requirement") or {}).get("slug"),
-        "template_bundle_id": job.template_bundle_id,
-        "template_bundle_slug": (job.template_bundle.slug if job.template_bundle else None),
+        "profile_id": job.profile_id,
+        "profile_slug": (job.profile.slug if job.profile else None),
     }
     return {
         "experiment": experiment,
