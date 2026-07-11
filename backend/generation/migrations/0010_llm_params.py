@@ -55,6 +55,16 @@ class Migration(migrations.Migration):
                 verbose_name="LLM defaults",
             ),
         ),
+        migrations.AlterField(
+            model_name="experimentcondition",
+            name="param_overrides",
+            field=models.JSONField(
+                blank=True,
+                default=dict,
+                help_text="Per-condition sampling-param overrides of the experiment llm_defaults",
+                verbose_name="param overrides",
+            ),
+        ),
         migrations.RunPython(backfill_llm_defaults, restore_param_columns),
         migrations.RemoveField(model_name="experiment", name="temperature"),
         migrations.RemoveField(model_name="experiment", name="max_tokens"),
