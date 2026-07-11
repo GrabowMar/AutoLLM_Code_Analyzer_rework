@@ -6,7 +6,6 @@ from backend.generation.models import ContentBlock
 from backend.generation.models import Experiment
 from backend.generation.models import ExperimentCondition
 from backend.generation.models import GenerationJob
-from backend.generation.models import PromptTemplate
 from backend.generation.models import TemplateBundle
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.users.tests.factories import UserFactory
@@ -22,18 +21,6 @@ class AppRequirementTemplateFactory(DjangoModelFactory):
     description = factory.Faker("sentence")
     backend_requirements = ["Requirement 1", "Requirement 2"]
     frontend_requirements = ["UI Requirement 1"]
-
-
-class PromptTemplateFactory(DjangoModelFactory):
-    class Meta:
-        model = PromptTemplate
-
-    name = factory.Sequence(lambda n: f"Prompt {n}")
-    slug = factory.Sequence(lambda n: f"prompt-{n}")
-    stage = "backend"
-    role = "system"
-    content = "You are a helpful assistant."
-    is_default = True
 
 
 class ContentBlockFactory(DjangoModelFactory):

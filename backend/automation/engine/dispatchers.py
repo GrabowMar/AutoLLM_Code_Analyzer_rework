@@ -66,8 +66,6 @@ def dispatch_generate(
             GenerationJob.objects.select_related(
                 "model",
                 "app_requirement",
-                "backend_prompt_template",
-                "frontend_prompt_template",
                 "batch",
             ).get(id=job.id),
         )

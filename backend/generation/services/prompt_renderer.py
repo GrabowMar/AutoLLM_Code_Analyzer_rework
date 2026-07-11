@@ -9,7 +9,6 @@ from typing import Any
 import jinja2
 
 from backend.generation.models import AppRequirementTemplate
-from backend.generation.models import PromptTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -199,8 +198,6 @@ class PromptRenderer:
     def render_backend_messages(
         self,
         app_requirement: AppRequirementTemplate,
-        prompt_template_system: PromptTemplate | None = None,
-        prompt_template_user: PromptTemplate | None = None,
         *,
         resolved_bundle: dict[str, Any] | None = None,
     ) -> list[dict]:
@@ -208,29 +205,15 @@ class PromptRenderer:
             return self.render_messages_from_snapshot(resolved_bundle, stage="backend")
 
         context = self._build_context(app_requirement)
-        system_content = self._get_template_content(
-            prompt_template_system,
-            "backend",
-            "system",
-            DEFAULT_BACKEND_SYSTEM,
-        )
-        user_content = self._get_template_content(
-            prompt_template_user,
-            "backend",
-            "user",
-            DEFAULT_BACKEND_USER,
-        )
         return [
-            {"role": "system", "content": self.render_template(system_content, context)},
-            {"role": "user", "content": self.render_template(user_content, context)},
+            {"role": "system", "content": self.render_template(DEFAULT_BACKEND_SYSTEM, context)},
+            {"role": "user", "content": self.render_template(DEFAULT_BACKEND_USER, context)},
         ]
 
     def render_frontend_messages(
         self,
         app_requirement: AppRequirementTemplate,
         backend_code: str,
-        prompt_template_system: PromptTemplate | None = None,
-        prompt_template_user: PromptTemplate | None = None,
         api_context_override: str | None = None,
         *,
         resolved_bundle: dict[str, Any] | None = None,
@@ -247,22 +230,9 @@ class PromptRenderer:
         context["backend_api_context"] = api_context_override or self._extract_api_context(
             backend_code,
         )
-
-        system_content = self._get_template_content(
-            prompt_template_system,
-            "frontend",
-            "system",
-            DEFAULT_FRONTEND_SYSTEM,
-        )
-        user_content = self._get_template_content(
-            prompt_template_user,
-            "frontend",
-            "user",
-            DEFAULT_FRONTEND_USER,
-        )
         return [
-            {"role": "system", "content": self.render_template(system_content, context)},
-            {"role": "user", "content": self.render_template(user_content, context)},
+            {"role": "system", "content": self.render_template(DEFAULT_FRONTEND_SYSTEM, context)},
+            {"role": "user", "content": self.render_template(DEFAULT_FRONTEND_USER, context)},
         ]
 
     @staticmethod
@@ -274,24 +244,6 @@ class PromptRenderer:
         if stage == "frontend" and role == "system":
             return DEFAULT_FRONTEND_SYSTEM
         return DEFAULT_FRONTEND_USER
-
-    @staticmethod
-    def _get_template_content(
-        prompt_template: PromptTemplate | None,
-        stage: str,
-        role: str,
-        default: str,
-    ) -> str:
-        if prompt_template and prompt_template.content:
-            return prompt_template.content
-        db_default = PromptTemplate.objects.filter(
-            stage=stage,
-            role=role,
-            is_default=True,
-        ).first()
-        if db_default:
-            return db_default.content
-        return default
 
     @staticmethod
     def _extract_api_context(backend_code: str) -> str:

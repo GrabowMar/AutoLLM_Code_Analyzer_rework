@@ -227,7 +227,6 @@ def export_package(
     package = export_template_package(
         user=request.auth,
         app_template_slugs=payload.app_template_slugs,
-        prompt_template_slugs=payload.prompt_template_slugs,
         bundle_slugs=payload.bundle_slugs,
         block_refs=[{"type": ref.type, "slug": ref.slug, "version": ref.version} for ref in payload.block_refs],
     )
@@ -253,7 +252,6 @@ def import_package(request, payload: TemplatePackageImportSchema):
         return 400, {"detail": str(exc)}
     return {
         "app_templates": [item.slug for item in imported["app_templates"]],
-        "prompt_templates": [item.slug for item in imported["prompt_templates"]],
         "blocks": [f"{item.slug}:{item.version}" for item in imported["blocks"]],
         "bundles": [item.slug for item in imported["bundles"]],
     }
@@ -282,7 +280,6 @@ def import_package_starter(
         return 400, {"detail": str(exc)}
     return {
         "app_templates": [item.slug for item in imported["app_templates"]],
-        "prompt_templates": [item.slug for item in imported["prompt_templates"]],
         "blocks": [f"{item.slug}:{item.version}" for item in imported["blocks"]],
         "bundles": [item.slug for item in imported["bundles"]],
     }

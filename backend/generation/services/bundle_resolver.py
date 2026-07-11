@@ -234,8 +234,6 @@ def build_resolved_bundle(
     user: AbstractUser | None,
     experiment_seed: int | None = None,
     top_p: float | None = None,
-    legacy_backend_system: str | None = None,
-    legacy_frontend_system: str | None = None,
 ) -> dict[str, Any]:
     """Build the full immutable snapshot dict for ``GenerationJob.resolved_bundle``."""
     block_refs, bundle_scaffold_slug, resolved_bundle_slug, resolved_bundle_version = resolve_bundle_for_job(
@@ -245,11 +243,6 @@ def build_resolved_bundle(
     )
     resolved_blocks = resolve_block_refs(block_refs, user)
     prompt_templates = assemble_prompt_templates(resolved_blocks)
-
-    if legacy_backend_system and not prompt_templates["backend"]["system"]:
-        prompt_templates["backend"]["system"] = legacy_backend_system
-    if legacy_frontend_system and not prompt_templates["frontend"]["system"]:
-        prompt_templates["frontend"]["system"] = legacy_frontend_system
 
     app_dict = app_requirement_to_dict(app_requirement)
     bundle_slug = template_bundle.slug if template_bundle else resolved_bundle_slug
@@ -319,8 +312,6 @@ def snapshot_for_scaffolding_job(job: GenerationJob) -> dict[str, Any]:
         raise ValueError(msg)
 
     scaffolding_slug = resolve_stack_slug(job)
-    legacy_backend = job.backend_prompt_template.content if job.backend_prompt_template else None
-    legacy_frontend = job.frontend_prompt_template.content if job.frontend_prompt_template else None
 
     snapshot = build_resolved_bundle(
         app_requirement=job.app_requirement,
@@ -332,8 +323,6 @@ def snapshot_for_scaffolding_job(job: GenerationJob) -> dict[str, Any]:
         user=job.created_by,
         experiment_seed=job.experiment_seed,
         top_p=job.top_p,
-        legacy_backend_system=legacy_backend,
-        legacy_frontend_system=legacy_frontend,
     )
     from backend.generation.services.prompt_renderer import PromptRenderer
 

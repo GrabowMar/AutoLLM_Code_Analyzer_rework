@@ -71,45 +71,6 @@ class AppRequirementTemplate(models.Model):
         return self.name
 
 
-class PromptTemplate(models.Model):
-    """Jinja2 prompt template for system/user prompts."""
-
-    class Stage(models.TextChoices):
-        BACKEND = "backend", _("Backend")
-        FRONTEND = "frontend", _("Frontend")
-
-    class Role(models.TextChoices):
-        SYSTEM = "system", _("System")
-        USER = "user", _("User")
-
-    name = models.CharField(_("name"), max_length=200)
-    slug = models.SlugField(_("slug"), max_length=200, unique=True)
-    stage = models.CharField(_("stage"), max_length=20, choices=Stage.choices)
-    role = models.CharField(_("role"), max_length=20, choices=Role.choices)
-    content = models.TextField(_("template content"))
-    description = models.TextField(_("description"), blank=True, default="")
-    is_default = models.BooleanField(_("system default"), default=False)
-    version = models.PositiveIntegerField(_("version"), default=1)
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="prompt_templates",
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = _("Prompt Template")
-        verbose_name_plural = _("Prompt Templates")
-        ordering = ["-is_default", "stage", "role", "name"]
-
-    def __str__(self) -> str:
-        return f"{self.name} ({self.stage}/{self.role})"
-
-
 class ContentBlock(models.Model):
     """Composable fragment for prompts, rules, validation, or rubrics."""
 
@@ -449,20 +410,6 @@ class GenerationJob(models.Model):
         null=True,
         blank=True,
         related_name="jobs",
-    )
-    backend_prompt_template = models.ForeignKey(
-        PromptTemplate,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="backend_jobs",
-    )
-    frontend_prompt_template = models.ForeignKey(
-        PromptTemplate,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="frontend_jobs",
     )
     template_bundle = models.ForeignKey(
         "TemplateBundle",

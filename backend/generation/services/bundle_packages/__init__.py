@@ -24,7 +24,6 @@ from backend.generation.services.bundle_packages.starters import list_starter_te
 from backend.generation.services.bundle_packages.visibility import visible_app_templates_for
 from backend.generation.services.bundle_packages.visibility import visible_blocks_for
 from backend.generation.services.bundle_packages.visibility import visible_bundles_for
-from backend.generation.services.bundle_packages.visibility import visible_prompt_templates_for
 
 __all__ = [
     "ALLOWED_CONFLICT_STRATEGIES",
@@ -46,5 +45,4 @@ __all__ = [
     "visible_app_templates_for",
     "visible_blocks_for",
     "visible_bundles_for",
-    "visible_prompt_templates_for",
 ]

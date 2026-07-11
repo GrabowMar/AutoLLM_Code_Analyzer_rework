@@ -36,85 +36,8 @@ PROMPTS_DIR = DATA_DIR / "prompts"
 BLOCKS_DIR = DATA_DIR / "blocks"
 CATALOG_PATH = BLOCKS_DIR / "catalog.yaml"
 
-# Legacy PromptTemplate rows, kept only for admin-UI compatibility until that
-# model is removed; not content-hash versioned.
-PROMPT_TEMPLATE_SEEDS = [
-    {
-        "slug": "v2-backend-system",
-        "name": "Backend System Prompt v2",
-        "stage": "backend",
-        "role": "system",
-        "description": "Default system prompt for Flask backend generation",
-        "path": "v2/backend/system.md.jinja2",
-        "is_default": True,
-    },
-    {
-        "slug": "v2-backend-user",
-        "name": "Backend User Prompt v2",
-        "stage": "backend",
-        "role": "user",
-        "description": "Default user prompt for Flask backend generation",
-        "path": "v2/backend/user.md.jinja2",
-        "is_default": True,
-    },
-    {
-        "slug": "v2-frontend-system",
-        "name": "Frontend System Prompt v2",
-        "stage": "frontend",
-        "role": "system",
-        "description": "Default system prompt for React frontend generation",
-        "path": "v2/frontend/system.md.jinja2",
-        "is_default": True,
-    },
-    {
-        "slug": "v2-frontend-user",
-        "name": "Frontend User Prompt v2",
-        "stage": "frontend",
-        "role": "user",
-        "description": "Default user prompt for React frontend generation",
-        "path": "v2/frontend/user.md.jinja2",
-        "is_default": True,
-    },
-    {
-        "slug": "fastapi-backend-system-v1",
-        "name": "FastAPI Backend System Prompt v1",
-        "stage": "backend",
-        "role": "system",
-        "description": "FastAPI-oriented system prompt for sample generation",
-        "path": "fastapi/backend/system.md.jinja2",
-        "is_default": False,
-    },
-    {
-        "slug": "fastapi-backend-user-v1",
-        "name": "FastAPI Backend User Prompt v1",
-        "stage": "backend",
-        "role": "user",
-        "description": "FastAPI-oriented user prompt for sample generation",
-        "path": "fastapi/backend/user.md.jinja2",
-        "is_default": False,
-    },
-    {
-        "slug": "vue-frontend-system-v1",
-        "name": "Vue Frontend System Prompt v1",
-        "stage": "frontend",
-        "role": "system",
-        "description": "Vue-oriented system prompt for sample generation",
-        "path": "vue/frontend/system.md.jinja2",
-        "is_default": False,
-    },
-    {
-        "slug": "vue-frontend-user-v1",
-        "name": "Vue Frontend User Prompt v1",
-        "stage": "frontend",
-        "role": "user",
-        "description": "Vue-oriented user prompt for sample generation",
-        "path": "vue/frontend/user.md.jinja2",
-        "is_default": False,
-    },
-]
-
-# ContentBlock(block_type=PROMPT_STAGE) rows assembled from the same prompt
-# files, keyed by a stable slug independent of PromptTemplate's.
+# ContentBlock(block_type=PROMPT_STAGE) rows assembled from the prompt files
+# under data/prompts/.
 PROMPT_STAGE_SEEDS = [
     {"slug": "base-backend-system", "stage": "backend", "role": "system", "path": "v2/backend/system.md.jinja2"},
     {"slug": "base-backend-user", "stage": "backend", "role": "user", "path": "v2/backend/user.md.jinja2"},
@@ -458,35 +381,10 @@ def seed_app_bundles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, i
     return created, updated
 
 
-def seed_prompt_templates(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, int]:
-    """Legacy ``PromptTemplate`` rows, kept for admin UI compatibility. Not versioned."""
-    from backend.generation.models import PromptTemplate
-
-    created = updated = 0
-    for data in PROMPT_TEMPLATE_SEEDS:
-        obj, was_created = PromptTemplate.objects.using(using).update_or_create(
-            slug=data["slug"],
-            defaults={
-                "name": data["name"],
-                "stage": data["stage"],
-                "role": data["role"],
-                "content": _read_prompt_file(data["path"]),
-                "description": data["description"],
-                "is_default": data["is_default"],
-            },
-        )
-        created += was_created
-        updated += not was_created
-        if log:
-            log(f"  {'Created' if was_created else 'Updated'} prompt: {obj.name}")
-    return created, updated
-
-
 def seed_all(*, using: str = DEFAULT_DB_ALIAS, log=None) -> dict[str, tuple[int, int]]:
     """Run every seeder in dependency order (bundles reference blocks by slug+version)."""
     return {
         "requirements": seed_requirements(using=using, log=log),
-        "prompt_templates": seed_prompt_templates(using=using, log=log),
         "content_blocks": seed_content_blocks(using=using, log=log),
         "template_bundles": seed_template_bundles(using=using, log=log),
         "app_bundles": seed_app_bundles(using=using, log=log),

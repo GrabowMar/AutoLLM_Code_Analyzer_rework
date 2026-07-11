@@ -171,8 +171,6 @@ class GenerationService:
         bundle = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
         backend_messages = self.renderer.render_backend_messages(
             app_requirement=app_req,
-            prompt_template_system=job.backend_prompt_template,
-            prompt_template_user=None,
             resolved_bundle=bundle if bundle else None,
         )
         start = time.time()
@@ -197,8 +195,6 @@ class GenerationService:
         frontend_messages = self.renderer.render_frontend_messages(
             app_requirement=app_req,
             backend_code=backend_content,
-            prompt_template_system=job.frontend_prompt_template,
-            prompt_template_user=None,
             api_context_override=api_context if scan_result.endpoints else None,
             resolved_bundle=bundle if bundle else None,
         )

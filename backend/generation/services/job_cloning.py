@@ -40,8 +40,6 @@ def clone_job(
         stack_slug=original.stack_slug,
         app_requirement=original.app_requirement,
         template_bundle=original.template_bundle,
-        backend_prompt_template=original.backend_prompt_template,
-        frontend_prompt_template=original.frontend_prompt_template,
         custom_system_prompt=original.custom_system_prompt,
         custom_user_prompt=original.custom_user_prompt,
         temperature=original.temperature,

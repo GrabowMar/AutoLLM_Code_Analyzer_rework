@@ -5,41 +5,33 @@
 	import {
 		getStacks,
 		getAppTemplates,
-		getPromptTemplates,
 		getContentBlocks,
 		getTemplateBundles,
 		createAppTemplate,
 		updateAppTemplate,
 		deleteAppTemplate,
-		createPromptTemplate,
-		updatePromptTemplate,
-		deletePromptTemplate,
 		importTemplatePackage,
 		getStarterTemplatePackages,
 		type Stack,
 		type AppRequirementTemplate,
 		type ContentBlock,
-		type PromptTemplate,
 		type StarterTemplatePackage,
 		type TemplateBundle,
 	} from '$lib/api/client';
 	import StacksList from '$lib/components/templates/StacksList.svelte';
 	import AppTemplateList from '$lib/components/templates/AppTemplateList.svelte';
-	import PromptTemplateList from '$lib/components/templates/PromptTemplateList.svelte';
 	import AppTemplateForm from '$lib/components/templates/AppTemplateForm.svelte';
-	import PromptTemplateForm from '$lib/components/templates/PromptTemplateForm.svelte';
 	import BundlesTab from '$lib/components/templates/BundlesTab.svelte';
 	import PackageImportForm from '$lib/components/templates/PackageImportForm.svelte';
 	import Layers from '@lucide/svelte/icons/layers';
 	import Package from '@lucide/svelte/icons/package';
 	import FileText from '@lucide/svelte/icons/file-text';
-	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import Plus from '@lucide/svelte/icons/plus';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Search from '@lucide/svelte/icons/search';
 
-	type TabId = 'scaffolding' | 'app' | 'prompt' | 'bundles';
-	let activeTab = $state<TabId>('scaffolding');
+	type TabId = 'stacks' | 'app' | 'bundles';
+	let activeTab = $state<TabId>('stacks');
 
 	let templateBundles = $state<TemplateBundle[]>([]);
 	let bundlesLoading = $state(true);
@@ -59,16 +51,6 @@
 	let appSaving = $state(false);
 	let appError = $state('');
 
-	// Prompt templates
-	let promptTemplates = $state<PromptTemplate[]>([]);
-	let promptLoading = $state(true);
-	let promptStageFilter = $state('');
-	let editingPrompt = $state<PromptTemplate | null>(null);
-	let creatingPrompt = $state(false);
-	let promptForm = $state({ name: '', slug: '', stage: 'backend', role: 'system', content: '' });
-	let promptSaving = $state(false);
-	let promptError = $state('');
-
 	let contentBlocks = $state<ContentBlock[]>([]);
 	let blocksLoading = $state(true);
 	let starterPackages = $state<StarterTemplatePackage[]>([]);
@@ -85,8 +67,6 @@
 	const isEditingOrCreating = $derived(
 		creatingApp ||
 		editingApp !== null ||
-		creatingPrompt ||
-		editingPrompt !== null ||
 		importingBundle
 	);
 
@@ -102,22 +82,6 @@
 		)
 	);
 
-	const filteredPrompt = $derived(
-		promptTemplates.filter(t =>
-			(!promptStageFilter || t.stage === promptStageFilter)
-		)
-	);
-
-	const groupedPrompts = $derived.by(() => {
-		const groups: Record<string, PromptTemplate[]> = {};
-		for (const t of filteredPrompt) {
-			const key = `${t.stage}/${t.role}`;
-			if (!groups[key]) groups[key] = [];
-			groups[key].push(t);
-		}
-		return groups;
-	});
-
 	async function loadStacks() {
 		stacksLoading = true;
 		try { stacks = await getStacks(); } catch { /* ignore */ }
@@ -128,12 +92,6 @@
 		appLoading = true;
 		try { appTemplates = await getAppTemplates(); } catch { /* ignore */ }
 		appLoading = false;
-	}
-
-	async function loadPrompt() {
-		promptLoading = true;
-		try { promptTemplates = await getPromptTemplates(); } catch { /* ignore */ }
-		promptLoading = false;
 	}
 
 	async function loadBlocks() {
@@ -163,13 +121,12 @@
 	}
 
 	async function refreshAllAssets() {
-		await Promise.all([loadApp(), loadPrompt(), loadBlocks(), loadBundles()]);
+		await Promise.all([loadApp(), loadBlocks(), loadBundles()]);
 	}
 
 	onMount(() => {
 		loadStacks();
 		loadApp();
-		loadPrompt();
 		loadBlocks();
 		loadBundles();
 		loadStarterPackages();
@@ -177,7 +134,6 @@
 
 	function cancelAllForms() {
 		cancelAppForm();
-		cancelPromptForm();
 		cancelBundleImport();
 	}
 
@@ -246,55 +202,6 @@
 		} catch { /* ignore */ }
 	}
 
-	// ── Prompt CRUD ─────────────────────────────────────────────
-
-	function startCreatePrompt() {
-		cancelAllForms();
-		creatingPrompt = true;
-		promptForm = { name: '', slug: '', stage: 'backend', role: 'system', content: '' };
-		promptError = '';
-	}
-
-	function startEditPrompt(t: PromptTemplate) {
-		cancelAllForms();
-		editingPrompt = t;
-		promptForm = { name: t.name, slug: t.slug, stage: t.stage, role: t.role, content: t.content };
-		promptError = '';
-	}
-
-	function cancelPromptForm() {
-		creatingPrompt = false;
-		editingPrompt = null;
-		promptError = '';
-	}
-
-	async function savePrompt() {
-		promptSaving = true;
-		promptError = '';
-		try {
-			const data = { ...promptForm };
-			if (editingPrompt) {
-				await updatePromptTemplate(editingPrompt.slug, data);
-			} else {
-				await createPromptTemplate(data);
-			}
-			cancelPromptForm();
-			await loadPrompt();
-		} catch (e: any) {
-			promptError = e?.message || 'Save failed';
-		}
-		promptSaving = false;
-	}
-
-	async function deletePrompt(t: PromptTemplate) {
-		if (!confirm(`Delete prompt template "${t.name}"?`)) return;
-		try {
-			await deletePromptTemplate(t.slug);
-			if (editingPrompt?.slug === t.slug) cancelPromptForm();
-			await loadPrompt();
-		} catch { /* ignore */ }
-	}
-
 	// ── Package import ──────────────────────────────────────────
 
 	function startImportBundle() {
@@ -343,8 +250,8 @@
 	<div class="flex gap-1 rounded-md bg-muted p-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden flex-nowrap shadow-inner">
 		<button
 			type="button"
-			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-200 whitespace-nowrap cursor-pointer {activeTab === 'scaffolding' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
-			onclick={() => handleTabChange('scaffolding')}
+			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-200 whitespace-nowrap cursor-pointer {activeTab === 'stacks' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
+			onclick={() => handleTabChange('stacks')}
 		>
 			<Layers class="h-4 w-4" />
 			Stacks <span class="ml-1 text-xs opacity-60 font-mono">({stacks.length})</span>
@@ -356,14 +263,6 @@
 		>
 			<FileText class="h-4 w-4" />
 			App Requirements <span class="ml-1 text-xs opacity-60 font-mono">({appTemplates.length})</span>
-		</button>
-		<button
-			type="button"
-			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-200 whitespace-nowrap cursor-pointer {activeTab === 'prompt' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
-			onclick={() => handleTabChange('prompt')}
-		>
-			<MessageSquare class="h-4 w-4" />
-			Prompts <span class="ml-1 text-xs opacity-60 font-mono">({promptTemplates.length})</span>
 		</button>
 		<button
 			type="button"
@@ -386,20 +285,10 @@
 				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-md border border-border bg-card p-3">
 					<div class="relative w-full sm:w-72">
 						<Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-						{#if activeTab === 'scaffolding'}
+						{#if activeTab === 'stacks'}
 							<Input bind:value={stackSearch} placeholder="Search stacks…" class="pl-9 h-9 text-xs transition-all hover:border-primary/45 focus-visible:ring-primary/20" />
 						{:else if activeTab === 'app'}
 							<Input bind:value={appSearch} placeholder="Search app requirements…" class="pl-9 h-9 text-xs transition-all hover:border-primary/45 focus-visible:ring-primary/20" />
-						{:else if activeTab === 'prompt'}
-							<div class="flex items-center gap-1 bg-muted/40 p-0.5 rounded border max-w-full">
-								{#each [['', 'All'], ['backend', 'Backend'], ['frontend', 'Frontend']] as [val, label]}
-									<button
-										type="button"
-										class="rounded px-2.5 py-1 text-[10px] font-medium transition-all duration-150 cursor-pointer {promptStageFilter === val ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
-										onclick={() => promptStageFilter = val}
-									>{label}</button>
-								{/each}
-							</div>
 						{/if}
 					</div>
 
@@ -407,15 +296,11 @@
 						<Button size="sm" class="w-full sm:w-auto text-xs font-semibold cursor-pointer shadow-xs transition-all duration-200" onclick={startCreateApp}>
 							<Plus class="mr-1.5 h-4 w-4" /> New App Template
 						</Button>
-					{:else if activeTab === 'prompt'}
-						<Button size="sm" class="w-full sm:w-auto text-xs font-semibold cursor-pointer shadow-xs transition-all duration-200" onclick={startCreatePrompt}>
-							<Plus class="mr-1.5 h-4 w-4" /> New Prompt
-						</Button>
 					{/if}
 				</div>
 			{/if}
 
-			{#if activeTab === 'scaffolding'}
+			{#if activeTab === 'stacks'}
 				<StacksList
 					stacks={filteredStacks}
 					loading={stacksLoading}
@@ -433,18 +318,6 @@
 				/>
 			{/if}
 
-			{#if activeTab === 'prompt'}
-				<PromptTemplateList
-					groups={groupedPrompts}
-					total={filteredPrompt.length}
-					loading={promptLoading}
-					compact={isEditingOrCreating}
-					activeSlug={editingPrompt?.slug ?? null}
-					onEdit={startEditPrompt}
-					onDelete={deletePrompt}
-				/>
-			{/if}
-
 			{#if activeTab === 'bundles'}
 				<BundlesTab
 					bundles={templateBundles}
@@ -452,7 +325,6 @@
 					{starterPackages}
 					{starterPackagesLoading}
 					{appTemplates}
-					{promptTemplates}
 					{contentBlocks}
 					{blocksLoading}
 					conflictStrategy={bundleConflictStrategy}
@@ -483,17 +355,6 @@
 						error={appError}
 						onSave={saveApp}
 						onCancel={cancelAppForm}
-					/>
-				{/if}
-
-				{#if creatingPrompt || editingPrompt}
-					<PromptTemplateForm
-						bind:form={promptForm}
-						isEdit={editingPrompt !== null}
-						saving={promptSaving}
-						error={promptError}
-						onSave={savePrompt}
-						onCancel={cancelPromptForm}
 					/>
 				{/if}
 

@@ -128,20 +128,6 @@ export interface PaginatedJobs {
   pages: number;
 }
 
-export interface PromptTemplate {
-  id: number;
-  name: string;
-  slug: string;
-  stage: string;
-  role: string;
-  content: string;
-  description: string;
-  is_default: boolean;
-  version: number;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface TemplateBundle {
   id: number;
   name: string;
@@ -167,7 +153,6 @@ export interface StarterTemplatePackage {
   name: string;
   description: string;
   app_template_count: number;
-  prompt_template_count: number;
   block_count: number;
   bundle_count: number;
 }
@@ -226,20 +211,6 @@ export async function createCustomJob(data: {
   return res.json();
 }
 
-export async function createPromptTemplate(data: {
-  name: string;
-  slug: string;
-  stage: string;
-  role: string;
-  content: string;
-}): Promise<PromptTemplate> {
-  const res = await apiFetch("/generation/prompt-templates/", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-  return res.json();
-}
-
 export async function getContentBlocks(): Promise<ContentBlock[]> {
   const res = await apiFetch("/generation/blocks/");
   return res.json();
@@ -265,7 +236,6 @@ export async function getBundlePreview(slug: string): Promise<BundlePreview> {
 export async function exportTemplatePackage(
   data: {
     app_template_slugs?: string[];
-    prompt_template_slugs?: string[];
     bundle_slugs?: string[];
     block_refs?: { type: string; slug: string; version: number }[];
   },
@@ -336,10 +306,6 @@ export async function deleteGenerationJob(
 ): Promise<{ success: boolean }> {
   const res = await apiFetch(`/generation/jobs/${id}/`, { method: "DELETE" });
   return res.json();
-}
-
-export async function deletePromptTemplate(slug: string): Promise<void> {
-  await apiFetch(`/generation/prompt-templates/${slug}/`, { method: "DELETE" });
 }
 
 export async function exportGenerationJob(
@@ -420,20 +386,6 @@ export async function getJobArtifacts(
   return res.json();
 }
 
-export async function getPromptTemplates(
-  stage?: string,
-  role?: string,
-): Promise<PromptTemplate[]> {
-  const params = new URLSearchParams();
-  if (stage) params.set("stage", stage);
-  if (role) params.set("role", role);
-  const qs = params.toString();
-  const res = await apiFetch(
-    `/generation/prompt-templates/${qs ? "?" + qs : ""}`,
-  );
-  return res.json();
-}
-
 export async function getStacks(): Promise<Stack[]> {
   const res = await apiFetch("/generation/stacks/");
   return res.json();
@@ -460,22 +412,6 @@ export async function updateAppTemplate(
   }>,
 ): Promise<AppRequirementTemplate> {
   const res = await apiFetch(`/generation/app-templates/${slug}/`, {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
-  return res.json();
-}
-
-export async function updatePromptTemplate(
-  slug: string,
-  data: Partial<{
-    name: string;
-    stage: string;
-    role: string;
-    content: string;
-  }>,
-): Promise<PromptTemplate> {
-  const res = await apiFetch(`/generation/prompt-templates/${slug}/`, {
     method: "PUT",
     body: JSON.stringify(data),
   });

@@ -5,7 +5,6 @@ from django.core.management import call_command
 
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
-from backend.generation.models import PromptTemplate
 from backend.generation.models import TemplateBundle
 
 
@@ -25,17 +24,6 @@ def test_seed_generation_templates_creates_sample_content():
             ],
         ).count()
         == 3
-    )
-    assert (
-        PromptTemplate.objects.filter(
-            slug__in=[
-                "fastapi-backend-system-v1",
-                "fastapi-backend-user-v1",
-                "vue-frontend-system-v1",
-                "vue-frontend-user-v1",
-            ],
-        ).count()
-        == 4
     )
     assert (
         ContentBlock.objects.filter(

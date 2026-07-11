@@ -8,7 +8,6 @@
 		importStarterTemplatePackage,
 		type AppRequirementTemplate,
 		type ContentBlock,
-		type PromptTemplate,
 		type StarterTemplatePackage,
 		type TemplateBundle,
 	} from '$lib/api/client';
@@ -19,7 +18,6 @@
 		starterPackages: StarterTemplatePackage[];
 		starterPackagesLoading: boolean;
 		appTemplates: AppRequirementTemplate[];
-		promptTemplates: PromptTemplate[];
 		contentBlocks: ContentBlock[];
 		blocksLoading: boolean;
 		conflictStrategy: 'rename' | 'overwrite' | 'error';
@@ -32,7 +30,6 @@
 		starterPackages,
 		starterPackagesLoading,
 		appTemplates,
-		promptTemplates,
 		contentBlocks,
 		blocksLoading,
 		conflictStrategy,
@@ -44,14 +41,12 @@
 	let error = $state('');
 	let packageSelection = $state({
 		app: [] as string[],
-		prompt: [] as string[],
 		bundle: [] as string[],
 		block: [] as string[],
 	});
 
 	const selectedAssetCount = $derived(
 		packageSelection.app.length +
-		packageSelection.prompt.length +
 		packageSelection.bundle.length +
 		packageSelection.block.length
 	);
@@ -61,7 +56,7 @@
 	}
 
 	function toggleSelection(
-		group: 'app' | 'prompt' | 'bundle' | 'block',
+		group: 'app' | 'bundle' | 'block',
 		value: string
 	) {
 		const current = packageSelection[group];
@@ -74,7 +69,7 @@
 	}
 
 	function isSelected(
-		group: 'app' | 'prompt' | 'bundle' | 'block',
+		group: 'app' | 'bundle' | 'block',
 		value: string
 	): boolean {
 		return packageSelection[group].includes(value);
@@ -83,7 +78,6 @@
 	function clearPackageSelection() {
 		packageSelection = {
 			app: [],
-			prompt: [],
 			bundle: [],
 			block: [],
 		};
@@ -101,7 +95,6 @@
 			const exported = await exportTemplatePackage(
 				{
 					app_template_slugs: packageSelection.app,
-					prompt_template_slugs: packageSelection.prompt,
 					bundle_slugs: packageSelection.bundle,
 					block_refs: selectedBlocks,
 				},
@@ -139,7 +132,7 @@
 		<div>
 			<h3 class="text-sm font-semibold text-foreground">Template packages</h3>
 			<p class="text-xs text-muted-foreground">
-				Pack app templates, prompts, blocks, and bundles into one shareable export.
+				Pack app templates, blocks, and bundles into one shareable export.
 			</p>
 		</div>
 		<div class="flex flex-wrap gap-2">
@@ -154,7 +147,7 @@
 				<div>
 					<h4 class="text-sm font-semibold text-foreground">Starter packages</h4>
 					<p class="text-xs text-muted-foreground">
-						One-click imports for built-in sample app requirements, prompts, blocks, and bundles.
+						One-click imports for built-in sample app requirements, blocks, and bundles.
 					</p>
 				</div>
 				<Badge variant="outline" class="text-[10px]">Uses {conflictStrategy} on conflict</Badge>
@@ -176,7 +169,6 @@
 								</div>
 								<div class="flex flex-wrap gap-1.5">
 									<Badge variant="outline" class="text-[9px]">{starter.app_template_count} apps</Badge>
-									<Badge variant="outline" class="text-[9px]">{starter.prompt_template_count} prompts</Badge>
 									<Badge variant="outline" class="text-[9px]">{starter.block_count} blocks</Badge>
 									<Badge variant="outline" class="text-[9px]">{starter.bundle_count} bundles</Badge>
 								</div>
@@ -222,21 +214,6 @@
 							type="button"
 							class="rounded-md border px-2.5 py-1 text-[11px] transition-colors cursor-pointer {isSelected('app', template.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
 							onclick={() => toggleSelection('app', template.slug)}
-						>
-							{template.name}
-						</button>
-					{/each}
-				</div>
-			</div>
-
-			<div class="space-y-2">
-				<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Prompt templates</p>
-				<div class="flex flex-wrap gap-2">
-					{#each promptTemplates as template}
-						<button
-							type="button"
-							class="rounded-md border px-2.5 py-1 text-[11px] transition-colors cursor-pointer {isSelected('prompt', template.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
-							onclick={() => toggleSelection('prompt', template.slug)}
 						>
 							{template.name}
 						</button>

@@ -7,7 +7,6 @@ from django.test import Client
 
 from backend.generation.tests.factories import AppRequirementTemplateFactory
 from backend.generation.tests.factories import ContentBlockFactory
-from backend.generation.tests.factories import PromptTemplateFactory
 from backend.generation.tests.factories import TemplateBundleFactory
 from backend.users.tests.factories import UserFactory
 
@@ -33,21 +32,21 @@ def test_list_app_templates_is_scoped_to_defaults_and_owner(client):
 
 
 @pytest.mark.django_db
-def test_non_owner_cannot_update_default_prompt_template(client):
+def test_non_owner_cannot_update_default_app_template(client):
     user = UserFactory()
     client.force_login(user)
-    prompt = PromptTemplateFactory(is_default=True, created_by=None)
+    template = AppRequirementTemplateFactory(is_default=True, created_by=None)
 
     response = client.put(
-        f"/api/generation/prompt-templates/{prompt.slug}/",
+        f"/api/generation/app-templates/{template.slug}/",
         data=json.dumps(
             {
-                "name": prompt.name,
-                "slug": prompt.slug,
-                "stage": prompt.stage,
-                "role": prompt.role,
-                "content": "Updated prompt",
-                "description": prompt.description,
+                "name": template.name,
+                "slug": template.slug,
+                "description": "Updated description",
+                "backend_requirements": [],
+                "frontend_requirements": [],
+                "admin_requirements": [],
             },
         ),
         content_type="application/json",
@@ -169,11 +168,6 @@ def test_template_package_export_and_import(client):
         created_by=owner,
         slug="shared-app",
     )
-    prompt = PromptTemplateFactory(
-        is_default=False,
-        created_by=owner,
-        slug="shared-prompt",
-    )
     block = ContentBlockFactory(
         is_system=False,
         created_by=owner,
@@ -193,7 +187,6 @@ def test_template_package_export_and_import(client):
         data=json.dumps(
             {
                 "app_template_slugs": [app_template.slug],
-                "prompt_template_slugs": [prompt.slug],
                 "bundle_slugs": [bundle.slug],
                 "block_refs": [],
             },
@@ -226,8 +219,64 @@ def test_template_package_export_and_import(client):
     # The importer can't see the owner's private assets, so the "rename"
     # strategy creates their own copies under fresh slugs.
     assert imported["app_templates"] == [f"{app_template.slug}-2"]
-    assert imported["prompt_templates"] == [f"{prompt.slug}-2"]
     assert imported["bundles"] == [f"{bundle.slug}-2"]
+
+
+@pytest.mark.django_db
+def test_import_skips_legacy_prompt_templates_section(client):
+    """Packages exported before PromptTemplate removal must still import."""
+    user = UserFactory()
+    client.force_login(user)
+
+    legacy_package = {
+        "template_package_schema_version": 1,
+        "kind": "llm-lab-template-package",
+        "assets": {
+            "app_templates": [
+                {
+                    "name": "Legacy App",
+                    "slug": "legacy-app",
+                    "category": "Productivity",
+                    "description": "From an old export",
+                    "backend_requirements": ["Store items"],
+                    "frontend_requirements": [],
+                    "admin_requirements": [],
+                    "api_endpoints": [],
+                    "data_model": {},
+                    "admin_api_endpoints": [],
+                },
+            ],
+            "prompt_templates": [
+                {
+                    "name": "Legacy Prompt",
+                    "slug": "legacy-prompt",
+                    "stage": "backend",
+                    "role": "system",
+                    "content": "You are a helpful assistant.",
+                    "description": "",
+                    "version": 1,
+                },
+            ],
+            "blocks": [],
+            "bundles": [],
+        },
+    }
+
+    response = client.post(
+        "/api/generation/packages/import/",
+        data=json.dumps(
+            {
+                "package_text": json.dumps(legacy_package),
+                "conflict_strategy": "rename",
+            },
+        ),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    imported = response.json()
+    assert imported["app_templates"] == ["legacy-app"]
+    assert "prompt_templates" not in imported
 
 
 def _bundle_payload(block, **overrides):
