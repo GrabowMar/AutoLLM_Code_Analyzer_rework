@@ -15,7 +15,6 @@ from backend.generation.models import ExperimentCondition
 from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
-from backend.generation.models import PromptTemplate
 from backend.generation.models import TemplateBundle
 
 # ── Template schemas ──────────────────────────────────────────────────
@@ -134,7 +133,6 @@ class BundleImportSchema(Schema):
 
 class TemplatePackageExportSchema(Schema):
     app_template_slugs: list[str] = []
-    prompt_template_slugs: list[str] = []
     bundle_slugs: list[str] = []
     block_refs: list[BlockRefSchema] = []
 
@@ -149,40 +147,12 @@ class StarterTemplatePackageSchema(Schema):
     name: str
     description: str
     app_template_count: int
-    prompt_template_count: int
     block_count: int
     bundle_count: int
 
 
 class StarterTemplatePackageImportSchema(Schema):
     conflict_strategy: str = "rename"
-
-
-class PromptTemplateSchema(ModelSchema):
-    class Meta:
-        model = PromptTemplate
-        fields = [
-            "id",
-            "name",
-            "slug",
-            "stage",
-            "role",
-            "content",
-            "description",
-            "is_default",
-            "version",
-            "created_at",
-            "updated_at",
-        ]
-
-
-class PromptTemplateCreateSchema(Schema):
-    name: str
-    slug: str
-    stage: str
-    role: str
-    content: str
-    description: str = ""
 
 
 # ── Job schemas ───────────────────────────────────────────────────────

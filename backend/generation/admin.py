@@ -5,7 +5,6 @@ from backend.generation.models import CopilotIteration
 from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
-from backend.generation.models import PromptTemplate
 
 
 @admin.register(AppRequirementTemplate)
@@ -13,14 +12,6 @@ class AppRequirementTemplateAdmin(admin.ModelAdmin):
     list_display = ["name", "slug", "category", "is_default", "created_at"]
     list_filter = ["category", "is_default"]
     search_fields = ["name", "slug", "category"]
-    prepopulated_fields = {"slug": ("name",)}
-
-
-@admin.register(PromptTemplate)
-class PromptTemplateAdmin(admin.ModelAdmin):
-    list_display = ["name", "stage", "role", "is_default", "version", "created_at"]
-    list_filter = ["stage", "role", "is_default"]
-    search_fields = ["name", "slug"]
     prepopulated_fields = {"slug": ("name",)}
 
 

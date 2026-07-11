@@ -18,13 +18,11 @@ from backend.generation.services.bundle_packages.constants import TEMPLATE_PACKA
 from backend.generation.services.bundle_packages.visibility import visible_app_templates_for
 from backend.generation.services.bundle_packages.visibility import visible_blocks_for
 from backend.generation.services.bundle_packages.visibility import visible_bundles_for
-from backend.generation.services.bundle_packages.visibility import visible_prompt_templates_for
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
 
     from backend.generation.models import AppRequirementTemplate
-    from backend.generation.models import PromptTemplate
 
 
 def export_bundle_package(bundle: TemplateBundle) -> dict[str, Any]:
@@ -41,12 +39,10 @@ def export_template_package(
     *,
     user: AbstractUser,
     app_template_slugs: list[str] | None = None,
-    prompt_template_slugs: list[str] | None = None,
     bundle_slugs: list[str] | None = None,
     block_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     app_template_slugs = app_template_slugs or []
-    prompt_template_slugs = prompt_template_slugs or []
     bundle_slugs = bundle_slugs or []
     block_refs = block_refs or []
 
@@ -77,12 +73,6 @@ def export_template_package(
             "app_templates": [
                 _serialize_app_template(item)
                 for item in visible_app_templates_for(user).filter(slug__in=app_template_slugs).order_by("name")
-            ],
-            "prompt_templates": [
-                _serialize_prompt_template(item)
-                for item in visible_prompt_templates_for(user)
-                .filter(slug__in=prompt_template_slugs)
-                .order_by("stage", "role", "name")
             ],
             "blocks": [_serialize_block(block) for block in blocks],
             "bundles": [_serialize_bundle(bundle) for bundle in bundles],
@@ -135,18 +125,6 @@ def _serialize_app_template(template: AppRequirementTemplate) -> dict[str, Any]:
         "api_endpoints": template.api_endpoints or [],
         "data_model": template.data_model or {},
         "admin_api_endpoints": template.admin_api_endpoints or [],
-    }
-
-
-def _serialize_prompt_template(template: PromptTemplate) -> dict[str, Any]:
-    return {
-        "name": template.name,
-        "slug": template.slug,
-        "stage": template.stage,
-        "role": template.role,
-        "content": template.content,
-        "description": template.description,
-        "version": template.version,
     }
 
 

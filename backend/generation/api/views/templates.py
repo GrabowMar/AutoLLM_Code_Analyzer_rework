@@ -1,20 +1,16 @@
-"""Template CRUD endpoints (scaffolding, app requirement, prompt templates)."""
+"""Template CRUD endpoints (stacks, app requirement templates)."""
 
 from __future__ import annotations
 
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
-from ninja import Query
 from ninja.errors import HttpError
 
 from backend.generation.api.schema import AppRequirementCreateSchema
 from backend.generation.api.schema import AppRequirementTemplateSchema
-from backend.generation.api.schema import PromptTemplateCreateSchema
-from backend.generation.api.schema import PromptTemplateSchema
 from backend.generation.api.schema import StackSchema
 from backend.generation.api.views._router import router
 from backend.generation.models import AppRequirementTemplate
-from backend.generation.models import PromptTemplate
 from backend.runtime.services.scaffolding import load_manifest
 
 
@@ -83,45 +79,5 @@ def update_app_template(request, slug: str, payload: AppRequirementCreateSchema)
 @router.delete("/app-templates/{slug}/")
 def delete_app_template(request, slug: str):
     template = _mutable_template_or_403(AppRequirementTemplate, request.auth, slug=slug)
-    template.delete()
-    return {"success": True}
-
-
-# -- Prompt Templates ---------------------------------------------------
-
-
-@router.get("/prompt-templates/", response=list[PromptTemplateSchema])
-def list_prompt_templates(request, stage: str = Query(""), role: str = Query("")):
-    """List prompt templates with optional filtering."""
-    qs = _visible_templates(PromptTemplate, request.auth)
-    if stage:
-        qs = qs.filter(stage=stage)
-    if role:
-        qs = qs.filter(role=role)
-    return qs
-
-
-@router.post("/prompt-templates/", response=PromptTemplateSchema)
-def create_prompt_template(request, payload: PromptTemplateCreateSchema):
-    return PromptTemplate.objects.create(**payload.dict(), created_by=request.auth)
-
-
-@router.get("/prompt-templates/{slug}/", response=PromptTemplateSchema)
-def get_prompt_template(request, slug: str):
-    return get_object_or_404(_visible_templates(PromptTemplate, request.auth), slug=slug)
-
-
-@router.put("/prompt-templates/{slug}/", response=PromptTemplateSchema)
-def update_prompt_template(request, slug: str, payload: PromptTemplateCreateSchema):
-    template = _mutable_template_or_403(PromptTemplate, request.auth, slug=slug)
-    for attr, value in payload.dict().items():
-        setattr(template, attr, value)
-    template.save()
-    return template
-
-
-@router.delete("/prompt-templates/{slug}/")
-def delete_prompt_template(request, slug: str):
-    template = _mutable_template_or_403(PromptTemplate, request.auth, slug=slug)
     template.delete()
     return {"success": True}

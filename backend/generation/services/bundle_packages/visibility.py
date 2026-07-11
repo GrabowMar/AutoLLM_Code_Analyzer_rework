@@ -8,7 +8,6 @@ from django.db.models import Q
 
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
-from backend.generation.models import PromptTemplate
 from backend.generation.models import TemplateBundle
 
 if TYPE_CHECKING:
@@ -17,13 +16,6 @@ if TYPE_CHECKING:
 
 def visible_app_templates_for(user: AbstractUser | None):
     qs = AppRequirementTemplate.objects.all()
-    if user and getattr(user, "is_authenticated", False):
-        return qs.filter(Q(is_default=True) | Q(created_by=user))
-    return qs.filter(is_default=True)
-
-
-def visible_prompt_templates_for(user: AbstractUser | None):
-    qs = PromptTemplate.objects.all()
     if user and getattr(user, "is_authenticated", False):
         return qs.filter(Q(is_default=True) | Q(created_by=user))
     return qs.filter(is_default=True)

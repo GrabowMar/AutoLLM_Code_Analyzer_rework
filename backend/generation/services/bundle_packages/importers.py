@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -12,7 +13,6 @@ from django.utils.text import slugify
 
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
-from backend.generation.models import PromptTemplate
 from backend.generation.models import TemplateBundle
 from backend.generation.services.bundle_packages.constants import ALLOWED_CONFLICT_STRATEGIES
 from backend.generation.services.bundle_packages.constants import BUNDLE_PACKAGE_KIND
@@ -23,6 +23,8 @@ from backend.generation.services.bundle_packages.visibility import visible_block
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
+
+logger = logging.getLogger(__name__)
 
 
 def parse_bundle_package_text(package_text: str) -> dict[str, Any]:
@@ -107,10 +109,18 @@ def _import_assets(
     block_ref_map: dict[tuple[str, int], tuple[str, int]] = {}
     imported: dict[str, list[Any]] = {
         "app_templates": [],
-        "prompt_templates": [],
         "blocks": [],
         "bundles": [],
     }
+
+    # Older package files may still carry a prompt_templates section for the
+    # removed PromptTemplate model; the rest of the package imports normally.
+    skipped_prompts = len(assets.get("prompt_templates") or [])
+    if skipped_prompts:
+        logger.warning(
+            "Skipping %d legacy prompt_templates entries in package import",
+            skipped_prompts,
+        )
 
     with transaction.atomic():
         for raw_app in assets.get("app_templates", []):
@@ -120,14 +130,6 @@ def _import_assets(
                 conflict_strategy=conflict_strategy,
             )
             imported["app_templates"].append(template)
-
-        for raw_prompt in assets.get("prompt_templates", []):
-            template = _import_prompt_template(
-                raw_prompt,
-                user=user,
-                conflict_strategy=conflict_strategy,
-            )
-            imported["prompt_templates"].append(template)
 
         for raw_block in assets.get("blocks", []):
             original_slug = str(raw_block.get("slug", "")).strip()
@@ -194,51 +196,6 @@ def _import_app_template(
 
     payload["slug"] = _unique_slug(AppRequirementTemplate, payload["slug"])
     return AppRequirementTemplate.objects.create(
-        **payload,
-        is_default=False,
-        created_by=user,
-    )
-
-
-def _import_prompt_template(
-    raw_template: Any,
-    *,
-    user: AbstractUser,
-    conflict_strategy: str,
-) -> PromptTemplate:
-    payload = _validate_prompt_template_payload(raw_template)
-    existing = PromptTemplate.objects.filter(slug=payload["slug"]).first()
-    if existing is None:
-        return PromptTemplate.objects.create(
-            **payload,
-            is_default=False,
-            created_by=user,
-        )
-
-    if _prompt_template_matches(existing, payload) and _is_visible_defaultish(existing, user):
-        return existing
-
-    if conflict_strategy == "overwrite" and existing.created_by_id == user.id:
-        _assign_fields(existing, payload)
-        existing.save(
-            update_fields=[
-                "name",
-                "stage",
-                "role",
-                "content",
-                "description",
-                "version",
-                "updated_at",
-            ],
-        )
-        return existing
-
-    if conflict_strategy == "error":
-        msg = f"Prompt template conflict for slug {payload['slug']}"
-        raise ValueError(msg)
-
-    payload["slug"] = _unique_slug(PromptTemplate, payload["slug"])
-    return PromptTemplate.objects.create(
         **payload,
         is_default=False,
         created_by=user,
@@ -396,26 +353,6 @@ def _validate_app_template_payload(raw_template: Any) -> dict[str, Any]:
     }
 
 
-def _validate_prompt_template_payload(raw_template: Any) -> dict[str, Any]:
-    if not isinstance(raw_template, dict):
-        msg = "Prompt template must be an object"
-        raise ValueError(msg)
-    slug = str(raw_template.get("slug", "")).strip()
-    name = str(raw_template.get("name", "")).strip()
-    if not slug or not name:
-        msg = "Prompt template requires name and slug"
-        raise ValueError(msg)
-    return {
-        "name": name,
-        "slug": slug,
-        "stage": str(raw_template.get("stage", "")).strip(),
-        "role": str(raw_template.get("role", "")).strip(),
-        "content": str(raw_template.get("content", "")),
-        "description": str(raw_template.get("description", "")).strip(),
-        "version": int(raw_template.get("version", 1)),
-    }
-
-
 def _validate_block_payload(raw_block: Any) -> dict[str, Any]:
     if not isinstance(raw_block, dict):
         msg = "Each block must be an object"
@@ -509,17 +446,6 @@ def _app_template_matches(existing: AppRequirementTemplate, payload: dict[str, A
         and (existing.api_endpoints or []) == payload["api_endpoints"]
         and (existing.data_model or {}) == payload["data_model"]
         and (existing.admin_api_endpoints or []) == payload["admin_api_endpoints"]
-    )
-
-
-def _prompt_template_matches(existing: PromptTemplate, payload: dict[str, Any]) -> bool:
-    return (
-        existing.name == payload["name"]
-        and existing.stage == payload["stage"]
-        and existing.role == payload["role"]
-        and existing.content == payload["content"]
-        and existing.description == payload["description"]
-        and existing.version == payload["version"]
     )
 
 

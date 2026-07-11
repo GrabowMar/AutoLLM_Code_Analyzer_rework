@@ -30,44 +30,6 @@ STARTER_TEMPLATE_PACKAGES = {
             "requirements/operations_incident_center.json",
             "requirements/commerce_subscription_billing.json",
         ],
-        "prompt_templates": [
-            {
-                "name": "FastAPI Backend System Prompt v1",
-                "slug": "fastapi-backend-system-v1",
-                "stage": "backend",
-                "role": "system",
-                "description": "FastAPI-oriented system prompt for sample generation",
-                "path": "prompts/fastapi/backend/system.md.jinja2",
-                "version": 1,
-            },
-            {
-                "name": "FastAPI Backend User Prompt v1",
-                "slug": "fastapi-backend-user-v1",
-                "stage": "backend",
-                "role": "user",
-                "description": "FastAPI-oriented user prompt for sample generation",
-                "path": "prompts/fastapi/backend/user.md.jinja2",
-                "version": 1,
-            },
-            {
-                "name": "Vue Frontend System Prompt v1",
-                "slug": "vue-frontend-system-v1",
-                "stage": "frontend",
-                "role": "system",
-                "description": "Vue-oriented system prompt for sample generation",
-                "path": "prompts/vue/frontend/system.md.jinja2",
-                "version": 1,
-            },
-            {
-                "name": "Vue Frontend User Prompt v1",
-                "slug": "vue-frontend-user-v1",
-                "stage": "frontend",
-                "role": "user",
-                "description": "Vue-oriented user prompt for sample generation",
-                "path": "prompts/vue/frontend/user.md.jinja2",
-                "version": 1,
-            },
-        ],
         "blocks": [
             {
                 "block_type": ContentBlock.BlockType.PROMPT_STAGE,
@@ -173,7 +135,6 @@ def list_starter_template_packages() -> list[dict[str, Any]]:
                 "name": str(package.get("starter_name", slug)),
                 "description": str(package.get("starter_description", "")),
                 "app_template_count": len(assets.get("app_templates", [])),
-                "prompt_template_count": len(assets.get("prompt_templates", [])),
                 "block_count": len(assets.get("blocks", [])),
                 "bundle_count": len(assets.get("bundles", [])),
             },
@@ -196,18 +157,6 @@ def build_starter_template_package(slug: str) -> dict[str, Any]:
         "starter_description": spec["description"],
         "assets": {
             "app_templates": [_load_json_data_file(relative_path) for relative_path in spec["app_template_files"]],
-            "prompt_templates": [
-                {
-                    "name": prompt["name"],
-                    "slug": prompt["slug"],
-                    "stage": prompt["stage"],
-                    "role": prompt["role"],
-                    "content": _read_data_text(prompt["path"]),
-                    "description": prompt["description"],
-                    "version": prompt["version"],
-                }
-                for prompt in spec["prompt_templates"]
-            ],
             "blocks": [_build_starter_block(block) for block in spec["blocks"]],
             "bundles": list(spec["bundles"]),
         },

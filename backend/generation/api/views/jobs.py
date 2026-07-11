@@ -181,8 +181,6 @@ def _load_job_for_cloning(request, job_id: str) -> GenerationJob:
             "model",
             "app_requirement",
             "template_bundle",
-            "backend_prompt_template",
-            "frontend_prompt_template",
         ),
         id=job_id,
         created_by=request.auth,
