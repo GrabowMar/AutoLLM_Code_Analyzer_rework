@@ -18,6 +18,7 @@ from backend.generation.models import Experiment
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
 from backend.generation.services.dispatcher import dispatch_job
+from backend.generation.services.llm_params import merge_llm_params
 from backend.generation.services.openrouter_client import OpenRouterClient
 from backend.generation.services.profile_resolver import apply_snapshot_to_job
 from backend.generation.services.profile_resolver import derive_experiment_seed
@@ -59,11 +60,9 @@ def expand_matrix(experiment: Experiment) -> list[MatrixCell]:
     ]
 
 
-def _condition_param(condition: ExperimentCondition, experiment: Experiment, key: str) -> Any:
-    overrides = condition.param_overrides or {}
-    if key in overrides:
-        return overrides[key]
-    return getattr(experiment, key)
+def _condition_llm_params(condition: ExperimentCondition, experiment: Experiment) -> dict[str, Any]:
+    """Experiment defaults + condition overrides, collapsed into one per-run layer."""
+    return merge_llm_params(experiment.llm_defaults, condition.param_overrides)
 
 
 def _estimate_cell_cost(cell: MatrixCell) -> float:
@@ -152,9 +151,7 @@ def launch_experiment(experiment: Experiment, user: AbstractUser) -> GenerationB
     for cell in pending_cells:
         condition = cell.condition
         app_req = cell.app_requirement
-        temperature = _condition_param(condition, experiment, "temperature")
-        max_tokens = _condition_param(condition, experiment, "max_tokens")
-        top_p = _condition_param(condition, experiment, "top_p")
+        llm_params = _condition_llm_params(condition, experiment)
 
         job = GenerationJob.objects.create(
             mode=GenerationJob.Mode.SCAFFOLDING,
@@ -167,9 +164,12 @@ def launch_experiment(experiment: Experiment, user: AbstractUser) -> GenerationB
             stack_slug=canonical_stack_slug(condition.profile.scaffolding_slug),
             app_requirement=app_req,
             profile=condition.profile,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            top_p=top_p,
+            llm_params=llm_params,
+            # Legacy columns mirror the collapsed layer so pre-snapshot code
+            # paths (and the admin) see the effective values.
+            temperature=llm_params.get("temperature", 0.3),
+            max_tokens=llm_params.get("max_tokens", 32000),
+            top_p=llm_params.get("top_p"),
         )
         if experiment.base_seed is not None:
             job.experiment_seed = derive_experiment_seed(
@@ -260,9 +260,7 @@ def export_experiment(experiment: Experiment) -> dict[str, Any]:
             "status": experiment.status,
             "repeats": experiment.repeats,
             "base_seed": experiment.base_seed,
-            "temperature": experiment.temperature,
-            "max_tokens": experiment.max_tokens,
-            "top_p": experiment.top_p,
+            "llm_defaults": experiment.llm_defaults,
             "continuation_limit": experiment.continuation_limit,
             "enable_repair": experiment.enable_repair,
             "created_at": experiment.created_at.isoformat(),

@@ -19,6 +19,7 @@ from backend.generation.services.generation_validation import build_repair_promp
 from backend.generation.services.generation_validation import extract_repaired_file
 from backend.generation.services.generation_validation import validate_frontend_files
 from backend.generation.services.generation_validation import validate_python_files
+from backend.generation.services.llm_params import sampling_params
 from backend.generation.services.metrics import JobMetrics
 from backend.generation.services.openrouter_client import OpenRouterClient
 from backend.generation.services.openrouter_client import OpenRouterError
@@ -362,18 +363,18 @@ class GenerationService:
         llm_config = {}
         if isinstance(job.resolved_bundle, dict):
             llm_config = job.resolved_bundle.get("llm") or {}
-        top_p = llm_config.get("top_p")
+        params = sampling_params(llm_config)
+        # Legacy fallback for pre-snapshot jobs whose llm section is empty.
+        params.setdefault("temperature", job.temperature)
+        params.setdefault("max_tokens", job.max_tokens)
         seed = job.experiment_seed
-        max_tokens = clamped_max_tokens(job.max_tokens, messages, llm_config)
+        params["max_tokens"] = clamped_max_tokens(params["max_tokens"], messages, llm_config)
 
         request_payload = {
             "model": model_id,
             "messages": messages,
-            "temperature": job.temperature,
-            "max_tokens": max_tokens,
+            **params,
         }
-        if top_p is not None:
-            request_payload["top_p"] = top_p
         if seed is not None:
             request_payload["seed"] = seed
 
@@ -382,10 +383,10 @@ class GenerationService:
             response = client.chat_completion(
                 model=model_id,
                 messages=messages,
-                temperature=job.temperature,
-                max_tokens=max_tokens,
-                top_p=top_p,
+                temperature=params["temperature"],
+                max_tokens=params["max_tokens"],
                 seed=seed,
+                params=params,
             )
         except OpenRouterError:
             GenerationArtifact.objects.create(

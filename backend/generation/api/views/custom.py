@@ -27,7 +27,9 @@ from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
 from backend.generation.models import GenerationProfile
 from backend.generation.services.dispatcher import dispatch_job
+from backend.generation.services.llm_params import validate_llm_params
 from backend.generation.services.profile_resolver import apply_snapshot_to_job
+from backend.generation.services.profile_resolver import build_custom_snapshot
 from backend.generation.services.profile_resolver import get_profile_for_app
 from backend.llm_models.models import LLMModel
 from backend.runtime.services.scaffolding import canonical_stack_slug
@@ -48,12 +50,21 @@ def _preflight_api_key(request) -> tuple[int, dict] | None:
     return None
 
 
+def _validated_llm_params(payload) -> dict:
+    """Validate the optional llm_params section of a job payload (400 on error)."""
+    try:
+        return validate_llm_params(payload.llm_params.as_params() if payload.llm_params else {})
+    except ValueError as exc:
+        raise HttpError(400, str(exc)) from exc
+
+
 @router.post("/jobs/custom/", response={200: GenerationJobSchema, 400: dict})
 def create_custom_job(request, payload: CustomJobCreateSchema):
     """Create a custom mode generation job."""
     err = _preflight_api_key(request)
     if err is not None:
         return err
+    llm_overrides = _validated_llm_params(payload)
     model = get_object_or_404(LLMModel, id=payload.model_id)
     job = GenerationJob.objects.create(
         mode=GenerationJob.Mode.CUSTOM,
@@ -63,6 +74,14 @@ def create_custom_job(request, payload: CustomJobCreateSchema):
         custom_user_prompt=payload.user_prompt,
         temperature=payload.temperature,
         max_tokens=payload.max_tokens,
+        llm_params=llm_overrides,
+        experiment_seed=payload.seed,
+        resolved_bundle=build_custom_snapshot(
+            model=model,
+            temperature=payload.temperature,
+            max_tokens=payload.max_tokens,
+            llm_overrides=llm_overrides,
+        ),
     )
     dispatch_job(job)
     return GenerationJob.objects.get(id=job.id)
@@ -74,6 +93,7 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
     err = _preflight_api_key(request)
     if err is not None:
         return err
+    llm_overrides = _validated_llm_params(payload)
     if not is_known_stack_slug(payload.stack_slug):
         raise HttpError(404, f"Unknown stack slug: {payload.stack_slug}")
     app_reqs = AppRequirementTemplate.objects.filter(
@@ -119,6 +139,7 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
                     profile=job_bundle,
                     temperature=payload.temperature,
                     max_tokens=payload.max_tokens,
+                    llm_params=llm_overrides,
                 )
                 job_count += 1
                 try:
