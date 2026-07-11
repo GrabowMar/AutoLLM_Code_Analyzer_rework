@@ -8,9 +8,9 @@ import pytest
 
 from backend.generation.models import Experiment
 from backend.generation.models import GenerationJob
-from backend.generation.models import TemplateBundle
+from backend.generation.models import GenerationProfile
 from backend.generation.services import experiments as experiments_svc
-from backend.generation.services.bundle_resolver import derive_experiment_seed
+from backend.generation.services.profile_resolver import derive_experiment_seed
 from backend.generation.tests.factories import AppRequirementTemplateFactory
 from backend.generation.tests.factories import ExperimentConditionFactory
 from backend.generation.tests.factories import ExperimentFactory
@@ -20,9 +20,9 @@ from backend.users.tests.factories import UserFactory
 pytestmark = pytest.mark.django_db
 
 
-def _real_flask_bundle() -> TemplateBundle:
+def _real_flask_bundle() -> GenerationProfile:
     """The real auto-seeded default bundle — has valid, resolvable block_refs."""
-    return TemplateBundle.objects.filter(slug="system-scaffolding-standard").order_by("-version").first()
+    return GenerationProfile.objects.filter(slug="system-scaffolding-standard").order_by("-version").first()
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def condition(experiment):
     bundle = _real_flask_bundle()
     assert bundle is not None, "system-scaffolding-standard must be auto-seeded"
     model = LLMModelFactory(input_price_per_token=0.000001, output_price_per_token=0.000002)
-    return ExperimentConditionFactory(experiment=experiment, template_bundle=bundle, model=model)
+    return ExperimentConditionFactory(experiment=experiment, profile=bundle, model=model)
 
 
 class TestExpandMatrix:
@@ -76,7 +76,7 @@ class TestPreviewExperiment:
     def test_preview_zero_cost_when_model_has_no_pricing(self, experiment):
         bundle = _real_flask_bundle()
         free_model = LLMModelFactory(input_price_per_token=0.0, output_price_per_token=0.0)
-        ExperimentConditionFactory(experiment=experiment, template_bundle=bundle, model=free_model)
+        ExperimentConditionFactory(experiment=experiment, profile=bundle, model=free_model)
 
         preview = experiments_svc.preview_experiment(experiment)
 
@@ -161,7 +161,7 @@ class TestLaunchExperiment:
         model = LLMModelFactory()
         cond = ExperimentConditionFactory(
             experiment=experiment,
-            template_bundle=bundle,
+            profile=bundle,
             model=model,
             param_overrides={"temperature": 0.9, "max_tokens": 4000},
         )

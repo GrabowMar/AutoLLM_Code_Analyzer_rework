@@ -9,12 +9,12 @@
 		type AppRequirementTemplate,
 		type ContentBlock,
 		type StarterTemplatePackage,
-		type TemplateBundle,
+		type GenerationProfile,
 	} from '$lib/api/client';
 
 	interface Props {
-		bundles: TemplateBundle[];
-		bundlesLoading: boolean;
+		profiles: GenerationProfile[];
+		profilesLoading: boolean;
 		starterPackages: StarterTemplatePackage[];
 		starterPackagesLoading: boolean;
 		appTemplates: AppRequirementTemplate[];
@@ -25,8 +25,8 @@
 		onRefreshAll: () => Promise<void>;
 	}
 	let {
-		bundles,
-		bundlesLoading,
+		profiles,
+		profilesLoading,
 		starterPackages,
 		starterPackagesLoading,
 		appTemplates,
@@ -132,7 +132,7 @@
 		<div>
 			<h3 class="text-sm font-semibold text-foreground">Template packages</h3>
 			<p class="text-xs text-muted-foreground">
-				Pack app templates, blocks, and bundles into one shareable export.
+				Pack app templates, blocks, and profiles into one shareable export.
 			</p>
 		</div>
 		<div class="flex flex-wrap gap-2">
@@ -147,7 +147,7 @@
 				<div>
 					<h4 class="text-sm font-semibold text-foreground">Starter packages</h4>
 					<p class="text-xs text-muted-foreground">
-						One-click imports for built-in sample app requirements, blocks, and bundles.
+						One-click imports for built-in sample app requirements, blocks, and profiles.
 					</p>
 				</div>
 				<Badge variant="outline" class="text-[10px]">Uses {conflictStrategy} on conflict</Badge>
@@ -170,7 +170,7 @@
 								<div class="flex flex-wrap gap-1.5">
 									<Badge variant="outline" class="text-[9px]">{starter.app_template_count} apps</Badge>
 									<Badge variant="outline" class="text-[9px]">{starter.block_count} blocks</Badge>
-									<Badge variant="outline" class="text-[9px]">{starter.bundle_count} bundles</Badge>
+									<Badge variant="outline" class="text-[9px]">{starter.bundle_count} profiles</Badge>
 								</div>
 								<Button
 									size="sm"
@@ -194,7 +194,7 @@
 			<div>
 				<h4 class="text-sm font-semibold text-foreground">Package builder</h4>
 				<p class="text-xs text-muted-foreground">
-					Select the assets to ship together. Bundle-linked blocks are included automatically on export.
+					Select the assets to ship together. Profile-linked blocks are included automatically on export.
 				</p>
 			</div>
 			<div class="flex items-center gap-2">
@@ -241,15 +241,15 @@
 			</div>
 
 			<div class="space-y-2 xl:col-span-2">
-				<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Bundles</p>
+				<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Profiles</p>
 				<div class="flex flex-wrap gap-2">
-					{#each bundles as bundle}
+					{#each profiles as profile}
 						<button
 							type="button"
-							class="rounded-md border px-2.5 py-1 text-[11px] transition-colors cursor-pointer {isSelected('bundle', bundle.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
-							onclick={() => toggleSelection('bundle', bundle.slug)}
+							class="rounded-md border px-2.5 py-1 text-[11px] transition-colors cursor-pointer {isSelected('bundle', profile.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
+							onclick={() => toggleSelection('bundle', profile.slug)}
 						>
-							{bundle.name}
+							{profile.name}
 						</button>
 					{/each}
 				</div>
@@ -285,45 +285,44 @@
 	<div class="p-4 bg-muted/20 border border-muted/50 rounded-md">
 		<p class="text-xs text-muted-foreground leading-relaxed flex items-start gap-1.5">
 			<Package class="h-4 w-4 shrink-0 text-primary mt-0.5" />
-			Template bundles compose structural requirement blocks and models into reproducible generation snapshot plans.
-			Bundle exports are now superseded by template packages that can ship the whole setup together.
+			Generation profiles compose prompt blocks, a stack, and LLM defaults into the reproducible snapshot frozen onto every job.
 		</p>
 	</div>
 
-	{#if bundlesLoading}
+	{#if profilesLoading}
 		<div class="flex justify-center py-16">
 			<LoaderCircle class="h-6 w-6 animate-spin text-primary" />
 		</div>
-	{:else if bundles.length === 0}
+	{:else if profiles.length === 0}
 		<div class="py-16 text-center text-xs text-muted-foreground">
-			No bundles discovered yet. Import a starter package above or run <span class="bg-muted px-1.5 py-0.5 rounded font-mono text-[10px]">seed_generation_templates</span> inside LLM Lab.
+			No profiles discovered yet. Import a starter package above or run <span class="bg-muted px-1.5 py-0.5 rounded font-mono text-[10px]">seed_generation_templates</span> inside LLM Lab.
 		</div>
 	{:else}
 		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-			{#each bundles as bundle (bundle.id)}
+			{#each profiles as profile (profile.id)}
 				<div class="group relative rounded-md border border-border bg-card p-4 shadow-sm hover:border-primary/40 hover:shadow-md transition-all">
 					<div class="space-y-2">
 						<div class="flex items-start justify-between gap-1.5">
 							<div class="min-w-0">
-								<span class="font-bold text-sm block truncate text-foreground">{bundle.name}</span>
-								<span class="font-mono text-[9px] text-muted-foreground mt-0.5 block truncate">{bundle.slug}</span>
+								<span class="font-bold text-sm block truncate text-foreground">{profile.name}</span>
+								<span class="font-mono text-[9px] text-muted-foreground mt-0.5 block truncate">{profile.slug}</span>
 							</div>
 						</div>
-						<p class="text-xs text-muted-foreground line-clamp-2 leading-relaxed h-8">{bundle.description || '—'}</p>
+						<p class="text-xs text-muted-foreground line-clamp-2 leading-relaxed h-8">{profile.description || '—'}</p>
 						<div class="flex flex-wrap items-center gap-1.5 pt-2">
-							{#if bundle.is_default}
+							{#if profile.is_default}
 								<Badge variant="secondary" class="text-[9px] px-1.5 py-0">Default</Badge>
 							{/if}
-							{#if bundle.is_system}
+							{#if profile.is_system}
 								<Badge variant="outline" class="text-[9px] px-1.5 py-0 bg-muted/40">System</Badge>
 							{/if}
 							<Badge variant="outline" class="text-[9px] px-1.5 py-0 border-primary/20 text-primary font-mono tabular-nums bg-primary/[0.02]">
-								{bundle.block_refs?.length ?? 0} blocks
+								{profile.block_refs?.length ?? 0} blocks
 							</Badge>
 						</div>
 						<div class="text-[9px] text-muted-foreground pt-1 border-t flex justify-between items-center font-mono">
 							<span>Stack:</span>
-							<span class="font-semibold text-foreground">{bundle.scaffolding_slug}</span>
+							<span class="font-semibold text-foreground">{profile.scaffolding_slug}</span>
 						</div>
 					</div>
 				</div>

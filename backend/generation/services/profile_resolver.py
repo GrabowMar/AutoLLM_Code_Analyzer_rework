@@ -1,4 +1,4 @@
-"""Resolve template bundles into immutable job snapshots for scaffolding runs."""
+"""Resolve generation profiles into immutable job snapshots for scaffolding runs."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
-from backend.generation.models import TemplateBundle
+from backend.generation.models import GenerationProfile
 from backend.runtime.services.scaffolding import resolve_stack_slug
 
 if TYPE_CHECKING:
@@ -146,37 +146,37 @@ def bundle_slug_for_app(app_slug: str) -> str:
     return f"app-{app_slug.replace('_', '-')}"
 
 
-def _visible_bundles(user: AbstractUser | None):
-    """Non-archived bundles visible to *user*, latest version of each slug first."""
-    qs = TemplateBundle.objects.filter(is_archived=False).order_by("slug", "-version")
+def _visible_profiles(user: AbstractUser | None):
+    """Non-archived profiles visible to *user*, latest version of each slug first."""
+    qs = GenerationProfile.objects.filter(is_archived=False).order_by("slug", "-version")
     if user and getattr(user, "is_authenticated", False):
         return qs.filter(Q(is_system=True) | Q(created_by=user))
     return qs.filter(is_system=True)
 
 
-def get_bundle_for_app(
+def get_profile_for_app(
     app_req: AppRequirementTemplate,
     user: AbstractUser | None = None,
     scaffolding_slug: str | None = None,
-) -> TemplateBundle | None:
-    """Latest version of the per-app pilot bundle if seeded, else system default."""
+) -> GenerationProfile | None:
+    """Latest version of the per-app pilot profile if seeded, else system default."""
     slug = bundle_slug_for_app(app_req.slug)
-    qs = _visible_bundles(user).filter(slug=slug)
+    qs = _visible_profiles(user).filter(slug=slug)
     if scaffolding_slug:
-        bundle = qs.filter(scaffolding_slug=scaffolding_slug).first()
-        if bundle:
-            return bundle
-        return get_default_bundle(scaffolding_slug=scaffolding_slug, user=user)
+        profile = qs.filter(scaffolding_slug=scaffolding_slug).first()
+        if profile:
+            return profile
+        return get_default_profile(scaffolding_slug=scaffolding_slug, user=user)
 
-    return qs.first() or get_default_bundle(user=user)
+    return qs.first() or get_default_profile(user=user)
 
 
-def get_default_bundle(
+def get_default_profile(
     scaffolding_slug: str | None = None,
     user: AbstractUser | None = None,
-) -> TemplateBundle | None:
-    """Latest version of the applicable default bundle."""
-    qs = _visible_bundles(user)
+) -> GenerationProfile | None:
+    """Latest version of the applicable default profile."""
+    qs = _visible_profiles(user)
     if scaffolding_slug:
         matching_default = qs.filter(
             scaffolding_slug=scaffolding_slug,
@@ -200,33 +200,33 @@ def get_default_bundle(
     )
 
 
-def resolve_bundle_for_job(
+def resolve_profile_for_job(
     *,
-    template_bundle: TemplateBundle | None,
+    profile: GenerationProfile | None,
     scaffolding_slug: str,
     user: AbstractUser | None,
 ) -> tuple[list[dict[str, Any]], str, str, int]:
     """Return (block_refs, scaffolding_slug, bundle_slug, bundle_version) for snapshot building."""
-    if template_bundle:
+    if profile:
         return (
-            list(template_bundle.block_refs or []),
-            template_bundle.scaffolding_slug,
-            template_bundle.slug,
-            template_bundle.version,
+            list(profile.block_refs or []),
+            profile.scaffolding_slug,
+            profile.slug,
+            profile.version,
         )
 
-    if bundle := get_default_bundle(scaffolding_slug=scaffolding_slug, user=user):
-        return list(bundle.block_refs or []), bundle.scaffolding_slug, bundle.slug, bundle.version
+    if profile := get_default_profile(scaffolding_slug=scaffolding_slug, user=user):
+        return list(profile.block_refs or []), profile.scaffolding_slug, profile.slug, profile.version
 
     catalog = load_catalog()
     refs = catalog.get("default_block_refs", [])
     return refs, scaffolding_slug, "catalog", 1
 
 
-def build_resolved_bundle(
+def build_resolved_snapshot(
     *,
     app_requirement: AppRequirementTemplate,
-    template_bundle: TemplateBundle | None,
+    profile: GenerationProfile | None,
     scaffolding_slug: str,
     model: LLMModel | None,
     temperature: float,
@@ -236,8 +236,8 @@ def build_resolved_bundle(
     top_p: float | None = None,
 ) -> dict[str, Any]:
     """Build the full immutable snapshot dict for ``GenerationJob.resolved_bundle``."""
-    block_refs, bundle_scaffold_slug, resolved_bundle_slug, resolved_bundle_version = resolve_bundle_for_job(
-        template_bundle=template_bundle,
+    block_refs, bundle_scaffold_slug, resolved_bundle_slug, resolved_bundle_version = resolve_profile_for_job(
+        profile=profile,
         scaffolding_slug=scaffolding_slug,
         user=user,
     )
@@ -245,7 +245,7 @@ def build_resolved_bundle(
     prompt_templates = assemble_prompt_templates(resolved_blocks)
 
     app_dict = app_requirement_to_dict(app_requirement)
-    bundle_slug = template_bundle.slug if template_bundle else resolved_bundle_slug
+    bundle_slug = profile.slug if profile else resolved_bundle_slug
 
     # Reproducibility seed for an experiment run, not a crypto value.
     seed = experiment_seed if experiment_seed is not None else random.randint(0, 2_147_483_647)  # noqa: S311
@@ -306,16 +306,16 @@ def attach_rendered_backend_prompts(
 
 
 def snapshot_for_scaffolding_job(job: GenerationJob) -> dict[str, Any]:
-    """Create and return resolved bundle for a scaffolding job (caller saves on job)."""
+    """Create and return the resolved snapshot for a scaffolding job (caller saves on job)."""
     if not job.app_requirement:
         msg = "Scaffolding job requires app_requirement"
         raise ValueError(msg)
 
     scaffolding_slug = resolve_stack_slug(job)
 
-    snapshot = build_resolved_bundle(
+    snapshot = build_resolved_snapshot(
         app_requirement=job.app_requirement,
-        template_bundle=job.template_bundle,
+        profile=job.profile,
         scaffolding_slug=scaffolding_slug,
         model=job.model,
         temperature=job.temperature,

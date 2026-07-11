@@ -5,7 +5,7 @@ from django.core.management import call_command
 
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
-from backend.generation.models import TemplateBundle
+from backend.generation.models import GenerationProfile
 
 
 @pytest.mark.django_db
@@ -37,10 +37,10 @@ def test_seed_generation_templates_creates_sample_content():
         ).count()
         == 4
     )
-    fastapi_react_bundle = TemplateBundle.objects.get(slug="system-fastapi-react-standard")
+    fastapi_react_bundle = GenerationProfile.objects.get(slug="system-fastapi-react-standard")
     assert fastapi_react_bundle.scaffolding_slug == "fastapi-react"
     assert (
-        TemplateBundle.objects.filter(
+        GenerationProfile.objects.filter(
             slug__in=["system-fastapi-vue-standard", "system-fastapi-react-standard"],
         ).count()
         == 2

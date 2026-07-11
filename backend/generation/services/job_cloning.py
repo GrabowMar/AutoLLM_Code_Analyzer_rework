@@ -7,9 +7,9 @@ import random
 from typing import TYPE_CHECKING
 
 from backend.generation.models import GenerationJob
-from backend.generation.services.bundle_resolver import apply_snapshot_to_job
-from backend.generation.services.bundle_resolver import bundle_key_from_snapshot
-from backend.generation.services.bundle_resolver import run_fingerprint
+from backend.generation.services.profile_resolver import apply_snapshot_to_job
+from backend.generation.services.profile_resolver import bundle_key_from_snapshot
+from backend.generation.services.profile_resolver import run_fingerprint
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
@@ -39,7 +39,7 @@ def clone_job(
         model=original.model,
         stack_slug=original.stack_slug,
         app_requirement=original.app_requirement,
-        template_bundle=original.template_bundle,
+        profile=original.profile,
         custom_system_prompt=original.custom_system_prompt,
         custom_user_prompt=original.custom_user_prompt,
         temperature=original.temperature,

@@ -132,15 +132,15 @@ class ContentBlock(models.Model):
         return f"{self.slug} v{self.version} ({self.block_type})"
 
 
-class TemplateBundle(models.Model):
-    """Ordered set of content blocks + scaffold slug for reproducible runs."""
+class GenerationProfile(models.Model):
+    """Ordered set of content blocks + scaffold slug + LLM defaults for reproducible runs."""
 
     name = models.CharField(_("name"), max_length=200)
     slug = models.SlugField(_("slug"), max_length=200)
     version = models.PositiveIntegerField(
         _("version"),
         default=1,
-        help_text="Versions are immutable: editing a bundle creates version+1",
+        help_text="Versions are immutable: editing a profile creates version+1",
     )
     content_hash = models.CharField(_("content hash"), max_length=64, blank=True, default="")
     is_archived = models.BooleanField(
@@ -166,27 +166,27 @@ class TemplateBundle(models.Model):
         default=dict,
         blank=True,
     )
-    is_system = models.BooleanField(_("system bundle"), default=False)
-    is_default = models.BooleanField(_("default bundle"), default=False)
+    is_system = models.BooleanField(_("system profile"), default=False)
+    is_default = models.BooleanField(_("default profile"), default=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="template_bundles",
+        related_name="generation_profiles",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = _("Template Bundle")
-        verbose_name_plural = _("Template Bundles")
+        verbose_name = _("Generation Profile")
+        verbose_name_plural = _("Generation Profiles")
         ordering = ["-is_default", "-is_system", "name", "-version"]
         constraints = [
             models.UniqueConstraint(
                 fields=["slug", "version"],
-                name="generation_templatebundle_slug_version_uniq",
+                name="generation_generationprofile_slug_version_uniq",
             ),
         ]
 
@@ -265,7 +265,7 @@ class Experiment(models.Model):
 
 
 class ExperimentCondition(models.Model):
-    """One cell of the model x template-bundle matrix for an :class:`Experiment`."""
+    """One cell of the model x profile matrix for an :class:`Experiment`."""
 
     experiment = models.ForeignKey(
         Experiment,
@@ -273,8 +273,8 @@ class ExperimentCondition(models.Model):
         related_name="conditions",
     )
     label = models.CharField(_("label"), max_length=200, blank=True, default="")
-    template_bundle = models.ForeignKey(
-        TemplateBundle,
+    profile = models.ForeignKey(
+        GenerationProfile,
         on_delete=models.PROTECT,
         related_name="experiment_conditions",
     )
@@ -298,13 +298,13 @@ class ExperimentCondition(models.Model):
         ordering = ["id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["experiment", "template_bundle", "model"],
+                fields=["experiment", "profile", "model"],
                 name="generation_experimentcondition_uniq",
             ),
         ]
 
     def __str__(self) -> str:
-        return self.label or f"{self.model_id} / {self.template_bundle.slug}"
+        return self.label or f"{self.model_id} / {self.profile.slug}"
 
 
 class GenerationBatch(models.Model):
@@ -411,13 +411,17 @@ class GenerationJob(models.Model):
         blank=True,
         related_name="jobs",
     )
-    template_bundle = models.ForeignKey(
-        "TemplateBundle",
+    profile = models.ForeignKey(
+        "GenerationProfile",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="jobs",
     )
+    # Historical name kept on purpose: the column and its JSON keys
+    # (bundle_slug, bundle_version, ...) are frozen provenance shared with
+    # every already-created job row. "Bundle" here means what the UI now
+    # calls a generation profile.
     resolved_bundle = models.JSONField(
         _("resolved bundle"),
         default=dict,
@@ -437,13 +441,15 @@ class GenerationJob(models.Model):
         db_index=True,
         help_text="Hash of prompt material (templates + app spec + block versions); shared across repeats/models",
     )
+    # Historical name (analytics slice by this column): holds
+    # "<profile-slug>@<version>".
     bundle_key = models.CharField(
         _("bundle key"),
         max_length=220,
         blank=True,
         default="",
         db_index=True,
-        help_text='Denormalized "bundle-slug@version" slicing key',
+        help_text='Denormalized "profile-slug@version" slicing key',
     )
 
     # Experiment membership (a job is one run/cell of a designed experiment)

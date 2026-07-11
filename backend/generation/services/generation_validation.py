@@ -122,7 +122,7 @@ def _parse_esbuild_errors(output: str) -> list[str]:
 
 def build_repair_prompt(filename: str, code: str, errors: list[str]) -> str:
     """Render the repair round's user message from the ``repair-instructions`` block."""
-    from backend.generation.services.bundle_resolver import get_content_block
+    from backend.generation.services.profile_resolver import get_content_block
     from backend.generation.services.prompt_renderer import PromptRenderer
 
     block = get_content_block("repair-instructions", 1)

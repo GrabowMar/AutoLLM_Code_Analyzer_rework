@@ -10,14 +10,14 @@ import yaml
 from django.utils import timezone
 
 from backend.generation.models import ContentBlock
-from backend.generation.models import TemplateBundle
-from backend.generation.services.bundle_packages.constants import BUNDLE_PACKAGE_KIND
-from backend.generation.services.bundle_packages.constants import BUNDLE_PACKAGE_SCHEMA_VERSION
-from backend.generation.services.bundle_packages.constants import TEMPLATE_PACKAGE_KIND
-from backend.generation.services.bundle_packages.constants import TEMPLATE_PACKAGE_SCHEMA_VERSION
-from backend.generation.services.bundle_packages.visibility import visible_app_templates_for
-from backend.generation.services.bundle_packages.visibility import visible_blocks_for
-from backend.generation.services.bundle_packages.visibility import visible_bundles_for
+from backend.generation.models import GenerationProfile
+from backend.generation.services.packages.constants import BUNDLE_PACKAGE_KIND
+from backend.generation.services.packages.constants import BUNDLE_PACKAGE_SCHEMA_VERSION
+from backend.generation.services.packages.constants import TEMPLATE_PACKAGE_KIND
+from backend.generation.services.packages.constants import TEMPLATE_PACKAGE_SCHEMA_VERSION
+from backend.generation.services.packages.visibility import visible_app_templates_for
+from backend.generation.services.packages.visibility import visible_blocks_for
+from backend.generation.services.packages.visibility import visible_profiles_for
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from backend.generation.models import AppRequirementTemplate
 
 
-def export_bundle_package(bundle: TemplateBundle) -> dict[str, Any]:
+def export_bundle_package(bundle: GenerationProfile) -> dict[str, Any]:
     return {
         "bundle_package_schema_version": BUNDLE_PACKAGE_SCHEMA_VERSION,
         "kind": BUNDLE_PACKAGE_KIND,
@@ -46,7 +46,7 @@ def export_template_package(
     bundle_slugs = bundle_slugs or []
     block_refs = block_refs or []
 
-    bundles = list(visible_bundles_for(user).filter(slug__in=bundle_slugs).order_by("name"))
+    bundles = list(visible_profiles_for(user).filter(slug__in=bundle_slugs).order_by("name"))
     explicit_blocks = []
     for ref in block_refs:
         block = (
@@ -140,7 +140,7 @@ def _serialize_block(block: ContentBlock) -> dict[str, Any]:
     }
 
 
-def _serialize_bundle(bundle: TemplateBundle) -> dict[str, Any]:
+def _serialize_bundle(bundle: GenerationProfile) -> dict[str, Any]:
     return {
         "name": bundle.name,
         "slug": bundle.slug,

@@ -6,7 +6,7 @@
 		getStacks,
 		getAppTemplates,
 		getContentBlocks,
-		getTemplateBundles,
+		getGenerationProfiles,
 		createAppTemplate,
 		updateAppTemplate,
 		deleteAppTemplate,
@@ -16,12 +16,12 @@
 		type AppRequirementTemplate,
 		type ContentBlock,
 		type StarterTemplatePackage,
-		type TemplateBundle,
+		type GenerationProfile,
 	} from '$lib/api/client';
 	import StacksList from '$lib/components/templates/StacksList.svelte';
 	import AppTemplateList from '$lib/components/templates/AppTemplateList.svelte';
 	import AppTemplateForm from '$lib/components/templates/AppTemplateForm.svelte';
-	import BundlesTab from '$lib/components/templates/BundlesTab.svelte';
+	import ProfilesTab from '$lib/components/templates/ProfilesTab.svelte';
 	import PackageImportForm from '$lib/components/templates/PackageImportForm.svelte';
 	import Layers from '@lucide/svelte/icons/layers';
 	import Package from '@lucide/svelte/icons/package';
@@ -30,11 +30,11 @@
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Search from '@lucide/svelte/icons/search';
 
-	type TabId = 'stacks' | 'app' | 'bundles';
+	type TabId = 'stacks' | 'app' | 'profiles';
 	let activeTab = $state<TabId>('stacks');
 
-	let templateBundles = $state<TemplateBundle[]>([]);
-	let bundlesLoading = $state(true);
+	let profiles = $state<GenerationProfile[]>([]);
+	let profilesLoading = $state(true);
 
 	// Stacks (read-only, from the runtime scaffolding manifest)
 	let stacks = $state<Stack[]>([]);
@@ -100,14 +100,14 @@
 		blocksLoading = false;
 	}
 
-	async function loadBundles() {
-		bundlesLoading = true;
+	async function loadProfiles() {
+		profilesLoading = true;
 		try {
-			templateBundles = await getTemplateBundles();
+			profiles = await getGenerationProfiles();
 		} catch {
 			/* ignore */
 		}
-		bundlesLoading = false;
+		profilesLoading = false;
 	}
 
 	async function loadStarterPackages() {
@@ -121,14 +121,14 @@
 	}
 
 	async function refreshAllAssets() {
-		await Promise.all([loadApp(), loadBlocks(), loadBundles()]);
+		await Promise.all([loadApp(), loadBlocks(), loadProfiles()]);
 	}
 
 	onMount(() => {
 		loadStacks();
 		loadApp();
 		loadBlocks();
-		loadBundles();
+		loadProfiles();
 		loadStarterPackages();
 	});
 
@@ -266,11 +266,11 @@
 		</button>
 		<button
 			type="button"
-			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-200 whitespace-nowrap cursor-pointer {activeTab === 'bundles' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
-			onclick={() => handleTabChange('bundles')}
+			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-200 whitespace-nowrap cursor-pointer {activeTab === 'profiles' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
+			onclick={() => handleTabChange('profiles')}
 		>
 			<Package class="h-4 w-4" />
-			Bundles <span class="ml-1 text-xs opacity-60 font-mono">({templateBundles.length})</span>
+			Profiles <span class="ml-1 text-xs opacity-60 font-mono">({profiles.length})</span>
 		</button>
 	</div>
 
@@ -281,7 +281,7 @@
 		<div class="space-y-4 {isEditingOrCreating ? 'hidden lg:block' : ''}">
 
 			<!-- SEARCH & ACTIONS BAR (Only for CRUD tabs) -->
-			{#if activeTab !== 'bundles'}
+			{#if activeTab !== 'profiles'}
 				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-md border border-border bg-card p-3">
 					<div class="relative w-full sm:w-72">
 						<Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -318,10 +318,10 @@
 				/>
 			{/if}
 
-			{#if activeTab === 'bundles'}
-				<BundlesTab
-					bundles={templateBundles}
-					{bundlesLoading}
+			{#if activeTab === 'profiles'}
+				<ProfilesTab
+					profiles={profiles}
+					{profilesLoading}
 					{starterPackages}
 					{starterPackagesLoading}
 					{appTemplates}

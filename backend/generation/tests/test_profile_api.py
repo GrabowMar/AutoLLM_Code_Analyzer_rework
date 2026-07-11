@@ -7,7 +7,7 @@ from django.test import Client
 
 from backend.generation.tests.factories import AppRequirementTemplateFactory
 from backend.generation.tests.factories import ContentBlockFactory
-from backend.generation.tests.factories import TemplateBundleFactory
+from backend.generation.tests.factories import GenerationProfileFactory
 from backend.users.tests.factories import UserFactory
 
 
@@ -20,7 +20,7 @@ def test_list_app_templates_is_scoped_to_defaults_and_owner(client):
     owned_template = AppRequirementTemplateFactory(is_default=False, created_by=user)
     other_users_template = AppRequirementTemplateFactory(is_default=False, created_by=UserFactory())
 
-    response = client.get("/api/generation/app-templates/")
+    response = client.get("/api/generation/app-specs/")
 
     assert response.status_code == 200
     slugs = {item["slug"] for item in response.json()}
@@ -38,7 +38,7 @@ def test_non_owner_cannot_update_default_app_template(client):
     template = AppRequirementTemplateFactory(is_default=True, created_by=None)
 
     response = client.put(
-        f"/api/generation/app-templates/{template.slug}/",
+        f"/api/generation/app-specs/{template.slug}/",
         data=json.dumps(
             {
                 "name": template.name,
@@ -60,14 +60,14 @@ def test_bundle_export_yaml_and_import_round_trip(client):
     owner = UserFactory()
     client.force_login(owner)
     block = ContentBlockFactory(is_system=False, created_by=owner)
-    bundle = TemplateBundleFactory(
+    bundle = GenerationProfileFactory(
         is_system=False,
         is_default=False,
         created_by=owner,
         block_refs=[{"type": block.block_type, "slug": block.slug, "version": block.version}],
     )
 
-    export_response = client.get(f"/api/generation/bundles/{bundle.slug}/export/?format=yaml")
+    export_response = client.get(f"/api/generation/profiles/{bundle.slug}/export/?format=yaml")
 
     assert export_response.status_code == 200
     package_text = export_response.content.decode()
@@ -77,7 +77,7 @@ def test_bundle_export_yaml_and_import_round_trip(client):
     import_client = Client()
     import_client.force_login(importer)
     import_response = import_client.post(
-        "/api/generation/bundles/import/",
+        "/api/generation/profiles/import/",
         data=json.dumps(
             {
                 "package_text": package_text,
@@ -105,7 +105,7 @@ def test_bundle_import_renames_conflicting_block_and_bundle(client):
         created_by=user,
         content="Old content",
     )
-    TemplateBundleFactory(
+    GenerationProfileFactory(
         slug="shared-bundle",
         is_system=False,
         is_default=False,
@@ -143,7 +143,7 @@ blocks:
 """
 
     response = client.post(
-        "/api/generation/bundles/import/",
+        "/api/generation/profiles/import/",
         data=json.dumps(
             {
                 "package_text": package_text,
@@ -173,7 +173,7 @@ def test_template_package_export_and_import(client):
         created_by=owner,
         slug="shared-block-export",
     )
-    bundle = TemplateBundleFactory(
+    bundle = GenerationProfileFactory(
         is_system=False,
         is_default=False,
         created_by=owner,
@@ -299,7 +299,7 @@ def test_create_bundle_creates_version_1(client):
     block = ContentBlockFactory(is_system=False, created_by=user)
 
     response = client.post(
-        "/api/generation/bundles/",
+        "/api/generation/profiles/",
         data=json.dumps(_bundle_payload(block)),
         content_type="application/json",
     )
@@ -316,13 +316,13 @@ def test_create_bundle_rejects_duplicate_slug(client):
     client.force_login(user)
     block = ContentBlockFactory(is_system=False, created_by=user)
     client.post(
-        "/api/generation/bundles/",
+        "/api/generation/profiles/",
         data=json.dumps(_bundle_payload(block)),
         content_type="application/json",
     )
 
     response = client.post(
-        "/api/generation/bundles/",
+        "/api/generation/profiles/",
         data=json.dumps(_bundle_payload(block)),
         content_type="application/json",
     )
@@ -338,13 +338,13 @@ def test_update_bundle_creates_new_version_not_edit_in_place(client):
     block = ContentBlockFactory(is_system=False, created_by=user)
     other_block = ContentBlockFactory(is_system=False, created_by=user)
     client.post(
-        "/api/generation/bundles/",
+        "/api/generation/profiles/",
         data=json.dumps(_bundle_payload(block)),
         content_type="application/json",
     )
 
     response = client.put(
-        "/api/generation/bundles/manual-bundle/",
+        "/api/generation/profiles/manual-bundle/",
         data=json.dumps(_bundle_payload(other_block, description="Updated")),
         content_type="application/json",
     )
@@ -352,9 +352,9 @@ def test_update_bundle_creates_new_version_not_edit_in_place(client):
     assert response.status_code == 200
     assert response.json()["version"] == 2
 
-    from backend.generation.models import TemplateBundle
+    from backend.generation.models import GenerationProfile
 
-    versions = TemplateBundle.objects.filter(slug="manual-bundle").order_by("version")
+    versions = GenerationProfile.objects.filter(slug="manual-bundle").order_by("version")
     assert [v.version for v in versions] == [1, 2]
     assert versions[0].description != "Updated"  # v1 is untouched
     assert versions[1].description == "Updated"
@@ -366,13 +366,13 @@ def test_update_bundle_rejects_no_op_change(client):
     client.force_login(user)
     block = ContentBlockFactory(is_system=False, created_by=user)
     client.post(
-        "/api/generation/bundles/",
+        "/api/generation/profiles/",
         data=json.dumps(_bundle_payload(block)),
         content_type="application/json",
     )
 
     response = client.put(
-        "/api/generation/bundles/manual-bundle/",
+        "/api/generation/profiles/manual-bundle/",
         data=json.dumps(_bundle_payload(block)),
         content_type="application/json",
     )
@@ -387,26 +387,26 @@ def test_delete_bundle_archives_all_versions(client):
     block = ContentBlockFactory(is_system=False, created_by=user)
     other_block = ContentBlockFactory(is_system=False, created_by=user)
     client.post(
-        "/api/generation/bundles/",
+        "/api/generation/profiles/",
         data=json.dumps(_bundle_payload(block)),
         content_type="application/json",
     )
     client.put(
-        "/api/generation/bundles/manual-bundle/",
+        "/api/generation/profiles/manual-bundle/",
         data=json.dumps(_bundle_payload(other_block, description="v2")),
         content_type="application/json",
     )
 
-    response = client.delete("/api/generation/bundles/manual-bundle/")
+    response = client.delete("/api/generation/profiles/manual-bundle/")
 
     assert response.status_code == 200
     assert response.json()["archived_versions"] == 2
 
-    from backend.generation.models import TemplateBundle
+    from backend.generation.models import GenerationProfile
 
-    assert all(b.is_archived for b in TemplateBundle.objects.filter(slug="manual-bundle"))
+    assert all(b.is_archived for b in GenerationProfile.objects.filter(slug="manual-bundle"))
     # Archived bundles drop out of the listing.
-    list_response = client.get("/api/generation/bundles/")
+    list_response = client.get("/api/generation/profiles/")
     assert "manual-bundle" not in {b["slug"] for b in list_response.json()}
 
 
@@ -419,18 +419,18 @@ def test_non_owner_cannot_update_or_delete_others_bundle(client):
     owner_client = Client()
     owner_client.force_login(owner)
     owner_client.post(
-        "/api/generation/bundles/",
+        "/api/generation/profiles/",
         data=json.dumps(_bundle_payload(block)),
         content_type="application/json",
     )
 
     client.force_login(other)
     update_response = client.put(
-        "/api/generation/bundles/manual-bundle/",
+        "/api/generation/profiles/manual-bundle/",
         data=json.dumps(_bundle_payload(block, description="hijacked")),
         content_type="application/json",
     )
-    delete_response = client.delete("/api/generation/bundles/manual-bundle/")
+    delete_response = client.delete("/api/generation/profiles/manual-bundle/")
 
     # A private bundle owned by someone else isn't even visible to `other`,
     # so this 404s rather than 403s — it doesn't leak that the slug exists.
@@ -443,14 +443,14 @@ def test_non_staff_cannot_edit_visible_system_bundle(client):
     user = UserFactory()
     client.force_login(user)
     block = ContentBlockFactory(is_system=True)
-    TemplateBundleFactory(
+    GenerationProfileFactory(
         slug="system-under-test",
         is_system=True,
         block_refs=[{"type": block.block_type, "slug": block.slug, "version": block.version}],
     )
 
     response = client.put(
-        "/api/generation/bundles/system-under-test/",
+        "/api/generation/profiles/system-under-test/",
         data=json.dumps(_bundle_payload(block, slug="system-under-test")),
         content_type="application/json",
     )
@@ -465,14 +465,14 @@ def test_staff_can_edit_system_bundle(client):
     staff = UserFactory(is_staff=True)
     client.force_login(staff)
     block = ContentBlockFactory(is_system=True)
-    TemplateBundleFactory(
+    GenerationProfileFactory(
         slug="system-under-test",
         is_system=True,
         block_refs=[{"type": block.block_type, "slug": block.slug, "version": block.version}],
     )
 
     response = client.put(
-        "/api/generation/bundles/system-under-test/",
+        "/api/generation/profiles/system-under-test/",
         data=json.dumps(_bundle_payload(block, slug="system-under-test", description="staff edit")),
         content_type="application/json",
     )
@@ -488,17 +488,17 @@ def test_list_bundles_returns_only_latest_version_per_slug(client):
     block = ContentBlockFactory(is_system=False, created_by=user)
     other_block = ContentBlockFactory(is_system=False, created_by=user)
     client.post(
-        "/api/generation/bundles/",
+        "/api/generation/profiles/",
         data=json.dumps(_bundle_payload(block)),
         content_type="application/json",
     )
     client.put(
-        "/api/generation/bundles/manual-bundle/",
+        "/api/generation/profiles/manual-bundle/",
         data=json.dumps(_bundle_payload(other_block, description="v2")),
         content_type="application/json",
     )
 
-    response = client.get("/api/generation/bundles/")
+    response = client.get("/api/generation/profiles/")
 
     matches = [b for b in response.json() if b["slug"] == "manual-bundle"]
     assert len(matches) == 1
@@ -511,17 +511,17 @@ def test_bundle_versions_endpoint_lists_full_history(client):
     client.force_login(user)
     block = ContentBlockFactory(is_system=False, created_by=user)
     client.post(
-        "/api/generation/bundles/",
+        "/api/generation/profiles/",
         data=json.dumps(_bundle_payload(block)),
         content_type="application/json",
     )
     client.put(
-        "/api/generation/bundles/manual-bundle/",
+        "/api/generation/profiles/manual-bundle/",
         data=json.dumps(_bundle_payload(block, description="v2")),
         content_type="application/json",
     )
 
-    response = client.get("/api/generation/bundles/manual-bundle/versions/")
+    response = client.get("/api/generation/profiles/manual-bundle/versions/")
 
     assert response.status_code == 200
     versions = [b["version"] for b in response.json()]

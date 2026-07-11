@@ -10,10 +10,10 @@ import yaml
 from django.utils import timezone
 
 from backend.generation.models import ContentBlock
-from backend.generation.services.bundle_packages.constants import DATA_DIR
-from backend.generation.services.bundle_packages.constants import TEMPLATE_PACKAGE_KIND
-from backend.generation.services.bundle_packages.constants import TEMPLATE_PACKAGE_SCHEMA_VERSION
-from backend.generation.services.bundle_packages.importers import import_template_package
+from backend.generation.services.packages.constants import DATA_DIR
+from backend.generation.services.packages.constants import TEMPLATE_PACKAGE_KIND
+from backend.generation.services.packages.constants import TEMPLATE_PACKAGE_SCHEMA_VERSION
+from backend.generation.services.packages.importers import import_template_package
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser

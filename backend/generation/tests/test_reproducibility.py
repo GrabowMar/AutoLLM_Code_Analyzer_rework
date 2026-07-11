@@ -8,15 +8,15 @@ import pytest
 
 from backend.generation.models import ContentBlock
 from backend.generation.models import GenerationJob
-from backend.generation.services.bundle_resolver import build_resolved_bundle
-from backend.generation.services.bundle_resolver import bundle_key_from_snapshot
-from backend.generation.services.bundle_resolver import derive_experiment_seed
+from backend.generation.services.profile_resolver import build_resolved_snapshot
+from backend.generation.services.profile_resolver import bundle_key_from_snapshot
+from backend.generation.services.profile_resolver import derive_experiment_seed
 from backend.generation.services.job_cloning import clone_job
 from backend.generation.services.openrouter_client import OpenRouterClient
 from backend.generation.tests.factories import AppRequirementTemplateFactory
 from backend.generation.tests.factories import ContentBlockFactory
 from backend.generation.tests.factories import GenerationJobFactory
-from backend.generation.tests.factories import TemplateBundleFactory
+from backend.generation.tests.factories import GenerationProfileFactory
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.users.tests.factories import UserFactory
 
@@ -32,16 +32,16 @@ def _make_bundle():
         metadata={"stage": "backend", "role": "system"},
         is_system=True,
     )
-    return TemplateBundleFactory(
+    return GenerationProfileFactory(
         slug="test-repro-bundle",
         block_refs=[{"type": "prompt_stage", "slug": "test-repro-backend-system", "version": 1}],
     )
 
 
 def _snapshot(app_req, bundle, *, seed, model=None, temperature=0.3):
-    return build_resolved_bundle(
+    return build_resolved_snapshot(
         app_requirement=app_req,
-        template_bundle=bundle,
+        profile=bundle,
         scaffolding_slug="flask-react",
         model=model,
         temperature=temperature,
@@ -97,6 +97,23 @@ def test_bundle_key_from_snapshot():
     assert bundle_key_from_snapshot({"bundle_slug": "b", "bundle_version": 3}) == "b@3"
     assert bundle_key_from_snapshot({"bundle_slug": "b"}) == "b@1"
     assert bundle_key_from_snapshot({}) == ""
+
+
+def test_prompt_hash_algorithm_is_frozen():
+    """Golden hash: prompt_hash groups historical jobs across releases, so its
+    inputs (prompt_templates + app_requirement + block refs) and algorithm must
+    never change. If this fails, the change breaks cross-release comparability
+    — do not update the constant without an explicit migration story."""
+    from backend.generation.services.profile_resolver import _snapshot_prompt_hash
+
+    snapshot = {
+        "prompt_templates": {"backend": {"system": "S", "user": "U"}, "frontend": {"system": "FS", "user": "FU"}},
+        "app_requirement": {"slug": "todo", "version": 2},
+        "blocks": [{"slug": "base-backend-system", "version": 1}],
+        "seed": 1234,  # must not affect the hash
+        "llm": {"temperature": 0.9},  # must not affect the hash
+    }
+    assert _snapshot_prompt_hash(snapshot) == "2e50b0f0739b9d0e"
 
 
 def test_derive_experiment_seed_is_deterministic():

@@ -13,24 +13,24 @@ from backend.generation.api.schema import ContentBlockCreateSchema
 from backend.generation.api.schema import ContentBlockSchema
 from backend.generation.api.schema import StarterTemplatePackageImportSchema
 from backend.generation.api.schema import StarterTemplatePackageSchema
-from backend.generation.api.schema import TemplateBundleCreateSchema
-from backend.generation.api.schema import TemplateBundleSchema
+from backend.generation.api.schema import GenerationProfileCreateSchema
+from backend.generation.api.schema import GenerationProfileSchema
 from backend.generation.api.schema import TemplatePackageExportSchema
 from backend.generation.api.schema import TemplatePackageImportSchema
 from backend.generation.api.views._router import router
 from backend.generation.models import ContentBlock
-from backend.generation.models import TemplateBundle
-from backend.generation.services.bundle_packages import dump_bundle_package
-from backend.generation.services.bundle_packages import dump_template_package
-from backend.generation.services.bundle_packages import export_bundle_package
-from backend.generation.services.bundle_packages import export_template_package
-from backend.generation.services.bundle_packages import import_bundle_package
-from backend.generation.services.bundle_packages import import_starter_template_package
-from backend.generation.services.bundle_packages import import_template_package
-from backend.generation.services.bundle_packages import list_starter_template_packages
-from backend.generation.services.bundle_packages import visible_blocks_for
-from backend.generation.services.bundle_packages import visible_bundles_for
-from backend.generation.services.bundle_resolver import resolve_block_refs
+from backend.generation.models import GenerationProfile
+from backend.generation.services.packages import dump_bundle_package
+from backend.generation.services.packages import dump_template_package
+from backend.generation.services.packages import export_bundle_package
+from backend.generation.services.packages import export_template_package
+from backend.generation.services.packages import import_bundle_package
+from backend.generation.services.packages import import_starter_template_package
+from backend.generation.services.packages import import_template_package
+from backend.generation.services.packages import list_starter_template_packages
+from backend.generation.services.packages import visible_blocks_for
+from backend.generation.services.packages import visible_profiles_for
+from backend.generation.services.profile_resolver import resolve_block_refs
 from backend.generation.services.versioning import content_hash
 
 
@@ -57,15 +57,15 @@ def _mutable_block_or_403(user, *, slug: str, version: int) -> ContentBlock:
     raise HttpError(403, "You can only modify your own blocks.")
 
 
-def _latest_bundle_or_404(user, *, slug: str) -> TemplateBundle:
+def _latest_bundle_or_404(user, *, slug: str) -> GenerationProfile:
     """Latest version of *slug* visible to *user* (any version, incl. archived, for staff)."""
-    bundle = visible_bundles_for(user).filter(slug=slug).first()
+    bundle = visible_profiles_for(user).filter(slug=slug).first()
     if not bundle:
         raise HttpError(404, f"Bundle {slug} not found")
     return bundle
 
 
-def _mutable_bundle_or_403(user, *, slug: str) -> TemplateBundle:
+def _mutable_bundle_or_403(user, *, slug: str) -> GenerationProfile:
     bundle = _latest_bundle_or_404(user, slug=slug)
     if bundle.created_by_id == getattr(user, "id", None):
         return bundle
@@ -74,11 +74,11 @@ def _mutable_bundle_or_403(user, *, slug: str) -> TemplateBundle:
     raise HttpError(403, "You can only modify your own bundles.")
 
 
-def _latest_bundles_by_slug(user) -> list[TemplateBundle]:
+def _latest_bundles_by_slug(user) -> list[GenerationProfile]:
     """Deduplicate a slug-ordered, version-descending queryset to one row per slug."""
     seen: set[str] = set()
-    result: list[TemplateBundle] = []
-    for bundle in visible_bundles_for(user):
+    result: list[GenerationProfile] = []
+    for bundle in visible_profiles_for(user):
         if bundle.slug in seen:
             continue
         seen.add(bundle.slug)
@@ -156,24 +156,24 @@ def delete_block(request, slug: str, version: int = Query(1)):
     return {"success": True}
 
 
-@router.get("/bundles/", response=list[TemplateBundleSchema])
+@router.get("/profiles/", response=list[GenerationProfileSchema])
 def list_bundles(request):
     """Latest version of each bundle slug visible to the user."""
     bundles = _latest_bundles_by_slug(request.auth)
     return sorted(bundles, key=lambda b: (not b.is_default, b.name))
 
 
-@router.get("/bundles/{slug}/versions/", response=list[TemplateBundleSchema])
+@router.get("/profiles/{slug}/versions/", response=list[GenerationProfileSchema])
 def list_bundle_versions(request, slug: str):
     """Full version history for one bundle slug, newest first."""
-    return visible_bundles_for(request.auth).filter(slug=slug).order_by("-version")
+    return visible_profiles_for(request.auth).filter(slug=slug).order_by("-version")
 
 
-def _serialize_block_refs(payload: TemplateBundleCreateSchema) -> list[dict]:
+def _serialize_block_refs(payload: GenerationProfileCreateSchema) -> list[dict]:
     return [{"type": ref.type, "slug": ref.slug, "version": ref.version} for ref in payload.block_refs]
 
 
-def _bundle_content_hash(payload: TemplateBundleCreateSchema) -> str:
+def _bundle_content_hash(payload: GenerationProfileCreateSchema) -> str:
     return content_hash(
         {
             "scaffolding_slug": payload.scaffolding_slug,
@@ -183,12 +183,12 @@ def _bundle_content_hash(payload: TemplateBundleCreateSchema) -> str:
     )
 
 
-@router.post("/bundles/", response={200: TemplateBundleSchema, 400: dict})
-def create_bundle(request, payload: TemplateBundleCreateSchema):
+@router.post("/profiles/", response={200: GenerationProfileSchema, 400: dict})
+def create_bundle(request, payload: GenerationProfileCreateSchema):
     """Create a user-owned bundle as version 1 of a new slug."""
-    if TemplateBundle.objects.filter(slug=payload.slug).exists():
+    if GenerationProfile.objects.filter(slug=payload.slug).exists():
         return 400, {"detail": f"Bundle slug {payload.slug} already exists. Use PUT to add a new version."}
-    return TemplateBundle.objects.create(
+    return GenerationProfile.objects.create(
         name=payload.name,
         slug=payload.slug,
         version=1,
@@ -203,7 +203,7 @@ def create_bundle(request, payload: TemplateBundleCreateSchema):
     )
 
 
-@router.post("/bundles/import/", response={200: TemplateBundleSchema, 400: dict})
+@router.post("/profiles/import/", response={200: GenerationProfileSchema, 400: dict})
 def import_bundle(request, payload: BundleImportSchema):
     try:
         bundle = import_bundle_package(
@@ -285,14 +285,14 @@ def import_package_starter(
     }
 
 
-@router.get("/bundles/{slug}/", response=TemplateBundleSchema)
+@router.get("/profiles/{slug}/", response=GenerationProfileSchema)
 def get_bundle(request, slug: str):
     """Latest version of a bundle. Use ``/bundles/{slug}/versions/`` for history."""
     return _latest_bundle_or_404(request.auth, slug=slug)
 
 
-@router.put("/bundles/{slug}/", response={200: TemplateBundleSchema, 400: dict})
-def update_bundle(request, slug: str, payload: TemplateBundleCreateSchema):
+@router.put("/profiles/{slug}/", response={200: GenerationProfileSchema, 400: dict})
+def update_bundle(request, slug: str, payload: GenerationProfileCreateSchema):
     """Create version+1 of *slug*. Versions are immutable — this never edits in place."""
     current = _mutable_bundle_or_403(request.auth, slug=slug)
     new_hash = _bundle_content_hash(payload)
@@ -303,7 +303,7 @@ def update_bundle(request, slug: str, payload: TemplateBundleCreateSchema):
     )
     if unchanged:
         return 400, {"detail": "No changes from the current version."}
-    return TemplateBundle.objects.create(
+    return GenerationProfile.objects.create(
         name=payload.name,
         slug=slug,
         version=current.version + 1,
@@ -318,15 +318,15 @@ def update_bundle(request, slug: str, payload: TemplateBundleCreateSchema):
     )
 
 
-@router.delete("/bundles/{slug}/")
+@router.delete("/profiles/{slug}/")
 def delete_bundle(request, slug: str):
     """Archive every version of *slug* (kept for jobs that reference it, hidden from pickers)."""
     _mutable_bundle_or_403(request.auth, slug=slug)
-    updated = TemplateBundle.objects.filter(slug=slug).update(is_archived=True)
+    updated = GenerationProfile.objects.filter(slug=slug).update(is_archived=True)
     return {"success": True, "archived_versions": updated}
 
 
-@router.get("/bundles/{slug}/export/")
+@router.get("/profiles/{slug}/export/")
 def export_bundle(
     request,
     slug: str,
@@ -343,12 +343,12 @@ def export_bundle(
     return response
 
 
-@router.get("/bundles/{slug}/preview/", response=dict)
+@router.get("/profiles/{slug}/preview/", response=dict)
 def preview_bundle(request, slug: str):
     """Resolve block refs to assembled prompt templates (no app requirement context)."""
     bundle = _latest_bundle_or_404(request.auth, slug=slug)
     resolved = resolve_block_refs(list(bundle.block_refs or []), request.auth)
-    from backend.generation.services.bundle_resolver import assemble_prompt_templates
+    from backend.generation.services.profile_resolver import assemble_prompt_templates
 
     templates = assemble_prompt_templates(resolved)
     return {
