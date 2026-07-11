@@ -69,12 +69,12 @@ const modeIcons: Record<string, any> = { custom: Pencil, scaffolding: Layers, co
 <!-- Failed banner -->
 {#if job.status === 'failed'}
 	<div class="flex items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3">
-		<AlertTriangle class="h-5 w-5 text-red-400 shrink-0" />
+		<AlertTriangle class="h-5 w-5 text-destructive shrink-0" />
 		<div class="flex-1">
-			<p class="text-sm font-medium text-red-400">Generation Failed</p>
-			<p class="text-xs text-red-400/70 truncate">{job.error_message || 'Unknown error'}</p>
+			<p class="text-sm font-medium text-destructive">Generation Failed</p>
+			<p class="text-xs text-destructive/70 truncate">{job.error_message || 'Unknown error'}</p>
 		</div>
-		<Button variant="outline" size="sm" href="/applications/{job.id}/failure" class="border-red-500/30 text-red-400 hover:bg-red-500/10">
+		<Button variant="outline" size="sm" href="/applications/{job.id}/failure" class="border-destructive/30 text-destructive hover:bg-destructive/10">
 			View Details
 		</Button>
 	</div>
@@ -141,7 +141,7 @@ const modeIcons: Record<string, any> = { custom: Pencil, scaffolding: Layers, co
 					<RefreshCw class="h-3.5 w-3.5 sm:mr-1.5" /><span class="hidden sm:inline">Re-generate</span>
 				</Button>
 				{#if job.status !== 'running'}
-					<Button variant="outline" size="sm" onclick={onDelete} title="Delete job" class="border-red-500/30 text-red-400 hover:bg-red-500/10">
+					<Button variant="outline" size="sm" onclick={onDelete} title="Delete job" class="border-destructive/30 text-destructive hover:bg-destructive/10">
 						<Trash2 class="h-3.5 w-3.5 sm:mr-1.5" /><span class="hidden sm:inline">Delete</span>
 					</Button>
 				{/if}

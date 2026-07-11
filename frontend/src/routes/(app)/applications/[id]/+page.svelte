@@ -300,7 +300,7 @@ onMount(fetchData);
 {:else if !job}
 	<Card.Root>
 		<Card.Content class="py-16 text-center">
-			<AlertTriangle class="mx-auto h-12 w-12 text-red-400 mb-4" />
+			<AlertTriangle class="mx-auto h-12 w-12 text-destructive mb-4" />
 			<h3 class="text-lg font-medium">Job not found</h3>
 			<Button variant="outline" size="sm" href="/applications" class="mt-4">Back to Applications</Button>
 		</Card.Content>

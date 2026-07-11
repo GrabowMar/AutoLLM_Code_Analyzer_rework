@@ -76,7 +76,7 @@
 		</div>
 
 		{#if error}
-			<div class="rounded-md bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-400 font-medium">
+			<div class="rounded-md bg-destructive/10 border border-destructive/30 p-3 text-xs text-destructive font-medium">
 				{error}
 			</div>
 		{/if}

@@ -96,7 +96,11 @@
 	}
 </script>
 
-<div class="mx-auto max-w-3xl space-y-6 p-6">
+<svelte:head>
+	<title>New Experiment - LLM Lab</title>
+</svelte:head>
+
+<div class="mx-auto max-w-3xl space-y-6">
 	<Button variant="ghost" size="sm" onclick={() => goto('/experiments')}>
 		<ArrowLeft class="h-4 w-4" />
 		Back to experiments
@@ -231,7 +235,7 @@
 	</Card.Root>
 
 	{#if error}
-		<div class="rounded-md bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">{error}</div>
+		<div class="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>
 	{/if}
 
 	<div class="flex justify-end gap-2">

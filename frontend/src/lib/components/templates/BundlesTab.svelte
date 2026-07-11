@@ -280,7 +280,7 @@
 		</div>
 
 		{#if error}
-			<div class="mt-4 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400 font-medium">
+			<div class="mt-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive font-medium">
 				{error}
 			</div>
 		{/if}

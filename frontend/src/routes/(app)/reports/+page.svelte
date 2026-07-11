@@ -237,7 +237,7 @@
 							</div>
 						{/if}
 						{#if r.status === 'failed' && r.error_message}
-							<div class="text-red-400 line-clamp-2">{r.error_message}</div>
+							<div class="text-destructive line-clamp-2">{r.error_message}</div>
 						{/if}
 					</Card.Content>
 					<Card.Footer class="gap-2 pt-3">

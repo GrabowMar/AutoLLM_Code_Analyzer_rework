@@ -85,7 +85,7 @@ let {
 					Loading jobs…
 				</div>
 			{:else if jobsError}
-				<div class="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
+				<div class="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
 					<AlertCircle class="h-4 w-4 shrink-0" />
 					{jobsError}
 					<Button variant="outline" size="sm" class="ml-auto" onclick={onRetryLoadJobs}>Retry</Button>

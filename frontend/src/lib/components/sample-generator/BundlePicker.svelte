@@ -158,7 +158,7 @@
 					<span class="font-mono text-right tabular-nums">{previewStages.frontend.system.toLocaleString()} / {previewStages.frontend.user.toLocaleString()}</span>
 				</div>
 			{:else if previewError}
-				<p class="border-t px-3 py-2 text-[10px] text-red-400">{previewError}</p>
+				<p class="border-t px-3 py-2 text-[10px] text-destructive">{previewError}</p>
 			{/if}
 		</div>
 	{/if}

@@ -182,6 +182,10 @@ fn: () => clearCaches() as Promise<Record<string, unknown>>,
 ];
 </script>
 
+<svelte:head>
+	<title>System - LLM Lab</title>
+</svelte:head>
+
 <div class="space-y-6">
 <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 <div class="page-header">

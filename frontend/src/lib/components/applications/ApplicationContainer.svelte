@@ -117,7 +117,7 @@ const statusColor: Record<string, string> = {
 				</div>
 
 				{#if container.last_error}
-					<div class="text-xs text-red-400 font-mono bg-red-500/5 border border-red-500/20 rounded p-2">
+					<div class="text-xs text-destructive font-mono bg-red-500/5 border border-red-500/20 rounded p-2">
 						{container.last_error}
 					</div>
 				{/if}

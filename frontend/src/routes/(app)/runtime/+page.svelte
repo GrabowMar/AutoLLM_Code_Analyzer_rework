@@ -103,8 +103,8 @@
 						</span>
 					{/if}
 				{:else}
-					<CircleX class="h-4 w-4 text-red-400 shrink-0" />
-					<span class="text-red-400 font-medium">Docker daemon unavailable</span>
+					<CircleX class="h-4 w-4 text-destructive shrink-0" />
+					<span class="text-destructive font-medium">Docker daemon unavailable</span>
 				{/if}
 			</Card.Content>
 		</Card.Root>
@@ -134,7 +134,7 @@
 			</Card.Content>
 		</Card.Root>
 	{:else if error}
-		<Card.Root><Card.Content class="p-6 text-red-400 text-sm">{error}</Card.Content></Card.Root>
+		<Card.Root><Card.Content class="p-6 text-destructive text-sm">{error}</Card.Content></Card.Root>
 	{:else if containers.length === 0}
 		<Card.Root>
 			<Card.Content class="py-16 text-center">
@@ -170,7 +170,7 @@
 						{/if}
 						<div>Created: {formatDate(c.created_at)}</div>
 						{#if c.last_error}
-							<div class="text-red-400 line-clamp-2">{c.last_error}</div>
+							<div class="text-destructive line-clamp-2">{c.last_error}</div>
 						{/if}
 					</Card.Content>
 					<Card.Footer class="gap-1 pt-3 flex-wrap">

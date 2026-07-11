@@ -69,3 +69,20 @@ export const reportStatusColors: Record<string, string> = {
   pending: "bg-slate-500/15 text-slate-400 border-slate-500/30",
   failed: "bg-red-500/15 text-red-400 border-red-500/30",
 };
+
+/** Experiment lifecycle (the experiment itself). */
+export const experimentLifecycleColors: Record<string, string> = {
+  draft: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
+  running: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  completed: "bg-emerald-500/15 text-emerald-500 border-emerald-500/30",
+  archived: "bg-amber-500/15 text-amber-500 border-amber-500/30",
+};
+
+/** Experiment run conditions (same palette as analysis runs). */
+export const experimentRunStatusColors: Record<string, string> = {
+  pending: "bg-amber-500/15 text-amber-500 border-amber-500/30",
+  running: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  completed: "bg-emerald-500/15 text-emerald-500 border-emerald-500/30",
+  failed: "bg-red-500/15 text-red-400 border-red-500/30",
+  cancelled: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
+};

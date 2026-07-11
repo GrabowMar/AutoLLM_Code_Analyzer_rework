@@ -6,6 +6,11 @@ const apiTarget = process.env.API_TARGET ?? "http://localhost:8000";
 
 export default defineConfig({
   plugins: [tailwindcss(), sveltekit()],
+  ssr: {
+    // layerchart ships raw .svelte files; Node can't load them when the
+    // package is externalized during dev SSR.
+    noExternal: ["layerchart"],
+  },
   build: {
     rollupOptions: {
       output: {

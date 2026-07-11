@@ -129,10 +129,10 @@ const TABS: Array<{ k: 'api' | 'cmds' | 'env'; label: string }> = [
 						{/if}
 						{#if apiResp}
 							{#if apiResp.error}
-								<div class="text-xs text-red-400 bg-red-500/5 border border-red-500/20 rounded p-2">{apiResp.error}</div>
+								<div class="text-xs text-destructive bg-red-500/5 border border-red-500/20 rounded p-2">{apiResp.error}</div>
 							{:else}
 								<div class="text-xs">
-									<Badge variant="outline" class="mb-2 {apiResp.status && apiResp.status < 400 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-red-500/10 text-red-400 border-red-500/30'}">HTTP {apiResp.status}</Badge>
+									<Badge variant="outline" class="mb-2 {apiResp.status && apiResp.status < 400 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-destructive/10 text-destructive border-destructive/30'}">HTTP {apiResp.status}</Badge>
 									<pre class="bg-zinc-950 text-zinc-100 p-3 rounded max-h-[400px] overflow-auto whitespace-pre-wrap break-words font-mono">{apiResp.text}</pre>
 								</div>
 							{/if}
@@ -149,7 +149,7 @@ const TABS: Array<{ k: 'api' | 'cmds' | 'env'; label: string }> = [
 						</div>
 						{#if cmdOutput}
 							{#if cmdOutput.error}
-								<div class="text-xs text-red-400 bg-red-500/5 border border-red-500/20 rounded p-2">{cmdOutput.error}</div>
+								<div class="text-xs text-destructive bg-red-500/5 border border-red-500/20 rounded p-2">{cmdOutput.error}</div>
 							{:else}
 								<div class="text-xs">
 									<Badge variant="outline" class="mb-2 {cmdOutput.exit_code === 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'}">

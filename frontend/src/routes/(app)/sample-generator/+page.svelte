@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { formatDuration as formatDurationShared, formatDateTime } from '$lib/utils/formatters';
+	import { generationStatusColors as statusColors } from '$lib/constants/colors';
 	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { Badge } from '$lib/components/ui/badge';
@@ -69,14 +70,6 @@
 
 	let lastRestoredJobId = $state<string | null>(null);
 	let lastAppliedModelSlug = $state<string | null>(null);
-
-	const statusColors: Record<string, string> = {
-		completed: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
-		running: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-		failed: 'bg-red-500/15 text-red-400 border-red-500/30',
-		pending: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
-		cancelled: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
-	};
 
 	const modeLabels: Record<string, string> = {
 		custom: 'Custom',

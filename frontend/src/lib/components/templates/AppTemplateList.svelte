@@ -63,7 +63,7 @@
 					{#if !t.is_default}
 						<button
 							type="button"
-							class="inline-flex items-center justify-center p-1.5 text-xs font-medium border border-red-500/20 rounded hover:bg-red-500/10 transition-colors cursor-pointer text-red-400 hover:text-red-300"
+							class="inline-flex items-center justify-center p-1.5 text-xs font-medium border border-red-500/20 rounded hover:bg-destructive/10 transition-colors cursor-pointer text-destructive hover:text-red-300"
 							title="Delete Template"
 							onclick={() => onDelete(t)}
 						>

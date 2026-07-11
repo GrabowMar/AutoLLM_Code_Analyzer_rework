@@ -260,7 +260,7 @@
 	{:else if error}
 		<Card.Root>
 			<Card.Content class="flex flex-col items-center gap-3 py-12">
-				<AlertTriangle class="h-8 w-8 text-red-400" />
+				<AlertTriangle class="h-8 w-8 text-destructive" />
 				<p class="text-sm text-muted-foreground">{error}</p>
 				<Button variant="outline" size="sm" onclick={() => loadAll()}>Retry</Button>
 			</Card.Content>

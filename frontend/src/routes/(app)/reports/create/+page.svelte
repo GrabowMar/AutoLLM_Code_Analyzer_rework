@@ -233,7 +233,7 @@
 				{/if}
 
 				{#if error}
-					<p class="text-sm text-red-400">{error}</p>
+					<p class="text-sm text-destructive">{error}</p>
 				{/if}
 			</Card.Content>
 			<Card.Footer class="gap-2 justify-end">

@@ -196,7 +196,7 @@
 <svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} />
 
 <header
-	class="fixed top-0 left-0 right-0 z-30 flex h-12 items-center gap-3 border-b border-border/70 bg-background/85 px-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/65 sm:px-4 md:gap-4 md:px-5 transition-[padding] duration-200 ease-out motion-reduce:transition-none md:pl-[calc(var(--app-sidebar-offset,0px)+1.25rem)]"
+	class="fixed top-0 left-0 right-0 z-30 flex h-12 items-center gap-3 border-b border-border/70 bg-background/85 px-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/65 sm:px-4 md:gap-4 md:px-5 transition-[padding] duration-200 ease-out motion-reduce:transition-none md:pl-[calc(var(--app-sidebar-offset,0px)+1.25rem)] after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:h-px after:opacity-40 after:content-[''] after:[background:var(--gradient-brand)]"
 >
 	<!-- Mobile sidebar trigger -->
 	<Sheet.Root bind:open={mobileMenuOpen}>
@@ -210,7 +210,10 @@
 			<!-- Mobile nav header -->
 			<div class="flex h-12 items-center justify-between border-b border-sidebar-border px-3">
 				<a href="/" class="flex items-center gap-2" onclick={() => (mobileMenuOpen = false)}>
-					<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
+					<div
+						class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sidebar-primary-foreground"
+						style="background: var(--gradient-brand);"
+					>
 						<FlaskConical class="h-3.5 w-3.5" />
 					</div>
 					<span class="font-semibold text-sm" style="font-family: var(--font-display);">LLM<span class="text-sidebar-primary">_</span>Lab</span>

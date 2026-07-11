@@ -276,7 +276,7 @@
 				</div>
 
 				{#if customError}
-					<div class="rounded-md bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">
+					<div class="rounded-md bg-destructive/10 border border-destructive/30 px-4 py-3 text-sm text-destructive">
 						{customError}
 					</div>
 				{/if}
@@ -468,7 +468,7 @@
 
 				<!-- Error / success feedback -->
 				{#if scaffoldingError}
-					<div class="rounded-md bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">
+					<div class="rounded-md bg-destructive/10 border border-destructive/30 px-4 py-3 text-sm text-destructive">
 						{scaffoldingError}
 					</div>
 				{/if}
@@ -599,7 +599,7 @@
 				</div>
 
 				{#if copilotError}
-					<div class="rounded-md bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">
+					<div class="rounded-md bg-destructive/10 border border-destructive/30 px-4 py-3 text-sm text-destructive">
 						{copilotError}
 					</div>
 				{/if}

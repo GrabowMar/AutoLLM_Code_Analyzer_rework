@@ -204,7 +204,7 @@
 			</Card.Content>
 		</Card.Root>
 	{:else if error}
-		<Card.Root><Card.Content class="p-6 text-red-400 text-sm">{error}</Card.Content></Card.Root>
+		<Card.Root><Card.Content class="p-6 text-destructive text-sm">{error}</Card.Content></Card.Root>
 	{:else if report}
 		<Card.Root>
 			<Card.Header>
@@ -247,7 +247,7 @@
 			</Card.Root>
 		{:else if report.status === 'failed'}
 			<Card.Root>
-				<Card.Content class="p-6 text-sm text-red-400">
+				<Card.Content class="p-6 text-sm text-destructive">
 					{report.error_message || 'Generation failed.'}
 				</Card.Content>
 			</Card.Root>

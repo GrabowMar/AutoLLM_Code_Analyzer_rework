@@ -234,7 +234,7 @@
 											</Button>
 										{:else if container.status === 'failed'}
 											<div class="flex flex-col gap-1">
-												<span class="text-[10px] text-red-400 font-mono line-clamp-1" title={container.last_error}>{container.last_error || 'Container crash'}</span>
+												<span class="text-[10px] text-destructive font-mono line-clamp-1" title={container.last_error}>{container.last_error || 'Container crash'}</span>
 												<Button
 													id="retry-container-btn-{job.id}"
 													variant="outline"
@@ -340,7 +340,7 @@
 												id="action-remove-container-{job.id}"
 												variant="ghost"
 												size="sm"
-												class="h-8 w-8 p-0 hover:bg-red-500/10 hover:text-red-400 text-muted-foreground/60"
+												class="h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive text-muted-foreground/60"
 												title="Delete Container (Preserves Code)"
 												disabled={isBusy != null}
 												onclick={() => onRemoveContainer(job.id, container.id)}
@@ -348,7 +348,7 @@
 												{#if isBusy === 'remove'}
 													<LoaderCircle class="h-4 w-4 animate-spin text-red-500" />
 												{:else}
-													<Server class="h-4 w-4 stroke-[1.5] text-red-400/80" />
+													<Server class="h-4 w-4 stroke-[1.5] text-destructive/80" />
 												{/if}
 											</Button>
 										{/if}
@@ -384,11 +384,11 @@
 											id="action-failure-{job.id}"
 											variant="ghost"
 											size="sm"
-											class="h-8 w-8 p-0 hover:bg-red-500/10 text-muted-foreground hover:text-red-400"
+											class="h-8 w-8 p-0 hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
 											href="/applications/{job.id}/failure"
 											title="Failure logs"
 										>
-											<AlertTriangle class="h-4 w-4 text-red-400" />
+											<AlertTriangle class="h-4 w-4 text-destructive" />
 										</Button>
 									{/if}
 
@@ -424,7 +424,7 @@
 											id="action-delete-{job.id}"
 											variant="ghost"
 											size="sm"
-											class="h-8 w-8 p-0 hover:bg-red-500/10 text-muted-foreground hover:text-red-400"
+											class="h-8 w-8 p-0 hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
 											title="Delete Job"
 											onclick={() => onDelete(job.id)}
 										>

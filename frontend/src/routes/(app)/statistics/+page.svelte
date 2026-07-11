@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { severityColors } from '$lib/constants/colors';
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -57,13 +58,6 @@
 		if (data) fetchTrends(trendDays);
 	});
 
-	const severityColors: Record<string, string> = {
-		critical: 'bg-red-500/15 text-red-400',
-		high: 'bg-orange-500/15 text-orange-400',
-		medium: 'bg-amber-500/15 text-amber-500',
-		low: 'bg-blue-500/15 text-blue-400',
-		info: 'bg-slate-500/15 text-slate-400',
-	};
 
 	const severityBarColor: Record<string, string> = {
 		critical: 'bg-red-500',
@@ -77,7 +71,7 @@
 		const pct = max === 100 ? val : (val / max) * 100;
 		if (pct >= 80) return 'text-emerald-500';
 		if (pct >= 60) return 'text-amber-500';
-		return 'text-red-400';
+		return 'text-destructive';
 	}
 
 	function pct01(v: number | null | undefined): string {

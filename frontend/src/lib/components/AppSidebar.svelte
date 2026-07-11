@@ -116,7 +116,10 @@
 			)}
 			aria-label="LLM Lab — Home"
 		>
-			<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground shadow-sm">
+			<div
+				class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sidebar-primary-foreground shadow-sm"
+				style="background: var(--gradient-brand);"
+			>
 				<FlaskConical class="h-3.5 w-3.5" />
 			</div>
 			{#if !prefs.sidebarCollapsed}
@@ -160,13 +163,16 @@
 							prefs.sidebarCollapsed ? 'justify-center px-0 py-2' : 'gap-2.5 px-2.5 py-1.5',
 							!prefs.sidebarCollapsed && item.subItem ? 'ml-4 text-xs' : '',
 							isActive(item.href)
-								? 'bg-sidebar-accent text-sidebar-primary font-medium'
+								? 'bg-sidebar-primary/10 text-sidebar-primary font-medium'
 								: 'text-sidebar-foreground/65 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground'
 						)}
 						title={prefs.sidebarCollapsed ? item.label : undefined}
 					>
 						{#if isActive(item.href)}
-							<span class="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-r bg-sidebar-primary"></span>
+							<span
+									class="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-r bg-sidebar-primary"
+									style="box-shadow: 0 0 8px var(--sidebar-primary);"
+								></span>
 						{/if}
 						<item.icon class="h-3.5 w-3.5 shrink-0" />
 						{#if !prefs.sidebarCollapsed}

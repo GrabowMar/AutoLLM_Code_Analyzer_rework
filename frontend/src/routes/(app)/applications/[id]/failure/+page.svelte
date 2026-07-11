@@ -90,7 +90,7 @@ onMount(fetchData);
 {:else if !job}
 <Card.Root>
 <Card.Content class="py-16 text-center">
-<AlertTriangle class="mx-auto h-12 w-12 text-red-400 mb-4" />
+<AlertTriangle class="mx-auto h-12 w-12 text-destructive mb-4" />
 <h3 class="text-lg font-medium">Job not found</h3>
 <Button variant="outline" size="sm" href="/applications" class="mt-4">Back to Applications</Button>
 </Card.Content>
@@ -106,17 +106,17 @@ onMount(fetchData);
 <span>/</span>
 <a href="/applications/{job.id}" class="hover:text-foreground transition-colors">{job.model_name ?? 'Job'}</a>
 <span>/</span>
-<span class="text-red-400 font-medium">Failure Details</span>
+<span class="text-destructive font-medium">Failure Details</span>
 </nav>
 
 <!-- Header -->
 <div class="flex items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-5 py-4">
 <div class="flex h-10 w-10 items-center justify-center rounded-md bg-red-500/20">
-<Skull class="h-5 w-5 text-red-400" />
+<Skull class="h-5 w-5 text-destructive" />
 </div>
 <div class="flex-1">
-<h1 class="text-lg font-semibold text-red-400">Failure Details</h1>
-<p class="text-sm text-red-400/70">{job.model_name} — Generation Failed</p>
+<h1 class="text-lg font-semibold text-destructive">Failure Details</h1>
+<p class="text-sm text-destructive/70">{job.model_name} — Generation Failed</p>
 </div>
 <div class="flex gap-2">
 <Button variant="outline" size="sm" href="/applications/{job.id}" class="border-zinc-600">
@@ -159,7 +159,7 @@ View Full Detail
 <Card.Root>
 <Card.Header class="pb-3">
 <Card.Title class="text-sm font-medium flex items-center gap-2">
-<AlertTriangle class="h-4 w-4 text-red-400" />
+<AlertTriangle class="h-4 w-4 text-destructive" />
 Error Message
 </Card.Title>
 </Card.Header>
@@ -198,7 +198,7 @@ Generation Errors
 <ol class="space-y-2">
 {#each allErrors as err, i}
 <li class="flex items-start gap-2 text-sm">
-<span class="shrink-0 text-xs font-bold text-red-400 bg-red-500/20 rounded px-1.5 py-0.5">{i + 1}</span>
+<span class="shrink-0 text-xs font-bold text-destructive bg-red-500/20 rounded px-1.5 py-0.5">{i + 1}</span>
 <span class="text-red-300/90">{err}</span>
 </li>
 {/each}
@@ -229,7 +229,7 @@ Failed Iterations
 <div class="text-xs text-muted-foreground mb-1">Errors:</div>
 <ul class="space-y-1">
 {#each it.errors_detected as err}
-<li class="flex items-start gap-1.5 text-xs text-red-400/90">
+<li class="flex items-start gap-1.5 text-xs text-destructive/90">
 <CircleX class="h-3 w-3 shrink-0 mt-0.5" />{err}
 </li>
 {/each}
@@ -290,9 +290,9 @@ Request Artifacts
 <Card.Root>
 <Card.Content class="py-8 text-center">
 <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-md bg-red-500/20">
-<Skull class="h-8 w-8 text-red-400" />
+<Skull class="h-8 w-8 text-destructive" />
 </div>
-<h3 class="text-lg font-semibold text-red-400">Failed</h3>
+<h3 class="text-lg font-semibold text-destructive">Failed</h3>
 <p class="text-sm text-muted-foreground mt-1">Generation did not complete successfully</p>
 </Card.Content>
 </Card.Root>
@@ -328,10 +328,10 @@ Request Artifacts
 </div>
 <div class="flex items-start gap-3">
 <div class="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-red-500/20">
-<CircleX class="h-3.5 w-3.5 text-red-400" />
+<CircleX class="h-3.5 w-3.5 text-destructive" />
 </div>
 <div>
-<p class="text-sm font-medium text-red-400">Generation Failed</p>
+<p class="text-sm font-medium text-destructive">Generation Failed</p>
 <p class="text-xs text-muted-foreground">{fmtDate(job.completed_at)}</p>
 </div>
 </div>
@@ -355,7 +355,7 @@ Request Artifacts
 {#if check.ok}
 <CircleCheck class="h-4 w-4 text-emerald-500" />
 {:else}
-<CircleX class="h-4 w-4 text-red-400" />
+<CircleX class="h-4 w-4 text-destructive" />
 {/if}
 <span class={check.ok ? 'text-foreground' : 'text-muted-foreground'}>{check.label}</span>
 </div>
