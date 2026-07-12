@@ -144,14 +144,22 @@ export interface LLMParams {
   reasoning?: Record<string, unknown> | null;
 }
 
+export interface BlockRef {
+  type: string;
+  slug: string;
+  version: number;
+}
+
 export interface GenerationProfile {
   id: number;
   name: string;
   slug: string;
+  version: number;
+  is_archived: boolean;
   description: string;
   scaffolding_slug: string;
-  block_refs: { type: string; slug: string; version: number }[];
-  llm_config: Record<string, unknown>;
+  block_refs: BlockRef[];
+  llm_config: LLMParams;
   is_system: boolean;
   is_default: boolean;
   created_at: string;
@@ -240,14 +248,121 @@ export async function getGenerationProfiles(): Promise<GenerationProfile[]> {
 }
 
 export interface ProfilePreview {
-  slug: string;
-  scaffolding_slug: string;
+  slug?: string;
+  version?: number;
+  scaffolding_slug?: string;
   block_count: number;
   prompt_templates: Record<string, { system?: string; user?: string }>;
+  effective_llm: LLMParams;
+  rendered?: Record<string, { system: string; user: string }>;
+  app_slug?: string;
 }
 
-export async function getProfilePreview(slug: string): Promise<ProfilePreview> {
-  const res = await apiFetch(`/generation/profiles/${slug}/preview/`);
+export async function getProfilePreview(
+  slug: string,
+  appSlug?: string,
+): Promise<ProfilePreview> {
+  const qs = appSlug ? `?app_slug=${encodeURIComponent(appSlug)}` : "";
+  const res = await apiFetch(`/generation/profiles/${slug}/preview/${qs}`);
+  return res.json();
+}
+
+export async function previewDraftProfile(data: {
+  block_refs: BlockRef[];
+  app_slug?: string;
+  llm_config?: LLMParams;
+}): Promise<ProfilePreview> {
+  const res = await apiFetch("/generation/profiles/preview-draft/", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export interface ProfileSuggestion {
+  app_id: number;
+  app_slug: string;
+  profile_id: number | null;
+  slug: string | null;
+  version: number | null;
+  name: string | null;
+  provenance: "app-pilot" | "stack-default" | "system-default" | "catalog";
+}
+
+export async function suggestProfiles(
+  appIds: number[],
+  stack?: string,
+): Promise<ProfileSuggestion[]> {
+  const params = new URLSearchParams({ app_ids: appIds.join(",") });
+  if (stack) params.set("stack", stack);
+  const res = await apiFetch(`/generation/profiles/suggest/?${params}`);
+  return res.json();
+}
+
+export async function getProfileVersions(slug: string): Promise<GenerationProfile[]> {
+  const res = await apiFetch(`/generation/profiles/${slug}/versions/`);
+  return res.json();
+}
+
+export interface ProfileWritePayload {
+  name: string;
+  slug: string;
+  description?: string;
+  scaffolding_slug: string;
+  block_refs: BlockRef[];
+  llm_config?: LLMParams;
+  is_default?: boolean;
+}
+
+export async function createGenerationProfile(
+  data: ProfileWritePayload,
+): Promise<GenerationProfile> {
+  const res = await apiFetch("/generation/profiles/", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function updateGenerationProfile(
+  slug: string,
+  data: ProfileWritePayload,
+): Promise<GenerationProfile> {
+  const res = await apiFetch(`/generation/profiles/${slug}/`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function archiveGenerationProfile(slug: string): Promise<void> {
+  await apiFetch(`/generation/profiles/${slug}/`, { method: "DELETE" });
+}
+
+export async function createContentBlock(data: {
+  block_type: string;
+  slug: string;
+  version?: number;
+  name: string;
+  description?: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+}): Promise<ContentBlock> {
+  const res = await apiFetch("/generation/blocks/", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function createBlockVersion(
+  slug: string,
+  data: { content: string; name?: string; description?: string; metadata?: Record<string, unknown> },
+): Promise<ContentBlock> {
+  const res = await apiFetch(`/generation/blocks/${slug}/new-version/`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
   return res.json();
 }
 

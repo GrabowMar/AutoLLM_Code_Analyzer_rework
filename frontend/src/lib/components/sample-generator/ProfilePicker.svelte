@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Badge } from '$lib/components/ui/badge';
-	import type { GenerationProfile } from '$lib/api/client';
+	import type { GenerationProfile, ProfileSuggestion } from '$lib/api/client';
 	import { getProfilePreview } from '$lib/api/generation';
 	import Check from '@lucide/svelte/icons/check';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
@@ -10,29 +10,45 @@
 		profiles: GenerationProfile[];
 		loading?: boolean;
 		selectedId: number | '';
-		appSlugs?: string[];
+		/** Server-resolved suggestions (one per selected app); empty = unknown. */
+		suggestions?: ProfileSuggestion[];
+		onSelect?: (profile: GenerationProfile | null) => void;
 	}
 
-	let { profiles, loading = false, selectedId = $bindable('' as number | ''), appSlugs = [] }: Props = $props();
+	let {
+		profiles,
+		loading = false,
+		selectedId = $bindable('' as number | ''),
+		suggestions = [],
+		onSelect,
+	}: Props = $props();
 
 	let open = $state(false);
 	let previewLoading = $state(false);
 	let previewError = $state('');
 	let previewStages = $state<Record<string, { system: number; user: number }> | null>(null);
 
-	const suggestedProfile = $derived.by(() => {
-		if (appSlugs.length !== 1) return null;
-		const dash = appSlugs[0].replace(/_/g, '-');
-		return profiles.find((p) => p.slug === `app-${dash}`) ?? null;
-	});
-
-	$effect(() => {
-		if (suggestedProfile && selectedId === '' && profiles.length > 0) {
-			selectedId = suggestedProfile.id;
-		}
-	});
-
 	const selected = $derived(profiles.find((p) => p.id === selectedId));
+
+	const provenanceLabels: Record<ProfileSuggestion['provenance'], string> = {
+		'app-pilot': 'app pilot',
+		'stack-default': 'stack default',
+		'system-default': 'system default',
+		catalog: 'catalog fallback',
+	};
+
+	/** Summarize what "Auto" resolves to across the selected apps. */
+	const autoSummary = $derived.by(() => {
+		if (suggestions.length === 0) return '';
+		const bySlug = new Map<string, number>();
+		for (const s of suggestions) {
+			const label = s.slug ? `${s.slug} (${provenanceLabels[s.provenance]})` : provenanceLabels[s.provenance];
+			bySlug.set(label, (bySlug.get(label) ?? 0) + 1);
+		}
+		return [...bySlug.entries()]
+			.map(([label, count]) => (suggestions.length > 1 ? `${label} ×${count}` : label))
+			.join(', ');
+	});
 
 	async function loadPreview(slug: string) {
 		previewLoading = true;
@@ -69,6 +85,7 @@
 	function select(id: number | '') {
 		selectedId = id;
 		open = false;
+		onSelect?.(id === '' ? null : (profiles.find((p) => p.id === id) ?? null));
 	}
 </script>
 
@@ -83,20 +100,11 @@
 			{#if selected.is_default}
 				<Badge variant="secondary" class="text-[9px] shrink-0">Default</Badge>
 			{/if}
-			{#if suggestedProfile?.id === selected.id}
-				<Badge variant="outline" class="text-[9px] text-primary border-primary/30 shrink-0">Suggested</Badge>
-			{/if}
-			<span class="text-[10px] text-muted-foreground shrink-0">{selected.block_refs?.length ?? 0} blocks</span>
+			<span class="text-[10px] text-muted-foreground shrink-0">{selected.block_refs?.length ?? 0} blocks · {selected.scaffolding_slug}</span>
 		{:else}
-			<span class="text-sm text-muted-foreground">Using default</span>
-		{/if}
-
-		{#if suggestedProfile && suggestedProfile.id !== selectedId}
-			<button
-				type="button"
-				class="ml-1 text-[10px] text-primary hover:underline shrink-0 cursor-pointer"
-				onclick={() => select(suggestedProfile!.id)}
-			>Use suggested</button>
+			<span class="text-sm text-muted-foreground truncate" title={autoSummary}>
+				Auto{autoSummary ? ` — ${autoSummary}` : ' (resolved per app)'}
+			</span>
 		{/if}
 
 		<button
@@ -111,7 +119,7 @@
 	<!-- Expanded picker -->
 	{#if open}
 		<div class="rounded-md border bg-popover shadow-sm overflow-hidden">
-			<!-- "No override" option -->
+			<!-- Auto option -->
 			<button
 				type="button"
 				class="flex w-full items-center gap-2 border-b px-3 py-2 text-left text-xs hover:bg-muted/50 transition-colors cursor-pointer {selectedId === '' ? 'bg-primary/5 text-primary' : 'text-muted-foreground'}"
@@ -120,11 +128,12 @@
 				<div class="flex h-3.5 w-3.5 items-center justify-center">
 					{#if selectedId === ''}<Check class="h-3 w-3 text-primary" />{/if}
 				</div>
-				<span class="font-medium">System default</span>
-				<span class="ml-1 text-muted-foreground">(no override)</span>
+				<span class="font-medium">Auto</span>
+				<span class="ml-1 truncate text-muted-foreground">{autoSummary || 'per-app pilot, else the stack default'}</span>
 			</button>
 			<div class="max-h-52 overflow-y-auto divide-y">
 				{#each profiles as profile}
+					{@const isSuggested = suggestions.some((s) => s.profile_id === profile.id)}
 					<button
 						type="button"
 						class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/50 transition-colors cursor-pointer {selectedId === profile.id ? 'bg-primary/5' : ''}"
@@ -137,10 +146,10 @@
 						{#if profile.is_default}
 							<Badge variant="secondary" class="text-[9px] shrink-0">Default</Badge>
 						{/if}
-						{#if suggestedProfile?.id === profile.id}
+						{#if isSuggested}
 							<Badge variant="outline" class="text-[9px] text-primary border-primary/30 shrink-0">Suggested</Badge>
 						{/if}
-						<span class="ml-auto text-[10px] text-muted-foreground shrink-0 tabular-nums">{profile.block_refs?.length ?? 0} blocks</span>
+						<span class="ml-auto text-[10px] text-muted-foreground shrink-0 tabular-nums">{profile.block_refs?.length ?? 0} blocks · {profile.scaffolding_slug}</span>
 					</button>
 				{/each}
 			</div>
