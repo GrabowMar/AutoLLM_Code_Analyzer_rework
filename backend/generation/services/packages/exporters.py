@@ -41,10 +41,12 @@ def export_template_package(
     app_template_slugs: list[str] | None = None,
     bundle_slugs: list[str] | None = None,
     block_refs: list[dict[str, Any]] | None = None,
+    stack_slugs: list[str] | None = None,
 ) -> dict[str, Any]:
     app_template_slugs = app_template_slugs or []
     bundle_slugs = bundle_slugs or []
     block_refs = block_refs or []
+    stack_slugs = stack_slugs or []
 
     bundles = list(visible_profiles_for(user).filter(slug__in=bundle_slugs).order_by("name"))
     explicit_blocks = []
@@ -70,13 +72,50 @@ def export_template_package(
         "kind": TEMPLATE_PACKAGE_KIND,
         "exported_at": timezone.now().isoformat(),
         "assets": {
-            "app_templates": [
+            "app_specs": [
                 _serialize_app_template(item)
                 for item in visible_app_templates_for(user).filter(slug__in=app_template_slugs).order_by("name")
             ],
             "blocks": [_serialize_block(block) for block in blocks],
-            "bundles": [_serialize_bundle(bundle) for bundle in bundles],
+            "profiles": [_serialize_bundle(bundle) for bundle in bundles],
+            "stacks": [_serialize_stack(row) for row in _exportable_stacks(user, stack_slugs)],
         },
+    }
+
+
+def _exportable_stacks(user: AbstractUser, stack_slugs: list[str]):
+    """User-authored stacks only — builtins ship with every install."""
+    from django.db.models import Q
+
+    from backend.runtime.models import Stack
+
+    if not stack_slugs:
+        return []
+    latest: dict[str, Stack] = {}
+    qs = (
+        Stack.objects.filter(slug__in=stack_slugs, is_archived=False, is_builtin=False)
+        .filter(Q(is_approved=True) | Q(created_by=user))
+        .order_by("slug", "-version")
+    )
+    for row in qs:
+        latest.setdefault(row.slug, row)
+    return list(latest.values())
+
+
+def _serialize_stack(row) -> dict[str, Any]:
+    return {
+        "slug": row.slug,
+        "name": row.name,
+        "description": row.description,
+        "has_frontend": row.has_frontend,
+        "default_port": row.default_port,
+        "patch_profile": row.patch_profile,
+        "frontend_component": row.frontend_component,
+        "backend_filename": row.backend_filename,
+        "backend_base_image": row.backend_base_image,
+        "frontend_base_image": row.frontend_base_image,
+        "server_kind": row.server_kind,
+        "files": row.files or {},
     }
 
 

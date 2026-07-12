@@ -134,9 +134,9 @@ def list_starter_template_packages() -> list[dict[str, Any]]:
                 "slug": slug,
                 "name": str(package.get("starter_name", slug)),
                 "description": str(package.get("starter_description", "")),
-                "app_template_count": len(assets.get("app_templates", [])),
+                "app_template_count": len(assets.get("app_specs", [])),
                 "block_count": len(assets.get("blocks", [])),
-                "bundle_count": len(assets.get("bundles", [])),
+                "bundle_count": len(assets.get("profiles", [])),
             },
         )
     return packages
@@ -156,9 +156,9 @@ def build_starter_template_package(slug: str) -> dict[str, Any]:
         "starter_name": spec["name"],
         "starter_description": spec["description"],
         "assets": {
-            "app_templates": [_load_json_data_file(relative_path) for relative_path in spec["app_template_files"]],
+            "app_specs": [_load_json_data_file(relative_path) for relative_path in spec["app_template_files"]],
             "blocks": [_build_starter_block(block) for block in spec["blocks"]],
-            "bundles": list(spec["bundles"]),
+            "profiles": list(spec["bundles"]),
         },
     }
 

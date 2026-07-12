@@ -351,6 +351,7 @@ def export_package(
         app_template_slugs=payload.app_template_slugs,
         bundle_slugs=payload.bundle_slugs,
         block_refs=[{"type": ref.type, "slug": ref.slug, "version": ref.version} for ref in payload.block_refs],
+        stack_slugs=payload.stack_slugs,
     )
     asset_count = sum(len(items) for items in package.get("assets", {}).values())
     if asset_count == 0:
@@ -373,9 +374,10 @@ def import_package(request, payload: TemplatePackageImportSchema):
     except ValueError as exc:
         return 400, {"detail": str(exc)}
     return {
-        "app_templates": [item.slug for item in imported["app_templates"]],
+        "app_specs": [item.slug for item in imported["app_specs"]],
         "blocks": [f"{item.slug}:{item.version}" for item in imported["blocks"]],
-        "bundles": [item.slug for item in imported["bundles"]],
+        "profiles": [item.slug for item in imported["profiles"]],
+        "stacks": [item.slug for item in imported["stacks"]],
     }
 
 
@@ -401,9 +403,10 @@ def import_package_starter(
     except ValueError as exc:
         return 400, {"detail": str(exc)}
     return {
-        "app_templates": [item.slug for item in imported["app_templates"]],
+        "app_specs": [item.slug for item in imported["app_specs"]],
         "blocks": [f"{item.slug}:{item.version}" for item in imported["blocks"]],
-        "bundles": [item.slug for item in imported["bundles"]],
+        "profiles": [item.slug for item in imported["profiles"]],
+        "stacks": [item.slug for item in imported["stacks"]],
     }
 
 
