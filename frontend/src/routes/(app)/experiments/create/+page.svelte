@@ -6,8 +6,9 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
-	import { getAppTemplates, type AppRequirementTemplate } from '$lib/api/generation';
+	import { getAppTemplates, type AppRequirementTemplate, type LLMParams } from '$lib/api/generation';
 	import { createExperiment } from '$lib/api/experiments';
+	import LLMParamsEditor from '$lib/components/sample-generator/LLMParamsEditor.svelte';
 	import { slugify } from '$lib/components/templates/slugify';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
@@ -20,8 +21,7 @@
 	let hypothesis = $state('');
 	let repeats = $state(3);
 	let baseSeed = $state<string>('');
-	let temperature = $state(0.3);
-	let maxTokens = $state(32000);
+	let llmDefaults = $state<LLMParams>({});
 
 	let apps = $state<AppRequirementTemplate[]>([]);
 	let appsLoading = $state(true);
@@ -84,8 +84,7 @@
 				app_requirement_ids: [...selectedAppIds],
 				repeats,
 				base_seed: baseSeed.trim() ? Number(baseSeed) : null,
-				temperature,
-				max_tokens: maxTokens,
+				llm_defaults: llmDefaults,
 			});
 			goto(`/experiments/${experiment.id}`);
 		} catch (err: any) {
@@ -164,18 +163,11 @@
 					<Input id="exp-seed" type="number" bind:value={baseSeed} placeholder="random" />
 					<p class="text-[10px] text-muted-foreground">Set for a reproducible seed matrix across launches.</p>
 				</div>
-				<div class="space-y-1.5">
-					<Label for="exp-temp">Default temperature</Label>
-					<input
-						id="exp-temp"
-						type="number"
-						step="0.1"
-						min={0}
-						max={2}
-						bind:value={temperature}
-						class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-					/>
-				</div>
+			</div>
+			<div class="space-y-1.5">
+				<Label>LLM defaults</Label>
+				<LLMParamsEditor bind:params={llmDefaults} idPrefix="exp-defaults" />
+				<p class="text-[10px] text-muted-foreground">Applied to every condition; conditions can override per cell.</p>
 			</div>
 		</Card.Content>
 	</Card.Root>

@@ -8,8 +8,9 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import ModelSelector from '$lib/components/sample-generator/ModelSelector.svelte';
 	import ProfilePicker from '$lib/components/sample-generator/ProfilePicker.svelte';
+	import LLMParamsEditor from '$lib/components/sample-generator/LLMParamsEditor.svelte';
 	import { getModels } from '$lib/api/models';
-	import { getGenerationProfiles, type GenerationProfile } from '$lib/api/generation';
+	import { getGenerationProfiles, type GenerationProfile, type LLMParams } from '$lib/api/generation';
 	import type { LLMModelSummary } from '$lib/api/client';
 	import {
 		getExperiment,
@@ -46,6 +47,8 @@
 	let profiles = $state<GenerationProfile[]>([]);
 	let newConditionModelId = $state<number | ''>('');
 	let newConditionProfileId = $state<number | ''>('');
+	let newConditionOverrides = $state<LLMParams>({});
+	let showConditionOverrides = $state(false);
 	let addingCondition = $state(false);
 
 	let previewing = $state(false);
@@ -99,10 +102,13 @@
 			const cond = await createCondition(experimentId, {
 				model_id: newConditionModelId as number,
 				profile_id: newConditionProfileId as number,
+				param_overrides: newConditionOverrides,
 			});
 			conditions = [...conditions, cond];
 			newConditionModelId = '';
 			newConditionProfileId = '';
+			newConditionOverrides = {};
+			showConditionOverrides = false;
 			previewResult = null;
 		} catch (err: any) {
 			error = err?.detail ?? err?.message ?? 'Failed to add condition';
@@ -214,8 +220,11 @@
 		<div class="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
 			<span>{experiment.app_requirement_ids.length} apps</span>
 			<span>{experiment.repeats}× repeats per cell</span>
-			<span>temp {experiment.temperature}</span>
-			<span>max_tokens {experiment.max_tokens}</span>
+			{#if Object.keys(experiment.llm_defaults ?? {}).length > 0}
+				<span class="font-mono">{Object.entries(experiment.llm_defaults).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ')}</span>
+			{:else}
+				<span>default sampling</span>
+			{/if}
 			{#if experiment.base_seed !== null}
 				<span>base seed {experiment.base_seed}</span>
 			{:else}
@@ -262,25 +271,44 @@
 				{/if}
 
 				{#if experiment.status === 'draft'}
-					<div class="grid gap-3 rounded-md border bg-muted/20 p-3 sm:grid-cols-[1fr_1fr_auto]">
-						<div class="space-y-1">
-							<span class="text-xs text-muted-foreground">Model</span>
-							<ModelSelector {models} mode="single" bind:selectedId={newConditionModelId} maxHeight="max-h-48" />
+					<div class="space-y-3 rounded-md border bg-muted/20 p-3">
+						<div class="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+							<div class="space-y-1">
+								<span class="text-xs text-muted-foreground">Model</span>
+								<ModelSelector {models} mode="single" bind:selectedId={newConditionModelId} maxHeight="max-h-48" />
+							</div>
+							<div class="space-y-1">
+								<span class="text-xs text-muted-foreground">Profile</span>
+								<ProfilePicker {profiles} bind:selectedId={newConditionProfileId} />
+							</div>
+							<div class="flex items-end">
+								<Button
+									size="sm"
+									disabled={!newConditionModelId || !newConditionProfileId || addingCondition}
+									onclick={addCondition}
+								>
+									<Plus class="h-3.5 w-3.5" />
+									Add
+								</Button>
+							</div>
 						</div>
-						<div class="space-y-1">
-							<span class="text-xs text-muted-foreground">Profile</span>
-							<ProfilePicker {profiles} bind:selectedId={newConditionProfileId} />
-						</div>
-						<div class="flex items-end">
-							<Button
-								size="sm"
-								disabled={!newConditionModelId || !newConditionProfileId || addingCondition}
-								onclick={addCondition}
-							>
-								<Plus class="h-3.5 w-3.5" />
-								Add
-							</Button>
-						</div>
+						<button
+							type="button"
+							class="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+							onclick={() => (showConditionOverrides = !showConditionOverrides)}
+						>
+							{showConditionOverrides ? 'Hide' : 'Show'} per-condition param overrides
+							{#if Object.keys(newConditionOverrides).length > 0}
+								<span class="text-primary">({Object.keys(newConditionOverrides).length} set)</span>
+							{/if}
+						</button>
+						{#if showConditionOverrides}
+							<LLMParamsEditor
+								bind:params={newConditionOverrides}
+								inherited={experiment.llm_defaults ?? {}}
+								idPrefix="cond-overrides"
+							/>
+						{/if}
 					</div>
 				{/if}
 			</Card.Content>

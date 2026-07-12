@@ -9,6 +9,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import type {
 		LLMModelSummary,
+		LLMParams,
 		Stack,
 		AppRequirementTemplate,
 	} from '$lib/api/client';
@@ -19,6 +20,7 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Bot from '@lucide/svelte/icons/bot';
 	import ModelSelector from '$lib/components/sample-generator/ModelSelector.svelte';
+	import LLMParamsEditor from '$lib/components/sample-generator/LLMParamsEditor.svelte';
 
 	type TabId = 'custom' | 'scaffolding' | 'copilot';
 
@@ -26,16 +28,15 @@
 		model_id: number;
 		system_prompt: string;
 		user_prompt: string;
-		temperature: number;
-		max_tokens: number;
+		llm_params: LLMParams;
+		seed?: number | null;
 	}
 
 	export interface ScaffoldingPayload {
 		stack_slug: string;
 		app_requirement_ids: number[];
 		model_ids: number[];
-		temperature: number;
-		max_tokens: number;
+		llm_params: LLMParams;
 		trials: number;
 	}
 
@@ -91,15 +92,14 @@
 	// Custom form
 	let customSystemPrompt = $state('You are an expert full-stack developer. Write clean, well-structured code with proper error handling, type safety, and following best practices.');
 	let customUserPrompt = $state('');
-	let customTemperature = $state(0.3);
-	let customMaxTokens = $state(32000);
+	let customLLMParams = $state<LLMParams>({});
+	let customSeed = $state<number | ''>('');
 
 	// Scaffolding form
 	let selectedStackSlug = $state('');
 	let selectedAppIds = $state<Set<number>>(new Set());
 	let selectedModelIds = $state<Set<number>>(new Set());
-	let scaffoldingTemperature = $state(0.3);
-	let scaffoldingMaxTokens = $state(32000);
+	let scaffoldingLLMParams = $state<LLMParams>({});
 	let scaffoldingTrials = $state(1);
 	let appSearch = $state('');
 	let categoryFilter = $state('');
@@ -170,8 +170,8 @@
 			model_id: customModelId as number,
 			system_prompt: customSystemPrompt,
 			user_prompt: customUserPrompt,
-			temperature: customTemperature,
-			max_tokens: customMaxTokens,
+			llm_params: customLLMParams,
+			seed: customSeed === '' ? null : customSeed,
 		});
 	}
 
@@ -181,8 +181,7 @@
 			stack_slug: selectedStackSlug,
 			app_requirement_ids: [...selectedAppIds],
 			model_ids: [...selectedModelIds],
-			temperature: scaffoldingTemperature,
-			max_tokens: scaffoldingMaxTokens,
+			llm_params: scaffoldingLLMParams,
 			trials: scaffoldingTrials,
 		});
 	}
@@ -248,28 +247,21 @@
 						Advanced
 					</button>
 					{#if customShowAdvanced}
-						<div class="grid gap-4 sm:grid-cols-2 rounded-md border bg-muted/20 p-3">
-							<div class="space-y-1.5">
-								<Label class="text-xs">Temperature: {customTemperature.toFixed(1)}</Label>
-								<input
-									type="range" min="0" max="2" step="0.1"
-									bind:value={customTemperature}
-									class="w-full accent-primary"
-								/>
-								<div class="flex justify-between text-[10px] text-muted-foreground">
-									<span>Precise</span><span>Creative</span>
+						<div class="space-y-3">
+							<LLMParamsEditor bind:params={customLLMParams} idPrefix="custom" />
+							<div class="grid gap-3 sm:grid-cols-2 rounded-md border bg-muted/20 p-3">
+								<div class="space-y-1.5">
+									<Label class="text-xs" for="custom-seed">Seed (optional)</Label>
+									<input
+										id="custom-seed"
+										type="number"
+										bind:value={customSeed}
+										min={0}
+										placeholder="random"
+										class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+									/>
+									<p class="text-[10px] text-muted-foreground">Fixed sampling seed for best-effort reproducibility.</p>
 								</div>
-							</div>
-							<div class="space-y-1.5">
-								<Label class="text-xs" for="custom-max-tokens">Max Tokens</Label>
-								<input
-									id="custom-max-tokens"
-									type="number"
-									bind:value={customMaxTokens}
-									min={1}
-									max={200000}
-									class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-								/>
 							</div>
 						</div>
 					{/if}
@@ -427,40 +419,21 @@
 						Advanced
 					</button>
 					{#if scaffoldingShowAdvanced}
-						<div class="grid gap-4 sm:grid-cols-2 rounded-md border bg-muted/20 p-3">
-							<div class="space-y-1.5">
-								<Label class="text-xs">Temperature: {scaffoldingTemperature.toFixed(1)}</Label>
-								<input
-									type="range" min="0" max="2" step="0.1"
-									bind:value={scaffoldingTemperature}
-									class="w-full accent-primary"
-								/>
-								<div class="flex justify-between text-[10px] text-muted-foreground">
-									<span>Precise</span><span>Creative</span>
+						<div class="space-y-3">
+							<LLMParamsEditor bind:params={scaffoldingLLMParams} idPrefix="scaffolding" />
+							<div class="grid gap-3 sm:grid-cols-2 rounded-md border bg-muted/20 p-3">
+								<div class="space-y-1.5">
+									<Label class="text-xs" for="scaffolding-trials">Repeats per Combination</Label>
+									<input
+										id="scaffolding-trials"
+										type="number"
+										bind:value={scaffoldingTrials}
+										min={1}
+										max={10}
+										class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+									/>
+									<p class="text-[10px] text-muted-foreground">Independent trials per app × model — comparisons need n &gt; 1.</p>
 								</div>
-							</div>
-							<div class="space-y-1.5">
-								<Label class="text-xs" for="scaffolding-max-tokens">Max Tokens</Label>
-								<input
-									id="scaffolding-max-tokens"
-									type="number"
-									bind:value={scaffoldingMaxTokens}
-									min={1}
-									max={200000}
-									class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-								/>
-							</div>
-							<div class="space-y-1.5">
-								<Label class="text-xs" for="scaffolding-trials">Repeats per Combination</Label>
-								<input
-									id="scaffolding-trials"
-									type="number"
-									bind:value={scaffoldingTrials}
-									min={1}
-									max={10}
-									class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-								/>
-								<p class="text-[10px] text-muted-foreground">Independent trials per app × model — comparisons need n &gt; 1.</p>
 							</div>
 						</div>
 					{/if}

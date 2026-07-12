@@ -86,6 +86,7 @@ export interface GenerationJob {
   created_by_email: string | null;
   temperature: number;
   max_tokens: number;
+  llm_params: LLMParams;
   custom_system_prompt: string;
   custom_user_prompt: string;
   copilot_description: string;
@@ -126,6 +127,21 @@ export interface PaginatedJobs {
   page: number;
   per_page: number;
   pages: number;
+}
+
+export interface LLMParams {
+  temperature?: number | null;
+  top_p?: number | null;
+  top_k?: number | null;
+  min_p?: number | null;
+  max_tokens?: number | null;
+  frequency_penalty?: number | null;
+  presence_penalty?: number | null;
+  repetition_penalty?: number | null;
+  stop?: string[] | null;
+  response_format?: Record<string, unknown> | null;
+  provider?: Record<string, unknown> | null;
+  reasoning?: Record<string, unknown> | null;
 }
 
 export interface GenerationProfile {
@@ -203,6 +219,8 @@ export async function createCustomJob(data: {
   user_prompt: string;
   temperature?: number;
   max_tokens?: number;
+  llm_params?: LLMParams;
+  seed?: number | null;
 }): Promise<GenerationJob> {
   const res = await apiFetch("/generation/jobs/custom/", {
     method: "POST",
@@ -288,6 +306,8 @@ export async function createScaffoldingBatch(data: {
   model_ids: number[];
   temperature?: number;
   max_tokens?: number;
+  llm_params?: LLMParams;
+  profile_id?: number | null;
   trials?: number;
 }): Promise<BatchCreateResponse> {
   const res = await apiFetch("/generation/jobs/scaffolding/", {
