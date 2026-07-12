@@ -35,6 +35,23 @@ class StackSchema(Schema):
     file_count: int = 0
 
 
+class StackWriteSchema(Schema):
+    """Create/update payload for a user-authored stack (Dockerfile is generated)."""
+
+    slug: str = ""  # required on create, ignored on update
+    name: str
+    description: str = ""
+    has_frontend: bool = False
+    default_port: int = 8000
+    patch_profile: str = "none"
+    frontend_component: str = ""
+    backend_filename: str = "app.py"
+    backend_base_image: str
+    frontend_base_image: str = ""
+    server_kind: str = "python"
+    files: dict = {}
+
+
 class AppRequirementTemplateSchema(ModelSchema):
     class Meta:
         model = AppRequirementTemplate

@@ -436,3 +436,20 @@ DOCKER_APPS_NETWORK = env("DOCKER_APPS_NETWORK", default="")
 
 # Maximum number of analyzer threads to run in parallel per analysis task.
 ANALYSIS_MAX_WORKERS = env.int("ANALYSIS_MAX_WORKERS", default=4)
+
+# ── User-authored stacks ─────────────────────────────────────────────
+# User stacks never ship their own Dockerfile: it is generated server-side
+# from a pinned template, and base images must come from this allowlist.
+STACK_ALLOWED_BASE_IMAGES = {
+    "python": env.list(
+        "STACK_ALLOWED_PYTHON_IMAGES",
+        default=["python:3.11-slim", "python:3.12-slim"],
+    ),
+    "node": env.list(
+        "STACK_ALLOWED_NODE_IMAGES",
+        default=["node:20-alpine", "node:22-alpine"],
+    ),
+}
+# When True, non-staff stacks need staff approval before jobs can use them.
+# Off by default: single-user research installs.
+STACK_REQUIRE_APPROVAL = env.bool("STACK_REQUIRE_APPROVAL", default=False)

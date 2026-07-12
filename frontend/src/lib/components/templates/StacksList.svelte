@@ -9,8 +9,11 @@
 		stacks: Stack[];
 		loading: boolean;
 		compact: boolean;
+		onEdit?: (s: Stack) => void;
+		onDuplicate?: (s: Stack) => void;
+		onArchive?: (s: Stack) => void;
 	}
-	let { stacks, loading, compact }: Props = $props();
+	let { stacks, loading, compact, onEdit, onDuplicate, onArchive }: Props = $props();
 </script>
 
 {#if loading}
