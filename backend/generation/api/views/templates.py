@@ -27,22 +27,61 @@ def _mutable_template_or_403(model, user, *, slug: str):
     raise HttpError(403, "You can only modify your own templates.")
 
 
-# -- Stacks (static scaffolding skeletons from runtime/scaffolding/manifest.json) --
+# -- Stacks (DB rows seeded from runtime/scaffolding/, latest version per slug) --
+
+
+def _latest_stacks(user=None):
+    """Latest non-archived Stack per slug, builtin plus (later) user-visible ones."""
+    from backend.runtime.models import Stack
+
+    rows = Stack.objects.filter(is_archived=False).order_by("slug", "-version")
+    latest: dict[str, Stack] = {}
+    for row in rows:
+        latest.setdefault(row.slug, row)
+    return list(latest.values())
+
+
+def _stack_payload(row, *, include_files: bool = False) -> dict:
+    payload = {
+        "slug": row.slug,
+        "version": row.version,
+        "name": row.name or row.slug,
+        "description": row.description,
+        "has_frontend": row.has_frontend,
+        "aliases": row.aliases or [],
+        "is_builtin": row.is_builtin,
+        "default_port": row.default_port,
+        "patch_profile": row.patch_profile,
+        "file_count": len(row.files or {}),
+    }
+    if include_files:
+        payload["files"] = row.files or {}
+    return payload
 
 
 @router.get("/stacks/", response=list[StackSchema])
 def list_stacks(request):
-    """List the stack skeletons available for scaffolding-mode jobs.
-
-    Stacks are code shipped with the app (``runtime/scaffolding/<dir>``), not
-    database rows — there is nothing per-user or per-install to create/edit
-    here, unlike the (removed) ``ScaffoldingTemplate`` model this replaces.
-    """
+    """List the stack skeletons available for scaffolding-mode jobs."""
+    rows = _latest_stacks(request.auth)
+    if rows:
+        return [_stack_payload(row) for row in rows]
+    # First boot before the post_migrate seeder ran: fall back to the manifest.
     manifest = load_manifest()
     return [
         {"slug": slug, "has_frontend": bool(config.get("has_frontend")), "aliases": config.get("aliases", [])}
         for slug, config in manifest.get("stacks", {}).items()
     ]
+
+
+@router.get("/stacks/{slug}/", response={200: dict, 404: dict})
+def get_stack(request, slug: str):
+    """Latest version of a stack, including its full skeleton file map."""
+    from backend.runtime.services.scaffolding import get_stack_row
+
+    row = get_stack_row(slug)
+    if row is None:
+        return 404, {"detail": f"Unknown stack slug: {slug}"}
+    return 200, _stack_payload(row, include_files=True)
 
 
 # -- App Requirement Templates ------------------------------------------

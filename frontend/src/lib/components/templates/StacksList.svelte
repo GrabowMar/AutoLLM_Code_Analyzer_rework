@@ -20,7 +20,7 @@
 {:else if stacks.length === 0}
 	<Card.Root class="border-dashed">
 		<Card.Content class="py-16 text-center text-sm text-muted-foreground">
-			No stacks found in the runtime scaffolding manifest.
+			No stacks seeded yet — run migrations to seed the builtin stacks.
 		</Card.Content>
 	</Card.Root>
 {:else}
