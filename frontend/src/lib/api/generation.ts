@@ -299,7 +299,9 @@ export async function suggestProfiles(
   return res.json();
 }
 
-export async function getProfileVersions(slug: string): Promise<GenerationProfile[]> {
+export async function getProfileVersions(
+  slug: string,
+): Promise<GenerationProfile[]> {
   const res = await apiFetch(`/generation/profiles/${slug}/versions/`);
   return res.json();
 }
@@ -357,7 +359,12 @@ export async function createContentBlock(data: {
 
 export async function createBlockVersion(
   slug: string,
-  data: { content: string; name?: string; description?: string; metadata?: Record<string, unknown> },
+  data: {
+    content: string;
+    name?: string;
+    description?: string;
+    metadata?: Record<string, unknown>;
+  },
 ): Promise<ContentBlock> {
   const res = await apiFetch(`/generation/blocks/${slug}/new-version/`, {
     method: "POST",
