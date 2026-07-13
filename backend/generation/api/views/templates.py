@@ -218,7 +218,11 @@ def update_stack(request, slug: str, payload: StackWriteSchema):
     if errors:
         return 400, {"detail": "; ".join(errors)}
     new_hash = _stack_content_hash(payload)
-    if new_hash == current.content_hash and payload.name == current.name and payload.description == current.description:
+    if (
+        new_hash == current.content_hash
+        and payload.name == current.name
+        and payload.description == current.description
+    ):
         return 400, {"detail": "No changes from the current version."}
     defaults = _stack_defaults(payload, current.created_by)
     # Re-approval on content change when the gate is on (staff edits stay approved).
