@@ -21,11 +21,18 @@ from backend.generation.models import GenerationProfile
 
 
 class StackSchema(Schema):
-    """A stack skeleton from runtime/scaffolding/manifest.json."""
+    """A stack skeleton (DB row seeded from runtime/scaffolding/)."""
 
     slug: str
     has_frontend: bool
     aliases: list[str] = []
+    version: int = 1
+    name: str = ""
+    description: str = ""
+    is_builtin: bool = True
+    default_port: int = 8000
+    patch_profile: str = "none"
+    file_count: int = 0
 
 
 class AppRequirementTemplateSchema(ModelSchema):

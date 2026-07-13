@@ -45,8 +45,54 @@ def load_manifest() -> dict[str, Any]:
     return _manifest_cache
 
 
-def _stack_entries(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Map canonical slug and aliases to stack config (canonical slug included)."""
+def _row_config(row: Any) -> dict[str, Any]:
+    """A Stack row in the manifest-entry dict shape the call sites expect.
+
+    Empty optional values are omitted so ``stack.get(key, default)`` call
+    sites keep their defaults.
+    """
+    config: dict[str, Any] = {
+        "canonical_slug": row.slug,
+        "stack_version": row.version,
+        "has_frontend": row.has_frontend,
+        "default_port": row.default_port,
+        "patch_profile": row.patch_profile,
+        "aliases": row.aliases or [],
+    }
+    if row.frontend_component:
+        config["frontend_component"] = row.frontend_component
+    if row.backend_filename:
+        config["backend_filename"] = row.backend_filename
+    return config
+
+
+def _db_stack_entries() -> dict[str, dict[str, Any]]:
+    """Latest non-archived Stack row per slug, keyed by slug and every alias.
+
+    Returns an empty dict when the table is empty or unavailable (first boot
+    before the post_migrate seeder ran) — callers fall back to the manifest.
+    """
+    from backend.runtime.models import Stack
+
+    entries: dict[str, dict[str, Any]] = {}
+    try:
+        rows = list(Stack.objects.filter(is_archived=False).order_by("slug", "-version"))
+    except Exception:  # noqa: BLE001 — table missing mid-migration
+        return {}
+    seen: set[str] = set()
+    for row in rows:
+        if row.slug in seen:
+            continue
+        seen.add(row.slug)
+        config = _row_config(row)
+        entries[row.slug] = config
+        for alias in row.aliases or []:
+            entries.setdefault(alias, config)
+    return entries
+
+
+def _manifest_stack_entries(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Map canonical slug and aliases to manifest config (canonical slug included)."""
     entries: dict[str, dict[str, Any]] = {}
     for canonical, config in manifest.get("stacks", {}).items():
         entry = {**config, "canonical_slug": canonical}
@@ -56,11 +102,15 @@ def _stack_entries(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return entries
 
 
+def _stack_entries() -> dict[str, dict[str, Any]]:
+    """DB-backed stack entries, falling back to the manifest when empty."""
+    return _db_stack_entries() or _manifest_stack_entries(load_manifest())
+
+
 def canonical_stack_slug(slug: str) -> str:
     """Map a raw scaffolding slug (canonical or alias) to its canonical stack slug."""
-    manifest = load_manifest()
-    entries = _stack_entries(manifest)
-    default = manifest.get("default_stack", "generic-python")
+    entries = _stack_entries()
+    default = load_manifest().get("default_stack", "generic-python")
 
     if slug in entries:
         return entries[slug]["canonical_slug"]
@@ -69,14 +119,13 @@ def canonical_stack_slug(slug: str) -> str:
 
 
 def is_known_stack_slug(slug: str) -> bool:
-    """Whether *slug* is a canonical stack slug or alias in the manifest."""
-    return slug in _stack_entries(load_manifest())
+    """Whether *slug* is a known canonical stack slug or alias."""
+    return slug in _stack_entries()
 
 
 def resolve_stack_slug(job: GenerationJob) -> str:
-    """Resolve a job's stack slug to a canonical stack slug from the manifest."""
-    manifest = load_manifest()
-    default = manifest.get("default_stack", "generic-python")
+    """Resolve a job's stack slug to a canonical stack slug."""
+    default = load_manifest().get("default_stack", "generic-python")
 
     if not job.stack_slug:
         return default
@@ -85,13 +134,33 @@ def resolve_stack_slug(job: GenerationJob) -> str:
 
 
 def get_stack_config(stack_slug: str) -> dict[str, Any]:
-    """Return manifest config for a canonical stack slug."""
-    manifest = load_manifest()
-    stacks = manifest.get("stacks", {})
-    if stack_slug not in stacks:
+    """Return the config dict for a canonical stack slug (DB row or manifest entry)."""
+    entries = _stack_entries()
+    if stack_slug not in entries:
         msg = f"Unknown stack slug: {stack_slug}"
         raise KeyError(msg)
-    return {**stacks[stack_slug], "canonical_slug": stack_slug}
+    return entries[stack_slug]
+
+
+def get_stack_row(slug: str, version: int | None = None):
+    """The Stack row for *slug* (exact *version*, or latest non-archived); None if absent."""
+    from backend.runtime.models import Stack
+
+    try:
+        qs = Stack.objects.filter(slug=slug)
+        if version is not None:
+            return qs.filter(version=version).first()
+        return qs.filter(is_archived=False).order_by("-version").first()
+    except Exception:  # noqa: BLE001 — table missing mid-migration
+        return None
+
+
+def stack_snapshot_entry(slug: str) -> dict[str, Any] | None:
+    """The ``{slug, version, content_hash}`` dict a job snapshot pins, or None."""
+    row = get_stack_row(canonical_stack_slug(slug))
+    if row is None:
+        return None
+    return {"slug": row.slug, "version": row.version, "content_hash": row.content_hash}
 
 
 def stack_has_frontend(stack_slug: str) -> bool:
@@ -110,10 +179,24 @@ def apply_scaffold(
     """
     dest_path.mkdir(parents=True, exist_ok=True)
     stack_slug = resolve_stack_slug(job)
-    stack = get_stack_config(stack_slug)
 
-    template_dir = _TEMPLATES_DIR / stack["directory"]
-    _copy_template_dir(template_dir, dest_path)
+    # Prefer the exact Stack version frozen into the job snapshot; legacy
+    # snapshots (string-only scaffolding_slug) resolve the latest version.
+    snapshot = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
+    pinned = snapshot.get("stack") or {}
+    row = get_stack_row(
+        pinned.get("slug") or stack_slug,
+        version=pinned.get("version"),
+    )
+
+    if row is not None:
+        stack = _row_config(row)
+        _materialize_stack_files(row.files or {}, dest_path)
+    else:
+        # First-boot fallback: table not seeded yet — provision from disk.
+        stack = get_stack_config(stack_slug)
+        template_dir = _TEMPLATES_DIR / stack.get("directory", stack_slug)
+        _copy_template_dir(template_dir, dest_path)
 
     _apply_substitutions(dest_path, job, stack)
 
@@ -255,6 +338,14 @@ def _render_substitutions(text: str, context: dict[str, str]) -> str:
         return match.group(0)
 
     return _SUBSTITUTION_PATTERN.sub(_replace, text)
+
+
+def _materialize_stack_files(files: dict[str, str], dst: Path) -> None:
+    """Write a Stack row's {relative_path: text} skeleton map into *dst*."""
+    for rel, content in files.items():
+        target = dst / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
 
 
 def _copy_template_dir(src: Path, dst: Path) -> None:

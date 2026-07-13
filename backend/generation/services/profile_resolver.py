@@ -20,6 +20,7 @@ from backend.generation.models import GenerationProfile
 from backend.generation.services.llm_params import SAMPLING_KEYS
 from backend.generation.services.llm_params import merge_llm_params
 from backend.runtime.services.scaffolding import resolve_stack_slug
+from backend.runtime.services.scaffolding import stack_snapshot_entry
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
@@ -313,6 +314,11 @@ def build_resolved_snapshot(
         "prompt_templates": prompt_templates,
         "prompts": {},
     }
+    # Pin the exact skeleton the job will be provisioned with (None only on
+    # a first boot where the Stack table has not been seeded yet).
+    stack_entry = stack_snapshot_entry(snapshot["scaffolding_slug"])
+    if stack_entry:
+        snapshot["stack"] = stack_entry
     snapshot["prompt_hash"] = _snapshot_prompt_hash(snapshot)
     snapshot["run_fingerprint"] = run_fingerprint(snapshot)
     return snapshot
@@ -465,6 +471,11 @@ def run_fingerprint(snapshot: dict[str, Any]) -> str:
         },
         "scaffolding_slug": snapshot.get("scaffolding_slug"),
     }
+    # Skeleton content identity: two runs on different stack versions are
+    # not exact replays of each other.
+    stack = snapshot.get("stack") or {}
+    if stack.get("content_hash"):
+        payload["stack_content_hash"] = stack["content_hash"]
     encoded = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(encoded.encode()).hexdigest()[:16]
 

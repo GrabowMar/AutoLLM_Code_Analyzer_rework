@@ -241,3 +241,89 @@ class PortAllocation(models.Model):
 
         msg = "Could not allocate port after retries"
         raise RuntimeError(msg)
+
+
+class Stack(models.Model):
+    """A runnable code skeleton (Dockerfile, deps, frontend shell) for scaffolding jobs.
+
+    slug+version rows are immutable, mirroring ContentBlock/GenerationProfile:
+    job snapshots pin an exact version so historical runs keep provisioning the
+    skeleton they were generated against. Builtin rows are seeded from
+    ``runtime/scaffolding/manifest.json`` + the skeleton directories; the
+    seeder bumps the version when the on-disk content changes.
+    """
+
+    class DockerfileMode(models.TextChoices):
+        # Dockerfile ships inside ``files`` (builtin stacks).
+        BUNDLED = "bundled", _("Bundled")
+        # Dockerfile is generated server-side from a pinned template
+        # (user-authored stacks; see Stage 6).
+        GENERATED = "generated", _("Generated")
+
+    slug = models.SlugField(_("slug"), max_length=100)
+    version = models.PositiveIntegerField(
+        _("version"),
+        default=1,
+        help_text="Versions are immutable: content changes create version+1",
+    )
+    name = models.CharField(_("name"), max_length=200, blank=True, default="")
+    description = models.TextField(_("description"), blank=True, default="")
+    is_builtin = models.BooleanField(_("builtin"), default=False)
+    is_archived = models.BooleanField(_("archived"), default=False)
+    is_approved = models.BooleanField(
+        _("approved"),
+        default=True,
+        help_text="Gate for user stacks when STACK_REQUIRE_APPROVAL is on",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="stacks",
+    )
+
+    # Runtime config (mirrors the manifest entry shape)
+    has_frontend = models.BooleanField(_("has frontend"), default=False)
+    default_port = models.PositiveIntegerField(_("default port"), default=8000)
+    patch_profile = models.CharField(
+        _("patch profile"),
+        max_length=20,
+        choices=[("flask", "Flask"), ("none", "None")],
+        default="none",
+    )
+    frontend_component = models.CharField(_("frontend component"), max_length=100, blank=True, default="")
+    backend_filename = models.CharField(_("backend filename"), max_length=100, default="app.py")
+    aliases = models.JSONField(_("aliases"), default=list, blank=True)
+
+    # Content
+    files = models.JSONField(
+        _("files"),
+        default=dict,
+        blank=True,
+        help_text="Skeleton tree as {relative_path: text}",
+    )
+    content_hash = models.CharField(_("content hash"), max_length=64, blank=True, default="")
+    dockerfile_mode = models.CharField(
+        _("dockerfile mode"),
+        max_length=20,
+        choices=DockerfileMode.choices,
+        default=DockerfileMode.BUNDLED,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("Stack")
+        verbose_name_plural = _("Stacks")
+        ordering = ["slug", "-version"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["slug", "version"],
+                name="runtime_stack_slug_version_uniq",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.slug} v{self.version}"

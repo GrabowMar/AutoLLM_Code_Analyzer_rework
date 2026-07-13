@@ -170,6 +170,13 @@ export interface Stack {
   slug: string;
   has_frontend: boolean;
   aliases: string[];
+  version: number;
+  name: string;
+  description: string;
+  is_builtin: boolean;
+  default_port: number;
+  patch_profile: string;
+  file_count: number;
 }
 
 export interface StarterTemplatePackage {
