@@ -206,12 +206,16 @@ def _import_stack(raw_stack: Any, *, user: AbstractUser, conflict_strategy: str)
         "description": str(raw_stack.get("description", "")),
         "has_frontend": bool(raw_stack.get("has_frontend")),
         "default_port": int(raw_stack.get("default_port", 8000)),
-        "patch_profile": raw_stack.get("patch_profile") if raw_stack.get("patch_profile") in ("flask", "none") else "none",
+        "patch_profile": raw_stack.get("patch_profile")
+        if raw_stack.get("patch_profile") in ("flask", "none")
+        else "none",
         "frontend_component": str(raw_stack.get("frontend_component", "")),
         "backend_filename": str(raw_stack.get("backend_filename", "app.py")),
         "backend_base_image": str(raw_stack.get("backend_base_image", "")),
         "frontend_base_image": str(raw_stack.get("frontend_base_image", "")),
-        "server_kind": raw_stack.get("server_kind") if raw_stack.get("server_kind") in ("python", "uvicorn") else "python",
+        "server_kind": raw_stack.get("server_kind")
+        if raw_stack.get("server_kind") in ("python", "uvicorn")
+        else "python",
     }
     errors = validate_stack_files(files) + validate_stack_config(
         backend_base_image=payload["backend_base_image"],
