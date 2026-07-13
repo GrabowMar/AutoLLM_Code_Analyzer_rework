@@ -553,3 +553,128 @@ def test_list_and_import_starter_package(client):
     # renamed copies were created, not the exact unsuffixed names.
     assert any(slug.startswith("analytics_campaign_monitor") for slug in payload["app_templates"])
     assert any(slug.startswith("system-fastapi-react-standard") for slug in payload["bundles"])
+
+
+@pytest.mark.django_db
+def test_profile_suggest_reports_provenance(client):
+    user = UserFactory()
+    client.force_login(user)
+    # crud_todo_list has a seeded app-pilot profile; a fresh factory app doesn't.
+    from backend.generation.models import AppRequirementTemplate
+
+    pilot_app = AppRequirementTemplate.objects.get(slug="crud_todo_list")
+    plain_app = AppRequirementTemplateFactory(is_default=True)
+
+    response = client.get(
+        f"/api/generation/profiles/suggest/?app_ids={pilot_app.id},{plain_app.id}&stack=flask-react",
+    )
+
+    assert response.status_code == 200
+    by_app = {entry["app_id"]: entry for entry in response.json()}
+    assert by_app[pilot_app.id]["provenance"] == "app-pilot"
+    assert by_app[pilot_app.id]["slug"] == "app-crud-todo-list"
+    assert by_app[plain_app.id]["provenance"] in ("stack-default", "system-default")
+    assert by_app[plain_app.id]["profile_id"] is not None
+
+
+@pytest.mark.django_db
+def test_profile_preview_with_app_slug_renders_prompts(client):
+    user = UserFactory()
+    client.force_login(user)
+
+    response = client.get(
+        "/api/generation/profiles/system-scaffolding-standard/preview/?app_slug=crud_todo_list",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["app_slug"] == "crud_todo_list"
+    rendered = data["rendered"]
+    for stage in ("backend", "frontend"):
+        assert rendered[stage]["system"]
+        assert rendered[stage]["user"]
+    # Materialized, not a raw template: app name substituted, no Jinja braces
+    assert "{{" not in rendered["backend"]["user"]
+    assert data["effective_llm"]["temperature"] == 0.3
+
+
+@pytest.mark.django_db
+def test_block_new_version_creates_user_owned_next_version(client):
+    user = UserFactory()
+    client.force_login(user)
+    block = ContentBlockFactory(is_system=True, slug="versioned-block", version=1)
+
+    response = client.post(
+        f"/api/generation/blocks/{block.slug}/new-version/",
+        data=json.dumps({"content": "Updated {{ name }} content"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["version"] == 2
+    assert data["is_system"] is False
+    assert data["block_type"] == block.block_type
+    assert data["name"] == block.name  # carried over when not supplied
+
+
+@pytest.mark.django_db
+def test_block_new_version_rejects_bad_jinja(client):
+    user = UserFactory()
+    client.force_login(user)
+    block = ContentBlockFactory(is_system=False, created_by=user)
+
+    response = client.post(
+        f"/api/generation/blocks/{block.slug}/new-version/",
+        data=json.dumps({"content": "{% broken"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert "Jinja2" in response.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_draft_preview_renders_unsaved_block_refs(client):
+    user = UserFactory()
+    client.force_login(user)
+    block = ContentBlockFactory(
+        is_system=False,
+        created_by=user,
+        block_type="prompt_stage",
+        slug="draft-backend-system",
+        content="You build {{ name }}.",
+        metadata={"stage": "backend", "role": "system"},
+    )
+
+    response = client.post(
+        "/api/generation/profiles/preview-draft/",
+        data=json.dumps(
+            {
+                "block_refs": [{"type": block.block_type, "slug": block.slug, "version": block.version}],
+                "app_slug": "crud_todo_list",
+            },
+        ),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["block_count"] == 1
+    assert data["prompt_templates"]["backend"]["system"] == "You build {{ name }}."
+    assert "{{" not in data["rendered"]["backend"]["system"]
+
+
+@pytest.mark.django_db
+def test_draft_preview_rejects_bad_llm_config(client):
+    user = UserFactory()
+    client.force_login(user)
+
+    response = client.post(
+        "/api/generation/profiles/preview-draft/",
+        data=json.dumps({"block_refs": [], "llm_config": {"temperature": 9}}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert "temperature" in response.json()["detail"]

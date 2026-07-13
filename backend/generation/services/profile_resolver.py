@@ -173,6 +173,31 @@ def get_profile_for_app(
     return qs.first() or get_default_profile(user=user)
 
 
+def suggest_profile_for_app(
+    app_req: AppRequirementTemplate,
+    user: AbstractUser | None = None,
+    scaffolding_slug: str | None = None,
+) -> tuple[GenerationProfile | None, str]:
+    """Like :func:`get_profile_for_app`, but also says *why* that profile won.
+
+    Provenance values: ``app-pilot`` (seeded per-app profile), ``stack-default``
+    (default/system profile matching the stack), ``system-default`` (global
+    default), ``catalog`` (no DB profile at all — bare catalog block refs).
+    """
+    slug = bundle_slug_for_app(app_req.slug)
+    qs = _visible_profiles(user).filter(slug=slug)
+    pilot = qs.filter(scaffolding_slug=scaffolding_slug).first() if scaffolding_slug else qs.first()
+    if pilot:
+        return pilot, "app-pilot"
+
+    default = get_default_profile(scaffolding_slug=scaffolding_slug, user=user)
+    if default is None:
+        return None, "catalog"
+    if scaffolding_slug and default.scaffolding_slug == scaffolding_slug:
+        return default, "stack-default"
+    return default, "system-default"
+
+
 def get_default_profile(
     scaffolding_slug: str | None = None,
     user: AbstractUser | None = None,

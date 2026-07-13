@@ -90,10 +90,27 @@ class ContentBlockCreateSchema(Schema):
     metadata: dict = {}
 
 
+class ContentBlockNewVersionSchema(Schema):
+    """Payload for the next immutable version of an existing block slug."""
+
+    content: str
+    name: str = ""
+    description: str = ""
+    metadata: dict | None = None
+
+
 class BlockRefSchema(Schema):
     type: str
     slug: str
     version: int = 1
+
+
+class ProfileDraftPreviewSchema(Schema):
+    """Unsaved profile editor state for live preview."""
+
+    block_refs: list[BlockRefSchema] = []
+    app_slug: str = ""
+    llm_config: dict = {}
 
 
 class LLMParamsSchema(Schema):

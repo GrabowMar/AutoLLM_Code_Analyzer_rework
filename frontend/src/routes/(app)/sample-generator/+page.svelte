@@ -8,6 +8,7 @@
 		getModels,
 		getStacks,
 		getAppTemplates,
+		getGenerationProfiles,
 		createCustomJob,
 		createScaffoldingBatch,
 		createCopilotJob,
@@ -17,6 +18,7 @@
 		type LLMModelSummary,
 		type Stack,
 		type AppRequirementTemplate,
+		type GenerationProfile,
 		type GenerationJob,
 		type PaginatedJobs,
 	} from '$lib/api/client';
@@ -46,6 +48,7 @@
 
 	let stacks = $state<Stack[]>([]);
 	let appTemplates = $state<AppRequirementTemplate[]>([]);
+	let profiles = $state<GenerationProfile[]>([]);
 	let scaffoldingLoading = $state(true);
 
 	let customSubmitting = $state(false);
@@ -175,12 +178,14 @@
 
 	async function loadScaffoldingData() {
 		try {
-			const [stackList, apps] = await Promise.all([
+			const [stackList, apps, profileList] = await Promise.all([
 				getStacks(),
 				getAppTemplates(),
+				getGenerationProfiles(),
 			]);
 			stacks = stackList;
 			appTemplates = apps;
+			profiles = profileList;
 		} finally {
 			scaffoldingLoading = false;
 		}
@@ -421,6 +426,7 @@
 				{modelsLoading}
 				{stacks}
 				{appTemplates}
+				{profiles}
 				{scaffoldingLoading}
 				{customSubmitting}
 				{customError}

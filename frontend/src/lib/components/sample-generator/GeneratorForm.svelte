@@ -7,11 +7,17 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Switch } from '$lib/components/ui/switch';
-	import type {
-		LLMModelSummary,
-		LLMParams,
-		Stack,
-		AppRequirementTemplate,
+	import * as Dialog from '$lib/components/ui/dialog';
+	import {
+		getProfilePreview,
+		suggestProfiles,
+		type AppRequirementTemplate,
+		type GenerationProfile,
+		type LLMModelSummary,
+		type LLMParams,
+		type ProfilePreview,
+		type ProfileSuggestion,
+		type Stack,
 	} from '$lib/api/client';
 	import Play from '@lucide/svelte/icons/play';
 	import Search from '@lucide/svelte/icons/search';
@@ -21,6 +27,7 @@
 	import Bot from '@lucide/svelte/icons/bot';
 	import ModelSelector from '$lib/components/sample-generator/ModelSelector.svelte';
 	import LLMParamsEditor from '$lib/components/sample-generator/LLMParamsEditor.svelte';
+	import ProfilePicker from '$lib/components/sample-generator/ProfilePicker.svelte';
 
 	type TabId = 'custom' | 'scaffolding' | 'copilot';
 
@@ -37,6 +44,7 @@
 		app_requirement_ids: number[];
 		model_ids: number[];
 		llm_params: LLMParams;
+		profile_id?: number | null;
 		trials: number;
 	}
 
@@ -53,6 +61,7 @@
 		modelsLoading: boolean;
 		stacks: Stack[];
 		appTemplates: AppRequirementTemplate[];
+		profiles: GenerationProfile[];
 		scaffoldingLoading: boolean;
 		customSubmitting: boolean;
 		customError: string;
@@ -74,6 +83,7 @@
 		modelsLoading,
 		stacks,
 		appTemplates,
+		profiles,
 		scaffoldingLoading,
 		customSubmitting,
 		customError,
@@ -101,6 +111,66 @@
 	let selectedModelIds = $state<Set<number>>(new Set());
 	let scaffoldingLLMParams = $state<LLMParams>({});
 	let scaffoldingTrials = $state(1);
+	let selectedProfileId = $state<number | ''>('');
+	let suggestions = $state<ProfileSuggestion[]>([]);
+	let suggestTimer: ReturnType<typeof setTimeout> | undefined;
+
+	const selectedProfile = $derived(profiles.find((p) => p.id === selectedProfileId));
+
+	// The profile owns the stack: server-side, the profile's scaffolding_slug
+	// wins over the picked stack, so reflect that instead of hiding it.
+	function onProfileSelect(profile: GenerationProfile | null) {
+		if (profile) selectedStackSlug = profile.scaffolding_slug;
+	}
+
+	$effect(() => {
+		const ids = [...selectedAppIds];
+		const stack = selectedStackSlug;
+		clearTimeout(suggestTimer);
+		if (ids.length === 0) {
+			suggestions = [];
+			return;
+		}
+		suggestTimer = setTimeout(async () => {
+			try {
+				suggestions = await suggestProfiles(ids, stack || undefined);
+			} catch {
+				suggestions = [];
+			}
+		}, 300);
+	});
+
+	// Prompt preview dialog (single selected app)
+	let promptPreviewOpen = $state(false);
+	let promptPreview = $state<ProfilePreview | null>(null);
+	let promptPreviewLoading = $state(false);
+	let promptPreviewError = $state('');
+	let promptPreviewStage = $state<'backend' | 'frontend'>('backend');
+
+	const previewableSlug = $derived.by(() => {
+		if (selectedProfile) return selectedProfile.slug;
+		if (suggestions.length === 1) return suggestions[0].slug;
+		return null;
+	});
+	const previewAppSlug = $derived.by(() => {
+		if (selectedAppIds.size !== 1) return null;
+		const id = [...selectedAppIds][0];
+		return appTemplates.find((t) => t.id === id)?.slug ?? null;
+	});
+
+	async function openPromptPreview() {
+		if (!previewableSlug || !previewAppSlug) return;
+		promptPreviewOpen = true;
+		promptPreviewLoading = true;
+		promptPreviewError = '';
+		promptPreview = null;
+		try {
+			promptPreview = await getProfilePreview(previewableSlug, previewAppSlug);
+		} catch (e: any) {
+			promptPreviewError = e?.detail ?? e?.message ?? 'Preview failed';
+		}
+		promptPreviewLoading = false;
+	}
 	let appSearch = $state('');
 	let categoryFilter = $state('');
 
@@ -182,6 +252,7 @@
 			app_requirement_ids: [...selectedAppIds],
 			model_ids: [...selectedModelIds],
 			llm_params: scaffoldingLLMParams,
+			profile_id: selectedProfileId === '' ? null : selectedProfileId,
 			trials: scaffoldingTrials,
 		});
 	}
@@ -329,6 +400,32 @@
 								</button>
 							{/each}
 						</div>
+					{/if}
+				</div>
+
+				<!-- Profile -->
+				<div class="space-y-2">
+					<div class="flex items-center justify-between">
+						<Label class="text-xs uppercase tracking-wide text-muted-foreground">Profile</Label>
+						{#if previewableSlug && previewAppSlug}
+							<button
+								type="button"
+								class="text-[11px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+								onclick={openPromptPreview}
+							>
+								Preview prompts
+							</button>
+						{/if}
+					</div>
+					<ProfilePicker
+						{profiles}
+						loading={scaffoldingLoading}
+						bind:selectedId={selectedProfileId}
+						{suggestions}
+						onSelect={onProfileSelect}
+					/>
+					{#if selectedProfile && selectedProfile.scaffolding_slug !== selectedStackSlug}
+						<p class="text-[10px] text-amber-500">The selected profile targets {selectedProfile.scaffolding_slug} — jobs will run on that stack.</p>
 					{/if}
 				</div>
 
@@ -596,3 +693,46 @@
 		</Card.Content>
 	</Card.Root>
 {/if}
+
+<!-- Prompt preview dialog: the exact prompts a job for this app+profile would freeze -->
+<Dialog.Root bind:open={promptPreviewOpen}>
+	<Dialog.Content class="max-w-3xl max-h-[85vh] overflow-y-auto">
+		<Dialog.Header>
+			<Dialog.Title>Prompt preview</Dialog.Title>
+			<Dialog.Description>
+				{previewableSlug}{promptPreview?.version ? `@${promptPreview.version}` : ''} rendered for {previewAppSlug} — what a job snapshot would freeze.
+			</Dialog.Description>
+		</Dialog.Header>
+		{#if promptPreviewLoading}
+			<div class="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+				<LoaderCircle class="h-4 w-4 animate-spin" /> Rendering…
+			</div>
+		{:else if promptPreviewError}
+			<p class="py-4 text-sm text-destructive">{promptPreviewError}</p>
+		{:else if promptPreview?.rendered}
+			<div class="space-y-3">
+				<div class="flex items-center gap-1 rounded border bg-muted/40 p-0.5 w-fit">
+					{#each ['backend', 'frontend'] as stage}
+						<button
+							type="button"
+							class="rounded px-3 py-1 text-xs font-medium transition-colors cursor-pointer {promptPreviewStage === stage ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
+							onclick={() => (promptPreviewStage = stage as 'backend' | 'frontend')}
+						>{stage}</button>
+					{/each}
+				</div>
+				{#each ['system', 'user'] as role}
+					{@const text = promptPreview.rendered[promptPreviewStage]?.[role as 'system' | 'user'] ?? ''}
+					<div>
+						<p class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{role} ({text.length.toLocaleString()} chars)</p>
+						<pre class="max-h-64 overflow-auto rounded border bg-muted/20 p-3 text-[11px] leading-relaxed whitespace-pre-wrap">{text}</pre>
+					</div>
+				{/each}
+				{#if promptPreview.effective_llm && Object.keys(promptPreview.effective_llm).length > 0}
+					<div class="text-[10px] text-muted-foreground font-mono">
+						llm: {JSON.stringify(promptPreview.effective_llm)}
+					</div>
+				{/if}
+			</div>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>

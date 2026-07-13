@@ -10,9 +10,11 @@ from ninja.errors import HttpError
 
 from backend.generation.api.schema import BundleImportSchema
 from backend.generation.api.schema import ContentBlockCreateSchema
+from backend.generation.api.schema import ContentBlockNewVersionSchema
 from backend.generation.api.schema import ContentBlockSchema
 from backend.generation.api.schema import GenerationProfileCreateSchema
 from backend.generation.api.schema import GenerationProfileSchema
+from backend.generation.api.schema import ProfileDraftPreviewSchema
 from backend.generation.api.schema import StarterTemplatePackageImportSchema
 from backend.generation.api.schema import StarterTemplatePackageSchema
 from backend.generation.api.schema import TemplatePackageExportSchema
@@ -31,7 +33,9 @@ from backend.generation.services.packages import import_template_package
 from backend.generation.services.packages import list_starter_template_packages
 from backend.generation.services.packages import visible_blocks_for
 from backend.generation.services.packages import visible_profiles_for
+from backend.generation.services.profile_resolver import build_resolved_snapshot
 from backend.generation.services.profile_resolver import resolve_block_refs
+from backend.generation.services.profile_resolver import suggest_profile_for_app
 from backend.generation.services.versioning import content_hash
 
 
@@ -119,6 +123,33 @@ def get_block(request, slug: str, version: int = 1):
     return get_object_or_404(visible_blocks_for(request.auth), slug=slug, version=version)
 
 
+@router.post("/blocks/{slug}/new-version/", response={200: ContentBlockSchema, 400: dict})
+def create_block_version(request, slug: str, payload: ContentBlockNewVersionSchema):
+    """Create the next version of *slug* with new content (versions are immutable).
+
+    Works on system blocks too: the new version is user-owned, and only
+    profiles that pin it will resolve it.
+    """
+    latest = visible_blocks_for(request.auth).filter(slug=slug).order_by("-version").first()
+    if latest is None:
+        raise HttpError(404, f"No visible block with slug {slug}")
+    err = _validate_jinja(payload.content)
+    if err:
+        return 400, {"detail": f"Invalid Jinja2: {err}"}
+    next_version = ContentBlock.objects.filter(slug=slug).order_by("-version").first().version + 1
+    return ContentBlock.objects.create(
+        block_type=latest.block_type,
+        slug=slug,
+        version=next_version,
+        name=payload.name or latest.name,
+        description=payload.description or latest.description,
+        content=payload.content,
+        metadata=payload.metadata if payload.metadata is not None else (latest.metadata or {}),
+        is_system=False,
+        created_by=request.auth,
+    )
+
+
 @router.put("/blocks/{slug}/", response={200: ContentBlockSchema, 400: dict})
 def update_block(
     request,
@@ -162,6 +193,88 @@ def list_bundles(request):
     """Latest version of each bundle slug visible to the user."""
     bundles = _latest_bundles_by_slug(request.auth)
     return sorted(bundles, key=lambda b: (not b.is_default, b.name))
+
+
+@router.get("/profiles/suggest/", response=list[dict])
+def suggest_profiles(request, app_ids: str = Query(""), stack: str = Query("")):
+    """Which profile each app would resolve to, and why.
+
+    Returns one entry per requested app id: ``{app_id, profile_id, slug,
+    version, name, provenance}`` where provenance is app-pilot /
+    stack-default / system-default / catalog.
+    """
+    from backend.generation.models import AppRequirementTemplate
+
+    try:
+        ids = [int(part) for part in app_ids.split(",") if part.strip()]
+    except ValueError as exc:
+        raise HttpError(400, "app_ids must be a comma-separated list of integers") from exc
+
+    results = []
+    for app_req in AppRequirementTemplate.objects.filter(id__in=ids):
+        profile, provenance = suggest_profile_for_app(app_req, request.auth, scaffolding_slug=stack or None)
+        results.append(
+            {
+                "app_id": app_req.id,
+                "app_slug": app_req.slug,
+                "profile_id": profile.id if profile else None,
+                "slug": profile.slug if profile else None,
+                "version": profile.version if profile else None,
+                "name": profile.name if profile else None,
+                "provenance": provenance,
+            },
+        )
+    return results
+
+
+@router.post("/profiles/preview-draft/", response={200: dict, 400: dict})
+def preview_draft_profile(request, payload: ProfileDraftPreviewSchema):
+    """Assemble (and optionally render) prompts for unsaved editor state.
+
+    Same shape as ``GET /profiles/{slug}/preview/`` but takes block_refs
+    directly, so the profile editor can live-preview before saving a version.
+    """
+    from backend.generation.services.llm_params import merge_llm_params
+    from backend.generation.services.profile_resolver import assemble_prompt_templates
+
+    refs = [{"type": r.type, "slug": r.slug, "version": r.version} for r in payload.block_refs]
+    resolved = resolve_block_refs(refs, request.auth)
+    templates = assemble_prompt_templates(resolved)
+    try:
+        effective_llm = merge_llm_params(validate_llm_params(payload.llm_config or {}))
+    except ValueError as exc:
+        return 400, {"detail": f"llm_config: {exc}"}
+    result = {
+        "block_count": len(resolved),
+        "prompt_templates": templates,
+        "effective_llm": effective_llm,
+    }
+    if not payload.app_slug:
+        return result
+
+    from backend.generation.models import AppRequirementTemplate
+    from backend.generation.services.profile_resolver import app_requirement_to_dict
+    from backend.generation.services.prompt_renderer import PromptRenderer
+
+    app_req = get_object_or_404(AppRequirementTemplate.objects.filter(slug=payload.app_slug))
+    snapshot = {
+        "prompt_templates": templates,
+        "app_requirement": app_requirement_to_dict(app_req),
+        "prompts": {},
+    }
+    renderer = PromptRenderer()
+    backend_msgs = renderer.render_messages_from_snapshot(snapshot, stage="backend")
+    frontend_msgs = renderer.render_messages_from_snapshot(
+        snapshot,
+        stage="frontend",
+        api_context_override="(backend API context is scanned from the generated backend at run time)",
+    )
+    result["rendered"] = {
+        "backend": {"system": backend_msgs[0]["content"], "user": backend_msgs[1]["content"]},
+        "frontend": {"system": frontend_msgs[0]["content"], "user": frontend_msgs[1]["content"]},
+    }
+    result["app_slug"] = payload.app_slug
+    return result
 
 
 @router.get("/profiles/{slug}/versions/", response=list[GenerationProfileSchema])
@@ -354,16 +467,58 @@ def export_bundle(
 
 
 @router.get("/profiles/{slug}/preview/", response=dict)
-def preview_bundle(request, slug: str):
-    """Resolve block refs to assembled prompt templates (no app requirement context)."""
-    bundle = _latest_bundle_or_404(request.auth, slug=slug)
-    resolved = resolve_block_refs(list(bundle.block_refs or []), request.auth)
+def preview_bundle(request, slug: str, app_slug: str = Query("")):
+    """Assembled prompt templates for a profile — the "what will be sent" view.
+
+    Without ``app_slug``: the raw assembled Jinja templates. With it: the
+    fully materialized backend/frontend prompts for that app spec, plus the
+    effective merged llm section, exactly as a job snapshot would freeze them.
+    """
+    profile = _latest_bundle_or_404(request.auth, slug=slug)
+    resolved = resolve_block_refs(list(profile.block_refs or []), request.auth)
+    from backend.generation.services.llm_params import merge_llm_params
     from backend.generation.services.profile_resolver import assemble_prompt_templates
 
     templates = assemble_prompt_templates(resolved)
-    return {
-        "slug": bundle.slug,
-        "scaffolding_slug": bundle.scaffolding_slug,
+    result = {
+        "slug": profile.slug,
+        "version": profile.version,
+        "scaffolding_slug": profile.scaffolding_slug,
         "block_count": len(resolved),
         "prompt_templates": templates,
+        "effective_llm": merge_llm_params(profile.llm_config),
     }
+    if not app_slug:
+        return result
+
+    from backend.generation.models import AppRequirementTemplate
+    from backend.generation.services.prompt_renderer import PromptRenderer
+
+    app_req = get_object_or_404(
+        AppRequirementTemplate.objects.filter(slug=app_slug),
+    )
+    snapshot = build_resolved_snapshot(
+        app_requirement=app_req,
+        profile=profile,
+        scaffolding_slug=profile.scaffolding_slug,
+        model=None,
+        temperature=0.3,
+        max_tokens=32000,
+        user=request.auth,
+    )
+    renderer = PromptRenderer()
+    backend_msgs = renderer.render_messages_from_snapshot(snapshot, stage="backend")
+    frontend_msgs = renderer.render_messages_from_snapshot(
+        snapshot,
+        stage="frontend",
+        api_context_override="(backend API context is scanned from the generated backend at run time)",
+    )
+    result["rendered"] = {
+        "backend": {"system": backend_msgs[0]["content"], "user": backend_msgs[1]["content"]},
+        "frontend": {"system": frontend_msgs[0]["content"], "user": frontend_msgs[1]["content"]},
+    }
+    result["effective_llm"] = {
+        k: v for k, v in snapshot["llm"].items() if k not in ("model_id", "pricing_snapshot_at")
+    }
+    result["app_slug"] = app_slug
+    return result
