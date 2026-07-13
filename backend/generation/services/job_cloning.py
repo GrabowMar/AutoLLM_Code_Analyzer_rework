@@ -44,6 +44,8 @@ def clone_job(
         custom_user_prompt=original.custom_user_prompt,
         temperature=original.temperature,
         max_tokens=original.max_tokens,
+        top_p=original.top_p,
+        llm_params=copy.deepcopy(original.llm_params or {}),
         copilot_description=original.copilot_description,
         copilot_max_iterations=original.copilot_max_iterations,
         copilot_use_open_source=original.copilot_use_open_source,

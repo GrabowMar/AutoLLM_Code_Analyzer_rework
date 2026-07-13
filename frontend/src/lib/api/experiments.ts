@@ -1,4 +1,5 @@
 import { apiFetch } from "./core";
+import type { LLMParams } from "./generation";
 
 export type ExperimentStatus = "draft" | "running" | "completed" | "archived";
 
@@ -13,9 +14,7 @@ export interface Experiment {
   base_seed: number | null;
   continuation_limit: number;
   enable_repair: boolean;
-  temperature: number;
-  max_tokens: number;
-  top_p: number | null;
+  llm_defaults: LLMParams;
   app_requirement_ids: number[];
   condition_count: number;
   created_at: string;
@@ -30,7 +29,7 @@ export interface ExperimentCondition {
   model_name: string | null;
   bundle_slug: string | null;
   bundle_version: number | null;
-  param_overrides: Record<string, unknown>;
+  param_overrides: LLMParams;
   created_at: string;
 }
 
@@ -86,9 +85,7 @@ export interface CreateExperimentPayload {
   base_seed?: number | null;
   continuation_limit?: number;
   enable_repair?: boolean;
-  temperature?: number;
-  max_tokens?: number;
-  top_p?: number | null;
+  llm_defaults?: LLMParams;
 }
 
 export type UpdateExperimentPayload = Partial<CreateExperimentPayload>;
@@ -97,7 +94,7 @@ export interface CreateConditionPayload {
   profile_id: number;
   model_id: number;
   label?: string;
-  param_overrides?: Record<string, unknown>;
+  param_overrides?: LLMParams;
 }
 
 export async function listExperiments(): Promise<Experiment[]> {

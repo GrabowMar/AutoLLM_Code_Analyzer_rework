@@ -20,6 +20,7 @@ from backend.generation.api.schema import TemplatePackageImportSchema
 from backend.generation.api.views._router import router
 from backend.generation.models import ContentBlock
 from backend.generation.models import GenerationProfile
+from backend.generation.services.llm_params import validate_llm_params
 from backend.generation.services.packages import dump_bundle_package
 from backend.generation.services.packages import dump_template_package
 from backend.generation.services.packages import export_bundle_package
@@ -173,6 +174,13 @@ def _serialize_block_refs(payload: GenerationProfileCreateSchema) -> list[dict]:
     return [{"type": ref.type, "slug": ref.slug, "version": ref.version} for ref in payload.block_refs]
 
 
+def _validated_llm_config(payload: GenerationProfileCreateSchema) -> dict:
+    try:
+        return validate_llm_params(payload.llm_config or {})
+    except ValueError as exc:
+        raise HttpError(400, f"llm_config: {exc}") from exc
+
+
 def _bundle_content_hash(payload: GenerationProfileCreateSchema) -> str:
     return content_hash(
         {
@@ -185,9 +193,10 @@ def _bundle_content_hash(payload: GenerationProfileCreateSchema) -> str:
 
 @router.post("/profiles/", response={200: GenerationProfileSchema, 400: dict})
 def create_bundle(request, payload: GenerationProfileCreateSchema):
-    """Create a user-owned bundle as version 1 of a new slug."""
+    """Create a user-owned profile as version 1 of a new slug."""
+    llm_config = _validated_llm_config(payload)
     if GenerationProfile.objects.filter(slug=payload.slug).exists():
-        return 400, {"detail": f"Bundle slug {payload.slug} already exists. Use PUT to add a new version."}
+        return 400, {"detail": f"Profile slug {payload.slug} already exists. Use PUT to add a new version."}
     return GenerationProfile.objects.create(
         name=payload.name,
         slug=payload.slug,
@@ -195,7 +204,7 @@ def create_bundle(request, payload: GenerationProfileCreateSchema):
         description=payload.description,
         scaffolding_slug=payload.scaffolding_slug,
         block_refs=_serialize_block_refs(payload),
-        llm_config=payload.llm_config,
+        llm_config=llm_config,
         content_hash=_bundle_content_hash(payload),
         is_system=False,
         is_default=payload.is_default,
@@ -295,6 +304,7 @@ def get_bundle(request, slug: str):
 def update_bundle(request, slug: str, payload: GenerationProfileCreateSchema):
     """Create version+1 of *slug*. Versions are immutable — this never edits in place."""
     current = _mutable_bundle_or_403(request.auth, slug=slug)
+    llm_config = _validated_llm_config(payload)
     new_hash = _bundle_content_hash(payload)
     unchanged = (
         new_hash == current.content_hash
@@ -310,7 +320,7 @@ def update_bundle(request, slug: str, payload: GenerationProfileCreateSchema):
         description=payload.description,
         scaffolding_slug=payload.scaffolding_slug,
         block_refs=_serialize_block_refs(payload),
-        llm_config=payload.llm_config,
+        llm_config=llm_config,
         content_hash=new_hash,
         is_system=current.is_system,
         is_default=payload.is_default,
