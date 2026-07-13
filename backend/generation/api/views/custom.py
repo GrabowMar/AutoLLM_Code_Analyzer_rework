@@ -33,7 +33,9 @@ from backend.generation.services.profile_resolver import build_custom_snapshot
 from backend.generation.services.profile_resolver import get_profile_for_app
 from backend.llm_models.models import LLMModel
 from backend.runtime.services.scaffolding import canonical_stack_slug
+from backend.runtime.services.scaffolding import get_stack_row
 from backend.runtime.services.scaffolding import is_known_stack_slug
+from backend.runtime.services.stack_validation import stack_usable_by
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,13 @@ def _validated_llm_params(payload) -> dict:
         return validate_llm_params(payload.llm_params.as_params() if payload.llm_params else {})
     except ValueError as exc:
         raise HttpError(400, str(exc)) from exc
+
+
+def _usable_stack_or_error(slug: str, user) -> None:
+    """403 for stacks the user may not run jobs on (unapproved/archived user stacks)."""
+    row = get_stack_row(canonical_stack_slug(slug))
+    if row is not None and not stack_usable_by(row, user):
+        raise HttpError(403, f"Stack {row.slug!r} is not approved for use yet.")
 
 
 @router.post("/jobs/custom/", response={200: GenerationJobSchema, 400: dict})
@@ -96,6 +105,7 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
     llm_overrides = _validated_llm_params(payload)
     if not is_known_stack_slug(payload.stack_slug):
         raise HttpError(404, f"Unknown stack slug: {payload.stack_slug}")
+    _usable_stack_or_error(payload.stack_slug, request.auth)
     app_reqs = AppRequirementTemplate.objects.filter(
         id__in=payload.app_requirement_ids,
     )
@@ -183,6 +193,7 @@ def create_copilot_job(request, payload: CopilotJobCreateSchema):
     if payload.stack_slug:
         if not is_known_stack_slug(payload.stack_slug):
             raise HttpError(404, f"Unknown stack slug: {payload.stack_slug}")
+        _usable_stack_or_error(payload.stack_slug, request.auth)
         stack_slug = canonical_stack_slug(payload.stack_slug)
 
     job = GenerationJob.objects.create(

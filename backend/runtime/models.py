@@ -296,6 +296,29 @@ class Stack(models.Model):
     backend_filename = models.CharField(_("backend filename"), max_length=100, default="app.py")
     aliases = models.JSONField(_("aliases"), default=list, blank=True)
 
+    # User-stack build config (generated dockerfile_mode only)
+    backend_base_image = models.CharField(
+        _("backend base image"),
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Must be in settings.STACK_ALLOWED_BASE_IMAGES['python']",
+    )
+    frontend_base_image = models.CharField(
+        _("frontend base image"),
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Must be in settings.STACK_ALLOWED_BASE_IMAGES['node']",
+    )
+    server_kind = models.CharField(
+        _("server kind"),
+        max_length=20,
+        choices=[("python", "python <backend_filename>"), ("uvicorn", "uvicorn app:app")],
+        default="python",
+        help_text="Constrained start command — user stacks cannot run arbitrary CMDs",
+    )
+
     # Content
     files = models.JSONField(
         _("files"),

@@ -177,6 +177,33 @@ export interface Stack {
   default_port: number;
   patch_profile: string;
   file_count: number;
+  is_approved: boolean;
+  dockerfile_mode: "bundled" | "generated";
+  backend_base_image: string;
+  frontend_base_image: string;
+  server_kind: string;
+  backend_filename: string;
+  frontend_component: string;
+}
+
+export interface StackDetail extends Stack {
+  files: Record<string, string>;
+  generated_dockerfile?: string;
+}
+
+export interface StackWritePayload {
+  slug?: string;
+  name: string;
+  description?: string;
+  has_frontend: boolean;
+  default_port: number;
+  patch_profile: string;
+  frontend_component?: string;
+  backend_filename: string;
+  backend_base_image: string;
+  frontend_base_image?: string;
+  server_kind: string;
+  files: Record<string, string>;
 }
 
 export interface StarterTemplatePackage {
@@ -533,6 +560,54 @@ export async function getJobArtifacts(
 ): Promise<GenerationArtifact[]> {
   const res = await apiFetch(`/generation/jobs/${id}/artifacts/`);
   return res.json();
+}
+
+export async function getStackDetail(slug: string): Promise<StackDetail> {
+  const res = await apiFetch(`/generation/stacks/${slug}/`);
+  return res.json();
+}
+
+export async function getStackBaseImages(): Promise<{
+  python: string[];
+  node: string[];
+}> {
+  const res = await apiFetch("/generation/stacks/base-images/");
+  return res.json();
+}
+
+export async function previewStackDockerfile(
+  data: StackWritePayload,
+): Promise<{ dockerfile: string }> {
+  const res = await apiFetch("/generation/stacks/preview-dockerfile/", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function createStack(
+  data: StackWritePayload,
+): Promise<StackDetail> {
+  const res = await apiFetch("/generation/stacks/", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function updateStack(
+  slug: string,
+  data: StackWritePayload,
+): Promise<StackDetail> {
+  const res = await apiFetch(`/generation/stacks/${slug}/`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function archiveStack(slug: string): Promise<void> {
+  await apiFetch(`/generation/stacks/${slug}/`, { method: "DELETE" });
 }
 
 export async function getStacks(): Promise<Stack[]> {

@@ -192,6 +192,10 @@ def apply_scaffold(
     if row is not None:
         stack = _row_config(row)
         _materialize_stack_files(row.files or {}, dest_path)
+        if row.dockerfile_mode == "generated":
+            from backend.runtime.services.dockerfile_gen import generate_dockerfile
+
+            (dest_path / "Dockerfile").write_text(generate_dockerfile(row), encoding="utf-8")
     else:
         # First-boot fallback: table not seeded yet — provision from disk.
         stack = get_stack_config(stack_slug)
@@ -341,9 +345,17 @@ def _render_substitutions(text: str, context: dict[str, str]) -> str:
 
 
 def _materialize_stack_files(files: dict[str, str], dst: Path) -> None:
-    """Write a Stack row's {relative_path: text} skeleton map into *dst*."""
+    """Write a Stack row's {relative_path: text} skeleton map into *dst*.
+
+    Paths are validated at stack creation; the resolve() containment check
+    here is defense in depth for rows written through other paths.
+    """
+    root = dst.resolve()
     for rel, content in files.items():
-        target = dst / rel
+        target = (dst / rel).resolve()
+        if not target.is_relative_to(root):
+            logger.warning("Skipping stack file escaping the build dir: %r", rel)
+            continue
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
 
