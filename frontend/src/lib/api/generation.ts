@@ -567,7 +567,10 @@ export async function getStackDetail(slug: string): Promise<StackDetail> {
   return res.json();
 }
 
-export async function getStackBaseImages(): Promise<{ python: string[]; node: string[] }> {
+export async function getStackBaseImages(): Promise<{
+  python: string[];
+  node: string[];
+}> {
   const res = await apiFetch("/generation/stacks/base-images/");
   return res.json();
 }
@@ -582,7 +585,9 @@ export async function previewStackDockerfile(
   return res.json();
 }
 
-export async function createStack(data: StackWritePayload): Promise<StackDetail> {
+export async function createStack(
+  data: StackWritePayload,
+): Promise<StackDetail> {
   const res = await apiFetch("/generation/stacks/", {
     method: "POST",
     body: JSON.stringify(data),
@@ -590,7 +595,10 @@ export async function createStack(data: StackWritePayload): Promise<StackDetail>
   return res.json();
 }
 
-export async function updateStack(slug: string, data: StackWritePayload): Promise<StackDetail> {
+export async function updateStack(
+  slug: string,
+  data: StackWritePayload,
+): Promise<StackDetail> {
   const res = await apiFetch(`/generation/stacks/${slug}/`, {
     method: "PUT",
     body: JSON.stringify(data),
