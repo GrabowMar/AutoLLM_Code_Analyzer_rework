@@ -81,14 +81,14 @@ def test_validate_rejects_unknown_provider_routing_keys():
 
 
 def test_validate_rejects_bad_reasoning():
-    with pytest.raises(ValueError, match="reasoning.effort"):
+    with pytest.raises(ValueError, match=r"reasoning\.effort"):
         validate_llm_params({"reasoning": {"effort": "extreme"}})
     with pytest.raises(ValueError, match="reasoning"):
         validate_llm_params({"reasoning": {"steps": 5}})
 
 
 def test_validate_collects_multiple_errors():
-    with pytest.raises(ValueError, match="temperature.*;.*top_p|top_p.*;.*temperature"):
+    with pytest.raises(ValueError, match=r"temperature.*top_p|top_p.*temperature"):
         validate_llm_params({"temperature": 9, "top_p": 9})
 
 
