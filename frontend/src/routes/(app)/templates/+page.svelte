@@ -15,7 +15,11 @@
 		archiveGenerationProfile,
 		createContentBlock,
 		createBlockVersion,
+		createStack,
+		updateStack,
+		archiveStack,
 		getStarterTemplatePackages,
+		type StackWritePayload,
 		type Stack,
 		type AppRequirementTemplate,
 		type ContentBlock,
@@ -24,6 +28,7 @@
 		type ProfileWritePayload,
 	} from '$lib/api/client';
 	import StacksList from '$lib/components/templates/StacksList.svelte';
+	import StackEditor from '$lib/components/templates/StackEditor.svelte';
 	import AppTemplateList from '$lib/components/templates/AppTemplateList.svelte';
 	import AppTemplateForm from '$lib/components/templates/AppTemplateForm.svelte';
 	import ProfileList from '$lib/components/templates/ProfileList.svelte';
@@ -60,10 +65,15 @@
 	let blockSaving = $state(false);
 	let blockError = $state('');
 
-	// Stacks (read-only, from the runtime scaffolding manifest)
+	// Stacks (builtin rows are read-only; user stacks are editable)
 	let stacks = $state<Stack[]>([]);
 	let stacksLoading = $state(true);
 	let stackSearch = $state('');
+	let editingStackSlug = $state<string | null>(null);
+	let duplicatingStackSlug = $state<string | null>(null);
+	let creatingStack = $state(false);
+	let stackSaving = $state(false);
+	let stackError = $state('');
 
 	// App specs
 	let appTemplates = $state<AppRequirementTemplate[]>([]);
@@ -84,7 +94,8 @@
 	const isEditingOrCreating = $derived(
 		creatingApp || editingApp !== null ||
 		creatingProfile || editingProfile !== null ||
-		creatingBlock || editingBlock !== null
+		creatingBlock || editingBlock !== null ||
+		creatingStack || editingStackSlug !== null || duplicatingStackSlug !== null
 	);
 
 	const filteredStacks = $derived(
@@ -145,6 +156,60 @@
 		cancelAppForm();
 		cancelProfileForm();
 		cancelBlockForm();
+		cancelStackForm();
+	}
+
+	// ── Stack CRUD ──────────────────────────────────────────────
+
+	function startCreateStack() {
+		cancelAllForms();
+		creatingStack = true;
+		stackError = '';
+	}
+
+	function startEditStack(s: Stack) {
+		cancelAllForms();
+		editingStackSlug = s.slug;
+		stackError = '';
+	}
+
+	function startDuplicateStack(s: Stack) {
+		cancelAllForms();
+		duplicatingStackSlug = s.slug;
+		stackError = '';
+	}
+
+	function cancelStackForm() {
+		creatingStack = false;
+		editingStackSlug = null;
+		duplicatingStackSlug = null;
+		stackError = '';
+	}
+
+	async function saveStack(payload: StackWritePayload, isNewSlug: boolean) {
+		stackSaving = true;
+		stackError = '';
+		try {
+			if (isNewSlug) {
+				await createStack(payload);
+			} else {
+				await updateStack(editingStackSlug!, payload);
+			}
+			cancelStackForm();
+			await loadStacks();
+		} catch (e: any) {
+			stackError = e?.detail ?? e?.message ?? 'Save failed';
+		}
+		stackSaving = false;
+	}
+
+	async function archiveStackRow(s: Stack) {
+		if (!confirm(`Archive all versions of stack "${s.slug}"? Existing jobs keep their pinned snapshots.`)) return;
+		try {
+			await archiveStack(s.slug);
+			if (editingStackSlug === s.slug) cancelStackForm();
+			await loadStacks();
+		} catch { /* ignore */ }
 	}
 
 	function handleTabChange(tab: TabId) {
@@ -401,6 +466,10 @@
 						<Button size="sm" class="w-full sm:w-auto text-xs font-semibold cursor-pointer shadow-xs transition-all duration-200" onclick={startCreateApp}>
 							<Plus class="mr-1.5 h-4 w-4" /> New App Spec
 						</Button>
+					{:else if activeTab === 'stacks'}
+						<Button size="sm" class="w-full sm:w-auto text-xs font-semibold cursor-pointer shadow-xs transition-all duration-200" onclick={startCreateStack}>
+							<Plus class="mr-1.5 h-4 w-4" /> New Stack
+						</Button>
 					{/if}
 				{/if}
 			</div>
@@ -440,6 +509,9 @@
 					stacks={filteredStacks}
 					loading={stacksLoading}
 					compact={isEditingOrCreating}
+					onEdit={startEditStack}
+					onDuplicate={startDuplicateStack}
+					onArchive={archiveStackRow}
 				/>
 			{/if}
 
@@ -485,6 +557,19 @@
 					{/key}
 				{/if}
 
+				{#if creatingStack || editingStackSlug || duplicatingStackSlug}
+					{#key editingStackSlug ?? duplicatingStackSlug ?? 'new'}
+						<StackEditor
+							editSlug={editingStackSlug}
+							duplicateFromSlug={duplicatingStackSlug}
+							saving={stackSaving}
+							error={stackError}
+							onSave={saveStack}
+							onCancel={cancelStackForm}
+						/>
+					{/key}
+				{/if}
+
 				{#if creatingApp || editingApp}
 					<AppTemplateForm
 						bind:form={appForm}
@@ -505,6 +590,7 @@
 	{profiles}
 	{appTemplates}
 	{contentBlocks}
+	{stacks}
 	{starterPackages}
 	{starterPackagesLoading}
 	onImported={refreshAllAssets}

@@ -412,6 +412,7 @@ export async function exportTemplatePackage(
     app_template_slugs?: string[];
     bundle_slugs?: string[];
     block_refs?: { type: string; slug: string; version: number }[];
+    stack_slugs?: string[];
   },
   format: "json" | "yaml" = "json",
 ): Promise<{ content: string; contentType: string }> {

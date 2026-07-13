@@ -12,6 +12,7 @@
 		type AppRequirementTemplate,
 		type ContentBlock,
 		type GenerationProfile,
+		type Stack,
 		type StarterTemplatePackage,
 	} from '$lib/api/client';
 
@@ -20,6 +21,7 @@
 		profiles: GenerationProfile[];
 		appTemplates: AppRequirementTemplate[];
 		contentBlocks: ContentBlock[];
+		stacks?: Stack[];
 		starterPackages: StarterTemplatePackage[];
 		starterPackagesLoading: boolean;
 		onImported: () => Promise<void>;
@@ -29,6 +31,7 @@
 		profiles,
 		appTemplates,
 		contentBlocks,
+		stacks = [],
 		starterPackages,
 		starterPackagesLoading,
 		onImported,
@@ -55,14 +58,16 @@
 	}
 
 	// ── Export builder ────────────────────────────────────────────
-	let selection = $state({ app: [] as string[], profile: [] as string[], block: [] as string[] });
-	const selectedCount = $derived(selection.app.length + selection.profile.length + selection.block.length);
+	let selection = $state({ app: [] as string[], profile: [] as string[], block: [] as string[], stack: [] as string[] });
+	const selectedCount = $derived(
+		selection.app.length + selection.profile.length + selection.block.length + selection.stack.length
+	);
 
 	function blockKey(block: ContentBlock): string {
 		return `${block.slug}:${block.version}`;
 	}
 
-	function toggle(group: 'app' | 'profile' | 'block', value: string) {
+	function toggle(group: 'app' | 'profile' | 'block' | 'stack', value: string) {
 		const current = selection[group];
 		selection = {
 			...selection,
@@ -81,6 +86,7 @@
 					app_template_slugs: selection.app,
 					bundle_slugs: selection.profile,
 					block_refs: selectedBlocks,
+					stack_slugs: selection.stack,
 				},
 				format,
 			);
@@ -221,6 +227,20 @@
 						{/each}
 					</div>
 				</div>
+				{#if stacks.some((st) => !st.is_builtin)}
+					<div class="space-y-2">
+						<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">User stacks</p>
+						<div class="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+							{#each stacks.filter((st) => !st.is_builtin) as st (st.slug)}
+								<button
+									type="button"
+									class="rounded-md border px-2 py-0.5 text-[11px] font-mono transition-colors cursor-pointer {selection.stack.includes(st.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
+									onclick={() => toggle('stack', st.slug)}
+								>{st.slug}</button>
+							{/each}
+						</div>
+					</div>
+				{/if}
 				<div class="flex items-center gap-2 border-t pt-3">
 					<Badge variant="outline" class="text-[10px]">{selectedCount} selected</Badge>
 					<Button size="sm" class="ml-auto text-xs cursor-pointer" disabled={selectedCount === 0} onclick={() => exportSelected('json')}>Export JSON</Button>

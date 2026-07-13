@@ -197,7 +197,8 @@ def test_template_package_export_and_import(client):
     assert export_response.status_code == 200
     package = json.loads(export_response.content.decode())
     assert package["kind"] == "llm-lab-template-package"
-    assert package["assets"]["bundles"][0]["slug"] == bundle.slug
+    assert package["template_package_schema_version"] == 2
+    assert package["assets"]["profiles"][0]["slug"] == bundle.slug
     assert package["assets"]["blocks"][0]["slug"] == block.slug
 
     importer = UserFactory()
@@ -218,8 +219,8 @@ def test_template_package_export_and_import(client):
     imported = import_response.json()
     # The importer can't see the owner's private assets, so the "rename"
     # strategy creates their own copies under fresh slugs.
-    assert imported["app_templates"] == [f"{app_template.slug}-2"]
-    assert imported["bundles"] == [f"{bundle.slug}-2"]
+    assert imported["app_specs"] == [f"{app_template.slug}-2"]
+    assert imported["profiles"] == [f"{bundle.slug}-2"]
 
 
 @pytest.mark.django_db
@@ -275,7 +276,8 @@ def test_import_skips_legacy_prompt_templates_section(client):
 
     assert response.status_code == 200
     imported = response.json()
-    assert imported["app_templates"] == ["legacy-app"]
+    # v1 keys are upgraded to the v2 vocabulary on import
+    assert imported["app_specs"] == ["legacy-app"]
     assert "prompt_templates" not in imported
 
 
@@ -551,8 +553,8 @@ def test_list_and_import_starter_package(client):
     # The real seeded catalog (auto-seeded post-migrate) already has these
     # slugs, so "rename" mangles them with a numeric suffix — check the
     # renamed copies were created, not the exact unsuffixed names.
-    assert any(slug.startswith("analytics_campaign_monitor") for slug in payload["app_templates"])
-    assert any(slug.startswith("system-fastapi-react-standard") for slug in payload["bundles"])
+    assert any(slug.startswith("analytics_campaign_monitor") for slug in payload["app_specs"])
+    assert any(slug.startswith("system-fastapi-react-standard") for slug in payload["profiles"])
 
 
 @pytest.mark.django_db
@@ -678,3 +680,86 @@ def test_draft_preview_rejects_bad_llm_config(client):
 
     assert response.status_code == 400
     assert "temperature" in response.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_package_round_trips_user_stacks(client):
+    owner = UserFactory()
+    client.force_login(owner)
+    stack_payload = {
+        "slug": "portable-stack",
+        "name": "Portable",
+        "has_frontend": False,
+        "default_port": 8000,
+        "patch_profile": "none",
+        "backend_filename": "app.py",
+        "backend_base_image": "python:3.12-slim",
+        "server_kind": "python",
+        "files": {"requirements.txt": "flask\n"},
+    }
+    created = client.post(
+        "/api/generation/stacks/",
+        data=json.dumps(stack_payload),
+        content_type="application/json",
+    )
+    assert created.status_code == 200
+
+    export_response = client.post(
+        "/api/generation/packages/export/?format=json",
+        data=json.dumps({"stack_slugs": ["portable-stack"]}),
+        content_type="application/json",
+    )
+    assert export_response.status_code == 200
+    package = json.loads(export_response.content.decode())
+    assert package["assets"]["stacks"][0]["slug"] == "portable-stack"
+    assert "Dockerfile" not in package["assets"]["stacks"][0]["files"]
+
+    importer = UserFactory()
+    import_client = Client()
+    import_client.force_login(importer)
+    import_response = import_client.post(
+        "/api/generation/packages/import/",
+        data=json.dumps({"package_text": json.dumps(package), "conflict_strategy": "rename"}),
+        content_type="application/json",
+    )
+    assert import_response.status_code == 200
+    # slug collides with the exporter's copy on the same install → renamed
+    assert import_response.json()["stacks"] == ["portable-stack-2"]
+
+    from backend.runtime.models import Stack
+
+    row = Stack.objects.get(slug="portable-stack-2")
+    assert row.dockerfile_mode == "generated"
+    assert row.created_by == importer
+
+
+@pytest.mark.django_db
+def test_package_import_rejects_stack_with_disallowed_base_image(client):
+    client.force_login(UserFactory())
+    package = {
+        "template_package_schema_version": 2,
+        "kind": "llm-lab-template-package",
+        "assets": {
+            "stacks": [
+                {
+                    "slug": "evil-stack",
+                    "name": "Evil",
+                    "has_frontend": False,
+                    "default_port": 8000,
+                    "backend_filename": "app.py",
+                    "backend_base_image": "evil/backdoor:latest",
+                    "server_kind": "python",
+                    "files": {"requirements.txt": "flask\n"},
+                },
+            ],
+        },
+    }
+
+    response = client.post(
+        "/api/generation/packages/import/",
+        data=json.dumps({"package_text": json.dumps(package), "conflict_strategy": "rename"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert "backend_base_image" in response.json()["detail"]

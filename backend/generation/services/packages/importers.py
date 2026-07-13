@@ -49,14 +49,28 @@ def parse_template_package_text(package_text: str) -> dict[str, Any]:
     if data.get("kind") != TEMPLATE_PACKAGE_KIND:
         msg = f"Unsupported package kind: {data.get('kind')!r}"
         raise ValueError(msg)
-    if data.get("template_package_schema_version") != TEMPLATE_PACKAGE_SCHEMA_VERSION:
-        msg = f"Unsupported template package schema version: {data.get('template_package_schema_version')!r}"
+    schema_version = data.get("template_package_schema_version")
+    if schema_version not in (1, TEMPLATE_PACKAGE_SCHEMA_VERSION):
+        msg = f"Unsupported template package schema version: {schema_version!r}"
         raise ValueError(msg)
     assets = data.get("assets")
     if not isinstance(assets, dict):
         msg = "Template package is missing a valid 'assets' section"
         raise ValueError(msg)
+    if schema_version == 1:
+        data["assets"] = _upgrade_v1_assets(assets)
     return data
+
+
+def _upgrade_v1_assets(assets: dict[str, Any]) -> dict[str, Any]:
+    """Map v1 asset keys to the v2 vocabulary (prompt_templates stay for the skip path)."""
+    upgraded = dict(assets)
+    if "app_specs" not in upgraded:
+        upgraded["app_specs"] = upgraded.pop("app_templates", [])
+    if "profiles" not in upgraded:
+        upgraded["profiles"] = upgraded.pop("bundles", [])
+    upgraded.setdefault("stacks", [])
+    return upgraded
 
 
 def import_bundle_package(
@@ -74,11 +88,11 @@ def import_bundle_package(
         user=user,
         conflict_strategy=conflict_strategy,
     )
-    bundles = imported.get("bundles", [])
-    if not bundles:
-        msg = "Bundle package did not import any bundles"
+    profiles = imported.get("profiles", [])
+    if not profiles:
+        msg = "Bundle package did not import any profiles"
         raise ValueError(msg)
-    return bundles[0]
+    return profiles[0]
 
 
 def import_template_package(
@@ -108,13 +122,14 @@ def _import_assets(
 
     block_ref_map: dict[tuple[str, int], tuple[str, int]] = {}
     imported: dict[str, list[Any]] = {
-        "app_templates": [],
+        "app_specs": [],
         "blocks": [],
-        "bundles": [],
+        "profiles": [],
+        "stacks": [],
     }
 
-    # Older package files may still carry a prompt_templates section for the
-    # removed PromptTemplate model; the rest of the package imports normally.
+    # Pre-rename package files may still carry a prompt_templates section for
+    # the removed PromptTemplate model; the rest imports normally.
     skipped_prompts = len(assets.get("prompt_templates") or [])
     if skipped_prompts:
         logger.warning(
@@ -122,14 +137,18 @@ def _import_assets(
             skipped_prompts,
         )
 
+    # Accept raw v1 keys too (import_bundle_package builds assets directly).
+    app_specs = assets.get("app_specs", assets.get("app_templates", []))
+    profiles = assets.get("profiles", assets.get("bundles", []))
+
     with transaction.atomic():
-        for raw_app in assets.get("app_templates", []):
+        for raw_app in app_specs:
             template = _import_app_template(
                 raw_app,
                 user=user,
                 conflict_strategy=conflict_strategy,
             )
-            imported["app_templates"].append(template)
+            imported["app_specs"].append(template)
 
         for raw_block in assets.get("blocks", []):
             original_slug = str(raw_block.get("slug", "")).strip()
@@ -142,16 +161,93 @@ def _import_assets(
             block_ref_map[(original_slug, original_version)] = (block.slug, block.version)
             imported["blocks"].append(block)
 
-        for raw_bundle in assets.get("bundles", []):
+        for raw_bundle in profiles:
             bundle = _import_bundle(
                 raw_bundle,
                 user=user,
                 conflict_strategy=conflict_strategy,
                 block_ref_map=block_ref_map,
             )
-            imported["bundles"].append(bundle)
+            imported["profiles"].append(bundle)
+
+        for raw_stack in assets.get("stacks", []):
+            imported["stacks"].append(
+                _import_stack(raw_stack, user=user, conflict_strategy=conflict_strategy),
+            )
 
     return imported
+
+
+def _import_stack(raw_stack: Any, *, user: AbstractUser, conflict_strategy: str):
+    """Import a user stack, re-validating against this install's allowlist.
+
+    Imported stacks are always ``generated`` dockerfile mode and enter the
+    approval queue like locally created ones.
+    """
+    from django.conf import settings
+
+    from backend.generation.services.versioning import content_hash
+    from backend.runtime.models import Stack
+    from backend.runtime.services.scaffolding import is_known_stack_slug
+    from backend.runtime.services.stack_validation import validate_stack_config
+    from backend.runtime.services.stack_validation import validate_stack_files
+
+    if not isinstance(raw_stack, dict):
+        msg = "Each stack must be an object"
+        raise ValueError(msg)
+    slug = str(raw_stack.get("slug", "")).strip()
+    if not slug:
+        msg = "Each stack must include a slug"
+        raise ValueError(msg)
+
+    files = raw_stack.get("files") or {}
+    payload = {
+        "name": str(raw_stack.get("name", slug)),
+        "description": str(raw_stack.get("description", "")),
+        "has_frontend": bool(raw_stack.get("has_frontend")),
+        "default_port": int(raw_stack.get("default_port", 8000)),
+        "patch_profile": raw_stack.get("patch_profile")
+        if raw_stack.get("patch_profile") in ("flask", "none")
+        else "none",
+        "frontend_component": str(raw_stack.get("frontend_component", "")),
+        "backend_filename": str(raw_stack.get("backend_filename", "app.py")),
+        "backend_base_image": str(raw_stack.get("backend_base_image", "")),
+        "frontend_base_image": str(raw_stack.get("frontend_base_image", "")),
+        "server_kind": raw_stack.get("server_kind")
+        if raw_stack.get("server_kind") in ("python", "uvicorn")
+        else "python",
+    }
+    errors = validate_stack_files(files) + validate_stack_config(
+        backend_base_image=payload["backend_base_image"],
+        frontend_base_image=payload["frontend_base_image"],
+        has_frontend=payload["has_frontend"],
+        default_port=payload["default_port"],
+        backend_filename=payload["backend_filename"],
+    )
+    if errors:
+        msg = f"Stack {slug}: {'; '.join(errors)}"
+        raise ValueError(msg)
+
+    if Stack.objects.filter(slug=slug).exists() or is_known_stack_slug(slug):
+        if conflict_strategy == "error":
+            msg = f"Stack conflict for slug {slug}"
+            raise ValueError(msg)
+        # "overwrite" would mutate immutable versions; rename in both cases.
+        slug = _unique_slug(Stack, slug)
+
+    approved = bool(getattr(user, "is_staff", False)) or not settings.STACK_REQUIRE_APPROVAL
+    return Stack.objects.create(
+        slug=slug,
+        version=1,
+        is_builtin=False,
+        is_approved=approved,
+        created_by=user,
+        aliases=[],
+        files=files,
+        content_hash=content_hash({**payload, "files": files}),
+        dockerfile_mode=Stack.DockerfileMode.GENERATED,
+        **payload,
+    )
 
 
 def _import_app_template(

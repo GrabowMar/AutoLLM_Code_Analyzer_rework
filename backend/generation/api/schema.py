@@ -201,6 +201,7 @@ class TemplatePackageExportSchema(Schema):
     app_template_slugs: list[str] = []
     bundle_slugs: list[str] = []
     block_refs: list[BlockRefSchema] = []
+    stack_slugs: list[str] = []
 
 
 class TemplatePackageImportSchema(Schema):
