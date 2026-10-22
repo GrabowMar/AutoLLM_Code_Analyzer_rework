@@ -101,7 +101,7 @@
 					<span
 						class={cn(
 							'rounded-full px-1.5 py-px text-[11px] font-medium leading-4',
-							checked ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'
+							checked ? 'bg-primary/15 text-success-fg' : 'bg-muted text-muted-foreground'
 						)}>{item.badge}</span
 					>
 				{/if}

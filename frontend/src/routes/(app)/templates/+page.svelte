@@ -12,6 +12,7 @@
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { formatApiError } from '$lib/api/core';
+	import { getMe } from '$lib/api/users';
 	import {
 		getStacks,
 		getAppTemplates,
@@ -146,6 +147,9 @@
 	let agentConfig = $state<AgentConfigInfo | null>(null);
 	let agentConfigLoading = $state(true);
 	let agentConfigError = $state('');
+
+	// Only staff may edit system profiles (the API answers 403 otherwise).
+	let isStaff = $state(false);
 
 	// Packages
 	let starterPackages = $state<StarterTemplatePackage[]>([]);
@@ -286,6 +290,9 @@
 		loadPresets();
 		loadAgentConfig();
 		loadStarterPackages();
+		getMe()
+			.then((me) => (isStaff = me.is_staff ?? false))
+			.catch(() => (isStaff = false));
 	});
 
 	function cancelAllForms() {
@@ -630,22 +637,23 @@
 			navigate({ tab: parseTab(v) });
 		}}
 	>
+		<!-- Icons and counts drop below sm so all four tabs fit a phone width. -->
 		<Tabs.List>
-			<Tabs.Trigger value="profiles">
-				<SlidersHorizontal />
-				Profiles <span class="text-xs text-muted-foreground font-mono">({profiles.length})</span>
+			<Tabs.Trigger value="profiles" class="px-2.5 sm:px-3">
+				<SlidersHorizontal class="hidden sm:block" />
+				Profiles <span class="hidden font-mono text-xs text-muted-foreground sm:inline">({profiles.length})</span>
 			</Tabs.Trigger>
-			<Tabs.Trigger value="specs">
-				<FileText />
-				App Specs <span class="text-xs text-muted-foreground font-mono">({appTemplates.length})</span>
+			<Tabs.Trigger value="specs" class="px-2.5 sm:px-3">
+				<FileText class="hidden sm:block" />
+				App Specs <span class="hidden font-mono text-xs text-muted-foreground sm:inline">({appTemplates.length})</span>
 			</Tabs.Trigger>
-			<Tabs.Trigger value="stacks">
-				<Layers />
-				Stacks <span class="text-xs text-muted-foreground font-mono">({stacks.length})</span>
+			<Tabs.Trigger value="stacks" class="px-2.5 sm:px-3">
+				<Layers class="hidden sm:block" />
+				Stacks <span class="hidden font-mono text-xs text-muted-foreground sm:inline">({stacks.length})</span>
 			</Tabs.Trigger>
-			<Tabs.Trigger value="presets">
-				<Settings2 />
-				Presets <span class="text-xs text-muted-foreground font-mono">({presets.filter((p) => !p.is_archived).length})</span>
+			<Tabs.Trigger value="presets" class="px-2.5 sm:px-3">
+				<Settings2 class="hidden sm:block" />
+				Presets <span class="hidden font-mono text-xs text-muted-foreground sm:inline">({presets.filter((p) => !p.is_archived).length})</span>
 			</Tabs.Trigger>
 		</Tabs.List>
 
@@ -691,6 +699,7 @@
 								{profiles}
 								loading={profilesLoading}
 								activeSlug={editingProfile?.slug ?? null}
+								canEditSystem={isStaff}
 								onEdit={startEditProfile}
 								onDuplicate={startDuplicateProfile}
 								onArchive={archiveProfile}

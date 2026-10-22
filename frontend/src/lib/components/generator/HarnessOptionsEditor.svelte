@@ -194,7 +194,7 @@
 					{/if}
 					<span class="font-mono text-[11px] text-muted-foreground">{field.key}</span>
 					{#if modified}
-						<span class="rounded-full bg-primary/15 px-1.5 text-[11px] font-medium text-primary">modified</span>
+						<span class="rounded-full bg-primary/15 px-1.5 text-[11px] font-medium text-success-fg">modified</span>
 						<button
 							type="button"
 							class="cursor-pointer text-[11px] text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"

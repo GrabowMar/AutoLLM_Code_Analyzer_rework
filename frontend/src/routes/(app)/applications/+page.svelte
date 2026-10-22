@@ -74,14 +74,7 @@
 		return 'created_desc';
 	});
 
-	let stats = $state<{
-		total: number;
-		completed: number;
-		running: number;
-		failed: number;
-		pending: number;
-		cancelled: number;
-	} | null>(null);
+	let stats = $state<Awaited<ReturnType<typeof getGenerationJobsStats>> | null>(null);
 
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let debounceTimer: ReturnType<typeof setTimeout>;
@@ -404,15 +397,16 @@
 	{#if stats}
 		<div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
 			{#each [
-				{ label: 'Total', value: stats.total },
-				{ label: 'Completed', value: stats.completed },
-				{ label: 'Running', value: stats.running },
-				{ label: 'Failed', value: stats.failed },
-				{ label: 'Pending', value: stats.pending }
+				{ label: 'Total', value: stats.total, note: '' },
+				{ label: 'Completed', value: stats.completed, note: '' },
+				{ label: 'Running', value: stats.running, note: stats.queued ? `${stats.queued} queued for a sandbox` : '' },
+				{ label: 'Failed', value: stats.failed, note: '' },
+				{ label: 'Pending', value: stats.pending, note: '' }
 			] as kpi (kpi.label)}
 				<div class="kpi-card">
 					<span class="kpi-label">{kpi.label}</span>
 					<span class="kpi-value">{kpi.value}</span>
+					{#if kpi.note}<span class="text-[11px] text-muted-foreground">{kpi.note}</span>{/if}
 				</div>
 			{/each}
 		</div>

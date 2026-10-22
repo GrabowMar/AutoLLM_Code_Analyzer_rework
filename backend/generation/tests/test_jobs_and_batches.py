@@ -345,6 +345,31 @@ class TestJobDetail:
         assert client.get(f"{API}/jobs/{explicit.id}/").json()["temperature"] == 0.2
         assert client.get(f"{API}/jobs/{custom.id}/").json()["temperature"] == 0.3
 
+    def test_stats_count_queued_within_running(self, user_client):
+        client, user = user_client
+        running = GenerationJob.Status.RUNNING
+        _job(user, status=running, phase=GenerationJob.Phase.QUEUED)
+        _job(user, status=running, phase=GenerationJob.Phase.RUNNING)
+        _job(user, status=GenerationJob.Status.COMPLETED)
+        stats = client.get(f"{API}/jobs/stats/").json()
+        assert stats == {
+            "total": 3,
+            "completed": 1,
+            "running": 2,
+            "queued": 1,
+            "failed": 0,
+            "pending": 0,
+            "cancelled": 0,
+        }
+
+    def test_malformed_job_id_is_a_json_404(self, user_client):
+        client, _user = user_client
+        for path in ("/jobs/not-a-uuid/", "/jobs/not-a-uuid/artifacts/", "/jobs/not-a-uuid/export/"):
+            res = client.get(f"{API}{path}")
+            assert res.status_code == 404, path
+            assert res.json() == {"detail": "Not Found"}
+        assert client.post(f"{API}/jobs/not-a-uuid/retry/").status_code == 404
+
     def test_presets_options_phase_and_fingerprint(self, user_client):
         client, user = user_client
         harness = _preset(user, "harness", "aider-whole", {"harness": "aider", "options": {"edit_format": "whole"}})

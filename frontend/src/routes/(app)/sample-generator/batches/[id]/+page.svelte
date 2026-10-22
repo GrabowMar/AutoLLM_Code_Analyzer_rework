@@ -65,8 +65,16 @@
 	let cancelOpen = $state(false);
 	let cancelling = $state(false);
 
+	// Batch routes only match UUIDs; anything else is a plain (HTML) 404.
+	const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 	async function load(id: string, silent = false) {
 		const mine = ++seq;
+		if (!UUID_RE.test(id)) {
+			notFound = true;
+			loading = false;
+			return;
+		}
 		if (!silent) refreshing = true;
 		try {
 			const [summary, list] = await Promise.all([getGenerationBatch(id), getGenerationBatchJobs(id)]);
@@ -242,7 +250,7 @@
 				<GitCompareArrows />
 				<AlertDescription>
 					Part of experiment
-					<a href="/experiments/{batch.experiment.id}" class="font-medium text-primary hover:underline">{batch.experiment.name}</a>.
+					<a href="/experiments/{batch.experiment.id}" class="font-medium text-success-fg hover:underline">{batch.experiment.name}</a>.
 					Columns are the experiment's conditions; launch further runs from the experiment page.
 				</AlertDescription>
 			</Alert>

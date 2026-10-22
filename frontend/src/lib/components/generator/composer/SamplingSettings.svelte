@@ -1,5 +1,5 @@
 <script lang="ts" module>
-	import type { LLMParams } from '$lib/api/generation';
+	import type { LLMParams, RunPreset, SamplingPresetConfig } from '$lib/api/generation';
 
 	/** Not sampling properties: presets reject them, so they stay inline overrides. */
 	export const NON_PRESET_LLM_KEYS = ['provider', 'stop', 'response_format'] as const;
@@ -8,6 +8,17 @@
 		const out: Record<string, unknown> = { ...params };
 		for (const key of NON_PRESET_LLM_KEYS) delete out[key];
 		return out as LLMParams;
+	}
+
+	/**
+	 * A system preset that sets no sampling parameter (the agent default,
+	 * "Provider defaults"). Template modes sample at their mode default without
+	 * any preset, so there it would only mislabel the runs' provenance.
+	 */
+	export function isNoopSamplingPreset(preset: RunPreset | null | undefined): boolean {
+		if (!preset || preset.kind !== 'sampling' || !preset.is_system) return false;
+		const config = preset.config as SamplingPresetConfig;
+		return Object.keys(config.llm_params ?? {}).length === 0 && !config.sampling_policy;
 	}
 
 	export function inlineOnlyParams(params: LLMParams): LLMParams {
@@ -31,7 +42,7 @@
 	 * - agent only: `policy` (bindable inline sampling_policy override), `inheritedPolicy`.
 	 * - `errors` (llm field errors), `invalid` (bindable output), `disabled`, `onchange()`.
 	 */
-	import type { PresetRef, RunPreset, SamplingPolicy, SamplingPresetConfig } from '$lib/api/generation';
+	import type { PresetRef, SamplingPolicy } from '$lib/api/generation';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
@@ -90,6 +101,16 @@
 
 	let saveOpen = $state(false);
 
+	// Template modes: no preset means the mode default (temperature 0.3, output
+	// cap 32,000); the no-op "Provider defaults" preset is not offered there.
+	const templateMode = $derived(mode !== 'agent');
+	const noneOption = $derived(
+		templateMode ? { label: 'No preset', description: 'Mode default: temperature 0.3 · output cap 32,000' } : null
+	);
+	$effect(() => {
+		if (templateMode && isNoopSamplingPreset(preset)) presetId = null;
+	});
+
 	const savable = $derived(presetableParams(cleanLLMParams(params)));
 	const canSave = $derived(Object.keys(savable).length > 0 || (mode === 'agent' && !!policy));
 	const saveConfig = $derived.by((): SamplingPresetConfig => {
@@ -106,6 +127,12 @@
 		const label = POLICY_LABELS[inheritedPolicy.value] ?? inheritedPolicy.value;
 		const source = POLICY_SOURCES[inheritedPolicy.source] ?? inheritedPolicy.source;
 		return source ? `${label} · ${source}` : label;
+	});
+	// The trigger is narrow: the platform default is implied, a preset is named.
+	const policyPlaceholder = $derived.by(() => {
+		if (!inheritedPolicy) return 'Platform default';
+		const label = POLICY_LABELS[inheritedPolicy.value] ?? inheritedPolicy.value;
+		return inheritedPolicy.source === 'preset' ? `${label} · preset` : label;
 	});
 
 	const HINTS = {
@@ -133,18 +160,22 @@
 			kind="sampling"
 			bind:selectedId={presetId}
 			{pinned}
+			autoSelectDefault={!templateMode}
+			{noneOption}
+			filter={templateMode ? (p) => !isNoopSamplingPreset(p) : undefined}
 			idPrefix="{mode}-sampling-preset"
 			{disabled}
 			onchange={() => onchange?.()}
 		/>
 		{#if mode === 'agent'}
 			<div class="min-w-0 space-y-1.5">
-				<Label for="{mode}-sampling-policy">Sampling policy</Label>
+				<!-- Same row height as the preset picker's label + Manage link, so the triggers line up. -->
+				<div class="flex min-h-4 items-center"><Label for="{mode}-sampling-policy">Sampling policy</Label></div>
 				<Select.Simple
 					id="{mode}-sampling-policy"
 					value={policy ?? ''}
 					items={policyItems}
-					placeholder={inheritedPolicyText}
+					placeholder={policyPlaceholder}
 					clearLabel="Inherit ({inheritedPolicyText})"
 					class={policy ? 'border-primary/50' : ''}
 					{disabled}

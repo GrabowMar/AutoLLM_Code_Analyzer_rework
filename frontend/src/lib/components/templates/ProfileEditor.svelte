@@ -76,7 +76,9 @@
 	let blockRefs = $state<BlockRef[]>($state.snapshot(seed?.block_refs ?? []) as BlockRef[]);
 	let llmConfig = $state<LLMParams>($state.snapshot(seed?.llm_config ?? {}) as LLMParams);
 	let llmInvalid = $state(false);
-	let isDefault = $state(seed?.is_default ?? false);
+	// A copy never inherits "default": duplicating the stack's default profile
+	// would otherwise silently make the copy the default for that stack.
+	let isDefault = $state(!isNewSlug && (seed?.is_default ?? false));
 
 	// ── Block composer ─────────────────────────────────────────────
 	let blockFilter = $state('');

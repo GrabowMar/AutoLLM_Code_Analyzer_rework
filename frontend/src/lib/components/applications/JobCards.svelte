@@ -1,5 +1,6 @@
 <script lang="ts">
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import { jobDisplayStatus, jobPhaseTones } from '$lib/components/generator/batches';
 	import { containerTones } from '$lib/constants/colors';
 	import { Button } from '$lib/components/ui/button';
 	import { formatDuration } from '$lib/utils/formatters';
@@ -73,7 +74,9 @@
 					<div class="min-w-0">
 						<a href="/applications/{job.id}" class="text-sm font-semibold hover:text-primary transition-colors block truncate">{jobDescription(job)}</a>
 						<span class="text-[11px] text-muted-foreground block truncate">
-							<span class="capitalize font-medium text-primary/80">{job.mode}</span> &middot; {job.model_name ?? '—'}
+							<span class="capitalize font-medium text-foreground/80">{job.mode}</span>{#if job.harness}
+								&middot; <span class="font-mono" title="Harness">{job.harness}</span>{/if}
+							&middot; {job.model_name ?? '—'}
 						</span>
 					</div>
 				</div>
@@ -87,7 +90,7 @@
 				<!-- Job Status -->
 				<div class="flex flex-col gap-1">
 					<span class="section-label">Job Status</span>
-					<StatusBadge status={job.status} class="w-fit" />
+					<StatusBadge status={jobDisplayStatus(job)} tones={jobPhaseTones} class="w-fit" />
 				</div>
 
 				<!-- Container / App -->
@@ -177,7 +180,7 @@
 								id="mobile-provision-btn-{job.id}"
 								variant="outline"
 								size="sm"
-								class="h-8 text-xs font-semibold gap-1.5 border-primary/30 text-primary hover:bg-primary/10 hover:border-primary/50"
+								class="h-8 text-xs font-semibold gap-1.5 border-primary/30 text-success-fg hover:bg-primary/10 hover:border-primary/50"
 								disabled={isBusy != null}
 								onclick={() => onBuild(job.id)}
 							>

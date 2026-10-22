@@ -15,6 +15,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Count
 from django.db.models import Exists
 from django.db.models import OuterRef
 from django.db.models import Q
@@ -68,16 +69,19 @@ _CONTAINER_STATUS_FILTERS = {
 
 @router.get("/jobs/stats/", response=dict)
 def job_stats(request):
-    """Get count of jobs by status."""
-    qs = GenerationJob.objects.filter(created_by=request.auth)
-    return {
-        "total": qs.count(),
-        "completed": qs.filter(status="completed").count(),
-        "running": qs.filter(status="running").count(),
-        "failed": qs.filter(status="failed").count(),
-        "pending": qs.filter(status="pending").count(),
-        "cancelled": qs.filter(status="cancelled").count(),
-    }
+    """Count jobs by status (one query). ``running`` includes the ``queued``
+    ones: running jobs still waiting for a sandbox slot (phase ``queued``).
+    """
+    status = GenerationJob.Status
+    return GenerationJob.objects.filter(created_by=request.auth).aggregate(
+        total=Count("id"),
+        completed=Count("id", filter=Q(status=status.COMPLETED)),
+        running=Count("id", filter=Q(status=status.RUNNING)),
+        queued=Count("id", filter=Q(status=status.RUNNING, phase=GenerationJob.Phase.QUEUED)),
+        failed=Count("id", filter=Q(status=status.FAILED)),
+        pending=Count("id", filter=Q(status=status.PENDING)),
+        cancelled=Count("id", filter=Q(status=status.CANCELLED)),
+    )
 
 
 @router.get("/jobs/", response=PaginatedJobsSchema)
@@ -155,18 +159,30 @@ def list_jobs(
     )
 
 
+def _job_uuid(job_id: str) -> uuid.UUID:
+    """A malformed job id is a JSON 404 (clients show "not found"), not a 500 from the UUID field."""
+    try:
+        return uuid.UUID(job_id)
+    except ValueError as exc:
+        raise HttpError(404, "Not Found") from exc
+
+
 @router.get("/jobs/{job_id}/", response=GenerationJobSchema)
 def get_job(request, job_id: str):
     return get_object_or_404(
         GenerationJob.objects.select_related(*_DETAIL_RELATED),
-        id=job_id,
+        id=_job_uuid(job_id),
         created_by=request.auth,
     )
 
 
 @router.post("/jobs/{job_id}/cancel/")
 def cancel_job(request, job_id: str):
-    job = get_object_or_404(GenerationJob.objects.select_related("batch"), id=job_id, created_by=request.auth)
+    job = get_object_or_404(
+        GenerationJob.objects.select_related("batch"),
+        id=_job_uuid(job_id),
+        created_by=request.auth,
+    )
     if job.status in ("pending", "running"):
         job.status = GenerationJob.Status.CANCELLED
         job.phase = GenerationJob.Phase.NONE
@@ -183,7 +199,11 @@ def cancel_job(request, job_id: str):
 @router.delete("/jobs/{job_id}/")
 def delete_job(request, job_id: str):
     """Delete a job that is not currently running."""
-    job = get_object_or_404(GenerationJob.objects.select_related("batch"), id=job_id, created_by=request.auth)
+    job = get_object_or_404(
+        GenerationJob.objects.select_related("batch"),
+        id=_job_uuid(job_id),
+        created_by=request.auth,
+    )
     if job.status == "running":
         return {
             "success": False,
@@ -203,7 +223,7 @@ def _load_job_for_cloning(request, job_id: str) -> GenerationJob:
             "app_requirement",
             "profile",
         ),
-        id=job_id,
+        id=_job_uuid(job_id),
         created_by=request.auth,
     )
 
@@ -263,14 +283,14 @@ def rerun_job(request, job_id: str):
 
 @router.get("/jobs/{job_id}/artifacts/", response=list[GenerationArtifactSchema])
 def get_job_artifacts(request, job_id: str):
-    job = get_object_or_404(GenerationJob, id=job_id, created_by=request.auth)
+    job = get_object_or_404(GenerationJob, id=_job_uuid(job_id), created_by=request.auth)
     return job.artifacts.all()
 
 
 @router.post("/jobs/{job_id}/evaluate/", response={200: dict, 400: dict})
 def evaluate(request, job_id: str):
     """Re-run the platform evaluation (build, run, hidden conformance suite) for a finished job."""
-    job = get_object_or_404(GenerationJob, id=job_id, created_by=request.auth)
+    job = get_object_or_404(GenerationJob, id=_job_uuid(job_id), created_by=request.auth)
     if job.status != GenerationJob.Status.COMPLETED:
         return 400, {"detail": "Only completed jobs can be evaluated."}
     if job.app_requirement_id is None and not (job.resolved_bundle or {}).get("app_requirement"):
@@ -286,7 +306,7 @@ def download_run_record(request, job_id: str, name: str):
     Only names listed in the job's own run record are served, and the file
     must still match the sha256 recorded when the run finished.
     """
-    job = get_object_or_404(GenerationJob, id=job_id, created_by=request.auth)
+    job = get_object_or_404(GenerationJob, id=_job_uuid(job_id), created_by=request.auth)
     record = ((job.result_data or {}).get("agent") or {}).get("run_record") or {}
     entry = record.get(name)
     if name.startswith("_") or not isinstance(entry, dict):
@@ -305,7 +325,7 @@ def download_run_record(request, job_id: str, name: str):
     response=list[CopilotIterationSchema],
 )
 def get_copilot_iterations(request, job_id: str):
-    job = get_object_or_404(GenerationJob, id=job_id, created_by=request.auth)
+    job = get_object_or_404(GenerationJob, id=_job_uuid(job_id), created_by=request.auth)
     return job.copilot_iterations.all()
 
 
@@ -314,7 +334,7 @@ def export_job(request, job_id: str):
     """Export full job data as JSON (job + artifacts + iterations)."""
     job = get_object_or_404(
         GenerationJob.objects.select_related(*_DETAIL_RELATED),
-        id=job_id,
+        id=_job_uuid(job_id),
         created_by=request.auth,
     )
     artifacts = list(

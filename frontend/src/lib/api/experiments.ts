@@ -1,5 +1,5 @@
 import { apiFetch } from "./core";
-import type { AgentConfig, LLMParams } from "./generation";
+import type { AgentConfig, LLMParams, NamedPresetRef } from "./generation";
 
 /** agent: cells run the sandboxed coding-agent harness; scaffolding: template prompts. */
 export type ExperimentMode = "agent" | "scaffolding";
@@ -26,6 +26,9 @@ export interface Experiment {
   sampling_preset?: number | null;
   /** Budget preset pk (experiment-wide). */
   budget_preset?: number | null;
+  /** The pinned sampling / budget preset versions (null = system default at launch, agent mode). */
+  sampling_preset_ref?: NamedPresetRef | null;
+  budget_preset_ref?: NamedPresetRef | null;
   app_requirement_ids: number[];
   condition_count: number;
   created_at: string;
@@ -42,6 +45,7 @@ export interface ExperimentCondition {
   harness: string;
   /** Harness preset pk; when set, `harness` is the preset's harness name. */
   harness_preset?: number | null;
+  harness_preset_ref?: NamedPresetRef | null;
   model_name: string | null;
   bundle_slug: string | null;
   bundle_version: number | null;
@@ -49,8 +53,16 @@ export interface ExperimentCondition {
   created_at: string;
 }
 
+export interface ExperimentLaunchError {
+  code: string;
+  detail: string;
+  condition_id: number;
+}
+
 export interface ExperimentPreview {
   total_jobs: number;
+  /** Cells a launch would create now (failed / cancelled cells are re-run). */
+  pending_jobs?: number;
   conditions: number;
   apps: number;
   repeats: number;
@@ -58,34 +70,72 @@ export interface ExperimentPreview {
   /** budget_upper_bound for agent mode (budget cap × jobs), heuristic for scaffolding. */
   cost_estimate_kind?: "budget_upper_bound" | "heuristic";
   mode?: ExperimentMode;
+  /** Experiment-wide stack; null = each condition's profile stack (legacy). */
+  stack_slug?: string | null;
+  stacks?: string[];
+  /** Effective presets, system defaults included. */
+  presets?: { sampling: NamedPresetRef | null; budget: NamedPresetRef | null };
+  /** Effective experiment-wide agent config (agent mode; harness excluded). */
+  agent_config?: AgentConfig | null;
   per_condition: {
     condition_id: number;
     label: string;
+    /** Model display name. */
     model: string;
+    /** Model slug. */
+    model_id?: string;
     harness?: string;
-    bundle_slug: string;
-    bundle_version: number;
+    harness_preset?: NamedPresetRef | null;
+    /** "slug@v" or null. */
+    profile?: string | null;
+    bundle_slug: string | null;
+    bundle_version: number | null;
+    stack_slug?: string;
     jobs: number;
     estimated_cost: number;
   }[];
   /** Agent mode: what each condition will actually run with, and where conditions differ. */
   comparability?: ExperimentComparability | null;
+  /** Problems that make a launch refuse (fix them first). */
+  launch_errors?: ExperimentLaunchError[];
+}
+
+export interface ExperimentComparabilityRow {
+  condition_id: number;
+  label: string;
+  /** Model slug. */
+  model: string;
+  model_name: string;
+  harness: string;
+  harness_version: string;
+  harness_preset: NamedPresetRef | null;
+  /** Non-default options only. */
+  harness_options: Record<string, unknown>;
+  sampling_policy: string;
+  /** Explicit params the gateway sends (seed, provider and max_tokens excluded). */
+  forced_params: Record<string, unknown>;
+  output_cap: number | null;
+  /** "default" or the explicit routing dict. */
+  provider_routing: "default" | Record<string, unknown>;
+  seed_forwarded: boolean;
+  dropped_params: Record<string, string>;
+  context_window: number;
+  context_window_source: "catalog" | "fallback";
+  stack_slug: string;
+  /** "slug@v" or null. */
+  profile: string | null;
+  param_overrides: Record<string, unknown>;
+  /** Every problem, blocking or not. */
+  problems: string[];
+  /** The blocking subset of `problems`. */
+  errors?: string[];
 }
 
 export interface ExperimentComparability {
-  conditions: {
-    condition_id: number;
-    model: string;
-    harness: string;
-    harness_version: string;
-    sampling_policy: string;
-    forced_params: Record<string, unknown>;
-    seed_forwarded: boolean;
-    dropped_params: Record<string, string>;
-    problems: string[];
-  }[];
+  conditions: ExperimentComparabilityRow[];
   differs_on: string[];
   has_problems: boolean;
+  has_errors?: boolean;
 }
 
 export interface ExperimentBatch {

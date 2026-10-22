@@ -134,6 +134,11 @@
 	);
 	const allDefaultHarness = $derived(kind === 'harness' && Object.keys(options).length === 0);
 	const missingHarness = $derived(kind === 'harness' && !harnessInfo);
+	// An empty sampling or budget preset would only duplicate the system default.
+	const emptyConfig = $derived(
+		(kind === 'sampling' && Object.keys(llmParams).length === 0 && !samplingPolicy) ||
+			(kind === 'budget' && Object.keys(budget).length === 0)
+	);
 
 	// ── live validation ────────────────────────────────────────────────
 	let check = $state<{ key: string; ok: boolean; errors: string[]; normalized: unknown; failed: string } | null>(null);
@@ -142,7 +147,7 @@
 	$effect(() => {
 		const key = configKey;
 		const k = kind;
-		if (localInvalid || allDefaultHarness || missingHarness) {
+		if (localInvalid || allDefaultHarness || missingHarness || emptyConfig) {
 			checking = false;
 			return;
 		}
@@ -184,6 +189,7 @@
 			!localInvalid &&
 			!allDefaultHarness &&
 			!missingHarness &&
+			!emptyConfig &&
 			serverErrors.length === 0 &&
 			(isNew || contentChanged || metaChanged)
 	);
@@ -215,6 +221,11 @@
 		budget:
 			'Per-run limits and network access. The request budget is the limit that should bind; wall clock, tokens and cost are safety nets.',
 	};
+	const NAME_PLACEHOLDERS: Record<PresetKind, string> = {
+		harness: 'e.g. Aider whole-file edits',
+		sampling: 'e.g. Temperature 0',
+		budget: 'e.g. Quick smoke test',
+	};
 	const samplingItems = Object.entries(SAMPLING_POLICY_LABELS).map(([value, label]) => ({ value, label }));
 	const platformPolicy = $derived(agentConfig?.defaults?.sampling_policy ?? 'provider_default');
 </script>
@@ -237,7 +248,7 @@
 		<div class="grid gap-3 sm:grid-cols-2">
 			<div class="space-y-1.5">
 				<Label class="text-xs" for="{idPrefix}-name">Name</Label>
-				<Input id="{idPrefix}-name" bind:value={name} maxlength={200} placeholder="e.g. Aider whole-file edits" class="h-9 text-sm" />
+				<Input id="{idPrefix}-name" bind:value={name} maxlength={200} placeholder={NAME_PLACEHOLDERS[kind]} class="h-9 text-sm" />
 			</div>
 			<div class="space-y-1.5">
 				<Label class="text-xs" for="{idPrefix}-slug">Slug</Label>
@@ -351,6 +362,12 @@
 				{#if localInvalid}
 					<TriangleAlert class="size-3.5 text-warning-fg" aria-hidden="true" />
 					<span class="text-warning-fg">Fix the highlighted fields first.</span>
+				{:else if emptyConfig}
+					<span class="text-muted-foreground">
+						Nothing set yet: an empty preset equals the system default ({kind === 'sampling'
+							? 'provider-default'
+							: 'platform-default'}). Set at least one value.
+					</span>
 				{:else if allDefaultHarness || missingHarness}
 					<span class="text-muted-foreground">Nothing to check yet.</span>
 				{:else if checking || !current}

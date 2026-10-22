@@ -145,8 +145,11 @@
 	{#if loading}
 		<LoaderCircle class="{iconCls} animate-spin text-muted-foreground" />
 	{:else if !container}
+		<!-- Outline: Build sits beside the page's primary action (and repeats per row in lists). -->
 		<Button
+			variant="outline"
 			size={btnSize}
+			aria-label="Build container"
 			onclick={onBuild}
 			disabled={!canBuild || busy === 'build'}
 			title={canBuild ? 'Build a runnable container from this generation' : 'Job must be completed before build'}
