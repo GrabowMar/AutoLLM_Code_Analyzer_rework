@@ -12,6 +12,16 @@ native ``mini.yaml`` prompts and loop; only the integration points are set:
 
 Native behaviour kept on purpose (and so part of what is compared): each
 command runs in a fresh subshell with mini's default 30 s timeout.
+
+Options (checked against the mini-swe-agent 2.4.6 source in the pinned lock):
+
+* ``command_timeout_seconds`` -- ``environment.timeout`` of the
+  ``LocalEnvironment`` (default 30). The CLI deep-merges every ``-c`` config
+  file, the environment is built from the merged ``environment`` mapping,
+  and the agent loop never passes its own per-command timeout, so the value
+  applies to every command of every model; ``mini.yaml``'s prompts do not
+  mention it. Emitted only when it differs from 30, so default sections are
+  unchanged.
 """
 
 from __future__ import annotations
@@ -24,9 +34,12 @@ from backend.generation.services.agent.harnesses.base import GATEWAY_BASE_URL
 from backend.generation.services.agent.harnesses.base import OUTPUT_DIR
 from backend.generation.services.agent.harnesses.base import Harness
 from backend.generation.services.agent.harnesses.base import HarnessSummary
+from backend.generation.services.agent.harnesses.base import OptionField
 
 MINI = "/opt/harness/venv/bin/mini"
 TRAJECTORY = f"{OUTPUT_DIR}/traj.json"
+# mini's own LocalEnvironmentConfig.timeout default.
+COMMAND_TIMEOUT_SECONDS = 30
 
 
 class MiniSweAgentHarness(Harness):
@@ -36,6 +49,18 @@ class MiniSweAgentHarness(Harness):
     version_setting = "AGENT_MINI_SWE_AGENT_VERSION"
     version_build_arg = "MINI_SWE_AGENT_VERSION"
     requires_tool_calling = True
+    description = "The SWE-agent team's minimal bash-only loop: one shell command per step, no editing helpers."
+    option_fields = (
+        OptionField(
+            key="command_timeout_seconds",
+            type="int",
+            label="Command timeout (s)",
+            help="How long one shell command may run before mini kills it (installs and builds need longer).",
+            default=COMMAND_TIMEOUT_SECONDS,
+            min=10,
+            max=600,
+        ),
+    )
 
     def snapshot_section(
         self,
@@ -45,9 +70,11 @@ class MiniSweAgentHarness(Harness):
         max_output_tokens: int,
         agent_config: dict[str, Any],
         title: str,
+        options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         version = self.version()
-        overrides = {
+        opts = self.effective_options(options)
+        overrides: dict[str, Any] = {
             "agent": {
                 "mode": "yolo",
                 "confirm_exit": False,
@@ -61,6 +88,8 @@ class MiniSweAgentHarness(Harness):
                 "model_kwargs": {"api_base": GATEWAY_BASE_URL, "api_key": DUMMY_API_KEY, "drop_params": True},
             },
         }
+        if opts["command_timeout_seconds"] != COMMAND_TIMEOUT_SECONDS:
+            overrides["environment"] = {"timeout": int(opts["command_timeout_seconds"])}
         return {
             "name": self.name,
             "version": version,

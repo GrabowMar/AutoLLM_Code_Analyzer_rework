@@ -4,6 +4,7 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import {
 		getGenerationJobs,
@@ -31,6 +32,7 @@
 	import CircleX from '@lucide/svelte/icons/circle-x';
 	import Clock from '@lucide/svelte/icons/clock';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
+	import Layers from '@lucide/svelte/icons/layers';
 	import { goto } from '$app/navigation';
 
 	let loading = $state(true);
@@ -173,9 +175,35 @@
 		runContainerAction(jobId, 'stop', () => stopContainer(containerId), 'Container stopping');
 	}
 
+	// One confirm dialog for the destructive row actions (container removal, job deletion).
+	let pendingConfirm = $state<
+		| { kind: 'remove-container'; jobId: string; containerId: string }
+		| { kind: 'delete-job'; jobId: string }
+		| null
+	>(null);
+	let confirmOpen = $state(false);
+	let confirmBusy = $state(false);
+
 	function handleRemoveContainer(jobId: string, containerId: string) {
-		if (!confirm('Remove this container? Generated code will be preserved.')) return;
-		runContainerAction(jobId, 'remove', () => removeContainer(containerId), 'Container removed');
+		pendingConfirm = { kind: 'remove-container', jobId, containerId };
+		confirmOpen = true;
+	}
+
+	async function runConfirmed() {
+		const action = pendingConfirm;
+		if (!action) return;
+		confirmBusy = true;
+		try {
+			if (action.kind === 'remove-container') {
+				confirmOpen = false;
+				await runContainerAction(action.jobId, 'remove', () => removeContainer(action.containerId), 'Container removed');
+			} else {
+				await deleteJob(action.jobId);
+				confirmOpen = false;
+			}
+		} finally {
+			confirmBusy = false;
+		}
 	}
 
 	async function refresh() {
@@ -248,8 +276,12 @@
 		}
 	}
 
-	async function handleDelete(id: string) {
-		if (!confirm('Are you sure you want to delete this job? This cannot be undone.')) return;
+	function handleDelete(id: string) {
+		pendingConfirm = { kind: 'delete-job', jobId: id };
+		confirmOpen = true;
+	}
+
+	async function deleteJob(id: string) {
 		try {
 			const result = await deleteGenerationJob(id);
 			if (result.success) {
@@ -357,6 +389,10 @@
 			<Button id="btn-refresh" variant="outline" size="sm" onclick={refresh} disabled={refreshing}>
 				<RefreshCw class="h-3.5 w-3.5 {refreshing ? 'animate-spin' : ''}" />
 				Refresh
+			</Button>
+			<Button variant="outline" size="sm" href="/sample-generator/batches">
+				<Layers class="h-3.5 w-3.5" />
+				Batches
 			</Button>
 			<Button id="btn-generate-new" size="sm" href="/sample-generator">
 				<FlaskConical class="h-3.5 w-3.5" />
@@ -572,3 +608,15 @@
 		class="rounded-md border border-border"
 	/>
 </div>
+
+<ConfirmDialog
+	bind:open={confirmOpen}
+	title={pendingConfirm?.kind === 'remove-container' ? 'Remove this container?' : 'Delete this job?'}
+	description={pendingConfirm?.kind === 'remove-container'
+		? 'Stops and removes the container. The generated code is kept.'
+		: 'Deletes the job, its generated files and its run record. This cannot be undone.'}
+	confirmLabel={pendingConfirm?.kind === 'remove-container' ? 'Remove container' : 'Delete job'}
+	destructive
+	busy={confirmBusy}
+	onConfirm={runConfirmed}
+/>

@@ -92,8 +92,57 @@ Rules (see `src/lib/components/charts/theme.ts`):
 | Clickable card               | add `.card-lift`                                                             | hover effects on static cards                          |
 | KPI                          | `dashboard/KpiCard` or `.kpi-card` / `.kpi-label` / `.kpi-value`             | one-off stat boxes                                     |
 | Small group label            | `.section-label`                                                             | `text-[10px] uppercase …` variants                     |
+| Pick one of a list           | `ui/select` (`Select.Simple` for plain lists, parts for rich rows)           | raw `<select>` with copied class strings               |
+| Boolean / multi-choice field | `ui/checkbox` (`Checkbox` in a `<label>`, or with `<Label for>`)             | `<input type=checkbox>`, hand-drawn check boxes        |
+| Mode switch (2–4 options)    | `ui/segmented` (`Segmented`)                                                 | pill rows with `aria-pressed` and active classes       |
 
 Navigation lives in `src/lib/nav.ts` (sidebar, mobile menu, breadcrumbs). Add routes there.
+
+### Form primitives (`src/lib/components/ui/`, bits-ui 2)
+
+- **Select** — `import * as Select from '$lib/components/ui/select'`.
+  - Plain list: `<Select.Simple id bind:value items={[{ value, label, description? }]} placeholder clearLabel? size? />`.
+    `value` is a string; `''` shows the placeholder. `clearLabel` adds an "unset" option (e.g. "Inherit").
+  - Rich rows: `Select.Root type="single" value onValueChange items` → `Select.Trigger id` (render the
+    selected row yourself) → `Select.Content` → `Select.Group`/`Select.GroupHeading`/`Select.Separator` →
+    `Select.Item value label` with a children snippet. Always pass `label` (typeahead) and `items` on Root.
+  - Two-line triggers: add `class="min-h-9 py-1.5 data-[size=default]:h-auto"`.
+- **Checkbox** — `<label class="flex items-center gap-2"><Checkbox bind:checked /> Free only</label>`;
+  `indeterminate` supported. Inside a clickable row (`<button role="checkbox">`) draw the box with spans
+  instead — a button may not contain another button.
+- **Segmented** — `<Segmented aria-label="Mode" bind:value items={[{ value, label, icon?, badge?, title? }]} />`;
+  a radiogroup (arrow keys move and select), `fullWidth` stretches items, narrow screens scroll sideways.
+- Number inputs bind numbers (`null` when empty): hand `<Input type="number">` the number itself, never
+  `String(n)`, or Svelte rewrites partial input such as `-0` while the user types.
+
+## Generation building blocks (`src/lib/components/generator/`)
+
+Shared by the composer, batch pages, Library and experiments; import from `$lib/components/generator`.
+Each file documents its props at the top. Conventions: selections are `$bindable` and replaced (never
+mutated); `onchange` fires only on user edits; catalogs load once per page (`loadModelCatalog`,
+`loadAppSpecCatalog`, `loadPresets` — browser-only caches); loading uses an inline spinner or
+`LoadingState`, failures `ErrorAlert` with retry.
+
+| Component              | Use for                                                                                                         |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `ModelPicker`          | models from the whole catalog; `mode` single/multi, `requireTools` pins ineligible picks with "Remove N"        |
+| `AppSpecPicker`        | app specs (graded tasks): search, category chips, difficulty, select shown / clear                              |
+| `StackSelect`          | stack slug; own unapproved stacks marked "Pending approval — only you can run it"; `defaultSlug`                |
+| `PresetPicker`         | one harness / sampling / budget preset; `pinned` keeps an old version ("v1 · latest is v3 · Use latest")        |
+| `HarnessOptionsEditor` | schema-driven harness options; sparse (default values are removed)                                              |
+| `LLMParamsEditor`      | sparse sampling params; blank = inherit, placeholder "0.3 · mode default"; `mode` hides fields that don't apply |
+| `ProfilePicker`        | scaffolding prompt profile or "Auto" (with suggestions) and a rendered-prompt preview                           |
+| `OpenRouterKeyBanner`  | key status: own key, deployment fallback, missing, rejected, or "couldn't check" (never a false "required")     |
+
+- Sparse editors never emit `null`/`''`; a field holding a value that wasn't applied (out of range, bad
+  JSON) sets the bindable `invalid` output — block submit on it.
+- Vocabulary: **Harness preset**, **Sampling preset**, **Budget preset**; sampling settings apply
+  identically to every model (per-model support is shown in previews, not tuned per model).
+- After creating a preset outside a picker, call `invalidatePresets(kind)`; mounted pickers reload.
+  "Manage" links open `/templates?tab=presets&kind=…` in a new tab and refresh on window focus.
+- API errors: show `formatApiError(e)` (handles `{detail}`, 422 `{detail: [{loc, msg}]}`, `{message}`,
+  `{detail, remediation}`); map 422s onto fields with `apiFieldErrors(e)`; ignore `isAbortError(e)` from
+  superseded requests.
 
 ## Color & type rules
 

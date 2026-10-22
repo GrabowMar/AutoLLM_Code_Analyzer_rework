@@ -1,9 +1,9 @@
 # Runtime contract per stack, as stated to the agent in its task brief.
 # Must agree with the stack's Dockerfile (runtime/scaffolding/<dir>/).
-# Stacks not listed here (user-authored) fall back to "_default".
+# Stacks not listed here (user-authored) fall back to "_default", and their
+# start command is the one their generated Dockerfile runs (server_kind).
 _default:
   backend_summary: "The backend is a Python web application."
-  start_command: "python app.py"
   frontend_summary: "a JavaScript single-page app"
 flask-react:
   backend_summary: "The backend is a Flask 3 application (Python 3.11)."

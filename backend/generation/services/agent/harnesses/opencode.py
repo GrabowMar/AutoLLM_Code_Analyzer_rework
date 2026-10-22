@@ -17,6 +17,15 @@ Pinned on top of the release itself:
 * **Permissions.** Everything allowed inside the sandbox (the container is
   the boundary) except the interactive ``doom_loop`` prompt, which a
   headless run auto-rejects anyway -- set to ``deny`` so it is explicit.
+
+Options: none. An option is only offered once it is verified in the pinned
+binary to act identically on every model family, and nothing in OpenCode's
+config qualified for 1.18.35: the binary chooses its editing tools by model
+id (GPT-family ids get ``apply_patch`` instead of ``edit``/``write``), so
+tool toggles would be model-specific, and per-agent step limits, compaction
+and temperature/top_p settings either duplicate the gateway-owned budget and
+sampling policy or could not be checked against this release's source (it
+is not vendored here). The section is therefore always the frozen default.
 """
 
 from __future__ import annotations
@@ -66,6 +75,7 @@ class OpenCodeHarness(Harness):
     version_setting = "AGENT_OPENCODE_VERSION"
     version_build_arg = "OPENCODE_VERSION"
     requires_tool_calling = True
+    description = "OpenCode's headless coding agent: native tool set, pinned model-agnostic system prompt."
 
     def snapshot_section(
         self,
@@ -75,7 +85,9 @@ class OpenCodeHarness(Harness):
         max_output_tokens: int,
         agent_config: dict[str, Any],
         title: str,
+        options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        self.normalize_options(options)  # no options exist: rejects any
         version = self.version()
         prompt = default_prompt(version)
         model_ref = f"openrouter/{model_slug}"

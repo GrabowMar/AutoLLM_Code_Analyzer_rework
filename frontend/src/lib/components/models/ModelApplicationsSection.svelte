@@ -7,6 +7,7 @@
 	import Eye from '@lucide/svelte/icons/eye';
 	import AppWindow from '@lucide/svelte/icons/app-window';
 	import { getGenerationJobs, type GenerationJobList } from '$lib/api/generation';
+	import { formatApiError } from '$lib/api/core';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
@@ -41,7 +42,7 @@
 			total = res.total;
 			onLoaded?.(res.total);
 		} catch (e) {
-			error = `Failed to load applications: ${(e as Error).message}`;
+			error = formatApiError(e, 'Failed to load applications.');
 		} finally {
 			loading = false;
 		}
@@ -58,7 +59,7 @@
 				<Card.Title class="text-base">Applications</Card.Title>
 				<Badge variant="outline" class="text-xs">{total}</Badge>
 			</div>
-			<Button size="sm" href="/sample-generator?mode=custom&model={slug}">
+			<Button size="sm" href="/sample-generator?mode=agent&model={encodeURIComponent(slug)}">
 				<Sparkles class="h-3.5 w-3.5 mr-1.5" />New
 			</Button>
 		</Card.Header>
@@ -70,7 +71,7 @@
 			{:else if jobs.length === 0}
 				<EmptyState compact icon={AppWindow} title="No applications yet" description="No applications have been generated with this model.">
 					{#snippet action()}
-						<Button size="sm" variant="outline" href="/sample-generator?mode=custom&model={slug}">
+						<Button size="sm" variant="outline" href="/sample-generator?mode=agent&model={encodeURIComponent(slug)}">
 							<Sparkles class="h-3.5 w-3.5 mr-1.5" />Generate the first one
 						</Button>
 					{/snippet}

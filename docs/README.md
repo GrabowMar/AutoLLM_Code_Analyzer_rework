@@ -13,7 +13,9 @@ You pick a requirement template and a set of models from OpenRouter. For each mo
 | [Quickstart](/docs/QUICKSTART) | From clone to your first generated and analyzed app |
 | [Development guide](/docs/development-guide) | just targets, tests, env vars, code layout, doc conventions |
 | [Architecture](/docs/ARCHITECTURE) | How the pieces fit: apps, auth, threads vs Celery, Docker surfaces |
-| [Generation process](/docs/GENERATION_PROCESS) | The three generation modes, templates, and the job lifecycle |
+| [Generation process](/docs/GENERATION_PROCESS) | The generation modes, run presets, fairness rules, identity keys, and the job lifecycle |
+| [Experiments](/docs/EXPERIMENTS) | Designed runs: conditions, presets, comparability, launch and export |
+| [Template packages](/docs/TEMPLATE_PACKAGES) | The package format, import/export rules, and starter packages |
 | [Analysis pipeline](/docs/ANALYSIS_PIPELINE) | Analyzer workspaces, tool execution, findings |
 | [Background services](/docs/BACKGROUND_SERVICES) | Celery, the scheduler, and the SSE event stream |
 | [Automation guide](/docs/AUTOMATION_GUIDE) | Pipelines, the DSL, batches, and schedules |

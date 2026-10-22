@@ -13,6 +13,7 @@ from backend.generation.services import result_writer
 from backend.generation.services.agent.runner import AgentRunCancelled
 from backend.generation.services.agent.runner import AgentRunError
 from backend.generation.services.agent.runner import AgentRunner
+from backend.generation.services.agent.runner import run_queue
 from backend.generation.services.backend_scanner import BackendScanner
 from backend.generation.services.code_parser import parse_to_files
 from backend.generation.services.copilot_validation import validate_python_code
@@ -67,9 +68,20 @@ class GenerationService:
 
     def execute(self, job: GenerationJob) -> None:
         """Execute a generation job based on its mode."""
+        started_at = timezone.now()
+        # Conditional claim: a cancel (job or batch) that landed between
+        # dispatch and this thread starting must not be overwritten.
+        claimed = (
+            GenerationJob.objects.filter(id=job.id)
+            .exclude(status=GenerationJob.Status.CANCELLED)
+            .update(status=GenerationJob.Status.RUNNING, started_at=started_at, updated_at=started_at)
+        )
+        if not claimed:
+            self._skip_cancelled(job)
+            return
         job.status = GenerationJob.Status.RUNNING
-        job.started_at = timezone.now()
-        job.save(update_fields=["status", "started_at", "updated_at"])
+        job.started_at = started_at
+        job.updated_at = started_at
         result_writer.publish_status(job)
 
         try:
@@ -115,12 +127,14 @@ class GenerationService:
             current = GenerationJob.objects.filter(id=job.id).values_list("status", flat=True).first()
             if current == GenerationJob.Status.CANCELLED:
                 job.status = GenerationJob.Status.CANCELLED
+            job.phase = GenerationJob.Phase.NONE
             job.completed_at = timezone.now()
             if job.started_at:
                 job.duration_seconds = (job.completed_at - job.started_at).total_seconds()
             job.save(
                 update_fields=[
                     "status",
+                    "phase",
                     "stack_slug",
                     "experiment_seed",
                     "resolved_bundle",
@@ -137,6 +151,18 @@ class GenerationService:
             )
             result_writer.publish_status(job)
             result_writer.update_batch(job)
+
+    @staticmethod
+    def _skip_cancelled(job: GenerationJob) -> None:
+        """Close out a job that was cancelled before it started (it never ran)."""
+        if job.mode == GenerationJob.Mode.AGENT:
+            run_queue().drop(str(job.id))
+        job.status = GenerationJob.Status.CANCELLED
+        job.phase = GenerationJob.Phase.NONE
+        job.completed_at = timezone.now()
+        job.save(update_fields=["status", "phase", "completed_at", "updated_at"])
+        result_writer.publish_status(job)
+        result_writer.update_batch(job)
 
     # ── Custom Mode ───────────────────────────────────────────────────
 

@@ -27,7 +27,7 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8001/api/models/
 | --- | --- |
 | `/users/`, `/tokens/`, `/credentials/` | Profile, API token CRUD, encrypted provider keys (OpenRouter) |
 | `/models/` | Model catalog list/filter and OpenRouter sync — [Models reference](/docs/MODELS_REFERENCE) |
-| `/generation/` | Jobs, batches, app specs, profiles, stacks, packages — [Generation process](/docs/GENERATION_PROCESS) |
+| `/generation/` | Jobs, batches, run presets, app specs, profiles, stacks, packages — [Generation process](/docs/GENERATION_PROCESS), [Template packages](/docs/TEMPLATE_PACKAGES) |
 | `/analysis/`, `/analyzers/` | Runs and findings; the tool catalog, workspace, and tool install/test — [Analyzer guide](/docs/ANALYZER_GUIDE) |
 | `/statistics/` | Dashboard aggregates |
 | `/rankings/` | Model scores and benchmarks, including a refresh action |

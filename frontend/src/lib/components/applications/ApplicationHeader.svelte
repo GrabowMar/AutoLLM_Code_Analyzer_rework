@@ -14,6 +14,7 @@ import Ban from '@lucide/svelte/icons/ban';
 import Trash2 from '@lucide/svelte/icons/trash-2';
 import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 import type { GenerationJob } from '$lib/api/client';
+import { batchHref, jobDisplayStatus, jobPhaseTones } from '$lib/components/generator/batches';
 import { fmt, fmtDur, fmtCost, copyText, type CodeFootprint } from './utils';
 import AppRuntimeControls from './AppRuntimeControls.svelte';
 
@@ -43,11 +44,16 @@ let {
 	onDelete,
 }: Props = $props();
 
+// Agent runs sample at the provider default unless a temperature was set explicitly.
+const temperature = $derived(
+	job.temperature != null ? String(job.temperature) : job.mode === 'agent' ? 'default' : '—'
+);
+
 const kpis = $derived([
 	{ label: 'Duration', value: fmtDur(job.duration_seconds) },
 	{ label: 'Tokens', value: fmt(totalTokens, 0) },
 	{ label: 'Cost', value: fmtCost(totalCost) },
-	{ label: 'Temperature', value: String(job.temperature) },
+	{ label: 'Temperature', value: temperature },
 	{ label: 'Max Tokens', value: fmt(job.max_tokens, 0) },
 	{ label: 'Lines of Code', value: fmt(codeFootprint?.totalLines ?? 0, 0) },
 ]);
@@ -59,7 +65,7 @@ const kpis = $derived([
 >
 	{#snippet meta()}
 		<Badge variant="outline" class="capitalize">{job.mode}</Badge>
-		<StatusBadge status={job.status} />
+		<StatusBadge status={jobDisplayStatus(job)} tones={jobPhaseTones} />
 	{/snippet}
 	{#snippet actions()}
 		<AppRuntimeControls jobId={job.id} jobStatus={job.status} />
@@ -87,16 +93,22 @@ const kpis = $derived([
 				<Trash2 class="h-3.5 w-3.5" />Delete
 			</Button>
 		{/if}
-		<Button size="sm" href="/sample-generator" title="Generate with same settings">
+		<Button
+			size="sm"
+			href="/sample-generator?from_job={job.id}"
+			title="New batch with this run's task, model, stack and presets (new seed)"
+		>
 			<RefreshCw class="h-3.5 w-3.5" />Re-generate
 		</Button>
 	{/snippet}
 	<div class="flex flex-wrap items-center gap-2 pt-1">
 		<Badge variant="outline">{provider}</Badge>
 		{#if job.template_name}<Badge variant="outline">{job.template_name}</Badge>{/if}
-		{#if job.scaffolding_name}<Badge variant="outline">{job.scaffolding_name}</Badge>{/if}
-		{#if job.batch_name}
-			<Badge variant="outline"><GitBranch class="h-3 w-3" />{job.batch_name}</Badge>
+		{#if job.stack_slug}<Badge variant="outline" class="font-mono">{job.stack_slug}</Badge>{/if}
+		{#if job.batch_id}
+			<a href={batchHref(job.batch_id)} class="rounded-full transition-colors hover:text-primary" title="Open the batch">
+				<Badge variant="outline" class="hover:border-primary/50"><GitBranch class="h-3 w-3" />{job.batch_name || 'Batch'}</Badge>
+			</a>
 		{/if}
 		<span class="truncate font-mono text-xs text-muted-foreground">{job.model_id_str} · {job.id.substring(0, 8)}</span>
 	</div>

@@ -29,6 +29,8 @@ async function refresh() {
 		} else {
 			inspect = null;
 		}
+	} catch {
+		// Keep the last known state; the next poll retries.
 	} finally {
 		loading = false;
 	}

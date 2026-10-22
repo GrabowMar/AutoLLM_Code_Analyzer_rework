@@ -177,6 +177,77 @@ class TestBrief:
         assert snap["contract"]["accounts"] is False
         assert "## Accounts" not in snap["brief"]["text"]
 
+    def test_task_description_is_added_to_the_spec_not_swapped_in(self):
+        model, app = _model(), _app()
+        plain = _snapshot(model=model, app=app)["brief"]
+        with_context = _snapshot(model=model, app=app, description="  Prefer a dark colour scheme.  ")["brief"]
+        assert with_context["version"] == 3
+        assert "Additional context" not in plain["text"]
+        # The spec's own description stays; the task description follows it.
+        text = with_context["text"]
+        assert "Track tasks\n\n## Additional context\nPrefer a dark colour scheme.\n\n## Backend requirements" in text
+        # Everything else is unchanged.
+        assert text.replace("## Additional context\nPrefer a dark colour scheme.\n\n", "") == plain["text"]
+
+    def test_free_form_description_is_the_task_itself(self):
+        snap = build_agent_snapshot(
+            app_requirement=None,
+            description="Build a URL shortener.",
+            profile=None,
+            stack_slug="generic-python",
+            model=_model(),
+            max_tokens=32000,
+        )
+        assert "Additional context" not in snap["brief"]["text"]
+        assert "nobody will answer questions or review intermediate steps. " in snap["brief"]["text"]
+        assert "\n\nBuild a URL shortener.\n\n" in snap["brief"]["text"]
+
+    @pytest.mark.parametrize(
+        ("server_kind", "filename", "port", "expected"),
+        [
+            ("uvicorn", "main.py", 9000, "uvicorn main:app --host 0.0.0.0 --port 9000"),
+            ("python", "server.py", 8000, "python server.py"),
+        ],
+    )
+    def test_user_stack_states_the_start_command_its_dockerfile_runs(self, server_kind, filename, port, expected):
+        from backend.generation.services.agent.brief import stack_contract
+
+        config = {
+            "has_frontend": False,
+            "backend_filename": filename,
+            "default_port": port,
+            "server_kind": server_kind,
+        }
+        contract = stack_contract("my-user-stack", config)
+        assert contract["start_command"] == expected
+        assert contract["backend_summary"] == "The backend is a Python web application."
+
+    def test_builtin_stack_keeps_its_stated_start_command(self):
+        from backend.generation.services.agent.brief import stack_contract
+
+        contract = stack_contract("fastapi-react", {"has_frontend": True, "server_kind": "python"})
+        assert contract["start_command"] == "uvicorn app:app --host 0.0.0.0 --port 8000"
+
+    def test_user_stack_brief_uses_the_stack_row(self):
+        from backend.runtime.models import Stack
+
+        Stack.objects.create(
+            slug="uvi-user-stack",
+            version=1,
+            name="Uvi",
+            has_frontend=False,
+            default_port=8000,
+            backend_filename="main.py",
+            backend_base_image="python:3.12-slim",
+            server_kind="uvicorn",
+            files={"requirements.txt": "fastapi\n"},
+            dockerfile_mode=Stack.DockerfileMode.GENERATED,
+            is_builtin=False,
+            is_approved=True,
+        )
+        brief = _snapshot(stack_slug="uvi-user-stack")["brief"]["text"]
+        assert "it is started with `uvicorn main:app --host 0.0.0.0 --port 8000`" in brief
+
 
 class TestAgentSnapshot:
     def test_prompt_hash_is_the_task_identity_across_models_harnesses_seeds(self):

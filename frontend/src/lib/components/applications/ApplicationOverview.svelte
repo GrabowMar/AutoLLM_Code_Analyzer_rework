@@ -5,6 +5,7 @@ import StatusBadge from '$lib/components/StatusBadge.svelte';
 import Wrench from '@lucide/svelte/icons/wrench';
 import CircleCheck from '@lucide/svelte/icons/circle-check';
 import type { GenerationJob } from '$lib/api/client';
+import { jobDisplayStatus, jobPhaseTones } from '$lib/components/generator/batches';
 import {
 	fmt,
 	fmtDur,
@@ -13,19 +14,15 @@ import {
 } from './utils';
 
 interface FixesData { total: number; retry: number; autofix: number; llm: number }
-interface FrameworkInfo { backend: string; frontend: string; database: string }
-interface CostData { totalTokens: number }
 
 interface Props {
 	job: GenerationJob;
 	provider: string;
 	codeFootprint: CodeFootprint | null;
 	fixesData: FixesData;
-	frameworkInfo: FrameworkInfo;
-	costData: CostData;
 }
 
-let { job, provider, codeFootprint, fixesData, frameworkInfo, costData }: Props = $props();
+let { job, provider, codeFootprint, fixesData }: Props = $props();
 </script>
 
 <section id="overview" class="space-y-4">
@@ -47,13 +44,10 @@ let { job, provider, codeFootprint, fixesData, frameworkInfo, costData }: Props 
 			<Card.Content class="space-y-2 text-sm">
 				<div class="flex justify-between items-center">
 					<span class="text-muted-foreground">Status</span>
-					<StatusBadge status={job.status} />
-				</div>
-				<div class="flex justify-between items-center">
-					<span class="text-muted-foreground">Generation</span>
-					<StatusBadge status={job.status === 'completed' || job.status === 'failed' || job.status === 'running' ? job.status : 'pending'} />
+					<StatusBadge status={jobDisplayStatus(job)} tones={jobPhaseTones} />
 				</div>
 				<div class="flex justify-between"><span class="text-muted-foreground">Created</span><span class="text-xs">{fmtDateCompact(job.created_at)}</span></div>
+				<div class="flex justify-between"><span class="text-muted-foreground">Updated</span><span class="text-xs">{fmtDateCompact(job.updated_at)}</span></div>
 				<div class="flex justify-between"><span class="text-muted-foreground">Duration</span><span class="font-semibold">{fmtDur(job.duration_seconds)}</span></div>
 			</Card.Content>
 		</Card.Root>
@@ -107,23 +101,4 @@ let { job, provider, codeFootprint, fixesData, frameworkInfo, costData }: Props 
 			</Card.Content>
 		</Card.Root>
 	</div>
-
-	<!-- Generation Details -->
-	<Card.Root>
-		<Card.Header class="pb-2"><Card.Title class="text-sm font-medium">Generation Details</Card.Title><Card.Description>Stack, template and run configuration.</Card.Description></Card.Header>
-		<Card.Content>
-			<div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-				<div><span class="text-xs text-muted-foreground block mb-0.5">Backend</span><span class="font-medium">{frameworkInfo.backend}</span></div>
-				<div><span class="text-xs text-muted-foreground block mb-0.5">Frontend</span><span class="font-medium">{frameworkInfo.frontend}</span></div>
-				<div><span class="text-xs text-muted-foreground block mb-0.5">Database</span><span class="font-medium">{frameworkInfo.database}</span></div>
-				<div><span class="text-xs text-muted-foreground block mb-0.5">Duration</span><span class="font-medium">{fmtDur(job.duration_seconds)}</span></div>
-			</div>
-			<div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-3 pt-3 border-t">
-				<div><span class="text-xs text-muted-foreground block mb-0.5">Template</span><span class="font-medium">{job.template_name ?? '—'}</span></div>
-				<div><span class="text-xs text-muted-foreground block mb-0.5">Tokens</span><span class="font-medium">{fmt(costData.totalTokens, 0)}</span></div>
-				<div><span class="text-xs text-muted-foreground block mb-0.5">Updated</span><span class="font-medium">{fmtDateCompact(job.updated_at)}</span></div>
-				<div><span class="text-xs text-muted-foreground block mb-0.5">Type</span><Badge variant="outline" class="text-xs capitalize">{job.mode}</Badge></div>
-			</div>
-		</Card.Content>
-	</Card.Root>
 </section>

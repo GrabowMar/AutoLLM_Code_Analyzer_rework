@@ -43,6 +43,17 @@ _LIMITS = {
     "max_total_tokens": (int, 1000, 200_000_000),
     "max_cost_usd": (float, 0.001, 100.0),
 }
+# What a budget preset may set: the limits plus the network policy (the
+# harness and sampling policy come from harness / sampling presets).
+BUDGET_KEYS = (*_LIMITS, "network_policy")
+
+
+def limits_schema() -> dict[str, dict[str, Any]]:
+    """``{key: {type, min, max}}`` of every numeric limit, for UIs."""
+    return {
+        key: {"type": "int" if kind is int else "float", "min": lo, "max": hi}
+        for key, (kind, lo, hi) in _LIMITS.items()
+    }
 
 
 def default_agent_config() -> dict[str, Any]:

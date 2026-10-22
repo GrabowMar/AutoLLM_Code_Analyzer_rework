@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from backend.generation.services.agent.harnesses.base import Harness
 
 HARNESSES: dict[str, Harness] = {h.name: h for h in (OpenCodeHarness(), MiniSweAgentHarness(), AiderHarness())}
-DEFAULT_HARNESS = "opencode"
 
 
 def get_harness(name: str) -> Harness:
@@ -21,6 +20,13 @@ def get_harness(name: str) -> Harness:
     except KeyError:
         msg = f"Unknown harness {name!r} (available: {', '.join(HARNESSES)})"
         raise ValueError(msg) from None
+
+
+def default_harness_name() -> str:
+    """The platform default harness (``AGENT_DEFAULT_HARNESS``)."""
+    from django.conf import settings
+
+    return settings.AGENT_DEFAULT_HARNESS
 
 
 def harness_choices() -> list[dict[str, object]]:
@@ -33,4 +39,19 @@ def harness_choices() -> list[dict[str, object]]:
             "requires_tool_calling": h.requires_tool_calling,
         }
         for h in HARNESSES.values()
+    ]
+
+
+def harness_details() -> list[dict[str, object]]:
+    """``harness_choices`` plus description, default flag and the option schema."""
+    default = default_harness_name()
+    return [
+        {
+            **choice,
+            "description": HARNESSES[str(choice["name"])].description,
+            "is_default": choice["name"] == default,
+            "option_schema": [f.to_dict() for f in HARNESSES[str(choice["name"])].option_schema()],
+            "default_options": HARNESSES[str(choice["name"])].default_options(),
+        }
+        for choice in harness_choices()
     ]

@@ -130,3 +130,30 @@ def test_get_profile_for_app_prefers_matching_scaffolding_default():
     )
 
     assert bundle == fastapi_bundle
+
+
+@pytest.mark.django_db
+def test_catalog_fallback_uses_the_default_profiles_refs_at_latest_system_versions():
+    from backend.generation.services.profile_resolver import catalog_default_block_refs
+
+    refs = catalog_default_block_refs()
+
+    assert [ref["slug"] for ref in refs] == [
+        "base-backend-system",
+        "base-backend-user",
+        "base-frontend-system",
+        "base-frontend-user",
+        "tone-standard",
+        "rules-flask-global",
+    ]
+    for ref in refs:
+        latest = ContentBlock.objects.filter(slug=ref["slug"], is_system=True).order_by("-version").first()
+        assert ref["version"] == latest.version
+        assert ref["type"] == latest.block_type
+
+
+@pytest.mark.django_db
+def test_profile_for_app_without_stack_is_the_global_default():
+    app_req = AppRequirementTemplateFactory(slug="no-pilot-app")
+
+    assert get_profile_for_app(app_req).slug == "system-scaffolding-standard"

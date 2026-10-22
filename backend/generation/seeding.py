@@ -11,6 +11,13 @@ in the database, so a job's ``resolved_bundle`` snapshot always keeps
 resolving to the exact content it captured even after the source file moves
 on.
 
+System and user rows share each ``(slug, version)`` space, so a new system
+version always takes the next *free* version number: a user's own version
+of a system block (``POST /blocks/{slug}/new-version/``) can never make the
+seeder collide. System profiles name blocks by slug only; the seeder pins
+each to the latest system version, so editing a prompt file reaches the
+profiles that use it (as a new profile version).
+
 Note: under pytest's ``--reuse-db`` the post_migrate signal only fires when
 the test database is (re)created, so data/ changes require ``--create-db``.
 """
@@ -23,7 +30,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from django.conf import settings
 from django.db import DEFAULT_DB_ALIAS
+from django.db import transaction
+from django.db.models import Max
 
 from backend.generation.services.versioning import content_hash
 
@@ -167,6 +177,12 @@ def _yaml_block_seeds() -> list[dict[str, Any]]:
     return seeds
 
 
+def _next_free_version(model: Any, using: str, slug: str) -> int:
+    """One past the highest version of *slug* any owner holds (``(slug, version)`` is shared)."""
+    top = model.objects.using(using).filter(slug=slug).aggregate(top=Max("version"))["top"]
+    return (top or 0) + 1
+
+
 def _upsert_content_block_version(
     ContentBlockModel: Any,  # noqa: N803
     using: str,
@@ -193,7 +209,7 @@ def _upsert_content_block_version(
             log(f"  Up to date block: {slug} v{latest.version}")
         return 0, int(changed)
 
-    next_version = (latest.version + 1) if latest else 1
+    next_version = _next_free_version(ContentBlockModel, using, slug)
     ContentBlockModel.objects.using(using).create(
         block_type=block_type,
         slug=slug,
@@ -285,7 +301,7 @@ def _upsert_profile_version(
             log(f"  Up to date profile: {slug} v{latest.version}")
         return 0, int(changed)
 
-    next_version = (latest.version + 1) if latest else 1
+    next_version = _next_free_version(GenerationProfileModel, using, slug)
     GenerationProfileModel.objects.using(using).create(
         name=name,
         slug=slug,
@@ -304,8 +320,37 @@ def _upsert_profile_version(
     return int(latest is None), int(latest is not None)
 
 
+def latest_system_block_refs(refs: list[dict[str, Any]], *, using: str = DEFAULT_DB_ALIAS) -> list[dict[str, Any]]:
+    """``{type, slug, version}`` refs pinned to the latest *system* version of each slug.
+
+    Data files name system blocks by slug only (a ``version`` there is
+    ignored; the lint rejects it), so a stale pin can never hide a prompt
+    edit. ``LookupError`` names the first slug with no system block.
+    """
+    from backend.generation.models import ContentBlock
+
+    resolved: list[dict[str, Any]] = []
+    for ref in refs:
+        slug = str(ref.get("slug", ""))
+        block = (
+            ContentBlock.objects.using(using)
+            .filter(slug=slug, is_system=True)
+            .order_by("-version")
+            .only("block_type", "version")
+            .first()
+        )
+        if block is None:
+            raise LookupError(slug)
+        resolved.append({"type": ref.get("type") or block.block_type, "slug": slug, "version": block.version})
+    return resolved
+
+
 def seed_profiles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, int]:
-    """Version-aware upsert of system ``GenerationProfile`` rows from ``blocks/catalog.yaml``."""
+    """Version-aware upsert of system ``GenerationProfile`` rows from ``blocks/catalog.yaml``.
+
+    ``is_default`` marks the default profile *of its stack* (one per stack);
+    the global default is the catalog's ``default_bundle_slug``.
+    """
     from backend.generation.models import GenerationProfile
 
     catalog = _load_catalog()
@@ -313,14 +358,21 @@ def seed_profiles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, int]
     # "bundles" is the pre-rename catalog key; accept it for older files.
     profile_entries = catalog.get("profiles", catalog.get("bundles", []))
     for profile_data in profile_entries:
+        try:
+            block_refs = latest_system_block_refs(profile_data.get("block_refs", []), using=using)
+        except LookupError as exc:
+            logger.warning("Skip system profile %s: block %s is not seeded", profile_data["slug"], exc)
+            if log:
+                log(f"  Skip profile {profile_data['slug']}: block {exc} missing")
+            continue
         c, u = _upsert_profile_version(
             GenerationProfile,
             using,
             slug=profile_data["slug"],
             name=profile_data.get("name", profile_data["slug"]),
             description=profile_data.get("description", ""),
-            scaffolding_slug=profile_data.get("scaffolding_slug", "flask-react"),
-            block_refs=profile_data.get("block_refs", []),
+            scaffolding_slug=profile_data.get("scaffolding_slug") or settings.GENERATION_DEFAULT_STACK,
+            block_refs=block_refs,
             is_default=profile_data.get("is_default", False),
             log=log,
         )
@@ -367,7 +419,14 @@ def seed_app_profiles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, 
             continue
 
         refs = list(base.block_refs or [])
-        for extra in manifest.get("extra_block_refs", []):
+        try:
+            extras = latest_system_block_refs(manifest.get("extra_block_refs", []), using=using)
+        except LookupError as exc:
+            logger.warning("Skip manifest %s: block %s is not seeded", yaml_path.name, exc)
+            if log:
+                log(f"  Skip {yaml_path.name}: block {exc} missing")
+            continue
+        for extra in extras:
             if extra not in refs:
                 refs.append(extra)
 
@@ -390,11 +449,32 @@ def seed_app_profiles(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, 
     return created, updated
 
 
+def seed_presets(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, int]:
+    """System run presets from ``data/presets/*.yaml`` (see services/presets.py)."""
+    from backend.generation.services.presets import seed_presets as _seed_presets
+
+    return _seed_presets(using=using, log=log)
+
+
 def seed_all(*, using: str = DEFAULT_DB_ALIAS, log=None) -> dict[str, tuple[int, int]]:
-    """Run every seeder in dependency order (profiles reference blocks by slug+version)."""
-    return {
-        "requirements": seed_requirements(using=using, log=log),
-        "content_blocks": seed_content_blocks(using=using, log=log),
-        "profiles": seed_profiles(using=using, log=log),
-        "app_profiles": seed_app_profiles(using=using, log=log),
-    }
+    """Run every seeder in dependency order (profiles reference blocks by slug+version).
+
+    Run presets go first and in isolation: every default agent run needs
+    them, so a failure in a later seeder must not leave them unseeded.
+    """
+    results: dict[str, tuple[int, int]] = {}
+    try:
+        with transaction.atomic(using=using):
+            results["presets"] = seed_presets(using=using, log=log)
+    except Exception:
+        logger.exception("Run preset seeding failed")
+        results["presets"] = (0, 0)
+    results.update(
+        {
+            "requirements": seed_requirements(using=using, log=log),
+            "content_blocks": seed_content_blocks(using=using, log=log),
+            "profiles": seed_profiles(using=using, log=log),
+            "app_profiles": seed_app_profiles(using=using, log=log),
+        },
+    )
+    return results

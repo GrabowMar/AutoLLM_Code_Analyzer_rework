@@ -8,10 +8,15 @@ registered AFTER the static job-creation routes in
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import uuid
 from pathlib import Path
 
 from django.conf import settings
+from django.db import transaction
+from django.db.models import Exists
+from django.db.models import OuterRef
 from django.db.models import Q
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
@@ -19,18 +24,46 @@ from ninja import Query
 from ninja.errors import HttpError
 
 from backend.common.pagination import paginate_queryset
+from backend.generation.api.schema import BatchSummarySchema
 from backend.generation.api.schema import CopilotIterationSchema
 from backend.generation.api.schema import GenerationArtifactSchema
-from backend.generation.api.schema import GenerationBatchSchema
 from backend.generation.api.schema import GenerationJobListSchema
 from backend.generation.api.schema import GenerationJobSchema
+from backend.generation.api.schema import PaginatedBatchesSchema
 from backend.generation.api.schema import PaginatedJobsSchema
 from backend.generation.api.views._router import router
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
+from backend.generation.services import result_writer
+from backend.generation.services.batches import batch_summaries
+from backend.generation.services.batches import batch_summary
+from backend.generation.services.batches import cancel_batch
+from backend.generation.services.batches import experiment_batch_q
+from backend.generation.services.batches import refresh_batch
 from backend.generation.services.dispatcher import dispatch_evaluation
 from backend.generation.services.dispatcher import dispatch_job
 from backend.generation.services.job_cloning import clone_job
+from backend.generation.services.job_listing import job_list_item
+from backend.generation.services.job_listing import with_list_fields
+from backend.runtime.models import ContainerInstance
+
+# Detail reads: every FK the detail schema resolves, in one query.
+_DETAIL_RELATED = (
+    "model",
+    "app_requirement",
+    "profile",
+    "batch",
+    "created_by",
+    "harness_preset",
+    "sampling_preset",
+    "budget_preset",
+)
+
+_CONTAINER_STATUS_FILTERS = {
+    "running": Q(status="running"),
+    "stopped": Q(status="stopped"),
+    "building": Q(status__in=["building", "pending"]),
+}
 
 
 @router.get("/jobs/stats/", response=dict)
@@ -58,40 +91,36 @@ def list_jobs(
     search: str = Query(""),
     sort_by: str = Query(""),
     container_status: str = Query(""),
+    batch_id: str = Query(""),
+    harness: str = Query(""),
 ):
     """List generation jobs with pagination and filters."""
-    qs = GenerationJob.objects.filter(created_by=request.auth).select_related(
-        "model",
-        "app_requirement",
-        "profile",
-    )
+    qs = GenerationJob.objects.filter(created_by=request.auth)
     if mode:
         qs = qs.filter(mode=mode)
     if status:
         qs = qs.filter(status=status)
     if model_id:
         qs = qs.filter(model__model_id=model_id)
+    if batch_id:
+        try:
+            qs = qs.filter(batch_id=uuid.UUID(batch_id))
+        except ValueError as exc:
+            raise HttpError(400, "batch_id must be a UUID") from exc
 
-    # Filter by container status
+    # Container filters are EXISTS subqueries, not joins: a job with several
+    # containers must still be one row (and counted once).
     if container_status:
-        if container_status == "running":
-            qs = qs.filter(container_instances__status="running")
-        elif container_status == "stopped":
-            qs = qs.filter(container_instances__status="stopped")
-        elif container_status == "building":
-            qs = qs.filter(container_instances__status__in=["building", "pending"])
+        containers = ContainerInstance.objects.filter(generation_job=OuterRef("pk"))
+        if container_status in _CONTAINER_STATUS_FILTERS:
+            qs = qs.filter(Exists(containers.filter(_CONTAINER_STATUS_FILTERS[container_status])))
         elif container_status == "none":
-            qs = qs.filter(Q(container_instances__isnull=True) | Q(container_instances__status="removed"))
+            qs = qs.filter(~Exists(containers.exclude(status="removed")))
 
     if search:
-        import uuid
-
         uuid_q = Q()
-        try:
-            val = uuid.UUID(search)
-            uuid_q = Q(id=val)
-        except ValueError:
-            pass
+        with contextlib.suppress(ValueError):
+            uuid_q = Q(id=uuid.UUID(search))
         qs = qs.filter(
             uuid_q
             | Q(model__model_name__icontains=search)
@@ -99,6 +128,10 @@ def list_jobs(
             | Q(app_requirement__name__icontains=search)
             | Q(stack_slug__icontains=search),
         )
+
+    qs = with_list_fields(qs)
+    if harness:
+        qs = qs.filter(harness=harness)
 
     # Sorting
     allowed_sorts = {
@@ -109,30 +142,12 @@ def list_jobs(
         "model_asc": "model__model_name",
     }
     order_field = allowed_sorts.get(sort_by, "-created_at")
-    qs = qs.order_by(order_field)
+    qs = qs.order_by(order_field, "-id")
 
     page_qs, total, page, pages = paginate_queryset(qs, page, per_page)
 
-    items = [
-        GenerationJobListSchema(
-            id=job.id,
-            mode=job.mode,
-            status=job.status,
-            model_name=job.model.model_name if job.model else None,
-            model_id_str=job.model.model_id if job.model else None,
-            template_name=(job.app_requirement.name if job.app_requirement else None),
-            stack_slug=job.stack_slug,
-            started_at=job.started_at,
-            completed_at=job.completed_at,
-            duration_seconds=job.duration_seconds,
-            error_message=job.error_message,
-            created_at=job.created_at,
-        )
-        for job in page_qs
-    ]
-
     return PaginatedJobsSchema(
-        items=items,
+        items=[GenerationJobListSchema(**job_list_item(job)) for job in page_qs],
         total=total,
         page=page,
         per_page=per_page,
@@ -143,13 +158,7 @@ def list_jobs(
 @router.get("/jobs/{job_id}/", response=GenerationJobSchema)
 def get_job(request, job_id: str):
     return get_object_or_404(
-        GenerationJob.objects.select_related(
-            "model",
-            "app_requirement",
-            "profile",
-            "batch",
-            "created_by",
-        ),
+        GenerationJob.objects.select_related(*_DETAIL_RELATED),
         id=job_id,
         created_by=request.auth,
     )
@@ -157,10 +166,12 @@ def get_job(request, job_id: str):
 
 @router.post("/jobs/{job_id}/cancel/")
 def cancel_job(request, job_id: str):
-    job = get_object_or_404(GenerationJob, id=job_id, created_by=request.auth)
+    job = get_object_or_404(GenerationJob.objects.select_related("batch"), id=job_id, created_by=request.auth)
     if job.status in ("pending", "running"):
         job.status = GenerationJob.Status.CANCELLED
-        job.save(update_fields=["status", "updated_at"])
+        job.phase = GenerationJob.Phase.NONE
+        job.save(update_fields=["status", "phase", "updated_at"])
+        result_writer.update_batch(job)
         return {"success": True, "status": "cancelled"}
     return {
         "success": False,
@@ -172,13 +183,16 @@ def cancel_job(request, job_id: str):
 @router.delete("/jobs/{job_id}/")
 def delete_job(request, job_id: str):
     """Delete a job that is not currently running."""
-    job = get_object_or_404(GenerationJob, id=job_id, created_by=request.auth)
+    job = get_object_or_404(GenerationJob.objects.select_related("batch"), id=job_id, created_by=request.auth)
     if job.status == "running":
         return {
             "success": False,
             "message": "Cannot delete a running job. Cancel it first.",
         }
+    batch = job.batch
     job.delete()
+    if batch is not None:
+        refresh_batch(batch)
     return {"success": True}
 
 
@@ -195,14 +209,13 @@ def _load_job_for_cloning(request, job_id: str) -> GenerationJob:
 
 
 def _dispatch_and_serialize(new_job: GenerationJob) -> GenerationJobSchema:
+    if new_job.batch_id:
+        # The clone joined its batch: total_jobs counts it, and the batch is
+        # active again until the clone finishes.
+        refresh_batch(new_job.batch)
     dispatch_job(new_job)
     return GenerationJobSchema.from_orm(
-        GenerationJob.objects.select_related(
-            "model",
-            "app_requirement",
-        ).get(
-            id=new_job.id,
-        ),
+        GenerationJob.objects.select_related(*_DETAIL_RELATED).get(id=new_job.id),
     )
 
 
@@ -243,12 +256,8 @@ def rerun_job(request, job_id: str):
         return 400, {"message": "Job is still in progress"}
     if not isinstance(original.resolved_bundle, dict) or not original.resolved_bundle:
         return 400, {"message": "Job has no resolved bundle snapshot to rerun"}
+    # An extra trial grows the batch rather than displacing a failure.
     new_job = clone_job(original, request.auth, reuse_snapshot=True, new_seed=True)
-    if new_job.batch:
-        # An extra trial grows the batch rather than displacing a failure.
-        GenerationBatch.objects.filter(id=new_job.batch_id).update(
-            total_jobs=new_job.batch.total_jobs + 1,
-        )
     return _dispatch_and_serialize(new_job)
 
 
@@ -304,13 +313,7 @@ def get_copilot_iterations(request, job_id: str):
 def export_job(request, job_id: str):
     """Export full job data as JSON (job + artifacts + iterations)."""
     job = get_object_or_404(
-        GenerationJob.objects.select_related(
-            "model",
-            "app_requirement",
-            "profile",
-            "batch",
-            "created_by",
-        ),
+        GenerationJob.objects.select_related(*_DETAIL_RELATED),
         id=job_id,
         created_by=request.auth,
     )
@@ -348,6 +351,8 @@ def export_job(request, job_id: str):
         "seed": resolved.get("seed", job.experiment_seed),
         "prompt_hash": job.prompt_hash or resolved.get("prompt_hash"),
         "run_fingerprint": resolved.get("run_fingerprint"),
+        "config_fingerprint": resolved.get("config_fingerprint"),
+        "presets": resolved.get("presets"),
         "bundle_key": job.bundle_key,
         "llm": resolved.get("llm"),
         "block_count": len(resolved.get("blocks", [])),
@@ -367,41 +372,57 @@ def export_job(request, job_id: str):
 # -- Batches ------------------------------------------------------------
 
 
-@router.get("/batches/", response=list[GenerationBatchSchema])
-def list_batches(request):
-    return GenerationBatch.objects.filter(created_by=request.auth)
-
-
-@router.get("/batches/{batch_id}/", response=GenerationBatchSchema)
-def get_batch(request, batch_id: str):
+def _owned_batch(request, batch_id: uuid.UUID) -> GenerationBatch:
     return get_object_or_404(GenerationBatch, id=batch_id, created_by=request.auth)
 
 
-@router.get("/batches/{batch_id}/jobs/", response=list[GenerationJobListSchema])
-def get_batch_jobs(request, batch_id: str):
-    batch = get_object_or_404(
-        GenerationBatch,
-        id=batch_id,
-        created_by=request.auth,
+@router.get("/batches/", response=PaginatedBatchesSchema)
+def list_batches(
+    request,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    mode: str = Query(""),
+    experiment: bool | None = Query(None),
+):
+    """The user's batches, newest first. ``experiment``: true = experiment launches only, false = ad-hoc only."""
+    qs = GenerationBatch.objects.filter(created_by=request.auth)
+    if mode:
+        qs = qs.filter(mode=mode)
+    if experiment is not None:
+        qs = qs.filter(experiment_batch_q()) if experiment else qs.exclude(experiment_batch_q())
+    page_qs, total, page, pages = paginate_queryset(qs.order_by("-created_at", "-id"), page, per_page)
+    return PaginatedBatchesSchema(
+        items=[BatchSummarySchema(**row) for row in batch_summaries(page_qs)],
+        total=total,
+        page=page,
+        per_page=per_page,
+        pages=pages,
     )
-    jobs = batch.jobs.select_related(
-        "model",
-        "app_requirement",
-    )
-    return [
-        GenerationJobListSchema(
-            id=job.id,
-            mode=job.mode,
-            status=job.status,
-            model_name=job.model.model_name if job.model else None,
-            model_id_str=job.model.model_id if job.model else None,
-            template_name=(job.app_requirement.name if job.app_requirement else None),
-            stack_slug=job.stack_slug,
-            started_at=job.started_at,
-            completed_at=job.completed_at,
-            duration_seconds=job.duration_seconds,
-            error_message=job.error_message,
-            created_at=job.created_at,
-        )
-        for job in jobs
-    ]
+
+
+@router.get("/batches/{uuid:batch_id}/", response=BatchSummarySchema)
+def get_batch(request, batch_id: uuid.UUID):
+    return batch_summary(_owned_batch(request, batch_id))
+
+
+@router.get("/batches/{uuid:batch_id}/jobs/", response=list[GenerationJobListSchema])
+def get_batch_jobs(request, batch_id: uuid.UUID):
+    """Every job of the batch, in creation order (task, trial, model, harness preset)."""
+    batch = _owned_batch(request, batch_id)
+    jobs = with_list_fields(batch.jobs.all()).order_by("created_at", "id")
+    return [GenerationJobListSchema(**job_list_item(job)) for job in jobs]
+
+
+@router.post("/batches/{uuid:batch_id}/cancel/", response=dict)
+def cancel_generation_batch(request, batch_id: uuid.UUID):
+    """Cancel every pending, queued and running job of the batch."""
+    batch = _owned_batch(request, batch_id)
+    cancelled = cancel_batch(batch)
+
+    def publish() -> None:
+        for job in cancelled:
+            result_writer.publish_status(job)
+
+    # After commit, so a client refetching on the event sees the cancel.
+    transaction.on_commit(publish)
+    return {"cancelled": len(cancelled)}

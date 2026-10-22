@@ -88,6 +88,7 @@ const extraLabels: Record<string, string> = {
   "/automation/create": "New pipeline",
   "/automation/runs": "Runs",
   "/experiments/create": "New experiment",
+  "/sample-generator/batches": "Batches",
   "/reports/create": "New report",
 };
 

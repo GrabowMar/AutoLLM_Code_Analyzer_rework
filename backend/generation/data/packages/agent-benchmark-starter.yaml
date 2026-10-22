@@ -1,0 +1,86 @@
+# Starter package: a template package (v3) plus a `starter` header, listed by
+# GET /api/generation/packages/starters/ and imported like any package
+# (see docs/TEMPLATE_PACKAGES.md). Linted by `manage.py lint_generation_data`.
+#
+# Run presets for agent comparisons. Every value is model-agnostic: per-model
+# support (dropped params, output caps) shows up in the run preview.
+kind: llm-lab-template-package
+template_package_schema_version: 3
+starter:
+  slug: agent-benchmark-starter
+  name: Agent benchmark starter
+  description: >-
+    Run presets for agent comparisons: Aider with whole-file edits or without
+    its repo map, mini-swe-agent with a longer command timeout, temperature 0
+    and high reasoning effort sampling, and smoke-test and extended budgets.
+assets:
+  presets:
+    - kind: harness
+      slug: aider-whole-file
+      name: Aider (whole-file edits)
+      description: >-
+        Aider rewrites whole files instead of sending diffs. Every edit costs
+        output tokens, so models with a small output cap can truncate.
+      config:
+        harness: aider
+        options:
+          edit_format: whole
+    - kind: harness
+      slug: aider-no-repo-map
+      name: Aider (no repo map)
+      description: >-
+        Aider without its repository map (map_tokens 0): an ablation of how
+        Aider selects context.
+      config:
+        harness: aider
+        options:
+          map_tokens: 0
+    - kind: harness
+      slug: mini-long-commands
+      name: mini-swe-agent (120 s commands)
+      description: >-
+        mini-swe-agent with a 120 s per-command timeout instead of the native
+        30 s, so slow installs and builds are not cut off.
+      config:
+        harness: mini-swe-agent
+        options:
+          command_timeout_seconds: 120
+    - kind: sampling
+      slug: temperature-zero
+      name: Temperature 0
+      description: >-
+        Temperature 0 for every model. Models that do not accept a temperature
+        drop it; the run preview lists them.
+      config:
+        llm_params:
+          temperature: 0
+    - kind: sampling
+      slug: reasoning-high
+      name: High reasoning effort
+      description: >-
+        Asks reasoning models for high reasoning effort. Models without
+        reasoning support drop it; the run preview lists them.
+      config:
+        llm_params:
+          reasoning:
+            effort: high
+    - kind: budget
+      slug: smoke
+      name: Smoke test
+      description: >-
+        30 model requests, for checking that a setup works. The 60-minute and
+        $3 caps stay generous safety nets, so the request budget binds.
+      config:
+        max_llm_requests: 30
+        wall_clock_seconds: 3600
+        max_cost_usd: 3
+    - kind: budget
+      slug: extended
+      name: Extended
+      description: >-
+        250 model requests, for large tasks. The 180-minute and $25 caps stay
+        generous safety nets, so the request budget binds.
+      config:
+        max_llm_requests: 250
+        wall_clock_seconds: 10800
+        max_cost_usd: 25

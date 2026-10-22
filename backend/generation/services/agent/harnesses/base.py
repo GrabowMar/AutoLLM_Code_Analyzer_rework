@@ -15,6 +15,12 @@ are:
 An adapter turns the frozen snapshot section into a shell command, an
 environment and a parser for the harness's own report. The entry script
 around it (scaffold commit, timeout, diff, workspace archive) is common.
+
+**Options** (``option_schema``) are the few harness knobs a run may change.
+Each one must apply identically to every model (checked against the pinned
+release's source, recorded in the adapter docstring) and is rendered only
+into values the section already carries (CLI args, config), so a section
+built with the default options is byte-identical to one built without any.
 """
 
 from __future__ import annotations
@@ -24,6 +30,112 @@ from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
 from typing import ClassVar
+
+OPTION_TYPES = ("enum", "int", "bool", "multi_enum")
+
+
+@dataclass(frozen=True)
+class OptionField:
+    """One user-settable harness option (rendered by the UI from ``to_dict``)."""
+
+    key: str
+    type: str  # one of OPTION_TYPES
+    label: str
+    help: str
+    default: Any
+    choices: tuple[tuple[str, str], ...] = ()  # (value, label) for enum / multi_enum
+    min: int | None = None
+    max: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "key": self.key,
+            "type": self.type,
+            "label": self.label,
+            "help": self.help,
+            "default": list(self.default) if isinstance(self.default, (list, tuple)) else self.default,
+        }
+        if self.choices:
+            data["choices"] = [{"value": value, "label": label} for value, label in self.choices]
+        if self.min is not None:
+            data["min"] = self.min
+        if self.max is not None:
+            data["max"] = self.max
+        return data
+
+    def coerce(self, value: Any) -> tuple[Any, str | None]:
+        """``(normalized value, error)`` for a user-supplied *value*."""
+        coercer = getattr(self, f"_coerce_{self.type}", None)
+        if coercer is None:
+            return None, f"{self.key} has an unknown option type {self.type!r}"
+        return coercer(value)
+
+    def _choice_values(self) -> list[str]:
+        return [value for value, _label in self.choices]
+
+    def _coerce_enum(self, value: Any) -> tuple[Any, str | None]:
+        if value not in self._choice_values():
+            return None, f"{self.key} must be one of {', '.join(self._choice_values())}"
+        return value, None
+
+    def _coerce_bool(self, value: Any) -> tuple[Any, str | None]:
+        if not isinstance(value, bool):
+            return None, f"{self.key} must be true or false"
+        return value, None
+
+    def _coerce_int(self, value: Any) -> tuple[Any, str | None]:
+        ok = isinstance(value, (int, float)) and not isinstance(value, bool) and float(value).is_integer()
+        in_range = ok and (self.min is None or value >= self.min) and (self.max is None or value <= self.max)
+        if not in_range:
+            return None, f"{self.key} must be an integer between {self.min} and {self.max}"
+        return int(value), None
+
+    def _coerce_multi_enum(self, value: Any) -> tuple[Any, str | None]:
+        values = self._choice_values()
+        if not isinstance(value, list) or not all(isinstance(v, str) and v in values for v in value):
+            return None, f"{self.key} must be a list of {', '.join(values)}"
+        # Choice order, without duplicates: equal sets hash equal.
+        return [v for v in values if v in value], None
+
+
+def normalize_options(
+    fields: tuple[OptionField, ...],
+    options: dict[str, Any] | None,
+    *,
+    harness: str,
+) -> dict[str, Any]:
+    """Validate *options* against *fields*; returns only the keys that differ from the defaults.
+
+    Raises ``ValueError`` listing every problem. Dropping default values means
+    ``{}`` and ``{"edit_format": "diff"}`` are the same configuration (same
+    content hash, same method key, same section).
+    """
+    if options is None:
+        return {}
+    if not isinstance(options, dict):
+        msg = "harness options must be an object"
+        raise ValueError(msg)  # noqa: TRY004 - one exception type for every validation problem
+    by_key = {f.key: f for f in fields}
+    errors: list[str] = []
+    unknown = sorted(set(options) - set(by_key))
+    if unknown:
+        allowed = ", ".join(by_key) or "none"
+        errors.append(f"Unknown {harness} options: {', '.join(unknown)} (allowed: {allowed})")
+    normalized: dict[str, Any] = {}
+    for key, spec in by_key.items():
+        if key not in options or options[key] is None:
+            continue
+        value, error = spec.coerce(options[key])
+        if error:
+            errors.append(error)
+            continue
+        default = list(spec.default) if isinstance(spec.default, tuple) else spec.default
+        if value != default:
+            normalized[key] = value
+    if errors:
+        raise ValueError("; ".join(errors))
+    return normalized
+
 
 GATEWAY_ALIAS = "llm-gateway"
 GATEWAY_PORT = 8080
@@ -94,6 +206,8 @@ class Harness:
 
     name: ClassVar[str]
     label: ClassVar[str]
+    # One sentence for pickers: what kind of agent this is.
+    description: ClassVar[str] = ""
     image: ClassVar[str]  # images/<image>, built FROM images/agent-base
     version_setting: ClassVar[str]  # settings attribute holding the pinned release
     version_build_arg: ClassVar[str]
@@ -101,6 +215,8 @@ class Harness:
     # Files the harness itself writes into the workspace (caches, histories):
     # excluded from git and from the collected sample.
     workspace_artifacts: ClassVar[tuple[str, ...]] = ()
+    # User-settable options (see the module docstring for what qualifies).
+    option_fields: ClassVar[tuple[OptionField, ...]] = ()
 
     def version(self) -> str:
         from django.conf import settings
@@ -110,6 +226,20 @@ class Harness:
     def build_args(self, version: str) -> dict[str, str]:
         return {self.version_build_arg: version}
 
+    def option_schema(self) -> list[OptionField]:
+        return list(self.option_fields)
+
+    def default_options(self) -> dict[str, Any]:
+        return {f.key: list(f.default) if isinstance(f.default, tuple) else f.default for f in self.option_fields}
+
+    def normalize_options(self, options: dict[str, Any] | None) -> dict[str, Any]:
+        """Validated options minus the defaults (``ValueError`` on bad input)."""
+        return normalize_options(self.option_fields, options, harness=self.name)
+
+    def effective_options(self, options: dict[str, Any] | None) -> dict[str, Any]:
+        """Every option's value for a run: the defaults overlaid with *options*."""
+        return {**self.default_options(), **self.normalize_options(options)}
+
     def snapshot_section(
         self,
         *,
@@ -118,8 +248,14 @@ class Harness:
         max_output_tokens: int,
         agent_config: dict[str, Any],
         title: str,
+        options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Everything frozen about this harness for one job (enters run_fingerprint)."""
+        """Everything frozen about this harness for one job (enters run_fingerprint).
+
+        *options* are the run's harness options (sparse; validated here);
+        with none, or only defaults, the section is the harness's frozen
+        default configuration.
+        """
         raise NotImplementedError
 
     def files(self, section: dict[str, Any], brief: str) -> dict[str, bytes]:

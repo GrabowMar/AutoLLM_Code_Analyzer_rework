@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 import yaml
+from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
@@ -44,10 +45,18 @@ _APPEND_TO_SYSTEM = frozenset(
 )
 
 
+DEFAULT_PROFILE_SLUG = "system-scaffolding-standard"
+
+
 def load_catalog() -> dict[str, Any]:
     if not CATALOG_PATH.is_file():
         return {}
     return yaml.safe_load(CATALOG_PATH.read_text(encoding="utf-8")) or {}
+
+
+def default_profile_slug() -> str:
+    """The global default profile: ``catalog.yaml: default_bundle_slug``."""
+    return str(load_catalog().get("default_bundle_slug") or DEFAULT_PROFILE_SLUG)
 
 
 def app_requirement_to_dict(app_req: AppRequirementTemplate) -> dict[str, Any]:
@@ -203,7 +212,14 @@ def get_default_profile(
     scaffolding_slug: str | None = None,
     user: AbstractUser | None = None,
 ) -> GenerationProfile | None:
-    """Latest version of the applicable default profile."""
+    """Latest version of the applicable default profile.
+
+    With a stack: that stack's default (``is_default`` means "default for its
+    stack"), else a system profile for it. Otherwise -- and as the last
+    resort -- the global default named by ``catalog.yaml:
+    default_bundle_slug``; every stack has a default, so ordering by slug
+    must never pick the global one.
+    """
     qs = _visible_profiles(user)
     if scaffolding_slug:
         matching_default = qs.filter(
@@ -220,11 +236,9 @@ def get_default_profile(
             return matching_system
 
     return (
-        qs.filter(is_default=True, is_system=True).first()
-        or qs.filter(
-            slug="system-scaffolding-standard",
-            is_system=True,
-        ).first()
+        qs.filter(slug=default_profile_slug(), is_system=True).first()
+        or qs.filter(is_default=True, is_system=True, scaffolding_slug=settings.GENERATION_DEFAULT_STACK).first()
+        or qs.filter(is_default=True, is_system=True).first()
     )
 
 
@@ -253,9 +267,30 @@ def resolve_profile_for_job(
             dict(profile.llm_config or {}),
         )
 
+    return catalog_default_block_refs(), scaffolding_slug, "catalog", 1, {}
+
+
+def catalog_default_block_refs() -> list[dict[str, Any]]:
+    """Block refs of the catalog's default profile, before any profile row exists (first boot).
+
+    Pinned to the latest system block versions like the seeder pins them;
+    an unseeded block keeps version 1 so resolution fails loudly on it.
+    """
+    from backend.generation.seeding import latest_system_block_refs
+
     catalog = load_catalog()
-    refs = catalog.get("default_block_refs", [])
-    return refs, scaffolding_slug, "catalog", 1, {}
+    default_slug = default_profile_slug()
+    entry = next(
+        (p for p in catalog.get("profiles", catalog.get("bundles", [])) if p.get("slug") == default_slug),
+        {},
+    )
+    refs: list[dict[str, Any]] = []
+    for ref in entry.get("block_refs", []):
+        try:
+            refs.extend(latest_system_block_refs([ref]))
+        except LookupError:
+            refs.append({"type": ref.get("type", ""), "slug": ref.get("slug", ""), "version": 1})
+    return refs
 
 
 def build_resolved_snapshot(
@@ -349,6 +384,7 @@ def build_custom_snapshot(
     temperature: float,
     max_tokens: int,
     llm_overrides: dict[str, Any] | None = None,
+    sampling_preset: Any = None,
 ) -> dict[str, Any]:
     """Minimal ``resolved_bundle`` for custom-mode jobs: just the frozen llm section.
 
@@ -357,11 +393,24 @@ def build_custom_snapshot(
     """
     llm_section = merge_llm_params({"temperature": temperature, "max_tokens": max_tokens}, llm_overrides)
     _attach_model_provenance(llm_section, model)
-    return {
+    snapshot = {
         "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
         "llm": llm_section,
         "llm_overrides": dict(llm_overrides or {}),
     }
+    _attach_preset_provenance(snapshot, sampling_preset)
+    return snapshot
+
+
+def _attach_preset_provenance(snapshot: dict[str, Any], sampling_preset: Any) -> None:
+    """Record the sampling preset a template-mode job used (a label; its values are in ``llm``).
+
+    Only when there is one, so snapshots of preset-less jobs keep their shape.
+    """
+    if sampling_preset is not None:
+        from backend.generation.services.presets import provenance
+
+        snapshot["presets"] = {"sampling": provenance(sampling_preset)}
 
 
 def attach_rendered_backend_prompts(
@@ -406,7 +455,9 @@ def snapshot_for_scaffolding_job(job: GenerationJob) -> dict[str, Any]:
     )
     from backend.generation.services.prompt_renderer import PromptRenderer
 
-    return attach_rendered_backend_prompts(snapshot, PromptRenderer())
+    snapshot = attach_rendered_backend_prompts(snapshot, PromptRenderer())
+    _attach_preset_provenance(snapshot, job.sampling_preset if job.sampling_preset_id else None)
+    return snapshot
 
 
 def apply_snapshot_to_job(job: GenerationJob, *, save: bool = True) -> GenerationJob:

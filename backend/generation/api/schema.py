@@ -3,6 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
+from django.conf import settings
 from ninja import Field
 from ninja import ModelSchema
 from ninja import Schema
@@ -16,6 +17,8 @@ from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
 from backend.generation.models import GenerationProfile
+from backend.generation.services.sampling import MODE_DEFAULT_MAX_TOKENS
+from backend.generation.services.sampling import MODE_DEFAULT_TEMPERATURE
 
 # ── Template schemas ──────────────────────────────────────────────────
 
@@ -33,6 +36,15 @@ class StackSchema(Schema):
     default_port: int = 8000
     patch_profile: str = "none"
     file_count: int = 0
+    # Builtin stacks are always approved; a user stack needs approval unless
+    # the viewer owns it (the list only returns stacks the viewer may run).
+    is_approved: bool = True
+    server_kind: str = "python"
+    dockerfile_mode: str = "bundled"
+    backend_base_image: str = ""
+    frontend_base_image: str = ""
+    backend_filename: str = "app.py"
+    frontend_component: str = ""
 
 
 class StackWriteSchema(Schema):
@@ -67,6 +79,7 @@ class AppRequirementTemplateSchema(ModelSchema):
             "api_endpoints",
             "data_model",
             "admin_api_endpoints",
+            "difficulty",
             "is_default",
             "created_at",
             "updated_at",
@@ -204,7 +217,7 @@ class GenerationProfileCreateSchema(Schema):
     name: str
     slug: str
     description: str = ""
-    scaffolding_slug: str = "flask-react"
+    scaffolding_slug: str = Field(default_factory=lambda: settings.GENERATION_DEFAULT_STACK)
     block_refs: list[BlockRefSchema] = []
     llm_config: dict = {}
     is_default: bool = False
@@ -215,11 +228,19 @@ class BundleImportSchema(Schema):
     conflict_strategy: str = "rename"
 
 
+class PresetSlugRefSchema(Schema):
+    kind: str
+    slug: str
+
+
 class TemplatePackageExportSchema(Schema):
+    """Profiles bring their blocks and their user stack along; presets export at their latest version."""
+
     app_template_slugs: list[str] = []
     bundle_slugs: list[str] = []
     block_refs: list[BlockRefSchema] = []
     stack_slugs: list[str] = []
+    preset_refs: list[PresetSlugRefSchema] = []
 
 
 class TemplatePackageImportSchema(Schema):
@@ -231,8 +252,13 @@ class StarterTemplatePackageSchema(Schema):
     slug: str
     name: str
     description: str
-    app_template_count: int
+    app_spec_count: int
     block_count: int
+    profile_count: int
+    stack_count: int
+    preset_count: int
+    # Pre-v3 names of app_spec_count / profile_count.
+    app_template_count: int
     bundle_count: int
 
 
@@ -240,18 +266,89 @@ class StarterTemplatePackageImportSchema(Schema):
     conflict_strategy: str = "rename"
 
 
+# ── Run preset schemas ────────────────────────────────────────────────
+
+
+class RunPresetSchema(Schema):
+    id: int
+    kind: str
+    slug: str
+    version: int
+    name: str
+    description: str
+    config: dict
+    content_hash: str
+    is_system: bool
+    is_archived: bool
+    is_default: bool
+    latest_version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class RunPresetCreateSchema(Schema):
+    kind: str
+    slug: str
+    name: str
+    description: str = ""
+    config: dict = {}
+
+
+class RunPresetUpdateSchema(Schema):
+    name: str
+    description: str = ""
+    # None keeps the current config (a metadata-only edit).
+    config: dict | None = None
+
+
+class RunPresetValidateSchema(Schema):
+    kind: str
+    config: dict = {}
+
+
 # ── Job schemas ───────────────────────────────────────────────────────
+
+
+class NamedPresetRefSchema(Schema):
+    id: int
+    slug: str
+    version: int
+    name: str
+
+
+class PresetRefSchema(Schema):
+    id: int
+    slug: str
+    version: int
+
+
+def _named_preset_ref(preset) -> dict | None:
+    if preset is None:
+        return None
+    return {"id": preset.id, "slug": preset.slug, "version": preset.version, "name": preset.name}
 
 
 class GenerationJobSchema(ModelSchema):
     model_name: str | None = None
     model_id_str: str | None = None
+    # LLMModel pk (what job creation takes as model_id / model_ids).
+    model_pk: int | None = None
     batch_id: UUID | None = None
     batch_name: str | None = None
     template_name: str | None = None
+    app_requirement_id: int | None = None
+    app_slug: str | None = None
+    experiment_id: UUID | None = None
+    condition_id: int | None = None
     bundle_name: str | None = None
     bundle_slug: str | None = None
     created_by_email: str | None = None
+    # Effective temperature; None for agent jobs that sampled at the provider default.
+    temperature: float | None = None
+    harness_preset: NamedPresetRefSchema | None = None
+    sampling_preset: NamedPresetRefSchema | None = None
+    budget_preset: NamedPresetRefSchema | None = None
+    config_fingerprint: str | None = None
 
     class Meta:
         model = GenerationJob
@@ -259,14 +356,15 @@ class GenerationJobSchema(ModelSchema):
             "id",
             "mode",
             "status",
+            "phase",
             "stack_slug",
-            "temperature",
             "max_tokens",
             "llm_params",
             "custom_system_prompt",
             "custom_user_prompt",
             "task_description",
             "agent_config",
+            "harness_options",
             "copilot_description",
             "copilot_max_iterations",
             "copilot_current_iteration",
@@ -279,6 +377,7 @@ class GenerationJobSchema(ModelSchema):
             "result_data",
             "metrics",
             "experiment_seed",
+            "repeat_index",
             "prompt_hash",
             "bundle_key",
             "resolved_bundle",
@@ -300,11 +399,24 @@ class GenerationJobSchema(ModelSchema):
         return None
 
     @staticmethod
-    def resolve_temperature(obj: GenerationJob) -> float:
-        """Effective value: the frozen snapshot wins over the legacy column."""
+    def resolve_model_pk(obj: GenerationJob) -> int | None:
+        return obj.model_id
+
+    @staticmethod
+    def resolve_temperature(obj: GenerationJob) -> float | None:
+        """Effective value: the frozen snapshot wins over the legacy column.
+
+        Agent runs only send a temperature some layer set explicitly (the
+        column default 0.3 never reaches the model), so without one it is
+        None: the provider default.
+        """
         resolved = obj.resolved_bundle if isinstance(obj.resolved_bundle, dict) else {}
         value = (resolved.get("llm") or {}).get("temperature")
-        return value if value is not None else obj.temperature
+        if value is not None:
+            return value
+        if obj.mode == GenerationJob.Mode.AGENT:
+            return (obj.llm_params or {}).get("temperature")
+        return obj.temperature
 
     @staticmethod
     def resolve_max_tokens(obj: GenerationJob) -> int:
@@ -332,6 +444,39 @@ class GenerationJobSchema(ModelSchema):
         return None
 
     @staticmethod
+    def resolve_app_requirement_id(obj: GenerationJob) -> int | None:
+        return obj.app_requirement_id
+
+    @staticmethod
+    def resolve_app_slug(obj: GenerationJob) -> str | None:
+        return obj.app_requirement.slug if obj.app_requirement else None
+
+    @staticmethod
+    def resolve_experiment_id(obj: GenerationJob) -> UUID | None:
+        return obj.experiment_id
+
+    @staticmethod
+    def resolve_condition_id(obj: GenerationJob) -> int | None:
+        return obj.condition_id
+
+    @staticmethod
+    def resolve_harness_preset(obj: GenerationJob) -> dict | None:
+        return _named_preset_ref(obj.harness_preset)
+
+    @staticmethod
+    def resolve_sampling_preset(obj: GenerationJob) -> dict | None:
+        return _named_preset_ref(obj.sampling_preset)
+
+    @staticmethod
+    def resolve_budget_preset(obj: GenerationJob) -> dict | None:
+        return _named_preset_ref(obj.budget_preset)
+
+    @staticmethod
+    def resolve_config_fingerprint(obj: GenerationJob) -> str | None:
+        resolved = obj.resolved_bundle if isinstance(obj.resolved_bundle, dict) else {}
+        return resolved.get("config_fingerprint")
+
+    @staticmethod
     def resolve_bundle_name(obj: GenerationJob) -> str | None:
         if obj.profile:
             return obj.profile.name
@@ -354,18 +499,37 @@ class GenerationJobSchema(ModelSchema):
 
 
 class GenerationJobListSchema(Schema):
+    """One job list row (services/job_listing.py builds it without loading the JSON blobs)."""
+
     id: UUID
     mode: str
     status: str
+    phase: str = ""
     model_name: str | None = None
     model_id_str: str | None = None
     template_name: str | None = None
+    app_slug: str | None = None
     stack_slug: str = ""
     started_at: datetime | None = None
     completed_at: datetime | None = None
     duration_seconds: float | None = None
     error_message: str = ""
     created_at: datetime
+    batch_id: UUID | None = None
+    harness: str | None = None
+    harness_preset: PresetRefSchema | None = None
+    condition_id: int | None = None
+    # "slug@version" of the generation profile, when the job used one.
+    profile_ref: str | None = None
+    repeat_index: int | None = None
+    experiment_seed: int | None = None
+    cost_usd: float | None = None
+    eval_status: str | None = None
+    pass_rate: float | None = None
+    termination: str | None = None
+    # "valid" | "warn" | "exclude" (result_data.agent.validity); None before an agent run is assessed.
+    validity: str | None = None
+    config_fingerprint: str | None = None
 
 
 class PaginatedJobsSchema(Schema):
@@ -377,53 +541,105 @@ class PaginatedJobsSchema(Schema):
 
 
 class CustomJobCreateSchema(Schema):
-    """Create a custom mode generation job."""
+    """Create a custom mode generation job.
+
+    llm layers (later wins): mode default (``temperature``/``max_tokens``)
+    -> sampling preset ``llm_params`` -> inline ``llm_params``.
+    """
 
     model_id: int
     system_prompt: str
     user_prompt: str
-    temperature: float = 0.3
-    max_tokens: int = 32000
+    temperature: float = MODE_DEFAULT_TEMPERATURE
+    max_tokens: int = MODE_DEFAULT_MAX_TOKENS
+    sampling_preset_id: int | None = None
     llm_params: LLMParamsSchema | None = None
-    seed: int | None = None
+    seed: int | None = Field(None, ge=0, le=2_147_483_647)
 
 
 class ScaffoldingJobCreateSchema(Schema):
-    """Create scaffolding mode generation job(s)."""
+    """Create scaffolding mode generation job(s).
 
-    stack_slug: str
+    llm layers (later wins): mode default (``temperature``/``max_tokens``)
+    -> profile ``llm_config`` -> sampling preset ``llm_params`` -> inline
+    ``llm_params``.
+    """
+
+    # None -> the profile's stack -> settings.GENERATION_DEFAULT_STACK. An
+    # explicit stack must match the profile's (prompts are written per stack).
+    stack_slug: str | None = None
     app_requirement_ids: list[int]
     model_ids: list[int]
-    temperature: float = 0.3
-    max_tokens: int = 32000
+    temperature: float = MODE_DEFAULT_TEMPERATURE
+    max_tokens: int = MODE_DEFAULT_MAX_TOKENS
     profile_id: int | None = None
+    sampling_preset_id: int | None = None
     llm_params: LLMParamsSchema | None = None
     # Independent repetitions per (template × model) cell. Sampling variance
     # between trials is the point — comparisons need n > 1.
     trials: int = Field(1, ge=1, le=10)
 
 
-class AgentJobCreateSchema(Schema):
-    """Create agent-mode job(s): apps (or one free-form task) x models x trials."""
+class LLMPreviewSchema(Schema):
+    """Effective llm params a scaffolding / single-prompt job would get (``POST /jobs/llm-preview/``)."""
 
-    stack_slug: str = "flask-react"
+    mode: str = Field(..., pattern="^(scaffolding|custom)$")
+    profile_id: int | None = None
+    sampling_preset_id: int | None = None
+    llm_params: LLMParamsSchema | None = None
+
+
+class AgentJobCreateSchema(Schema):
+    """Create (or preview) agent-mode job(s): apps (or one free-form task) x models x harness presets x trials.
+
+    Precedence and rules: services/agent/request.py.
+    """
+
+    # None -> the profile's stack -> settings.GENERATION_DEFAULT_STACK.
+    stack_slug: str | None = None
     app_requirement_ids: list[int] = []
     # Free-form task for a run without an app spec; with app specs it is
     # added to every brief as extra context.
     description: str = ""
-    model_ids: list[int]
-    profile_id: int | None = None
-    # Per-call output cap. No temperature default: agent runs sample at the
-    # provider default unless llm_params sets sampling explicitly.
-    max_tokens: int = 32000
-    llm_params: LLMParamsSchema | None = None
-    agent_config: AgentConfigSchema | None = None
-    # Several harnesses -> one job per harness per cell (overrides agent_config.harness).
+    model_ids: list[int] = []
+    # The comparison axis: one job per harness preset per cell.
+    harness_preset_ids: list[int] = []
+    # Legacy: harness names, each run with that harness's system default preset.
     harnesses: list[str] = []
+    # None -> the system presets sampling/provider-default and budget/platform-default.
+    sampling_preset_id: int | None = None
+    budget_preset_id: int | None = None
+    profile_id: int | None = None
+    # Legacy lowest llm layer (per-call output cap). No temperature default:
+    # agent runs sample at the provider default unless a layer sets sampling.
+    max_tokens: int | None = Field(None, ge=256, le=200_000)
+    llm_params: LLMParamsSchema | None = None
+    # Inline overrides of the budget preset (and, without presets, the legacy harness choice).
+    agent_config: AgentConfigSchema | None = None
     trials: int = Field(1, ge=1, le=10)
     # Base seed: per-job seeds are derived from it and the cell identity, so a
     # resubmitted batch reproduces the same seed matrix. None = random seeds.
     base_seed: int | None = Field(None, ge=0, le=2_147_483_647)
+
+    def to_request(self):
+        from backend.generation.services.agent.request import AgentRequest
+
+        return AgentRequest(
+            model_ids=list(self.model_ids),
+            app_requirement_ids=list(self.app_requirement_ids),
+            description=self.description,
+            stack_slug=self.stack_slug or None,
+            harness_preset_ids=list(self.harness_preset_ids),
+            harnesses=list(self.harnesses),
+            sampling_preset_id=self.sampling_preset_id,
+            budget_preset_id=self.budget_preset_id,
+            llm_params=self.llm_params.as_params() if self.llm_params else {},
+            agent_config=self.agent_config.as_config() if self.agent_config else {},
+            max_tokens=self.max_tokens,
+            profile_id=self.profile_id,
+            trials=self.trials,
+            base_seed=self.base_seed,
+        )
 
 
 class CopilotJobCreateSchema(Schema):
@@ -440,6 +656,54 @@ class BatchCreateResponseSchema(Schema):
     batch_id: UUID
     job_count: int
     status: str
+
+
+class BatchCountsSchema(Schema):
+    pending: int = 0
+    # RUNNING jobs still waiting for a sandbox slot (GenerationJob.phase).
+    queued: int = 0
+    running: int = 0
+    completed: int = 0
+    failed: int = 0
+    cancelled: int = 0
+
+
+class BatchExperimentRefSchema(Schema):
+    id: UUID
+    name: str
+
+
+class BatchSummarySchema(Schema):
+    """A batch with its status and aggregates derived from its live jobs (services/batches.py)."""
+
+    id: UUID
+    name: str
+    mode: str
+    status: str
+    total_jobs: int
+    counts: BatchCountsSchema
+    is_terminal: bool
+    created_at: datetime
+    updated_at: datetime
+    stack_slug: str | None = None
+    harnesses: list[str] = []
+    harness_presets: list[PresetRefSchema] = []
+    model_count: int = 0
+    app_count: int = 0
+    trials: int | None = None
+    base_seed: int | None = None
+    cost_usd: float = 0.0
+    graded: bool = False
+    mean_pass_rate: float | None = None
+    experiment: BatchExperimentRefSchema | None = None
+
+
+class PaginatedBatchesSchema(Schema):
+    items: list[BatchSummarySchema]
+    total: int
+    page: int
+    per_page: int
+    pages: int
 
 
 class GenerationBatchSchema(ModelSchema):
@@ -497,6 +761,8 @@ class ExperimentConditionSchema(ModelSchema):
     model_name: str | None = None
     bundle_slug: str | None = None
     bundle_version: int | None = None
+    # The pinned harness preset version (``harness_preset`` is its pk).
+    harness_preset_ref: NamedPresetRefSchema | None = None
 
     class Meta:
         model = ExperimentCondition
@@ -506,6 +772,7 @@ class ExperimentConditionSchema(ModelSchema):
             "profile",
             "model",
             "harness",
+            "harness_preset",
             "param_overrides",
             "created_at",
         ]
@@ -522,11 +789,19 @@ class ExperimentConditionSchema(ModelSchema):
     def resolve_bundle_version(obj: ExperimentCondition) -> int | None:
         return obj.profile.version if obj.profile_id else None
 
+    @staticmethod
+    def resolve_harness_preset_ref(obj: ExperimentCondition) -> dict | None:
+        return _named_preset_ref(obj.harness_preset) if obj.harness_preset_id else None
+
 
 class ExperimentConditionCreateSchema(Schema):
-    profile_id: int
+    """A condition: model + harness preset (agent; profile optional) or model + profile (scaffolding)."""
+
+    profile_id: int | None = None
     model_id: int
+    # Legacy harness name; with harness_preset_id it must match the preset (or be blank).
     harness: str = ""
+    harness_preset_id: int | None = None
     label: str = ""
     param_overrides: dict = {}
 
@@ -534,6 +809,11 @@ class ExperimentConditionCreateSchema(Schema):
 class ExperimentSchema(ModelSchema):
     app_requirement_ids: list[int] = []
     condition_count: int = 0
+    # Experiment-wide stack; null = each condition's profile stack (legacy).
+    stack_slug: str | None = None
+    # The pinned preset versions (``sampling_preset`` / ``budget_preset`` are their pks).
+    sampling_preset_ref: NamedPresetRefSchema | None = None
+    budget_preset_ref: NamedPresetRefSchema | None = None
 
     class Meta:
         model = Experiment
@@ -547,6 +827,8 @@ class ExperimentSchema(ModelSchema):
             "repeats",
             "base_seed",
             "mode",
+            "sampling_preset",
+            "budget_preset",
             "agent_config",
             "continuation_limit",
             "enable_repair",
@@ -557,22 +839,42 @@ class ExperimentSchema(ModelSchema):
 
     @staticmethod
     def resolve_app_requirement_ids(obj: Experiment) -> list[int]:
-        return list(obj.app_requirements.values_list("id", flat=True))
+        # .all() so a list's prefetch_related is used.
+        return [app.id for app in obj.app_requirements.all()]
 
     @staticmethod
     def resolve_condition_count(obj: Experiment) -> int:
-        return obj.conditions.count()
+        return len(obj.conditions.all())
+
+    @staticmethod
+    def resolve_stack_slug(obj: Experiment) -> str | None:
+        return obj.stack_slug or None
+
+    @staticmethod
+    def resolve_sampling_preset_ref(obj: Experiment) -> dict | None:
+        return _named_preset_ref(obj.sampling_preset) if obj.sampling_preset_id else None
+
+    @staticmethod
+    def resolve_budget_preset_ref(obj: Experiment) -> dict | None:
+        return _named_preset_ref(obj.budget_preset) if obj.budget_preset_id else None
 
 
 class ExperimentCreateSchema(Schema):
+    """Experiment-wide settings; ``stack_slug`` None keeps each condition profile's stack (legacy)."""
+
     name: str
     slug: str
     description: str = ""
     hypothesis: str = ""
     app_requirement_ids: list[int] = []
     repeats: int = Field(3, ge=1, le=20)
-    base_seed: int | None = None
+    base_seed: int | None = Field(None, ge=0, le=2_147_483_647)
     mode: str = Field("agent", pattern="^(agent|scaffolding)$")
+    stack_slug: str | None = None
+    # Pinned preset versions. Agent mode: None -> the system default preset;
+    # scaffolding takes only a sampling preset's llm_params (no default).
+    sampling_preset_id: int | None = None
+    budget_preset_id: int | None = None
     agent_config: AgentConfigSchema | None = None
     continuation_limit: int = Field(1, ge=0, le=5)
     enable_repair: bool = True
@@ -580,13 +882,18 @@ class ExperimentCreateSchema(Schema):
 
 
 class ExperimentUpdateSchema(Schema):
+    """Draft-only partial update; an explicit null clears base_seed, stack_slug and the preset ids."""
+
     name: str | None = None
     description: str | None = None
     hypothesis: str | None = None
     app_requirement_ids: list[int] | None = None
     repeats: int | None = Field(None, ge=1, le=20)
-    base_seed: int | None = None
+    base_seed: int | None = Field(None, ge=0, le=2_147_483_647)
     mode: str | None = Field(None, pattern="^(agent|scaffolding)$")
+    stack_slug: str | None = None
+    sampling_preset_id: int | None = None
+    budget_preset_id: int | None = None
     agent_config: AgentConfigSchema | None = None
     continuation_limit: int | None = Field(None, ge=0, le=5)
     enable_repair: bool | None = None

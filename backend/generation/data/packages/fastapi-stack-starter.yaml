@@ -1,0 +1,46 @@
+# Starter package: a template package (v3) plus a `starter` header, listed by
+# GET /api/generation/packages/starters/ and imported like any package
+# (see docs/TEMPLATE_PACKAGES.md). Linted by `manage.py lint_generation_data`.
+#
+# Nothing here is a copy: app specs come from their files under data/
+# (`content_file`), and the profiles reference the seeded system blocks by
+# slug, which import resolves to the latest system version. The profiles must
+# match their catalog.yaml entries (the lint checks), so on an install that
+# already seeded them, importing reuses them instead of duplicating them.
+kind: llm-lab-template-package
+template_package_schema_version: 3
+starter:
+  slug: fastapi-stack-starter
+  name: FastAPI starter pack
+  description: >-
+    Three richer app specs (campaign analytics, incident centre, subscription
+    billing) and the FastAPI + React and FastAPI + Vue generation profiles.
+    Anything this install already has is reused, not duplicated.
+assets:
+  app_specs:
+    - content_file: requirements/analytics_campaign_monitor.json
+    - content_file: requirements/operations_incident_center.json
+    - content_file: requirements/commerce_subscription_billing.json
+  profiles:
+    - slug: system-fastapi-vue-standard
+      name: FastAPI + Vue standard
+      description: FastAPI backend prompts paired with Vue frontend prompts and shared FastAPI rules
+      scaffolding_slug: fastapi-vue
+      block_refs:
+        - {type: prompt_stage, slug: fastapi-backend-system}
+        - {type: prompt_stage, slug: fastapi-backend-user}
+        - {type: prompt_stage, slug: vue-frontend-system}
+        - {type: prompt_stage, slug: vue-frontend-user}
+        - {type: prompt_tone, slug: tone-standard}
+        - {type: prompt_rules, slug: rules-fastapi-global}
+    - slug: system-fastapi-react-standard
+      name: FastAPI + React standard
+      description: FastAPI backend prompts paired with the default React frontend prompts
+      scaffolding_slug: fastapi-react
+      block_refs:
+        - {type: prompt_stage, slug: fastapi-backend-system}
+        - {type: prompt_stage, slug: fastapi-backend-user}
+        - {type: prompt_stage, slug: base-frontend-system}
+        - {type: prompt_stage, slug: base-frontend-user}
+        - {type: prompt_tone, slug: tone-standard}
+        - {type: prompt_rules, slug: rules-fastapi-global}

@@ -1,0 +1,9 @@
+# System run preset (seeded by backend/generation/seeding.py:seed_presets).
+# Content changes create a new version; jobs keep pointing at the old one.
+kind: harness
+slug: mini-swe-agent-default
+name: mini-swe-agent (default)
+description: mini-swe-agent with its native mini.yaml loop and a 30 s command timeout.
+config:
+  harness: mini-swe-agent
+  options: {}

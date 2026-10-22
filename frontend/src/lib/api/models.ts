@@ -19,6 +19,8 @@ export interface LLMModelSummary {
   supports_function_calling: boolean;
   supports_streaming: boolean;
   supports_json_mode: boolean;
+  /** OpenRouter lists `reasoning`/`include_reasoning` among the model's supported params. */
+  supports_reasoning?: boolean;
 }
 
 export interface LLMModelDetail extends LLMModelSummary {
