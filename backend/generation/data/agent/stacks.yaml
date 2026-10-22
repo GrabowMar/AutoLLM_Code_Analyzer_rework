@@ -1,0 +1,23 @@
+# Runtime contract per stack, as stated to the agent in its task brief.
+# Must agree with the stack's Dockerfile (runtime/scaffolding/<dir>/).
+# Stacks not listed here (user-authored) fall back to "_default".
+_default:
+  backend_summary: "The backend is a Python web application."
+  start_command: "python app.py"
+  frontend_summary: "a JavaScript single-page app"
+flask-react:
+  backend_summary: "The backend is a Flask 3 application (Python 3.11)."
+  start_command: "python app.py"
+  frontend_summary: "React 18 + Vite + Tailwind CSS, entry component `frontend/src/App.jsx`"
+fastapi-react:
+  backend_summary: "The backend is a FastAPI application (Python 3.11) exposing `app` in `app.py`."
+  start_command: "uvicorn app:app --host 0.0.0.0 --port 8000"
+  frontend_summary: "React 18 + Vite + Tailwind CSS, entry component `frontend/src/App.jsx`"
+fastapi-vue:
+  backend_summary: "The backend is a FastAPI application (Python 3.11) exposing `app` in `app.py`."
+  start_command: "uvicorn app:app --host 0.0.0.0 --port 8000"
+  frontend_summary: "Vue 3 + Vite, entry component `frontend/src/App.vue`"
+generic-python:
+  backend_summary: "The backend is a Python 3.11 web application (choose any framework and list it in requirements.txt)."
+  start_command: "python app.py"
+  frontend_summary: "none"

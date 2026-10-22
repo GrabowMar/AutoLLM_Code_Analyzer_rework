@@ -1,86 +1,152 @@
+# Containers show up as llmlab-<service>-1, volumes as llmlab_<volume>.
+name: llmlab
+
+# Every service runs under a memory/CPU/PID cap and with a raised OOM score, so
+# a busy dev stack slows itself down (or is the first thing the kernel's OOM
+# killer picks) instead of starving whatever else shares the host.
 volumes:
-  backend_local_postgres_data: {}
-  backend_local_postgres_data_backups: {}
-  backend_local_redis_data: {}
+  postgres_data: {}
+  postgres_data_backups: {}
+  redis_data: {}
+  apps_dind_data: {}
+  apps_dind_certs: {}
 
 services:
   django: &django
     build:
       context: .
       dockerfile: ./compose/local/django/Dockerfile
-    image: backend_local_django
+    # One image for django, celery and flower (same Dockerfile).
+    image: llmlab/django:local
     depends_on:
       - postgres
       - redis
       - mailpit
-    # Lets the app reverse-proxy (APPS_PROXY_PATH) reach a sample app's published
-    # host port at host.docker.internal:<app_port>.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - apps-dind
     volumes:
       - /app/.venv
       - .:/app:z
-      - /var/run/docker.sock:/var/run/docker.sock
+      # Client half of the apps-dind TLS material only (not its CA key).
+      - type: volume
+        source: apps_dind_certs
+        target: /apps-dind-certs
+        read_only: true
+        volume:
+          subpath: client
     env_file:
       - ./.envs/.local/.django
       - ./.envs/.local/.postgres
+    environment:
+      # Sample apps are built and run inside apps-dind (nested containers), and
+      # the reverse-proxy reaches an app's published port at apps-dind:<app_port>.
+      APPS_DOCKER_HOST: tcp://apps-dind:2376
+      APPS_DOCKER_CERT_PATH: /apps-dind-certs
+      APPS_UPSTREAM_HOST: apps-dind
+      # App ports are published inside apps-dind only, so browsers reach apps via
+      # Django's /apps/<name>/ path proxy (or APPS_SUBDOMAIN_PROXY, which wins).
+      APPS_PROXY_PATH: "True"
     ports:
       - '8001:8000'
     command: /start
+    # Also hosts the devcontainer session (editor server, tests).
+    mem_limit: 4g
+    cpus: 4
+    pids_limit: 2048
+    oom_score_adj: 500
 
   postgres:
     build:
       context: .
       dockerfile: ./compose/production/postgres/Dockerfile
-    image: backend_production_postgres
+    image: llmlab/postgres:local
     volumes:
-      - backend_local_postgres_data:/var/lib/postgresql
-      - backend_local_postgres_data_backups:/backups
+      - postgres_data:/var/lib/postgresql
+      - postgres_data_backups:/backups
     env_file:
       - ./.envs/.local/.postgres
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 512
+    oom_score_adj: 500
+
+  # Sandbox Docker daemon: generated apps and analyzer workspaces run as its
+  # nested containers, off the host daemon and fenced off from this network.
+  # Its limits cap all of them together.
+  apps-dind:
+    build:
+      context: .
+      dockerfile: ./compose/local/apps-dind/Dockerfile
+    image: llmlab/apps-dind:local
+    privileged: true
+    hostname: apps-dind
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+      DOCKER_TLS_SAN: DNS:apps-dind
+    volumes:
+      - apps_dind_data:/var/lib/docker
+      - apps_dind_certs:/certs
+    mem_limit: 4g
+    cpus: 4
+    pids_limit: 4096
+    oom_score_adj: 500
 
   mailpit:
     image: docker.io/axllent/mailpit:latest
     ports:
       - "8025:8025"
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 128
+    oom_score_adj: 500
 
   redis:
     image: docker.io/redis:8.8
     volumes:
-      - backend_local_redis_data:/data
+      - redis_data:/data
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    oom_score_adj: 500
 
   celeryworker:
     <<: *django
-    image: backend_local_celeryworker
     depends_on:
       - redis
       - postgres
       - mailpit
+      - apps-dind
     ports: []
     command: /start-celeryworker
+    mem_limit: 2g
+    cpus: 2
 
   celerybeat:
     <<: *django
-    image: backend_local_celerybeat
     depends_on:
       - redis
       - postgres
       - mailpit
+      - apps-dind
     ports: []
     command: /start-celerybeat
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
 
   flower:
     <<: *django
-    image: backend_local_flower
     ports:
       - '5555:5555'
     command: /start-flower
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
 
   frontend:
     build:
       context: .
       dockerfile: ./compose/local/frontend/Dockerfile
-    image: backend_local_frontend
+    image: llmlab/frontend:local
     restart: unless-stopped
     depends_on:
       - django
@@ -96,3 +162,7 @@ services:
     ports:
       - '8000:8080'
     command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "8080"]
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 1024
+    oom_score_adj: 500

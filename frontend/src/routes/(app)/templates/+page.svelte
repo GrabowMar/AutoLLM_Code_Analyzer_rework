@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
+	import * as Tabs from '$lib/components/ui/tabs';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 	import {
 		getStacks,
 		getAppTemplates,
@@ -45,8 +47,7 @@
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Search from '@lucide/svelte/icons/search';
 
-	type TabId = 'stacks' | 'app' | 'profiles';
-	let activeTab = $state<TabId>('profiles');
+	let activeTab = $state('profiles');
 
 	// Profiles + blocks
 	let profiles = $state<GenerationProfile[]>([]);
@@ -210,11 +211,6 @@
 			if (editingStackSlug === s.slug) cancelStackForm();
 			await loadStacks();
 		} catch { /* ignore */ }
-	}
-
-	function handleTabChange(tab: TabId) {
-		cancelAllForms();
-		activeTab = tab;
 	}
 
 	// ── Profile CRUD ────────────────────────────────────────────
@@ -382,207 +378,183 @@
 	}
 </script>
 
-<svelte:head>
-	<title>Generation Library - LLM Lab</title>
-</svelte:head>
-
 <div class="space-y-6">
-	<!-- Header -->
-	<div class="flex flex-wrap items-start justify-between gap-3">
-		<div class="page-header min-w-0">
-			<h1>Generation Library</h1>
-			<p>App specs describe what to build, profiles define the prompts and LLM behavior, stacks are where it runs.</p>
-		</div>
-		<Button variant="outline" size="sm" class="text-xs cursor-pointer" onclick={() => (packagesOpen = true)}>
-			<Package class="mr-1.5 h-3.5 w-3.5" /> Packages
-		</Button>
-	</div>
+	<PageHeader
+		title="Generation Library"
+		description="App specs describe what to build, profiles define the prompts and LLM behavior, stacks are where it runs."
+	>
+		{#snippet actions()}
+			<Button variant="outline" size="sm" onclick={() => (packagesOpen = true)}>
+				<Package /> Packages
+			</Button>
+		{/snippet}
+	</PageHeader>
 
-	<!-- Tabs Menu -->
-	<div class="flex gap-1 rounded-md bg-muted p-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden flex-nowrap shadow-inner">
-		<button
-			type="button"
-			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-200 whitespace-nowrap cursor-pointer {activeTab === 'profiles' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
-			onclick={() => handleTabChange('profiles')}
-		>
-			<SlidersHorizontal class="h-4 w-4" />
-			Profiles <span class="ml-1 text-xs opacity-60 font-mono">({profiles.length})</span>
-		</button>
-		<button
-			type="button"
-			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-200 whitespace-nowrap cursor-pointer {activeTab === 'app' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
-			onclick={() => handleTabChange('app')}
-		>
-			<FileText class="h-4 w-4" />
-			App Specs <span class="ml-1 text-xs opacity-60 font-mono">({appTemplates.length})</span>
-		</button>
-		<button
-			type="button"
-			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-200 whitespace-nowrap cursor-pointer {activeTab === 'stacks' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
-			onclick={() => handleTabChange('stacks')}
-		>
-			<Layers class="h-4 w-4" />
-			Stacks <span class="ml-1 text-xs opacity-60 font-mono">({stacks.length})</span>
-		</button>
-	</div>
+	<Tabs.Root bind:value={activeTab} onValueChange={cancelAllForms}>
+		<Tabs.List>
+			<Tabs.Trigger value="profiles">
+				<SlidersHorizontal />
+				Profiles <span class="text-xs text-muted-foreground font-mono">({profiles.length})</span>
+			</Tabs.Trigger>
+			<Tabs.Trigger value="app">
+				<FileText />
+				App Specs <span class="text-xs text-muted-foreground font-mono">({appTemplates.length})</span>
+			</Tabs.Trigger>
+			<Tabs.Trigger value="stacks">
+				<Layers />
+				Stacks <span class="text-xs text-muted-foreground font-mono">({stacks.length})</span>
+			</Tabs.Trigger>
+		</Tabs.List>
 
-	<!-- Master-Detail Content Grid -->
-	<div class="grid gap-6 {isEditingOrCreating ? 'lg:grid-cols-[1fr_1.2fr]' : 'grid-cols-1'}">
+		<!-- Master-Detail Content Grid -->
+		<div class="grid gap-6 pt-4 {isEditingOrCreating ? 'lg:grid-cols-[1fr_1.2fr]' : 'grid-cols-1'}">
 
-		<!-- LIST SECTION -->
-		<div class="space-y-4 {isEditingOrCreating ? 'hidden lg:block' : ''}">
-
-			<!-- SEARCH & ACTIONS BAR -->
-			<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-md border border-border bg-card p-3">
-				{#if activeTab === 'profiles'}
-					<div class="flex items-center gap-1 bg-muted/40 p-0.5 rounded border">
-						{#each [['profiles', 'Profiles'], ['blocks', 'Blocks']] as [id, label]}
-							<button
-								type="button"
-								class="rounded px-3 py-1 text-[11px] font-medium transition-all duration-150 cursor-pointer {profilesView === id ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
-								onclick={() => { cancelAllForms(); profilesView = id as 'profiles' | 'blocks'; }}
-							>{label}</button>
-						{/each}
-					</div>
-					{#if profilesView === 'profiles'}
-						<Button size="sm" class="w-full sm:w-auto text-xs font-semibold cursor-pointer shadow-xs transition-all duration-200" onclick={startCreateProfile}>
-							<Plus class="mr-1.5 h-4 w-4" /> New Profile
-						</Button>
-					{:else}
-						<Button size="sm" class="w-full sm:w-auto text-xs font-semibold cursor-pointer shadow-xs transition-all duration-200" onclick={startCreateBlock}>
-							<Plus class="mr-1.5 h-4 w-4" /> New Block
-						</Button>
-					{/if}
-				{:else}
-					<div class="relative w-full sm:w-72">
-						<Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-						{#if activeTab === 'stacks'}
-							<Input bind:value={stackSearch} placeholder="Search stacks…" class="pl-9 h-9 text-xs transition-all hover:border-primary/45 focus-visible:ring-primary/20" />
+			<!-- LIST SECTION -->
+			<div class="{isEditingOrCreating ? 'hidden lg:block' : ''}">
+				<Tabs.Content value="profiles" class="space-y-4 pt-0">
+					<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+						<div class="flex items-center gap-1 rounded-md border bg-muted/40 p-0.5" role="group" aria-label="Show profiles or blocks">
+							{#each [['profiles', 'Profiles'], ['blocks', 'Blocks']] as [id, label] (id)}
+								<button
+									type="button"
+									aria-pressed={profilesView === id}
+									class="rounded px-3 py-1 text-xs font-medium transition-colors {profilesView === id ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
+									onclick={() => { cancelAllForms(); profilesView = id as 'profiles' | 'blocks'; }}
+								>{label}</button>
+							{/each}
+						</div>
+						{#if profilesView === 'profiles'}
+							<Button size="sm" class="w-full sm:w-auto" onclick={startCreateProfile}>
+								<Plus /> New Profile
+							</Button>
 						{:else}
-							<Input bind:value={appSearch} placeholder="Search app specs…" class="pl-9 h-9 text-xs transition-all hover:border-primary/45 focus-visible:ring-primary/20" />
+							<Button size="sm" class="w-full sm:w-auto" onclick={startCreateBlock}>
+								<Plus /> New Block
+							</Button>
 						{/if}
 					</div>
-					{#if activeTab === 'app'}
-						<Button size="sm" class="w-full sm:w-auto text-xs font-semibold cursor-pointer shadow-xs transition-all duration-200" onclick={startCreateApp}>
-							<Plus class="mr-1.5 h-4 w-4" /> New App Spec
-						</Button>
-					{:else if activeTab === 'stacks'}
-						<Button size="sm" class="w-full sm:w-auto text-xs font-semibold cursor-pointer shadow-xs transition-all duration-200" onclick={startCreateStack}>
-							<Plus class="mr-1.5 h-4 w-4" /> New Stack
-						</Button>
-					{/if}
-				{/if}
-			</div>
-
-			{#if activeTab === 'profiles'}
-				{#if profilesView === 'profiles'}
-					<ProfileList
-						{profiles}
-						loading={profilesLoading}
-						activeSlug={editingProfile?.slug ?? null}
-						onEdit={startEditProfile}
-						onDuplicate={startDuplicateProfile}
-						onArchive={archiveProfile}
-					/>
-				{:else}
-					<BlockList
-						blocks={contentBlocks}
-						loading={blocksLoading}
-						activeSlug={editingBlock?.slug ?? null}
-						onEdit={startEditBlock}
-					/>
-				{/if}
-			{/if}
-
-			{#if activeTab === 'app'}
-				<AppTemplateList
-					templates={filteredApp}
-					loading={appLoading}
-					activeSlug={editingApp?.slug ?? null}
-					onEdit={startEditApp}
-					onDelete={deleteApp}
-				/>
-			{/if}
-
-			{#if activeTab === 'stacks'}
-				<StacksList
-					stacks={filteredStacks}
-					loading={stacksLoading}
-					compact={isEditingOrCreating}
-					onEdit={startEditStack}
-					onDuplicate={startDuplicateStack}
-					onArchive={archiveStackRow}
-				/>
-			{/if}
-
-		</div>
-
-		<!-- DETAIL/EDITOR COLUMN -->
-		{#if isEditingOrCreating}
-			<div class="space-y-4">
-				<!-- Mobile back button to close panel and return to list -->
-				<button
-					type="button"
-					class="lg:hidden inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer mb-2"
-					onclick={cancelAllForms}
-				>
-					<ArrowLeft class="h-4 w-4" /> Back to library
-				</button>
-
-				{#if creatingProfile || editingProfile}
-					{#key editingProfile?.id ?? 'new'}
-						<ProfileEditor
-							initial={editingProfile}
-							duplicate={duplicatingProfile}
+					{#if profilesView === 'profiles'}
+						<ProfileList
+							{profiles}
+							loading={profilesLoading}
+							activeSlug={editingProfile?.slug ?? null}
+							onEdit={startEditProfile}
+							onDuplicate={startDuplicateProfile}
+							onArchive={archiveProfile}
+						/>
+					{:else}
+						<BlockList
 							blocks={contentBlocks}
-							{stacks}
-							{appTemplates}
-							saving={profileSaving}
-							error={profileError}
-							onSave={saveProfile}
-							onCancel={cancelProfileForm}
+							loading={blocksLoading}
+							activeSlug={editingBlock?.slug ?? null}
+							onEdit={startEditBlock}
 						/>
-					{/key}
-				{/if}
+					{/if}
+				</Tabs.Content>
 
-				{#if creatingBlock || editingBlock}
-					{#key editingBlock?.id ?? 'new'}
-						<BlockEditor
-							initial={editingBlock}
-							saving={blockSaving}
-							error={blockError}
-							onSave={saveBlock}
-							onCancel={cancelBlockForm}
-						/>
-					{/key}
-				{/if}
-
-				{#if creatingStack || editingStackSlug || duplicatingStackSlug}
-					{#key editingStackSlug ?? duplicatingStackSlug ?? 'new'}
-						<StackEditor
-							editSlug={editingStackSlug}
-							duplicateFromSlug={duplicatingStackSlug}
-							saving={stackSaving}
-							error={stackError}
-							onSave={saveStack}
-							onCancel={cancelStackForm}
-						/>
-					{/key}
-				{/if}
-
-				{#if creatingApp || editingApp}
-					<AppTemplateForm
-						bind:form={appForm}
-						isEdit={editingApp !== null}
-						saving={appSaving}
-						error={appError}
-						onSave={saveApp}
-						onCancel={cancelAppForm}
+				<Tabs.Content value="app" class="space-y-4 pt-0">
+					<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+						<div class="relative w-full sm:w-72">
+							<Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+							<Input bind:value={appSearch} placeholder="Search app specs…" aria-label="Search app specs" class="pl-9 h-9" />
+						</div>
+						<Button size="sm" class="w-full sm:w-auto" onclick={startCreateApp}>
+								<Plus /> New App Spec
+							</Button>
+					</div>
+					<AppTemplateList
+						templates={filteredApp}
+						loading={appLoading}
+						activeSlug={editingApp?.slug ?? null}
+						onEdit={startEditApp}
+						onDelete={deleteApp}
 					/>
-				{/if}
+				</Tabs.Content>
+
+				<Tabs.Content value="stacks" class="space-y-4 pt-0">
+					<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+						<div class="relative w-full sm:w-72">
+							<Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+							<Input bind:value={stackSearch} placeholder="Search stacks…" aria-label="Search stacks" class="pl-9 h-9" />
+						</div>
+						<Button size="sm" class="w-full sm:w-auto" onclick={startCreateStack}>
+								<Plus /> New Stack
+							</Button>
+					</div>
+					<StacksList
+						stacks={filteredStacks}
+						loading={stacksLoading}
+						compact={isEditingOrCreating}
+						onEdit={startEditStack}
+						onDuplicate={startDuplicateStack}
+						onArchive={archiveStackRow}
+					/>
+				</Tabs.Content>
 			</div>
-		{/if}
-	</div>
+
+			<!-- DETAIL/EDITOR COLUMN -->
+			{#if isEditingOrCreating}
+				<div class="space-y-4">
+					<!-- Mobile back button to close panel and return to list -->
+					<Button variant="ghost" size="sm" class="lg:hidden" onclick={cancelAllForms}>
+						<ArrowLeft /> Back to library
+					</Button>
+
+					{#if creatingProfile || editingProfile}
+						{#key editingProfile?.id ?? 'new'}
+							<ProfileEditor
+								initial={editingProfile}
+								duplicate={duplicatingProfile}
+								blocks={contentBlocks}
+								{stacks}
+								{appTemplates}
+								saving={profileSaving}
+								error={profileError}
+								onSave={saveProfile}
+								onCancel={cancelProfileForm}
+							/>
+						{/key}
+					{/if}
+
+					{#if creatingBlock || editingBlock}
+						{#key editingBlock?.id ?? 'new'}
+							<BlockEditor
+								initial={editingBlock}
+								saving={blockSaving}
+								error={blockError}
+								onSave={saveBlock}
+								onCancel={cancelBlockForm}
+							/>
+						{/key}
+					{/if}
+
+					{#if creatingStack || editingStackSlug || duplicatingStackSlug}
+						{#key editingStackSlug ?? duplicatingStackSlug ?? 'new'}
+							<StackEditor
+								editSlug={editingStackSlug}
+								duplicateFromSlug={duplicatingStackSlug}
+								saving={stackSaving}
+								error={stackError}
+								onSave={saveStack}
+								onCancel={cancelStackForm}
+							/>
+						{/key}
+					{/if}
+
+					{#if creatingApp || editingApp}
+						<AppTemplateForm
+							bind:form={appForm}
+							isEdit={editingApp !== null}
+							saving={appSaving}
+							error={appError}
+							onSave={saveApp}
+							onCancel={cancelAppForm}
+						/>
+					{/if}
+				</div>
+			{/if}
+		</div>
+	</Tabs.Root>
 </div>
 
 <PackagesDialog

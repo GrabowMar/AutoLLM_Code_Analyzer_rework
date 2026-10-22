@@ -1,10 +1,9 @@
 <script lang="ts">
-	import { Badge } from '$lib/components/ui/badge';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import { containerTones } from '$lib/constants/colors';
 	import { Button } from '$lib/components/ui/button';
 	import { formatDuration } from '$lib/utils/formatters';
 	import {
-		jobListStatusColors as statusColors,
-		jobListContainerStatusColors as containerStatusColors,
 		jobDescription,
 		timeAgo,
 	} from './utils';
@@ -58,7 +57,7 @@
 	{#each jobs as job (job.id)}
 		{@const container = containersByJobId[job.id]}
 		{@const isBusy = containerBusy[job.id]}
-		<div class="block rounded-lg border bg-card p-3.5 transition-colors hover:bg-muted/50 space-y-3">
+		<div class="block rounded-lg border bg-card p-3.5 space-y-3">
 			<!-- Card Header: Mode & Time -->
 			<div class="flex items-center justify-between gap-2">
 				<div class="flex items-center gap-2.5 min-w-0 flex-1">
@@ -67,7 +66,7 @@
 							<Pencil class="h-4 w-4 text-muted-foreground" />
 						{:else if job.mode === 'scaffolding'}
 							<Layers class="h-4 w-4 text-muted-foreground" />
-						{:else if job.mode === 'copilot'}
+						{:else if job.mode === 'agent' || job.mode === 'copilot'}
 							<Bot class="h-4 w-4 text-muted-foreground" />
 						{/if}
 					</div>
@@ -87,25 +86,15 @@
 			<div class="grid grid-cols-2 gap-2.5 py-2.5 border-y">
 				<!-- Job Status -->
 				<div class="flex flex-col gap-1">
-					<span class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Job Status</span>
-					<Badge variant="outline" class="w-fit text-[9px] font-mono px-1.5 py-0.5 {statusColors[job.status] ?? ''}">
-						{#if job.status === 'running'}
-							<span class="mr-1 h-1 w-1 rounded-full bg-amber-500 animate-pulse"></span>
-						{/if}
-						{job.status}
-					</Badge>
+					<span class="section-label">Job Status</span>
+					<StatusBadge status={job.status} class="w-fit" />
 				</div>
 
 				<!-- Container / App -->
 				<div class="flex flex-col gap-1">
-					<span class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Container</span>
+					<span class="section-label">Container</span>
 					{#if container}
-						<Badge variant="outline" class="w-fit text-[9px] font-mono px-1.5 py-0.5 {containerStatusColors[container.status] ?? ''}">
-							{#if container.status === 'running'}
-								<span class="h-1 w-1 rounded-full bg-emerald-500 animate-ping mr-1"></span>
-							{/if}
-							{container.status}
-						</Badge>
+						<StatusBadge status={container.status} tones={containerTones} class="w-fit" />
 					{:else}
 						<span class="text-xs text-muted-foreground/60 italic">Not created</span>
 					{/if}
@@ -119,7 +108,7 @@
 						{#if container.status === 'running'}
 							{@const accessUrl = container.app_url ?? null}
 							<div class="flex items-center justify-between gap-2 flex-wrap">
-								<span class="text-[10.5px] text-muted-foreground font-mono">Port: {container.app_port}</span>
+								<span class="text-[11px] text-muted-foreground font-mono">Port: {container.app_port}</span>
 								{#if accessUrl}
 									<Button
 										id="mobile-access-app-btn-{job.id}"
@@ -128,7 +117,7 @@
 										href={accessUrl}
 										target="_blank"
 										rel="noopener noreferrer"
-										class="h-8 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 hover:border-emerald-500/50"
+										class="h-8 text-success-fg"
 									>
 										<ExternalLink class="h-3 w-3 mr-1.5" />
 										Access App
@@ -142,7 +131,7 @@
 									id="mobile-start-btn-{job.id}"
 									variant="outline"
 									size="sm"
-									class="h-8 text-xs gap-1 hover:bg-emerald-500/10 hover:text-emerald-400 border-zinc-700/50"
+									class="h-8 gap-1 text-xs"
 									disabled={isBusy != null}
 									onclick={() => onStart(job.id, container.id)}
 								>
@@ -157,12 +146,12 @@
 							</div>
 						{:else if container.status === 'failed'}
 							<div class="flex flex-col gap-1.5">
-								<span class="text-[10px] text-destructive font-mono line-clamp-1">{container.last_error || 'Container failed'}</span>
+								<span class="text-[11px] text-destructive font-mono line-clamp-1">{container.last_error || 'Container failed'}</span>
 								<Button
 									id="mobile-restart-btn-{job.id}"
 									variant="outline"
 									size="sm"
-									class="h-8 text-xs gap-1 hover:bg-amber-500/10 hover:text-amber-400 border-red-500/20"
+									class="h-8 gap-1 text-xs"
 									disabled={isBusy != null}
 									onclick={() => onStart(job.id, container.id)}
 								>
@@ -176,7 +165,7 @@
 								</Button>
 							</div>
 						{:else if container.status === 'building'}
-							<span class="text-xs text-amber-400/90 font-medium flex items-center gap-1.5 justify-center py-1">
+							<span class="text-xs text-warning-fg font-medium flex items-center gap-1.5 justify-center py-1">
 								<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
 								Provisioning environment...
 							</span>
@@ -217,8 +206,8 @@
 								id="mobile-action-stop-{job.id}"
 								variant="ghost"
 								size="sm"
-								class="h-8 w-8 p-0 text-amber-500 hover:bg-amber-500/10"
-								title="Stop Container"
+								class="h-8 w-8 p-0 text-warning-fg hover:bg-warning/10"
+								title="Stop Container" aria-label="Stop Container"
 								disabled={isBusy != null}
 								onclick={() => onStop(job.id, container.id)}
 							>
@@ -235,7 +224,7 @@
 								variant="ghost"
 								size="sm"
 								class="h-8 w-8 p-0 text-destructive hover:bg-destructive/10"
-								title="Remove Container"
+								title="Remove Container" aria-label="Remove Container"
 								disabled={isBusy != null}
 								onclick={() => onRemoveContainer(job.id, container.id)}
 							>
@@ -248,29 +237,29 @@
 						{/if}
 					{/if}
 
-					<Button variant="ghost" size="sm" class="h-8 w-8 p-0" href="/applications/{job.id}" title="View details">
+					<Button variant="ghost" size="sm" class="h-8 w-8 p-0" href="/applications/{job.id}" title="View details" aria-label="View details">
 						<Eye class="h-4 w-4" />
 					</Button>
 					{#if job.status === 'failed' || job.status === 'cancelled'}
-						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-blue-400 hover:bg-blue-500/10" title="Retry" onclick={() => onRetry(job.id)}>
+						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-info-fg hover:bg-info/10" title="Retry" aria-label="Retry" onclick={() => onRetry(job.id)}>
 							<RotateCcw class="h-4 w-4" />
 						</Button>
 					{/if}
 					{#if job.status === 'failed'}
-						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-destructive hover:bg-destructive/10" href="/applications/{job.id}/failure" title="Failure details">
+						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-destructive hover:bg-destructive/10" href="/applications/{job.id}/failure" title="Failure details" aria-label="Failure details">
 							<AlertTriangle class="h-4 w-4" />
 						</Button>
 					{/if}
 					{#if job.status === 'pending' || job.status === 'running'}
-						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-amber-400 hover:bg-amber-500/10" title="Cancel" onclick={() => onCancel(job.id)}>
+						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-warning-fg hover:bg-warning/10" title="Cancel" aria-label="Cancel" onclick={() => onCancel(job.id)}>
 							<Ban class="h-4 w-4" />
 						</Button>
 					{/if}
-					<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-muted-foreground" title="Copy ID" onclick={() => onCopyId(job.id)}>
+					<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-muted-foreground" title="Copy ID" aria-label="Copy ID" onclick={() => onCopyId(job.id)}>
 						<Copy class="h-3.5 w-3.5" />
 					</Button>
 					{#if job.status !== 'running'}
-						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-destructive hover:bg-destructive/10" title="Delete" onclick={() => onDelete(job.id)}>
+						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-destructive hover:bg-destructive/10" title="Delete" aria-label="Delete" onclick={() => onDelete(job.id)}>
 							<Trash2 class="h-3.5 w-3.5" />
 						</Button>
 					{/if}

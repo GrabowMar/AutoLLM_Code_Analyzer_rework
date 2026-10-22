@@ -1,7 +1,10 @@
 <script lang="ts">
 import { page } from '$app/stores';
 import { goto } from '$app/navigation';
-import * as Card from '$lib/components/ui/card';
+import * as Tabs from '$lib/components/ui/tabs';
+import PageHeader from '$lib/components/PageHeader.svelte';
+import LoadingState from '$lib/components/LoadingState.svelte';
+import EmptyState from '$lib/components/EmptyState.svelte';
 import { Button } from '$lib/components/ui/button';
 import {
 	getGenerationJob,
@@ -27,7 +30,6 @@ import Shield from '@lucide/svelte/icons/shield';
 import Database from '@lucide/svelte/icons/database';
 import ChartBar from '@lucide/svelte/icons/chart-bar';
 import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
-import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 import Server from '@lucide/svelte/icons/server';
 import Wrench from '@lucide/svelte/icons/wrench';
 import FileText from '@lucide/svelte/icons/file-text';
@@ -45,6 +47,7 @@ import ApplicationContainer from '$lib/components/applications/ApplicationContai
 import ApplicationTools from '$lib/components/applications/ApplicationTools.svelte';
 import ApplicationAnalyses from '$lib/components/applications/ApplicationAnalyses.svelte';
 import ApplicationLogs from '$lib/components/applications/ApplicationLogs.svelte';
+import AgentRunSummary from '$lib/components/applications/AgentRunSummary.svelte';
 import {
 	type CodeFootprint,
 	type VirtualFile,
@@ -60,6 +63,7 @@ let activeSection = $state('overview');
 const sections = $derived(
 	[
 		{ id: 'overview', label: 'Overview', icon: Eye },
+		job?.mode === 'agent' ? { id: 'agent', label: 'Agent Run', icon: Bot } : null,
 		{ id: 'prompts', label: 'Prompts', icon: Terminal },
 		{ id: 'files', label: 'Files & Code', icon: FolderTree },
 		{ id: 'container', label: 'Container', icon: Server },
@@ -86,7 +90,24 @@ const codeFootprint = $derived.by<CodeFootprint | null>(() => {
 	const languages: Record<string, number> = {};
 	const files: VirtualFile[] = [];
 
-	if (job.mode === 'scaffolding') {
+	const fileMap = rd.files && typeof rd.files === 'object' ? (rd.files as Record<string, string>) : null;
+	if (job.mode === 'agent' && fileMap) {
+		// Agent runs: the whole collected workspace, path for path.
+		const langByExt: Record<string, [string, string]> = {
+			py: ['Python', 'python'], js: ['JavaScript', 'javascript'], jsx: ['JavaScript', 'javascript'],
+			ts: ['TypeScript', 'typescript'], tsx: ['TypeScript', 'typescript'], vue: ['Vue', 'html'],
+			html: ['HTML', 'html'], css: ['CSS', 'css'], json: ['JSON', 'json'], md: ['Markdown', 'markdown'],
+		};
+		for (const [path, code] of Object.entries(fileMap).sort(([a], [b]) => a.localeCompare(b))) {
+			if (typeof code !== 'string') continue;
+			const lines = code.split('\n').length;
+			const [label, lang] = langByExt[path.split('.').pop()?.toLowerCase() ?? ''] ?? ['Other', 'text'];
+			totalLines += lines;
+			totalChars += code.length;
+			languages[label] = (languages[label] ?? 0) + lines;
+			files.push({ name: path, code, lang });
+		}
+	} else if (job.mode === 'scaffolding') {
 		if (rd.backend_code) {
 			const lines = rd.backend_code.split('\n').length;
 			totalLines += lines;
@@ -280,39 +301,26 @@ async function handleRetry() {
 	}
 }
 
-function scrollToSection(id: string) {
-	activeSection = id;
-	document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
 onMount(fetchData);
 </script>
 
-<svelte:head>
-	<title>{job?.model_name ?? 'Application'} - LLM Lab</title>
-</svelte:head>
-
 {#if loading}
-	<div class="flex items-center justify-center py-32">
-		<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
-		<span class="ml-3 text-muted-foreground">Loading application details...</span>
-	</div>
+	<LoadingState label="loading application" />
 {:else if !job}
-	<Card.Root>
-		<Card.Content class="py-16 text-center">
-			<AlertTriangle class="mx-auto h-12 w-12 text-destructive mb-4" />
-			<h3 class="text-lg font-medium">Job not found</h3>
-			<Button variant="outline" size="sm" href="/applications" class="mt-4">Back to Applications</Button>
-		</Card.Content>
-	</Card.Root>
+	<div class="space-y-6">
+		<PageHeader title="Application" back={{ href: '/applications', label: 'Applications' }} />
+		<EmptyState icon={AlertTriangle} title="Job not found" description="It may have been deleted, or the link is wrong.">
+			{#snippet action()}
+				<Button variant="outline" size="sm" href="/applications">Back to Applications</Button>
+			{/snippet}
+		</EmptyState>
+	</div>
 {:else}
-	<div class="space-y-5">
+	<div class="space-y-6">
 		<ApplicationHeader
 			{job}
 			{provider}
 			{codeFootprint}
-			{sections}
-			{activeSection}
 			totalTokens={costData.totalTokens}
 			totalCost={costData.totalCost}
 			onCancel={handleCancel}
@@ -320,47 +328,39 @@ onMount(fetchData);
 			onExport={handleExport}
 			onDownloadCode={downloadCode}
 			onDelete={handleDelete}
-			onNavigate={scrollToSection}
 		/>
 
-		<ApplicationOverview
-			{job}
-			{provider}
-			{codeFootprint}
-			{fixesData}
-			{frameworkInfo}
-			{costData}
-		/>
+		<Tabs.Root bind:value={activeSection}>
+			<Tabs.List aria-label="Application sections">
+				{#each sections as sec (sec.id)}
+					{@const SecIcon = sec.icon}
+					<Tabs.Trigger value={sec.id}><SecIcon />{sec.label}</Tabs.Trigger>
+				{/each}
+			</Tabs.List>
 
-		<ApplicationPrompts {job} {artifacts} />
-
-		<ApplicationFiles files={virtualFiles} />
-
-		<ApplicationContainer jobId={job.id} jobStatus={job.status} />
-
-		<ApplicationTools jobId={job.id} />
-
-		<ApplicationAnalyses jobId={job.id} />
-
-		<ApplicationLogs jobId={job.id} />
-
-		{#if backendScan}
-			<ApplicationApiScan scan={backendScan} />
-		{/if}
-
-		<ApplicationDependencies deps={backendDeps} mode={job.mode} />
-
-		<ApplicationArtifacts {artifacts} />
-
-		{#if job.mode === 'copilot' && iterations.length > 0}
-			<ApplicationIterations {iterations} />
-		{/if}
-
-		<ApplicationMetrics
-			{job}
-			{costData}
-			artifactCount={artifacts.length}
-			iterationCount={iterations.length}
-		/>
+			<Tabs.Content value="overview">
+				<ApplicationOverview {job} {provider} {codeFootprint} {fixesData} {frameworkInfo} {costData} />
+			</Tabs.Content>
+			{#if job.mode === 'agent'}
+				<Tabs.Content value="agent"><AgentRunSummary {job} /></Tabs.Content>
+			{/if}
+			<Tabs.Content value="prompts"><ApplicationPrompts {job} {artifacts} /></Tabs.Content>
+			<Tabs.Content value="files"><ApplicationFiles files={virtualFiles} /></Tabs.Content>
+			<Tabs.Content value="container"><ApplicationContainer jobId={job.id} jobStatus={job.status} /></Tabs.Content>
+			<Tabs.Content value="tools"><ApplicationTools jobId={job.id} /></Tabs.Content>
+			<Tabs.Content value="analyses"><ApplicationAnalyses jobId={job.id} /></Tabs.Content>
+			<Tabs.Content value="logs"><ApplicationLogs jobId={job.id} /></Tabs.Content>
+			{#if backendScan}
+				<Tabs.Content value="scan"><ApplicationApiScan scan={backendScan} /></Tabs.Content>
+			{/if}
+			<Tabs.Content value="dependencies"><ApplicationDependencies deps={backendDeps} mode={job.mode} /></Tabs.Content>
+			<Tabs.Content value="artifacts"><ApplicationArtifacts {artifacts} /></Tabs.Content>
+			{#if job.mode === 'copilot'}
+				<Tabs.Content value="iterations"><ApplicationIterations {iterations} /></Tabs.Content>
+			{/if}
+			<Tabs.Content value="metrics">
+				<ApplicationMetrics {job} {costData} artifactCount={artifacts.length} iterationCount={iterations.length} />
+			</Tabs.Content>
+		</Tabs.Root>
 	</div>
 {/if}

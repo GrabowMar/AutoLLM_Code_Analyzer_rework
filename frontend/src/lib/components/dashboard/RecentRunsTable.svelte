@@ -3,7 +3,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
-	import { generationStatusColors as statusColors } from '$lib/constants/colors';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import type { RecentAnalysis } from '$lib/utils/dashboard';
 
 	interface Props {
@@ -50,13 +51,7 @@
 								>
 							</td>
 							<td class="px-4 py-2.5" data-label="Status">
-								<span
-									class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium {statusColors[
-										analysis.status
-									]}"
-								>
-									{analysis.status}
-								</span>
+								<StatusBadge status={analysis.status} />
 							</td>
 							<td class="px-4 py-2.5" data-label="Time">
 								<span class="text-xs text-muted-foreground">{analysis.time}</span>
@@ -64,8 +59,12 @@
 						</tr>
 					{:else}
 						<tr>
-							<td colspan="3" class="px-4 py-6 text-center text-sm text-muted-foreground">
-								No analyses yet — start one above.
+							<td colspan="3">
+								<EmptyState compact icon={FlaskConical} title="No analyses yet">
+									{#snippet action()}
+										<Button href="/analysis/create" size="sm" variant="outline">New analysis</Button>
+									{/snippet}
+								</EmptyState>
 							</td>
 						</tr>
 					{/each}

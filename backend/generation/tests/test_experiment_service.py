@@ -32,7 +32,9 @@ def user():
 
 @pytest.fixture
 def experiment(user):
-    exp = ExperimentFactory(created_by=user, repeats=2)
+    # These tests cover the scaffolding (template) path and its cost heuristic;
+    # agent-mode experiments are covered in test_agent_mode.py.
+    exp = ExperimentFactory(created_by=user, repeats=2, mode="scaffolding")
     exp.app_requirements.add(AppRequirementTemplateFactory(), AppRequirementTemplateFactory())
     return exp
 

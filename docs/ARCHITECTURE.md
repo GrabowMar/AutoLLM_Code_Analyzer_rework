@@ -12,7 +12,7 @@ flowchart LR
     DJ --> RD[(Redis)]
     DJ -->|threads| GEN["Generation / analysis runs"]
     RD --> CW["Celery worker + beat"]
-    DJ -->|docker.sock| DK["Docker daemon"]
+    DJ -->|"mTLS :2376"| DK["apps-dind (sandbox Docker daemon)"]
     DK --> AW["Analyzer workspaces (per user)"]
     DK --> SA["Generated sample apps"]
     GEN --> OR[["OpenRouter"]]
@@ -54,10 +54,14 @@ Details in [Background services](/docs/BACKGROUND_SERVICES).
 
 ## Docker surfaces
 
-Django mounts `/var/run/docker.sock` and drives two kinds of sibling containers:
+Django never touches the host Docker daemon. Locally it drives `apps-dind`, a sandbox Docker-in-Docker service, over mutual TLS (`APPS_DOCKER_HOST=tcp://apps-dind:2376`, client cert from `APPS_DOCKER_CERT_PATH`), and two kinds of containers run nested inside it:
 
 1. **Analyzer workspaces** — one long-lived, hardened container per user, built from the `backend/analyzer-base:latest` image (`backend/analysis/images/analyzer-base`). Analysis tools are installed into it once and reused across runs; each run's code is copied into `/work` after wiping the previous run's files.
-2. **Generated sample apps** — each completed generation job can be built and started as its own container by the `runtime` app. Locally they're reached through the in-app path proxy (`/apps/<name>/`); in production `AppSubdomainProxyMiddleware` serves each app at `<container>.<APPS_DOMAIN>` behind Traefik — see [Deployment guide](/docs/deployment-guide).
+2. **Generated sample apps** — each completed generation job can be built and started as its own container by the `runtime` app. Locally an app's port is published only inside `apps-dind`, and Django's path proxy (`/apps/<name>/`) forwards to `apps-dind:<app_port>`; in production `AppSubdomainProxyMiddleware` serves each app at `<container>.<APPS_DOMAIN>` behind Traefik — see [Deployment guide](/docs/deployment-guide).
+
+`apps-dind` fences its nested containers off from private address space (the stack's own network with Postgres/Redis/Django, other host networks, cloud metadata) with `DOCKER-USER` rules set by `compose/local/apps-dind/entrypoint.sh`; public internet stays open for package installs. Replies to connections Django opens into an app still flow.
+
+The local stack is the compose project `llmlab`. Every service has a memory/CPU/PID cap and `oom_score_adj: 500`, so on a shared host the stack throttles itself and is the OOM killer's first pick. `apps-dind`'s cap (4 GB, 4 CPUs) covers all nested apps together. Inside it, logs rotate, build cache is capped at 5 GB, images unused for a week are pruned hourly, and removing an app also deletes its image. The devcontainer has no host Docker socket: its `docker` CLI is pointed at `apps-dind` too.
 
 ## Data flow
 

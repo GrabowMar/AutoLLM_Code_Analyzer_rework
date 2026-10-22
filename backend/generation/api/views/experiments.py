@@ -18,6 +18,8 @@ from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import Experiment
 from backend.generation.models import ExperimentCondition
 from backend.generation.models import GenerationProfile
+from backend.generation.services.agent.config import validate_agent_config
+from backend.generation.services.agent.harnesses import get_harness
 from backend.generation.services.experiments import experiment_status
 from backend.generation.services.experiments import export_experiment
 from backend.generation.services.experiments import launch_experiment
@@ -42,6 +44,13 @@ def _validated(params: dict | None) -> dict:
         raise HttpError(400, str(exc)) from exc
 
 
+def _validated_agent(config: dict | None) -> dict:
+    try:
+        return validate_agent_config(config or {})
+    except ValueError as exc:
+        raise HttpError(400, str(exc)) from exc
+
+
 @router.get("/experiments/", response=list[ExperimentSchema])
 def list_experiments(request):
     return Experiment.objects.filter(created_by=request.auth).prefetch_related("app_requirements", "conditions")
@@ -58,6 +67,8 @@ def create_experiment(request, payload: ExperimentCreateSchema):
         hypothesis=payload.hypothesis,
         repeats=payload.repeats,
         base_seed=payload.base_seed,
+        mode=payload.mode,
+        agent_config=_validated_agent(payload.agent_config.as_config() if payload.agent_config else {}),
         continuation_limit=payload.continuation_limit,
         enable_repair=payload.enable_repair,
         llm_defaults=_validated(payload.llm_defaults.as_params() if payload.llm_defaults else {}),
@@ -83,6 +94,8 @@ def update_experiment(request, experiment_id: str, payload: ExperimentUpdateSche
     app_ids = data.pop("app_requirement_ids", None)
     if "llm_defaults" in data:
         data["llm_defaults"] = _validated(data["llm_defaults"])
+    if "agent_config" in data:
+        data["agent_config"] = _validated_agent(data["agent_config"])
     for field, value in data.items():
         setattr(experiment, field, value)
     experiment.save()
@@ -121,13 +134,24 @@ def create_condition(request, experiment_id: str, payload: ExperimentConditionCr
 
     profile = get_object_or_404(GenerationProfile, id=payload.profile_id, is_archived=False)
     model = get_object_or_404(LLMModel, id=payload.model_id)
-    if experiment.conditions.filter(profile=profile, model=model).exists():
-        return 400, {"detail": "This experiment already has a condition for that profile + model."}
+    harness_name = payload.harness.strip()
+    if harness_name:
+        if experiment.mode != "agent":
+            raise HttpError(400, "A harness only applies to agent-mode experiments.")
+        try:
+            harness = get_harness(harness_name)
+        except ValueError as exc:
+            raise HttpError(400, str(exc)) from exc
+        if harness.requires_tool_calling and not model.supports_function_calling:
+            raise HttpError(400, f"{harness.label} needs a tool-calling model; {model.model_id} has none.")
+    if experiment.conditions.filter(profile=profile, model=model, harness=harness_name).exists():
+        return 400, {"detail": "This experiment already has a condition for that profile + model + harness."}
     return ExperimentCondition.objects.create(
         experiment=experiment,
         label=payload.label,
         profile=profile,
         model=model,
+        harness=harness_name,
         param_overrides=_validated(payload.param_overrides),
     )
 

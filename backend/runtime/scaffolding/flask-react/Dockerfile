@@ -1,7 +1,7 @@
 # Stage 1: Build React frontend
 FROM node:20-alpine AS frontend-builder
 WORKDIR /frontend
-COPY frontend/package.json ./
+COPY frontend/package*.json ./
 RUN npm install --silent
 COPY frontend/ ./
 RUN npm run build
@@ -17,7 +17,9 @@ RUN apt-get update \
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py ./
+# Whole backend tree (multi-module apps); .dockerignore keeps out
+# node_modules, build output and local data.
+COPY . .
 COPY --from=frontend-builder /frontend/dist ./static
 RUN mkdir -p data
 

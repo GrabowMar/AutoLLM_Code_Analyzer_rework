@@ -1,6 +1,5 @@
 import { toast } from "svelte-sonner";
 
-export { generationStatusColors as statusColors } from "$lib/constants/colors";
 export {
   formatNumber as fmt,
   formatDuration as fmtDur,
@@ -9,58 +8,22 @@ export {
   formatCost as fmtCost,
 } from "$lib/utils/formatters";
 
-export const modeColors: Record<string, string> = {
-  custom: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  scaffolding: "bg-purple-500/15 text-purple-400 border-purple-500/30",
-  copilot: "bg-teal-500/15 text-teal-400 border-teal-500/30",
-};
-
 export const httpColors: Record<string, string> = {
-  GET: "text-emerald-400",
-  POST: "text-blue-400",
-  PUT: "text-amber-400",
-  DELETE: "text-red-400",
-  PATCH: "text-purple-400",
+  GET: "text-success-fg",
+  POST: "text-info-fg",
+  PUT: "text-warning-fg",
+  DELETE: "text-danger-fg",
+  PATCH: "text-primary",
 };
 
 export const segmentBorderColors: Record<string, string> = {
-  metadata: "border-l-purple-400 bg-purple-500/5",
-  system: "border-l-blue-400 bg-blue-500/5",
-  user: "border-l-emerald-400 bg-emerald-500/5",
-  template: "border-l-sky-400 bg-sky-500/5",
-  requirements: "border-l-emerald-400 bg-emerald-500/5",
-  scaffolding: "border-l-orange-400 bg-orange-500/5",
+  metadata: "border-l-muted-foreground bg-muted/40",
+  system: "border-l-info bg-info/5",
+  user: "border-l-success bg-success/5",
+  template: "border-l-primary bg-primary/5",
+  requirements: "border-l-success bg-success/5",
+  scaffolding: "border-l-warning bg-warning/5",
   default: "",
-};
-
-// Applications-list palette: lighter /10 fills with explicit dark: variants,
-// unlike the shared /15 maps in $lib/constants/colors.
-export const jobListStatusColors: Record<string, string> = {
-  completed:
-    "bg-emerald-500/10 text-emerald-500 border-emerald-500/30 dark:text-emerald-400 dark:border-emerald-500/20",
-  failed:
-    "bg-red-500/10 text-red-500 border-red-500/30 dark:text-red-400 dark:border-red-500/20",
-  running:
-    "bg-amber-500/10 text-amber-500 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/20",
-  pending:
-    "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
-  cancelled:
-    "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
-};
-
-export const jobListContainerStatusColors: Record<string, string> = {
-  pending:
-    "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
-  building:
-    "bg-amber-500/10 text-amber-500 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/20 animate-pulse",
-  running:
-    "bg-emerald-500/10 text-emerald-500 border-emerald-500/30 dark:text-emerald-400 dark:border-emerald-500/20",
-  stopped:
-    "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
-  failed:
-    "bg-red-500/10 text-red-500 border-red-500/30 dark:text-red-400 dark:border-red-500/20",
-  removed:
-    "bg-zinc-500/10 text-zinc-500 border-zinc-500/30 dark:text-zinc-400 dark:border-zinc-500/20",
 };
 
 export function timeAgo(dateStr: string): string {

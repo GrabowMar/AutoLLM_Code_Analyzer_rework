@@ -1,6 +1,7 @@
 <script lang="ts">
-	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
@@ -29,7 +30,6 @@
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import CircleX from '@lucide/svelte/icons/circle-x';
 	import Clock from '@lucide/svelte/icons/clock';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import { goto } from '$app/navigation';
 
@@ -295,7 +295,7 @@
 			});
 		}
 		if (modeFilter) {
-			const labels: Record<string, string> = { custom: 'Custom', scaffolding: 'Scaffolding', copilot: 'Copilot' };
+			const labels: Record<string, string> = { agent: 'Agent', custom: 'Custom', scaffolding: 'Scaffolding', copilot: 'Copilot (legacy)' };
 			tags.push({
 				key: 'mode',
 				label: `Mode: ${labels[modeFilter] || modeFilter}`,
@@ -351,64 +351,34 @@
 	});
 </script>
 
-<svelte:head>
-	<title>Applications - LLM Lab</title>
-	<meta name="description" content="View and manage generated web applications from LLM models, monitor containers, and access active projects." />
-</svelte:head>
-
-<div class="space-y-3">
-	<!-- Header -->
-	<div class="flex items-center justify-between gap-2">
-		<div class="page-header min-w-0">
-			<h1>Applications</h1>
-			<p class="hidden sm:block">Browse and manage generated web applications.</p>
-		</div>
-		<div class="flex flex-wrap items-center justify-end gap-2">
-			<Button
-				id="btn-refresh"
-				variant="outline"
-				size="sm"
-				onclick={refresh}
-				disabled={refreshing}
-			>
-				<RefreshCw class="h-3.5 w-3.5 sm:mr-2 {refreshing ? 'animate-spin' : ''}" />
-				<span class="hidden sm:inline">Refresh</span>
+<div class="space-y-6">
+	<PageHeader title="Applications" description="Browse and manage generated web applications.">
+		{#snippet actions()}
+			<Button id="btn-refresh" variant="outline" size="sm" onclick={refresh} disabled={refreshing}>
+				<RefreshCw class="h-3.5 w-3.5 {refreshing ? 'animate-spin' : ''}" />
+				Refresh
 			</Button>
-			<Button
-				id="btn-generate-new"
-				variant="outline"
-				size="sm"
-				href="/sample-generator"
-			>
-				<FlaskConical class="h-3.5 w-3.5 sm:mr-2" />
-				<span class="hidden sm:inline">Generate New</span>
+			<Button id="btn-generate-new" size="sm" href="/sample-generator">
+				<FlaskConical class="h-3.5 w-3.5" />
+				Generate New
 			</Button>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
-	<!-- Stats Bar -->
 	{#if stats}
-		<div class="flex flex-wrap items-center gap-2 text-xs">
-			<Badge variant="secondary" class="gap-1.5">
-				<AppWindow class="h-3 w-3" />
-				{stats.total} total apps
-			</Badge>
-			<Badge variant="secondary" class="gap-1.5 text-emerald-600 dark:text-emerald-400">
-				<CircleCheck class="h-3 w-3" />
-				{stats.completed} completed
-			</Badge>
-			<Badge variant="secondary" class="gap-1.5 text-amber-600 dark:text-amber-400">
-				<RefreshCw class="h-3 w-3 animate-pulse" />
-				{stats.running} running
-			</Badge>
-			<Badge variant="outline" class="text-red-600 dark:text-red-400">
-				<CircleX class="h-3 w-3" />
-				{stats.failed} failed
-			</Badge>
-			<Badge variant="outline">
-				<Clock class="h-3 w-3" />
-				{stats.pending} pending
-			</Badge>
+		<div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
+			{#each [
+				{ label: 'Total', value: stats.total },
+				{ label: 'Completed', value: stats.completed },
+				{ label: 'Running', value: stats.running },
+				{ label: 'Failed', value: stats.failed },
+				{ label: 'Pending', value: stats.pending }
+			] as kpi (kpi.label)}
+				<div class="kpi-card">
+					<span class="kpi-label">{kpi.label}</span>
+					<span class="kpi-value">{kpi.value}</span>
+				</div>
+			{/each}
 		</div>
 	{/if}
 
@@ -434,39 +404,36 @@
 					onclick={() => selectStatusTab('')}
 				>
 					<AppWindow class="h-3 w-3" /> All
-					{#if stats}<span class="ml-1 font-mono text-[10px]">{stats.total}</span>{/if}
+					{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.total}</span>{/if}
 				</button>
 				<button
-					class="fb-chip {statusFilter === 'completed' ? 'fb-chip-emerald' : ''}"
+					class="fb-chip {statusFilter === 'completed' ? 'fb-chip-on' : ''}"
 					onclick={() => selectStatusTab('completed')}
 				>
 					<CircleCheck class="h-3 w-3" /> Completed
-					{#if stats}<span class="ml-1 font-mono text-[10px]">{stats.completed}</span>{/if}
+					{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.completed}</span>{/if}
 				</button>
 				<button
-					class="fb-chip {statusFilter === 'running' ? 'fb-chip-amber' : ''}"
+					class="fb-chip {statusFilter === 'running' ? 'fb-chip-on' : ''}"
 					onclick={() => selectStatusTab('running')}
 				>
-					<span class="relative flex h-1.5 w-1.5 shrink-0">
-						<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-						<span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
-					</span>
+					<span class="status-dot status-dot-live h-1.5 w-1.5 text-info" aria-hidden="true"></span>
 					Running
-					{#if stats}<span class="ml-1 font-mono text-[10px]">{stats.running}</span>{/if}
+					{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.running}</span>{/if}
 				</button>
 				<button
-					class="fb-chip {statusFilter === 'failed' ? 'fb-chip-red' : ''}"
+					class="fb-chip {statusFilter === 'failed' ? 'fb-chip-on' : ''}"
 					onclick={() => selectStatusTab('failed')}
 				>
 					<CircleX class="h-3 w-3" /> Failed
-					{#if stats}<span class="ml-1 font-mono text-[10px]">{stats.failed}</span>{/if}
+					{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.failed}</span>{/if}
 				</button>
 				<button
-					class="fb-chip {statusFilter === 'pending' ? 'fb-chip-slate' : ''}"
+					class="fb-chip {statusFilter === 'pending' ? 'fb-chip-on' : ''}"
 					onclick={() => selectStatusTab('pending')}
 				>
 					<Clock class="h-3 w-3" /> Pending
-					{#if stats}<span class="ml-1 font-mono text-[10px]">{stats.pending}</span>{/if}
+					{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.pending}</span>{/if}
 				</button>
 			</div>
 
@@ -474,18 +441,19 @@
 			<div class="fb-group">
 				<span class="fb-group-label">Mode</span>
 				<button class="fb-chip {modeFilter === '' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = ''; applyFilters(); }}>All</button>
+				<button class="fb-chip {modeFilter === 'agent' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'agent'; applyFilters(); }}>Agent</button>
 				<button class="fb-chip {modeFilter === 'custom' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'custom'; applyFilters(); }}>Custom</button>
 				<button class="fb-chip {modeFilter === 'scaffolding' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'scaffolding'; applyFilters(); }}>Scaffolding</button>
-				<button class="fb-chip {modeFilter === 'copilot' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'copilot'; applyFilters(); }}>Copilot</button>
+				<button class="fb-chip {modeFilter === 'copilot' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'copilot'; applyFilters(); }}>Copilot (legacy)</button>
 			</div>
 
 			<!-- Row 3: Container -->
 			<div class="fb-group">
 				<span class="fb-group-label">Container</span>
 				<button class="fb-chip {containerFilter === '' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = ''; applyFilters(); }}>All</button>
-				<button class="fb-chip {containerFilter === 'running' ? 'fb-chip-emerald' : ''}" onclick={() => { containerFilter = 'running'; applyFilters(); }}>Running</button>
-				<button class="fb-chip {containerFilter === 'stopped' ? 'fb-chip-slate' : ''}" onclick={() => { containerFilter = 'stopped'; applyFilters(); }}>Stopped</button>
-				<button class="fb-chip {containerFilter === 'building' ? 'fb-chip-amber' : ''}" onclick={() => { containerFilter = 'building'; applyFilters(); }}>Building</button>
+				<button class="fb-chip {containerFilter === 'running' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'running'; applyFilters(); }}>Running</button>
+				<button class="fb-chip {containerFilter === 'stopped' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'stopped'; applyFilters(); }}>Stopped</button>
+				<button class="fb-chip {containerFilter === 'building' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'building'; applyFilters(); }}>Building</button>
 				<button class="fb-chip {containerFilter === 'none' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'none'; applyFilters(); }}>None</button>
 			</div>
 
@@ -523,10 +491,6 @@
 		{/snippet}
 
 		{#snippet actions()}
-			<Button variant="outline" size="sm" onclick={refresh} disabled={refreshing}>
-				<RefreshCw class="h-3.5 w-3.5 {refreshing ? 'animate-spin' : ''}" />
-				<span class="hidden sm:inline ml-1.5">Refresh</span>
-			</Button>
 			<select
 				class="fb-select"
 				bind:value={perPage}
@@ -542,33 +506,23 @@
 
 	<!-- Results List -->
 	{#if loading}
-		<Card.Root>
-			<Card.Content class="flex items-center justify-center py-20">
-				<div class="flex flex-col items-center gap-3">
-					<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
-					<span class="text-xs text-muted-foreground font-mono">Fetching applications dashboard...</span>
-				</div>
-			</Card.Content>
-		</Card.Root>
+		<LoadingState label="loading applications" />
 	{:else if filteredItems.length === 0}
-		<Card.Root>
-			<Card.Content class="py-20 text-center max-w-md mx-auto">
-				<div class="h-12 w-12 bg-muted rounded-full flex items-center justify-center mx-auto mb-4 border">
-					<AppWindow class="h-6 w-6 text-muted-foreground" />
-				</div>
-				<h3 class="text-lg font-bold mb-1 text-foreground">No applications found</h3>
-				<p class="text-xs text-muted-foreground mb-4 leading-relaxed">
-					{hasActiveFilters
-						? 'No applications match your filtering criteria. Try resetting filters or looking for another term.'
-						: 'No code generation jobs are registered yet. Get started by designing your first application.'}
-				</p>
+		<EmptyState
+			icon={AppWindow}
+			title="No applications found"
+			description={hasActiveFilters
+				? 'No applications match your filters. Try clearing them or searching for another term.'
+				: 'No code generation jobs yet. Get started by generating your first application.'}
+		>
+			{#snippet action()}
 				{#if hasActiveFilters}
 					<Button id="btn-empty-clear" variant="outline" size="sm" onclick={clearFilters}>Clear Filters</Button>
 				{:else}
-					<Button id="btn-empty-create" variant="outline" size="sm" href="/sample-generator">Go to Sample Generator</Button>
+					<Button id="btn-empty-create" size="sm" href="/sample-generator">Go to Sample Generator</Button>
 				{/if}
-			</Card.Content>
-		</Card.Root>
+			{/snippet}
+		</EmptyState>
 	{:else}
 		<!-- Table (desktop) -->
 		<div class="hidden md:block">

@@ -1,11 +1,13 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
 	import { listExperiments, type Experiment } from '$lib/api/experiments';
-	import { experimentLifecycleColors as statusColors } from '$lib/constants/colors';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 
@@ -28,58 +30,42 @@
 	}
 </script>
 
-<svelte:head>
-	<title>Experiments - LLM Lab</title>
-</svelte:head>
-
 <div class="space-y-6">
-	<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-		<div class="page-header min-w-0">
-			<h1>Experiments</h1>
-			<p>Designed runs: apps × models × prompt bundles × repeats, with a reproducibility seed.</p>
-		</div>
-		<Button href="/experiments/create" size="sm">
-			<Plus class="h-4 w-4" />
-			New experiment
-		</Button>
-	</div>
-
-	{#if error}
-		<div
-			class="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
-		>
-			{error}
-		</div>
-	{/if}
+	<PageHeader
+		title="Experiments"
+		description="Designed runs: apps × models × prompt bundles × repeats, with a reproducibility seed."
+	>
+		{#snippet actions()}
+			<Button href="/experiments/create" size="sm">
+				<Plus class="h-4 w-4" />
+				New experiment
+			</Button>
+		{/snippet}
+	</PageHeader>
 
 	{#if loading}
-		<div class="flex items-center justify-center py-16">
-			<span class="loading-mono">loading experiments</span>
-		</div>
+		<LoadingState label="loading experiments" />
+	{:else if error}
+		<ErrorAlert message={error} onretry={load} />
 	{:else if experiments.length === 0}
-		<Card.Root>
-			<Card.Content class="flex flex-col items-center gap-3 py-16 text-center">
-				<GitCompareArrows class="h-8 w-8 text-muted-foreground" />
-				<p class="text-sm text-muted-foreground">
-					No experiments yet. Create one to compare models and prompt variants across a set of apps.
-				</p>
-				<Button onclick={() => goto('/experiments/create')}>
-					<Plus class="h-4 w-4" />
-					New experiment
-				</Button>
-			</Card.Content>
-		</Card.Root>
+		<EmptyState
+			icon={GitCompareArrows}
+			title="No experiments yet"
+			description="Create one to compare models and prompt variants across a set of apps."
+		>
+			{#snippet action()}
+				<Button href="/experiments/create" size="sm"><Plus class="h-4 w-4" />New experiment</Button>
+			{/snippet}
+		</EmptyState>
 	{:else}
 		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 			{#each experiments as exp (exp.id)}
-				<button type="button" class="text-left" onclick={() => goto(`/experiments/${exp.id}`)}>
-					<Card.Root class="h-full transition-colors hover:border-primary/40">
+				<a href="/experiments/{exp.id}" class="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+					<Card.Root class="card-lift h-full">
 						<Card.Header class="pb-2">
 							<div class="flex items-start justify-between gap-2">
 								<Card.Title class="text-base">{exp.name}</Card.Title>
-								<Badge variant="outline" class="shrink-0 text-[10px] {statusColors[exp.status] ?? ''}">
-									{exp.status}
-								</Badge>
+								<StatusBadge status={exp.status} />
 							</div>
 							{#if exp.description}
 								<Card.Description class="line-clamp-2">{exp.description}</Card.Description>
@@ -96,7 +82,7 @@
 							</div>
 						</Card.Content>
 					</Card.Root>
-				</button>
+				</a>
 			{/each}
 		</div>
 	{/if}

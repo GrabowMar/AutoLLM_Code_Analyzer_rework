@@ -2,7 +2,7 @@
 	import type { ApiUser } from '$lib/api/users';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
-	import Mail from '@lucide/svelte/icons/mail';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Shield from '@lucide/svelte/icons/shield';
 	import UserIcon from '@lucide/svelte/icons/user';
 	import Pencil from '@lucide/svelte/icons/pencil';
@@ -23,60 +23,35 @@
 	});
 </script>
 
-<section
-	class="relative overflow-hidden rounded-xl border border-border bg-card"
->
-	<!-- Gradient banner -->
+<div class="flex items-start gap-4">
 	<div
-		class="h-28 sm:h-32 w-full"
-		style="background:
-			radial-gradient(120% 80% at 0% 0%, color-mix(in oklch, var(--primary) 35%, transparent), transparent 60%),
-			radial-gradient(120% 80% at 100% 100%, color-mix(in oklch, var(--accent) 45%, transparent), transparent 60%),
-			linear-gradient(135deg, color-mix(in oklch, var(--primary) 15%, var(--card)), var(--card));"
+		class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl font-mono text-xl font-bold text-white sm:h-16 sm:w-16 sm:text-2xl {avatarBg}"
 		aria-hidden="true"
-	></div>
-
-	<div class="px-4 pb-5 sm:px-6 sm:pb-6">
-		<div class="-mt-10 flex flex-col gap-4 sm:-mt-12 sm:flex-row sm:items-end sm:justify-between">
-			<div class="flex flex-col items-start gap-3 sm:flex-row sm:items-end">
-				<div
-					class={'flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-2xl text-2xl sm:text-3xl font-bold text-white ring-4 ring-background shadow-lg ' +
-						avatarBg}
-					style="font-family: var(--font-mono);"
-				>
-					{initials}
-				</div>
-				<div class="space-y-1 pb-1">
-					<h1 class="text-xl sm:text-2xl font-semibold tracking-tight">
-						{profile.name || 'Unnamed user'}
-					</h1>
-					<div class="flex items-center gap-1.5 text-sm text-muted-foreground">
-						<Mail class="h-3.5 w-3.5" />
-						<span style="font-family: var(--font-mono);" class="truncate">{profile.email}</span>
-					</div>
-					<div class="flex flex-wrap items-center gap-1.5 pt-1">
-						{#if profile.is_staff}
-							<Badge variant="default" class="gap-1">
-								<Shield class="h-3 w-3" />
-								Staff
-							</Badge>
-						{/if}
-						<Badge variant="secondary" class="gap-1">
-							<UserIcon class="h-3 w-3" />
-							Member
-						</Badge>
-					</div>
-				</div>
-			</div>
-
-			{#if isSelf}
-				<div class="flex shrink-0 gap-2">
+	>
+		{initials}
+	</div>
+	<div class="min-w-0 flex-1">
+		<PageHeader title={profile.name || 'Unnamed user'} description={profile.email}>
+			{#snippet meta()}
+				{#if profile.is_staff}
+					<Badge variant="default" class="gap-1">
+						<Shield class="h-3 w-3" />
+						Staff
+					</Badge>
+				{/if}
+				<Badge variant="secondary" class="gap-1">
+					<UserIcon class="h-3 w-3" />
+					Member
+				</Badge>
+			{/snippet}
+			{#snippet actions()}
+				{#if isSelf}
 					<Button href="/users/settings#profile" size="sm" variant="outline">
 						<Pencil class="h-3.5 w-3.5" />
 						Edit profile
 					</Button>
-				</div>
-			{/if}
-		</div>
+				{/if}
+			{/snippet}
+		</PageHeader>
 	</div>
-</section>
+</div>

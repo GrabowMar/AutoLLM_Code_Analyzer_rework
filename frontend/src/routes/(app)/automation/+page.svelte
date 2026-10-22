@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { pipelineLifecycleColors as statusColors } from '$lib/constants/colors';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { Badge } from '$lib/components/ui/badge';
@@ -12,9 +11,13 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Play from '@lucide/svelte/icons/play';
 	import Workflow from '@lucide/svelte/icons/workflow';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Search from '@lucide/svelte/icons/search';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import {
 		listPipelines,
 		deletePipeline,
@@ -99,20 +102,17 @@
 	onMount(load);
 </script>
 
-<svelte:head><title>Automation Workflows — LLM Eval Lab</title></svelte:head>
-
 <div class="space-y-6">
-	<div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-		<div class="page-header">
-			<h1>Workflows</h1>
-			<p>Visual, node-based automation pipelines. Compose generation, analysis and reporting steps as a workflow.</p>
-		</div>
-		<div class="flex items-center gap-2 flex-wrap">
-			<Button size="sm" onclick={() => goto('/automation/create')} class="gap-1.5">
-				<Plus class="h-4 w-4" />New Workflow
+	<PageHeader
+		title="Workflows"
+		description="Visual, node-based automation pipelines. Compose generation, analysis and reporting steps as a workflow."
+	>
+		{#snippet actions()}
+			<Button size="sm" href="/automation/create">
+				<Plus class="h-4 w-4" />New workflow
 			</Button>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	<!-- Search + filter -->
 	<div class="flex flex-col sm:flex-row gap-2">
@@ -121,11 +121,12 @@
 			<Input
 				bind:value={search}
 				placeholder="Search workflows by name…"
+				aria-label="Search workflows"
 				class="pl-9 h-9"
 				onkeydown={(e) => { if (e.key === 'Enter') { page = 1; load(); } }}
 			/>
 		</div>
-		<select bind:value={statusFilter} onchange={() => { page = 1; load(); }} class="std-select">
+		<select bind:value={statusFilter} onchange={() => { page = 1; load(); }} class="std-select" aria-label="Filter by status">
 			<option value="">All statuses</option>
 			<option value="draft">Draft</option>
 			<option value="active">Active</option>
@@ -134,32 +135,30 @@
 	</div>
 
 	{#if loading}
-		<div class="flex justify-center py-20">
-			<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
-		</div>
+		<LoadingState label="loading workflows" />
 	{:else if error}
-		<div class="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">{error}</div>
+		<ErrorAlert message={error} onretry={load} />
 	{:else if pipelines.length === 0}
-		<div class="rounded-md border border-dashed py-16 text-center">
-			<Workflow class="h-10 w-10 mx-auto text-muted-foreground" />
-			<p class="mt-3 text-sm font-medium">No workflows yet</p>
-			<p class="text-xs text-muted-foreground mt-1">Build your first node-based automation workflow.</p>
-			<Button size="sm" class="mt-4 gap-1.5" onclick={() => goto('/automation/create')}>
-				<Plus class="h-4 w-4" />Create your first workflow
-			</Button>
-		</div>
+		<EmptyState
+			icon={Workflow}
+			title={search || statusFilter ? 'No matching workflows' : 'No workflows yet'}
+			description={search || statusFilter ? 'Try a different search or status filter.' : 'Build your first node-based automation workflow.'}
+		>
+			{#snippet action()}
+				<Button size="sm" href="/automation/create"><Plus class="h-4 w-4" />Create workflow</Button>
+			{/snippet}
+		</EmptyState>
 	{:else}
 		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 			{#each pipelines as p (p.id)}
-				<button
-					type="button"
-					class="text-left rounded-md border bg-card hover:border-primary/40 hover:shadow-md transition-all group flex flex-col focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-					onclick={() => goto(`/automation/${p.id}`)}
-				>
+				<div class="card-lift group relative flex flex-col rounded-md border bg-card focus-within:ring-2 focus-within:ring-ring">
 					<div class="p-4 flex-1 space-y-2">
 						<div class="flex items-start justify-between gap-2">
-							<h3 class="font-medium text-sm leading-tight group-hover:text-primary transition-colors line-clamp-2">{p.name}</h3>
-							<Badge variant="outline" class="text-[10px] shrink-0 {statusColors[p.status] ?? ''}">{p.status}</Badge>
+							<h3 class="font-medium text-sm leading-tight group-hover:text-primary transition-colors line-clamp-2">
+								<!-- stretched link: the whole card opens the workflow; action buttons sit above it -->
+								<a href="/automation/{p.id}" class="after:absolute after:inset-0 focus-visible:outline-none">{p.name}</a>
+							</h3>
+							<StatusBadge status={p.status} />
 						</div>
 						{#if p.description}
 							<p class="text-xs text-muted-foreground line-clamp-2">{p.description}</p>
@@ -169,10 +168,10 @@
 						{#if p.tags.length > 0}
 							<div class="flex flex-wrap gap-1 pt-1">
 								{#each p.tags.slice(0, 4) as tag (tag)}
-									<Badge variant="secondary" class="text-[10px] px-1.5 py-0">{tag}</Badge>
+									<Badge variant="secondary" class="text-[11px] px-1.5 py-0">{tag}</Badge>
 								{/each}
 								{#if p.tags.length > 4}
-									<Badge variant="secondary" class="text-[10px] px-1.5 py-0">+{p.tags.length - 4}</Badge>
+									<Badge variant="secondary" class="text-[11px] px-1.5 py-0">+{p.tags.length - 4}</Badge>
 								{/if}
 							</div>
 						{/if}
@@ -181,8 +180,8 @@
 						<span>Updated {fmt(p.updated_at)}</span>
 						<span class="font-mono">v{p.version}</span>
 					</div>
-					<div class="px-2 py-2 border-t bg-card flex items-center gap-0.5">
-						<Button variant="ghost" size="sm" class="h-10 w-10 p-0 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 touch-manipulation" title="Run" aria-label="Run workflow {p.name}" onclick={(e) => run(p.id, e)}>
+					<div class="relative z-10 px-2 py-2 border-t flex items-center gap-0.5">
+						<Button variant="ghost" size="sm" class="h-10 w-10 p-0 text-success-fg hover:text-success-fg hover:bg-success/10 touch-manipulation" title="Run" aria-label="Run workflow {p.name}" onclick={(e) => run(p.id, e)}>
 							<Play class="h-4 w-4" />
 						</Button>
 						<Button variant="ghost" size="sm" class="h-10 w-10 p-0 touch-manipulation" title="View" aria-label="View {p.name}" onclick={(e) => { e.stopPropagation(); goto(`/automation/${p.id}`); }}>
@@ -200,7 +199,7 @@
 							</Button>
 						</div>
 					</div>
-				</button>
+				</div>
 			{/each}
 		</div>
 

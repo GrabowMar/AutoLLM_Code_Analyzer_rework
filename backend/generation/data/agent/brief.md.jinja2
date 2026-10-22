@@ -1,0 +1,67 @@
+{#- Agent task brief, rendered once per job and frozen into its snapshot.
+    Model- and harness-agnostic on purpose: only the app spec and the runtime
+    contract the platform evaluates, no length targets or style coaching.
+    Bump BRIEF_VERSION in services/agent/brief.py whenever this text changes;
+    the contract parts come from services/evaluation/contract.py. -#}
+# Task: build "{{ app.name }}"
+
+You are working alone: nobody will answer questions or review intermediate steps. Make reasonable decisions yourself, keep working until the application is complete, and finish with a short summary of what you built and anything known not to work.
+
+{% if description %}{{ description }}
+
+{% endif -%}
+{% if app.backend_requirements %}## Backend requirements
+{% for req in app.backend_requirements %}- {{ req }}
+{% endfor %}
+{% endif -%}
+{% if app.frontend_requirements %}## Frontend requirements
+{% for req in app.frontend_requirements %}- {{ req }}
+{% endfor %}
+{% endif -%}
+{% if app.admin_requirements %}## Admin requirements
+{% for req in app.admin_requirements %}- {{ req }}
+{% endfor %}
+{% endif -%}
+{% if app.data_model %}## Data model
+```json
+{{ app.data_model | tojson(indent=2) }}
+```
+
+{% endif -%}
+{% if endpoints %}## API contract
+Implement every endpoint below. Request and response bodies are JSON and must use these shapes (extra fields are fine; listed fields must be present).
+{% for ep in endpoints %}
+### {{ ep.method }} {{ ep.path }}
+{{ ep.description }}
+{% if ep.request %}Request:
+```json
+{{ ep.request | tojson(indent=2) }}
+```
+{% endif %}{% if ep.response is not none %}Response:
+```json
+{{ ep.response | tojson(indent=2) }}
+```
+{% endif %}{% endfor %}
+{% endif -%}
+{% if contract.accounts %}## Accounts
+{% if contract.spec_defines_auth %}- Use the register and login endpoints defined in the API contract above. Login returns a token in the `token` field.
+{% else %}- `POST {{ contract.register_path }}` with `{"{{ contract.identity_field }}": string, "password": string}` creates an account (HTTP 201).
+- `POST {{ contract.login_path }}` with the same body returns HTTP 200 and `{"token": string}`.
+{% endif %}- Authenticated requests send `Authorization: Bearer <token>`.{% if contract.writes_require_auth %} Endpoints the requirements reserve for signed-in users answer HTTP 401 without a valid token.{% endif %}
+{% if contract.admin %}- Endpoints under `/api/admin/` require an admin account. At startup, make sure an admin account `{{ contract.admin_identity }}` exists whose password is the value of the environment variable `{{ contract.admin_password_env }}` (use `{{ contract.admin_password_default }}` if it is unset); it signs in through the same login endpoint.
+{% endif %}
+{% endif -%}
+## Project and runtime contract
+The working directory already contains the project skeleton for the `{{ stack.slug }}` stack. Build the application inside it.
+
+- {{ stack.backend_summary }}
+- The backend entry point is `{{ stack.backend_filename }}`; it is started with `{{ stack.start_command }}` and must listen on `0.0.0.0:{{ stack.port }}`.
+- `GET {{ contract.health_path }}` must return HTTP 200 with a JSON body.
+- All API routes live under `/api/`.
+{% if stack.has_frontend %}- The frontend lives in `frontend/` ({{ stack.frontend_summary }}). It is built with `npm run build` and the build output is served by the backend from `./static`, so the backend must serve `index.html` for `/` and for every other non-API path.
+{% endif %}- Persist data in SQLite under `./data/` (the directory exists at runtime and is writable). The application starts from an empty `./data/`, so create the schema (and any seed data) at startup.
+- Python dependencies go in `requirements.txt`{% if stack.has_frontend %}, frontend dependencies in `frontend/package.json`{% endif %}. Pin versions.
+- The platform builds and runs the project with its own `Dockerfile`. These files belong to the platform and are restored after your run, so changes to them have no effect: {% for f in protected_files %}`{{ f }}`{% if not loop.last %}, {% endif %}{% endfor %}.
+- When you finish, the platform builds the project, starts it with no network access, and checks it automatically against everything stated in this brief.
+- Network access while you work is limited to {{ network_summary }}. There is no other internet access.
+- {{ budget_summary }} Work in an order that leaves a runnable application early, then improve it.

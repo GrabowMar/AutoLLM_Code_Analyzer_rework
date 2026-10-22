@@ -1,7 +1,10 @@
 <script lang="ts">
 import { onMount, onDestroy } from 'svelte';
 import * as Card from '$lib/components/ui/card';
-import { Badge } from '$lib/components/ui/badge';
+import StatusBadge from '$lib/components/StatusBadge.svelte';
+import LoadingState from '$lib/components/LoadingState.svelte';
+import EmptyState from '$lib/components/EmptyState.svelte';
+import { containerTones } from '$lib/constants/colors';
 import Server from '@lucide/svelte/icons/server';
 import ExternalLink from '@lucide/svelte/icons/external-link';
 import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -36,75 +39,71 @@ onMount(() => {
 	poll = setInterval(refresh, 5000);
 });
 onDestroy(() => { if (poll) clearInterval(poll); });
-
-const statusColor: Record<string, string> = {
-	pending: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
-	building: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-	running: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-	stopped: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
-	failed: 'bg-red-500/15 text-red-400 border-red-500/30',
-	removed: 'bg-zinc-500/15 text-zinc-500 border-zinc-500/30',
-};
 </script>
 
 <section id="container" class="space-y-4">
-	<h2 class="text-lg font-semibold flex items-center gap-2"><Server class="h-5 w-5" /> Container</h2>
 	<Card.Root>
-		<Card.Content class="p-4 space-y-4">
-			<div class="flex items-center gap-3 flex-wrap">
+		<Card.Header class="flex flex-row flex-wrap items-start justify-between gap-3">
+			<div class="space-y-1.5">
+				<Card.Title>Runtime container</Card.Title>
+				<Card.Description>Build, start and inspect the container serving this app.</Card.Description>
+			</div>
+			<div class="flex flex-wrap items-center gap-2">
 				<AppRuntimeControls {jobId} {jobStatus} onChange={() => refresh()} />
-				<Button variant="ghost" size="sm" onclick={refresh} title="Refresh">
+				<Button variant="ghost" size="sm" onclick={refresh} title="Refresh" aria-label="Refresh container">
 					<RefreshCw class="h-3.5 w-3.5" />
 				</Button>
 			</div>
+		</Card.Header>
+		<Card.Content class="space-y-4">
 
 			{#if loading}
-				<p class="text-sm text-muted-foreground">Loading…</p>
+				<LoadingState label="loading container" class="py-8" />
 			{:else if !container}
-				<p class="text-sm text-muted-foreground">No container yet. Click <strong>Build</strong> to provision.</p>
+				<EmptyState compact icon={Server} title="No container yet" description="Use Build above to provision a runtime for this app." />
 			{:else}
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
 					<div>
-						<span class="text-xs text-muted-foreground">Status</span>
-						<div><Badge variant="outline" class="text-xs {statusColor[container.status] ?? ''}">{container.status}</Badge></div>
+						<span class="section-label">Status</span>
+						<div><StatusBadge status={container.status} tones={containerTones} /></div>
 					</div>
 					<div>
-						<span class="text-xs text-muted-foreground">Updated</span>
+						<span class="section-label">Updated</span>
 						<div class="font-mono text-xs">{new Date(container.updated_at).toLocaleString()}</div>
 					</div>
 					<div>
-						<span class="text-xs text-muted-foreground">Container ID</span>
+						<span class="section-label">Container ID</span>
 						<div class="font-mono text-xs break-all">{container.id}</div>
 					</div>
 					<div>
-						<span class="text-xs text-muted-foreground">Name</span>
+						<span class="section-label">Name</span>
 						<div class="font-mono text-xs break-all">{container.name}</div>
 					</div>
 					<div class="md:col-span-2">
-						<span class="text-xs text-muted-foreground">Image</span>
+						<span class="section-label">Image</span>
 						<div class="font-mono text-xs break-all">{inspect?.image || container.image || '—'}</div>
 					</div>
 				</div>
 
 				<div>
-					<h3 class="text-sm font-medium mb-2">Ports</h3>
+					<h3 class="section-label mb-2">Ports</h3>
 					<div class="overflow-x-auto">
 						<table class="w-full text-sm">
 							<thead>
-								<tr class="border-b bg-muted/30">
-									<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Service</th>
-									<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Host Port</th>
-									<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Container Port</th>
-									<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Actions</th>
+								<tr>
+									<th>Service</th>
+									<th>Host Port</th>
+									<th>Container Port</th>
+									<th>Actions</th>
 								</tr>
 							</thead>
-							<tbody class="divide-y">
+							<tbody>
 								{#if container.app_port}
-									<tr class="hover:bg-muted/30">
-										<td class="px-3 py-2">App</td>
-										<td class="px-3 py-2 font-mono text-xs">{container.app_port}</td>
-										<td class="px-3 py-2 font-mono text-xs">8000</td>
-										<td class="px-3 py-2">
+									<tr>
+										<td>App</td>
+										<td class="font-mono text-xs">{container.app_port}</td>
+										<td class="font-mono text-xs">8000</td>
+										<td>
 											<a href={container.app_url ?? '#'} target="_blank" rel="noopener noreferrer" class="text-primary hover:underline inline-flex items-center gap-1 text-xs">Open <ExternalLink class="h-3 w-3" /></a>
 										</td>
 									</tr>
@@ -117,7 +116,7 @@ const statusColor: Record<string, string> = {
 				</div>
 
 				{#if container.last_error}
-					<div class="text-xs text-destructive font-mono bg-red-500/5 border border-red-500/20 rounded p-2">
+					<div class="rounded border border-destructive/30 bg-destructive/10 p-2 font-mono text-xs text-danger-fg">
 						{container.last_error}
 					</div>
 				{/if}

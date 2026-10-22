@@ -48,7 +48,7 @@
 			<Button
 				variant="outline"
 				size="sm"
-				class="hover-glow justify-start"
+				class="justify-start"
 				onclick={onSyncModels}
 				disabled={pendingAction !== null}
 			>
@@ -66,7 +66,7 @@
 			>
 				{#if pendingAction === 'caches'}<Loader2
 						class="mr-2 h-3.5 w-3.5 animate-spin"
-					/>{:else}<Eraser class="mr-2 h-3.5 w-3.5 text-amber-500" />{/if}
+					/>{:else}<Eraser class="mr-2 h-3.5 w-3.5 text-warning" />{/if}
 				Clear Caches
 			</Button>
 			<Button
@@ -78,7 +78,7 @@
 			>
 				{#if pendingAction === 'stuck'}<Loader2
 						class="mr-2 h-3.5 w-3.5 animate-spin"
-					/>{:else}<Activity class="mr-2 h-3.5 w-3.5 text-emerald-500" />{/if}
+					/>{:else}<Activity class="mr-2 h-3.5 w-3.5 text-success" />{/if}
 				Clear Stuck
 			</Button>
 			<Button variant="outline" size="sm" class="col-span-2 justify-start" href="/system">

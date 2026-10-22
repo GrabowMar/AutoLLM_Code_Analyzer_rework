@@ -5,6 +5,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Button } from '$lib/components/ui/button';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 
 	interface Props {}
 
@@ -59,9 +60,7 @@
 			</Alert>
 		{/if}
 		{#if passwordError}
-			<Alert variant="destructive" class="mb-4">
-				<AlertDescription>{passwordError}</AlertDescription>
-			</Alert>
+			<ErrorAlert message={passwordError} class="mb-4" />
 		{/if}
 		<form onsubmit={handlePasswordChange} class="space-y-4">
 			<div class="space-y-2">

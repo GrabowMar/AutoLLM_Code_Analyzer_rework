@@ -184,11 +184,42 @@ MEDIA_ROOT = str(APPS_DIR / "media")
 # https://docs.djangoproject.com/en/dev/ref/settings/#media-url
 MEDIA_URL = "/media/"
 
-# Copilot (Aider) generation workspaces
+# Agent-mode generation (OpenCode harness in an apps-daemon sandbox)
 # ------------------------------------------------------------------------------
-GENERATION_WORKSPACE_ROOT = str(Path(MEDIA_ROOT) / "generation_workspaces")
-AIDER_COPILOT_TIMEOUT_SECONDS = env.int("AIDER_COPILOT_TIMEOUT_SECONDS", default=600)
-AIDER_AUTO_TEST = env.bool("AIDER_AUTO_TEST", default=True)
+# Full run records (LLM call log, harness events, patch) land under
+# GENERATION_RUNS_ROOT/<job_id>/; job rows keep summaries plus sha256s.
+GENERATION_RUNS_ROOT = str(Path(MEDIA_ROOT) / "generation_runs")
+# Harness releases baked into the sandbox images (images/agent-*). Changing one
+# changes the image tag and every new job's run_fingerprint.
+AGENT_DEFAULT_HARNESS = env.str("AGENT_DEFAULT_HARNESS", default="opencode")
+AGENT_OPENCODE_VERSION = env.str("AGENT_OPENCODE_VERSION", default="1.18.35")
+AGENT_MINI_SWE_AGENT_VERSION = env.str("AGENT_MINI_SWE_AGENT_VERSION", default="2.4.6")
+AGENT_AIDER_VERSION = env.str("AGENT_AIDER_VERSION", default="0.86.2")
+# Defaults for every agent run; experiments / jobs may override them
+# (generation/services/agent/config.py validates the ranges). The request
+# budget binds; wall clock and USD are safety nets (see config.py).
+AGENT_MAX_LLM_REQUESTS = env.int("AGENT_MAX_LLM_REQUESTS", default=100)
+AGENT_WALL_CLOCK_SECONDS = env.int("AGENT_WALL_CLOCK_SECONDS", default=3600)
+AGENT_MAX_TOTAL_TOKENS = env.int("AGENT_MAX_TOTAL_TOKENS", default=30_000_000)
+AGENT_MAX_COST_USD = env.float("AGENT_MAX_COST_USD", default=5.0)
+AGENT_SAMPLING_POLICY = env.str("AGENT_SAMPLING_POLICY", default="provider_default")
+# Build, run and grade every agent sample with the hidden conformance suite
+# right after its run (generation/services/evaluation/).
+AGENT_AUTO_EVALUATE = env.bool("AGENT_AUTO_EVALUATE", default=True)
+AGENT_NETWORK_POLICY = env.str("AGENT_NETWORK_POLICY", default="packages")
+# Sandboxes running at once in one process. Each may use AGENT_SANDBOX_MEM_LIMIT
+# of the apps daemon's own cap (4 GB in docker-compose.local.yml, shared with
+# the sample apps), so raise both together. The limits are frozen into every
+# job snapshot: runs are only comparable under the same caps.
+AGENT_MAX_CONCURRENT_RUNS = env.int("AGENT_MAX_CONCURRENT_RUNS", default=1)
+AGENT_SANDBOX_MEM_LIMIT = env.str("AGENT_SANDBOX_MEM_LIMIT", default="3g")
+AGENT_SANDBOX_NANO_CPUS = env.int("AGENT_SANDBOX_NANO_CPUS", default=2_000_000_000)
+# Provider routing used when a run sets no explicit ``provider`` llm param.
+AGENT_DEFAULT_PROVIDER_ROUTING = {
+    "require_parameters": True,
+    "quantizations": ["fp8", "fp16", "bf16", "fp32", "unknown"],
+    "allow_fallbacks": True,
+}
 
 # TEMPLATES
 # ------------------------------------------------------------------------------
@@ -433,6 +464,14 @@ TRAEFIK_DYNAMIC_DIR = env("TRAEFIK_DYNAMIC_DIR", default="")
 # on this network WITHOUT host port binding; Traefik (also on the network)
 # reaches them by container name at port 8000.
 DOCKER_APPS_NETWORK = env("DOCKER_APPS_NETWORK", default="")
+
+# Docker daemon that builds and runs sample apps and analyzer workspaces.  Empty
+# means the standard DOCKER_HOST/socket environment.  Local compose points it at
+# the apps-dind sandbox (tcp://apps-dind:2376), so generated apps run as nested
+# containers and never touch the host daemon.  APPS_DOCKER_CERT_PATH holds the
+# mutual-TLS client cert (ca.pem, cert.pem, key.pem) for that daemon.
+APPS_DOCKER_HOST = env("APPS_DOCKER_HOST", default="")
+APPS_DOCKER_CERT_PATH = env("APPS_DOCKER_CERT_PATH", default="")
 
 # Maximum number of analyzer threads to run in parallel per analysis task.
 ANALYSIS_MAX_WORKERS = env.int("ANALYSIS_MAX_WORKERS", default=4)

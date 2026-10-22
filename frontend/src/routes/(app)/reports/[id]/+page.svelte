@@ -1,17 +1,19 @@
 <script lang="ts">
 	import { formatDateTime as formatDate } from '$lib/utils/formatters';
-	import { reportStatusColors as statusColors } from '$lib/constants/colors';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onMount, onDestroy } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import { toast } from 'svelte-sonner';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import { getReport, deleteReport, type ReportDetail, type ReportStatus } from '$lib/api/client';
+	import { getReport, deleteReport, type ReportDetail } from '$lib/api/client';
 
 	let report = $state<ReportDetail | null>(null);
 	let loading = $state(true);
@@ -43,11 +45,21 @@
 		if (timer) clearInterval(timer);
 	});
 
+	let confirmOpen = $state(false);
+	let confirmBusy = $state(false);
+
 	async function remove() {
 		if (!report) return;
-		if (!confirm('Delete this report?')) return;
-		await deleteReport(report.report_id);
-		goto('/reports');
+		confirmBusy = true;
+		try {
+			await deleteReport(report.report_id);
+			confirmOpen = false;
+			goto('/reports');
+		} catch (e) {
+			toast.error((e as Error)?.message || 'Failed to delete report');
+		} finally {
+			confirmBusy = false;
+		}
 	}
 
 	function isObject(v: unknown): v is Record<string, unknown> {
@@ -178,79 +190,55 @@
 	</div>
 {/snippet}
 
-<svelte:head>
-	<title>{report?.title ?? 'Report'} — LLM Eval Lab</title>
-</svelte:head>
-
 <div class="max-w-5xl space-y-6">
-	<div class="flex items-center justify-between">
-		<Button variant="ghost" size="sm" onclick={() => goto('/reports')}>
-			<ArrowLeft class="mr-1 h-4 w-4" />Back to reports
-		</Button>
-		<div class="flex gap-2">
+	<PageHeader
+		title={report?.title ?? 'Report'}
+		description={report?.description || undefined}
+		back={{ href: '/reports', label: 'Reports' }}
+	>
+		{#snippet meta()}
+			{#if report}<StatusBadge status={report.status} />{/if}
+		{/snippet}
+		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={load}>
 				<RefreshCw class="mr-1 h-4 w-4" />Refresh
 			</Button>
-			<Button variant="outline" size="sm" onclick={remove}>
+			<Button variant="outline" size="sm" disabled={!report} onclick={() => (confirmOpen = true)}>
 				<Trash2 class="mr-1 h-4 w-4" />Delete
 			</Button>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	{#if loading}
-		<Card.Root>
-			<Card.Content class="flex items-center justify-center py-20">
-				<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
-			</Card.Content>
-		</Card.Root>
+		<LoadingState label="loading report" />
 	{:else if error}
-		<Card.Root><Card.Content class="p-6 text-destructive text-sm">{error}</Card.Content></Card.Root>
+		<ErrorAlert message={error} onretry={load} />
 	{:else if report}
 		<Card.Root>
-			<Card.Header>
-				<div class="flex items-start justify-between gap-4 flex-wrap">
-					<div>
-						<Card.Title class="text-xl">{report.title}</Card.Title>
-						{#if report.description}
-							<Card.Description class="mt-1">{report.description}</Card.Description>
-						{/if}
-					</div>
-					<Badge class={statusColors[report.status]}>{report.status}</Badge>
-				</div>
-			</Card.Header>
-			<Card.Content class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+			<Card.Content class="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
 				<div>
-					<div class="text-muted-foreground">Type</div>
-					<div class="font-medium">{report.report_type}</div>
+					<div class="section-label">Type</div>
+					<div class="font-medium">{report.report_type.replace(/_/g, ' ')}</div>
 				</div>
 				<div>
-					<div class="text-muted-foreground">Created</div>
+					<div class="section-label">Created</div>
 					<div class="font-medium">{formatDate(report.created_at)}</div>
 				</div>
 				<div>
-					<div class="text-muted-foreground">Completed</div>
+					<div class="section-label">Completed</div>
 					<div class="font-medium">{formatDate(report.completed_at)}</div>
 				</div>
 				<div>
-					<div class="text-muted-foreground">Expires</div>
+					<div class="section-label">Expires</div>
 					<div class="font-medium">{formatDate(report.expires_at)}</div>
 				</div>
 			</Card.Content>
 		</Card.Root>
 
 		{#if report.status === 'generating' || report.status === 'pending'}
-			<Card.Root>
-				<Card.Content class="p-6 flex items-center gap-3 text-sm text-muted-foreground">
-					<LoaderCircle class="h-5 w-5 animate-spin" />
-					Generating report… ({report.progress_percent}%)
-				</Card.Content>
-			</Card.Root>
+			<LoadingState label="generating report… {report.progress_percent}%" />
 		{:else if report.status === 'failed'}
-			<Card.Root>
-				<Card.Content class="p-6 text-sm text-destructive">
-					{report.error_message || 'Generation failed.'}
-				</Card.Content>
-			</Card.Root>
+			<ErrorAlert title="Generation failed" message={report.error_message || 'Generation failed.'} />
 		{:else if report.status === 'completed'}
 			{#if report.summary && Object.keys(report.summary).length > 0}
 				<Card.Root>
@@ -324,7 +312,7 @@
 							{/if}
 							{#each wide as [k, v] (k)}
 								<div class="{flat.length > 0 ? 'mt-4 border-t pt-4' : ''}">
-									<h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{k.replace(/_/g, ' ')}</h4>
+									<h4 class="section-label mb-2">{k.replace(/_/g, ' ')}</h4>
 									{#if k === 'metrics_by_tool' && isObject(v)}
 										{@render metricsByTool(v)}
 									{:else if isObjectRows(v)}
@@ -343,3 +331,13 @@
 		{/if}
 	{/if}
 </div>
+
+<ConfirmDialog
+	bind:open={confirmOpen}
+	title="Delete report?"
+	description="This permanently removes the report. This cannot be undone."
+	confirmLabel="Delete"
+	destructive
+	busy={confirmBusy}
+	onConfirm={remove}
+/>

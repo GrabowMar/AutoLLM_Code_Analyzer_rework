@@ -1,7 +1,5 @@
 """Tests for GenerationService — validates copilot iteration and scaffolding flow."""
 
-from unittest.mock import MagicMock
-
 from backend.generation.services.generation_service import GenerationService
 
 
@@ -96,34 +94,3 @@ class TestValidatePythonCode:
         assert len(code.splitlines()) > 30
         errors = GenerationService._validate_python_code(code)
         assert len(errors) == 0
-
-
-class TestPickCopilotModel:
-    """Tests for pick_copilot_model_id."""
-
-    def test_explicit_model(self) -> None:
-        from backend.generation.services.aider_runner import pick_copilot_model_id
-
-        job = MagicMock()
-        job.model = MagicMock()
-        job.model.model_id = "openai/gpt-4o"
-        result = pick_copilot_model_id(job)
-        assert result == "openai/gpt-4o"
-
-    def test_open_source_default(self) -> None:
-        from backend.generation.services.aider_runner import pick_copilot_model_id
-
-        job = MagicMock()
-        job.model = None
-        job.copilot_use_open_source = True
-        result = pick_copilot_model_id(job)
-        assert "deepseek" in result
-
-    def test_closed_source_default(self) -> None:
-        from backend.generation.services.aider_runner import pick_copilot_model_id
-
-        job = MagicMock()
-        job.model = None
-        job.copilot_use_open_source = False
-        result = pick_copilot_model_id(job)
-        assert "gpt-4o-mini" in result

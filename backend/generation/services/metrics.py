@@ -34,7 +34,16 @@ class JobMetrics(BaseModel):
     endpoints_found: int | None = None
     models_found: int | None = None
 
-    # Copilot
+    # Agent mode (harness runs; see services/agent/runner.py)
+    reasoning_tokens: int | None = None
+    cached_tokens: int | None = None
+    llm_calls: int | None = None
+    harness_steps: int | None = None
+    tool_calls: int | None = None
+    termination: str | None = None
+    providers: dict[str, int] | None = None
+
+    # Copilot (legacy) / harness identity
     iterations_used: int | None = None
     final_error_count: int | None = None
     engine: str | None = None

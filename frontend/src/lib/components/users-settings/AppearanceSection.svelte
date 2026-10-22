@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { avatarColorClasses } from '$lib/constants/colors';
 	import { getPreferences, VALID_COLORS } from '$lib/stores/preferences.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Label } from '$lib/components/ui/label';
@@ -9,19 +10,6 @@
 	import Palette from '@lucide/svelte/icons/palette';
 
 	const prefs = getPreferences();
-
-	const avatarColorMap: Record<string, string> = {
-		blue: 'bg-blue-500',
-		indigo: 'bg-indigo-500',
-		purple: 'bg-purple-500',
-		pink: 'bg-pink-500',
-		red: 'bg-red-500',
-		orange: 'bg-orange-500',
-		amber: 'bg-amber-500',
-		green: 'bg-green-500',
-		teal: 'bg-teal-500',
-		cyan: 'bg-cyan-500',
-	};
 
 	const accentRingMap: Record<string, string> = {
 		blue: 'ring-blue-500',
@@ -47,7 +35,7 @@
 	</Card.Header>
 	<Card.Content class="space-y-6">
 		<div class="space-y-2">
-			<Label class="text-[11px] uppercase tracking-wider text-muted-foreground" style="font-family: var(--font-mono);">Theme</Label>
+			<Label class="section-label">Theme</Label>
 			<div class="flex flex-col gap-2 sm:flex-row sm:gap-3">
 				{#each [
 					{ value: 'light', label: 'Light', Icon: Sun },
@@ -65,7 +53,7 @@
 						<Icon class="h-3.5 w-3.5" />
 						<span class="font-medium">{label}</span>
 						{#if prefs.theme === value}
-							<span class="ml-auto text-[10px] text-primary" style="font-family: var(--font-mono);">active</span>
+							<span class="ml-auto text-[11px] text-primary font-mono">active</span>
 						{/if}
 					</button>
 				{/each}
@@ -75,7 +63,7 @@
 		<Separator />
 
 		<div class="space-y-2">
-			<Label class="text-[11px] uppercase tracking-wider text-muted-foreground" style="font-family: var(--font-mono);">Accent color</Label>
+			<Label class="section-label">Accent color</Label>
 			<p class="text-xs text-muted-foreground">Used for highlights, focus rings, and primary actions.</p>
 			<div class="flex flex-wrap gap-2 pt-1">
 				{#each VALID_COLORS as color}
@@ -83,7 +71,7 @@
 						type="button"
 						aria-label={`Accent color ${color}`}
 						aria-pressed={prefs.accentColor === color}
-						class="h-7 w-7 rounded-md cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background {avatarColorMap[color]} {prefs.accentColor ===
+						class="h-7 w-7 rounded-md cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background {avatarColorClasses[color]} {prefs.accentColor ===
 						color
 							? `ring-2 ring-offset-2 ring-offset-background ${accentRingMap[color]}`
 							: 'opacity-80 hover:opacity-100 hover:scale-110'}"
@@ -97,7 +85,7 @@
 		<Separator />
 
 		<div class="space-y-2">
-			<Label class="text-[11px] uppercase tracking-wider text-muted-foreground" style="font-family: var(--font-mono);">Avatar color</Label>
+			<Label class="section-label">Avatar color</Label>
 			<p class="text-xs text-muted-foreground">Color of your initials avatar in the header and profile.</p>
 			<div class="flex flex-wrap gap-2 pt-1">
 				{#each VALID_COLORS as color}
@@ -105,7 +93,7 @@
 						type="button"
 						aria-label={`Avatar color ${color}`}
 						aria-pressed={prefs.avatarColor === color}
-						class="h-7 w-7 rounded-full cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background {avatarColorMap[color]} {prefs.avatarColor ===
+						class="h-7 w-7 rounded-full cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background {avatarColorClasses[color]} {prefs.avatarColor ===
 						color
 							? `ring-2 ring-offset-2 ring-offset-background ${accentRingMap[color]}`
 							: 'opacity-80 hover:opacity-100 hover:scale-110'}"

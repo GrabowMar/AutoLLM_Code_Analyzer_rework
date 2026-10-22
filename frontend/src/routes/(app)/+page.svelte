@@ -195,7 +195,7 @@
 </script>
 
 <svelte:head>
-	<title>Dashboard - LLM Lab</title>
+	<title>Dashboard · LLM Lab</title>
 </svelte:head>
 
 <div class="bento gap-4 sm:gap-5">

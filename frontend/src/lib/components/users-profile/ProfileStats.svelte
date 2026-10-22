@@ -28,16 +28,12 @@
 
 <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
 	{#each items as item (item.label)}
-		<div class="rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/40">
+		<div class="flex flex-col gap-1 rounded-md border border-border bg-card px-4 py-3">
 			<div class="flex items-center justify-between">
-				<span class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground" style="font-family: var(--font-mono);">
-					{item.label}
-				</span>
-				<item.icon class="h-3.5 w-3.5 text-muted-foreground/70" />
+				<span class="kpi-label">{item.label}</span>
+				<item.icon class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
 			</div>
-			<p class="mt-2 text-2xl font-semibold tabular-nums tracking-tight" style="font-family: var(--font-display);">
-				{item.value}
-			</p>
+			<p class="kpi-value">{item.value}</p>
 		</div>
 	{/each}
 </section>

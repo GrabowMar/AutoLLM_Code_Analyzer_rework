@@ -22,7 +22,7 @@
 >
 	<div class="flex justify-between gap-2">
 		<span class="text-muted-foreground">Type</span>
-		<span class="rounded bg-amber-500/20 border border-amber-400/40 text-amber-200 px-1.5 py-0.5 text-[10px] font-mono">{reportType}</span>
+		<span class="rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 font-mono text-[11px] text-warning-fg">{reportType}</span>
 	</div>
 	{#if template}
 		<div class="flex justify-between gap-2">

@@ -1,14 +1,15 @@
-"""Job creation endpoints (custom, scaffolding, copilot modes).
+"""Job creation endpoints (agent, custom, scaffolding modes).
 
 These endpoints all live under ``/jobs/<static-segment>/`` and MUST be registered
 before any ``/jobs/{job_id}/`` route — Django Ninja matches routes in
 registration order, and otherwise would interpret "custom" / "scaffolding" /
-"copilot" as a ``job_id``. The package ``__init__.py`` enforces this ordering.
+"agent" as a ``job_id``. The package ``__init__.py`` enforces this ordering.
 """
 
 from __future__ import annotations
 
 import logging
+import random
 
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
@@ -16,8 +17,8 @@ from ninja.errors import HttpError
 
 from backend.credentials.services.resolver import MissingApiKeyError
 from backend.credentials.services.resolver import has_resolvable_key
+from backend.generation.api.schema import AgentJobCreateSchema
 from backend.generation.api.schema import BatchCreateResponseSchema
-from backend.generation.api.schema import CopilotJobCreateSchema
 from backend.generation.api.schema import CustomJobCreateSchema
 from backend.generation.api.schema import GenerationJobSchema
 from backend.generation.api.schema import ScaffoldingJobCreateSchema
@@ -26,10 +27,16 @@ from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
 from backend.generation.models import GenerationProfile
+from backend.generation.services.agent.config import merge_agent_config
+from backend.generation.services.agent.config import validate_agent_config
+from backend.generation.services.agent.harnesses import get_harness
+from backend.generation.services.agent.harnesses import harness_choices
+from backend.generation.services.agent.snapshot import apply_agent_snapshot_to_job
 from backend.generation.services.dispatcher import dispatch_job
 from backend.generation.services.llm_params import validate_llm_params
 from backend.generation.services.profile_resolver import apply_snapshot_to_job
 from backend.generation.services.profile_resolver import build_custom_snapshot
+from backend.generation.services.profile_resolver import derive_experiment_seed
 from backend.generation.services.profile_resolver import get_profile_for_app
 from backend.llm_models.models import LLMModel
 from backend.runtime.services.scaffolding import canonical_stack_slug
@@ -180,30 +187,139 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
     )
 
 
-@router.post("/jobs/copilot/", response={200: GenerationJobSchema, 400: dict})
-def create_copilot_job(request, payload: CopilotJobCreateSchema):
-    """Create a copilot mode generation job."""
+def _validated_agent_config(payload) -> dict:
+    try:
+        return validate_agent_config(payload.agent_config.as_config() if payload.agent_config else {})
+    except ValueError as exc:
+        raise HttpError(400, str(exc)) from exc
+
+
+def require_tool_capable(models, harness) -> None:
+    """400 unless every model can drive *harness* (tool-calling harnesses need tool support)."""
+    if not harness.requires_tool_calling:
+        return
+    unable = [m.model_id for m in models if not m.supports_function_calling]
+    if unable:
+        raise HttpError(
+            400,
+            f"{harness.label} needs tool-calling models; not supported by: {', '.join(unable)}",
+        )
+
+
+def _blocked_shuffle(jobs: list[GenerationJob], seed: int | None) -> list[GenerationJob]:
+    """Trial by trial, cells shuffled within each trial (see experiments.run_order)."""
+    rng = random.Random(seed)  # noqa: S311 - run-order randomisation, not crypto
+    blocks: dict[int, list[GenerationJob]] = {}
+    for job in jobs:
+        blocks.setdefault(job.repeat_index or 0, []).append(job)
+    ordered: list[GenerationJob] = []
+    for trial in sorted(blocks):
+        rng.shuffle(blocks[trial])
+        ordered.extend(blocks[trial])
+    return ordered
+
+
+@router.post("/jobs/agent/", response={200: BatchCreateResponseSchema, 400: dict})
+def create_agent_jobs(request, payload: AgentJobCreateSchema):
+    """Create agent-mode jobs: (app specs | one free-form task) x models x harnesses x trials.
+
+    Every cell of one (task, trial) shares a seed (common random numbers), and
+    jobs run trial by trial in a seeded random order within each trial, so
+    conditions are compared paired and are never confounded with run time.
+    """
     err = _preflight_api_key(request)
     if err is not None:
         return err
-    model = None
-    if payload.model_id:
-        model = get_object_or_404(LLMModel, id=payload.model_id)
-    stack_slug = ""
-    if payload.stack_slug:
-        if not is_known_stack_slug(payload.stack_slug):
-            raise HttpError(404, f"Unknown stack slug: {payload.stack_slug}")
-        _usable_stack_or_error(payload.stack_slug, request.auth)
-        stack_slug = canonical_stack_slug(payload.stack_slug)
+    llm_overrides = _validated_llm_params(payload)
+    agent_overrides = _validated_agent_config(payload)
+    if not is_known_stack_slug(payload.stack_slug):
+        raise HttpError(404, f"Unknown stack slug: {payload.stack_slug}")
+    _usable_stack_or_error(payload.stack_slug, request.auth)
+    stack_slug = canonical_stack_slug(payload.stack_slug)
 
-    job = GenerationJob.objects.create(
-        mode=GenerationJob.Mode.COPILOT,
+    app_reqs = list(AppRequirementTemplate.objects.filter(id__in=payload.app_requirement_ids).order_by("id"))
+    if len(app_reqs) != len(set(payload.app_requirement_ids)):
+        raise HttpError(404, "Unknown app requirement id")
+    if not app_reqs and not payload.description.strip():
+        raise HttpError(400, "Give at least one app spec or a task description")
+    models = list(LLMModel.objects.filter(id__in=payload.model_ids).order_by("id"))
+    if not models or len(models) != len(set(payload.model_ids)):
+        raise HttpError(404, "Unknown model id")
+    harness_names = list(dict.fromkeys(payload.harnesses)) or [merge_agent_config(agent_overrides)["harness"]]
+    try:
+        harnesses = [get_harness(name) for name in harness_names]
+    except ValueError as exc:
+        raise HttpError(400, str(exc)) from exc
+    for harness in harnesses:
+        require_tool_capable(models, harness)
+
+    profile = None
+    if payload.profile_id:
+        profile = get_object_or_404(
+            GenerationProfile.objects.filter(Q(is_system=True) | Q(created_by=request.auth)),
+            id=payload.profile_id,
+        )
+
+    tasks = app_reqs or [None]
+    batch = GenerationBatch.objects.create(
+        name=f"Agent batch - {stack_slug}",
+        mode=GenerationJob.Mode.AGENT,
+        total_jobs=len(tasks) * len(models) * len(harnesses) * payload.trials,
         created_by=request.auth,
-        model=model,
-        stack_slug=stack_slug,
-        copilot_description=payload.description,
-        copilot_max_iterations=payload.max_iterations,
-        copilot_use_open_source=payload.use_open_source,
     )
-    dispatch_job(job)
-    return GenerationJob.objects.get(id=job.id)
+    failed = 0
+    created: list[GenerationJob] = []
+    for app_req in tasks:
+        for trial in range(payload.trials):
+            seed = None
+            if payload.base_seed is not None:
+                seed = derive_experiment_seed(payload.base_seed, app_req.slug if app_req else "task", trial)
+            for model in models:
+                for harness in harnesses:
+                    job = GenerationJob.objects.create(
+                        mode=GenerationJob.Mode.AGENT,
+                        created_by=request.auth,
+                        batch=batch,
+                        model=model,
+                        stack_slug=stack_slug,
+                        app_requirement=app_req,
+                        profile=profile,
+                        task_description=payload.description,
+                        max_tokens=payload.max_tokens,
+                        llm_params=llm_overrides,
+                        agent_config={**agent_overrides, "harness": harness.name},
+                        experiment_seed=seed,
+                        repeat_index=trial,
+                    )
+                    try:
+                        apply_agent_snapshot_to_job(job)
+                    except Exception as exc:  # noqa: BLE001 - isolate one bad job from the batch
+                        logger.warning("Agent snapshot failed for job %s: %s", job.id, exc)
+                        job.status = GenerationJob.Status.FAILED
+                        job.error_message = f"Snapshot build failed: {exc}"
+                        job.save(update_fields=["status", "error_message", "updated_at"])
+                        failed += 1
+                        continue
+                    created.append(job)
+    if failed:
+        batch.failed_jobs = failed
+        batch.save(update_fields=["failed_jobs", "updated_at"])
+    order_seed = payload.base_seed if payload.base_seed is not None else random.SystemRandom().randrange(2**31)
+    for job in _blocked_shuffle(created, order_seed):
+        dispatch_job(job)
+    return BatchCreateResponseSchema(batch_id=batch.id, job_count=batch.total_jobs, status="pending")
+
+
+@router.get("/agent/harnesses/", response=list[dict])
+def list_harnesses(request):
+    """Available agent harnesses with their pinned releases."""
+    return harness_choices()
+
+
+@router.post("/jobs/copilot/", response={410: dict})
+def create_copilot_job(request):
+    """Retired: the in-process aider loop was replaced by sandboxed agent mode."""
+    return 410, {
+        "detail": "Copilot mode was retired. Use POST /generation/jobs/agent/ (sandboxed OpenCode harness).",
+        "code": "mode_retired",
+    }

@@ -5,6 +5,10 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import * as Tabs from '$lib/components/ui/tabs';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import {
 		exportTemplatePackage,
 		importTemplatePackage,
@@ -37,8 +41,7 @@
 		onImported,
 	}: Props = $props();
 
-	type Section = 'starters' | 'export' | 'import';
-	let section = $state<Section>('starters');
+	let section = $state('starters');
 	let error = $state('');
 
 	// ── Starters ──────────────────────────────────────────────────
@@ -135,136 +138,140 @@
 			<Dialog.Description>Share app specs, blocks, and profiles as portable packages.</Dialog.Description>
 		</Dialog.Header>
 
-		<div class="flex items-center gap-1 rounded-md bg-muted p-1 text-xs">
-			{#each [['starters', 'Starter packages'], ['export', 'Export'], ['import', 'Import']] as [id, label]}
-				<button
-					type="button"
-					class="rounded px-3 py-1.5 font-medium transition-colors cursor-pointer {section === id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
-					onclick={() => (section = id as Section)}
-				>{label}</button>
-			{/each}
-			<div class="ml-auto flex items-center gap-1.5">
-				<Label class="text-[10px] text-muted-foreground">on conflict</Label>
-				<select bind:value={conflictStrategy} class="h-7 rounded border border-input bg-surface-1 px-1.5 text-[11px] cursor-pointer">
-					<option value="rename">rename</option>
-					<option value="overwrite">overwrite mine</option>
-					<option value="error">error</option>
-				</select>
-			</div>
+		<div class="flex items-center justify-end gap-1.5">
+			<Label for="pkg-conflict" class="text-xs text-muted-foreground">On conflict</Label>
+			<select id="pkg-conflict" bind:value={conflictStrategy} class="h-7 rounded border border-input bg-surface-1 px-1.5 text-xs cursor-pointer">
+				<option value="rename">rename</option>
+				<option value="overwrite">overwrite mine</option>
+				<option value="error">error</option>
+			</select>
 		</div>
 
-		{#if section === 'starters'}
-			{#if starterPackagesLoading}
-				<div class="flex items-center gap-2 py-6 text-xs text-muted-foreground">
-					<LoaderCircle class="h-3.5 w-3.5 animate-spin" /> Loading starter packages…
-				</div>
-			{:else if starterPackages.length === 0}
-				<p class="py-6 text-xs text-muted-foreground">No starter packages available.</p>
-			{:else}
-				<div class="grid gap-3 sm:grid-cols-2">
-					{#each starterPackages as starter (starter.slug)}
-						<div class="rounded-md border border-border bg-card p-3 shadow-sm space-y-2">
-							<div>
-								<h5 class="text-sm font-semibold text-foreground">{starter.name}</h5>
-								<p class="text-xs text-muted-foreground">{starter.description}</p>
+		<Tabs.Root bind:value={section}>
+			<Tabs.List>
+				<Tabs.Trigger value="starters">Starter packages</Tabs.Trigger>
+				<Tabs.Trigger value="export">Export</Tabs.Trigger>
+				<Tabs.Trigger value="import">Import</Tabs.Trigger>
+			</Tabs.List>
+
+			<Tabs.Content value="starters">
+				{#if starterPackagesLoading}
+					<LoadingState label="loading starter packages" class="py-6" />
+				{:else if starterPackages.length === 0}
+					<EmptyState compact title="No starter packages available" />
+				{:else}
+					<div class="grid gap-3 sm:grid-cols-2">
+						{#each starterPackages as starter (starter.slug)}
+							<div class="rounded-md border border-border bg-card p-3 space-y-2">
+								<div>
+									<h3 class="text-sm font-semibold">{starter.name}</h3>
+									<p class="text-xs text-muted-foreground">{starter.description}</p>
+								</div>
+								<div class="flex flex-wrap gap-1.5">
+									<Badge variant="outline">{starter.app_template_count} apps</Badge>
+									<Badge variant="outline">{starter.block_count} blocks</Badge>
+									<Badge variant="outline">{starter.bundle_count} profiles</Badge>
+								</div>
+								<Button
+									size="sm"
+									disabled={starterImportSlug === starter.slug}
+									onclick={() => importStarter(starter.slug)}
+								>
+									{#if starterImportSlug === starter.slug}
+										<LoaderCircle class="animate-spin" /> Importing…
+									{:else}
+										Import
+									{/if}
+								</Button>
 							</div>
-							<div class="flex flex-wrap gap-1.5">
-								<Badge variant="outline" class="text-[9px]">{starter.app_template_count} apps</Badge>
-								<Badge variant="outline" class="text-[9px]">{starter.block_count} blocks</Badge>
-								<Badge variant="outline" class="text-[9px]">{starter.bundle_count} profiles</Badge>
-							</div>
-							<Button
-								size="sm"
-								class="text-xs cursor-pointer shadow-xs"
-								disabled={starterImportSlug === starter.slug}
-								onclick={() => importStarter(starter.slug)}
-							>
-								{#if starterImportSlug === starter.slug}
-									<LoaderCircle class="mr-1.5 h-3.5 w-3.5 animate-spin" /> Importing…
-								{:else}
-									Import
-								{/if}
-							</Button>
-						</div>
-					{/each}
-				</div>
-			{/if}
-		{:else if section === 'export'}
-			<div class="space-y-3">
-				<div class="space-y-2">
-					<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">App specs</p>
-					<div class="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
-						{#each appTemplates as t (t.slug)}
-							<button
-								type="button"
-								class="rounded-md border px-2 py-0.5 text-[11px] transition-colors cursor-pointer {selection.app.includes(t.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
-								onclick={() => toggle('app', t.slug)}
-							>{t.name}</button>
 						{/each}
 					</div>
-				</div>
-				<div class="space-y-2">
-					<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Profiles <span class="normal-case font-normal">(their blocks are bundled automatically)</span></p>
-					<div class="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
-						{#each profiles as p (p.slug)}
-							<button
-								type="button"
-								class="rounded-md border px-2 py-0.5 text-[11px] transition-colors cursor-pointer {selection.profile.includes(p.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
-								onclick={() => toggle('profile', p.slug)}
-							>{p.name}</button>
-						{/each}
-					</div>
-				</div>
-				<div class="space-y-2">
-					<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Extra blocks</p>
-					<div class="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
-						{#each contentBlocks as b (b.id)}
-							<button
-								type="button"
-								class="rounded-md border px-2 py-0.5 text-[10px] font-mono transition-colors cursor-pointer {selection.block.includes(blockKey(b)) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
-								onclick={() => toggle('block', blockKey(b))}
-							>{b.slug} v{b.version}</button>
-						{/each}
-					</div>
-				</div>
-				{#if stacks.some((st) => !st.is_builtin)}
+				{/if}
+			</Tabs.Content>
+
+			<Tabs.Content value="export">
+				<div class="space-y-3">
 					<div class="space-y-2">
-						<p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">User stacks</p>
+						<p class="section-label">App specs</p>
 						<div class="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
-							{#each stacks.filter((st) => !st.is_builtin) as st (st.slug)}
+							{#each appTemplates as t (t.slug)}
 								<button
 									type="button"
-									class="rounded-md border px-2 py-0.5 text-[11px] font-mono transition-colors cursor-pointer {selection.stack.includes(st.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
-									onclick={() => toggle('stack', st.slug)}
-								>{st.slug}</button>
+									class="rounded-md border px-2 py-0.5 text-[11px] transition-colors cursor-pointer {selection.app.includes(t.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
+									aria-pressed={selection.app.includes(t.slug)}
+									onclick={() => toggle('app', t.slug)}
+								>{t.name}</button>
 							{/each}
 						</div>
 					</div>
-				{/if}
-				<div class="flex items-center gap-2 border-t pt-3">
-					<Badge variant="outline" class="text-[10px]">{selectedCount} selected</Badge>
-					<Button size="sm" class="ml-auto text-xs cursor-pointer" disabled={selectedCount === 0} onclick={() => exportSelected('json')}>Export JSON</Button>
-					<Button variant="outline" size="sm" class="text-xs cursor-pointer" disabled={selectedCount === 0} onclick={() => exportSelected('yaml')}>Export YAML</Button>
+					<div class="space-y-2">
+						<p class="section-label">Profiles <span class="normal-case font-normal">(their blocks are bundled automatically)</span></p>
+						<div class="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+							{#each profiles as p (p.slug)}
+								<button
+									type="button"
+									class="rounded-md border px-2 py-0.5 text-[11px] transition-colors cursor-pointer {selection.profile.includes(p.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
+									aria-pressed={selection.profile.includes(p.slug)}
+									onclick={() => toggle('profile', p.slug)}
+								>{p.name}</button>
+							{/each}
+						</div>
+					</div>
+					<div class="space-y-2">
+						<p class="section-label">Extra blocks</p>
+						<div class="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+							{#each contentBlocks as b (b.id)}
+								<button
+									type="button"
+									class="rounded-md border px-2 py-0.5 text-[11px] font-mono transition-colors cursor-pointer {selection.block.includes(blockKey(b)) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
+									aria-pressed={selection.block.includes(blockKey(b))}
+									onclick={() => toggle('block', blockKey(b))}
+								>{b.slug} v{b.version}</button>
+							{/each}
+						</div>
+					</div>
+					{#if stacks.some((st) => !st.is_builtin)}
+						<div class="space-y-2">
+							<p class="section-label">User stacks</p>
+							<div class="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+								{#each stacks.filter((st) => !st.is_builtin) as st (st.slug)}
+									<button
+										type="button"
+										class="rounded-md border px-2 py-0.5 text-[11px] font-mono transition-colors cursor-pointer {selection.stack.includes(st.slug) ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-primary/40'}"
+										aria-pressed={selection.stack.includes(st.slug)}
+										onclick={() => toggle('stack', st.slug)}
+									>{st.slug}</button>
+								{/each}
+							</div>
+						</div>
+					{/if}
+					<div class="flex items-center gap-2 border-t pt-3">
+						<Badge variant="outline">{selectedCount} selected</Badge>
+						<Button variant="outline" size="sm" class="ml-auto" disabled={selectedCount === 0} onclick={() => exportSelected('yaml')}>Export YAML</Button>
+						<Button size="sm" disabled={selectedCount === 0} onclick={() => exportSelected('json')}>Export JSON</Button>
+					</div>
 				</div>
-			</div>
-		{:else}
-			<div class="space-y-3">
-				<div class="space-y-1.5">
-					<Label class="text-xs" for="pkg-import-text">Package JSON / YAML</Label>
-					<Textarea id="pkg-import-text" bind:value={packageText} rows={10} class="font-mono text-xs" placeholder="Paste a package, or pick a file below" />
-					<input type="file" accept=".json,.yaml,.yml" onchange={readFile} class="text-xs" />
+			</Tabs.Content>
+
+			<Tabs.Content value="import">
+				<div class="space-y-3">
+					<div class="space-y-1.5">
+						<Label class="text-xs" for="pkg-import-text">Package JSON / YAML</Label>
+						<Textarea id="pkg-import-text" bind:value={packageText} rows={10} class="font-mono text-xs" placeholder="Paste a package, or pick a file below" />
+						<input type="file" accept=".json,.yaml,.yml" aria-label="Package file" onchange={readFile} class="text-xs" />
+					</div>
+					<div class="flex justify-end">
+						<Button size="sm" disabled={importing || !packageText.trim()} onclick={submitImport}>
+							{#if importing}<LoaderCircle class="animate-spin" />{/if}
+							Import package
+						</Button>
+					</div>
 				</div>
-				<div class="flex justify-end">
-					<Button size="sm" class="text-xs cursor-pointer" disabled={importing || !packageText.trim()} onclick={submitImport}>
-						{#if importing}<LoaderCircle class="mr-1.5 h-3.5 w-3.5 animate-spin" />{/if}
-						Import package
-					</Button>
-				</div>
-			</div>
-		{/if}
+			</Tabs.Content>
+		</Tabs.Root>
 
 		{#if error}
-			<div class="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive font-medium">{error}</div>
+			<ErrorAlert message={error} />
 		{/if}
 	</Dialog.Content>
 </Dialog.Root>

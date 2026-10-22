@@ -11,13 +11,16 @@ import Check from '@lucide/svelte/icons/check';
 import Rocket from '@lucide/svelte/icons/rocket';
 import Loader from '@lucide/svelte/icons/loader-circle';
 import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-import AlertCircle from '@lucide/svelte/icons/alert-circle';
 import Store from '@lucide/svelte/icons/store';
 import { toast } from 'svelte-sonner';
 import { createRun } from '$lib/api/runs';
 import { getToolCatalog, type AnalyzerTool } from '$lib/api/analyzers';
 import { getGenerationJobs, type GenerationJobList } from '$lib/api/client';
 import AnalysisTargetForm from '$lib/components/analysis/AnalysisTargetForm.svelte';
+import PageHeader from '$lib/components/PageHeader.svelte';
+import LoadingState from '$lib/components/LoadingState.svelte';
+import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+import { toneClasses } from '$lib/constants/colors';
 
 let step = $state(1);
 const stepLabels = ['Select Source', 'Tools', 'Review'];
@@ -153,24 +156,12 @@ const canAdvance = $derived.by(() => {
 });
 </script>
 
-<svelte:head>
-	<title>New Analysis - LLM Lab</title>
-</svelte:head>
-
 <div class="space-y-6">
-	<div class="flex items-center gap-2 text-sm text-muted-foreground">
-		<Button variant="ghost" size="sm" href="/analysis" class="gap-1.5 px-2">
-			<ArrowLeft class="h-3.5 w-3.5" />
-			Analysis
-		</Button>
-		<span>/</span>
-		<span class="text-foreground font-medium">New Analysis</span>
-	</div>
-
-	<div class="page-header">
-		<h1>New Analysis</h1>
-		<p>Pick a source, choose installed analyzers, and launch a run.</p>
-	</div>
+	<PageHeader
+		title="New Analysis"
+		description="Pick a source, choose installed analyzers, and launch a run."
+		back={{ href: '/analysis', label: 'Analysis' }}
+	/>
 
 	<div class="grid gap-4 sm:gap-6 lg:grid-cols-4">
 		<div class="space-y-6 lg:col-span-3">
@@ -178,11 +169,11 @@ const canAdvance = $derived.by(() => {
 			<div class="flex items-center gap-2 overflow-x-auto">
 				{#each stepLabels as label, i}
 					<button
-						class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors {step === i + 1 ? 'bg-primary/10 text-primary font-medium' : i + 1 < step ? 'text-emerald-500' : 'text-muted-foreground'}"
+						class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors {step === i + 1 ? 'bg-primary/10 text-primary font-medium' : i + 1 < step ? 'text-success-fg' : 'text-muted-foreground'}"
 						aria-current={step === i + 1 ? 'step' : undefined}
 						onclick={() => { if (i + 1 <= step) step = i + 1; }}
 					>
-						<span class="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold {step === i + 1 ? 'bg-primary text-primary-foreground' : i + 1 < step ? 'bg-emerald-500 text-white' : 'bg-muted text-muted-foreground'}">
+						<span class="flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold {step === i + 1 ? 'bg-primary text-primary-foreground' : i + 1 < step ? 'bg-success/15 text-success-fg' : 'bg-muted text-muted-foreground'}">
 							{#if i + 1 < step}
 								<Check class="h-3 w-3" />
 							{:else}
@@ -233,25 +224,9 @@ const canAdvance = $derived.by(() => {
 					</div>
 
 					{#if toolsLoading}
-						<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-							{#each Array(4) as _}
-								<div class="animate-pulse motion-reduce:animate-none rounded-lg border border-border p-4">
-									<div class="mb-3 h-4 w-28 rounded bg-muted"></div>
-									{#each Array(3) as _}
-										<div class="mb-2 flex items-center gap-2.5">
-											<div class="h-4 w-4 rounded bg-muted"></div>
-											<div class="h-3 w-40 rounded bg-muted"></div>
-										</div>
-									{/each}
-								</div>
-							{/each}
-						</div>
+						<LoadingState label="loading analyzers" />
 					{:else if toolsError}
-						<div class="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-							<AlertCircle class="h-4 w-4 shrink-0" />
-							{toolsError}
-							<Button variant="outline" size="sm" class="ml-auto" onclick={loadTools}>Retry</Button>
-						</div>
+						<ErrorAlert message={toolsError} onretry={loadTools} />
 					{:else}
 						<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 							{#each groupedTools as group}
@@ -277,15 +252,15 @@ const canAdvance = $derived.by(() => {
 														<div class="flex items-center gap-2">
 															<span class="text-sm font-medium">{tool.name}</span>
 															{#if tool.kind === 'ai'}
-																<Badge variant="outline" class="text-[10px]">AI</Badge>
+																<Badge variant="outline" class="text-[11px]">AI</Badge>
 															{/if}
 															{#if tool.installed}
-																<Badge variant="outline" class="text-[10px] border-emerald-500/30 bg-emerald-500/10 text-emerald-500">
+																<Badge variant="outline" class="text-[11px] {toneClasses.success}">
 																	<Check class="mr-0.5 h-2.5 w-2.5" /> Installed
 																</Badge>
 															{:else}
-																<Badge variant="outline" class="text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-500">Not installed</Badge>
-																<a href="/analyzers" class="text-[10px] text-amber-500 underline-offset-2 hover:underline">Install →</a>
+																<Badge variant="outline" class="text-[11px] {toneClasses.warning}">Not installed</Badge>
+																<a href="/analyzers" class="text-[11px] text-warning-fg underline-offset-2 hover:underline">Install →</a>
 															{/if}
 														</div>
 														<div class="text-xs text-muted-foreground line-clamp-2">{tool.description}</div>
@@ -344,15 +319,12 @@ const canAdvance = $derived.by(() => {
 							<div class="mb-1 text-muted-foreground">Analyzers ({installedSelectedCount})</div>
 							<div class="flex flex-wrap gap-1">
 								{#each selectedToolsList.filter((t) => t.installed) as t}
-									<Badge variant="secondary" class="text-[10px]">{t.name}</Badge>
+									<Badge variant="secondary" class="text-[11px]">{t.name}</Badge>
 								{/each}
 							</div>
 						</div>
 						{#if launchError}
-							<div class="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-destructive">
-								<AlertCircle class="h-4 w-4 shrink-0" />
-								{launchError}
-							</div>
+							<ErrorAlert message={launchError} />
 						{/if}
 					</Card.Content>
 				</Card.Root>
@@ -392,7 +364,7 @@ const canAdvance = $derived.by(() => {
 				<Card.Header><Card.Title class="text-sm">Selections</Card.Title></Card.Header>
 				<Card.Content class="space-y-3">
 					<div>
-						<div class="mb-1 text-xs font-medium uppercase text-muted-foreground">Source</div>
+						<div class="section-label mb-1">Source</div>
 						{#if sourceMode === 'job' && selectedJob}
 							<span class="text-sm">{selectedJob.model_name ?? selectedJob.id.slice(0, 8)}</span>
 						{:else if sourceMode === 'paste' && (pasteBackend.trim() || pasteFrontend.trim())}
@@ -403,13 +375,11 @@ const canAdvance = $derived.by(() => {
 					</div>
 					<Separator />
 					<div>
-						<div class="mb-1 text-xs font-medium uppercase text-muted-foreground">
-							Analyzers ({installedSelectedCount})
-						</div>
+						<div class="section-label mb-1">Analyzers ({installedSelectedCount})</div>
 						{#if installedSelectedCount > 0}
 							<div class="flex flex-wrap gap-1">
 								{#each selectedToolsList.filter((t) => t.installed) as t}
-									<Badge variant="secondary" class="text-[10px]">{t.name}</Badge>
+									<Badge variant="secondary" class="text-[11px]">{t.name}</Badge>
 								{/each}
 							</div>
 						{:else}

@@ -19,7 +19,7 @@
 </script>
 
 <svelte:head>
-	<title>{page.status} {info.title} - LLM Lab</title>
+	<title>{page.status} {info.title} · LLM Lab</title>
 </svelte:head>
 
 <div class="flex min-h-[70vh] items-center justify-center p-4">
@@ -28,10 +28,10 @@
 			<span class="text-primary">$</span> cat /var/log/error.log <span class="text-muted-foreground">| tail -1</span>
 		</div>
 		<div class="rounded-md border border-border bg-card overflow-hidden">
-			<div class="flex items-center gap-2 border-b border-border bg-surface-2 px-4 py-2 text-xs" style="font-family: var(--font-mono);">
-				<span class="h-2.5 w-2.5 rounded-full bg-destructive/70"></span>
-				<span class="h-2.5 w-2.5 rounded-full bg-amber-500/60"></span>
-				<span class="h-2.5 w-2.5 rounded-full bg-emerald-500/60"></span>
+			<div class="flex items-center gap-2 border-b border-border bg-surface-2 px-4 py-2 text-xs font-mono">
+				<span aria-hidden="true" class="h-2.5 w-2.5 rounded-full bg-destructive/70"></span>
+				<span aria-hidden="true" class="h-2.5 w-2.5 rounded-full bg-warning/60"></span>
+				<span aria-hidden="true" class="h-2.5 w-2.5 rounded-full bg-success/60"></span>
 				<span class="ml-2 text-muted-foreground">error_handler.ts — line {page.status}</span>
 			</div>
 			<div class="px-6 py-8 text-center">
@@ -40,10 +40,10 @@
 						<Icon class="h-8 w-8" />
 					</div>
 				</div>
-				<div class="text-5xl font-bold tabular-nums tracking-tight" style="font-family: var(--font-display);">
+				<div class="text-5xl font-bold tabular-nums tracking-tight font-display">
 					{page.status}
 				</div>
-				<div class="mt-1 text-sm font-medium text-foreground" style="font-family: var(--font-display);">
+				<div class="mt-1 text-sm font-medium text-foreground font-display">
 					{info.title}
 				</div>
 				<p class="mt-3 text-sm text-muted-foreground">
@@ -53,7 +53,7 @@
 					<Button href="/">Go to Dashboard</Button>
 					<Button variant="outline" onclick={() => history.back()}>Go Back</Button>
 				</div>
-				<p class="mt-6 text-[10px] uppercase tracking-wider text-muted-foreground" style="font-family: var(--font-mono);">
+				<p class="mt-6 text-[11px] uppercase tracking-wider text-muted-foreground font-mono">
 					// error_code: {page.status}
 				</p>
 			</div>

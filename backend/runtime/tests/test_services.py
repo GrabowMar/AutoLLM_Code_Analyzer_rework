@@ -211,3 +211,65 @@ def test_idempotency_guard_skips_non_pending():
     action.refresh_from_db()
     assert action.status == ContainerAction.Status.RUNNING
     assert action.started_at == original_started_at
+
+
+def test_new_client_uses_apps_daemon_over_tls(settings):
+    from backend.runtime.services import docker_manager
+
+    settings.APPS_DOCKER_HOST = "tcp://apps-dind:2376"
+    settings.APPS_DOCKER_CERT_PATH = "/apps-dind-certs"
+    with patch("docker.from_env") as from_env:
+        docker_manager.new_client()
+    from_env.assert_called_once_with(
+        environment={
+            "DOCKER_HOST": "tcp://apps-dind:2376",
+            "DOCKER_TLS_VERIFY": "1",
+            "DOCKER_CERT_PATH": "/apps-dind-certs",
+        },
+    )
+
+
+def test_new_client_defaults_to_process_environment(settings):
+    from backend.runtime.services import docker_manager
+
+    settings.APPS_DOCKER_HOST = ""
+    with patch("docker.from_env") as from_env:
+        docker_manager.new_client()
+    from_env.assert_called_once_with()
+
+
+def _run_remove(container) -> ContainerAction:
+    action = container_service.create_action(container, ContainerAction.ActionType.REMOVE, UserFactory())
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        action.refresh_from_db()
+        if action.status in (ContainerAction.Status.COMPLETED, ContainerAction.Status.FAILED):
+            break
+        time.sleep(0.1)
+    return action
+
+
+@pytest.mark.django_db(transaction=True)
+def test_remove_action_drops_per_app_image():
+    mock_client = _mock_docker()
+    with patch("backend.runtime.services.docker_manager.client", return_value=mock_client):
+        container = ContainerInstanceFactory(status=ContainerInstance.Status.STOPPED, name="llm-abc12345")
+        container.image = "backend/llm-abc12345:latest"
+        container.save(update_fields=["image"])
+        action = _run_remove(container)
+
+    assert action.status == ContainerAction.Status.COMPLETED
+    mock_client.images.remove.assert_called_once_with("backend/llm-abc12345:latest", force=True)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_remove_action_keeps_shared_image():
+    mock_client = _mock_docker()
+    with patch("backend.runtime.services.docker_manager.client", return_value=mock_client):
+        container = ContainerInstanceFactory(status=ContainerInstance.Status.STOPPED, name="analyzer-0123456789")
+        container.image = "backend/analyzer-base:latest"
+        container.save(update_fields=["image"])
+        action = _run_remove(container)
+
+    assert action.status == ContainerAction.Status.COMPLETED
+    mock_client.images.remove.assert_not_called()

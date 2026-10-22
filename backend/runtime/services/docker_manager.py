@@ -10,15 +10,32 @@ logger = logging.getLogger(__name__)
 _docker_client = None
 
 
+def new_client():
+    """Build a Docker client for the apps daemon (``APPS_DOCKER_HOST``).
+
+    Falls back to the process environment (DOCKER_HOST / local socket) when no
+    apps daemon is configured.  Raises if the client cannot be created.
+    """
+    import docker
+    from django.conf import settings
+
+    host = getattr(settings, "APPS_DOCKER_HOST", "")
+    if not host:
+        return docker.from_env()
+    environment = {"DOCKER_HOST": host}
+    cert_path = getattr(settings, "APPS_DOCKER_CERT_PATH", "")
+    if cert_path:
+        environment |= {"DOCKER_TLS_VERIFY": "1", "DOCKER_CERT_PATH": cert_path}
+    return docker.from_env(environment=environment)
+
+
 def client():
     """Return a cached Docker client, or None if daemon unavailable."""
     global _docker_client  # noqa: PLW0603
     if _docker_client is not None:
         return _docker_client
     try:
-        import docker
-
-        _docker_client = docker.from_env()
+        _docker_client = new_client()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Docker client unavailable: %s", exc)
         return None
@@ -203,6 +220,20 @@ def remove(name: str, *, force: bool = True) -> dict[str, Any]:
         container.remove(force=force)
     except Exception as exc:  # noqa: BLE001
         logger.warning("remove(%s) failed: %s", name, exc)
+        return {"error": str(exc)}
+    else:
+        return {"status": "removed"}
+
+
+def remove_image(tag: str) -> dict[str, Any]:
+    """Remove an image by tag (e.g. a removed app's per-app build)."""
+    try:
+        c = client()
+        if c is None:
+            return {"error": "Docker daemon unavailable"}
+        c.images.remove(tag, force=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("remove_image(%s) failed: %s", tag, exc)
         return {"error": str(exc)}
     else:
         return {"status": "removed"}

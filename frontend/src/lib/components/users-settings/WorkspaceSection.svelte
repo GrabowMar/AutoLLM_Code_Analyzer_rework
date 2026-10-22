@@ -58,7 +58,7 @@
 	<Card.Content class="space-y-5">
 		<div class="grid gap-4 sm:grid-cols-2">
 			<label class="flex flex-col gap-1.5">
-				<span class="text-[11px] uppercase tracking-wider text-muted-foreground" style="font-family: var(--font-mono);">Items per page</span>
+				<span class="section-label">Items per page</span>
 				<select
 					class="h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 					value={prefs.itemsPerPage}
@@ -72,7 +72,7 @@
 			</label>
 
 			<label class="flex flex-col gap-1.5">
-				<span class="text-[11px] uppercase tracking-wider text-muted-foreground" style="font-family: var(--font-mono);">Date format</span>
+				<span class="section-label">Date format</span>
 				<select
 					class="h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 					value={prefs.dateFormat}

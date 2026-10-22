@@ -2,7 +2,10 @@
 	import { onMount } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import { containerTones } from '$lib/constants/colors';
 	import Activity from '@lucide/svelte/icons/activity';
 	import PlayCircle from '@lucide/svelte/icons/play-circle';
 	import StopCircle from '@lucide/svelte/icons/stop-circle';
@@ -58,46 +61,44 @@
 		</Card.Header>
 		<Card.Content>
 			{#if loading}
-				<div class="flex items-center justify-center py-10 text-muted-foreground">
-					<LoaderCircle class="h-5 w-5 animate-spin" />
-				</div>
+				<LoadingState label="loading usage" class="py-10" />
 			{:else if error}
-				<div class="rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
+				<ErrorAlert message={error} onretry={load} />
 			{:else}
 				<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-					<div class="rounded-lg border bg-card p-3">
+					<div class="rounded-md border bg-card p-3">
 						<div class="flex items-center gap-2 text-xs text-muted-foreground">
-							<PlayCircle class="h-3.5 w-3.5 text-emerald-400" />Running
+							<PlayCircle class="h-3.5 w-3.5 text-success-fg" />Running
 						</div>
-						<div class="mt-1 text-2xl font-semibold text-emerald-400">{running}</div>
+						<div class="mt-1 text-2xl font-semibold text-success-fg">{running}</div>
 					</div>
-					<div class="rounded-lg border bg-card p-3">
+					<div class="rounded-md border bg-card p-3">
 						<div class="flex items-center gap-2 text-xs text-muted-foreground">
-							<StopCircle class="h-3.5 w-3.5 text-zinc-400" />Stopped
+							<StopCircle class="h-3.5 w-3.5 text-muted-foreground" />Stopped
 						</div>
 						<div class="mt-1 text-2xl font-semibold">{stopped}</div>
 					</div>
-					<div class="rounded-lg border bg-card p-3">
+					<div class="rounded-md border bg-card p-3">
 						<div class="flex items-center gap-2 text-xs text-muted-foreground">
-							<CircleDashed class="h-3.5 w-3.5 text-amber-400" />Other
+							<CircleDashed class="h-3.5 w-3.5 text-warning-fg" />Other
 						</div>
 						<div class="mt-1 text-2xl font-semibold">{other}</div>
 					</div>
-					<div class="rounded-lg border bg-card p-3">
+					<div class="rounded-md border bg-card p-3">
 						<div class="text-xs text-muted-foreground">Container Coverage</div>
 						<div class="mt-1 text-2xl font-semibold">{coverage}%</div>
-						<div class="text-[10px] text-muted-foreground">{containers.length} / {totalApps} apps</div>
+						<div class="text-[11px] text-muted-foreground">{containers.length} / {totalApps} apps</div>
 					</div>
 				</div>
 
 				{#if containers.length > 0}
 					<div class="mt-4">
-						<div class="text-xs font-medium text-muted-foreground mb-2">Recent containers</div>
+						<div class="section-label mb-2">Recent containers</div>
 						<div class="space-y-1.5">
 							{#each containers.slice(0, 8) as c (c.id)}
 								<div class="flex items-center justify-between rounded border bg-muted/20 px-2 py-1.5 text-xs">
 									<div class="flex items-center gap-2 min-w-0">
-										<Badge variant="outline" class="text-[10px]">{c.status}</Badge>
+										<StatusBadge status={c.status} tones={containerTones} />
 										<span class="font-mono truncate">{c.name || c.id.substring(0, 8)}</span>
 									</div>
 									<div class="text-muted-foreground font-mono whitespace-nowrap">

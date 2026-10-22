@@ -10,7 +10,9 @@ from backend.credentials.services.resolver import get_openrouter_key
 from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationJob
 from backend.generation.services import result_writer
-from backend.generation.services.aider_runner import AiderExecutionError
+from backend.generation.services.agent.runner import AgentRunCancelled
+from backend.generation.services.agent.runner import AgentRunError
+from backend.generation.services.agent.runner import AgentRunner
 from backend.generation.services.backend_scanner import BackendScanner
 from backend.generation.services.code_parser import parse_to_files
 from backend.generation.services.copilot_validation import validate_python_code
@@ -39,7 +41,7 @@ DEFAULT_ENABLE_REPAIR = True
 
 
 class GenerationService:
-    """Orchestrates generation for all three modes."""
+    """Orchestrates generation for every mode (agent first; template modes secondary)."""
 
     def __init__(self) -> None:
         self.renderer = PromptRenderer()
@@ -71,7 +73,9 @@ class GenerationService:
         result_writer.publish_status(job)
 
         try:
-            if job.mode == GenerationJob.Mode.CUSTOM:
+            if job.mode == GenerationJob.Mode.AGENT:
+                AgentRunner(job).execute()
+            elif job.mode == GenerationJob.Mode.CUSTOM:
                 self._run_custom(job)
             elif job.mode == GenerationJob.Mode.SCAFFOLDING:
                 self._run_scaffolding(job)
@@ -82,6 +86,9 @@ class GenerationService:
                 raise ValueError(msg)
 
             job.status = GenerationJob.Status.COMPLETED
+        except AgentRunCancelled:
+            logger.info("Job %s cancelled", job.id)
+            job.status = GenerationJob.Status.CANCELLED
         except OpenRouterError as exc:
             logger.exception("Job %s failed (OpenRouter)", job.id)
             job.status = GenerationJob.Status.FAILED
@@ -91,8 +98,8 @@ class GenerationService:
             existing["error_status_code"] = exc.status_code
             existing["error_remediation"] = exc.remediation
             job.result_data = existing
-        except AiderExecutionError as exc:
-            logger.exception("Job %s failed (Aider)", job.id)
+        except AgentRunError as exc:
+            logger.warning("Job %s failed (agent run): %s", job.id, exc)
             job.status = GenerationJob.Status.FAILED
             job.error_message = exc.display()[:2000]
             existing = job.result_data if isinstance(job.result_data, dict) else {}
@@ -104,12 +111,21 @@ class GenerationService:
             job.status = GenerationJob.Status.FAILED
             job.error_message = str(exc)[:2000]
         finally:
+            # A cancel request that raced the run's end still wins.
+            current = GenerationJob.objects.filter(id=job.id).values_list("status", flat=True).first()
+            if current == GenerationJob.Status.CANCELLED:
+                job.status = GenerationJob.Status.CANCELLED
             job.completed_at = timezone.now()
             if job.started_at:
                 job.duration_seconds = (job.completed_at - job.started_at).total_seconds()
             job.save(
                 update_fields=[
                     "status",
+                    "stack_slug",
+                    "experiment_seed",
+                    "resolved_bundle",
+                    "prompt_hash",
+                    "bundle_key",
                     "completed_at",
                     "duration_seconds",
                     "error_message",
@@ -310,39 +326,12 @@ class GenerationService:
 
         return files, repair_used
 
-    # ── Copilot Mode ──────────────────────────────────────────────────
+    # ── Copilot Mode (retired) ────────────────────────────────────────
 
     def _run_copilot(self, job: GenerationJob) -> None:
-        """Copilot mode: Aider agent loop in an ephemeral git workspace."""
-        from backend.generation.services.aider_runner import AiderRunner
-        from backend.generation.services.aider_runner import pick_copilot_model_id
-        from backend.generation.services.copilot_results import CopilotResults
-        from backend.generation.services.copilot_workspace import CopilotWorkspace
-
-        max_iters = min(job.copilot_max_iterations or 5, 10)
-        total_start = time.time()
-        workspace = CopilotWorkspace.create(job)
-        try:
-            iterations = AiderRunner(job, workspace).run_loop(max_iters)
-            CopilotResults.apply(job, workspace, iterations)
-
-            loc = 0
-            if isinstance(job.result_data, dict):
-                files = job.result_data.get("files") or {}
-                for code in files.values():
-                    if isinstance(code, str):
-                        loc += code.count("\n") + 1
-
-            job.metrics = JobMetrics(
-                duration_seconds=round(time.time() - total_start, 2),
-                model=pick_copilot_model_id(job),
-                iterations_used=len(iterations),
-                final_error_count=len(iterations[-1].errors) if iterations else 0,
-                engine="aider",
-                lines_of_code=loc,
-            ).dump()
-        finally:
-            workspace.cleanup()
+        """The in-process aider loop was replaced by agent mode's sandboxed harness."""
+        msg = "Copilot mode was retired; create an agent-mode job instead."
+        raise ValueError(msg)
 
     @staticmethod
     def _validate_python_code(code: str) -> list[str]:

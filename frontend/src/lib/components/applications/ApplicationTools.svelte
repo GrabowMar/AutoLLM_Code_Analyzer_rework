@@ -2,7 +2,10 @@
 import { onMount } from 'svelte';
 import * as Card from '$lib/components/ui/card';
 import { Button } from '$lib/components/ui/button';
-import { Badge } from '$lib/components/ui/badge';
+import * as Tabs from '$lib/components/ui/tabs';
+import StatusBadge from '$lib/components/StatusBadge.svelte';
+import LoadingState from '$lib/components/LoadingState.svelte';
+import EmptyState from '$lib/components/EmptyState.svelte';
 import Wrench from '@lucide/svelte/icons/wrench';
 import Play from '@lucide/svelte/icons/play';
 import { toast } from 'svelte-sonner';
@@ -20,7 +23,7 @@ let { jobId }: Props = $props();
 let container = $state<ContainerInstance | null>(null);
 let inspect = $state<ContainerInspect | null>(null);
 let loading = $state(true);
-let activeTab = $state<'api' | 'cmds' | 'env'>('api');
+let activeTab = $state('api');
 
 let method = $state<'GET' | 'POST' | 'PUT' | 'DELETE'>('GET');
 let path = $state('/');
@@ -89,7 +92,7 @@ async function runCmd(action: string) {
 	}
 }
 
-const TABS: Array<{ k: 'api' | 'cmds' | 'env'; label: string }> = [
+const TABS = [
 	{ k: 'api', label: 'API Tester' },
 	{ k: 'cmds', label: 'Quick Commands' },
 	{ k: 'env', label: 'Environment' },
@@ -97,49 +100,52 @@ const TABS: Array<{ k: 'api' | 'cmds' | 'env'; label: string }> = [
 </script>
 
 <section id="tools" class="space-y-4">
-	<h2 class="text-lg font-semibold flex items-center gap-2"><Wrench class="h-5 w-5" /> Tools</h2>
 	<Card.Root>
-		<Card.Content class="p-4">
+		<Card.Header>
+			<Card.Title>Container tools</Card.Title>
+			<Card.Description>Send requests to the running app, run diagnostics and inspect its environment.</Card.Description>
+		</Card.Header>
+		<Card.Content>
 			{#if loading}
-				<p class="text-sm text-muted-foreground">Loading…</p>
+				<LoadingState label="loading container" class="py-8" />
 			{:else if !container}
-				<p class="text-sm text-muted-foreground italic">Build and start a container to use these tools.</p>
+				<EmptyState compact icon={Wrench} title="No container" description="Build and start a container to use these tools." />
 			{:else}
-				<div class="flex gap-1 border-b mb-3">
-					{#each TABS as t (t.k)}
-						<button type="button" onclick={() => (activeTab = t.k)} class="px-3 py-1.5 text-sm border-b-2 -mb-px {activeTab === t.k ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}">{t.label}</button>
-					{/each}
-				</div>
+				<Tabs.Root bind:value={activeTab}>
+					<Tabs.List>
+						{#each TABS as t (t.k)}
+							<Tabs.Trigger value={t.k}>{t.label}</Tabs.Trigger>
+						{/each}
+					</Tabs.List>
 
-				{#if activeTab === 'api'}
-					<div class="space-y-3">
+					<Tabs.Content value="api" class="space-y-3">
 						<div class="flex flex-wrap items-center gap-2">
-							<select bind:value={method} class="rounded border bg-background px-2 py-1 text-sm">
+							<select bind:value={method} aria-label="HTTP method" class="rounded border bg-background px-2 py-1 text-sm">
 								<option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option>
 							</select>
 							<span class="text-xs font-mono text-muted-foreground border rounded px-2 py-1 bg-muted/30">{container.app_url ?? '—'}</span>
-							<input bind:value={path} placeholder="/path" class="flex-1 min-w-[200px] rounded border bg-background px-2 py-1 text-sm font-mono" />
-							<Button size="sm" onclick={sendRequest} disabled={sending || container.status !== 'running'}>
-								<Play class="h-3.5 w-3.5 mr-1.5" /> Send
-							</Button>
+							<input bind:value={path} placeholder="/path" aria-label="Request path" class="flex-1 min-w-[200px] rounded border bg-background px-2 py-1 text-sm font-mono" />
 							<Button size="sm" variant="outline" onclick={clearReq}>Clear</Button>
+							<Button size="sm" onclick={sendRequest} disabled={sending || container.status !== 'running'}>
+								<Play class="h-3.5 w-3.5" /> Send
+							</Button>
 						</div>
 						{#if method !== 'GET'}
-							<textarea bind:value={body} rows="4" placeholder={'{"key": "value"}'} class="w-full rounded border bg-background px-2 py-1 text-xs font-mono"></textarea>
+							<textarea bind:value={body} rows="4" aria-label="Request body" placeholder={'{"key": "value"}'} class="w-full rounded border bg-background px-2 py-1 text-xs font-mono"></textarea>
 						{/if}
 						{#if apiResp}
 							{#if apiResp.error}
-								<div class="text-xs text-destructive bg-red-500/5 border border-red-500/20 rounded p-2">{apiResp.error}</div>
+								<div class="rounded border border-destructive/30 bg-destructive/10 p-2 text-xs text-danger-fg">{apiResp.error}</div>
 							{:else}
-								<div class="text-xs">
-									<Badge variant="outline" class="mb-2 {apiResp.status && apiResp.status < 400 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-destructive/10 text-destructive border-destructive/30'}">HTTP {apiResp.status}</Badge>
-									<pre class="bg-zinc-950 text-zinc-100 p-3 rounded max-h-[400px] overflow-auto whitespace-pre-wrap break-words font-mono">{apiResp.text}</pre>
+								<div class="space-y-2 text-xs">
+									<StatusBadge status={null} tone={apiResp.status && apiResp.status < 400 ? 'success' : 'danger'} label="HTTP {apiResp.status}" />
+									<pre class="bg-muted/40 text-foreground/90 p-3 rounded max-h-[400px] overflow-auto whitespace-pre-wrap break-words font-mono">{apiResp.text}</pre>
 								</div>
 							{/if}
 						{/if}
-					</div>
-				{:else if activeTab === 'cmds'}
-					<div class="space-y-3">
+					</Tabs.Content>
+
+					<Tabs.Content value="cmds" class="space-y-3">
 						<div class="flex flex-wrap gap-2">
 							{#each QUICK as q (q.key)}
 								<Button size="sm" variant="outline" onclick={() => runCmd(q.key)} disabled={!!runningCmd || container.status !== 'running'}>
@@ -149,45 +155,43 @@ const TABS: Array<{ k: 'api' | 'cmds' | 'env'; label: string }> = [
 						</div>
 						{#if cmdOutput}
 							{#if cmdOutput.error}
-								<div class="text-xs text-destructive bg-red-500/5 border border-red-500/20 rounded p-2">{cmdOutput.error}</div>
+								<div class="rounded border border-destructive/30 bg-destructive/10 p-2 text-xs text-danger-fg">{cmdOutput.error}</div>
 							{:else}
-								<div class="text-xs">
-									<Badge variant="outline" class="mb-2 {cmdOutput.exit_code === 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'}">
-										{cmdOutput.action} · exit {cmdOutput.exit_code}
-									</Badge>
-									<pre class="bg-zinc-950 text-zinc-100 p-3 rounded max-h-[400px] overflow-auto whitespace-pre-wrap break-words font-mono">{cmdOutput.output || '(no output)'}</pre>
+								<div class="space-y-2 text-xs">
+									<StatusBadge status={null} tone={cmdOutput.exit_code === 0 ? 'success' : 'warning'} label="{cmdOutput.action} · exit {cmdOutput.exit_code}" class="normal-case" />
+									<pre class="bg-muted/40 text-foreground/90 p-3 rounded max-h-[400px] overflow-auto whitespace-pre-wrap break-words font-mono">{cmdOutput.output || '(no output)'}</pre>
 								</div>
 							{/if}
 						{/if}
-					</div>
-				{:else}
-					<div>
+					</Tabs.Content>
+
+					<Tabs.Content value="env">
 						{#if !inspect}
-							<p class="text-sm text-muted-foreground">No inspect data available.</p>
+							<EmptyState compact title="No inspect data available" />
 						{:else if Object.keys(inspect.env || {}).length === 0}
-							<p class="text-sm text-muted-foreground italic">No environment variables.</p>
+							<EmptyState compact title="No environment variables" />
 						{:else}
 							<div class="overflow-x-auto">
 								<table class="w-full text-sm">
 									<thead>
-										<tr class="border-b bg-muted/30">
-											<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Key</th>
-											<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Value</th>
+										<tr>
+											<th>Key</th>
+											<th>Value</th>
 										</tr>
 									</thead>
-									<tbody class="divide-y">
+									<tbody>
 										{#each Object.entries(inspect.env) as [k, v] (k)}
-											<tr class="hover:bg-muted/30">
-												<td class="px-3 py-2 font-mono text-xs">{k}</td>
-												<td class="px-3 py-2 font-mono text-xs break-all">{v}</td>
+											<tr>
+												<td class="font-mono text-xs">{k}</td>
+												<td class="font-mono text-xs break-all">{v}</td>
 											</tr>
 										{/each}
 									</tbody>
 								</table>
 							</div>
 						{/if}
-					</div>
-				{/if}
+					</Tabs.Content>
+				</Tabs.Root>
 			{/if}
 		</Card.Content>
 	</Card.Root>

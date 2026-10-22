@@ -5,6 +5,7 @@
 	import Check from '@lucide/svelte/icons/check';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import LoadingState from '$lib/components/LoadingState.svelte';
 
 	interface Props {
 		profiles: GenerationProfile[];
@@ -94,13 +95,13 @@
 	<div class="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2">
 		<span class="text-xs font-medium text-muted-foreground shrink-0">Profile</span>
 		{#if loading}
-			<LoaderCircle class="h-3 w-3 animate-spin text-muted-foreground" />
+			<LoaderCircle class="h-3 w-3 animate-spin text-muted-foreground" aria-label="Loading profiles" />
 		{:else if selected}
 			<span class="text-sm font-medium truncate">{selected.name}</span>
 			{#if selected.is_default}
-				<Badge variant="secondary" class="text-[9px] shrink-0">Default</Badge>
+				<Badge variant="secondary" class="shrink-0">Default</Badge>
 			{/if}
-			<span class="text-[10px] text-muted-foreground shrink-0">{selected.block_refs?.length ?? 0} blocks · {selected.scaffolding_slug}</span>
+			<span class="text-[11px] text-muted-foreground shrink-0">{selected.block_refs?.length ?? 0} blocks · {selected.scaffolding_slug}</span>
 		{:else}
 			<span class="text-sm text-muted-foreground truncate" title={autoSummary}>
 				Auto{autoSummary ? ` — ${autoSummary}` : ' (resolved per app)'}
@@ -109,7 +110,8 @@
 
 		<button
 			type="button"
-			class="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors shrink-0 cursor-pointer"
+			aria-expanded={open}
+			class="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0 cursor-pointer"
 			onclick={() => (open = !open)}
 		>
 			Change <ChevronDown class="h-3 w-3 transition-transform duration-150 {open ? 'rotate-180' : ''}" />
@@ -123,6 +125,7 @@
 			<button
 				type="button"
 				class="flex w-full items-center gap-2 border-b px-3 py-2 text-left text-xs hover:bg-muted/50 transition-colors cursor-pointer {selectedId === '' ? 'bg-primary/5 text-primary' : 'text-muted-foreground'}"
+				aria-pressed={selectedId === ''}
 				onclick={() => select('')}
 			>
 				<div class="flex h-3.5 w-3.5 items-center justify-center">
@@ -137,6 +140,7 @@
 					<button
 						type="button"
 						class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/50 transition-colors cursor-pointer {selectedId === profile.id ? 'bg-primary/5' : ''}"
+						aria-pressed={selectedId === profile.id}
 						onclick={() => select(profile.id)}
 					>
 						<div class="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
@@ -144,30 +148,28 @@
 						</div>
 						<span class="font-medium truncate">{profile.name}</span>
 						{#if profile.is_default}
-							<Badge variant="secondary" class="text-[9px] shrink-0">Default</Badge>
+							<Badge variant="secondary" class="shrink-0">Default</Badge>
 						{/if}
 						{#if isSuggested}
-							<Badge variant="outline" class="text-[9px] text-primary border-primary/30 shrink-0">Suggested</Badge>
+							<Badge class="shrink-0">Suggested</Badge>
 						{/if}
-						<span class="ml-auto text-[10px] text-muted-foreground shrink-0 tabular-nums">{profile.block_refs?.length ?? 0} blocks · {profile.scaffolding_slug}</span>
+						<span class="ml-auto text-[11px] text-muted-foreground shrink-0 tabular-nums">{profile.block_refs?.length ?? 0} blocks · {profile.scaffolding_slug}</span>
 					</button>
 				{/each}
 			</div>
 
 			<!-- Preview, shown at bottom of open picker -->
 			{#if previewLoading}
-				<div class="flex items-center gap-1.5 border-t px-3 py-2 text-xs text-muted-foreground">
-					<LoaderCircle class="h-3 w-3 animate-spin" /> Loading preview…
-				</div>
+				<LoadingState label="loading preview" class="border-t py-2" />
 			{:else if previewStages && selected}
-				<div class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 border-t bg-muted/20 px-3 py-2 text-[10px]">
+				<div class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 border-t bg-muted/20 px-3 py-2 text-[11px]">
 					<span class="text-muted-foreground">Backend sys / user</span>
 					<span class="font-mono text-right tabular-nums">{previewStages.backend.system.toLocaleString()} / {previewStages.backend.user.toLocaleString()}</span>
 					<span class="text-muted-foreground">Frontend sys / user</span>
 					<span class="font-mono text-right tabular-nums">{previewStages.frontend.system.toLocaleString()} / {previewStages.frontend.user.toLocaleString()}</span>
 				</div>
 			{:else if previewError}
-				<p class="border-t px-3 py-2 text-[10px] text-destructive">{previewError}</p>
+				<p class="border-t px-3 py-2 text-xs text-danger-fg">{previewError}</p>
 			{/if}
 		</div>
 	{/if}

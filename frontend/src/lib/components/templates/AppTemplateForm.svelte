@@ -7,6 +7,7 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Save from '@lucide/svelte/icons/save';
 	import XIcon from '@lucide/svelte/icons/x';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import { slugify } from './slugify';
 
 	export interface AppTemplateFormData {
@@ -29,62 +30,59 @@
 	let { form = $bindable(), isEdit, saving, error, onSave, onCancel }: Props = $props();
 </script>
 
-<Card.Root class="shadow-lg border-primary/20">
-	<Card.Header class="pb-3 bg-muted/10 border-b">
-		<div class="flex items-center justify-between">
-			<Card.Title class="text-sm font-bold text-foreground">
-				{isEdit ? 'Edit' : 'New'} App Requirement Template
-			</Card.Title>
-			<button type="button" class="text-muted-foreground hover:text-foreground cursor-pointer" onclick={onCancel}>
-				<XIcon class="h-4 w-4" />
-			</button>
+<Card.Root>
+	<Card.Header class="border-b">
+		<div class="flex items-start justify-between gap-2">
+			<div class="space-y-1">
+				<Card.Title>{isEdit ? 'Edit' : 'New'} app spec</Card.Title>
+				<Card.Description>Requirements are one per line.</Card.Description>
+			</div>
+			<Button variant="ghost" size="icon" class="size-8" aria-label="Close editor" onclick={onCancel}>
+				<XIcon />
+			</Button>
 		</div>
 	</Card.Header>
-	<Card.Content class="pt-5 space-y-4">
+	<Card.Content class="space-y-4">
 		<div class="grid gap-4 sm:grid-cols-2">
 			<div class="space-y-1.5">
-				<Label class="text-xs uppercase tracking-wider text-muted-foreground">Name</Label>
-				<Input bind:value={form.name} placeholder="e.g. Chat Messenger" class="h-9 text-xs transition-all hover:border-primary/45 focus-visible:ring-primary/20"
+				<Label for="app-name" class="text-xs">Name</Label>
+				<Input id="app-name" bind:value={form.name} placeholder="e.g. Chat Messenger" class="h-9 text-xs"
 					oninput={() => { if (!isEdit) form.slug = slugify(form.name); }} />
 			</div>
 			<div class="space-y-1.5">
-				<Label class="text-xs uppercase tracking-wider text-muted-foreground">Slug</Label>
-				<Input bind:value={form.slug} placeholder="e.g. chat_messenger" class="h-9 text-xs font-mono transition-all hover:border-primary/45 focus-visible:ring-primary/20" />
+				<Label for="app-slug" class="text-xs">Slug</Label>
+				<Input id="app-slug" bind:value={form.slug} placeholder="e.g. chat_messenger" class="h-9 text-xs font-mono" />
 			</div>
 			<div class="space-y-1.5 sm:col-span-2">
-				<Label class="text-xs uppercase tracking-wider text-muted-foreground">Description</Label>
-				<Textarea bind:value={form.description} rows={2} placeholder="Brief summary of what this application does..." class="text-xs leading-relaxed" />
+				<Label for="app-desc" class="text-xs">Description</Label>
+				<Textarea id="app-desc" bind:value={form.description} rows={2} placeholder="Brief summary of what this application does..." class="text-xs leading-relaxed" />
 			</div>
 			<div class="space-y-1.5">
-				<Label class="text-xs uppercase tracking-wider text-muted-foreground">Backend Requirements (one per line)</Label>
-				<Textarea bind:value={form.backend_requirements} rows={6} placeholder={"e.g.\nWebSockets for active connections\nCRUD endpoints for messages\nUser identity session management"} class="font-mono text-[11px] leading-normal bg-muted/20" />
+				<Label for="app-backend" class="text-xs">Backend Requirements</Label>
+				<Textarea id="app-backend" bind:value={form.backend_requirements} rows={6} placeholder={"e.g.\nWebSockets for active connections\nCRUD endpoints for messages\nUser identity session management"} class="font-mono text-[11px] leading-normal bg-muted/20" />
 			</div>
 			<div class="space-y-1.5">
-				<Label class="text-xs uppercase tracking-wider text-muted-foreground">Frontend Requirements (one per line)</Label>
-				<Textarea bind:value={form.frontend_requirements} rows={6} placeholder={"e.g.\nReal-time scrolling chat view\nSidebar of direct message lists\nVisual status rings for users"} class="font-mono text-[11px] leading-normal bg-muted/20" />
+				<Label for="app-frontend" class="text-xs">Frontend Requirements</Label>
+				<Textarea id="app-frontend" bind:value={form.frontend_requirements} rows={6} placeholder={"e.g.\nReal-time scrolling chat view\nSidebar of direct message lists\nVisual status rings for users"} class="font-mono text-[11px] leading-normal bg-muted/20" />
 			</div>
 			<div class="space-y-1.5 sm:col-span-2">
-				<Label class="text-xs uppercase tracking-wider text-muted-foreground">Admin Features (one per line)</Label>
-				<Textarea bind:value={form.admin_requirements} rows={3} placeholder={"e.g.\nGlobal analytics tracking dashboard\nManage and freeze user rooms"} class="font-mono text-[11px] leading-normal bg-muted/20" />
+				<Label for="app-admin" class="text-xs">Admin Features</Label>
+				<Textarea id="app-admin" bind:value={form.admin_requirements} rows={3} placeholder={"e.g.\nGlobal analytics tracking dashboard\nManage and freeze user rooms"} class="font-mono text-[11px] leading-normal bg-muted/20" />
 			</div>
 		</div>
 
 		{#if error}
-			<div class="rounded-md bg-destructive/10 border border-destructive/30 p-3 text-xs text-destructive font-medium">
-				{error}
-			</div>
+			<ErrorAlert message={error} />
 		{/if}
 
-		<div class="flex gap-2 pt-2 border-t">
-			<Button size="sm" class="text-xs cursor-pointer shadow-xs" onclick={onSave} disabled={saving || !form.name || !form.slug}>
+		<div class="flex justify-end gap-2 pt-4 border-t">
+			<Button variant="outline" size="sm" onclick={onCancel}>Cancel</Button>
+			<Button size="sm" onclick={onSave} disabled={saving || !form.name || !form.slug}>
 				{#if saving}
-					<LoaderCircle class="mr-1.5 h-3.5 w-3.5 animate-spin" /> Saving…
+					<LoaderCircle class="animate-spin" /> Saving…
 				{:else}
-					<Save class="mr-1.5 h-3.5 w-3.5" /> Save Template
+					<Save /> Save app spec
 				{/if}
-			</Button>
-			<Button variant="outline" size="sm" class="text-xs cursor-pointer" onclick={onCancel}>
-				Cancel
 			</Button>
 		</div>
 	</Card.Content>

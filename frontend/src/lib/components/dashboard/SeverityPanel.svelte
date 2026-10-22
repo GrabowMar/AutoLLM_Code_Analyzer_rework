@@ -14,7 +14,7 @@
 	let { severity, loading = false }: Props = $props();
 </script>
 
-<Card.Root class="gradient-border-top h-full">
+<Card.Root class="h-full">
 	<Card.Header>
 		<div class="flex items-center gap-2">
 			<ShieldAlert class="h-4 w-4 text-muted-foreground" />

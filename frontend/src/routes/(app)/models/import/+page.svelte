@@ -5,7 +5,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { toast } from 'svelte-sonner';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import Upload from '@lucide/svelte/icons/upload';
 	import FileJson from '@lucide/svelte/icons/file-json';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
@@ -53,25 +54,12 @@
 	}
 </script>
 
-<svelte:head>
-	<title>Import Models - LLM Lab</title>
-</svelte:head>
-
 <div class="space-y-6">
-	<!-- Breadcrumb -->
-	<div class="flex items-center gap-2 text-sm text-muted-foreground">
-		<Button variant="ghost" size="sm" href="/models" class="gap-1.5 px-2">
-			<ArrowLeft class="h-3.5 w-3.5" />
-			Models
-		</Button>
-		<span>/</span>
-		<span class="text-foreground font-medium">Import</span>
-	</div>
-
-	<div class="page-header">
-		<h1>Import Models</h1>
-		<p>Import model definitions from exported JSON or OpenRouter model payload JSON.</p>
-	</div>
+	<PageHeader
+		title="Import Models"
+		description="Import model definitions from exported JSON or OpenRouter model payload JSON."
+		back={{ href: '/models', label: 'Models' }}
+	/>
 
 	<div class="mx-auto max-w-lg">
 		<Card.Root>
@@ -88,32 +76,31 @@
 						<Badge variant="outline">Supported: .json</Badge>
 						<Badge variant="secondary">Round-trips with model JSON export</Badge>
 					</div>
-					<div class="flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 transition-colors hover:border-primary/50">
-						<FileJson class="h-10 w-10 text-muted-foreground/50" />
+					<div class="flex flex-col items-center justify-center gap-3 rounded-md border-2 border-dashed p-8 transition-colors hover:border-primary/50">
+						<FileJson class="h-10 w-10 text-muted-foreground" aria-hidden="true" />
 						<div class="text-center">
 							<p class="text-sm font-medium">
 								{#if fileName}
 									{fileName}
 								{:else}
-									Drop file here or click to browse
+									Choose a JSON file to import
 								{/if}
 							</p>
-							<p class="text-xs text-muted-foreground mt-1">Accepts .json and .zip files</p>
+							<p class="text-xs text-muted-foreground mt-1">Accepts .json files</p>
 						</div>
 						<Input
 							type="file"
 							accept=".json,application/json"
 							class="max-w-xs"
 							onchange={handleFileChange}
+							aria-label="Model JSON file"
 						/>
 					</div>
 					{#if error}
-						<div class="rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
-							{error}
-						</div>
+						<ErrorAlert message={error} />
 					{/if}
 					{#if result}
-						<div class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-300">
+						<div class="rounded-md border border-success/30 bg-success/10 p-3 text-sm text-success-fg" role="status">
 							Imported {result.imported} of {result.count} records.
 						</div>
 					{/if}

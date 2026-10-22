@@ -89,6 +89,8 @@ export interface GenerationJob {
   llm_params: LLMParams;
   custom_system_prompt: string;
   custom_user_prompt: string;
+  task_description: string;
+  agent_config: AgentConfig;
   copilot_description: string;
   copilot_max_iterations: number;
   copilot_current_iteration: number;
@@ -101,6 +103,9 @@ export interface GenerationJob {
   result_data: Record<string, any>;
   metrics: Record<string, any>;
   experiment_seed: number | null;
+  stack_slug: string;
+  prompt_hash: string;
+  bundle_key: string;
   resolved_bundle: Record<string, any>;
   created_at: string;
   updated_at: string;
@@ -242,17 +247,64 @@ export async function createAppTemplate(data: {
   return res.json();
 }
 
-export async function createCopilotJob(data: {
-  description: string;
-  model_id?: number;
-  max_iterations?: number;
-  use_open_source?: boolean;
-}): Promise<GenerationJob> {
-  const res = await apiFetch("/generation/jobs/copilot/", {
+/** Agent-run budget / network overrides (None = server default from AGENT_* settings). */
+export interface AgentConfig {
+  harness?: string;
+  /** provider_default: the gateway strips harness-sent sampling knobs; harness_native: passes them through. */
+  sampling_policy?: "provider_default" | "harness_native";
+  wall_clock_seconds?: number;
+  max_llm_requests?: number;
+  max_total_tokens?: number;
+  max_cost_usd?: number;
+  network_policy?: "packages" | "none";
+}
+
+/** Agent mode: app specs (or one free-form task) × models × harnesses × trials, each run in a sandbox. */
+export async function createAgentBatch(data: {
+  stack_slug: string;
+  app_requirement_ids: number[];
+  description?: string;
+  model_ids: number[];
+  /** One job per harness per cell; empty = agent_config.harness / server default. */
+  harnesses?: string[];
+  llm_params?: LLMParams;
+  agent_config?: AgentConfig;
+  profile_id?: number | null;
+  trials?: number;
+  base_seed?: number | null;
+}): Promise<BatchCreateResponse> {
+  const res = await apiFetch("/generation/jobs/agent/", {
     method: "POST",
     body: JSON.stringify(data),
   });
   return res.json();
+}
+
+export interface AgentHarness {
+  name: string;
+  label: string;
+  version: string;
+  requires_tool_calling: boolean;
+}
+
+export async function getAgentHarnesses(): Promise<AgentHarness[]> {
+  const res = await apiFetch("/generation/agent/harnesses/");
+  return res.json();
+}
+
+/** Re-run the platform evaluation (build, run, hidden conformance suite) for a finished job. */
+export async function evaluateGenerationJob(
+  jobId: string,
+): Promise<{ status: string }> {
+  const res = await apiFetch(`/generation/jobs/${jobId}/evaluate/`, {
+    method: "POST",
+  });
+  return res.json();
+}
+
+/** URL of one agent run-record file (served only while it matches its recorded sha256). */
+export function runRecordUrl(jobId: string, name: string): string {
+  return `/api/generation/jobs/${jobId}/run-record/${encodeURIComponent(name)}`;
 }
 
 export async function createCustomJob(data: {

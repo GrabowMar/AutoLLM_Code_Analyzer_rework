@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import MousePointerClick from '@lucide/svelte/icons/mouse-pointer-click';
 	import { Label } from '$lib/components/ui/label';
 	import { Button } from '$lib/components/ui/button';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -164,27 +166,25 @@
 	});
 </script>
 
-<aside class="flex flex-col h-full w-80 shrink-0 border-l bg-card/40 overflow-y-auto">
+<aside class="flex flex-col h-full w-80 shrink-0 border-l bg-card overflow-y-auto">
 	<div class="px-4 py-3 border-b flex items-center justify-between">
 		<div>
 			<h2 class="text-sm font-semibold flex items-center gap-1.5">
-				<Settings class="h-4 w-4" /> Properties
+				<Settings class="h-4 w-4 text-muted-foreground" aria-hidden="true" /> Properties
 			</h2>
 			<p class="text-xs text-muted-foreground mt-0.5">
 				{selected ? 'Editing selected node' : 'Select a node to edit'}
 			</p>
 		</div>
 		{#if selected}
-			<Button variant="ghost" size="icon" class="h-7 w-7 text-destructive hover:text-destructive" onclick={deleteNode} title="Delete node">
+			<Button variant="ghost" size="icon" class="h-7 w-7 text-destructive hover:text-destructive" onclick={deleteNode} title="Delete node" aria-label="Delete node">
 				<Trash2 class="h-4 w-4" />
 			</Button>
 		{/if}
 	</div>
 
 	{#if !selected}
-		<div class="flex-1 flex items-center justify-center p-6 text-center">
-			<p class="text-xs text-muted-foreground">Click a node on the canvas to edit its configuration here.</p>
-		</div>
+		<EmptyState compact class="flex-1 px-6" icon={MousePointerClick} title="No node selected" description="Click a node on the canvas to edit its configuration here." />
 	{:else}
 		<div class="p-4 space-y-4 text-sm">
 			<div class="space-y-1.5">
@@ -195,7 +195,7 @@
 					onchange={(e) => renameNode((e.target as HTMLInputElement).value)}
 					class="w-full rounded-md border bg-background px-2 py-1.5 text-sm font-mono"
 				/>
-				<p class="text-[10px] text-muted-foreground">Must be unique. Renaming updates dependencies.</p>
+				<p class="text-[11px] text-muted-foreground">Must be unique. Renaming updates dependencies.</p>
 			</div>
 
 			<div class="space-y-1.5">
@@ -222,7 +222,7 @@
 			</div>
 
 			<div class="border-t pt-4 space-y-3">
-				<p class="text-xs uppercase tracking-wider text-muted-foreground font-medium">Configuration</p>
+				<p class="section-label">Configuration</p>
 
 				{#if selected.data.kind === 'generate'}
 					<div class="space-y-1.5">
@@ -300,7 +300,7 @@
 									<option value={String(p.id)}>{p.name}{p.is_default ? ' (default)' : ''}</option>
 								{/each}
 							</select>
-							<p class="text-[10px] text-muted-foreground">Analyzer toggles below override profile defaults.</p>
+							<p class="text-[11px] text-muted-foreground">Analyzer toggles below override profile defaults.</p>
 						</div>
 					{/if}
 					<div class="space-y-1.5">
@@ -346,7 +346,7 @@
 						>
 							{#each REPORT_TYPES as t (t.value)}<option value={t.value}>{t.label}</option>{/each}
 						</select>
-						<p class="text-[10px] text-muted-foreground">Determines which generator runs.</p>
+						<p class="text-[11px] text-muted-foreground">Determines which generator runs.</p>
 					</div>
 					{#if cfg.report_type === 'template_comparison'}
 						<div class="space-y-1.5">
@@ -432,7 +432,7 @@
 						>
 							{#each SCRIPT_OPERATIONS as op (op.value)}<option value={op.value}>{op.label}</option>{/each}
 						</select>
-						<p class="text-[10px] text-muted-foreground">Only allowlisted operations run; arbitrary code is rejected.</p>
+						<p class="text-[11px] text-muted-foreground">Only allowlisted operations run; arbitrary code is rejected.</p>
 					</div>
 					<details class="space-y-1.5">
 						<summary class="text-xs cursor-pointer text-muted-foreground hover:text-foreground">Advanced: raw JSON</summary>

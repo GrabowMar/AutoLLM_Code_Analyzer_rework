@@ -3,6 +3,7 @@ import * as Card from '$lib/components/ui/card';
 import { Badge } from '$lib/components/ui/badge';
 import { Button } from '$lib/components/ui/button';
 import FolderTree from '@lucide/svelte/icons/folder-tree';
+import EmptyState from '$lib/components/EmptyState.svelte';
 import FileText from '@lucide/svelte/icons/file-text';
 import FileCode from '@lucide/svelte/icons/file-code';
 import Eye from '@lucide/svelte/icons/eye';
@@ -19,22 +20,22 @@ let selectedFileIdx = $state(0);
 
 const keyArtifactFiles = $derived.by(() => {
 	const notable = ['docker-compose.yml', 'docker-compose.yaml', 'readme.md', 'requirements.txt', 'package.json', 'dockerfile', '.env', 'manage.py', 'app.py', 'index.html'];
-	const found: { name: string; idx: number; icon: string; subtitle: string }[] = [];
+	const found: { name: string; idx: number; subtitle: string }[] = [];
 	for (let i = 0; i < files.length; i++) {
 		const f = files[i];
 		const basename = (f.name.split('/').pop() ?? f.name).toLowerCase();
 		if (notable.includes(basename)) {
-			let icon = '📄', subtitle = 'File';
-			if (basename.includes('docker-compose')) { icon = '🐳'; subtitle = 'Docker Compose'; }
-			else if (basename === 'dockerfile') { icon = '🐳'; subtitle = 'Docker'; }
-			else if (basename === 'readme.md') { icon = '📖'; subtitle = 'Documentation'; }
-			else if (basename === 'requirements.txt') { icon = '📦'; subtitle = 'Python deps'; }
-			else if (basename === 'package.json') { icon = '📦'; subtitle = 'Node.js deps'; }
-			else if (basename === '.env') { icon = '🔧'; subtitle = 'Environment'; }
-			else if (basename === 'manage.py') { icon = '🐍'; subtitle = 'Django management'; }
-			else if (basename === 'app.py') { icon = '🐍'; subtitle = 'Application entry'; }
-			else if (basename === 'index.html') { icon = '🌐'; subtitle = 'HTML entry'; }
-			found.push({ name: f.name.split('/').pop() ?? f.name, idx: i, icon, subtitle });
+			let subtitle = 'File';
+			if (basename.includes('docker-compose')) subtitle = 'Docker Compose';
+			else if (basename === 'dockerfile') subtitle = 'Docker';
+			else if (basename === 'readme.md') subtitle = 'Documentation';
+			else if (basename === 'requirements.txt') subtitle = 'Python deps';
+			else if (basename === 'package.json') subtitle = 'Node.js deps';
+			else if (basename === '.env') subtitle = 'Environment';
+			else if (basename === 'manage.py') subtitle = 'Django management';
+			else if (basename === 'app.py') subtitle = 'Application entry';
+			else if (basename === 'index.html') subtitle = 'HTML entry';
+			found.push({ name: f.name.split('/').pop() ?? f.name, idx: i, subtitle });
 		}
 	}
 	return found;
@@ -69,29 +70,27 @@ const extensionBreakdown = $derived.by(() => {
 </script>
 
 <section id="files" class="space-y-4">
-	<h2 class="text-lg font-semibold flex items-center gap-2"><FolderTree class="h-5 w-5" /> Files & Code</h2>
 	{#if files.length === 0}
 		<Card.Root>
-			<Card.Content class="py-12 text-center">
-				<FolderTree class="mx-auto h-10 w-10 text-muted-foreground/30 mb-3" />
-				<p class="text-sm text-muted-foreground">No files generated</p>
+			<Card.Content>
+				<EmptyState compact icon={FolderTree} title="No files generated" description="This job produced no code output." />
 			</Card.Content>
 		</Card.Root>
 	{:else}
 		<!-- Key Artifacts Card -->
 		{#if keyArtifactFiles.length > 0}
 			<Card.Root>
-				<Card.Header class="pb-2"><Card.Title class="text-sm font-medium flex items-center gap-1.5"><FileText class="h-3.5 w-3.5" /> Key Artifacts</Card.Title></Card.Header>
+				<Card.Header class="pb-2"><Card.Title class="text-sm font-medium">Key Artifacts</Card.Title><Card.Description>Entry points, manifests and config detected in the output.</Card.Description></Card.Header>
 				<Card.Content class="p-0">
 					<div class="divide-y">
 						{#each keyArtifactFiles as artifact}
-							<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors">
-								<span class="text-lg">{artifact.icon}</span>
+							<div class="flex items-center gap-3 px-4 py-2.5">
+								<FileText class="h-4 w-4 shrink-0 text-muted-foreground" />
 								<div class="flex-1 min-w-0">
 									<div class="text-sm font-medium font-mono">{artifact.name}</div>
 									<div class="text-xs text-muted-foreground">{artifact.subtitle}</div>
 								</div>
-								<Button variant="ghost" size="sm" class="h-7 w-7 p-0" onclick={() => (selectedFileIdx = artifact.idx)} title="View file">
+								<Button variant="ghost" size="sm" class="h-7 w-7 p-0" onclick={() => (selectedFileIdx = artifact.idx)} title="View file" aria-label="View {artifact.name}">
 									<Eye class="h-3.5 w-3.5" />
 								</Button>
 							</div>
@@ -101,21 +100,19 @@ const extensionBreakdown = $derived.by(() => {
 			</Card.Root>
 		{/if}
 
-		<!-- File Stats Badges -->
-		<div class="flex items-center gap-2 flex-wrap">
-			<Badge variant="outline" class="text-xs bg-primary/10 text-primary border-primary/30">📁 {fileStats.totalFiles} Files</Badge>
-			<Badge variant="outline" class="text-xs bg-emerald-500/10 text-emerald-500 border-emerald-500/30">📊 {(fileStats.totalSize / 1024).toFixed(1)} KB</Badge>
-			<Badge variant="outline" class="text-xs bg-sky-500/10 text-sky-400 border-sky-500/30">&lt;/&gt; {fileStats.codeCount} Code</Badge>
-			<Badge variant="outline" class="text-xs bg-amber-500/10 text-amber-400 border-amber-500/30">⚙️ {fileStats.configCount} Config</Badge>
-		</div>
-
 		<!-- File Explorer -->
 		<Card.Root>
-			<Card.Content class="p-0">
-				<div class="flex flex-col sm:flex-row" style="min-height: 300px; height: auto; max-height: 650px;">
+			<Card.Header>
+				<Card.Title>File explorer</Card.Title>
+				<Card.Description>
+					{fileStats.totalFiles} files · {(fileStats.totalSize / 1024).toFixed(1)} KB · {fileStats.codeCount} code · {fileStats.configCount} config
+				</Card.Description>
+			</Card.Header>
+			<Card.Content class="border-t p-0">
+				<div class="flex max-h-[650px] min-h-[300px] flex-col sm:flex-row">
 					<!-- Left: File Tree -->
 					<div class="w-full sm:w-1/3 border-b sm:border-b-0 sm:border-r overflow-y-auto bg-muted/20 max-h-48 sm:max-h-none">
-						<div class="p-2 text-xs font-medium text-muted-foreground uppercase tracking-wider border-b px-3 py-2">
+						<div class="section-label border-b px-3 py-2">
 							Files ({files.length})
 						</div>
 						{#each files as f, i}
@@ -137,13 +134,13 @@ const extensionBreakdown = $derived.by(() => {
 							<span class="text-sm font-medium font-mono">{files[selectedFileIdx]?.name ?? ''}</span>
 							<div class="flex items-center gap-1">
 								<Badge variant="outline" class="text-xs">{files[selectedFileIdx]?.lang}</Badge>
-								<Button variant="ghost" size="sm" class="h-7" onclick={() => copyText(files[selectedFileIdx]?.code ?? '', 'Copied file')}>
+								<Button variant="ghost" size="sm" class="h-7" title="Copy file" aria-label="Copy file" onclick={() => copyText(files[selectedFileIdx]?.code ?? '', 'Copied file')}>
 									<Copy class="h-3.5 w-3.5" />
 								</Button>
 							</div>
 						</div>
-						<div class="flex-1 overflow-auto bg-zinc-950 max-w-full">
-							<pre class="p-4 text-xs font-mono text-zinc-300 leading-relaxed overflow-x-auto">{#each (files[selectedFileIdx]?.code ?? '').split('\n') as line, ln}<span class="inline-block w-10 text-right mr-4 text-zinc-600 select-none">{ln + 1}</span>{line}
+						<div class="flex-1 overflow-auto bg-muted/40 max-w-full">
+							<pre class="p-4 text-xs font-mono text-foreground/90 leading-relaxed overflow-x-auto">{#each (files[selectedFileIdx]?.code ?? '').split('\n') as line, ln}<span class="inline-block w-10 text-right mr-4 text-muted-foreground/60 select-none">{ln + 1}</span>{line}
 {/each}</pre>
 						</div>
 					</div>
@@ -154,28 +151,28 @@ const extensionBreakdown = $derived.by(() => {
 		<!-- By Extension Breakdown -->
 		{#if extensionBreakdown.length > 0}
 			<Card.Root>
-				<Card.Header class="pb-2"><Card.Title class="text-sm font-medium">By Extension</Card.Title></Card.Header>
+				<Card.Header class="pb-2"><Card.Title class="text-sm font-medium">By Extension</Card.Title><Card.Description>Share of generated files per extension.</Card.Description></Card.Header>
 				<Card.Content class="p-0">
 					<div class="overflow-x-auto">
 					<table class="w-full text-sm">
 						<thead>
-							<tr class="border-b bg-muted/30">
-								<th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Extension</th>
-								<th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Files</th>
-								<th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Size</th>
-								<th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground w-1/3">%</th>
+							<tr>
+								<th>Extension</th>
+								<th>Files</th>
+								<th>Size</th>
+								<th class="w-1/3">%</th>
 							</tr>
 						</thead>
-						<tbody class="divide-y">
+						<tbody>
 							{#each extensionBreakdown as ext}
-								<tr class="hover:bg-muted/30">
-									<td class="px-4 py-2 font-mono text-xs font-medium">{ext.ext}</td>
-									<td class="px-4 py-2">{ext.count}</td>
-									<td class="px-4 py-2 text-muted-foreground">{(ext.size / 1024).toFixed(1)} KB</td>
-									<td class="px-4 py-2">
+								<tr>
+									<td class="font-mono text-xs font-medium">{ext.ext}</td>
+									<td>{ext.count}</td>
+									<td class="text-muted-foreground">{(ext.size / 1024).toFixed(1)} KB</td>
+									<td>
 										<div class="flex items-center gap-2">
-											<div class="flex-1 h-2 rounded-full bg-zinc-800 overflow-hidden">
-												<div class="h-full rounded-full {ext.pct > 30 ? 'bg-primary' : ext.pct > 10 ? 'bg-sky-500' : 'bg-zinc-600'}" style="width: {ext.pct}%"></div>
+											<div class="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+												<div class="h-full rounded-full {ext.pct > 30 ? 'bg-primary' : ext.pct > 10 ? 'bg-primary/60' : 'bg-muted-foreground/50'}" style="width: {ext.pct}%"></div>
 											</div>
 											<span class="text-xs text-muted-foreground w-10 text-right">{ext.pct.toFixed(0)}%</span>
 										</div>

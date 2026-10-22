@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * Shows a provider's favicon logo, falling back to a colored initial badge.
+	 * Shows a provider's favicon logo, falling back to a neutral initials badge.
 	 * Uses Google's favicon service — tiny images, browser-cached per domain.
 	 */
 
@@ -48,18 +48,6 @@
 		'gryphe': 'gryphe.com',
 	};
 
-	// Deterministic color for the fallback badge based on provider name
-	const PALETTE = [
-		'#3b82f6', '#10b981', '#8b5cf6', '#f59e0b',
-		'#ef4444', '#06b6d4', '#f97316', '#6366f1',
-	];
-
-	function hashColor(str: string): string {
-		let h = 0;
-		for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
-		return PALETTE[Math.abs(h) % PALETTE.length];
-	}
-
 	let { provider, size = 20, class: cls = '' }: Props = $props();
 
 	const key = $derived(provider.toLowerCase().trim());
@@ -76,7 +64,6 @@
 			.join('')
 			.slice(0, 2)
 	);
-	const badgeColor = $derived(hashColor(provider));
 
 	let failed = $state(false);
 </script>
@@ -94,8 +81,9 @@
 	/>
 {:else}
 	<span
-		class="inline-flex shrink-0 items-center justify-center rounded-sm font-bold text-white leading-none {cls}"
-		style="background:{badgeColor}; width:{size}px; height:{size}px; font-size:{Math.round(size * 0.42)}px;"
+		class="inline-flex shrink-0 items-center justify-center rounded-sm border border-border bg-muted font-bold text-muted-foreground leading-none {cls}"
+		style="width:{size}px; height:{size}px; font-size:{Math.max(11, Math.round(size * 0.42))}px;"
+		role="img"
 		aria-label="{provider} logo"
 	>
 		{initials}

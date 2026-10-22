@@ -114,37 +114,37 @@
 		<div class="fb-group">
 			<span class="fb-group-label">Quick</span>
 			<button
-				class="fb-chip {filterPriceRange === 'free' ? 'fb-chip-emerald' : ''}"
+				class="fb-chip {filterPriceRange === 'free' ? 'fb-chip-on' : ''}"
 				onclick={() => onApplyQuickFilter('free')}
 			>
 				<Gift class="h-3 w-3" /> Free
 			</button>
 			<button
-				class="fb-chip {filterCapability === 'vision' ? 'fb-chip-violet' : ''}"
+				class="fb-chip {filterCapability === 'vision' ? 'fb-chip-on' : ''}"
 				onclick={() => onApplyQuickFilter('vision')}
 			>
 				<Eye class="h-3 w-3" /> Vision
 			</button>
 			<button
-				class="fb-chip {filterCapability === 'function_calling' ? 'fb-chip-orange' : ''}"
+				class="fb-chip {filterCapability === 'function_calling' ? 'fb-chip-on' : ''}"
 				onclick={() => onApplyQuickFilter('functions')}
 			>
 				<Wrench class="h-3 w-3" /> Functions
 			</button>
 			<button
-				class="fb-chip {filterContextRange === 'xlarge' ? 'fb-chip-blue' : ''}"
+				class="fb-chip {filterContextRange === 'xlarge' ? 'fb-chip-on' : ''}"
 				onclick={() => onApplyQuickFilter('large-context')}
 			>
 				128K+ Context
 			</button>
 			<button
-				class="fb-chip {sortBy === 'cost_efficiency' && sortDir === 'desc' ? 'fb-chip-amber' : ''}"
+				class="fb-chip {sortBy === 'cost_efficiency' && sortDir === 'desc' ? 'fb-chip-on' : ''}"
 				onclick={() => onApplyQuickFilter('efficient')}
 			>
 				<Sparkles class="h-3 w-3" /> Efficient
 			</button>
 			<button
-				class="fb-chip {filterUsedInApps ? 'fb-chip-indigo' : ''}"
+				class="fb-chip {filterUsedInApps ? 'fb-chip-on' : ''}"
 				onclick={onToggleUsedInApps}
 			>
 				<AppWindow class="h-3 w-3" /> Used in Apps

@@ -1,5 +1,8 @@
 import { apiFetch } from "./core";
-import type { LLMParams } from "./generation";
+import type { AgentConfig, LLMParams } from "./generation";
+
+/** agent: cells run the sandboxed coding-agent harness; scaffolding: template prompts. */
+export type ExperimentMode = "agent" | "scaffolding";
 
 export type ExperimentStatus = "draft" | "running" | "completed" | "archived";
 
@@ -12,6 +15,8 @@ export interface Experiment {
   status: ExperimentStatus;
   repeats: number;
   base_seed: number | null;
+  mode: ExperimentMode;
+  agent_config: AgentConfig;
   continuation_limit: number;
   enable_repair: boolean;
   llm_defaults: LLMParams;
@@ -26,6 +31,8 @@ export interface ExperimentCondition {
   label: string;
   profile: number;
   model: number;
+  /** Agent harness for agent-mode experiments ("" = experiment default). */
+  harness: string;
   model_name: string | null;
   bundle_slug: string | null;
   bundle_version: number | null;
@@ -39,15 +46,37 @@ export interface ExperimentPreview {
   apps: number;
   repeats: number;
   estimated_cost: number;
+  /** budget_upper_bound for agent mode (budget cap × jobs), heuristic for scaffolding. */
+  cost_estimate_kind?: "budget_upper_bound" | "heuristic";
+  mode?: ExperimentMode;
   per_condition: {
     condition_id: number;
     label: string;
     model: string;
+    harness?: string;
     bundle_slug: string;
     bundle_version: number;
     jobs: number;
     estimated_cost: number;
   }[];
+  /** Agent mode: what each condition will actually run with, and where conditions differ. */
+  comparability?: ExperimentComparability | null;
+}
+
+export interface ExperimentComparability {
+  conditions: {
+    condition_id: number;
+    model: string;
+    harness: string;
+    harness_version: string;
+    sampling_policy: string;
+    forced_params: Record<string, unknown>;
+    seed_forwarded: boolean;
+    dropped_params: Record<string, string>;
+    problems: string[];
+  }[];
+  differs_on: string[];
+  has_problems: boolean;
 }
 
 export interface ExperimentBatch {
@@ -83,6 +112,8 @@ export interface CreateExperimentPayload {
   app_requirement_ids?: number[];
   repeats?: number;
   base_seed?: number | null;
+  mode?: ExperimentMode;
+  agent_config?: AgentConfig;
   continuation_limit?: number;
   enable_repair?: boolean;
   llm_defaults?: LLMParams;
@@ -93,6 +124,7 @@ export type UpdateExperimentPayload = Partial<CreateExperimentPayload>;
 export interface CreateConditionPayload {
   profile_id: number;
   model_id: number;
+  harness?: string;
   label?: string;
   param_overrides?: LLMParams;
 }

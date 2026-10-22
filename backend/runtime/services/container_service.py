@@ -325,6 +325,10 @@ def _do_remove(action: ContainerAction, container: ContainerInstance) -> None:
     if error and not not_found:
         action.mark_failed(error)
         return
+    # Per-app images are never reused once the app is gone; shared ones
+    # (e.g. the analyzer base image) are left alone.
+    if container.image == f"backend/{container.name}:latest":
+        docker_manager.remove_image(container.image)
     traefik_router.delete_route(container)
     port_allocator.release(container)
     container.status = ContainerInstance.Status.REMOVED

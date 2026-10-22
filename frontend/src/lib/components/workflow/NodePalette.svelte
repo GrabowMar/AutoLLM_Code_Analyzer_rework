@@ -25,12 +25,12 @@
 	}
 
 	const ITEMS: PaletteItem[] = [
-		{ kind: 'generate', label: 'Generate', description: 'LLM creates a sample app', icon: Sparkles, accent: 'text-violet-300 bg-violet-500/10 border-violet-500/40' },
-		{ kind: 'analyze', label: 'Analyze', description: 'Run analyzer tools', icon: Search, accent: 'text-blue-300 bg-blue-500/10 border-blue-500/40' },
-		{ kind: 'report', label: 'Report', description: 'Compile findings', icon: FileText, accent: 'text-amber-300 bg-amber-500/10 border-amber-500/40' },
-		{ kind: 'wait', label: 'Wait', description: 'Pause execution', icon: Hourglass, accent: 'text-slate-300 bg-slate-500/10 border-slate-500/40' },
-		{ kind: 'notify', label: 'Notify', description: 'Send a notification', icon: Bell, accent: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/40' },
-		{ kind: 'script', label: 'Script', description: 'Custom JSON step', icon: Terminal, accent: 'text-gray-300 bg-gray-500/10 border-gray-500/40' }
+		{ kind: 'generate', label: 'Generate', description: 'LLM creates a sample app', icon: Sparkles, accent: 'text-chart-3' },
+		{ kind: 'analyze', label: 'Analyze', description: 'Run analyzer tools', icon: Search, accent: 'text-chart-2' },
+		{ kind: 'report', label: 'Report', description: 'Compile findings', icon: FileText, accent: 'text-chart-4' },
+		{ kind: 'wait', label: 'Wait', description: 'Pause execution', icon: Hourglass, accent: 'text-muted-foreground' },
+		{ kind: 'notify', label: 'Notify', description: 'Send a notification', icon: Bell, accent: 'text-chart-1' },
+		{ kind: 'script', label: 'Script', description: 'Custom JSON step', icon: Terminal, accent: 'text-muted-foreground' }
 	];
 
 	const ANALYZER_TOOLS = [
@@ -50,7 +50,7 @@
 	}
 </script>
 
-<aside class="flex flex-col h-full {compact ? 'w-full' : 'w-64'} shrink-0 {compact ? '' : 'border-r'} bg-card/40 overflow-y-auto">
+<aside class="flex flex-col h-full {compact ? 'w-full' : 'w-64'} shrink-0 {compact ? '' : 'border-r'} bg-card overflow-y-auto">
 	{#if !compact}
 		<div class="px-4 py-3 border-b">
 			<h2 class="text-sm font-semibold">Node Palette</h2>
@@ -65,13 +65,13 @@
 				draggable="true"
 				ondragstart={(e) => onDragStart(e, item.kind)}
 				onclick={() => onAdd?.(item.kind)}
-				class="text-left w-full rounded-md border {item.accent} px-3 py-2.5 cursor-pointer active:scale-[0.98] hover:scale-[1.02] transition-transform select-none touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:active:scale-100 min-h-[44px]"
+				class="text-left w-full rounded-md border border-border bg-background px-3 py-2.5 cursor-grab hover:border-primary/40 hover:bg-muted/40 active:scale-[0.98] transition-[border-color,background-color,transform] select-none touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none motion-reduce:active:scale-100 min-h-[44px]"
 			>
 				<div class="flex items-center gap-2">
-					<item.icon class="h-4 w-4 shrink-0" />
+					<item.icon class="h-4 w-4 shrink-0 {item.accent}" aria-hidden="true" />
 					<span class="text-sm font-medium">{item.label}</span>
 					{#if onAdd}
-						<Plus class="h-3.5 w-3.5 ml-auto opacity-60" />
+						<Plus class="h-3.5 w-3.5 ml-auto text-muted-foreground" aria-hidden="true" />
 					{/if}
 				</div>
 				<p class="text-[11px] text-muted-foreground mt-0.5 leading-tight">{item.description}</p>
@@ -81,17 +81,17 @@
 
 	{#if !compact}
 		<div class="px-4 py-3 border-t border-b">
-			<h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Analysis Tools</h3>
+			<h3 class="section-label">Analysis tools</h3>
 			<p class="text-[11px] text-muted-foreground mt-0.5">Toggle inside Analyze nodes</p>
 		</div>
 
 		<div class="p-3 space-y-3 text-xs">
 			{#each ['Static', 'Dynamic', 'Performance', 'AI'] as group (group)}
 				<div>
-					<p class="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">{group}</p>
+					<p class="section-label mb-1.5">{group}</p>
 					<div class="flex flex-wrap gap-1">
 						{#each ANALYZER_TOOLS.filter((t) => t.group === group) as tool (tool.slug)}
-							<span class="rounded border border-border bg-background/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">{tool.label}</span>
+							<span class="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">{tool.label}</span>
 						{/each}
 					</div>
 				</div>

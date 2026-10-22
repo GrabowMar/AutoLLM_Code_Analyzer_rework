@@ -1,7 +1,10 @@
 <script lang="ts">
 import { onMount } from 'svelte';
 import * as Card from '$lib/components/ui/card';
-import { Badge } from '$lib/components/ui/badge';
+import StatusBadge from '$lib/components/StatusBadge.svelte';
+import LoadingState from '$lib/components/LoadingState.svelte';
+import EmptyState from '$lib/components/EmptyState.svelte';
+import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 import { Button } from '$lib/components/ui/button';
 import ChartBar from '@lucide/svelte/icons/chart-bar';
 import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -29,13 +32,6 @@ async function refresh() {
 
 onMount(refresh);
 
-const statusColor: Record<string, string> = {
-	pending: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
-	running: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-	completed: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-	failed: 'bg-red-500/15 text-red-400 border-red-500/30',
-	cancelled: 'bg-zinc-500/15 text-zinc-500 border-zinc-500/30',
-};
 
 const summary = $derived.by(() => {
 	const total = tasks.length;
@@ -54,48 +50,52 @@ function findingsOf(t: AnalysisRunListItem): number | string {
 </script>
 
 <section id="analyses" class="space-y-4">
-	<h2 class="text-lg font-semibold flex items-center gap-2"><ChartBar class="h-5 w-5" /> Analyses</h2>
 	<Card.Root>
-		<Card.Content class="p-4 space-y-3">
-			<div class="flex items-center gap-3 flex-wrap">
-				<div class="flex gap-2 text-xs">
-					<Badge variant="outline">Total {summary.total}</Badge>
-					<Badge variant="outline" class="bg-emerald-500/10 text-emerald-400 border-emerald-500/30">Done {summary.done}</Badge>
-					<Badge variant="outline" class="bg-amber-500/10 text-amber-400 border-amber-500/30">Running {summary.running}</Badge>
-					<Badge variant="outline" class="bg-destructive/10 text-destructive border-destructive/30">Failed {summary.failed}</Badge>
-				</div>
-				<Button size="sm" variant="outline" onclick={refresh} class="ml-auto">
-					<RefreshCw class="h-3.5 w-3.5 mr-1.5" /> Refresh
+		<Card.Header class="flex flex-row flex-wrap items-start justify-between gap-3">
+			<div class="space-y-1.5">
+				<Card.Title>Analyses</Card.Title>
+				<Card.Description>
+					{summary.total} total · {summary.done} done · {summary.running} running · {summary.failed} failed
+				</Card.Description>
+			</div>
+			<div class="flex flex-wrap items-center gap-2">
+				<Button size="sm" variant="outline" onclick={refresh}>
+					<RefreshCw class="h-3.5 w-3.5" /> Refresh
 				</Button>
 				<Button size="sm" href="/analysis/create?generation_job_id={jobId}">New Analysis</Button>
 			</div>
-
+		</Card.Header>
+		<Card.Content class="space-y-3">
 			{#if loading}
-				<p class="text-sm text-muted-foreground">Loading…</p>
+				<LoadingState label="loading analyses" class="py-8" />
 			{:else if error}
-				<p class="text-sm text-destructive">{error}</p>
+				<ErrorAlert message={error} onretry={refresh} />
 			{:else if tasks.length === 0}
-				<p class="text-sm text-muted-foreground italic">No analyses yet for this application.</p>
+				<EmptyState compact icon={ChartBar} title="No analyses yet" description="Run an analysis to scan this application for issues.">
+					{#snippet action()}
+						<Button size="sm" href="/analysis/create?generation_job_id={jobId}">New Analysis</Button>
+					{/snippet}
+				</EmptyState>
 			{:else}
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
 						<thead>
-							<tr class="border-b bg-muted/30">
-								<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Task</th>
-								<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Status</th>
-								<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Findings</th>
-								<th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Created</th>
-								<th class="px-3 py-2 text-right text-xs font-medium text-muted-foreground">Actions</th>
+							<tr>
+								<th>Task</th>
+								<th>Status</th>
+								<th>Findings</th>
+								<th>Created</th>
+								<th class="text-right">Actions</th>
 							</tr>
 						</thead>
-						<tbody class="divide-y">
+						<tbody>
 							{#each tasks as t (t.id)}
-								<tr class="hover:bg-muted/30">
-									<td class="px-3 py-2 font-medium">{t.name}</td>
-									<td class="px-3 py-2"><Badge variant="outline" class="text-xs {statusColor[t.status] ?? ''}">{t.status}</Badge></td>
-									<td class="px-3 py-2 font-mono text-xs">{findingsOf(t)}</td>
-									<td class="px-3 py-2 text-xs text-muted-foreground">{new Date(t.created_at).toLocaleString()}</td>
-									<td class="px-3 py-2 text-right">
+								<tr>
+									<td class="font-medium">{t.name}</td>
+									<td><StatusBadge status={t.status} /></td>
+									<td class="font-mono text-xs">{findingsOf(t)}</td>
+									<td class="text-xs text-muted-foreground">{new Date(t.created_at).toLocaleString()}</td>
+									<td class="text-right">
 										<Button size="sm" variant="ghost" href="/analysis/{t.id}">View</Button>
 									</td>
 								</tr>

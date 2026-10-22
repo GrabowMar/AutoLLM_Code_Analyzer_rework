@@ -2,10 +2,11 @@
 import * as Card from '$lib/components/ui/card';
 import { Button } from '$lib/components/ui/button';
 import Search from '@lucide/svelte/icons/search';
-import Loader from '@lucide/svelte/icons/loader-circle';
 import FileCode from '@lucide/svelte/icons/file-code';
 import ClipboardPaste from '@lucide/svelte/icons/clipboard-paste';
-import AlertCircle from '@lucide/svelte/icons/alert-circle';
+import LoadingState from '$lib/components/LoadingState.svelte';
+import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+import EmptyState from '$lib/components/EmptyState.svelte';
 import type { GenerationJobList } from '$lib/api/client';
 
 type SourceMode = 'job' | 'paste';
@@ -51,6 +52,7 @@ let {
 			<Button
 				variant={sourceMode === 'job' ? 'default' : 'outline'}
 				size="sm"
+				aria-pressed={sourceMode === 'job'}
 				onclick={() => onSourceModeChange('job')}
 			>
 				<FileCode class="mr-1.5 h-3.5 w-3.5" />
@@ -59,6 +61,7 @@ let {
 			<Button
 				variant={sourceMode === 'paste' ? 'default' : 'outline'}
 				size="sm"
+				aria-pressed={sourceMode === 'paste'}
 				onclick={() => onSourceModeChange('paste')}
 			>
 				<ClipboardPaste class="mr-1.5 h-3.5 w-3.5" />
@@ -73,6 +76,7 @@ let {
 					<input
 						type="text"
 						placeholder="Search jobs..."
+						aria-label="Search generation jobs"
 						class="h-9 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm"
 						bind:value={jobSearch}
 					/>
@@ -80,20 +84,27 @@ let {
 			</div>
 
 			{#if jobsLoading}
-				<div class="flex items-center justify-center py-12 text-muted-foreground">
-					<Loader class="mr-2 h-4 w-4 animate-spin" />
-					Loading jobs…
-				</div>
+				<LoadingState label="loading jobs" />
 			{:else if jobsError}
-				<div class="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-					<AlertCircle class="h-4 w-4 shrink-0" />
-					{jobsError}
-					<Button variant="outline" size="sm" class="ml-auto" onclick={onRetryLoadJobs}>Retry</Button>
-				</div>
+				<ErrorAlert message={jobsError} onretry={onRetryLoadJobs} />
 			{:else if filteredJobs.length === 0}
-				<div class="py-12 text-center text-sm text-muted-foreground">
-					{jobs.length === 0 ? 'No completed generation jobs found.' : 'No jobs match your search.'}
-				</div>
+				<EmptyState
+					compact
+					icon={FileCode}
+					title={jobs.length === 0 ? 'No completed generation jobs found' : 'No jobs match your search'}
+					description={jobs.length === 0 ? 'Generate an app first, or paste code directly.' : undefined}
+				>
+					{#snippet action()}
+						{#if jobs.length === 0}
+							<Button variant="outline" size="sm" onclick={() => onSourceModeChange('paste')}>
+								<ClipboardPaste class="mr-1.5 h-3.5 w-3.5" />
+								Paste code instead
+							</Button>
+						{:else}
+							<Button variant="outline" size="sm" onclick={() => (jobSearch = '')}>Clear search</Button>
+						{/if}
+					{/snippet}
+				</EmptyState>
 			{:else}
 				<div class="overflow-x-auto table-scroll-wrapper">
 					<table class="w-full text-sm">

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ShieldHalf from '@lucide/svelte/icons/shield-half';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 	import CheckCircle from '@lucide/svelte/icons/check-circle';
 	import Sliders from '@lucide/svelte/icons/sliders';
 	import Download from '@lucide/svelte/icons/download';
@@ -14,23 +14,8 @@
 	import { Button } from '$lib/components/ui/button';
 </script>
 
-<svelte:head>
-	<title>Privacy Policy & Data Usage - LLM Lab</title>
-</svelte:head>
-
 <div class="max-w-5xl mx-auto space-y-6">
-	<!-- Header -->
-	<div class="page-header">
-		<div class="flex items-center gap-4">
-			<div class="flex size-12 items-center justify-center rounded-md bg-primary/10 text-primary shrink-0 border border-primary/20">
-				<ShieldHalf class="size-6" />
-			</div>
-			<div>
-				<h1>Privacy Policy &amp; Data Usage</h1>
-				<p>Last updated: January 2026</p>
-			</div>
-		</div>
-	</div>
+	<PageHeader title="Privacy Policy & Data Usage" description="Last updated: January 2026" />
 	<div class="rounded-md border border-primary/30 bg-primary/[0.05] px-4 py-3 text-sm text-foreground">
 		<strong class="text-primary">Your Privacy Matters:</strong> This document explains what data we collect, how we use it, and how you can control your privacy settings.
 	</div>
@@ -52,7 +37,7 @@
 					{ title: 'Essential Only Option', desc: 'Disable all optional tracking and analytics' }
 				] as item}
 					<div class="flex items-start gap-3">
-						<CheckCircle class="size-4 text-green-500 mt-0.5 shrink-0" />
+						<CheckCircle class="size-4 text-success mt-0.5 shrink-0" />
 						<div>
 							<strong class="text-sm">{item.title}:</strong>
 							<span class="text-sm text-muted-foreground ml-1">{item.desc}</span>
@@ -69,7 +54,7 @@
 		<Card.Root>
 			<Card.Header>
 				<Card.Title class="flex items-center gap-2">
-					<Badge class="bg-green-500 text-white">Required</Badge>
+					<Badge>Required</Badge>
 					Essential Data
 				</Card.Title>
 			</Card.Header>
@@ -104,7 +89,7 @@
 		<Card.Root>
 			<Card.Header>
 				<Card.Title class="flex items-center gap-2">
-					<Badge class="bg-blue-500 text-white">Optional</Badge>
+					<Badge variant="secondary">Optional</Badge>
 					Analytics & Performance
 				</Card.Title>
 			</Card.Header>
@@ -140,7 +125,7 @@
 		<Card.Root>
 			<Card.Header>
 				<Card.Title class="flex items-center gap-2">
-					<Badge class="bg-purple-500 text-white">Optional</Badge>
+					<Badge variant="secondary">Optional</Badge>
 					Functional & Preferences
 				</Card.Title>
 			</Card.Header>
@@ -176,7 +161,7 @@
 		<Card.Root>
 			<Card.Header>
 				<Card.Title class="flex items-center gap-2">
-					<Badge class="bg-indigo-500 text-white">Optional</Badge>
+					<Badge variant="secondary">Optional</Badge>
 					AI Processing & History
 				</Card.Title>
 			</Card.Header>
@@ -251,7 +236,7 @@
 	<Card.Root>
 		<Card.Header>
 			<Card.Title class="flex items-center gap-2">
-				<Lock class="size-5 text-green-600" />
+				<Lock class="size-5 text-success" />
 				Security & Protection
 			</Card.Title>
 		</Card.Header>

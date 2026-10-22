@@ -1,5 +1,4 @@
 <script lang="ts">
-import * as Card from '$lib/components/ui/card';
 import { Badge } from '$lib/components/ui/badge';
 import { Button } from '$lib/components/ui/button';
 import {
@@ -23,6 +22,8 @@ import ModelsFiltersBar from '$lib/components/models/ModelsFiltersBar.svelte';
 import type { FilterTag } from '$lib/components/FilterBar.svelte';
 import ModelsTable from '$lib/components/models/ModelsTable.svelte';
 import PaginationBar from '$lib/components/PaginationBar.svelte';
+import PageHeader from '$lib/components/PageHeader.svelte';
+import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 
 let searchQuery = $state('');
 let selectedProvider = $state('');
@@ -244,18 +245,9 @@ onMount(() => {
 });
 </script>
 
-<svelte:head>
-	<title>Models - LLM Lab</title>
-</svelte:head>
-
-<div class="space-y-3">
-	<!-- Header -->
-	<div class="flex items-center justify-between gap-2">
-		<div class="page-header min-w-0">
-			<h1>Models</h1>
-			<p class="hidden sm:block">Browse and manage AI models available for research.</p>
-		</div>
-		<div class="flex flex-wrap items-center justify-end gap-2">
+<div class="space-y-6">
+	<PageHeader title="Models" description="Browse and manage AI models available for research.">
+		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={openComparison} disabled={selectedModelSlugs.size === 0}>
 				<GitCompareArrows class="h-3.5 w-3.5 sm:mr-2" />
 				<span class="hidden sm:inline">Compare{selectedModelSlugs.size > 0 ? ` (${selectedModelSlugs.size})` : ''}</span>
@@ -268,8 +260,8 @@ onMount(() => {
 				<Upload class="h-3.5 w-3.5 sm:mr-2" />
 				<span class="hidden sm:inline">Import</span>
 			</Button>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	<!-- Stats Bar -->
 	{#if stats}
@@ -278,7 +270,7 @@ onMount(() => {
 				<Cpu class="h-3 w-3" />
 				{stats.total} models
 			</Badge>
-			<Badge variant="secondary" class="gap-1.5 text-emerald-600 dark:text-emerald-400">
+			<Badge variant="secondary" class="gap-1.5 text-success-fg">
 				<Gift class="h-3 w-3" />
 				{stats.free} free
 			</Badge>
@@ -319,11 +311,8 @@ onMount(() => {
 		onExport={downloadExport}
 	/>
 
-	<!-- Error -->
 	{#if error}
-		<div class="rounded-lg border border-destructive bg-destructive/10 p-4 text-sm text-destructive">
-			{error}
-		</div>
+		<ErrorAlert message={error} onretry={load} />
 	{/if}
 
 	{#if data && !loading && selectedModelSlugs.size > 0}

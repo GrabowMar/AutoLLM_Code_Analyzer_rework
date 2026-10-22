@@ -235,6 +235,19 @@ class Experiment(models.Model):
         blank=True,
         help_text="Set for deterministic seed derivation across launches; unset = random per run",
     )
+    mode = models.CharField(
+        _("generation mode"),
+        max_length=20,
+        choices=[("agent", _("Agent")), ("scaffolding", _("Scaffolding"))],
+        default="agent",
+        help_text="agent: conditions run the coding-agent harness; scaffolding: template prompts",
+    )
+    agent_config = models.JSONField(
+        _("agent config"),
+        default=dict,
+        blank=True,
+        help_text="Budget / network overrides for agent-mode runs (see services/agent/config.py)",
+    )
     continuation_limit = models.PositiveSmallIntegerField(_("continuation limit"), default=1)
     enable_repair = models.BooleanField(_("enable repair round"), default=True)
     llm_defaults = models.JSONField(
@@ -292,6 +305,13 @@ class ExperimentCondition(models.Model):
         blank=True,
         help_text="Per-condition sampling-param overrides of the experiment llm_defaults",
     )
+    harness = models.CharField(
+        _("harness"),
+        max_length=40,
+        blank=True,
+        default="",
+        help_text="Agent harness for agent-mode experiments (blank = the experiment's agent_config / default)",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -301,13 +321,14 @@ class ExperimentCondition(models.Model):
         ordering = ["id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["experiment", "profile", "model"],
-                name="generation_experimentcondition_uniq",
+                fields=["experiment", "profile", "model", "harness"],
+                name="generation_experimentcondition_harness_uniq",
             ),
         ]
 
     def __str__(self) -> str:
-        return self.label or f"{self.model_id} / {self.profile.slug}"
+        harness = f" / {self.harness}" if self.harness else ""
+        return self.label or f"{self.model_id} / {self.profile.slug}{harness}"
 
 
 class GenerationBatch(models.Model):
@@ -354,9 +375,12 @@ class GenerationJob(models.Model):
     """A single generation request."""
 
     class Mode(models.TextChoices):
+        # Primary: a coding agent (OpenCode) builds the app in a sandbox.
+        AGENT = "agent", _("Agent")
         CUSTOM = "custom", _("Custom")
         SCAFFOLDING = "scaffolding", _("Scaffolding")
-        COPILOT = "copilot", _("Copilot")
+        # Legacy: in-process aider loop; kept so historical jobs still load.
+        COPILOT = "copilot", _("Copilot (legacy)")
 
     class Status(models.TextChoices):
         PENDING = "pending", _("Pending")
@@ -494,7 +518,13 @@ class GenerationJob(models.Model):
         blank=True,
     )
 
-    # Copilot mode
+    # Agent mode. task_description is a free-form brief for runs without an
+    # app spec (with one, it is prepended to the spec); agent_config holds
+    # per-job budget / network overrides (services/agent/config.py).
+    task_description = models.TextField(_("task description"), blank=True, default="")
+    agent_config = models.JSONField(_("agent config overrides"), default=dict, blank=True)
+
+    # Copilot mode (legacy)
     copilot_description = models.TextField(
         _("copilot description"),
         blank=True,

@@ -151,11 +151,11 @@ Get a key at
 <p class="font-mono text-sm">{status.key_prefix}…</p>
 <p class="flex items-center gap-2 text-xs text-muted-foreground">
 {#if status.last_validation_status === 'valid'}
-<CheckCircle2 class="h-3.5 w-3.5 text-green-500" />
+<CheckCircle2 class="h-3.5 w-3.5 text-success" />
 {:else if status.last_validation_status === 'invalid'}
-<XCircle class="h-3.5 w-3.5 text-red-500" />
+<XCircle class="h-3.5 w-3.5 text-destructive" />
 {:else}
-<AlertTriangle class="h-3.5 w-3.5 text-amber-500" />
+<AlertTriangle class="h-3.5 w-3.5 text-warning" />
 {/if}
 <span>{statusLabel(status.last_validation_status)}</span>
 <span>· Last checked: {formatTimestamp(status.last_validated_at)}</span>
@@ -171,7 +171,7 @@ Get a key at
 <Button variant="outline" size="sm" onclick={() => (showForm = !showForm)} disabled={saving}>
 {showForm ? 'Cancel' : 'Replace'}
 </Button>
-<Button variant="destructive" size="sm" onclick={handleDelete} disabled={saving}>
+<Button variant="destructive" size="sm" onclick={handleDelete} disabled={saving} aria-label="Remove key">
 <Trash2 class="h-4 w-4" />
 </Button>
 </div>

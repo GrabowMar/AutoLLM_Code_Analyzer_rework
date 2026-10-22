@@ -7,6 +7,7 @@
 	import { untrack } from 'svelte';
 	import { slugify } from '$lib/components/templates/slugify';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import type { ContentBlock } from '$lib/api/client';
 
 	export interface BlockSavePayload {
@@ -73,15 +74,14 @@
 </script>
 
 <Card.Root>
-	<Card.Header class="pb-3">
-		<Card.Title class="text-base">
-			{#if initial}
-				New version of <span class="font-mono">{initial.slug}</span>
-				<span class="text-xs font-normal text-muted-foreground">v{initial.version} → next — profiles keep their pinned version until re-pointed</span>
-			{:else}
-				New Block
-			{/if}
-		</Card.Title>
+	<Card.Header class="border-b">
+		{#if initial}
+			<Card.Title>New version of <span class="font-mono">{initial.slug}</span></Card.Title>
+			<Card.Description>v{initial.version} → next. Profiles keep their pinned version until re-pointed.</Card.Description>
+		{:else}
+			<Card.Title>New block</Card.Title>
+			<Card.Description>A reusable prompt fragment that profiles can compose.</Card.Description>
+		{/if}
 	</Card.Header>
 	<Card.Content class="space-y-4">
 		<div class="grid gap-3 sm:grid-cols-2">
@@ -130,19 +130,19 @@
 		<div class="space-y-1.5">
 			<Label class="text-xs" for="block-content">Content (Jinja2)</Label>
 			<Textarea id="block-content" bind:value={content} rows={14} class="text-xs font-mono leading-relaxed" />
-			<p class="text-[10px] text-muted-foreground">
+			<p class="text-[11px] text-muted-foreground">
 				Variables: <span class="font-mono">name, slug, description, backend_requirements, frontend_requirements, admin_requirements, api_endpoints, data_model</span>{#if blockType === 'prompt_stage' && stage === 'frontend'}, <span class="font-mono">backend_api_context</span>{/if}
 			</p>
 		</div>
 
 		{#if error}
-			<div class="rounded-md bg-destructive/10 border border-destructive/30 px-4 py-3 text-sm text-destructive">{error}</div>
+			<ErrorAlert message={error} />
 		{/if}
 
 		<div class="flex items-center justify-end gap-2 border-t pt-4">
 			<Button variant="outline" size="sm" onclick={onCancel} disabled={saving}>Cancel</Button>
 			<Button size="sm" onclick={submit} disabled={saving || !name.trim() || !slug.trim() || !content.trim()}>
-				{#if saving}<LoaderCircle class="mr-1.5 h-3.5 w-3.5 animate-spin" />{/if}
+				{#if saving}<LoaderCircle class="animate-spin" />{/if}
 				{initial ? 'Create new version' : 'Create block'}
 			</Button>
 		</div>

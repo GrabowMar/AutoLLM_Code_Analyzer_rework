@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import { containerTones } from '$lib/constants/colors';
 	import { toast } from 'svelte-sonner';
 	import Play from '@lucide/svelte/icons/play';
 	import Square from '@lucide/svelte/icons/square';
@@ -18,7 +19,6 @@
 		restartContainer,
 		removeContainer,
 		type ContainerInstance,
-		type ContainerStatus,
 	} from '$lib/api/runtime';
 
 	interface Props {
@@ -37,15 +37,6 @@
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	const canBuild = $derived(jobStatus === '' || jobStatus === 'completed');
-
-	const statusColor: Record<ContainerStatus, string> = {
-		pending: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
-		building: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-		running: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-		stopped: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
-		failed: 'bg-red-500/15 text-red-400 border-red-500/30',
-		removed: 'bg-zinc-500/15 text-zinc-500 border-zinc-500/30',
-	};
 
 	async function refresh(silent = false) {
 		if (!silent) loading = true;
@@ -158,18 +149,11 @@
 			{#if showLabels}<span class="hidden sm:inline">Build</span>{/if}
 		</Button>
 	{:else}
-		<Badge variant="outline" class="text-xs {statusColor[container.status]}">
-			{#if container.status === 'building' || container.status === 'pending'}
-				<LoaderCircle class="h-3 w-3 mr-1 animate-spin" />
-			{:else if container.status === 'running'}
-				<span class="mr-1 h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
-			{/if}
-			{container.status}
-		</Badge>
+		<StatusBadge status={container.status} tones={containerTones} />
 
 		{#if container.status === 'failed' && container.last_error}
 			<span class="text-xs text-destructive truncate max-w-[260px]" title={container.last_error}>
-				⚠ {container.last_error}
+				{container.last_error}
 			</span>
 		{/if}
 
@@ -180,7 +164,7 @@
 				href={previewUrl}
 				target="_blank"
 				rel="noopener noreferrer"
-				class="text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 hover:border-emerald-500/50"
+				class="text-success-fg"
 				title="Open app preview"
 			>
 				<ExternalLink class="{iconCls} {showLabels ? 'sm:mr-1.5' : ''}" />

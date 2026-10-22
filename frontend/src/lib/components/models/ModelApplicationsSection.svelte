@@ -3,11 +3,14 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import Eye from '@lucide/svelte/icons/eye';
 	import AppWindow from '@lucide/svelte/icons/app-window';
 	import { getGenerationJobs, type GenerationJobList } from '$lib/api/generation';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import AppRuntimeControls from '$lib/components/applications/AppRuntimeControls.svelte';
 
 	interface Props {
@@ -22,14 +25,6 @@
 	let total = $state(0);
 	let loading = $state(true);
 	let error = $state('');
-
-	const statusClass: Record<string, string> = {
-		completed: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-		failed: 'bg-red-500/15 text-red-400 border-red-500/30',
-		running: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-		pending: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
-		cancelled: 'bg-zinc-500/15 text-zinc-500 border-zinc-500/30',
-	};
 
 	function fmtDate(s: string | null): string {
 		if (!s) return '—';
@@ -69,25 +64,22 @@
 		</Card.Header>
 		<Card.Content>
 			{#if loading}
-				<div class="flex items-center justify-center py-10 text-muted-foreground">
-					<LoaderCircle class="h-5 w-5 animate-spin" />
-				</div>
+				<LoadingState label="loading applications" class="py-10" />
 			{:else if error}
-				<div class="rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
+				<ErrorAlert message={error} onretry={load} />
 			{:else if jobs.length === 0}
-				<div class="py-8 text-center text-sm text-muted-foreground">
-					No applications generated with this model yet.
-					<div class="mt-2">
+				<EmptyState compact icon={AppWindow} title="No applications yet" description="No applications have been generated with this model.">
+					{#snippet action()}
 						<Button size="sm" variant="outline" href="/sample-generator?mode=custom&model={slug}">
 							<Sparkles class="h-3.5 w-3.5 mr-1.5" />Generate the first one
 						</Button>
-					</div>
-				</div>
+					{/snippet}
+				</EmptyState>
 			{:else}
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
 						<thead>
-							<tr class="border-b text-left text-xs text-muted-foreground">
+							<tr class="border-b text-left">
 								<th class="py-2 pr-3 font-medium">#</th>
 								<th class="py-2 pr-3 font-medium">Mode</th>
 								<th class="py-2 pr-3 font-medium">Template</th>
@@ -105,13 +97,13 @@
 										{job.template_name ?? job.scaffolding_name ?? '—'}
 									</td>
 									<td class="py-2 pr-3">
-										<Badge variant="outline" class="text-xs {statusClass[job.status] ?? ''}">{job.status}</Badge>
+										<StatusBadge status={job.status} />
 									</td>
 									<td class="py-2 pr-3 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(job.created_at)}</td>
 									<td class="py-2 pr-3">
 										<div class="flex items-center justify-end gap-2">
 											<AppRuntimeControls jobId={job.id} jobStatus={job.status} compact={true} showPorts={true} />
-											<Button variant="outline" size="sm" href="/applications/{job.id}" title="View application">
+											<Button variant="outline" size="sm" href="/applications/{job.id}" title="View application" aria-label="View application">
 												<Eye class="h-3.5 w-3.5" />
 											</Button>
 										</div>

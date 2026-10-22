@@ -12,7 +12,7 @@ Interactive generation and analysis execute on threads inside the django contain
 
 ## Analysis runs fail to start
 
-- The django container must reach the host Docker daemon: check that `/var/run/docker.sock` is mounted and that `docker ps` shows the stack's containers alongside an `analyzer-workspace` one once provisioned.
+- The django container must reach the `apps-dind` sandbox daemon: check `just logs apps-dind` for `API listen on [::]:2376`, and that `docker compose exec apps-dind docker ps` lists an `analyzer-*` container once provisioned. Workspaces and sample apps live there, not in the host's `docker ps`.
 - The first-ever run builds the `backend/analyzer-base:latest` image, which can take minutes or fail on network hiccups — `just logs django` shows the build output.
 - Install tools **one at a time** from the Analyzers page; parallel installs can race workspace provisioning.
 
