@@ -763,7 +763,9 @@
 				<Card.Description>
 					{#if isAgent}
 						Each condition is a model × harness preset. Every app runs under every condition with the same brief, stack,
-						budget, sampling settings and seed per (app, repeat) cell.
+						budget and sampling settings{experiment.base_seed != null
+							? ', and the same seed per (app, repeat) cell.'
+							: '. Without a base seed, each run draws its own seed.'}
 					{:else}
 						Each condition is a model × prompt profile; every app runs under every condition.
 					{/if}
@@ -854,7 +856,7 @@
 										>
 											<ChevronRight class={cn('size-3.5 transition-transform duration-150', showProfile && 'rotate-90')} aria-hidden="true" />
 											Profile LLM defaults (optional)
-											{#if showProfile && newProfileId != null}<span class="text-primary">(1 set)</span>{/if}
+											{#if showProfile && newProfileId != null}<span class="text-success-fg">(1 set)</span>{/if}
 										</button>
 										{#if showProfile}
 											<div id="cond-profile-panel" class="mt-2 space-y-1.5">
@@ -907,7 +909,7 @@
 								<ChevronRight class={cn('size-3.5 transition-transform duration-150', showOverrides && 'rotate-90')} aria-hidden="true" />
 								Per-condition overrides (ablation)
 								{#if Object.keys(cleanLLMParams(newOverrides)).length > 0}
-									<span class="text-primary">({Object.keys(cleanLLMParams(newOverrides)).length} set)</span>
+									<span class="text-success-fg">({Object.keys(cleanLLMParams(newOverrides)).length} set)</span>
 								{/if}
 							</button>
 							{#if showOverrides}
@@ -1100,7 +1102,9 @@
 								size="sm"
 								onclick={askLaunch}
 								disabled={launching || previewing}
-								title="Create new runs for the failed and cancelled cells, with their original seeds"
+								title={experiment.base_seed != null
+									? 'Create new runs for the failed and cancelled cells, with their original seeds'
+									: 'Create new runs for the failed and cancelled cells (new random seeds: no base seed)'}
 							>
 								{#if launching || previewing}<LoaderCircle class="animate-spin" />{:else}<Rocket />{/if}
 								Re-run failed
@@ -1120,7 +1124,7 @@
 					{#if launchedBatch}
 						<p class="text-sm" role="status">
 							Launched as batch
-							<a class="font-medium text-primary underline-offset-2 hover:underline" href="/sample-generator/batches/{launchedBatch.id}">
+							<a class="font-medium text-success-fg underline underline-offset-2 hover:decoration-2" href="/sample-generator/batches/{launchedBatch.id}">
 								{launchedBatch.name}
 							</a>.
 						</p>
@@ -1192,7 +1196,11 @@
 			? `${previewResult.conditions} ${plural(previewResult.conditions, 'condition')} × ${previewResult.apps} ${plural(previewResult.apps, 'app')} × ${previewResult.repeats} ${plural(previewResult.repeats, 'repeat')}. ${
 					previewResult.cost_estimate_kind === 'budget_upper_bound' ? 'Cost cap (upper bound)' : 'Estimated cost'
 				}: ${previewCost(previewResult)} for the whole matrix. The experiment's design is frozen once it launches.`
-			: `Re-runs the ${launchRuns} failed or cancelled cell${launchRuns === 1 ? '' : 's'} with the seeds of their (app, repeat) cells. Completed runs are kept.`
+			: `Re-runs the ${launchRuns} failed or cancelled cell${launchRuns === 1 ? '' : 's'} ${
+					experiment?.base_seed != null
+						? 'with their original seeds'
+						: 'with new random seeds (the experiment has no base seed)'
+				}. Completed runs are kept.`
 		: ''}
 	confirmLabel={isDraft ? 'Launch' : 'Re-run'}
 	busy={launching}

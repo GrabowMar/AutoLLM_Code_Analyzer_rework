@@ -31,6 +31,7 @@ from backend.generation.services.packages import import_bundle_package
 from backend.generation.services.packages import import_starter_template_package
 from backend.generation.services.packages import import_template_package
 from backend.generation.services.packages import list_starter_template_packages
+from backend.generation.services.packages import visible_app_templates_for
 from backend.generation.services.packages import visible_blocks_for
 from backend.generation.services.packages import visible_profiles_for
 from backend.generation.services.profile_resolver import build_resolved_snapshot
@@ -203,15 +204,13 @@ def suggest_profiles(request, app_ids: str = Query(""), stack: str = Query("")):
     version, name, provenance}`` where provenance is app-pilot /
     stack-default / system-default / catalog.
     """
-    from backend.generation.models import AppRequirementTemplate
-
     try:
         ids = [int(part) for part in app_ids.split(",") if part.strip()]
     except ValueError as exc:
         raise HttpError(400, "app_ids must be a comma-separated list of integers") from exc
 
     results = []
-    for app_req in AppRequirementTemplate.objects.filter(id__in=ids):
+    for app_req in visible_app_templates_for(request.auth).filter(id__in=ids):
         profile, provenance = suggest_profile_for_app(app_req, request.auth, scaffolding_slug=stack or None)
         results.append(
             {
@@ -252,11 +251,10 @@ def preview_draft_profile(request, payload: ProfileDraftPreviewSchema):
     if not payload.app_slug:
         return result
 
-    from backend.generation.models import AppRequirementTemplate
     from backend.generation.services.profile_resolver import app_requirement_to_dict
     from backend.generation.services.prompt_renderer import PromptRenderer
 
-    app_req = get_object_or_404(AppRequirementTemplate.objects.filter(slug=payload.app_slug))
+    app_req = get_object_or_404(visible_app_templates_for(request.auth), slug=payload.app_slug)
     snapshot = {
         "prompt_templates": templates,
         "app_requirement": app_requirement_to_dict(app_req),
@@ -287,6 +285,24 @@ def _serialize_block_refs(payload: GenerationProfileCreateSchema) -> list[dict]:
     return [{"type": ref.type, "slug": ref.slug, "version": ref.version} for ref in payload.block_refs]
 
 
+def _check_block_refs_visible(user, payload: GenerationProfileCreateSchema) -> None:
+    """400 for a ref to a block *user* cannot see (another user's private block, or none).
+
+    Generation already resolves refs through the visible blocks; this keeps a
+    profile from pointing at a private block it could then leak via export.
+    """
+    wanted = {(ref.slug, ref.version) for ref in payload.block_refs}
+    if not wanted:
+        return
+    visible = set(
+        visible_blocks_for(user).filter(slug__in={slug for slug, _ in wanted}).values_list("slug", "version"),
+    )
+    unknown = sorted(wanted - visible)
+    if unknown:
+        names = ", ".join(f"{slug} v{version}" for slug, version in unknown)
+        raise HttpError(400, f"Unknown block {names}")
+
+
 def _validated_llm_config(payload: GenerationProfileCreateSchema) -> dict:
     try:
         return validate_llm_params(payload.llm_config or {})
@@ -308,6 +324,7 @@ def _bundle_content_hash(payload: GenerationProfileCreateSchema) -> str:
 def create_bundle(request, payload: GenerationProfileCreateSchema):
     """Create a user-owned profile as version 1 of a new slug."""
     llm_config = _validated_llm_config(payload)
+    _check_block_refs_visible(request.auth, payload)
     if GenerationProfile.objects.filter(slug=payload.slug).exists():
         return 400, {"detail": f"Profile slug {payload.slug} already exists. Use PUT to add a new version."}
     return GenerationProfile.objects.create(
@@ -423,6 +440,7 @@ def update_bundle(request, slug: str, payload: GenerationProfileCreateSchema):
     """Create version+1 of *slug*. Versions are immutable — this never edits in place."""
     current = _mutable_bundle_or_403(request.auth, slug=slug)
     llm_config = _validated_llm_config(payload)
+    _check_block_refs_visible(request.auth, payload)
     new_hash = _bundle_content_hash(payload)
     unchanged = (
         new_hash == current.content_hash
@@ -463,7 +481,7 @@ def export_bundle(
     bundle = _latest_bundle_or_404(request.auth, slug=slug)
     if fmt not in {"json", "yaml"}:
         raise HttpError(400, "format must be 'json' or 'yaml'")
-    package = export_bundle_package(bundle)
+    package = export_bundle_package(bundle, request.auth)
     payload, content_type = dump_bundle_package(package, fmt)
     extension = "yaml" if fmt == "yaml" else "json"
     response = HttpResponse(payload, content_type=content_type)
@@ -496,12 +514,9 @@ def preview_bundle(request, slug: str, app_slug: str = Query("")):
     if not app_slug:
         return result
 
-    from backend.generation.models import AppRequirementTemplate
     from backend.generation.services.prompt_renderer import PromptRenderer
 
-    app_req = get_object_or_404(
-        AppRequirementTemplate.objects.filter(slug=app_slug),
-    )
+    app_req = get_object_or_404(visible_app_templates_for(request.auth), slug=app_slug)
     snapshot = build_resolved_snapshot(
         app_requirement=app_req,
         profile=profile,

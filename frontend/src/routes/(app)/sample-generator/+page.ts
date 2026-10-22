@@ -9,7 +9,8 @@ const UUID_RE =
 /**
  * URL contract: `?mode=agent|scaffolding|custom` (default agent; unknown
  * values such as the retired `copilot` land on agent), `?model=<slug>` and
- * `?app=<slug>` preselect, `?from_job=<uuid>` starts from a job's settings.
+ * `?app=<slug>` preselect, `?from_job=<uuid>` starts from a job's settings,
+ * `?from_batch=<uuid>` from a batch's whole grid (new seed).
  * Legacy `?job=<uuid>` links open the job page.
  */
 export const load: PageLoad = ({ url }) => {
@@ -25,6 +26,7 @@ export const load: PageLoad = ({ url }) => {
     ? (rawMode as GenerationMode)
     : "agent";
   const fromJob = param("from_job");
+  const fromBatch = param("from_batch");
 
   return {
     mode,
@@ -32,5 +34,7 @@ export const load: PageLoad = ({ url }) => {
     appSlug: param("app"),
     fromJobId: fromJob && UUID_RE.test(fromJob) ? fromJob : null,
     invalidFromJob: fromJob && !UUID_RE.test(fromJob) ? fromJob : null,
+    fromBatchId: fromBatch && UUID_RE.test(fromBatch) ? fromBatch : null,
+    invalidFromBatch: fromBatch && !UUID_RE.test(fromBatch) ? fromBatch : null,
   };
 };

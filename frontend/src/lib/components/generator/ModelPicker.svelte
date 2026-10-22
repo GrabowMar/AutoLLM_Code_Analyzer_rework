@@ -30,7 +30,7 @@
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ProviderIcon from '$lib/components/ProviderIcon.svelte';
-	import { loadModelCatalog, modelIneligibility } from './catalog';
+	import { loadModelCatalog, modelIneligibility, watchCatalog } from './catalog';
 	import { navigateList } from './list-keyboard';
 	import Brain from '@lucide/svelte/icons/brain';
 	import Check from '@lucide/svelte/icons/check';
@@ -161,6 +161,11 @@
 
 	onMount(() => {
 		void load();
+		// Models added or retired by a catalog sync since the list was cached show up here.
+		return watchCatalog('models', (list) => {
+			models = list;
+			error = '';
+		});
 	});
 
 	function isExpanded(provider: string): boolean {

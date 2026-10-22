@@ -47,6 +47,7 @@ from backend.generation.services.experiments import preview_experiment
 from backend.generation.services.experiments import resolve_stack
 from backend.generation.services.experiments import stack_mismatch
 from backend.generation.services.llm_params import validate_llm_params
+from backend.generation.services.packages import visible_app_templates_for
 from backend.generation.services.presets import preset_config_for_use
 from backend.llm_models.models import LLMModel
 
@@ -89,6 +90,20 @@ def _http(call, *args):
         raise HttpError(exc.status, exc.detail) from exc
 
 
+def _visible_apps(user, ids: list[int]) -> list[AppRequirementTemplate]:
+    """The app specs *ids* names; 404 when any is unknown or another user's private spec.
+
+    Never drops a hidden id silently: the experiment would run fewer apps
+    than requested.
+    """
+    wanted = set(ids)
+    apps = list(visible_app_templates_for(user).filter(id__in=wanted).order_by("id"))
+    missing = sorted(wanted - {app.id for app in apps})
+    if missing:
+        raise HttpError(404, f"Unknown app requirement id {', '.join(str(i) for i in missing)}")
+    return apps
+
+
 def _stack(raw: str | None, user) -> str:
     """Canonical stack slug ("" = legacy per-profile stacks); 404 unknown, 403 unusable."""
     raw = (raw or "").strip()
@@ -126,10 +141,10 @@ def create_experiment(request, payload: ExperimentCreateSchema):
         llm_defaults=_validated(payload.llm_defaults.as_params() if payload.llm_defaults else {}),
         created_by=request.auth,
     )
+    apps = _visible_apps(request.auth, payload.app_requirement_ids or [])
     _http(check_design, experiment)
     experiment.save()
-    if payload.app_requirement_ids:
-        apps = AppRequirementTemplate.objects.filter(id__in=payload.app_requirement_ids)
+    if apps:
         experiment.app_requirements.set(apps)
     return experiment
 
@@ -146,6 +161,7 @@ def update_experiment(request, experiment_id: str, payload: ExperimentUpdateSche
 
     data = payload.dict(exclude_unset=True)
     app_ids = data.pop("app_requirement_ids", None)
+    apps = _visible_apps(request.auth, app_ids) if app_ids is not None else None
     if "llm_defaults" in data:
         data["llm_defaults"] = _validated(data["llm_defaults"])
     if "agent_config" in data:
@@ -162,8 +178,7 @@ def update_experiment(request, experiment_id: str, payload: ExperimentUpdateSche
     # The final state must still agree with the conditions (stack, mode).
     _http(check_design, experiment)
     experiment.save()
-    if app_ids is not None:
-        apps = AppRequirementTemplate.objects.filter(id__in=app_ids)
+    if apps is not None:
         experiment.app_requirements.set(apps)
     return experiment
 

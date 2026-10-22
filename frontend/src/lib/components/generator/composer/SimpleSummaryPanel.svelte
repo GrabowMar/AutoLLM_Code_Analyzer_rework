@@ -17,7 +17,7 @@
 	import EffectiveParams from './EffectiveParams.svelte';
 	import SummaryChecklist from './SummaryChecklist.svelte';
 	import SummaryIssues from './SummaryIssues.svelte';
-	import { BLOCKED_START_CLASS, type ChecklistItem, type IssueAction, type SummaryIssue } from './issues';
+	import { type ChecklistItem, type IssueAction, type SummaryIssue } from './issues';
 	import type { LLMPreviewTracker } from './llm-preview.svelte';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Play from '@lucide/svelte/icons/play';
@@ -100,7 +100,7 @@
 		{/if}
 
 		<div class="hidden space-y-1.5 border-t border-border/60 pt-3 @4xl/composer:block">
-			<Button class={cn('w-full', !canStart && !submitting && BLOCKED_START_CLASS)} disabled={!canStart || submitting} onclick={onstart}>
+			<Button class="w-full" disabled={!canStart || submitting} aria-busy={submitting} onclick={onstart}>
 				{#if submitting}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Play />{/if}
 				{startLabel}
 			</Button>

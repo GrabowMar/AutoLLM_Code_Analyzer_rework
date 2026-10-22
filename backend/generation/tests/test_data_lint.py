@@ -276,7 +276,7 @@ assets:
     assert has("block_refs differs from catalog.yaml")
     assert has("preset harness/lazy: Every option is at its default; use the system preset aider-default")
     assert has("preset budget/my-default: the slug is reserved")
-    assert has("max_llm_requests must be a int between 1 and 2000")
+    assert has("max_llm_requests must be an integer between 1 and 2000")
 
 
 def test_lint_starter_packages_validates_inline_app_specs(tmp_path, monkeypatch):

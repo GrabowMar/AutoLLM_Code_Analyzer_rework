@@ -133,7 +133,11 @@
 
 	const counts = $derived(batchCounts(batch));
 	const inFlight = $derived(activeCount(counts));
-	// Template for "New batch like this": the earliest run of the batch.
+	// "New batch like this": the whole grid from the batch's stored request;
+	// batches that predate it fall back to their earliest run's settings.
+	const fromBatch = $derived(
+		!!batch?.request && (batch.mode === 'agent' || batch.mode === 'scaffolding') && Object.keys(batch.request).length > 0
+	);
 	const templateJob = $derived(
 		jobs.length ? jobs.reduce((a, b) => (b.created_at < a.created_at ? b : a)) : null
 	);
@@ -216,6 +220,14 @@
 				{#if batch!.experiment}
 					<Button size="sm" href="/experiments/{batch!.experiment.id}">
 						<GitCompareArrows class="h-3.5 w-3.5" />Open experiment
+					</Button>
+				{:else if fromBatch}
+					<Button
+						size="sm"
+						href="/sample-generator?from_batch={batch!.id}"
+						title="Open the Sample Generator with this batch's tasks, models, harness presets, presets, overrides, stack and trials, and a new seed"
+					>
+						<CopyPlus class="h-3.5 w-3.5" />New batch like this
 					</Button>
 				{:else if templateJob}
 					<Button

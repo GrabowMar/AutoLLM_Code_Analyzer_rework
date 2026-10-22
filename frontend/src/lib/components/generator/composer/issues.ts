@@ -54,14 +54,25 @@ const TITLES: Record<string, string> = {
   auto_profile: "Profile chosen per app",
   no_profile_for_stack: "No prompt profile for this stack",
   llm_preview_failed: "Effective parameters unavailable",
+  support_unknown: "Parameter support unknown",
+  preset_lookup_failed: "Selected preset not loaded",
+  profile_unavailable: "Profile version unavailable",
+  profile_lookup_failed: "Profile version not loaded",
 };
 
 /**
- * A blocked Start button reads as plainly unavailable (muted fill), not as a
- * faded primary that looks clickable; a busy one keeps the primary look.
+ * The warning shown while a selected preset could not be looked up (an
+ * outage, not a 404): the selection is kept, and its action retries.
  */
-export const BLOCKED_START_CLASS =
-  "disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 disabled:shadow-none";
+export function presetLookupIssue(errors: string[]): SummaryIssue | null {
+  const messages = [...new Set(errors.filter(Boolean))];
+  if (messages.length === 0) return null;
+  return {
+    code: "preset_lookup_failed",
+    severity: "warn",
+    detail: `A selected preset couldn't be loaded (${messages.join("; ")}). It stays selected; retry to show its settings.`,
+  };
+}
 
 export function issueTitle(code: string): string {
   return TITLES[code] ?? code.replace(/_/g, " ");

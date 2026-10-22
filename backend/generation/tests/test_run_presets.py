@@ -998,7 +998,7 @@ class TestCloning:
         return job
 
     def test_retry_keeps_presets_cell_and_configuration(self, preset_job):
-        retry = clone_job(preset_job, preset_job.created_by, reuse_snapshot=False, new_seed=True)
+        retry = clone_job(preset_job, preset_job.created_by, reuse_snapshot=False, new_seed=True, keep_cell=True)
         assert (retry.harness_preset_id, retry.sampling_preset_id, retry.budget_preset_id) == (
             preset_job.harness_preset_id,
             preset_job.sampling_preset_id,
@@ -1012,6 +1012,9 @@ class TestCloning:
         )
         original = preset_job.resolved_bundle
         assert retry.resolved_bundle["config_fingerprint"] == original["config_fingerprint"]
+        # The replacement trial runs under the cell's seed: same run identity.
+        assert retry.experiment_seed == 42
+        assert retry.resolved_bundle["run_fingerprint"] == original["run_fingerprint"]
         assert retry.resolved_bundle["harness"]["config"]["environment"] == {"timeout": 120}
         assert retry.resolved_bundle["presets"] == original["presets"]
         assert retry.bundle_key == original["method_key"]

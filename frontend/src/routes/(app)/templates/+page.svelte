@@ -139,6 +139,8 @@
 	let presetsLoading = $state(true);
 	let presetsLoadError = $state('');
 	let showArchived = $state(false);
+	// Only the latest list request may land (toggling "Show archived" quickly races two).
+	let presetsSeq = 0;
 	let presetEditor = $state<{ kind: PresetKind; preset: RunPreset | null; duplicate: boolean; harness: string } | null>(null);
 	let presetSaving = $state(false);
 	let presetError = $state('');
@@ -183,7 +185,8 @@
 		return appTemplates.filter((t) => !q || t.name.toLowerCase().includes(q) || t.slug.includes(q));
 	});
 
-	const kindPresets = $derived(presets.filter((p) => p.kind === presetKind));
+	// The list always matches the checkbox, whichever response landed last.
+	const kindPresets = $derived(presets.filter((p) => p.kind === presetKind && (showArchived || !p.is_archived)));
 	const presetCounts = $derived(
 		Object.fromEntries(PRESET_KINDS.map((k) => [k, presets.filter((p) => p.kind === k && !p.is_archived).length])) as Record<PresetKind, number>
 	);
@@ -244,12 +247,17 @@
 	}
 
 	async function loadPresets() {
+		const mine = ++presetsSeq;
 		// Silent refresh keeps the list on screen.
 		presetsLoading = presets.length === 0;
 		presetsLoadError = '';
 		try {
-			presets = await listRunPresets(undefined, { include_archived: showArchived });
+			const list = await listRunPresets(undefined, { include_archived: showArchived });
+			if (mine !== presetsSeq) return;
+			presets = list;
 		} catch (e) {
+			// An older request's error must not hide the newer list either.
+			if (mine !== presetsSeq) return;
 			presetsLoadError = formatApiError(e, 'Could not load presets.');
 		}
 		presetsLoading = false;

@@ -293,7 +293,7 @@
 								<Badge variant="outline" class="shrink-0">{ref.type}</Badge>
 								<button
 									type="button"
-									class="min-w-0 truncate rounded text-xs font-mono transition-colors hover:text-primary cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+									class="min-w-0 truncate rounded text-xs font-mono transition-colors hover:text-success-fg cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
 									title="Show content"
 									aria-expanded={expandedRef === i}
 									onclick={() => (expandedRef = expandedRef === i ? null : i)}

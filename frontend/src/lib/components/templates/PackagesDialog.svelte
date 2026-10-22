@@ -14,7 +14,9 @@
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import { toast } from 'svelte-sonner';
 	import { formatApiError } from '$lib/api/core';
+	import { toneClasses } from '$lib/constants/colors';
 	import {
 		exportTemplatePackage,
 		importTemplatePackage,
@@ -217,6 +219,45 @@
 		return `${preset.kind}:${preset.slug}`;
 	}
 
+	/** A profile block ref the export leaves out (the server lists these as `omitted_blocks`). */
+	interface OmittedBlock {
+		profile: string;
+		slug: string;
+		version: number;
+	}
+
+	// The blocks you can see are exactly what the server may export: a selected
+	// profile's ref to anything else (another user's private block, or a deleted
+	// one) is left out of the package.
+	const visibleBlockKeys = $derived(new Set(contentBlocks.map((b) => `${b.slug}@${b.version}`)));
+	const omittedBlocks = $derived.by(() => {
+		const out = new Map<string, OmittedBlock>();
+		for (const p of profiles) {
+			if (!selection.profile.includes(p.slug)) continue;
+			for (const ref of p.block_refs ?? []) {
+				const version = ref.version ?? 1;
+				if (visibleBlockKeys.has(`${ref.slug}@${version}`)) continue;
+				out.set(`${p.slug}:${ref.slug}@${version}`, { profile: p.slug, slug: ref.slug, version });
+			}
+		}
+		return [...out.values()];
+	});
+
+	/** The server's own list from a JSON export (authoritative); YAML falls back to the local one. */
+	function exportedOmissions(content: string, format: 'json' | 'yaml'): OmittedBlock[] {
+		if (format !== 'json') return omittedBlocks;
+		try {
+			const parsed = JSON.parse(content) as { omitted_blocks?: OmittedBlock[] };
+			return Array.isArray(parsed.omitted_blocks) ? parsed.omitted_blocks : [];
+		} catch {
+			return omittedBlocks;
+		}
+	}
+
+	function blockList(items: OmittedBlock[]): string {
+		return items.map((b) => `${b.slug} v${b.version}`).join(', ');
+	}
+
 	function toggle(group: Group, value: string) {
 		const current = selection[group];
 		selection = {
@@ -250,6 +291,12 @@
 			a.download = `generation-template-package.${format}`;
 			a.click();
 			URL.revokeObjectURL(href);
+			const omitted = exportedOmissions(exported.content, format);
+			if (omitted.length > 0) {
+				toast.warning(`Exported without ${omitted.length === 1 ? '1 block' : `${omitted.length} blocks`} a profile uses`, {
+					description: `${blockList(omitted)}: missing or not visible to you.`,
+				});
+			}
 		} catch (e) {
 			error = formatApiError(e, 'Export failed.');
 		} finally {
@@ -432,6 +479,26 @@
 							{/each}
 						{/if}
 					</div>
+					{#if omittedBlocks.length > 0}
+						<div class="rounded-md border px-3 py-2 text-xs {toneClasses.warning}" role="status">
+							<p class="font-medium">
+								{omittedBlocks.length === 1 ? '1 block' : `${omittedBlocks.length} blocks`} will be left out of the package
+							</p>
+							<ul class="mt-1 space-y-0.5">
+								{#each omittedBlocks as block (`${block.profile}:${block.slug}@${block.version}`)}
+									<li>
+										<span class="font-mono">{block.slug} v{block.version}</span>, used by
+										<span class="font-mono">{block.profile}</span>
+									</li>
+								{/each}
+							</ul>
+							<p class="mt-1">
+								{omittedBlocks.length === 1 ? 'It is' : 'They are'} missing or not visible to you (another user's private
+								block), so only the profile's reference is exported. Importing the profile elsewhere needs the block to exist
+								there.
+							</p>
+						</div>
+					{/if}
 					<div class="flex flex-wrap items-center gap-2 border-t pt-3">
 						<Badge variant="outline">{selectedCount} selected</Badge>
 						<div class="ml-auto flex gap-2">

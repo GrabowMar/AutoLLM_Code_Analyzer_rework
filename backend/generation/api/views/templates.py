@@ -51,7 +51,7 @@ def _latest_stacks(user=None):
     return list(latest.values())
 
 
-def _stack_payload(row, *, include_files: bool = False) -> dict:
+def _stack_payload(row, user=None, *, include_files: bool = False) -> dict:
     payload = {
         "slug": row.slug,
         "version": row.version,
@@ -70,6 +70,8 @@ def _stack_payload(row, *, include_files: bool = False) -> dict:
         "server_kind": row.server_kind,
         "backend_filename": row.backend_filename,
         "frontend_component": row.frontend_component,
+        # The requester created it (and may edit / archive it).
+        "is_own": row.created_by_id is not None and row.created_by_id == getattr(user, "id", None),
     }
     if include_files:
         payload["files"] = row.files or {}
@@ -83,7 +85,7 @@ def list_stacks(request):
     """List the stack skeletons available for scaffolding-mode jobs."""
     rows = _latest_stacks(request.auth)
     if rows:
-        return [_stack_payload(row) for row in rows]
+        return [_stack_payload(row, request.auth) for row in rows]
     # First boot before the post_migrate seeder ran: fall back to the manifest.
     manifest = load_manifest()
     return [
@@ -188,7 +190,7 @@ def create_stack(request, payload: StackWriteSchema):
     if Stack.objects.filter(slug=payload.slug).exists() or is_known_stack_slug(payload.slug):
         return 400, {"detail": f"Stack slug {payload.slug} already exists. Use PUT to add a new version."}
     row = Stack.objects.create(slug=payload.slug, version=1, **_stack_defaults(payload, request.auth))
-    return 200, _stack_payload(row, include_files=True)
+    return 200, _stack_payload(row, request.auth, include_files=True)
 
 
 @router.get("/stacks/{slug}/", response={200: dict, 404: dict})
@@ -199,7 +201,7 @@ def get_stack(request, slug: str):
     row = get_stack_row(slug)
     if row is None:
         return 404, {"detail": f"Unknown stack slug: {slug}"}
-    return 200, _stack_payload(row, include_files=True)
+    return 200, _stack_payload(row, request.auth, include_files=True)
 
 
 @router.put("/stacks/{slug}/", response={200: dict, 400: dict, 403: dict, 404: dict})
@@ -229,7 +231,7 @@ def update_stack(request, slug: str, payload: StackWriteSchema):
     if settings.STACK_REQUIRE_APPROVAL and not request.auth.is_staff:
         defaults["is_approved"] = False
     row = Stack.objects.create(slug=slug, version=current.version + 1, **defaults)
-    return 200, _stack_payload(row, include_files=True)
+    return 200, _stack_payload(row, request.auth, include_files=True)
 
 
 @router.delete("/stacks/{slug}/", response={200: dict, 403: dict, 404: dict})

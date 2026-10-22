@@ -24,7 +24,7 @@
 	import SimpleSummaryPanel from './SimpleSummaryPanel.svelte';
 	import StartBar from './StartBar.svelte';
 	import { DEFAULT_SYSTEM_PROMPT, MAX_SEED, randomSeed, saveDraft, type CustomDraft, type PresetPins } from './draft';
-	import type { ChecklistItem, IssueAction, SummaryIssue } from './issues';
+	import { presetLookupIssue, type ChecklistItem, type IssueAction, type SummaryIssue } from './issues';
 	import { trackLLMPreview } from './llm-preview.svelte';
 	import { trackPresets } from './preset-lookup.svelte';
 	import Dices from '@lucide/svelte/icons/dices';
@@ -83,6 +83,8 @@
 		} else if (keyState === 'invalid') {
 			out.push({ code: 'missing_api_key', severity: 'warn', detail: 'Your OpenRouter key was rejected at its last validation; the run may fail.' });
 		}
+		const lookup = presetLookupIssue([samplingPresets.lookupError]);
+		if (lookup) out.push(lookup);
 		out.push({
 			code: 'ungraded_task',
 			severity: 'info',
@@ -93,6 +95,7 @@
 	const errorCount = $derived(issues.filter((i) => i.severity === 'error').length);
 	const actions: Record<string, IssueAction> = {
 		missing_api_key: { label: 'Open Settings', href: '/users/settings#credentials' },
+		preset_lookup_failed: { label: 'Retry', onclick: () => samplingPresets.retry() },
 	};
 
 	let submitting = $state(false);

@@ -8,6 +8,7 @@ import type {
   GenerationJobList,
   PresetRef,
 } from "$lib/api/generation";
+import { apiErrorStatus } from "$lib/api/core";
 import type { Tone } from "$lib/constants/colors";
 
 export const BATCH_MODE_LABELS: Record<string, string> = {
@@ -183,9 +184,11 @@ export function shortId(id: string | null | undefined): string {
   return (id ?? "").slice(0, 8);
 }
 
-/** Ninja's 404 body is `{detail: "Not Found"}`; apiFetch throws the body. */
+/** A 404 from `apiFetch` (its status; for other thrown values, Ninja's `{detail: "Not Found"}` body). */
 export function isNotFoundError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
+  const status = apiErrorStatus(error);
+  if (status != null) return status === 404;
   const detail = (error as Record<string, unknown>).detail;
   return typeof detail === "string" && /not found/i.test(detail);
 }
