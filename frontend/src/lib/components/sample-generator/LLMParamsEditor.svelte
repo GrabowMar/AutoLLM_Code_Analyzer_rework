@@ -107,7 +107,7 @@
 </script>
 
 <div class="space-y-3 rounded-md border bg-muted/20 p-3">
-	<p class="text-[10px] text-muted-foreground">
+	<p class="text-[11px] text-muted-foreground">
 		Blank fields inherit from the profile (or the system defaults). Set values are frozen into the run snapshot.
 	</p>
 
@@ -134,6 +134,7 @@
 		<button
 			type="button"
 			class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+			aria-expanded={showExpert}
 			onclick={() => (showExpert = !showExpert)}
 		>
 			<ChevronRight class="h-3.5 w-3.5 transition-transform duration-150 {showExpert ? 'rotate-90' : ''}" />
@@ -190,7 +191,7 @@
 						class="{inputClass} h-auto font-mono text-xs"
 					></textarea>
 					{#if providerError}
-						<p class="text-[10px] text-destructive">{providerError}</p>
+						<p class="text-xs text-danger-fg">{providerError}</p>
 					{/if}
 				</div>
 			</div>

@@ -7,6 +7,9 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import Copy from '@lucide/svelte/icons/copy';
@@ -94,19 +97,20 @@
 
 <!-- New token banner (shown once after creation) -->
 {#if newlyCreatedToken}
-	<Alert class="border-amber-400/60 bg-amber-50 dark:bg-amber-950/30">
-		<AlertTriangle class="h-4 w-4 text-amber-600" />
+	<Alert class="border-warning/40 bg-warning/10">
+		<AlertTriangle class="h-4 w-4 text-warning-fg" />
 		<AlertDescription class="space-y-3">
-			<p class="font-semibold text-amber-800 dark:text-amber-300">
+			<p class="font-semibold text-warning-fg">
 				Save this token — it will not be shown again.
 			</p>
-			<div class="flex items-center gap-2 rounded-lg border border-amber-300 bg-white dark:bg-zinc-900 p-3">
+			<div class="flex items-center gap-2 rounded-lg border border-warning/40 bg-background p-3">
 				<code class="flex-1 break-all text-sm font-mono">{newlyCreatedToken.token}</code>
 				<Button
 					size="icon"
 					variant="ghost"
 					onclick={() => copyToken(newlyCreatedToken!.token)}
 					title="Copy token"
+					aria-label="Copy token"
 				>
 					<Copy class="h-4 w-4" />
 				</Button>
@@ -139,16 +143,16 @@
 	</Card.Header>
 	<Card.Content class="space-y-3">
 		{#if tokensLoading}
-			<div class="space-y-2">
-				{#each [1, 2] as _}
-					<div class="h-14 animate-pulse rounded-md bg-muted"></div>
-				{/each}
-			</div>
+			<LoadingState label="loading tokens" class="py-8" />
 		{:else if tokens.length === 0}
-			<div class="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border p-8 text-center">
-				<Key class="h-8 w-8 text-muted-foreground" />
-				<p class="text-sm text-muted-foreground">No API tokens yet. Create one to get started.</p>
-			</div>
+			<EmptyState compact icon={Key} title="No API tokens yet" description="Create one to get started.">
+				{#snippet action()}
+					<Button onclick={() => (showCreateDialog = true)} size="sm" variant="outline">
+						<Plus class="h-4 w-4" />
+						New Token
+					</Button>
+				{/snippet}
+			</EmptyState>
 		{:else}
 			{#each tokens as token (token.id)}
 				<div class="flex flex-col gap-2 rounded-lg border border-border p-3 sm:flex-row sm:items-center sm:justify-between {token.revoked_at ? 'opacity-50' : ''}">
@@ -156,11 +160,11 @@
 						<div class="flex items-center gap-2 flex-wrap">
 							<p class="text-sm font-medium truncate">{token.name}</p>
 							{#if token.revoked_at}
-								<span class="rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">Revoked</span>
+								<StatusBadge status="revoked" tone="danger" />
 							{:else if token.expires_at && new Date(token.expires_at) < new Date()}
-								<span class="rounded-full bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400">Expired</span>
+								<StatusBadge status="expired" tone="warning" />
 							{:else}
-								<span class="rounded-full bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs text-green-700 dark:text-green-400">Active</span>
+								<StatusBadge status="active" />
 							{/if}
 							{#each token.scopes as scope}
 								<span class="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{scope}</span>

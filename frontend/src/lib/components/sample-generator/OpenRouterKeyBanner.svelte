@@ -29,16 +29,16 @@
 </script>
 
 {#if loading}
-	<div class="flex items-center gap-2 rounded-md border border-border px-4 py-2.5 text-sm text-muted-foreground">
+	<div class="flex items-center gap-2 rounded-md border border-border px-4 py-2.5 text-sm text-muted-foreground" role="status">
 		<LoaderCircle class="h-4 w-4 animate-spin shrink-0" />
 		Checking OpenRouter API key…
 	</div>
 {:else if !status?.configured && !status?.global_fallback_available}
-	<div class="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+	<div class="rounded-md border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
 		<div class="flex items-start gap-2">
-			<Key class="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
+			<Key class="h-4 w-4 shrink-0 text-warning-fg mt-0.5" aria-hidden="true" />
 			<div>
-				<p class="font-medium text-amber-600 dark:text-amber-400">OpenRouter API key required</p>
+				<p class="font-medium text-warning-fg">OpenRouter API key required</p>
 				<p class="mt-1 text-muted-foreground">
 					Generation uses your personal key from Settings. Add one before running jobs.
 				</p>
@@ -52,11 +52,11 @@
 		</div>
 	</div>
 {:else if status?.last_validation_status === 'invalid'}
-	<div class="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm">
+	<div class="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm">
 		<div class="flex items-start gap-2">
-			<AlertTriangle class="h-4 w-4 shrink-0 text-destructive mt-0.5" />
+			<AlertTriangle class="h-4 w-4 shrink-0 text-danger-fg mt-0.5" aria-hidden="true" />
 			<div>
-				<p class="font-medium text-destructive">OpenRouter key invalid</p>
+				<p class="font-medium text-danger-fg">OpenRouter key invalid</p>
 				{#if status.last_validation_message}
 					<p class="mt-1 text-xs text-muted-foreground">{status.last_validation_message}</p>
 				{/if}
@@ -67,9 +67,9 @@
 		</div>
 	</div>
 {:else if isValid}
-	<div class="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-4 py-2.5 text-sm">
+	<div class="rounded-md border border-success/30 bg-success/10 px-4 py-2.5 text-sm">
 		<div class="flex flex-wrap items-center gap-2">
-			<Check class="h-4 w-4 text-emerald-500 shrink-0" />
+			<Check class="h-4 w-4 text-success-fg shrink-0" aria-hidden="true" />
 			<span class="text-muted-foreground">
 				Using stored OpenRouter key
 				{#if status?.key_prefix}
@@ -77,7 +77,7 @@
 				{/if}
 			</span>
 			{#if status?.using_global_fallback}
-				<span class="text-xs text-amber-600">(deployment fallback)</span>
+				<span class="text-xs text-warning-fg">(deployment fallback)</span>
 			{/if}
 		</div>
 	</div>

@@ -1,30 +1,17 @@
 <script lang="ts">
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
-	import FlaskConical from '@lucide/svelte/icons/flask-conical';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Code from '@lucide/svelte/icons/code';
 	import Shield from '@lucide/svelte/icons/shield';
 	import BarChart3 from '@lucide/svelte/icons/bar-chart-3';
 	import Boxes from '@lucide/svelte/icons/boxes';
 </script>
 
-<svelte:head>
-	<title>About - LLM Lab</title>
-</svelte:head>
-
-<div class="max-w-3xl mx-auto space-y-8">
-	<div class="page-header">
-		<div class="flex items-center gap-4">
-			<div class="flex size-12 items-center justify-center rounded-md bg-primary/10 text-primary border border-primary/20 shrink-0">
-				<FlaskConical class="size-6" />
-			</div>
-			<div class="flex-1 min-w-0">
-				<h1>LLM Lab</h1>
-				<p>Research Platform for LLM Evaluation</p>
-			</div>
-			<Badge variant="outline" class="font-mono text-xs">v0.1.0</Badge>
-		</div>
-	</div>
+<div class="max-w-3xl mx-auto space-y-6">
+	<PageHeader title="LLM Lab" documentTitle="About" description="Research Platform for LLM Evaluation">
+		{#snippet meta()}<Badge variant="outline" class="font-mono text-xs">v0.1.0</Badge>{/snippet}
+	</PageHeader>
 
 	<Card.Root>
 		<Card.Content class="pt-6">

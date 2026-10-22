@@ -3,7 +3,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import AppWindow from '@lucide/svelte/icons/app-window';
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
-	import { generationStatusColors as statusColors } from '$lib/constants/colors';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import type { RecentApp } from '$lib/utils/dashboard';
 
 	interface Props {
@@ -52,13 +53,7 @@
 								<span class="text-sm text-muted-foreground">{app.model}</span>
 							</td>
 							<td class="px-4 py-2.5" data-label="Status">
-								<span
-									class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium {statusColors[
-										app.status
-									]}"
-								>
-									{app.status}
-								</span>
+								<StatusBadge status={app.status} />
 							</td>
 							<td class="px-4 py-2.5" data-label="Created">
 								<span class="text-xs text-muted-foreground">{app.time}</span>
@@ -66,8 +61,12 @@
 						</tr>
 					{:else}
 						<tr>
-							<td colspan="4" class="px-4 py-6 text-center text-sm text-muted-foreground">
-								No generation jobs yet.
+							<td colspan="4">
+								<EmptyState compact icon={AppWindow} title="No generation jobs yet">
+									{#snippet action()}
+										<Button href="/sample-generator" size="sm" variant="outline">Generate an app</Button>
+									{/snippet}
+								</EmptyState>
 							</td>
 						</tr>
 					{/each}

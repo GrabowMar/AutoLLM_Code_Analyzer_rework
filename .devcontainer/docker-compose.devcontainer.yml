@@ -1,0 +1,36 @@
+# Devcontainer-only overrides layered on top of docker-compose.local.yml.
+# Plain `just up` / `docker compose` usage is unaffected.
+volumes:
+  devcontainer_venv: {}
+  devcontainer_node_modules: {}
+  devcontainer_cache: {}
+
+services:
+  django:
+    volumes:
+      # dev-user's own venv (the image's /app/.venv is root-owned), so `uv add`
+      # works and survives rebuilds. Populated by post-create.sh.
+      - devcontainer_venv:/home/dev-user/.venv
+      # Keep node_modules off the bind mount; the frontend service has its own copy.
+      - devcontainer_node_modules:/app/frontend/node_modules
+      # uv / npm / pre-commit caches.
+      - devcontainer_cache:/home/dev-user/.cache
+    environment:
+      UV_LINK_MODE: copy
+      UV_PROJECT_ENVIRONMENT: /home/dev-user/.venv
+      VIRTUAL_ENV: /home/dev-user/.venv
+      # The image points PYTHONPATH at the root-owned /app/.venv; don't mix it in.
+      PYTHONPATH: ""
+      # The `docker` CLI (installed by post-create.sh) talks to the apps-dind
+      # sandbox, never the host daemon: anything started from here is a nested
+      # container next to the generated apps.
+      DOCKER_HOST: tcp://apps-dind:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /apps-dind-certs
+
+  # These still run as root; stop them leaving root-owned __pycache__ in the bind mount.
+  celeryworker: &no_bytecode
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+  celerybeat: *no_bytecode
+  flower: *no_bytecode

@@ -6,8 +6,7 @@
 </script>
 
 <span
-	class={cn('flex h-full w-full items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground', className)}
-	style="font-family: var(--font-mono);"
+	class={cn('font-mono flex h-full w-full items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground', className)}
 	{...restProps}
 >
 	{#if children}{@render children()}{/if}

@@ -79,13 +79,12 @@
 
 		{#if showImportSection}
 			<div class="space-y-2 rounded-md border border-border bg-muted/30 p-3">
-				<Label for="import-json" class="text-[11px] uppercase tracking-wider text-muted-foreground" style="font-family: var(--font-mono);">
+				<Label for="import-json" class="section-label">
 					Paste settings JSON
 				</Label>
 				<textarea
 					id="import-json"
-					class="flex min-h-[110px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-					style="font-family: var(--font-mono);"
+					class="flex min-h-[110px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring font-mono"
 					placeholder={'{"theme":"dark","accentColor":"purple", ...}'}
 					bind:value={importJson}
 				></textarea>

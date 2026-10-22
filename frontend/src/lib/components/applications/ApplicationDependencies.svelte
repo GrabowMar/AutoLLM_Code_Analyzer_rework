@@ -2,6 +2,7 @@
 import * as Card from '$lib/components/ui/card';
 import { Badge } from '$lib/components/ui/badge';
 import Package from '@lucide/svelte/icons/package';
+import EmptyState from '$lib/components/EmptyState.svelte';
 
 interface Props {
 	deps: (string | unknown)[];
@@ -12,7 +13,6 @@ let { deps, mode }: Props = $props();
 </script>
 
 <section id="dependencies" class="space-y-4">
-	<h2 class="text-lg font-semibold flex items-center gap-2"><Package class="h-5 w-5" /> Dependencies</h2>
 	{#if deps.length > 0}
 		<Card.Root>
 			<Card.Header class="pb-3">
@@ -25,17 +25,17 @@ let { deps, mode }: Props = $props();
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
 						<thead>
-							<tr class="border-b bg-muted/30">
-								<th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Package</th>
-								<th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Version</th>
+							<tr>
+								<th>Package</th>
+								<th>Version</th>
 							</tr>
 						</thead>
-						<tbody class="divide-y">
+						<tbody>
 							{#each deps as dep}
 								{@const parts = typeof dep === 'string' ? dep.split(/[=<>~!]+/) : [String(dep)]}
-								<tr class="hover:bg-muted/30">
-									<td class="px-4 py-2 font-mono text-xs">{parts[0]}</td>
-									<td class="px-4 py-2"><Badge variant="outline" class="text-xs">{parts[1] ?? 'latest'}</Badge></td>
+								<tr>
+									<td class="font-mono text-xs">{parts[0]}</td>
+									<td><Badge variant="outline" class="text-xs">{parts[1] ?? 'latest'}</Badge></td>
 								</tr>
 							{/each}
 						</tbody>
@@ -45,9 +45,8 @@ let { deps, mode }: Props = $props();
 		</Card.Root>
 	{:else}
 		<Card.Root>
-			<Card.Content class="py-10 text-center">
-				<Package class="mx-auto h-10 w-10 text-muted-foreground/30 mb-3" />
-				<p class="text-sm text-muted-foreground">No dependencies recorded</p>
+			<Card.Content>
+				<EmptyState compact icon={Package} title="No dependencies recorded" description="The generator did not report any packages for this app." />
 			</Card.Content>
 		</Card.Root>
 	{/if}

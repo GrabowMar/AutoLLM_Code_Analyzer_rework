@@ -14,7 +14,9 @@
 	import AlertCircle from '@lucide/svelte/icons/alert-circle';
 	import Clock from '@lucide/svelte/icons/clock';
 	import Calendar from '@lucide/svelte/icons/calendar';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import { Button } from '$lib/components/ui/button';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import Link from '@lucide/svelte/icons/link';
 	import { toast } from 'svelte-sonner';
 
@@ -70,26 +72,20 @@
 </script>
 
 <svelte:head>
-	<title>{doc?.title ?? 'Docs'} - LLM Lab</title>
+	<title>{doc?.title ?? 'Docs'} · LLM Lab</title>
 </svelte:head>
 
 <div class="mx-auto flex w-full max-w-6xl gap-8 px-4 py-6 sm:px-6 sm:py-8 lg:gap-12 lg:px-10">
 	<!-- Article -->
 	<article class="min-w-0 flex-1">
 		{#if loading}
-			<div class="flex items-center gap-2 py-12 text-sm text-muted-foreground">
-				<LoaderCircle class="h-4 w-4 animate-spin" />
-				Loading…
-			</div>
+			<LoadingState label="loading page" />
 		{:else if notFound}
-			<div class="flex flex-col items-center gap-3 py-20 text-center">
-				<AlertCircle class="h-10 w-10 text-muted-foreground/40" />
-				<h2 class="text-lg font-semibold">Page not found</h2>
-				<p class="text-sm text-muted-foreground">
-					The document <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{currentSlug}</code> does not exist.
-				</p>
-				<a href="/docs" class="text-sm text-primary hover:underline">← Back to docs</a>
-			</div>
+			<EmptyState icon={AlertCircle} title="Page not found" description="The document “{currentSlug}” does not exist.">
+				{#snippet action()}
+					<Button href="/docs" variant="outline" size="sm">Back to docs</Button>
+				{/snippet}
+			</EmptyState>
 		{:else if doc}
 			{@const Icon = meta.icon}
 			<!-- Breadcrumb + meta row -->

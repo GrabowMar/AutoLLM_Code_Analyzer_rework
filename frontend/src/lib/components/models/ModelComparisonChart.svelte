@@ -6,6 +6,7 @@
 	import Users from '@lucide/svelte/icons/users';
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import type { LLMModelSummary } from '$lib/api/client';
 
 	interface Props {
@@ -36,10 +37,10 @@
 				</Card.Title>
 				{#if relatedModels.length > 4}
 					<div class="flex items-center gap-1">
-						<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => scrollRelated('left')}>
+						<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => scrollRelated('left')} aria-label="Scroll related models left">
 							<ChevronLeft class="h-4 w-4" />
 						</Button>
-						<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => scrollRelated('right')}>
+						<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => scrollRelated('right')} aria-label="Scroll related models right">
 							<ChevronRight class="h-4 w-4" />
 						</Button>
 					</div>
@@ -48,16 +49,13 @@
 		</Card.Header>
 		<Card.Content>
 			{#if relatedModels.length === 0}
-				<div class="flex h-24 flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/20">
-					<Users class="h-6 w-6 text-muted-foreground/40" />
-					<p class="text-sm text-muted-foreground">No related models from {provider} found</p>
-				</div>
+				<EmptyState compact icon={Users} title="No related models" description="No other models from {provider} found." />
 			{:else}
 				<div bind:this={relatedScrollEl} class="flex gap-3 overflow-x-auto pb-2 scrollbar-thin">
 					{#each relatedModels as related}
 						<a
 							href="/models/{related.canonical_slug}"
-							class="group flex-shrink-0 w-56 rounded-lg border bg-card p-3 transition-all hover:shadow-md hover:border-primary/30"
+							class="group card-lift flex-shrink-0 w-56 rounded-md border bg-card p-3 hover:border-primary/30"
 						>
 							<div class="flex items-start gap-2 mb-2">
 								<div class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-primary/10">
@@ -81,7 +79,7 @@
 							{#if related.capabilities && related.capabilities.length > 0}
 								<div class="flex flex-wrap gap-1 mt-1.5">
 									{#each related.capabilities.slice(0, 3) as cap}
-										<Badge variant="outline" class="text-[10px] px-1 py-0">{cap}</Badge>
+										<Badge variant="outline" class="text-[11px] px-1 py-0">{cap}</Badge>
 									{/each}
 								</div>
 							{/if}

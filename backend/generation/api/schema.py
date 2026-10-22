@@ -162,6 +162,24 @@ class LLMParamsSchema(Schema):
         return {k: v for k, v in self.dict().items() if v is not None}
 
 
+class AgentConfigSchema(Schema):
+    """Agent-run budget / network overrides; every field optional (None = default).
+
+    Validated by ``services.agent.config.validate_agent_config`` in the views.
+    """
+
+    harness: str | None = None
+    sampling_policy: str | None = None
+    wall_clock_seconds: int | None = None
+    max_llm_requests: int | None = None
+    max_total_tokens: int | None = None
+    max_cost_usd: float | None = None
+    network_policy: str | None = None
+
+    def as_config(self) -> dict:
+        return {k: v for k, v in self.dict().items() if v is not None}
+
+
 class GenerationProfileSchema(ModelSchema):
     class Meta:
         model = GenerationProfile
@@ -247,6 +265,8 @@ class GenerationJobSchema(ModelSchema):
             "llm_params",
             "custom_system_prompt",
             "custom_user_prompt",
+            "task_description",
+            "agent_config",
             "copilot_description",
             "copilot_max_iterations",
             "copilot_current_iteration",
@@ -383,6 +403,29 @@ class ScaffoldingJobCreateSchema(Schema):
     trials: int = Field(1, ge=1, le=10)
 
 
+class AgentJobCreateSchema(Schema):
+    """Create agent-mode job(s): apps (or one free-form task) x models x trials."""
+
+    stack_slug: str = "flask-react"
+    app_requirement_ids: list[int] = []
+    # Free-form task for a run without an app spec; with app specs it is
+    # added to every brief as extra context.
+    description: str = ""
+    model_ids: list[int]
+    profile_id: int | None = None
+    # Per-call output cap. No temperature default: agent runs sample at the
+    # provider default unless llm_params sets sampling explicitly.
+    max_tokens: int = 32000
+    llm_params: LLMParamsSchema | None = None
+    agent_config: AgentConfigSchema | None = None
+    # Several harnesses -> one job per harness per cell (overrides agent_config.harness).
+    harnesses: list[str] = []
+    trials: int = Field(1, ge=1, le=10)
+    # Base seed: per-job seeds are derived from it and the cell identity, so a
+    # resubmitted batch reproduces the same seed matrix. None = random seeds.
+    base_seed: int | None = Field(None, ge=0, le=2_147_483_647)
+
+
 class CopilotJobCreateSchema(Schema):
     """Create a copilot mode generation job."""
 
@@ -462,6 +505,7 @@ class ExperimentConditionSchema(ModelSchema):
             "label",
             "profile",
             "model",
+            "harness",
             "param_overrides",
             "created_at",
         ]
@@ -482,6 +526,7 @@ class ExperimentConditionSchema(ModelSchema):
 class ExperimentConditionCreateSchema(Schema):
     profile_id: int
     model_id: int
+    harness: str = ""
     label: str = ""
     param_overrides: dict = {}
 
@@ -501,6 +546,8 @@ class ExperimentSchema(ModelSchema):
             "status",
             "repeats",
             "base_seed",
+            "mode",
+            "agent_config",
             "continuation_limit",
             "enable_repair",
             "llm_defaults",
@@ -525,6 +572,8 @@ class ExperimentCreateSchema(Schema):
     app_requirement_ids: list[int] = []
     repeats: int = Field(3, ge=1, le=20)
     base_seed: int | None = None
+    mode: str = Field("agent", pattern="^(agent|scaffolding)$")
+    agent_config: AgentConfigSchema | None = None
     continuation_limit: int = Field(1, ge=0, le=5)
     enable_repair: bool = True
     llm_defaults: LLMParamsSchema | None = None
@@ -537,6 +586,8 @@ class ExperimentUpdateSchema(Schema):
     app_requirement_ids: list[int] | None = None
     repeats: int | None = Field(None, ge=1, le=20)
     base_seed: int | None = None
+    mode: str | None = Field(None, pattern="^(agent|scaffolding)$")
+    agent_config: AgentConfigSchema | None = None
     continuation_limit: int | None = Field(None, ge=0, le=5)
     enable_repair: bool | None = None
     llm_defaults: LLMParamsSchema | None = None

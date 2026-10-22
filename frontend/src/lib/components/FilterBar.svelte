@@ -107,7 +107,7 @@
 			/>
 			{#if searchValue}
 				<button
-					class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground/50 transition-colors hover:text-foreground"
+					class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
 					onclick={clearSearch}
 					aria-label="Clear search"
 					tabindex="-1"
@@ -116,7 +116,7 @@
 				</button>
 			{:else}
 				<kbd
-					class="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 select-none items-center rounded border border-border bg-muted px-1 font-mono text-[9px] text-muted-foreground/50 sm:inline-flex"
+					class="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 select-none items-center rounded border border-border bg-muted px-1 font-mono text-[11px] text-muted-foreground sm:inline-flex"
 					aria-hidden="true">/</kbd
 				>
 			{/if}
@@ -136,7 +136,7 @@
 				<span class="hidden sm:inline">Filters</span>
 				{#if activeCount > 0}
 					<span
-						class="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-primary-foreground"
+						class="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[11px] font-bold leading-none text-primary-foreground"
 					>
 						{activeCount}
 					</span>
@@ -167,7 +167,7 @@
 	<!-- ── Row 3: Active filter tags ──────────────────────────── -->
 	{#if activeTags.length > 0}
 		<div class="flex flex-wrap items-center gap-1.5 border-t border-border bg-muted/30 px-3 py-1.5">
-			<span class="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">Active:</span>
+			<span class="section-label">Active:</span>
 			{#each activeTags as tag (tag.key)}
 				<span
 					class="fb-tag {tag.color ?? ''}"
@@ -184,7 +184,7 @@
 			{/each}
 			{#if onClearAll}
 				<button
-					class="ml-0.5 cursor-pointer text-[10px] text-muted-foreground/60 underline underline-offset-2 transition-colors hover:text-foreground"
+					class="ml-0.5 cursor-pointer text-[11px] text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground"
 					onclick={onClearAll}
 				>
 					Clear all

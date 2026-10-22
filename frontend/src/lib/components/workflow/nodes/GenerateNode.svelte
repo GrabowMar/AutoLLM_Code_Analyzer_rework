@@ -35,8 +35,8 @@
 		<span class="font-mono">{appNum}</span>
 	</div>
 	{#if hasPrompt}
-		<div class="pt-1 mt-1 border-t border-current/10">
-			<span class="text-violet-300 text-[10px] uppercase tracking-wider">Custom prompt</span>
+		<div class="pt-1 mt-1 border-t border-border">
+			<span class="section-label">Custom prompt</span>
 		</div>
 	{/if}
 </NodeShell>

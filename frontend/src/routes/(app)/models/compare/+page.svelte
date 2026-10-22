@@ -7,11 +7,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import { toast } from 'svelte-sonner';
 	import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Check from '@lucide/svelte/icons/check';
 	import Cpu from '@lucide/svelte/icons/cpu';
 	import Link from '@lucide/svelte/icons/link';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import Settings from '@lucide/svelte/icons/settings';
 	import X from '@lucide/svelte/icons/x';
 
@@ -119,49 +121,41 @@
 	});
 </script>
 
-<svelte:head>
-	<title>Model Comparison - LLM Lab</title>
-</svelte:head>
-
-<div class="space-y-4 sm:space-y-6">
-	<div class="flex items-center gap-2 text-sm text-muted-foreground">
-		<Button variant="ghost" size="sm" href="/models" class="gap-1.5 px-2">
-			<ArrowLeft class="h-3.5 w-3.5" />
-			Models
-		</Button>
-		<span>/</span>
-		<span class="font-medium text-foreground">Comparison</span>
-	</div>
-
-	<div class="page-header">
-		<h1>Model Comparison</h1>
-		<p>Side-by-side comparison for the models selected in the models list or detail view.</p>
-	</div>
+<div class="space-y-6">
+	<PageHeader
+		title="Model Comparison"
+		description="Side-by-side comparison for the models selected in the models list or detail view."
+		back={{ href: '/models', label: 'Models' }}
+	>
+		{#snippet actions()}
+			{#if comparedModels.length > 0}
+				<Button variant="outline" size="sm" onclick={copyShareLink}>
+					<Link class="mr-2 h-3.5 w-3.5" />
+					Share Link
+				</Button>
+			{/if}
+		{/snippet}
+	</PageHeader>
 
 	{#if queryModels.length === 0}
 		<Card.Root>
-			<Card.Content class="flex flex-col items-center justify-center gap-3 py-12 text-center">
-				<Cpu class="h-10 w-10 text-muted-foreground/40" />
-				<div>
-					<p class="text-sm font-medium">No models selected.</p>
-					<p class="text-sm text-muted-foreground">Choose one or more models from the models page to open a real comparison.</p>
-				</div>
-				<Button href="/models">Go to Models</Button>
+			<Card.Content>
+				<EmptyState icon={Cpu} title="No models selected" description="Choose one or more models from the models page to open a comparison.">
+					{#snippet action()}
+						<Button href="/models" size="sm">Go to Models</Button>
+					{/snippet}
+				</EmptyState>
 			</Card.Content>
 		</Card.Root>
 	{:else if loading}
-		<div class="flex items-center justify-center py-20">
-			<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
-		</div>
+		<LoadingState label="loading comparison" />
 	{:else}
 		{#if error}
-			<div class="rounded-lg border border-destructive bg-destructive/10 p-4 text-sm text-destructive">
-				{error}
-			</div>
+			<ErrorAlert message={error} onretry={loadComparison} />
 		{/if}
 
 		{#if missingModels.length > 0}
-			<div class="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-300">
+			<div class="rounded-md border border-warning/30 bg-warning/10 p-4 text-sm text-warning-fg">
 				<div class="flex items-start gap-2">
 					<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
 					<div>
@@ -197,12 +191,6 @@
 									<option value={model.canonical_slug}>{model.model_name}</option>
 								{/each}
 							</select>
-						</div>
-						<div class="sm:ml-auto">
-							<Button variant="outline" size="sm" onclick={copyShareLink}>
-								<Link class="mr-2 h-3.5 w-3.5" />
-								Share Link
-							</Button>
 						</div>
 					</div>
 					<div class="flex flex-wrap gap-1.5">
@@ -278,9 +266,9 @@
 									{#each comparedModels as model}
 										<td class="px-4 py-2.5 text-sm">
 											{#if model.is_free}
-												<Check class="h-4 w-4 text-emerald-500" />
+												<Check class="h-4 w-4 text-success-fg" aria-label="Yes" />
 											{:else}
-												<X class="h-4 w-4 text-muted-foreground/40" />
+												<X class="h-4 w-4 text-muted-foreground" aria-label="No" />
 											{/if}
 										</td>
 									{/each}
@@ -312,7 +300,7 @@
 									<td class="px-4 py-2.5 text-sm font-medium">Input Delta</td>
 									{#each comparedModels as model}
 										{@const delta = model.input_price_per_million - baselineInputPrice}
-										<td class="px-4 py-2.5 text-sm font-mono {delta > 0 ? 'text-red-500' : delta < 0 ? 'text-emerald-500' : 'text-muted-foreground'}">
+										<td class="px-4 py-2.5 text-sm font-mono {delta > 0 ? 'text-danger-fg' : delta < 0 ? 'text-success-fg' : 'text-muted-foreground'}">
 											{formatDelta(delta)}
 										</td>
 									{/each}
@@ -321,7 +309,7 @@
 									<td class="px-4 py-2.5 text-sm font-medium">Output Delta</td>
 									{#each comparedModels as model}
 										{@const delta = model.output_price_per_million - baselineOutputPrice}
-										<td class="px-4 py-2.5 text-sm font-mono {delta > 0 ? 'text-red-500' : delta < 0 ? 'text-emerald-500' : 'text-muted-foreground'}">
+										<td class="px-4 py-2.5 text-sm font-mono {delta > 0 ? 'text-danger-fg' : delta < 0 ? 'text-success-fg' : 'text-muted-foreground'}">
 											{formatDelta(delta)}
 										</td>
 									{/each}
@@ -354,9 +342,9 @@
 										{#each comparedModels as model}
 											<td class="px-4 py-2.5 text-center">
 												{#if supportsCapability(model, capability)}
-													<Check class="inline h-4 w-4 text-emerald-500" />
+													<Check class="inline h-4 w-4 text-success-fg" aria-label="Yes" />
 												{:else}
-													<X class="inline h-4 w-4 text-muted-foreground/40" />
+													<X class="inline h-4 w-4 text-muted-foreground" aria-label="No" />
 												{/if}
 											</td>
 										{/each}

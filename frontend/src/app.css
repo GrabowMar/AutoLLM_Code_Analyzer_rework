@@ -69,6 +69,11 @@
   --success: #16a34a; /* green-600 */
   --warning: #d97706; /* amber-600 */
   --info: #2563eb; /* blue-600 */
+  /* Text-safe tone shades for badges/inline status (4.5:1 on card and on 10% tints) */
+  --success-fg: #15803d; /* green-700 */
+  --warning-fg: #b45309; /* amber-700 */
+  --danger-fg: #b91c1c; /* red-700 */
+  --info-fg: #1d4ed8; /* blue-700 */
 
   --border: #e2e8f0; /* slate-200 */
   --input: #e2e8f0;
@@ -150,6 +155,10 @@
   --success: #22c55e;
   --warning: #f59e0b;
   --info: #3b82f6;
+  --success-fg: #4ade80; /* green-400 */
+  --warning-fg: #fbbf24; /* amber-400 */
+  --danger-fg: #f87171; /* red-400 */
+  --info-fg: #60a5fa; /* blue-400 */
 
   --border: #253c56; /* visible lines without harsh contrast */
   --input: #253c56;
@@ -222,6 +231,10 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
+  --color-success-fg: var(--success-fg);
+  --color-warning-fg: var(--warning-fg);
+  --color-danger-fg: var(--danger-fg);
+  --color-info-fg: var(--info-fg);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -432,30 +445,24 @@
 
 /* ─── Component Layer ─────────────────────────────────────────── */
 @layer components {
-  /* ── Cards: tight, IDE panel-like ───────────────────────────── */
-  [data-slot="card"] {
-    transition:
-      border-color 0.2s ease,
-      box-shadow 0.2s ease,
-      transform 0.2s ease;
-  }
-  [data-slot="card"]:hover {
-    border-color: color-mix(in oklab, var(--primary) 35%, var(--border));
-    box-shadow:
-      0 1px 0 0 color-mix(in oklab, var(--primary) 8%, transparent) inset,
-      0 4px 12px -4px color-mix(in oklab, #000 50%, transparent);
-  }
-
   /* ── Page header (compact, dense) ───────────────────────────── */
   .page-header {
-    @apply flex flex-col gap-1 border-b border-border/60 pb-4;
+    @apply flex flex-col gap-2 border-b border-border pb-4;
   }
   .page-header h1 {
-    @apply text-2xl font-semibold tracking-tight sm:text-3xl;
+    @apply text-xl font-semibold tracking-tight sm:text-2xl;
     font-family: var(--font-display);
   }
   .page-header p {
-    @apply text-xs text-muted-foreground sm:text-sm;
+    @apply text-sm text-muted-foreground;
+  }
+  .back-link {
+    @apply inline-flex w-fit items-center gap-1 rounded text-xs font-medium text-muted-foreground transition-colors hover:text-foreground;
+  }
+
+  /* Small uppercase label above a group of fields/values */
+  .section-label {
+    @apply text-[11px] font-medium uppercase tracking-wider text-muted-foreground;
   }
 
   /* ── Empty state ────────────────────────────────────────────── */
@@ -483,12 +490,15 @@
     opacity: 0.55;
     transition: opacity 0.2s ease;
   }
-  .kpi-card:hover {
+  /* Hover affordance only when the tile is a link */
+  a:hover > .kpi-card,
+  a.kpi-card:hover {
     border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
     transform: translateY(-2px);
     box-shadow: var(--glow-primary);
   }
-  .kpi-card:hover::before {
+  a:hover > .kpi-card::before,
+  a.kpi-card:hover::before {
     opacity: 1;
   }
   .kpi-label {
@@ -497,27 +507,6 @@
   .kpi-value {
     @apply text-3xl font-semibold tabular-nums;
     font-family: var(--font-display);
-  }
-  .kpi-delta-up {
-    color: var(--success);
-  }
-  .kpi-delta-down {
-    color: var(--destructive);
-  }
-
-  /* ── Section block ──────────────────────────────────────────── */
-  .panel {
-    @apply rounded-md border border-border bg-card;
-  }
-  .panel-header {
-    @apply flex items-center justify-between gap-2 border-b border-border/70 px-4 py-2.5;
-  }
-  .panel-title {
-    @apply text-sm font-semibold;
-    font-family: var(--font-display);
-  }
-  .panel-body {
-    @apply p-4;
   }
 
   /* ── Tables (data-dense — minimal padding, row hover, zebra) ── */
@@ -540,10 +529,6 @@
   table tbody tr:hover {
     background-color: color-mix(in oklab, var(--primary) 8%, transparent);
   }
-  /* Zebra optional via class */
-  table.zebra tbody tr:nth-child(even) {
-    background-color: color-mix(in oklab, var(--muted) 50%, transparent);
-  }
 
   /* ── Focus ring (universal) ─────────────────────────────────── */
   a:focus-visible,
@@ -554,26 +539,6 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
     border-radius: var(--radius);
-  }
-
-  /* ── Status pills ───────────────────────────────────────────── */
-  .pill {
-    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tabular-nums;
-  }
-  .pill-success {
-    @apply border-transparent bg-[color:var(--success)]/15 text-[color:var(--success)];
-  }
-  .pill-warn {
-    @apply border-transparent bg-[color:var(--warning)]/15 text-[color:var(--warning)];
-  }
-  .pill-error {
-    @apply border-transparent bg-[color:var(--destructive)]/15 text-[color:var(--destructive)];
-  }
-  .pill-info {
-    @apply border-transparent bg-[color:var(--info)]/15 text-[color:var(--info)];
-  }
-  .pill-muted {
-    @apply border-border bg-muted text-muted-foreground;
   }
 
   /* ── Filter Bar design tokens ───────────────────────────────── */
@@ -594,38 +559,13 @@
   .fb-chip-on {
     @apply border-primary/50 bg-primary/10 text-primary hover:bg-primary/15 hover:border-primary/60;
   }
-  /* Chip — active with semantic color */
-  .fb-chip-blue {
-    @apply border-blue-500/40   bg-blue-500/10   text-blue-600   dark:text-blue-400   hover:bg-blue-500/15   hover:border-blue-500/60;
-  }
-  .fb-chip-emerald {
-    @apply border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/15 hover:border-emerald-500/60;
-  }
-  .fb-chip-amber {
-    @apply border-amber-500/40  bg-amber-500/10  text-amber-600  dark:text-amber-500  hover:bg-amber-500/15  hover:border-amber-500/60;
-  }
-  .fb-chip-red {
-    @apply border-red-500/40    bg-red-500/10    text-red-600    dark:text-red-400    hover:bg-red-500/15    hover:border-red-500/60;
-  }
-  .fb-chip-orange {
-    @apply border-orange-500/40 bg-orange-500/10 text-orange-600 dark:text-orange-400 hover:bg-orange-500/15 hover:border-orange-500/60;
-  }
-  .fb-chip-violet {
-    @apply border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/15 hover:border-violet-500/60;
-  }
-  .fb-chip-slate {
-    @apply border-slate-400/40  bg-slate-500/10  text-slate-600  dark:text-slate-400  hover:bg-slate-500/15  hover:border-slate-400/60;
-  }
-  .fb-chip-indigo {
-    @apply border-indigo-500/40 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/15 hover:border-indigo-500/60;
-  }
   /* Filter group row */
   .fb-group {
     @apply flex flex-wrap items-center gap-1.5;
   }
   /* Filter group label */
   .fb-group-label {
-    @apply w-14 shrink-0 select-none text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70;
+    @apply w-14 shrink-0 select-none text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70;
   }
   /* Active tag */
   .fb-tag {
@@ -736,50 +676,10 @@
     }
   }
 
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
-
   @media (max-width: 767px) {
     .hide-mobile {
       display: none !important;
     }
-  }
-  @media (min-width: 768px) {
-    .show-mobile-only {
-      display: none !important;
-    }
-  }
-
-  /* ── Touch-device overrides ──────────────────────────────────
-     NOTE: previous rules collapsed the desktop sidebar / breadcrumb on ANY
-     coarse-pointer device (including touch laptops & tablets >=md), which
-     killed navigation on iPad-class widths. Width-based responsiveness
-     (md:flex / md:hidden) already handles small viewports correctly, so
-     these classes are now no-ops kept only for backwards compat. */
-  .touch-mobile-hide,
-  .touch-mobile-show,
-  .touch-mobile-hide-nav,
-  .touch-mobile-hide-text {
-    /* intentionally empty */
-  }
-
-  /* ── Subtle "running / live" pulse (for active jobs, KPIs) ──── */
-  @keyframes data-pulse {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.45;
-    }
-  }
-  .data-pulse {
-    animation: data-pulse 1.6s ease-in-out infinite;
   }
 
   /* ── Skeleton loader ────────────────────────────────────────── */
@@ -866,35 +766,6 @@
     box-shadow: 0 4px 14px -6px color-mix(in oklab, var(--primary) 30%, transparent);
   }
 
-  /* ── Auth layout grid background pattern accent ─────────────── */
-  .grid-bg {
-    background-image: linear-gradient(
-        color-mix(in oklab, var(--foreground) 4%, transparent) 1px,
-        transparent 1px
-      ),
-      linear-gradient(
-        90deg,
-        color-mix(in oklab, var(--foreground) 4%, transparent) 1px,
-        transparent 1px
-      );
-    background-size: 32px 32px;
-  }
-
-  /* ── Glass surfaces (hero panels, tooltips, overlays only) ──── */
-  .glass-panel {
-    background: var(--glass-bg);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--glass-border);
-    border-radius: calc(var(--radius) + 2px);
-    box-shadow: inset 0 1px 0 color-mix(in oklab, #fff 6%, transparent);
-  }
-  @supports not (backdrop-filter: blur(1px)) {
-    .glass-panel {
-      background: var(--card);
-    }
-  }
-
   /* ── Gradient accents ───────────────────────────────────────── */
   .gradient-text {
     background: var(--gradient-brand);
@@ -902,33 +773,6 @@
     background-clip: text;
     color: transparent;
   }
-  .gradient-border-top {
-    position: relative;
-    overflow: hidden;
-  }
-  .gradient-border-top::before {
-    content: "";
-    position: absolute;
-    inset: 0 0 auto 0;
-    height: 2px;
-    background: var(--gradient-brand);
-    opacity: 0.7;
-  }
-
-  /* ── Glow (primary CTAs, active nav, KPI hover only) ────────── */
-  .glow-primary {
-    box-shadow: var(--glow-primary);
-  }
-  .glow-accent {
-    box-shadow: var(--glow-accent);
-  }
-  .hover-glow {
-    transition: box-shadow 0.2s ease;
-  }
-  .hover-glow:hover {
-    box-shadow: var(--glow-primary);
-  }
-
   /* ── Hero panel (dashboard greeting) ────────────────────────── */
   .hero-panel {
     @apply relative overflow-hidden;

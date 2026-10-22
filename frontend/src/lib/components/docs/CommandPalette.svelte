@@ -144,6 +144,7 @@
 		<div
 			class="w-full max-w-xl overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl"
 			role="dialog"
+			tabindex="-1"
 			aria-modal="true"
 			aria-label="Search documentation"
 			onclick={(e) => e.stopPropagation()}
@@ -157,7 +158,7 @@
 					placeholder="Search docs… (press Enter to open)"
 					class="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
 				/>
-				<kbd class="hidden rounded border bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground sm:inline">ESC</kbd>
+				<kbd class="hidden rounded border bg-muted px-1.5 py-0.5 text-[11px] font-mono text-muted-foreground sm:inline">ESC</kbd>
 			</div>
 
 			<div class="max-h-[60vh] overflow-y-auto p-1">
@@ -190,7 +191,7 @@
 										{#if item.section}
 											<span class="text-xs text-muted-foreground truncate">/ {item.section}</span>
 										{/if}
-										<span class="ml-auto text-[10px] {meta.accent} truncate">{meta.label}</span>
+										<span class="ml-auto text-[11px] {meta.accent} truncate">{meta.label}</span>
 									</div>
 									{#if item.snippet}
 										<p class="mt-1 line-clamp-1 pl-5 text-xs text-muted-foreground">
@@ -204,7 +205,7 @@
 				{/if}
 			</div>
 
-			<div class="flex items-center justify-between border-t bg-muted/30 px-3 py-1.5 text-[10px] text-muted-foreground">
+			<div class="flex items-center justify-between border-t bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
 				<div class="flex items-center gap-3">
 					<span class="flex items-center gap-1"><kbd class="rounded bg-background px-1 py-0.5 font-mono">↑↓</kbd> Navigate</span>
 					<span class="flex items-center gap-1"><CornerDownLeft class="h-3 w-3" /> Open</span>

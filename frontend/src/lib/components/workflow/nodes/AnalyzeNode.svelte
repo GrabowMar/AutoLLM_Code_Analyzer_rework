@@ -54,24 +54,24 @@
 >
 	{#each TOOL_GROUPS as group (group.label)}
 		<div class="flex items-start gap-2">
-			<span class="text-muted-foreground w-12 shrink-0 pt-0.5 text-[10px] uppercase tracking-wider">{group.label}</span>
+			<span class="text-muted-foreground w-12 shrink-0 pt-0.5 text-[11px] uppercase tracking-wider">{group.label}</span>
 			<div class="flex flex-wrap gap-1">
 				{#each group.tools as tool (tool.slug)}
 					<span
-						class="rounded px-1.5 py-0.5 text-[10px] border {isOn(tool.slug) ? 'bg-blue-500/20 border-blue-400/50 text-blue-200' : 'bg-background/40 border-border/60 text-muted-foreground/60'}"
+						class="rounded px-1.5 py-0.5 text-[11px] border {isOn(tool.slug) ? 'bg-info/10 border-info/40 text-info-fg' : 'border-border text-muted-foreground opacity-60'}"
 					>{tool.name}</span>
 				{/each}
 			</div>
 		</div>
 	{/each}
 	{#if profileName}
-		<div class="mt-1 border-t border-current/10 pt-1">
-			<span class="text-[10px] text-blue-200">⬡ {profileName}</span>
+		<div class="mt-1 border-t border-border pt-1">
+			<span class="text-[11px] text-info-fg">⬡ {profileName}</span>
 		</div>
 	{/if}
 	{#if liveTarget}
-		<div class="mt-1 border-t border-current/10 pt-1">
-			<span class="text-[10px] uppercase tracking-wider text-blue-300">● Live target</span>
+		<div class="mt-1 border-t border-border pt-1">
+			<span class="text-[11px] uppercase tracking-wider text-info-fg">● Live target</span>
 		</div>
 	{/if}
 </NodeShell>

@@ -7,6 +7,7 @@
 	import AppWindow from '@lucide/svelte/icons/app-window';
 	import Clock from '@lucide/svelte/icons/clock';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { timeAgo } from '$lib/utils/dashboard';
 	import type { RecentActivityItem } from '$lib/api/client';
 
@@ -19,10 +20,10 @@
 	let { items, isRefreshing, onRefresh }: Props = $props();
 
 	function dotColor(status: string): string {
-		if (status === 'completed') return 'text-emerald-500';
+		if (status === 'completed') return 'text-success';
 		if (status === 'failed') return 'text-destructive';
-		if (status === 'running') return 'text-amber-500';
-		return 'text-blue-500';
+		if (status === 'running') return 'text-info';
+		return 'text-muted-foreground';
 	}
 </script>
 
@@ -83,10 +84,7 @@
 				{/each}
 			</div>
 		{:else}
-			<div class="flex flex-col items-center justify-center py-8 text-center">
-				<Activity class="h-8 w-8 text-muted-foreground/50" />
-				<p class="mt-2 text-xs text-muted-foreground">No recent activity yet.</p>
-			</div>
+			<EmptyState compact icon={Activity} title="No recent activity yet" />
 		{/if}
 	</Card.Content>
 </Card.Root>

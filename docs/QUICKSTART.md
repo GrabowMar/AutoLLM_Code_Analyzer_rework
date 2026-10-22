@@ -4,7 +4,7 @@ Get a local LLM Lab instance running with Docker Compose, from clone to your fir
 
 ## Prerequisites
 
-- Docker with the Compose plugin. The Django container talks to the host Docker daemon (it mounts `/var/run/docker.sock`) to run analyzer workspaces and generated sample apps.
+- Docker with the Compose plugin, able to run one privileged container: analyzer workspaces and generated sample apps run nested inside the `apps-dind` service (Docker-in-Docker), never on the host daemon.
 - [just](https://github.com/casey/just) and Python 3 on the host (only used to run the bootstrap script; everything else runs in containers).
 - An [OpenRouter API key](https://openrouter.ai/keys). Not needed to boot the stack, but nothing can be generated or AI-reviewed without one.
 

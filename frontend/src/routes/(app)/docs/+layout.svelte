@@ -44,10 +44,6 @@
 	}
 </script>
 
-<svelte:head>
-	<title>Documentation - LLM Lab</title>
-</svelte:head>
-
 {#snippet sidebarContent(onnav: () => void)}
 	<div class="mb-3 flex items-center justify-between">
 		<a
@@ -72,7 +68,7 @@
 			<Search class="h-3.5 w-3.5" />
 			Search docs…
 		</span>
-		<kbd class="hidden rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] sm:inline">
+		<kbd class="hidden rounded border bg-muted px-1.5 py-0.5 font-mono text-[11px] sm:inline">
 			⌘K
 		</kbd>
 	</button>
@@ -95,7 +91,7 @@
 			{@const Icon = meta.icon}
 			<div>
 				<div
-					class="mb-1 flex items-center gap-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+					class="mb-1 flex items-center gap-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
 				>
 					<Icon class="h-3 w-3 {meta.accent}" />
 					{group.category}

@@ -23,7 +23,7 @@
 					<Card.Title>Analyzer Health</Card.Title>
 					<Card.Description>
 						{#if health}
-							<span class="font-medium text-emerald-600 dark:text-emerald-400"
+							<span class="font-medium text-success-fg"
 								>{health.online}</span
 							>
 							online ·
@@ -51,13 +51,13 @@
 			<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
 				{#each health.analyzers as a (a.name)}
 					<div
-						class="flex flex-col gap-1.5 rounded-md border border-border bg-surface-2/50 px-3 py-2.5 transition-colors hover:border-primary/40"
+						class="flex flex-col gap-1.5 rounded-md border border-border bg-surface-2/50 px-3 py-2.5"
 					>
 						<div class="flex items-center justify-between gap-2">
 							<span class="truncate text-sm font-medium">{a.display_name}</span>
 							<span
 								class="status-dot h-2 w-2 {a.available
-									? 'status-dot-live text-emerald-500'
+									? 'text-success'
 									: 'text-destructive'}"
 								role="img"
 								aria-label={a.available ? 'online' : 'offline'}
@@ -67,7 +67,7 @@
 							<span class="mono-tag uppercase">{a.type}</span>
 							<span
 								class="truncate text-[11px] {a.available
-									? 'text-emerald-600 dark:text-emerald-400'
+									? 'text-success-fg'
 									: 'text-muted-foreground'}"
 							>
 								{a.message}

@@ -1,9 +1,4 @@
-import { analysisStatusColors, severityColors } from "$lib/constants/colors";
-
-/** Status → Tailwind class mappings for analysis tasks and results */
-export const statusColors = analysisStatusColors;
-
-export { severityColors };
+export { severityColors } from "$lib/constants/colors";
 
 /** Analyzer type labels */
 export const analyzerTypeLabels: Record<string, string> = {

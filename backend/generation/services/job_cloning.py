@@ -7,6 +7,8 @@ import random
 from typing import TYPE_CHECKING
 
 from backend.generation.models import GenerationJob
+from backend.generation.services.agent.snapshot import apply_agent_snapshot_to_job
+from backend.generation.services.agent.snapshot import reseed_agent_snapshot
 from backend.generation.services.profile_resolver import apply_snapshot_to_job
 from backend.generation.services.profile_resolver import bundle_key_from_snapshot
 from backend.generation.services.profile_resolver import run_fingerprint
@@ -46,6 +48,8 @@ def clone_job(
         max_tokens=original.max_tokens,
         top_p=original.top_p,
         llm_params=copy.deepcopy(original.llm_params or {}),
+        task_description=original.task_description,
+        agent_config=copy.deepcopy(original.agent_config or {}),
         copilot_description=original.copilot_description,
         copilot_max_iterations=original.copilot_max_iterations,
         copilot_use_open_source=original.copilot_use_open_source,
@@ -55,8 +59,12 @@ def clone_job(
     if reuse_snapshot and snapshot:
         snapshot = copy.deepcopy(snapshot)
         if new_seed:
-            snapshot["seed"] = random.randint(0, 2_147_483_647)  # noqa: S311 - experiment seed
-            snapshot["run_fingerprint"] = run_fingerprint(snapshot)
+            seed = random.randint(0, 2_147_483_647)  # noqa: S311 - experiment seed
+            if snapshot.get("mode") == "agent":
+                snapshot = reseed_agent_snapshot(snapshot, seed, original.model)
+            else:
+                snapshot["seed"] = seed
+                snapshot["run_fingerprint"] = run_fingerprint(snapshot)
         new_job.experiment_seed = snapshot.get("seed")
         new_job.resolved_bundle = snapshot
         new_job.prompt_hash = snapshot.get("prompt_hash") or ""
@@ -70,6 +78,8 @@ def clone_job(
                 "updated_at",
             ],
         )
+    elif original.mode == GenerationJob.Mode.AGENT:
+        apply_agent_snapshot_to_job(new_job)
     elif original.mode == GenerationJob.Mode.SCAFFOLDING and original.app_requirement:
         apply_snapshot_to_job(new_job)
 

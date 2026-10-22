@@ -206,12 +206,37 @@ def apply_scaffold(
 
     result = job.result_data or {}
     files = result.get("files")
-    if phase == ScaffoldPhase.BUILD and result.get("result_schema_version") == 2 and isinstance(files, dict) and files:
+    is_v2 = phase == ScaffoldPhase.BUILD and result.get("result_schema_version") == 2
+    if is_v2 and isinstance(files, dict) and result.get("materialize") == "verbatim":
+        _materialize_verbatim(dest_path, files)
+    elif is_v2 and isinstance(files, dict) and files:
         _materialize_files(dest_path, stack, files, result)
     else:
         _materialize_legacy(dest_path, stack, phase, result)
 
     return dest_path
+
+
+# Platform-owned build files an agent's output may never replace.
+_PROTECTED_BUILD_FILES = frozenset({"Dockerfile", ".dockerignore", "docker-compose.yml"})
+
+
+def _materialize_verbatim(dest_path: Path, files: dict[str, str]) -> None:
+    """Write an agent run's workspace over the skeleton exactly as the agent left it.
+
+    No entry renaming, code patching or dependency inference: the agent saw
+    the same skeleton and contract, so what gets built is what it wrote. The
+    stack's build files stay the platform's.
+    """
+    root = dest_path.resolve()
+    for rel, content in files.items():
+        if rel in _PROTECTED_BUILD_FILES or not isinstance(content, str):
+            continue
+        target = (dest_path / rel).resolve()
+        if root not in target.parents:
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
 
 
 def _materialize_files(

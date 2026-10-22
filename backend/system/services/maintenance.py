@@ -5,13 +5,13 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
-import docker
 from django.core.cache import cache
 from django.utils import timezone
 
 from backend.analysis.models import AnalysisRun
 from backend.generation.models import GenerationJob
 from backend.runtime.models import ContainerInstance
+from backend.runtime.services import docker_manager
 
 
 def clear_stuck_analysis_tasks(older_than_minutes: int = 60) -> int:
@@ -38,7 +38,7 @@ def clear_stuck_generation_jobs(older_than_minutes: int = 60) -> int:
 
 def purge_orphan_containers() -> int:
     try:
-        client = docker.from_env()
+        client = docker_manager.new_client()
         all_containers = client.containers.list(all=True)
         existing_ids: set[str] = set()
         for c in all_containers:
@@ -68,7 +68,17 @@ def purge_orphan_containers() -> int:
             status=ContainerInstance.Status.REMOVED,
         )
 
-    return len(orphan_ids)
+    # Agent-run sandboxes outlive their job only if the process running it
+    # died; anything older than the longest allowed run is such a leftover.
+    reaped = 0
+    try:
+        from backend.generation.services.agent.sandbox import reap_orphans
+
+        reaped = reap_orphans(older_than_seconds=5 * 3600)
+    except Exception:  # noqa: BLE001 - apps daemon unreachable: nothing to reap
+        reaped = 0
+
+    return len(orphan_ids) + reaped
 
 
 def clear_caches() -> dict[str, Any]:

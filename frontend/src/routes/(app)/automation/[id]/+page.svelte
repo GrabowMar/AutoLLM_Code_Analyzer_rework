@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { formatDateTime as fmt } from '$lib/utils/formatters';
-	import { pipelineRunStatusColors, pipelineLifecycleColors } from '$lib/constants/colors';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
@@ -8,14 +7,20 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import Eye from '@lucide/svelte/icons/eye';
 	import Edit from '@lucide/svelte/icons/pencil';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Play from '@lucide/svelte/icons/play';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import History from '@lucide/svelte/icons/history';
+	import Workflow from '@lucide/svelte/icons/workflow';
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import {
@@ -52,11 +57,6 @@
 	let paramsText = $state('{}');
 	let triggerError = $state('');
 	let triggering = $state(false);
-
-	const statusColors: Record<string, string> = {
-		...pipelineRunStatusColors,
-		...pipelineLifecycleColors
-	};
 
 	async function load() {
 		loading = true;
@@ -122,80 +122,68 @@
 	onMount(load);
 </script>
 
-<svelte:head><title>{pipeline?.name ?? 'Workflow'} — LLM Eval Lab</title></svelte:head>
-
 <div class="space-y-6">
-	<nav aria-label="Breadcrumb" class="flex items-center gap-2 text-sm text-muted-foreground">
-		<a href="/automation" class="hover:text-foreground transition-colors flex items-center gap-1">
-			<ArrowLeft class="h-3.5 w-3.5" />
-			<span class="font-medium text-foreground">Automation</span>
-		</a>
-		<span>/</span>
-		<span class="truncate max-w-[300px]">{pipeline?.name ?? 'Loading...'}</span>
-	</nav>
-	<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-		<div class="page-header">
-			<h1>
-				{pipeline?.name ?? 'Loading...'}
-				{#if pipeline}
-					<Badge class={statusColors[pipeline.status] ?? ''} variant="outline">{pipeline.status}</Badge>
-				{/if}
-			</h1>
-			<p class="font-mono text-xs">{id}</p>
-		</div>
-		{#if pipeline}
-			<div class="flex items-center gap-2 flex-wrap">
+	<PageHeader
+		title={pipeline?.name ?? 'Workflow'}
+		description={pipeline?.description || undefined}
+		back={{ href: '/automation', label: 'Workflows' }}
+	>
+		{#snippet meta()}
+			{#if pipeline}<StatusBadge status={pipeline.status} />{/if}
+		{/snippet}
+		{#snippet actions()}
+			{#if pipeline}
 				<Button variant="outline" size="sm" onclick={load}>
-					<RefreshCw class="mr-2 h-4 w-4" />Refresh
+					<RefreshCw class="h-4 w-4" />Refresh
 				</Button>
-				<Button variant="outline" size="sm" onclick={() => goto(`/automation/${id}/edit`)}>
-					<Edit class="mr-2 h-4 w-4" />Edit
+				<Button variant="outline" size="sm" href="/automation/{id}/edit">
+					<Edit class="h-4 w-4" />Edit
 				</Button>
 				<Button variant="outline" size="sm" onclick={clone}>
-					<Copy class="mr-2 h-4 w-4" />Clone
-				</Button>
-				<Button size="sm" onclick={() => { showTrigger = true; }}>
-					<Play class="mr-2 h-4 w-4" />Run
+					<Copy class="h-4 w-4" />Clone
 				</Button>
 				<Button variant="destructive" size="sm" onclick={remove}>
-					<Trash2 class="mr-2 h-4 w-4" />Delete
+					<Trash2 class="h-4 w-4" />Delete
 				</Button>
-			</div>
-		{/if}
-	</div>
+				<Button size="sm" onclick={() => { showTrigger = true; }}>
+					<Play class="h-4 w-4" />Run
+				</Button>
+			{/if}
+		{/snippet}
+		<p class="font-mono text-xs text-muted-foreground">{id}</p>
+	</PageHeader>
 
 	<!-- Trigger Run Dialog -->
-	{#if showTrigger}
-		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" role="dialog" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) showTrigger = false; }} onkeydown={(e) => { if (e.key === 'Escape') showTrigger = false; }}>
-			<div class="w-full max-w-md rounded-lg border bg-card shadow-lg p-6 space-y-4">
-				<h2 class="text-lg font-semibold">Trigger Workflow Run</h2>
-				<div class="space-y-1">
-					<Label>Parameters (JSON)</Label>
-					<textarea
-						bind:value={paramsText}
-						rows={5}
-						class="w-full rounded-md border bg-background p-3 font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-ring"
-					></textarea>
-					{#if triggerError}<p class="text-sm text-destructive">{triggerError}</p>{/if}
-				</div>
-				<div class="flex justify-end gap-2">
-					<Button variant="outline" onclick={() => { showTrigger = false; triggerError = ''; }}>Cancel</Button>
-					<Button onclick={triggerRun} disabled={triggering}>
-						<Play class="mr-2 h-4 w-4" />{triggering ? 'Starting...' : 'Start Run'}
-					</Button>
-				</div>
+	<Dialog.Root bind:open={showTrigger} onOpenChange={(o) => { if (!o) triggerError = ''; }}>
+		<Dialog.Content class="max-w-md space-y-4">
+			<Dialog.Header>
+				<Dialog.Title>Trigger workflow run</Dialog.Title>
+				<Dialog.Description class="text-sm text-muted-foreground">Optional run parameters, passed to every step.</Dialog.Description>
+			</Dialog.Header>
+			<div class="space-y-1">
+				<Label for="run-params">Parameters (JSON)</Label>
+				<textarea
+					id="run-params"
+					bind:value={paramsText}
+					rows={5}
+					aria-invalid={triggerError ? 'true' : undefined}
+					class="w-full rounded-md border bg-background p-3 font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+				></textarea>
+				{#if triggerError}<p class="text-sm text-destructive" role="alert">{triggerError}</p>{/if}
 			</div>
-		</div>
-	{/if}
+			<Dialog.Footer>
+				<Button variant="outline" onclick={() => { showTrigger = false; triggerError = ''; }}>Cancel</Button>
+				<Button onclick={triggerRun} disabled={triggering}>
+					<Play class="h-4 w-4" />{triggering ? 'Starting…' : 'Start run'}
+				</Button>
+			</Dialog.Footer>
+		</Dialog.Content>
+	</Dialog.Root>
 
 	{#if loading}
-		<Card.Root>
-			<Card.Content class="flex items-center justify-center py-20">
-				<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
-			</Card.Content>
-		</Card.Root>
+		<LoadingState label="loading workflow" />
 	{:else if error}
-		<p class="text-destructive">{error}</p>
+		<ErrorAlert message={error} onretry={load} />
 	{:else if pipeline}
 		<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
 			<Card.Root class="md:col-span-1">
@@ -206,9 +194,6 @@
 					<div class="flex justify-between"><span class="text-muted-foreground">Updated</span><span>{fmt(pipeline.updated_at)}</span></div>
 					<div class="flex justify-between"><span class="text-muted-foreground">Nodes</span><span>{nodes.length}</span></div>
 					<div class="flex justify-between"><span class="text-muted-foreground">Edges</span><span>{edges.length}</span></div>
-					{#if pipeline.description}
-						<p class="text-muted-foreground pt-2 border-t">{pipeline.description}</p>
-					{/if}
 					{#if pipeline.tags.length > 0}
 						<div class="flex flex-wrap gap-1 pt-2 border-t">
 							{#each pipeline.tags as tag (tag)}<Badge variant="secondary" class="text-xs">{tag}</Badge>{/each}
@@ -222,7 +207,11 @@
 				<Card.Header><Card.Title>Workflow</Card.Title></Card.Header>
 				<Card.Content class="p-0">
 					{#if nodes.length === 0}
-						<p class="text-sm text-muted-foreground p-6 text-center">No nodes defined. Click Edit to build the workflow.</p>
+						<EmptyState compact icon={Workflow} title="No steps yet" description="Open the editor to add steps to this workflow.">
+							{#snippet action()}
+								<Button variant="outline" size="sm" href="/automation/{id}/edit"><Edit class="h-4 w-4" />Edit workflow</Button>
+							{/snippet}
+						</EmptyState>
 					{:else}
 						<div class="h-[400px] border-t">
 							<WorkflowCanvas bind:nodes bind:edges bind:selectedNodeId readOnly />
@@ -241,11 +230,16 @@
 		<!-- Runs history -->
 		<Card.Root>
 			<Card.Header>
-				<Card.Title>Run History ({runsTotal})</Card.Title>
+				<Card.Title>Run history</Card.Title>
+				<Card.Description>{runsTotal} run{runsTotal === 1 ? '' : 's'}</Card.Description>
 			</Card.Header>
 			<Card.Content class={runs.length === 0 ? '' : 'p-0'}>
 				{#if runs.length === 0}
-					<p class="text-sm text-muted-foreground">No runs yet. Click <strong>Run</strong> to trigger the workflow.</p>
+					<EmptyState compact icon={History} title="No runs yet" description="Run the workflow to see its history here.">
+						{#snippet action()}
+							<Button size="sm" onclick={() => { showTrigger = true; }}><Play class="h-4 w-4" />Run workflow</Button>
+						{/snippet}
+					</EmptyState>
 				{:else}
 					<div class="hidden md:block">
 						<div class="overflow-x-auto">
@@ -260,15 +254,15 @@
 									</tr>
 								</thead>
 								<tbody>
-									{#each runs as r, i (r.id)}
-										<tr class="border-b transition-colors hover:bg-muted/50 group {i % 2 === 0 ? '' : 'bg-muted/15'} {r.status === 'failed' ? 'bg-destructive/[0.03]' : ''}">
+									{#each runs as r (r.id)}
+										<tr class="border-b transition-colors hover:bg-muted/50">
 											<td class="px-3 py-2 align-top font-mono text-xs">{r.id.slice(0, 8)}…</td>
-											<td class="px-3 py-2 align-top"><Badge variant="outline" class="text-[10px] {statusColors[r.status] ?? ''}">{r.status}</Badge></td>
+											<td class="px-3 py-2 align-top"><StatusBadge status={r.status} /></td>
 											<td class="px-3 py-2 align-top text-sm">{fmt(r.started_at)}</td>
 											<td class="px-3 py-2 align-top text-sm text-muted-foreground">{duration(r.started_at, r.completed_at) ?? '—'}</td>
 											<td class="px-3 py-2">
 												<div class="flex items-center justify-end gap-1">
-													<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="View" onclick={() => goto(`/automation/runs/${r.id}`)}>
+													<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="View run" aria-label="View run {r.id.slice(0, 8)}" href="/automation/runs/{r.id}">
 														<Eye class="h-3.5 w-3.5" />
 													</Button>
 												</div>
@@ -282,10 +276,10 @@
 
 					<div class="md:hidden space-y-3 p-3">
 						{#each runs as r (r.id)}
-							<div class="border rounded-lg p-3 bg-card">
+							<div class="rounded-md border p-3">
 								<div class="flex items-start justify-between gap-2 mb-2">
-									<button class="font-mono text-xs hover:underline" onclick={() => goto(`/automation/runs/${r.id}`)}>{r.id.slice(0, 8)}…</button>
-									<Badge variant="outline" class="shrink-0 text-[10px] {statusColors[r.status] ?? ''}">{r.status}</Badge>
+									<a class="font-mono text-xs hover:underline" href="/automation/runs/{r.id}">{r.id.slice(0, 8)}…</a>
+									<StatusBadge status={r.status} />
 								</div>
 								<div class="text-xs text-muted-foreground space-y-0.5">
 									<div>Started: {fmt(r.started_at)}</div>
@@ -298,11 +292,11 @@
 					{#if runsPages > 1}
 						<div class="flex justify-center gap-2 p-4 border-t">
 							<Button variant="outline" size="sm" disabled={runsPage <= 1} onclick={async () => { runsPage--; const r = await listPipelineRuns(id, runsPage); runs = r.items; runsTotal = r.total; runsPages = r.pages; }}>
-								<ChevronLeft class="h-4 w-4" />
+								<ChevronLeft class="h-4 w-4" /><span class="sr-only">Previous page</span>
 							</Button>
 							<span class="px-3 py-2 text-sm">Page {runsPage} / {runsPages}</span>
 							<Button variant="outline" size="sm" disabled={runsPage >= runsPages} onclick={async () => { runsPage++; const r = await listPipelineRuns(id, runsPage); runs = r.items; runsTotal = r.total; runsPages = r.pages; }}>
-								<ChevronRight class="h-4 w-4" />
+								<ChevronRight class="h-4 w-4" /><span class="sr-only">Next page</span>
 							</Button>
 						</div>
 					{/if}

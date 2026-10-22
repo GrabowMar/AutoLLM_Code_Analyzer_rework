@@ -8,9 +8,15 @@ registered AFTER the static job-creation routes in
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
+from django.conf import settings
 from django.db.models import Q
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from ninja import Query
+from ninja.errors import HttpError
 
 from backend.common.pagination import paginate_queryset
 from backend.generation.api.schema import CopilotIterationSchema
@@ -22,6 +28,7 @@ from backend.generation.api.schema import PaginatedJobsSchema
 from backend.generation.api.views._router import router
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
+from backend.generation.services.dispatcher import dispatch_evaluation
 from backend.generation.services.dispatcher import dispatch_job
 from backend.generation.services.job_cloning import clone_job
 
@@ -249,6 +256,39 @@ def rerun_job(request, job_id: str):
 def get_job_artifacts(request, job_id: str):
     job = get_object_or_404(GenerationJob, id=job_id, created_by=request.auth)
     return job.artifacts.all()
+
+
+@router.post("/jobs/{job_id}/evaluate/", response={200: dict, 400: dict})
+def evaluate(request, job_id: str):
+    """Re-run the platform evaluation (build, run, hidden conformance suite) for a finished job."""
+    job = get_object_or_404(GenerationJob, id=job_id, created_by=request.auth)
+    if job.status != GenerationJob.Status.COMPLETED:
+        return 400, {"detail": "Only completed jobs can be evaluated."}
+    if job.app_requirement_id is None and not (job.resolved_bundle or {}).get("app_requirement"):
+        return 400, {"detail": "This job has no app spec to evaluate against."}
+    dispatch_evaluation(job)
+    return {"status": "queued"}
+
+
+@router.get("/jobs/{job_id}/run-record/{name}")
+def download_run_record(request, job_id: str, name: str):
+    """One file of an agent run's evidence (LLM call log, harness events, patch, workspace).
+
+    Only names listed in the job's own run record are served, and the file
+    must still match the sha256 recorded when the run finished.
+    """
+    job = get_object_or_404(GenerationJob, id=job_id, created_by=request.auth)
+    record = ((job.result_data or {}).get("agent") or {}).get("run_record") or {}
+    entry = record.get(name)
+    if name.startswith("_") or not isinstance(entry, dict):
+        raise HttpError(404, "No such run-record file")
+    path = Path(settings.GENERATION_RUNS_ROOT) / str(job.id) / name
+    if not path.is_file():
+        raise HttpError(404, "Run-record file is no longer on disk")
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != entry.get("sha256"):
+        raise HttpError(409, "Run-record file does not match its recorded sha256")
+    return FileResponse(path.open("rb"), as_attachment=True, filename=f"{str(job.id)[:8]}-{name}")
 
 
 @router.get(

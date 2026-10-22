@@ -7,8 +7,14 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Card from '$lib/components/ui/card';
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
-	import Sparkles from '@lucide/svelte/icons/sparkles';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import Search from '@lucide/svelte/icons/search';
+	import BookOpen from '@lucide/svelte/icons/book-open';
+	import { Button } from '$lib/components/ui/button';
+	import { formatApiError } from '$lib/api/core';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import Clock from '@lucide/svelte/icons/clock';
 
 	let tree = $state<DocNode[]>([]);
@@ -23,87 +29,72 @@
 	// shows a precise "Updated …" badge from /docs/page.
 	const recent = $derived(allLeaves.slice(0, 4));
 
-	onMount(async () => {
-		const [t, c] = await Promise.all([
-			getDocsTree(),
-			getDocsCategories().catch(() => CATEGORY_ORDER),
-		]);
-		tree = t;
-		if (Array.isArray(c) && c.length) categoryOrder = c;
-		loaded = true;
-	});
+	let error = $state<string | null>(null);
+
+	async function load() {
+		error = null;
+		try {
+			const [t, c] = await Promise.all([
+				getDocsTree(),
+				getDocsCategories().catch(() => CATEGORY_ORDER),
+			]);
+			tree = t;
+			if (Array.isArray(c) && c.length) categoryOrder = c;
+			loaded = true;
+		} catch (e) {
+			error = formatApiError(e, 'Failed to load documentation.');
+		}
+	}
+
+	onMount(load);
 
 	function hasSlug(slug: string): boolean {
 		return allLeaves.some((l) => l.slug === slug);
 	}
 </script>
 
-<svelte:head>
-	<title>Documentation - LLM Lab</title>
-</svelte:head>
+<div class="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+	<PageHeader
+		title="Documentation"
+		description="Guides, architecture overviews, and reference docs for running, extending, and operating the platform."
+	>
+		{#snippet actions()}
+			<Button
+				variant="outline"
+				size="sm"
+				onclick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
+				aria-label="Open command palette"
+			>
+				<Search />
+				Search
+				<kbd class="rounded border bg-muted px-1.5 py-0.5 font-mono text-[11px]">⌘K</kbd>
+			</Button>
+			{#if hasSlug('api-reference')}
+				<Button href="/docs/api-reference" variant="outline" size="sm">API reference</Button>
+			{/if}
+			{#if hasSlug('ARCHITECTURE')}
+				<Button href="/docs/ARCHITECTURE" variant="outline" size="sm">Architecture</Button>
+			{/if}
+			{#if hasSlug('QUICKSTART')}
+				<Button href="/docs/QUICKSTART" size="sm">
+					Quickstart
+					<ArrowRight />
+				</Button>
+			{/if}
+		{/snippet}
+	</PageHeader>
 
-<div class="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8 md:py-10">
-	<!-- Hero ----------------------------------------------------------- -->
-	<section class="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-primary/5 via-background to-background p-8 md:p-12">
-		<div class="absolute -right-12 -top-12 h-48 w-48 rounded-full bg-primary/10 blur-3xl" aria-hidden="true"></div>
-		<div class="relative max-w-2xl">
-			<Badge variant="outline" class="mb-4 gap-1.5">
-				<Sparkles class="h-3 w-3 text-primary" />
-				Documentation
-			</Badge>
-			<h1 class="text-3xl font-bold tracking-tight md:text-4xl">
-				Everything you need to ship with LLM Lab
-			</h1>
-			<p class="mt-3 text-base text-muted-foreground md:text-lg">
-				Guides, architecture overviews, and reference docs for running, extending, and
-				operating the platform.
-			</p>
-			<div class="mt-6 flex flex-wrap gap-2">
-				{#if hasSlug('QUICKSTART')}
-					<a
-						href="/docs/QUICKSTART"
-						class="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
-					>
-						Quickstart
-						<ArrowRight class="h-3.5 w-3.5" />
-					</a>
-				{/if}
-				{#if hasSlug('ARCHITECTURE')}
-					<a
-						href="/docs/ARCHITECTURE"
-						class="inline-flex items-center gap-1.5 rounded-md border bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
-					>
-						Architecture
-					</a>
-				{/if}
-				{#if hasSlug('api-reference')}
-					<a
-						href="/docs/api-reference"
-						class="inline-flex items-center gap-1.5 rounded-md border bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
-					>
-						API reference
-					</a>
-				{/if}
-				<button
-					type="button"
-					class="inline-flex items-center gap-2 rounded-md border bg-background/60 px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
-					onclick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
-					aria-label="Open command palette"
-				>
-					Search
-					<kbd class="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
-				</button>
-			</div>
-		</div>
-	</section>
+	{#if error}
+		<ErrorAlert message={error} onretry={load} />
+	{/if}
 
 	{#if !loaded}
-		<div class="flex items-center justify-center py-20">
-			<LoaderCircle class="h-6 w-6 animate-spin text-muted-foreground" />
-		</div>
+		{#if !error}<LoadingState label="loading docs" />{/if}
+	{:else if grouped.length === 0}
+		<EmptyState icon={BookOpen} title="No documentation yet" description="Markdown files added to the docs folder will appear here." />
 	{:else}
 		<!-- Category sections ---------------------------------------------- -->
-		<div class="mt-10 space-y-10">
+		<div class="space-y-10">
 			{#each grouped as group (group.category)}
 				{@const meta = metaFor(group.category)}
 				{@const Icon = meta.icon}
@@ -124,7 +115,7 @@
 					<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 						{#each group.items as item (item.slug)}
 							<a href="/docs/{item.slug}" class="block focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-lg">
-								<Card.Root class="h-full transition-all hover:border-primary/50 hover:shadow-sm">
+								<Card.Root class="card-lift h-full hover:border-primary/50">
 									<Card.Header class="space-y-1.5">
 										<Card.Title class="text-sm">{item.title}</Card.Title>
 										{#if item.description}
@@ -143,8 +134,8 @@
 
 		<!-- Footer strip --------------------------------------------------- -->
 		{#if recent.length > 0}
-			<section class="mt-12 rounded-lg border bg-muted/20 p-5">
-				<div class="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+			<section class="rounded-lg border bg-muted/20 p-5">
+				<div class="section-label mb-2 flex items-center gap-2">
 					<Clock class="h-3.5 w-3.5" />
 					Popular
 				</div>

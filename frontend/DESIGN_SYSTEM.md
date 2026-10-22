@@ -55,12 +55,59 @@ Rules (see `src/lib/components/charts/theme.ts`):
 - Hero scale: `.display-xl` (3xl/4xl). Page titles: `.page-header h1` (2xl/3xl).
 - KPI values: `.kpi-value` (3xl, tabular).
 
-## Glass & glow (usage rules)
+## Page anatomy (every page under `(app)/`)
 
-- `.glass-panel` / `.hero-panel`: hero, tooltips, overlays **only** — never on
-  dense data surfaces (tables, lists).
-- `--glow-primary` (`.glow-primary`, `.hover-glow`): primary CTAs, active nav
-  rail, KPI-card hover **only**. Glow is seasoning, not a default shadow.
+```svelte
+<div class="space-y-6">
+  <PageHeader title="Experiments" description="One sentence on what this page is for."
+              back={{ href: '/experiments', label: 'Experiments' }}>   <!-- detail/create pages only -->
+    {#snippet meta()}<StatusBadge status={x.status} />{/snippet}         <!-- optional -->
+    {#snippet actions()}<Button href="/experiments/create" size="sm"><Plus />New experiment</Button>{/snippet}
+  </PageHeader>
+
+  {#if error}<ErrorAlert message={error} onretry={load} />{/if}
+  {#if loading}<LoadingState label="loading experiments" />
+  {:else if items.length === 0}<EmptyState title="No experiments yet" description="…">{#snippet action()}…{/snippet}</EmptyState>
+  {:else} …content… {/if}
+</div>
+```
+
+- `PageHeader` owns the `<h1>` and the browser `<title>` (`"{title} · LLM Lab"`) — no
+  separate `<svelte:head><title>` and no hand-rolled `.page-header` markup.
+- Vertical rhythm: `space-y-6` between page sections, `gap-4` inside grids, `gap-3` in KPI rows.
+- Primary action is the last button in `actions`, `size="sm"`; secondary actions `variant="outline"`.
+
+## Shared components (`src/lib/components/`)
+
+| Need                         | Use                                                                          | Not                                                    |
+| ---------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Page title/actions/back link | `PageHeader`                                                                 | ad-hoc `<h1>` rows, `ArrowLeft` links                  |
+| Any status/lifecycle         | `StatusBadge status=…` (`tones={containerTones}` for containers)             | per-page status color maps, `Badge class={…Colors[x]}` |
+| Severity                     | `Badge class={severityColors[s]}`                                            | raw red/orange/amber classes                           |
+| Error banner                 | `ErrorAlert message onretry?`                                                | `div.bg-destructive/10` boxes                          |
+| Loading a region             | `LoadingState label` (buttons keep an inline `LoaderCircle`)                 | centered spinners / “Loading…” text                    |
+| Nothing to show              | `EmptyState title description icon? action?` (`compact` inside cards)        | bare “No X found.” paragraphs                          |
+| Tabs                         | `ui/tabs` (`Tabs.Root bind:value` / `List` / `Trigger` / `Content`)          | button rows with `activeTab` classes                   |
+| Section container            | `Card.Root` + `Card.Header`/`Card.Title`/`Card.Description` + `Card.Content` | bespoke bordered divs                                  |
+| Clickable card               | add `.card-lift`                                                             | hover effects on static cards                          |
+| KPI                          | `dashboard/KpiCard` or `.kpi-card` / `.kpi-label` / `.kpi-value`             | one-off stat boxes                                     |
+| Small group label            | `.section-label`                                                             | `text-[10px] uppercase …` variants                     |
+
+Navigation lives in `src/lib/nav.ts` (sidebar, mobile menu, breadcrumbs). Add routes there.
+
+## Color & type rules
+
+- Components use tokens only: `primary`, `muted-foreground`, `success|warning|destructive|info`
+  (fills/borders) and `success-fg|warning-fg|danger-fg|info-fg` (text on tints). No raw
+  `red-500`/`emerald-400`/`blue-600` etc. outside `constants/colors.ts` and chart theme.
+- Minimum text size 11px (`text-[11px]`); body/table text `text-sm`; no `text-[9px]`/`text-[10px]`.
+- Status is never color alone: `StatusBadge` always shows a dot + text.
+- `font-display`/`font-mono` via classes, never inline `style="font-family…"`.
+
+## Decoration (usage rules)
+
+- Swiss-minimal data surfaces: no glass, glow or gradients on cards, tables or lists.
+- `.hero-panel` and `--gradient-brand` stay on the dashboard hero only.
 
 ## Motion
 
@@ -90,7 +137,7 @@ entrances, live status dots (`.status-dot-live`), KPI count-ups.
 
 ## Avoid (anti-patterns)
 
-- Ornate decoration; glass/glow on data-dense surfaces
+- Ornate decoration; glass/glow on data-dense surfaces; hover lift on non-clickable cards
 - Light mode as default; slow animations (>300ms UI transitions)
 - Dual-axis charts; cycled/generated categorical hues; color-only identity
 

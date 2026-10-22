@@ -5,10 +5,11 @@ from __future__ import annotations
 import time
 from typing import Any
 
-import docker
 import redis as redis_lib
 from celery import current_app as celery_app
 from django.conf import settings
+
+from backend.runtime.services import docker_manager
 
 
 def container_health() -> list[dict[str, Any]]:
@@ -20,7 +21,7 @@ def container_health() -> list[dict[str, Any]]:
         return cached
 
     try:
-        client = docker.from_env()
+        client = docker_manager.new_client()
         containers = client.containers.list(all=True)
     except Exception as exc:  # noqa: BLE001
         return [{"error": str(exc)}]

@@ -65,6 +65,11 @@ def upsert_openrouter_models(models_payload: list[dict]) -> int:
         raw_cs = model_data.get("canonical_slug", "")
         if raw_cs:
             canonical = raw_cs
+            # OpenRouter gives ":variant" ids (":batch", ":free", ...) the
+            # base model's canonical_slug; keep them distinct rows instead
+            # of letting the variant overwrite the base model.
+            if ":" in model_id:
+                canonical = f"{canonical}:{model_id.rsplit(':', 1)[1]}"
         canonical = _build_canonical_slug(model_id, canonical)
 
         provider = model_id.split("/")[0] if "/" in model_id else "unknown"

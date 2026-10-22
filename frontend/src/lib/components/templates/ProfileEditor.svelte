@@ -25,6 +25,8 @@
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import Eye from '@lucide/svelte/icons/eye';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 
 	interface Props {
 		/** Existing profile to edit (creates version+1) or null for a new profile. */
@@ -178,10 +180,13 @@
 </script>
 
 <Card.Root>
-	<Card.Header class="pb-3">
-		<Card.Title class="text-base">
-			{#if initial === null}New Profile{:else if duplicate}Duplicate {initial.name}{:else}Edit {initial.name} <span class="text-xs font-normal text-muted-foreground">creates v{initial.version + 1} — versions are immutable</span>{/if}
+	<Card.Header class="border-b">
+		<Card.Title>
+			{#if initial === null}New profile{:else if duplicate}Duplicate {initial.name}{:else}Edit {initial.name}{/if}
 		</Card.Title>
+		<Card.Description>
+			{#if initial !== null && !duplicate}Saving creates v{initial.version + 1}; versions are immutable.{:else}Prompts, blocks and LLM defaults used by generation jobs.{/if}
+		</Card.Description>
 	</Card.Header>
 	<Card.Content class="space-y-4">
 		<div class="grid gap-3 sm:grid-cols-2">
@@ -216,7 +221,7 @@
 						<option value={stack.slug}>{stack.slug}{stack.has_frontend ? '' : ' (backend only)'}</option>
 					{/each}
 				</select>
-				<p class="text-[10px] text-muted-foreground">Jobs using this profile run on this stack.</p>
+				<p class="text-[11px] text-muted-foreground">Jobs using this profile run on this stack.</p>
 			</div>
 			<label class="flex items-center gap-2 self-end pb-1 text-xs cursor-pointer">
 				<input type="checkbox" bind:checked={isDefault} class="accent-primary" />
@@ -236,35 +241,37 @@
 						{@const latest = latestVersionOf(ref)}
 						<div class="rounded border bg-card">
 							<div class="flex items-center gap-2 px-2 py-1.5">
-								<Badge variant="outline" class="text-[9px] px-1 py-0 shrink-0">{ref.type}</Badge>
+								<Badge variant="outline" class="shrink-0">{ref.type}</Badge>
 								<button
 									type="button"
 									class="text-xs font-mono truncate hover:text-primary transition-colors cursor-pointer"
 									title="Show content"
+									aria-expanded={expandedRef === i}
 									onclick={() => (expandedRef = expandedRef === i ? null : i)}
 								>{ref.slug}</button>
 								<select
 									value={ref.version}
 									onchange={(e) => setRefVersion(i, parseInt(e.currentTarget.value, 10))}
-									class="ml-auto h-6 rounded border border-input bg-surface-1 px-1 text-[10px] font-mono shrink-0"
+									class="ml-auto h-6 rounded border border-input bg-surface-1 px-1 text-[11px] font-mono shrink-0"
 									title="Pinned version"
+									aria-label="Pinned version of {ref.slug}"
 								>
 									{#each blocks.filter((b) => b.block_type === ref.type && b.slug === ref.slug) as v}
 										<option value={v.version}>v{v.version}{v.version === latest ? ' (latest)' : ''}</option>
 									{/each}
 								</select>
 								{#if ref.version < latest}
-									<Badge variant="outline" class="text-[9px] px-1 py-0 text-amber-500 border-amber-500/30 shrink-0">outdated</Badge>
+									<StatusBadge status="outdated" tone="warning" />
 								{/if}
 								<div class="flex shrink-0 gap-0.5">
 									<button type="button" class="p-1 text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-30" disabled={i === 0} onclick={() => moveRef(i, -1)} aria-label="Move up"><ArrowUp class="h-3 w-3" /></button>
 									<button type="button" class="p-1 text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-30" disabled={i === blockRefs.length - 1} onclick={() => moveRef(i, 1)} aria-label="Move down"><ArrowDown class="h-3 w-3" /></button>
-									<button type="button" class="p-1 text-muted-foreground hover:text-destructive cursor-pointer" onclick={() => removeRef(i)} aria-label="Remove"><X class="h-3 w-3" /></button>
+									<button type="button" class="p-1 text-muted-foreground hover:text-danger-fg cursor-pointer" onclick={() => removeRef(i)} aria-label="Remove"><X class="h-3 w-3" /></button>
 								</div>
 							</div>
 							{#if expandedRef === i}
 								{@const content = blockContent(ref)}
-								<pre class="max-h-48 overflow-auto border-t bg-muted/20 p-2 text-[10px] leading-relaxed whitespace-pre-wrap">{content?.content ?? '(block content not loaded)'}</pre>
+								<pre class="max-h-48 overflow-auto border-t bg-muted/20 p-2 text-[11px] font-mono leading-relaxed whitespace-pre-wrap">{content?.content ?? '(block content not loaded)'}</pre>
 							{/if}
 						</div>
 					{/each}
@@ -276,6 +283,7 @@
 				<div class="flex flex-wrap gap-2">
 					<select
 						bind:value={blockTypeFilter}
+						aria-label="Filter by block type"
 						class="h-7 rounded border border-input bg-surface-1 px-2 text-[11px]"
 					>
 						<option value="">all types</option>
@@ -285,6 +293,7 @@
 						type="text"
 						bind:value={blockFilter}
 						placeholder="filter blocks…"
+						aria-label="Filter blocks"
 						class="h-7 flex-1 min-w-32 rounded border border-input bg-surface-1 px-2 text-[11px]"
 					/>
 				</div>
@@ -292,12 +301,12 @@
 					{#each availableBlocks as b (b.id)}
 						<button
 							type="button"
-							class="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] transition-colors cursor-pointer {usedKeys.has(`${b.block_type}:${b.slug}`) ? 'opacity-40 cursor-not-allowed' : 'hover:border-primary/40 hover:text-foreground text-muted-foreground'}"
+							class="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] transition-colors cursor-pointer {usedKeys.has(`${b.block_type}:${b.slug}`) ? 'opacity-40 cursor-not-allowed' : 'hover:border-primary/40 hover:text-foreground text-muted-foreground'}"
 							disabled={usedKeys.has(`${b.block_type}:${b.slug}`)}
 							title={b.description || b.name}
 							onclick={() => addBlock(b)}
 						>
-							<Plus class="h-2.5 w-2.5" />
+							<Plus class="h-3 w-3" aria-hidden="true" />
 							<span class="font-mono">{b.slug}</span>
 							<span class="opacity-60">{b.block_type}</span>
 						</button>
@@ -317,6 +326,7 @@
 			<button
 				type="button"
 				class="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+				aria-expanded={previewOpen}
 				onclick={() => (previewOpen = !previewOpen)}
 			>
 				<Eye class="h-3.5 w-3.5" />
@@ -327,6 +337,7 @@
 					<div class="flex flex-wrap items-center gap-2">
 						<select
 							bind:value={previewAppSlug}
+							aria-label="Preview app"
 							class="h-7 rounded border border-input bg-surface-1 px-2 text-[11px]"
 						>
 							<option value="">raw templates (no app)</option>
@@ -334,11 +345,12 @@
 								<option value={app.slug}>rendered for: {app.name}</option>
 							{/each}
 						</select>
-						<div class="flex items-center gap-1 rounded border bg-muted/40 p-0.5">
+						<div class="flex items-center gap-1 rounded border bg-muted/40 p-0.5" role="group" aria-label="Preview stage">
 							{#each ['backend', 'frontend'] as stage}
 								<button
 									type="button"
-									class="rounded px-2 py-0.5 text-[10px] font-medium transition-colors cursor-pointer {previewStage === stage ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
+									aria-pressed={previewStage === stage}
+									class="rounded px-2 py-0.5 text-[11px] font-medium transition-colors cursor-pointer {previewStage === stage ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
 									onclick={() => (previewStage = stage as 'backend' | 'frontend')}
 								>{stage}</button>
 							{/each}
@@ -346,16 +358,16 @@
 						{#if previewLoading}<LoaderCircle class="h-3.5 w-3.5 animate-spin text-muted-foreground" />{/if}
 					</div>
 					{#if previewError}
-						<p class="text-[10px] text-destructive">{previewError}</p>
+						<p class="text-xs text-danger-fg">{previewError}</p>
 					{:else if previewText}
 						<div class="space-y-2">
 							<div>
-								<p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">System ({(previewText.system ?? '').length.toLocaleString()} chars)</p>
-								<pre class="max-h-40 overflow-auto rounded border bg-card p-2 text-[10px] leading-relaxed whitespace-pre-wrap">{previewText.system || '(empty — inherits at run time)'}</pre>
+								<p class="section-label mb-1">System ({(previewText.system ?? '').length.toLocaleString()} chars)</p>
+								<pre class="max-h-40 overflow-auto rounded border bg-card p-2 text-[11px] font-mono leading-relaxed whitespace-pre-wrap">{previewText.system || '(empty — inherits at run time)'}</pre>
 							</div>
 							<div>
-								<p class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">User ({(previewText.user ?? '').length.toLocaleString()} chars)</p>
-								<pre class="max-h-40 overflow-auto rounded border bg-card p-2 text-[10px] leading-relaxed whitespace-pre-wrap">{previewText.user || '(empty — inherits at run time)'}</pre>
+								<p class="section-label mb-1">User ({(previewText.user ?? '').length.toLocaleString()} chars)</p>
+								<pre class="max-h-40 overflow-auto rounded border bg-card p-2 text-[11px] font-mono leading-relaxed whitespace-pre-wrap">{previewText.user || '(empty — inherits at run time)'}</pre>
 							</div>
 						</div>
 					{/if}
@@ -364,13 +376,13 @@
 		</div>
 
 		{#if error}
-			<div class="rounded-md bg-destructive/10 border border-destructive/30 px-4 py-3 text-sm text-destructive">{error}</div>
+			<ErrorAlert message={error} />
 		{/if}
 
 		<div class="flex items-center justify-end gap-2 border-t pt-4">
 			<Button variant="outline" size="sm" onclick={onCancel} disabled={saving}>Cancel</Button>
 			<Button size="sm" onclick={submit} disabled={saving || !name.trim() || !slug.trim()}>
-				{#if saving}<LoaderCircle class="mr-1.5 h-3.5 w-3.5 animate-spin" />{/if}
+				{#if saving}<LoaderCircle class="animate-spin" />{/if}
 				{initial === null || duplicate ? 'Create profile' : `Save as v${initial.version + 1}`}
 			</Button>
 		</div>

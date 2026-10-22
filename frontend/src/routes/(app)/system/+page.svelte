@@ -2,7 +2,13 @@
 import { onMount, onDestroy } from 'svelte';
 import * as Card from '$lib/components/ui/card';
 import { Button } from '$lib/components/ui/button';
-import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+import Lock from '@lucide/svelte/icons/lock';
+import PageHeader from '$lib/components/PageHeader.svelte';
+import StatusBadge from '$lib/components/StatusBadge.svelte';
+import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+import LoadingState from '$lib/components/LoadingState.svelte';
+import EmptyState from '$lib/components/EmptyState.svelte';
+import { containerTones, type Tone } from '$lib/constants/colors';
 import {
 getMe,
 getSystemSnapshot,
@@ -139,13 +145,8 @@ if (h > 0) return `${h}h ${m}m`;
 return `${m}m`;
 }
 
-function statusBadgeClass(status: string): string {
-const s = status.toLowerCase();
-if (s === 'running') return 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30';
-if (s === 'exited' || s === 'stopped' || s === 'dead') return 'bg-red-500/15 text-red-400 border border-red-500/30';
-if (s === 'paused') return 'bg-amber-500/15 text-amber-500 border border-amber-500/30';
-return 'bg-zinc-500/15 text-zinc-400 border border-zinc-500/30';
-}
+// Raw Docker states (not ContainerInstance statuses) need a few extra tones.
+const dockerTones: Partial<Record<string, Tone>> = { ...containerTones, exited: 'danger', stopped: 'danger', dead: 'danger', paused: 'warning' };
 
 const modelSections = [
 { key: 'analysis_tasks', label: 'Analysis Tasks' },
@@ -182,36 +183,21 @@ fn: () => clearCaches() as Promise<Record<string, unknown>>,
 ];
 </script>
 
-<svelte:head>
-	<title>System - LLM Lab</title>
-</svelte:head>
-
 <div class="space-y-6">
-<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-<div class="page-header">
-<h1>System Monitor</h1>
-<p>Real-time metrics and maintenance tools</p>
-</div>
+<PageHeader title="System Monitor" description="Real-time metrics and maintenance tools.">
+{#snippet actions()}
 {#if snapshot}
-<span class="text-xs text-muted-foreground animate-pulse">Auto-refreshing every 10s</span>
+<span class="text-xs text-muted-foreground">Auto-refreshing every 10s</span>
 {/if}
-</div>
+{/snippet}
+</PageHeader>
 
 {#if loading}
-<Card.Root>
-<Card.Content class="flex items-center justify-center py-20">
-<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
-</Card.Content>
-</Card.Root>
+<LoadingState label="loading system snapshot" />
 {:else if !isStaff}
-<div class="rounded-lg border border-destructive/30 bg-destructive/10 p-6 text-center">
-<p class="text-lg font-semibold text-destructive">403 — Staff access required</p>
-<p class="mt-1 text-sm text-muted-foreground">This page is only available to admin users.</p>
-</div>
+<EmptyState icon={Lock} title="Staff access required" description="This page is only available to admin users." />
 {:else if error}
-<div class="rounded-lg border border-destructive/30 bg-destructive/10 p-4">
-<p class="text-sm text-destructive">{error}</p>
-</div>
+<ErrorAlert message={error} onretry={loadSnapshot} />
 {:else if snapshot}
 <!-- HOST METRICS -->
 <Card.Root>
@@ -229,7 +215,7 @@ fn: () => clearCaches() as Promise<Record<string, unknown>>,
 <p class="text-xs text-muted-foreground">Memory</p>
 <p class="text-2xl font-bold">{memory().percent as number}%</p>
 <div class="h-2 rounded bg-muted overflow-hidden">
-<div class="h-full bg-blue-500 rounded" style="width: {memory().percent}%"></div>
+<div class="h-full bg-info rounded" style="width: {memory().percent}%"></div>
 </div>
 <p class="text-xs text-muted-foreground">
 {formatBytes(memory().used as number)} / {formatBytes(memory().total as number)}
@@ -246,13 +232,13 @@ fn: () => clearCaches() as Promise<Record<string, unknown>>,
 </div>
 {#if disks().length > 0}
 <div>
-<p class="mb-2 text-xs font-medium text-muted-foreground uppercase">Disk</p>
+<p class="section-label mb-2">Disk</p>
 <div class="space-y-2">
 {#each disks() as d}
 <div class="flex items-center gap-3">
 <span class="w-16 truncate text-xs text-muted-foreground">{d.mountpoint}</span>
 <div class="flex-1 h-2 rounded bg-muted overflow-hidden">
-<div class="h-full bg-orange-400 rounded" style="width: {d.percent}%"></div>
+<div class="h-full bg-warning rounded" style="width: {d.percent}%"></div>
 </div>
 <span class="w-12 text-right text-xs">{d.percent}%</span>
 <span class="text-xs text-muted-foreground">{formatBytes(d.used as number)} / {formatBytes(d.total as number)}</span>
@@ -269,7 +255,7 @@ fn: () => clearCaches() as Promise<Record<string, unknown>>,
 <Card.Header class="pb-2"><Card.Title>Containers</Card.Title></Card.Header>
 <Card.Content class="space-y-3">
 {#if containers().length === 0}
-<p class="text-sm text-muted-foreground">No containers found.</p>
+<EmptyState compact title="No containers found" />
 {:else}
 <div class="overflow-x-auto">
 <table class="w-full text-sm">
@@ -287,9 +273,7 @@ fn: () => clearCaches() as Promise<Record<string, unknown>>,
 <td class="px-3 py-2 align-top font-mono text-xs">{c.name}</td>
 <td class="px-3 py-2 align-top text-xs text-muted-foreground">{c.image}</td>
 <td class="px-3 py-2 align-top">
-<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {statusBadgeClass(c.status as string)}">
-{c.status}
-</span>
+<StatusBadge status={c.status as string} tones={dockerTones} />
 </td>
 <td class="px-3 py-2 align-top text-xs text-muted-foreground">{c.health}</td>
 </tr>
@@ -315,7 +299,7 @@ fn: () => clearCaches() as Promise<Record<string, unknown>>,
 <div class="flex justify-between"><dt class="text-muted-foreground">Version</dt><dd>{redis().redis_version}</dd></div>
 </dl>
 {:else}
-<p class="text-sm text-destructive">Unreachable: {redis().error}</p>
+<p class="text-sm text-danger-fg">Unreachable: {redis().error}</p>
 {/if}
 </Card.Content>
 </Card.Root>
@@ -351,25 +335,25 @@ fn: () => clearCaches() as Promise<Record<string, unknown>>,
 <Card.Content class="space-y-3">
 <div class="grid grid-cols-2 gap-3 sm:grid-cols-4 text-sm">
 <div class="kpi-card">
-<div class="text-xs text-muted-foreground uppercase tracking-wider">Backends</div>
-<div class="text-2xl font-semibold font-mono tabular-nums">{dbStats().numbackends}</div>
+<div class="kpi-label">Backends</div>
+<div class="kpi-value">{dbStats().numbackends}</div>
 </div>
 <div class="kpi-card">
-<div class="text-xs text-muted-foreground uppercase tracking-wider">Commits</div>
-<div class="text-2xl font-semibold font-mono tabular-nums">{dbStats().xact_commit?.toLocaleString()}</div>
+<div class="kpi-label">Commits</div>
+<div class="kpi-value">{dbStats().xact_commit?.toLocaleString()}</div>
 </div>
 <div class="kpi-card">
-<div class="text-xs text-muted-foreground uppercase tracking-wider">Rollbacks</div>
-<div class="text-2xl font-semibold font-mono tabular-nums">{dbStats().xact_rollback}</div>
+<div class="kpi-label">Rollbacks</div>
+<div class="kpi-value">{dbStats().xact_rollback}</div>
 </div>
 <div class="kpi-card">
-<div class="text-xs text-muted-foreground uppercase tracking-wider">Deadlocks</div>
-<div class="text-2xl font-semibold font-mono tabular-nums {dbStats().deadlocks > 0 ? 'text-destructive' : ''}">{dbStats().deadlocks}</div>
+<div class="kpi-label">Deadlocks</div>
+<div class="kpi-value {dbStats().deadlocks > 0 ? 'text-danger-fg' : ''}">{dbStats().deadlocks}</div>
 </div>
 </div>
 {#if topTables().length > 0}
 <div>
-<p class="mb-2 text-xs font-medium text-muted-foreground uppercase">Top Tables by Size</p>
+<p class="section-label mb-2">Top Tables by Size</p>
 <div class="divide-y">
 {#each topTables() as t}
 <div class="flex items-center justify-between py-1.5 text-sm">
@@ -411,7 +395,10 @@ fn: () => clearCaches() as Promise<Record<string, unknown>>,
 
 <!-- MAINTENANCE -->
 <Card.Root>
-<Card.Header class="pb-2"><Card.Title>Maintenance Actions</Card.Title></Card.Header>
+<Card.Header class="pb-2">
+<Card.Title>Maintenance Actions</Card.Title>
+<Card.Description>Each action asks for confirmation before it runs.</Card.Description>
+</Card.Header>
 <Card.Content class="space-y-4">
 <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 {#each maintenanceActions as action}

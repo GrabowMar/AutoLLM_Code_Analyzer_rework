@@ -3,7 +3,10 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Sheet from '$lib/components/ui/sheet';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import * as Card from '$lib/components/ui/card';
+	import { Label } from '$lib/components/ui/label';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import Save from '@lucide/svelte/icons/save';
 	import Code from '@lucide/svelte/icons/code-2';
 	import LayoutGrid from '@lucide/svelte/icons/layout-grid';
@@ -97,76 +100,69 @@
 	}
 </script>
 
-<svelte:head><title>New Workflow — LLM Eval Lab</title></svelte:head>
-
-<div class="flex flex-col h-[calc(100dvh-7rem)] -m-3 sm:-m-4 md:-m-5 mt-0 sm:mt-0 md:mt-0">
-	<!-- Toolbar -->
-	<header class="flex flex-wrap items-center gap-2 border-b bg-card/40 px-3 py-2 shrink-0">
-		<Button variant="ghost" size="sm" onclick={() => goto('/automation')} class="gap-1.5">
-			<ArrowLeft class="h-4 w-4" />Back
-		</Button>
-		<div class="h-5 w-px bg-border"></div>
-		<Input
-			bind:value={name}
-			class="h-8 max-w-sm font-medium"
-			placeholder="Workflow name"
-		/>
-		<div class="ml-auto flex items-center gap-2 flex-wrap">
-			<Button
-				variant={showJson ? 'default' : 'outline'}
-				size="sm"
-				onclick={() => (showJson = !showJson)}
-				class="gap-1.5"
-			>
+<div class="flex h-[calc(100dvh-7rem)] flex-col gap-4">
+	<PageHeader
+		title="New workflow"
+		description="Drag steps from the palette onto the canvas and connect them, or edit the JSON directly."
+		back={{ href: '/automation', label: 'Workflows' }}
+	>
+		{#snippet actions()}
+			<Button variant="outline" size="sm" onclick={() => (showJson = !showJson)} aria-pressed={showJson}>
 				{#if showJson}<LayoutGrid class="h-3.5 w-3.5" />Canvas{:else}<Code class="h-3.5 w-3.5" />JSON{/if}
 			</Button>
-			<Button variant="outline" size="sm" onclick={() => (showMeta = !showMeta)} class="gap-1.5">
+			<Button variant="outline" size="sm" onclick={() => (showMeta = !showMeta)} aria-expanded={showMeta}>
 				<Settings2 class="h-3.5 w-3.5" />Metadata
 			</Button>
-			<Button onclick={save} disabled={saving} size="sm" class="gap-1.5">
-				<Save class="h-3.5 w-3.5" />{saving ? 'Saving…' : 'Create Workflow'}
+			<Button onclick={save} disabled={saving} size="sm">
+				<Save class="h-3.5 w-3.5" />{saving ? 'Saving…' : 'Create workflow'}
 			</Button>
+		{/snippet}
+		<div class="flex max-w-sm items-center gap-2 pt-1">
+			<Label for="wf-name" class="shrink-0 text-xs">Name</Label>
+			<Input id="wf-name" bind:value={name} class="h-8 font-medium" placeholder="Workflow name" />
 		</div>
-	</header>
+	</PageHeader>
 
 	{#if showMeta}
-		<div class="grid grid-cols-1 md:grid-cols-3 gap-3 border-b bg-muted/30 px-3 py-3 shrink-0">
-			<div class="space-y-1">
-				<label class="text-xs font-medium" for="meta-description">Description</label>
-				<Input id="meta-description" bind:value={description} placeholder="What does this workflow do?" class="h-8 text-xs" />
-			</div>
-			<div class="space-y-1">
-				<label class="text-xs font-medium" for="meta-status">Status</label>
-				<select id="meta-status" bind:value={status} class="w-full h-8 rounded-md border border-input bg-surface-1 px-2 text-xs hover:border-primary/40 focus-visible:outline-none cursor-pointer">
-					<option value="draft">Draft</option>
-					<option value="active">Active</option>
-					<option value="archived">Archived</option>
-				</select>
-			</div>
-			<div class="space-y-1">
-				<label class="text-xs font-medium" for="meta-tags">Tags (comma-separated)</label>
-				<Input id="meta-tags" bind:value={tags} placeholder="ci, nightly, prod" class="h-8 text-xs" />
-			</div>
-		</div>
+		<Card.Root class="shrink-0">
+			<Card.Content class="grid grid-cols-1 gap-3 md:grid-cols-3">
+				<div class="space-y-1">
+					<Label for="meta-description" class="text-xs">Description</Label>
+					<Input id="meta-description" bind:value={description} placeholder="What does this workflow do?" class="h-8 text-xs" />
+				</div>
+				<div class="space-y-1">
+					<Label for="meta-status" class="text-xs">Status</Label>
+					<select id="meta-status" bind:value={status} class="std-select h-8 w-full text-xs">
+						<option value="draft">Draft</option>
+						<option value="active">Active</option>
+						<option value="archived">Archived</option>
+					</select>
+				</div>
+				<div class="space-y-1">
+					<Label for="meta-tags" class="text-xs">Tags (comma-separated)</Label>
+					<Input id="meta-tags" bind:value={tags} placeholder="ci, nightly, prod" class="h-8 text-xs" />
+				</div>
+			</Card.Content>
+		</Card.Root>
 	{/if}
 
 	{#if errors.length > 0}
-		<div class="border-b bg-destructive/10 px-3 py-2 text-xs text-destructive shrink-0 space-y-0.5">
-			{#each errors as e}<p>• {e}</p>{/each}
-		</div>
+		<ErrorAlert class="shrink-0" title="Can't save workflow" message={errors.join(' · ')} />
 	{/if}
 
 	<!-- Main area -->
 	{#if showJson}
-		<div class="flex-1 min-h-0 p-3">
+		<div class="flex min-h-0 flex-1 flex-col gap-1">
 			<textarea
 				bind:value={jsonDraft}
-				class="w-full h-full rounded-md border bg-background p-3 font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+				aria-label="Workflow JSON"
+				aria-invalid={jsonError ? 'true' : undefined}
+				class="min-h-0 w-full flex-1 rounded-md border bg-background p-3 font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
 			></textarea>
-			{#if jsonError}<p class="text-xs text-destructive mt-1">{jsonError}</p>{/if}
+			{#if jsonError}<p class="text-xs text-destructive" role="alert">{jsonError}</p>{/if}
 		</div>
 	{:else}
-		<div class="flex-1 min-h-0 flex relative">
+		<div class="relative flex min-h-0 flex-1 overflow-hidden rounded-md border">
 			<div class="hidden md:flex">
 				<NodePalette />
 			</div>

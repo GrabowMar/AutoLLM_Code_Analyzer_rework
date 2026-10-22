@@ -5,6 +5,8 @@
 	import { cn } from '$lib/utils';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
 
 	import ProfileSection from '$lib/components/users-settings/ProfileSection.svelte';
 	import SecuritySection from '$lib/components/users-settings/SecuritySection.svelte';
@@ -131,43 +133,30 @@
 	});
 </script>
 
-<svelte:head>
-	<title>Settings - LLM Lab</title>
-</svelte:head>
+{#snippet sectionHeading(id: string, label: string)}
+	<h2 id="section-{id}-label" class="section-label">{label}</h2>
+{/snippet}
 
 <div class="space-y-6">
-	<!-- Page header (matches Dashboard / Models / Statistics) -->
-	<div class="page-header">
-		<div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-			<div class="min-w-0 space-y-1">
-				<div
-					class="flex items-center gap-2 text-[11px] font-medium text-muted-foreground"
-					style="font-family: var(--font-mono);"
-				>
-					<span class="text-primary">$</span>
-					<span>user_settings</span>
-					<span class="text-primary" aria-hidden="true">/</span>
-					<span class="truncate">{profile?.email ?? '—'}</span>
-				</div>
-				<h1>Settings</h1>
-				<p style="font-family: var(--font-mono);">
-					// configure account, appearance, workspace, privacy, and integrations
-				</p>
-			</div>
-		</div>
-	</div>
+	<PageHeader
+		title="Settings"
+		description="Configure account, appearance, workspace, privacy, and integrations."
+	>
+		{#if profile?.email}
+			<p class="font-mono text-xs text-muted-foreground">{profile.email}</p>
+		{/if}
+	</PageHeader>
 
 	<div class="grid gap-6 lg:grid-cols-[14rem_minmax(0,1fr)]">
 		<!-- Sticky TOC sidebar (lg+) / horizontal chips (<lg) -->
 		<aside class="lg:sticky lg:top-16 lg:self-start">
 			<!-- Desktop nav -->
 			<nav class="hidden lg:block" aria-label="Settings sections">
-				<div class="space-y-4 rounded-md border border-border bg-card/40 p-3">
+				<div class="space-y-4 rounded-md border border-border bg-card p-3">
 					{#each groupedSections as group (group.group)}
 						<div class="space-y-1">
 							<p
-								class="px-2 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground"
-								style="font-family: var(--font-mono);"
+								class="section-label px-2"
 							>
 								{group.label}
 							</p>
@@ -179,7 +168,7 @@
 											type="button"
 											onclick={() => scrollToSection(s.id)}
 											class={cn(
-												'group relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
+												'group relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
 												active
 													? 'bg-primary/10 text-foreground'
 													: 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
@@ -207,7 +196,7 @@
 			<!-- Mobile / tablet jump-to bar -->
 			<div class="lg:hidden -mx-3 sm:mx-0">
 				<div
-					class="flex gap-1.5 overflow-x-auto px-3 sm:px-0 py-1 border-y border-border bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/65"
+					class="flex gap-1.5 overflow-x-auto px-3 sm:px-0 py-1 border-y border-border bg-background"
 				>
 					{#each SECTIONS as s (s.id)}
 						{@const active = activeId === s.id}
@@ -233,24 +222,10 @@
 		<div class="min-w-0 space-y-8">
 			<!-- Account -->
 			<section id="section-account" aria-labelledby="section-account-label" class="space-y-3 scroll-mt-20">
-				<div class="flex items-baseline gap-2">
-					<span class="text-primary" style="font-family: var(--font-mono);">//</span>
-					<h2
-						id="section-account-label"
-						class="text-sm font-semibold uppercase tracking-[0.12em] text-muted-foreground"
-						style="font-family: var(--font-mono);"
-					>
-						account
-					</h2>
-				</div>
+				{@render sectionHeading('account', 'Account')}
 				{#if loading}
 					<Card.Root>
-						<Card.Content class="space-y-3 pt-6 animate-pulse motion-reduce:animate-none">
-							<div class="h-4 w-1/3 rounded bg-muted"></div>
-							<div class="h-9 rounded bg-muted"></div>
-							<div class="h-9 rounded bg-muted w-1/2"></div>
-							<div class="h-9 rounded bg-muted w-32"></div>
-						</Card.Content>
+						<LoadingState label="loading profile" />
 					</Card.Root>
 				{:else}
 					<ProfileSection {profile} onUpdated={(u) => (profile = u)} />
@@ -259,112 +234,45 @@
 
 			<!-- Security -->
 			<section id="section-security" aria-labelledby="section-security-label" class="space-y-3 scroll-mt-20">
-				<div class="flex items-baseline gap-2">
-					<span class="text-primary" style="font-family: var(--font-mono);">//</span>
-					<h2
-						id="section-security-label"
-						class="text-sm font-semibold uppercase tracking-[0.12em] text-muted-foreground"
-						style="font-family: var(--font-mono);"
-					>
-						security
-					</h2>
-				</div>
+				{@render sectionHeading('security', 'Security')}
 				<SecuritySection />
 			</section>
 
 			<!-- Appearance -->
 			<section id="section-appearance" aria-labelledby="section-appearance-label" class="space-y-3 scroll-mt-20">
-				<div class="flex items-baseline gap-2">
-					<span class="text-primary" style="font-family: var(--font-mono);">//</span>
-					<h2
-						id="section-appearance-label"
-						class="text-sm font-semibold uppercase tracking-[0.12em] text-muted-foreground"
-						style="font-family: var(--font-mono);"
-					>
-						appearance
-					</h2>
-				</div>
+				{@render sectionHeading('appearance', 'Appearance')}
 				<AppearanceSection />
 			</section>
 
 			<!-- Workspace -->
 			<section id="section-workspace" aria-labelledby="section-workspace-label" class="space-y-3 scroll-mt-20">
-				<div class="flex items-baseline gap-2">
-					<span class="text-primary" style="font-family: var(--font-mono);">//</span>
-					<h2
-						id="section-workspace-label"
-						class="text-sm font-semibold uppercase tracking-[0.12em] text-muted-foreground"
-						style="font-family: var(--font-mono);"
-					>
-						workspace
-					</h2>
-				</div>
+				{@render sectionHeading('workspace', 'Workspace')}
 				<WorkspaceSection />
 			</section>
 
 			<!-- Privacy -->
 			<section id="section-privacy" aria-labelledby="section-privacy-label" class="space-y-3 scroll-mt-20">
-				<div class="flex items-baseline gap-2">
-					<span class="text-primary" style="font-family: var(--font-mono);">//</span>
-					<h2
-						id="section-privacy-label"
-						class="text-sm font-semibold uppercase tracking-[0.12em] text-muted-foreground"
-						style="font-family: var(--font-mono);"
-					>
-						privacy
-					</h2>
-				</div>
+				{@render sectionHeading('privacy', 'Privacy & Cookies')}
 				<CookieSettingsSection />
 			</section>
 
 			<!-- Credentials -->
 			<section id="section-credentials" aria-labelledby="section-credentials-label" class="space-y-3 scroll-mt-20">
-				<div class="flex items-baseline gap-2">
-					<span class="text-primary" style="font-family: var(--font-mono);">//</span>
-					<h2
-						id="section-credentials-label"
-						class="text-sm font-semibold uppercase tracking-[0.12em] text-muted-foreground"
-						style="font-family: var(--font-mono);"
-					>
-						credentials
-					</h2>
-				</div>
+				{@render sectionHeading('credentials', 'API Credentials')}
 				<ApiKeysSection />
 			</section>
 
 			<!-- Personal tokens -->
 			<section id="section-tokens" aria-labelledby="section-tokens-label" class="space-y-3 scroll-mt-20">
-				<div class="flex items-baseline gap-2">
-					<span class="text-primary" style="font-family: var(--font-mono);">//</span>
-					<h2
-						id="section-tokens-label"
-						class="text-sm font-semibold uppercase tracking-[0.12em] text-muted-foreground"
-						style="font-family: var(--font-mono);"
-					>
-						personal_tokens
-					</h2>
-				</div>
+				{@render sectionHeading('tokens', 'Personal Tokens')}
 				<TokenSection />
 			</section>
 
 			<!-- Data Management -->
 			<section id="section-data" aria-labelledby="section-data-label" class="space-y-3 scroll-mt-20">
-				<div class="flex items-baseline gap-2">
-					<span class="text-primary" style="font-family: var(--font-mono);">//</span>
-					<h2
-						id="section-data-label"
-						class="text-sm font-semibold uppercase tracking-[0.12em] text-muted-foreground"
-						style="font-family: var(--font-mono);"
-					>
-						data
-					</h2>
-				</div>
+				{@render sectionHeading('data', 'Data Management')}
 				<DataManagementSection />
 			</section>
-
-			<div class="pt-6 text-center text-[11px] text-muted-foreground" style="font-family: var(--font-mono);">
-				// end of settings · {SECTIONS.length} sections
-			</div>
 		</div>
 	</div>
 </div>

@@ -1,13 +1,19 @@
 <script lang="ts">
 	import { formatDateTime as fmt } from '$lib/utils/formatters';
-	import { pipelineRunStatusColors as statusColors } from '$lib/constants/colors';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onMount, onDestroy } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import * as Tabs from '$lib/components/ui/tabs';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import Workflow from '@lucide/svelte/icons/workflow';
+	import ListChecks from '@lucide/svelte/icons/list-checks';
+	import ScrollText from '@lucide/svelte/icons/scroll-text';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import XCircle from '@lucide/svelte/icons/x-circle';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
@@ -27,7 +33,7 @@
 	let pipeline = $state<PipelineDetail | null>(null);
 	let loading = $state(true);
 	let error = $state('');
-	let activeTab = $state<'canvas' | 'timeline' | 'logs'>('canvas');
+	let activeTab = $state<string>('canvas');
 	let logs = $state('');
 	let logsLoading = $state(false);
 	let logsError = $state('');
@@ -36,14 +42,6 @@
 	let nodes = $state<WorkflowNode[]>([]);
 	let edges = $state<Edge[]>([]);
 	let selectedNodeId = $state<string | null>(null);
-
-	const statusBg: Record<string, string> = {
-		pending: 'border-l-slate-400',
-		running: 'border-l-blue-400',
-		succeeded: 'border-l-emerald-500',
-		failed: 'border-l-red-400',
-		cancelled: 'border-l-orange-400'
-	};
 
 	const stepIdToName = $derived.by(() => {
 		const map = new Map<string, string>();
@@ -160,65 +158,41 @@
 	});
 </script>
 
-<svelte:head><title>Run Detail — LLM Eval Lab</title></svelte:head>
-
 <div class="space-y-6">
-	<nav aria-label="Breadcrumb" class="flex items-center gap-2 text-sm text-muted-foreground">
-		<a href="/automation" class="hover:text-foreground transition-colors flex items-center gap-1">
-			<ArrowLeft class="h-3.5 w-3.5" />
-			<span class="font-medium text-foreground">Automation</span>
-		</a>
-		<span>/</span>
-		{#if run}
-			<a href="/automation/{run.pipeline_id}" class="hover:text-foreground transition-colors">{pipeline?.name ?? 'Workflow'}</a>
-			<span>/</span>
-		{/if}
-		<span class="truncate max-w-[300px]">Run</span>
-	</nav>
-	<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-		<div class="page-header">
-			<h1>
-				Run Detail
-				{#if run}
-					<Badge class={statusColors[run.status] ?? ''} variant="outline">{run.status}</Badge>
-					{#if run.status === 'running'}
-						<LoaderCircle class="h-4 w-4 animate-spin text-blue-400 inline" />
-					{/if}
-				{/if}
-			</h1>
-			<p class="font-mono text-xs">{id}</p>
-		</div>
-		<div class="flex items-center gap-2 flex-wrap">
-			<Button variant="outline" size="sm" onclick={load}><RefreshCw class="mr-2 h-4 w-4" />Refresh</Button>
+	<PageHeader
+		title="Workflow run"
+		documentTitle="Run {id.slice(0, 8)}"
+		back={run ? { href: `/automation/${run.pipeline_id}`, label: pipeline?.name ?? 'Workflow' } : { href: '/automation', label: 'Workflows' }}
+	>
+		{#snippet meta()}
+			{#if run}<StatusBadge status={run.status} />{/if}
+		{/snippet}
+		{#snippet actions()}
+			<Button variant="outline" size="sm" onclick={load}><RefreshCw class="h-4 w-4" />Refresh</Button>
 			{#if run && (run.status === 'failed' || run.status === 'cancelled')}
 				<Button variant="outline" size="sm" onclick={retry} disabled={retrying}>
-					<RotateCcw class="mr-2 h-4 w-4" />{retrying ? 'Retrying...' : 'Retry'}
+					<RotateCcw class="h-4 w-4" />{retrying ? 'Retrying…' : 'Retry'}
 				</Button>
 			{/if}
 			{#if run && (run.status === 'pending' || run.status === 'running')}
-				<Button variant="destructive" size="sm" onclick={cancel}><XCircle class="mr-2 h-4 w-4" />Cancel</Button>
+				<Button variant="destructive" size="sm" onclick={cancel}><XCircle class="h-4 w-4" />Cancel</Button>
 			{/if}
-		</div>
-	</div>
+		{/snippet}
+		<p class="font-mono text-xs text-muted-foreground">{id}</p>
+	</PageHeader>
 
 	{#if loading}
-		<Card.Root>
-			<Card.Content class="flex items-center justify-center py-20">
-				<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
-			</Card.Content>
-		</Card.Root>
+		<LoadingState label="loading run" />
 	{:else if error}
-		<Card.Root>
-			<Card.Content class="pt-6 text-center text-destructive">{error}</Card.Content>
-		</Card.Root>
+		<ErrorAlert message={error} onretry={load} />
 	{:else if run}
 		<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 			<Card.Root>
-				<Card.Header><Card.Title>Run Info</Card.Title></Card.Header>
+				<Card.Header><Card.Title>Run info</Card.Title></Card.Header>
 				<Card.Content class="space-y-2 text-sm">
 					<div class="flex justify-between">
 						<span class="text-muted-foreground">Workflow</span>
-						<button class="hover:underline font-mono text-xs" onclick={() => goto(`/automation/${run!.pipeline_id}`)}>{run.pipeline_id.slice(0, 8)}…</button>
+						<a class="hover:underline font-mono text-xs" href="/automation/{run.pipeline_id}">{pipeline?.name ?? `${run.pipeline_id.slice(0, 8)}…`}</a>
 					</div>
 					<div class="flex justify-between"><span class="text-muted-foreground">Started</span><span>{fmt(run.started_at)}</span></div>
 					<div class="flex justify-between"><span class="text-muted-foreground">Completed</span><span>{fmt(run.completed_at)}</span></div>
@@ -228,8 +202,8 @@
 					</div>
 					{#if run.error}
 						<div class="pt-2">
-							<p class="text-muted-foreground text-xs font-medium uppercase">Error</p>
-							<p class="text-destructive text-xs mt-1 font-mono">{run.error}</p>
+							<p class="section-label">Error</p>
+							<p class="text-danger-fg text-xs mt-1 font-mono break-words">{run.error}</p>
 						</div>
 					{/if}
 				</Card.Content>
@@ -243,49 +217,44 @@
 			</Card.Root>
 		</div>
 
-		<!-- Tabs: Canvas | Timeline | Logs -->
-		<div class="space-y-4">
-			<div class="flex gap-1 border-b">
-				<button
-					class="px-4 py-2 text-sm font-medium transition-colors {activeTab === 'canvas' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}"
-					onclick={() => activeTab = 'canvas'}
-				>Workflow Canvas</button>
-				<button
-					class="px-4 py-2 text-sm font-medium transition-colors {activeTab === 'timeline' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}"
-					onclick={() => activeTab = 'timeline'}
-				>Step Timeline</button>
-				<button
-					class="px-4 py-2 text-sm font-medium transition-colors {activeTab === 'logs' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}"
-					onclick={() => activeTab = 'logs'}
-				>Logs</button>
-			</div>
+		<Tabs.Root bind:value={activeTab}>
+			<Tabs.List>
+				<Tabs.Trigger value="canvas"><Workflow />Workflow canvas</Tabs.Trigger>
+				<Tabs.Trigger value="timeline"><ListChecks />Step timeline</Tabs.Trigger>
+				<Tabs.Trigger value="logs"><ScrollText />Logs</Tabs.Trigger>
+			</Tabs.List>
 
-			{#if activeTab === 'canvas'}
+			<Tabs.Content value="canvas">
 				<Card.Root>
-					<Card.Header><Card.Title>Workflow Status</Card.Title></Card.Header>
+					<Card.Header><Card.Title>Workflow status</Card.Title></Card.Header>
 					<Card.Content class="p-0">
 						{#if nodes.length === 0}
-							<p class="text-sm text-muted-foreground p-6 text-center">Workflow not available (parent may have been deleted).</p>
+							<EmptyState compact icon={Workflow} title="Workflow not available" description="The parent workflow may have been deleted." />
 						{:else}
 							<div class="h-[500px] border-t">
 								<WorkflowCanvas bind:nodes bind:edges bind:selectedNodeId readOnly runStatusMap={runStatusMap} />
 							</div>
 							<div class="px-4 py-2 border-t flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
-								<span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full ring-2 ring-slate-500/40"></span>pending</span>
-								<span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full ring-2 ring-blue-400 animate-pulse"></span>running</span>
-								<span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full ring-2 ring-emerald-500"></span>succeeded</span>
-								<span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full ring-2 ring-red-500"></span>failed</span>
-								<span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full ring-2 ring-orange-400"></span>cancelled</span>
+								<span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full ring-1 ring-border"></span>pending</span>
+								<span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full ring-2 ring-info animate-pulse motion-reduce:animate-none"></span>running</span>
+								<span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full ring-2 ring-success"></span>succeeded</span>
+								<span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full ring-2 ring-destructive"></span>failed</span>
+								<span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full ring-2 ring-warning"></span>cancelled</span>
 							</div>
 						{/if}
 					</Card.Content>
 				</Card.Root>
-			{:else if activeTab === 'timeline'}
+			</Tabs.Content>
+
+			<Tabs.Content value="timeline">
 				<Card.Root>
-					<Card.Header><Card.Title>Step Runs ({run.step_runs.length})</Card.Title></Card.Header>
+					<Card.Header>
+						<Card.Title>Step runs</Card.Title>
+						<Card.Description>{run.step_runs.length} recorded</Card.Description>
+					</Card.Header>
 					<Card.Content>
 						{#if run.step_runs.length === 0}
-							<p class="text-sm text-muted-foreground">No step runs recorded yet.</p>
+							<EmptyState compact icon={ListChecks} title="No step runs yet" description="Steps appear here as the run progresses." />
 						{:else}
 							<div class="space-y-0">
 								{#each run.step_runs as sr, idx}
@@ -294,21 +263,21 @@
 									<div class="flex items-start gap-3">
 										<div class="flex flex-col items-center shrink-0 pt-1">
 											{#if sr.status === 'succeeded'}
-												<CheckCircle class="h-5 w-5 text-emerald-500 shrink-0" />
+												<CheckCircle class="h-5 w-5 text-success-fg shrink-0" aria-hidden="true" />
 											{:else if sr.status === 'failed'}
-												<AlertCircle class="h-5 w-5 text-destructive shrink-0" />
+												<AlertCircle class="h-5 w-5 text-danger-fg shrink-0" aria-hidden="true" />
 											{:else if sr.status === 'running'}
-												<LoaderCircle class="h-5 w-5 text-blue-400 animate-spin shrink-0" />
+												<LoaderCircle class="h-5 w-5 text-info-fg animate-spin shrink-0" aria-hidden="true" />
 											{:else if sr.status === 'cancelled'}
-												<XCircle class="h-5 w-5 text-orange-400 shrink-0" />
+												<XCircle class="h-5 w-5 text-warning-fg shrink-0" aria-hidden="true" />
 											{:else}
-												<Clock class="h-5 w-5 text-slate-400 shrink-0" />
+												<Clock class="h-5 w-5 text-muted-foreground shrink-0" aria-hidden="true" />
 											{/if}
 											{#if idx < run.step_runs.length - 1}
 												<div class="w-px flex-1 bg-border my-1 min-h-[1.5rem]"></div>
 											{/if}
 										</div>
-										<div class="flex-1 rounded-md border border-l-4 {statusBg[sr.status] ?? 'border-l-border'} bg-card p-3 mb-2">
+										<div class="flex-1 min-w-0 rounded-md border p-3 mb-2">
 											<div class="flex items-start justify-between gap-2">
 												<div class="min-w-0">
 													<p class="font-medium text-sm font-mono">{stepName}</p>
@@ -316,11 +285,11 @@
 												</div>
 												<div class="flex items-center gap-2 shrink-0">
 													{#if dur}<span class="text-xs text-muted-foreground">{dur}</span>{/if}
-													<Badge class="{statusColors[sr.status] ?? ''} text-xs" variant="outline">{sr.status}</Badge>
+													<StatusBadge status={sr.status} />
 												</div>
 											</div>
 											{#if sr.error}
-												<p class="text-xs text-destructive mt-2 font-mono">{sr.error}</p>
+												<p class="text-xs text-danger-fg mt-2 font-mono break-words">{sr.error}</p>
 											{/if}
 											{#if Object.keys(sr.output).length > 0}
 												<details class="mt-2">
@@ -335,12 +304,14 @@
 						{/if}
 					</Card.Content>
 				</Card.Root>
-			{:else}
+			</Tabs.Content>
+
+			<Tabs.Content value="logs">
 				<Card.Root>
-					<Card.Header><Card.Title>Run Logs</Card.Title></Card.Header>
+					<Card.Header><Card.Title>Run logs</Card.Title></Card.Header>
 					<Card.Content>
 						{#if logsLoading}
-							<div class="flex justify-center py-8"><LoaderCircle class="h-6 w-6 animate-spin text-muted-foreground" /></div>
+							<LoadingState class="py-8" label="loading logs" />
 						{:else}
 							{#if logsError}
 								<p class="text-xs text-muted-foreground mb-2">{logsError}</p>
@@ -348,12 +319,12 @@
 							{#if logs}
 								<pre class="text-xs font-mono bg-muted/50 rounded p-3 overflow-auto max-h-[60vh] whitespace-pre-wrap">{logs}</pre>
 							{:else}
-								<p class="text-sm text-muted-foreground">No logs available.</p>
+								<EmptyState compact icon={ScrollText} title="No logs available" />
 							{/if}
 						{/if}
 					</Card.Content>
 				</Card.Root>
-			{/if}
-		</div>
+			</Tabs.Content>
+		</Tabs.Root>
 	{/if}
 </div>

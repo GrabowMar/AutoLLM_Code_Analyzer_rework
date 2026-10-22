@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { avatarColorClasses } from '$lib/constants/colors';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import PanelLeft from '@lucide/svelte/icons/panel-left';
@@ -9,74 +10,19 @@
 	import Cookie from '@lucide/svelte/icons/cookie';
 	import Key from '@lucide/svelte/icons/key';
 	import LogOut from '@lucide/svelte/icons/log-out';
-	import Boxes from '@lucide/svelte/icons/boxes';
-	import AppWindow from '@lucide/svelte/icons/app-window';
-	import BarChart3 from '@lucide/svelte/icons/bar-chart-3';
-	import FileText from '@lucide/svelte/icons/file-text';
-	import WandSparkles from '@lucide/svelte/icons/wand-sparkles';
-	import Trophy from '@lucide/svelte/icons/trophy';
-	import ChartColumn from '@lucide/svelte/icons/chart-column';
-	import BookOpen from '@lucide/svelte/icons/book-open';
-	import Zap from '@lucide/svelte/icons/zap';
-	import Layers from '@lucide/svelte/icons/layers';
 	import X from '@lucide/svelte/icons/x';
+	import SidebarNav from './SidebarNav.svelte';
+	import { routeLabels } from '$lib/nav';
 	import { Separator } from '$lib/components/ui/separator';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { getAuth } from '$lib/stores/auth.svelte';
 	import { getPreferences } from '$lib/stores/preferences.svelte';
 	import { cn } from '$lib/utils';
-	import type { Component } from 'svelte';
 
 	interface AuthState {
 		isAuthenticated: boolean;
 		user: { id: number; email: string; display?: string; name?: string } | null;
-	}
-
-	interface NavItem {
-		label: string;
-		href: string;
-		icon: Component;
-	}
-
-	interface NavSection {
-		title: string;
-		items: NavItem[];
-	}
-
-	const navSections: NavSection[] = [
-		{
-			title: 'Platform',
-			items: [
-				{ label: 'Dashboard', href: '/', icon: FlaskConical },
-				{ label: 'Models', href: '/models', icon: Boxes },
-				{ label: 'Applications', href: '/applications', icon: AppWindow },
-				{ label: 'Analysis', href: '/analysis', icon: BarChart3 },
-			],
-		},
-		{
-			title: 'Tools',
-			items: [
-				{ label: 'Automation', href: '/automation', icon: Zap },
-				{ label: 'Sample Generator', href: '/sample-generator', icon: WandSparkles },
-				{ label: 'Templates', href: '/templates', icon: Layers },
-				{ label: 'Reports', href: '/reports', icon: FileText },
-			],
-		},
-		{
-			title: 'Insights',
-			items: [
-				{ label: 'Rankings', href: '/rankings', icon: Trophy },
-				{ label: 'Statistics', href: '/statistics', icon: ChartColumn },
-				{ label: 'Docs', href: '/docs', icon: BookOpen },
-			],
-		},
-	];
-
-	function isActive(href: string): boolean {
-		const pathname = page.url?.pathname ?? '/';
-		if (href === '/') return pathname === '/';
-		return pathname === href || pathname.startsWith(href + '/');
 	}
 
 	let { auth }: { auth: AuthState } = $props();
@@ -86,37 +32,6 @@
 
 	let mobileMenuOpen = $state(false);
 	let dropdownOpen = $state(false);
-
-	const avatarColorMap: Record<string, string> = {
-		blue: 'bg-blue-500',
-		indigo: 'bg-indigo-500',
-		purple: 'bg-purple-500',
-		pink: 'bg-pink-500',
-		red: 'bg-red-500',
-		orange: 'bg-orange-500',
-		amber: 'bg-amber-500',
-		green: 'bg-green-500',
-		teal: 'bg-teal-500',
-		cyan: 'bg-cyan-500'
-	};
-
-	const routeLabels: Record<string, string> = {
-		'/': 'Dashboard',
-		'/models': 'Models',
-		'/applications': 'Applications',
-		'/analysis': 'Analysis',
-		'/reports': 'Reports',
-		'/rankings': 'Rankings',
-		'/statistics': 'Statistics',
-		'/sample-generator': 'Sample Generator',
-		'/templates': 'Templates',
-		'/automation': 'Automation',
-		'/docs': 'Docs',
-		'/about': 'About',
-		'/privacy': 'Privacy Policy',
-		'/users': 'Users',
-		'/users/settings': 'Settings'
-	};
 
 	let breadcrumbSegments = $derived.by(() => {
 		const pathname = page.url?.pathname ?? '/';
@@ -152,7 +67,7 @@
 		return segments;
 	});
 
-	let avatarBgClass = $derived(avatarColorMap[preferences.avatarColor] ?? 'bg-blue-500');
+	let avatarBgClass = $derived(avatarColorClasses[preferences.avatarColor] ?? 'bg-blue-500');
 
 	let userInitial = $derived.by(() => {
 		if (!auth.user) return '?';
@@ -196,120 +111,67 @@
 <svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} />
 
 <header
-	class="fixed top-0 left-0 right-0 z-30 flex h-12 items-center gap-3 border-b border-border/70 bg-background/85 px-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/65 sm:px-4 md:gap-4 md:px-5 transition-[padding] duration-200 ease-out motion-reduce:transition-none md:pl-[calc(var(--app-sidebar-offset,0px)+1.25rem)] after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:h-px after:opacity-40 after:content-[''] after:[background:var(--gradient-brand)]"
+	class="fixed inset-x-0 top-0 z-30 flex h-12 items-center gap-3 border-b border-border bg-background/90 px-3 backdrop-blur-md transition-[padding] duration-200 ease-out motion-reduce:transition-none sm:px-4 md:gap-4 md:px-5 md:pl-[calc(var(--app-sidebar-offset,0px)+1.25rem)]"
 >
-	<!-- Mobile sidebar trigger -->
 	<Sheet.Root bind:open={mobileMenuOpen}>
 		<Sheet.Trigger
-			class="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground md:hidden cursor-pointer transition-colors"
+			class="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground md:hidden"
 		>
 			<PanelLeft class="h-5 w-5" />
-			<span class="sr-only">Toggle menu</span>
+			<span class="sr-only">Open menu</span>
 		</Sheet.Trigger>
-		<Sheet.Content side="left" class="w-72 p-0 bg-sidebar text-sidebar-foreground border-sidebar-border" showClose={false}>
-			<!-- Mobile nav header -->
+		<Sheet.Content side="left" class="w-72 gap-0 border-sidebar-border bg-sidebar p-0 text-sidebar-foreground" showClose={false}>
 			<div class="flex h-12 items-center justify-between border-b border-sidebar-border px-3">
 				<a href="/" class="flex items-center gap-2" onclick={() => (mobileMenuOpen = false)}>
-					<div
-						class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sidebar-primary-foreground"
-						style="background: var(--gradient-brand);"
-					>
+					<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
 						<FlaskConical class="h-3.5 w-3.5" />
-					</div>
-					<span class="font-semibold text-sm" style="font-family: var(--font-display);">LLM<span class="text-sidebar-primary">_</span>Lab</span>
+					</span>
+					<span class="text-sm font-semibold font-display">LLM<span class="text-sidebar-primary">_</span>Lab</span>
 				</a>
 				<button
-					class="inline-flex h-9 w-9 items-center justify-center rounded-md text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground cursor-pointer transition-colors"
+					class="inline-flex h-9 w-9 items-center justify-center rounded-md text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
 					onclick={() => (mobileMenuOpen = false)}
+					aria-label="Close menu"
 				>
 					<X class="h-4 w-4" />
 				</button>
 			</div>
 
-			<!-- Mobile nav sections -->
-			<nav class="flex-1 overflow-y-auto py-2">
-				{#each navSections as section (section.title)}
-					<div class="px-3 pt-3 pb-1">
-						<span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/35" style="font-family: var(--font-mono);">
-							{section.title}
-						</span>
-					</div>
-					<div class="flex flex-col gap-px px-2">
-						{#each section.items as item (item.href)}
-							<a
-								href={item.href}
-								class={cn(
-									'group relative flex items-center gap-2.5 rounded px-2.5 py-2 text-[13px] transition-colors duration-150 motion-reduce:transition-none',
-									isActive(item.href)
-										? 'bg-sidebar-accent text-sidebar-primary font-medium'
-										: 'text-sidebar-foreground/65 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground'
-								)}
-								onclick={() => (mobileMenuOpen = false)}
-							>
-								{#if isActive(item.href)}
-									<span class="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-r bg-sidebar-primary"></span>
-								{/if}
-								<item.icon class="h-3.5 w-3.5 shrink-0" />
-								{item.label}
-							</a>
-						{/each}
-					</div>
-				{/each}
-			</nav>
+			<SidebarNav onnavigate={() => (mobileMenuOpen = false)} />
 
-			<!-- Mobile nav footer -->
-			<div class="border-t border-sidebar-border px-3 py-2.5">
-				<div class="flex items-center justify-between">
-					<div class="flex items-center gap-2">
-						<div class="relative flex h-1.5 w-1.5 shrink-0">
-							<span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-[color:var(--success)] opacity-60"></span>
-							<span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-[color:var(--success)]"></span>
-						</div>
-						<span class="text-[11px] text-sidebar-foreground/70">System online</span>
-					</div>
-					<ThemeToggle />
-				</div>
+			<div class="flex justify-end border-t border-sidebar-border px-3 py-2">
+				<ThemeToggle />
 			</div>
 		</Sheet.Content>
 	</Sheet.Root>
 
-	<a href="/" class="flex items-center gap-2 font-semibold text-sm min-w-0" style="font-family: var(--font-display);">
-		<FlaskConical class="h-4 w-4 text-primary shrink-0" />
+	<a href="/" class="flex min-w-0 items-center gap-2 text-sm font-semibold font-display md:hidden">
+		<FlaskConical class="h-4 w-4 shrink-0 text-primary" />
 		<span class="truncate">LLM<span class="text-primary">_</span>Lab</span>
 	</a>
 
 	{#if breadcrumbSegments.length > 0}
-		<nav aria-label="Breadcrumb" class="hidden items-center gap-1 text-xs text-muted-foreground md:flex touch-mobile-hide-nav" style="font-family: var(--font-mono);">
-			<span class="text-muted-foreground/40">/</span>
-			{#each breadcrumbSegments as segment, i}
-				{#if i > 0}
-					<span class="text-muted-foreground/40">/</span>
-				{/if}
-				{#if i === breadcrumbSegments.length - 1}
-					<span class="font-medium text-foreground">{segment.label}</span>
-				{:else}
-					<a href={segment.href} class="hover:text-primary transition-colors">{segment.label}</a>
-				{/if}
-			{/each}
+		<nav aria-label="Breadcrumb" class="hidden min-w-0 md:block">
+			<ol class="flex items-center gap-1.5 text-sm text-muted-foreground">
+				{#each breadcrumbSegments as segment, i (segment.href)}
+					{#if i > 0}
+						<li aria-hidden="true" class="text-muted-foreground/50">/</li>
+					{/if}
+					<li class="min-w-0 truncate">
+						{#if i === breadcrumbSegments.length - 1}
+							<span class="font-medium text-foreground" aria-current="page">{segment.label}</span>
+						{:else}
+							<a href={segment.href} class="transition-colors hover:text-foreground">{segment.label}</a>
+						{/if}
+					</li>
+				{/each}
+			</ol>
 		</nav>
 	{/if}
 
 	<div class="flex-1"></div>
 
 	<div class="flex items-center gap-1.5">
-		<!-- System status dot (desktop) -->
-		<div
-			class="hidden md:flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/30 px-2 py-1 text-[10px] text-muted-foreground"
-			style="font-family: var(--font-mono);"
-			title="System online"
-		>
-			<span class="relative flex h-1.5 w-1.5 shrink-0">
-				<span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-[color:var(--success)] opacity-60 motion-reduce:hidden"></span>
-				<span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-[color:var(--success)]"></span>
-			</span>
-			<span class="uppercase tracking-wider">online</span>
-		</div>
-
 		<ThemeToggle />
 
 		{#if auth.isAuthenticated && auth.user}
@@ -321,10 +183,10 @@
 					onclick={toggleDropdown}
 					aria-expanded={dropdownOpen}
 					aria-haspopup="true"
+					aria-label="Account menu"
 				>
 					<div
 						class="{avatarBgClass} flex h-7 w-7 items-center justify-center rounded-md text-xs font-semibold text-white shadow-sm"
-						style="font-family: var(--font-mono);"
 					>
 						{userInitial}
 					</div>
@@ -339,20 +201,19 @@
 						<div class="flex items-center gap-3 border-b border-border/60 bg-muted/30 px-3 py-2.5">
 							<div
 								class="{avatarBgClass} flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-sm font-semibold text-white shadow-sm"
-								style="font-family: var(--font-mono);"
 							>
 								{userInitial}
 							</div>
 							<div class="min-w-0 flex-1">
 								<p class="text-sm font-medium truncate">{userDisplayName}</p>
-								<p class="text-[11px] text-muted-foreground truncate" style="font-family: var(--font-mono);">
+								<p class="text-[11px] text-muted-foreground truncate">
 									{auth.user.email}
 								</p>
 							</div>
 						</div>
 
 						<div class="p-1">
-							<p class="px-2 pt-1.5 pb-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70" style="font-family: var(--font-mono);">
+							<p class="px-2 pt-1.5 pb-1 text-[11px] uppercase tracking-[0.14em] text-muted-foreground/70">
 								Profile
 							</p>
 							<a
@@ -363,7 +224,7 @@
 							>
 								<User class="h-3.5 w-3.5" />
 								<span class="flex-1">View profile</span>
-								<span class="text-[10px] text-muted-foreground/70" style="font-family: var(--font-mono);">↗</span>
+								<span class="text-[11px] text-muted-foreground/70">↗</span>
 							</a>
 							<a
 								href="/users/settings#account"
@@ -376,7 +237,7 @@
 							</a>
 
 							<div role="separator" class="my-1 h-px bg-border/60"></div>
-							<p class="px-2 pt-0.5 pb-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70" style="font-family: var(--font-mono);">
+							<p class="px-2 pt-0.5 pb-1 text-[11px] uppercase tracking-[0.14em] text-muted-foreground/70">
 								Preferences
 							</p>
 							<a

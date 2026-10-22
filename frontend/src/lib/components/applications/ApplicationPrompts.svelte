@@ -1,6 +1,6 @@
 <script lang="ts">
 import * as Card from '$lib/components/ui/card';
-import { Badge } from '$lib/components/ui/badge';
+import EmptyState from '$lib/components/EmptyState.svelte';
 import { Button } from '$lib/components/ui/button';
 import Terminal from '@lucide/svelte/icons/terminal';
 import Copy from '@lucide/svelte/icons/copy';
@@ -29,11 +29,24 @@ const promptEntries = $derived.by<PromptEntry[]>(() => {
 
 	if (job.mode === 'custom') {
 		if (job.custom_system_prompt)
-			entries.push({ label: 'System Prompt', badge: 'SYS', badgeColor: 'bg-blue-500/20 text-blue-400', content: job.custom_system_prompt });
+			entries.push({ label: 'System Prompt', badge: 'SYS', badgeColor: 'bg-info/15 text-info-fg', content: job.custom_system_prompt });
 		if (job.custom_user_prompt)
-			entries.push({ label: 'User Prompt', badge: 'USR', badgeColor: 'bg-emerald-500/20 text-emerald-400', content: job.custom_user_prompt });
+			entries.push({ label: 'User Prompt', badge: 'USR', badgeColor: 'bg-success/15 text-success-fg', content: job.custom_user_prompt });
 		if (job.result_data?.content)
-			entries.push({ label: 'Response', badge: 'RES', badgeColor: 'bg-purple-500/20 text-purple-400', content: job.result_data.content.substring(0, 2000) + (job.result_data.content.length > 2000 ? '\n...(truncated for preview)' : '') });
+			entries.push({ label: 'Response', badge: 'RES', badgeColor: 'bg-primary/15 text-primary', content: job.result_data.content.substring(0, 2000) + (job.result_data.content.length > 2000 ? '\n...(truncated for preview)' : '') });
+	}
+
+	if (job.mode === 'agent') {
+		// Agent runs: the two frozen texts every model received; the full
+		// conversation lives in the run record (llm_calls.jsonl.gz).
+		const snap = (job.resolved_bundle ?? {}) as Record<string, any>;
+		if (snap.harness?.system_prompt)
+			entries.push({ label: `Harness system prompt (v${snap.harness.system_prompt_version})`, badge: 'SYS', badgeColor: 'bg-info/15 text-info-fg', content: snap.harness.system_prompt });
+		if (snap.brief?.text)
+			entries.push({ label: `Task brief (v${snap.brief.version})`, badge: 'USR', badgeColor: 'bg-success/15 text-success-fg', content: snap.brief.text });
+		const final = job.result_data?.agent?.harness_report?.final_message;
+		if (final)
+			entries.push({ label: 'Agent final message', badge: 'RES', badgeColor: 'bg-primary/15 text-primary', content: final });
 	}
 
 	for (const art of artifacts) {
@@ -42,7 +55,7 @@ const promptEntries = $derived.by<PromptEntry[]>(() => {
 		for (const msg of msgs) {
 			const roleLabel = msg.role === 'system' ? 'System' : msg.role === 'user' ? 'User' : 'Assistant';
 			const roleBadge = msg.role === 'system' ? 'SYS' : msg.role === 'user' ? 'USR' : 'AST';
-			const roleColor = msg.role === 'system' ? 'bg-blue-500/20 text-blue-400' : msg.role === 'user' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-purple-500/20 text-purple-400';
+			const roleColor = msg.role === 'system' ? 'bg-info/15 text-info-fg' : msg.role === 'user' ? 'bg-success/15 text-success-fg' : 'bg-primary/15 text-primary';
 			entries.push({
 				label: `${art.stage} — ${roleLabel}`,
 				badge: roleBadge,
@@ -57,7 +70,7 @@ const promptEntries = $derived.by<PromptEntry[]>(() => {
 			entries.push({
 				label: `${art.stage} — Response`,
 				badge: 'RES',
-				badgeColor: 'bg-purple-500/20 text-purple-400',
+				badgeColor: 'bg-primary/15 text-primary',
 				content: respContent.substring(0, 3000) + (respContent.length > 3000 ? '\n...(truncated)' : ''),
 				meta: { stage: art.stage, model: respModel, finish: choices[0]?.finish_reason ?? '—' },
 			});
@@ -65,39 +78,43 @@ const promptEntries = $derived.by<PromptEntry[]>(() => {
 	}
 
 	if (entries.length === 0 && job.mode === 'copilot' && job.copilot_description) {
-		entries.push({ label: 'Copilot Description', badge: 'DESC', badgeColor: 'bg-teal-500/20 text-teal-400', content: job.copilot_description });
+		entries.push({ label: 'Copilot Description', badge: 'DESC', badgeColor: 'bg-muted text-muted-foreground', content: job.copilot_description });
 	}
 
 	return entries;
 });
+
+const legend = [
+	{ label: 'Template', cls: 'bg-primary' },
+	{ label: 'Requirements', cls: 'bg-success' },
+	{ label: 'Scaffolding', cls: 'bg-warning' },
+	{ label: 'Metadata', cls: 'bg-muted-foreground' },
+];
 </script>
 
 <section id="prompts" class="space-y-4">
-	<h2 class="text-lg font-semibold flex items-center gap-2"><Terminal class="h-5 w-5" /> Prompts</h2>
-
-	<!-- Source Legend -->
-	<div class="flex items-center gap-2 flex-wrap">
-		<span class="text-xs text-muted-foreground font-medium">Sources:</span>
-		<Badge variant="outline" class="text-[10px] bg-sky-500/10 text-sky-400 border-sky-500/30">📋 Template</Badge>
-		<Badge variant="outline" class="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30">📝 Requirements</Badge>
-		<Badge variant="outline" class="text-[10px] bg-orange-500/10 text-orange-400 border-orange-500/30">🏗️ Scaffolding</Badge>
-		<Badge variant="outline" class="text-[10px] bg-purple-500/10 text-purple-400 border-purple-500/30">📊 Metadata</Badge>
-	</div>
-
 	{#if promptEntries.length === 0}
 		<Card.Root>
-			<Card.Content class="py-12 text-center">
-				<Terminal class="mx-auto h-10 w-10 text-muted-foreground/30 mb-3" />
-				<p class="text-sm text-muted-foreground">No prompts recorded for this job</p>
+			<Card.Content>
+				<EmptyState compact icon={Terminal} title="No prompts recorded" description="This job has no stored prompt exchange." />
 			</Card.Content>
 		</Card.Root>
 	{:else}
 		<Card.Root>
-			<Card.Content class="p-0">
-				<div class="flex flex-col sm:flex-row" style="min-height: 300px; height: auto; max-height: 600px;">
+			<Card.Header>
+				<Card.Title>Prompt exchange</Card.Title>
+				<Card.Description class="flex flex-wrap items-center gap-x-3 gap-y-1">
+					Sections are marked by source:
+					{#each legend as l (l.label)}
+						<span class="inline-flex items-center gap-1.5 text-xs"><span class="h-3 w-0.5 rounded-full {l.cls}" aria-hidden="true"></span>{l.label}</span>
+					{/each}
+				</Card.Description>
+			</Card.Header>
+			<Card.Content class="border-t p-0">
+				<div class="flex max-h-[600px] min-h-[300px] flex-col sm:flex-row">
 					<!-- Left: Prompt Tree -->
 					<div class="w-full sm:w-2/5 border-b sm:border-b-0 sm:border-r overflow-y-auto bg-muted/20 max-h-48 sm:max-h-none">
-						<div class="p-2 text-xs font-medium text-muted-foreground uppercase tracking-wider border-b px-3 py-2">
+						<div class="section-label border-b px-3 py-2">
 							Prompt Exchange ({promptEntries.length})
 						</div>
 						{#each promptEntries as entry, i}
@@ -105,7 +122,7 @@ const promptEntries = $derived.by<PromptEntry[]>(() => {
 								class="w-full text-left px-3 py-2.5 text-sm border-b border-border/50 transition-colors flex items-start gap-2 {selectedPromptIdx === i ? 'bg-primary/10 border-l-2 border-l-primary' : 'hover:bg-muted/50'}"
 								onclick={() => (selectedPromptIdx = i)}
 							>
-								<span class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded {entry.badgeColor}">{entry.badge}</span>
+								<span class="shrink-0 rounded px-1.5 py-0.5 font-mono text-[11px] font-bold {entry.badgeColor}">{entry.badge}</span>
 								<div class="min-w-0">
 									<div class="font-medium truncate">{entry.label}</div>
 									{#if entry.meta}

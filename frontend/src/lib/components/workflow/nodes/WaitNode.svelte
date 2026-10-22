@@ -26,6 +26,6 @@
 	selected={selected ?? false}
 >
 	<div class="flex items-center justify-center py-2">
-		<span class="font-mono text-2xl font-bold text-slate-200">{formatDuration(seconds)}</span>
+		<span class="font-mono text-2xl font-bold text-foreground">{formatDuration(seconds)}</span>
 	</div>
 </NodeShell>

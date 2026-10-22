@@ -13,6 +13,8 @@
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import {
 		generateReport,
 		getModels,
@@ -121,27 +123,30 @@
 	}
 </script>
 
-<svelte:head>
-	<title>New report — LLM Eval Lab</title>
-</svelte:head>
-
 <div class="max-w-3xl space-y-6">
-	<div class="flex items-center gap-3">
-		<Button variant="ghost" size="sm" onclick={() => (step === 1 ? goto('/reports') : (step = 1))}>
-			<ArrowLeft class="mr-1 h-4 w-4" />Back
-		</Button>
-		<h1 class="text-2xl font-bold">New report</h1>
-		<Badge variant="outline">Step {step} of 2</Badge>
-	</div>
+	<PageHeader
+		title="New report"
+		description="Pick a report type, then configure and generate it."
+		back={{ href: '/reports', label: 'Reports' }}
+	>
+		{#snippet meta()}<Badge variant="outline">Step {step} of 2</Badge>{/snippet}
+	</PageHeader>
 
 	{#if step === 1}
+		<Card.Root>
+			<Card.Header>
+				<Card.Title>1. Report type</Card.Title>
+				<Card.Description>What should the report cover?</Card.Description>
+			</Card.Header>
+			<Card.Content>
 		<div class="grid gap-3 sm:grid-cols-2">
 			{#each reportTypes as t (t.key)}
 				{@const TypeIcon = t.icon}
 				<button
 					type="button"
 					onclick={() => pickType(t.key)}
-					class="text-left rounded-lg border p-4 hover:border-primary hover:bg-muted/40 transition"
+					aria-pressed={selectedType === t.key}
+					class="card-lift rounded-lg border p-4 text-left hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {selectedType === t.key ? 'border-primary bg-primary/5' : ''}"
 				>
 					<div class="flex items-center gap-2 mb-1">
 						<TypeIcon class="h-4 w-4 text-primary" />
@@ -151,10 +156,12 @@
 				</button>
 			{/each}
 		</div>
+			</Card.Content>
+		</Card.Root>
 	{:else if selectedType}
 		<Card.Root>
 			<Card.Header>
-				<Card.Title>{reportTypes.find((r) => r.key === selectedType)?.label}</Card.Title>
+				<Card.Title>2. Configure · {reportTypes.find((r) => r.key === selectedType)?.label}</Card.Title>
 				<Card.Description>Configure the report and generate.</Card.Description>
 			</Card.Header>
 			<Card.Content class="space-y-4">
@@ -233,14 +240,16 @@
 				{/if}
 
 				{#if error}
-					<p class="text-sm text-destructive">{error}</p>
+					<ErrorAlert message={error} />
 				{/if}
 			</Card.Content>
 			<Card.Footer class="gap-2 justify-end">
-				<Button variant="outline" onclick={() => (step = 1)}>Back</Button>
+				<Button variant="outline" onclick={() => (step = 1)}>
+					<ArrowLeft class="mr-1 h-4 w-4" />Change type
+				</Button>
 				<Button onclick={submit} disabled={submitting}>
 					{#if submitting}
-						<LoaderCircle class="mr-2 h-4 w-4 animate-spin" />
+						<LoaderCircle class="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" />
 					{/if}
 					Generate report
 				</Button>

@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { formatDuration as formatDurationShared, formatDateTime } from '$lib/utils/formatters';
-	import { generationStatusColors as statusColors } from '$lib/constants/colors';
 	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
+	import * as Tabs from '$lib/components/ui/tabs';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 	import {
 		getModels,
 		getStacks,
@@ -11,10 +12,12 @@
 		getGenerationProfiles,
 		createCustomJob,
 		createScaffoldingBatch,
-		createCopilotJob,
+		createAgentBatch,
+		getAgentHarnesses,
 		getGenerationJobs,
 		getGenerationJob,
 		cancelGenerationJob,
+		type AgentHarness,
 		type LLMModelSummary,
 		type Stack,
 		type AppRequirementTemplate,
@@ -30,7 +33,7 @@
 	import GeneratorForm, {
 		type CustomPayload,
 		type ScaffoldingPayload,
-		type CopilotPayload,
+		type AgentPayload,
 	} from '$lib/components/sample-generator/GeneratorForm.svelte';
 	import GenerationResults from '$lib/components/sample-generator/GenerationResults.svelte';
 	import GenerationHistory from '$lib/components/sample-generator/GenerationHistory.svelte';
@@ -42,9 +45,9 @@
 	const activeTab = $derived(data.mode);
 
 	let models = $state<LLMModelSummary[]>([]);
+	let harnesses = $state<AgentHarness[]>([]);
 	let modelsLoading = $state(true);
 	let customModelId = $state<number | ''>('');
-	let copilotModelId = $state<number | ''>('');
 
 	let stacks = $state<Stack[]>([]);
 	let appTemplates = $state<AppRequirementTemplate[]>([]);
@@ -60,10 +63,11 @@
 	let scaffoldingError = $state('');
 	let scaffoldingResult = $state<{ batch_id: string; job_count: number; status: string } | null>(null);
 
-	let copilotSubmitting = $state(false);
-	let copilotError = $state('');
-	let copilotJob = $state<GenerationJob | null>(null);
-	let copilotPolling = $state(false);
+	let agentSubmitting = $state(false);
+	let agentError = $state('');
+	let agentResult = $state<{ batch_id: string; job_count: number; status: string } | null>(null);
+	let agentJob = $state<GenerationJob | null>(null);
+	let agentPolling = $state(false);
 
 	let historyData = $state<PaginatedJobs | null>(null);
 	let historyLoading = $state(true);
@@ -75,9 +79,10 @@
 	let lastAppliedModelSlug = $state<string | null>(null);
 
 	const modeLabels: Record<string, string> = {
+		agent: 'Agent',
 		custom: 'Custom',
 		scaffolding: 'Scaffolding',
-		copilot: 'Copilot',
+		copilot: 'Copilot (legacy)',
 	};
 
 	function sampleGeneratorUrl(opts: {
@@ -119,7 +124,6 @@
 		if (!m) return;
 		lastAppliedModelSlug = data.modelSlug;
 		if (activeTab === 'custom') customModelId = m.id;
-		else if (activeTab === 'copilot') copilotModelId = m.id;
 	}
 
 	$effect(() => {
@@ -138,6 +142,11 @@
 		try {
 			const job = await getGenerationJob(jobId);
 			lastRestoredJobId = jobId;
+			// Legacy copilot jobs have no tab any more: their page has the details.
+			if (job.mode === 'copilot') {
+				goto(`/applications/${jobId}`);
+				return;
+			}
 			if (job.mode !== activeTab) {
 				goto(sampleGeneratorUrl({ mode: job.mode as TabId, job: jobId }), {
 					replaceState: true,
@@ -148,9 +157,9 @@
 			if (job.mode === 'custom') {
 				customJob = job;
 				if (job.status === 'running' || job.status === 'pending') pollCustomJob(job.id);
-			} else if (job.mode === 'copilot') {
-				copilotJob = job;
-				if (job.status === 'running' || job.status === 'pending') pollCopilotJob(job.id);
+			} else if (job.mode === 'agent') {
+				agentJob = job;
+				if (job.status === 'running' || job.status === 'pending') pollAgentJob(job.id);
 			}
 		} catch {
 			// invalid job id
@@ -165,12 +174,14 @@
 	});
 
 	onMount(async () => {
-		const [modelsRes] = await Promise.all([
+		const [modelsRes, harnessList] = await Promise.all([
 			getModels({ per_page: 100 }),
+			getAgentHarnesses().catch(() => [] as AgentHarness[]),
 			loadScaffoldingData(),
 			loadHistory(),
 		]);
 		models = modelsRes.items;
+		harnesses = harnessList;
 		modelsLoading = false;
 		applyModelSlugFromUrl();
 		if (data.jobId) restoreJobFromUrl(data.jobId);
@@ -277,56 +288,56 @@
 		}
 	}
 
-	async function submitCopilotJob(payload: CopilotPayload) {
-		copilotSubmitting = true;
-		copilotError = '';
-		copilotJob = null;
+	async function submitAgentBatch(payload: AgentPayload) {
+		agentSubmitting = true;
+		agentError = '';
+		agentResult = null;
 		try {
-			const job = await createCopilotJob(payload);
-			copilotJob = job;
-			syncJobInUrl(job);
-			pollCopilotJob(job.id);
+			agentResult = await createAgentBatch(payload);
 			loadHistory();
 		} catch (err: any) {
-			const detail = err?.detail ?? err?.message ?? 'Failed to create copilot job';
+			const detail = err?.detail ?? err?.message ?? 'Failed to start agent runs';
 			const remediation = err?.remediation ? ` ${err.remediation}` : '';
-			copilotError = detail + remediation;
+			agentError = detail + remediation;
 		} finally {
-			copilotSubmitting = false;
+			agentSubmitting = false;
 		}
 	}
 
-	async function pollCopilotJob(id: string) {
-		copilotPolling = true;
+	async function pollAgentJob(id: string) {
+		agentPolling = true;
 		let sseCleanup: (() => void) | null = null;
+		const done = (job: GenerationJob) =>
+			job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled';
 		try {
 			sseCleanup = subscribe([`generation:${id}`], async () => {
 				try {
 					const job = await getGenerationJob(id);
-					copilotJob = job;
-					if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
+					agentJob = job;
+					if (done(job)) {
 						loadHistory();
 						sseCleanup?.();
 						sseCleanup = null;
-						copilotPolling = false;
+						agentPolling = false;
 					}
 				} catch {
 					// ignore
 				}
 			});
-			while (copilotPolling) {
-				await new Promise((r) => setTimeout(r, 5000));
-				if (!copilotPolling) break;
+			// Agent runs take minutes; SSE carries the transitions, this is a slow fallback.
+			while (agentPolling) {
+				await new Promise((r) => setTimeout(r, 10000));
+				if (!agentPolling || agentJob?.id !== id) break;
 				const job = await getGenerationJob(id);
-				copilotJob = job;
-				if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
+				agentJob = job;
+				if (done(job)) {
 					loadHistory();
 					break;
 				}
 			}
 		} finally {
 			sseCleanup?.();
-			copilotPolling = false;
+			agentPolling = false;
 		}
 	}
 
@@ -360,106 +371,75 @@
 	const formatDate = formatDateTime;
 </script>
 
-<svelte:head>
-	<title>Sample Generator - LLM Lab</title>
-</svelte:head>
-
 <div class="space-y-6">
-	<div class="page-header">
-		<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-			<div class="min-w-0">
-				<div class="flex flex-wrap items-center gap-2">
-					<h1>Sample Generator</h1>
-					<Badge variant="outline" class="text-[10px]">AI-Powered</Badge>
-				</div>
-				<p class="mt-1 text-sm text-muted-foreground max-w-2xl">
-					Generate code with three modes: one-shot <strong>Custom</strong> prompts, matrix
-					<strong>Scaffolding</strong> batches, or iterative <strong>Copilot + Aider</strong> in a git
-					workspace (uses your stored OpenRouter key).
-				</p>
+	<PageHeader
+		title="Sample Generator"
+		description="Agent runs build each app with a sandboxed coding agent (OpenCode, mini-swe-agent or Aider) under a fixed brief, budget and gateway-recorded LLM calls, then grade it with a hidden conformance suite. Custom prompts and template Scaffolding remain available for one-shot comparisons."
+	>
+		{#snippet actions()}
+			<Button variant="outline" size="sm" href="/templates">
+				<Layers /> Generation Library
+			</Button>
+		{/snippet}
+	</PageHeader>
+
+	<Tabs.Root value={activeTab} onValueChange={(v) => switchTab(v as TabId)}>
+		<Tabs.List>
+			<Tabs.Trigger value="agent">
+				<Bot />Agent
+			</Tabs.Trigger>
+			<Tabs.Trigger value="custom"><Code />Custom</Tabs.Trigger>
+			<Tabs.Trigger value="scaffolding"><Layers />Scaffolding</Tabs.Trigger>
+		</Tabs.List>
+
+		<!-- One panel; GeneratorForm switches its content on activeTab. -->
+		<Tabs.Content value={activeTab}>
+		<div class="grid gap-6 {activeTab !== 'scaffolding' ? 'lg:grid-cols-[1fr_360px]' : ''}">
+			<div class="space-y-4">
+				{#if activeTab === 'agent'}
+					<OpenRouterKeyBanner />
+				{/if}
+				<GeneratorForm
+					activeTab={activeTab}
+					{models}
+					{harnesses}
+					{modelsLoading}
+					{stacks}
+					{appTemplates}
+					{profiles}
+					{scaffoldingLoading}
+					{customSubmitting}
+					{customError}
+					{scaffoldingSubmitting}
+					{scaffoldingError}
+					{scaffoldingResult}
+					{agentSubmitting}
+					{agentError}
+					{agentResult}
+					bind:customModelId
+					onSubmitCustom={submitCustomJob}
+					onSubmitScaffolding={submitScaffoldingBatch}
+					onSubmitAgent={submitAgentBatch}
+				/>
 			</div>
-			<a
-				href="/templates"
-				class="shrink-0 self-start inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground bg-card hover:text-foreground hover:border-primary/40 hover:bg-accent transition-colors"
-			>
-				<Layers class="h-3.5 w-3.5" /> Manage Templates
-			</a>
-		</div>
-	</div>
 
-	<div class="flex gap-1 rounded-lg bg-muted p-1 overflow-x-auto flex-nowrap">
-		<button
-			type="button"
-			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap {activeTab === 'custom' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
-			onclick={() => switchTab('custom')}
-		>
-			<Code class="h-4 w-4" />
-			Custom
-		</button>
-		<button
-			type="button"
-			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap {activeTab === 'scaffolding' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
-			onclick={() => switchTab('scaffolding')}
-		>
-			<Layers class="h-4 w-4" />
-			Scaffolding
-		</button>
-		<button
-			type="button"
-			class="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap {activeTab === 'copilot' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
-			onclick={() => switchTab('copilot')}
-		>
-			<Bot class="h-4 w-4" />
-			Copilot
-			<Badge variant="outline" class="text-[9px] ml-0.5">Aider</Badge>
-		</button>
-	</div>
-
-	<div class="grid gap-6 {activeTab !== 'scaffolding' ? 'lg:grid-cols-[1fr_360px]' : ''}">
-		<div class="space-y-4">
-			{#if activeTab === 'copilot'}
-				<OpenRouterKeyBanner />
+			{#if activeTab !== 'scaffolding'}
+				<GenerationResults
+					mode={activeTab === 'agent' ? 'agent' : 'custom'}
+					job={activeTab === 'agent' ? agentJob : customJob}
+					{formatDuration}
+					onCancel={cancelJob}
+				/>
 			{/if}
-			<GeneratorForm
-				activeTab={activeTab}
-				{models}
-				{modelsLoading}
-				{stacks}
-				{appTemplates}
-				{profiles}
-				{scaffoldingLoading}
-				{customSubmitting}
-				{customError}
-				{scaffoldingSubmitting}
-				{scaffoldingError}
-				{scaffoldingResult}
-				{copilotSubmitting}
-				{copilotError}
-				bind:customModelId
-				bind:copilotModelId
-				onSubmitCustom={submitCustomJob}
-				onSubmitScaffolding={submitScaffoldingBatch}
-				onSubmitCopilot={submitCopilotJob}
-			/>
 		</div>
-
-		{#if activeTab !== 'scaffolding'}
-			<GenerationResults
-				mode={activeTab === 'copilot' ? 'copilot' : 'custom'}
-				job={activeTab === 'copilot' ? copilotJob : customJob}
-				{statusColors}
-				{formatDuration}
-				onCancel={cancelJob}
-			/>
-		{/if}
-	</div>
+		</Tabs.Content>
+		</Tabs.Root>
 
 	<GenerationHistory
 		{historyData}
 		{historyLoading}
 		bind:historyModeFilter
 		bind:historyStatusFilter
-		{statusColors}
 		{modeLabels}
 		{formatDuration}
 		{formatDate}

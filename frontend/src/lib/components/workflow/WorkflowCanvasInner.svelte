@@ -11,6 +11,7 @@
 		type NodeTypes
 	} from '@xyflow/svelte';
 
+	import { mode } from 'mode-watcher';
 	import GenerateNode from './nodes/GenerateNode.svelte';
 	import AnalyzeNode from './nodes/AnalyzeNode.svelte';
 	import ReportNode from './nodes/ReportNode.svelte';
@@ -141,7 +142,7 @@
 		minZoom={0.2}
 		maxZoom={2}
 		defaultEdgeOptions={{ type: 'smoothstep', animated: true }}
-		colorMode="dark"
+		colorMode={mode.current ?? 'dark'}
 	>
 		<Background />
 		<Controls />
@@ -150,19 +151,19 @@
 			nodeColor={(n) => {
 				const kind = (n.type as StepKind) ?? 'script';
 				const map: Record<string, string> = {
-					generate: '#8b5cf6',
-					analyze: '#3b82f6',
-					report: '#f59e0b',
-					wait: '#64748b',
-					notify: '#10b981',
-					script: '#6b7280'
+					generate: 'var(--chart-3)',
+					analyze: 'var(--chart-2)',
+					report: 'var(--chart-4)',
+					wait: 'var(--muted-foreground)',
+					notify: 'var(--chart-1)',
+					script: 'var(--muted-foreground)'
 				};
-				return map[kind] ?? '#6b7280';
+				return map[kind] ?? 'var(--muted-foreground)';
 			}}
 		/>
 		{#if nodes.length === 0 && !readOnly}
 			<Panel position="top-center">
-				<div class="rounded-md border border-dashed border-border bg-background/80 backdrop-blur px-4 py-3 text-center max-w-md">
+				<div class="rounded-md border border-dashed border-border bg-card px-4 py-3 text-center max-w-md">
 					<p class="text-sm font-medium">Empty workflow</p>
 					<p class="text-xs text-muted-foreground mt-1">Drag a node from the palette on the left to begin.</p>
 				</div>
@@ -186,6 +187,6 @@
 	}
 	:global(.svelte-flow-wrapper .svelte-flow__attribution) {
 		opacity: 0.5;
-		font-size: 9px;
+		font-size: 11px;
 	}
 </style>

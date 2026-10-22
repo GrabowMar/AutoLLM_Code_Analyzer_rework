@@ -26,7 +26,7 @@
 				label: b.severity,
 				value: b.count,
 				percent: b.percent,
-				color: severityChartColors[b.severity.toLowerCase()] ?? '#94a3b8',
+				color: severityChartColors[b.severity.toLowerCase()] ?? severityChartColors.info,
 			}))
 	);
 </script>
@@ -51,7 +51,7 @@
 			class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"
 			aria-hidden="true"
 		>
-			<span class="text-2xl font-bold" style="font-family: var(--font-display);">
+			<span class="text-2xl font-bold font-display">
 				{severity.total}
 			</span>
 			<span class="text-[11px] text-muted-foreground">findings</span>

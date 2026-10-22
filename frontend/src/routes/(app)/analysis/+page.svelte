@@ -11,11 +11,6 @@
 	import Eye from '@lucide/svelte/icons/eye';
 	import StopCircle from '@lucide/svelte/icons/circle-stop';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import Clock from '@lucide/svelte/icons/clock';
-	import Check from '@lucide/svelte/icons/check';
-	import X from '@lucide/svelte/icons/x';
-	import Ban from '@lucide/svelte/icons/ban';
-	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -26,7 +21,12 @@
 		type AnalysisRunListItem,
 	} from '$lib/api/runs';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import { statusColors, severityColors } from '$lib/constants/analysis';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import { severityColors } from '$lib/constants/analysis';
 	import { formatDate, statusLabel } from '$lib/utils/formatters';
 
 	let loading = $state(true);
@@ -182,31 +182,23 @@
 	});
 </script>
 
-<svelte:head>
-	<title>Analysis - LLM Lab</title>
-</svelte:head>
-
 <div class="space-y-6">
-	<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-		<div class="page-header min-w-0">
-			<h1>Analysis</h1>
-			<p>Run and monitor analyzers against your generated apps.</p>
-		</div>
-		<div class="flex flex-wrap items-center gap-2">
+	<PageHeader title="Analysis" description="Run and monitor analyzers against your generated apps.">
+		{#snippet actions()}
 			<Button variant="outline" size="sm" href="/analyzers">
 				<Store class="mr-2 h-3.5 w-3.5" />
 				Tool Shop
 			</Button>
 			<Button variant="outline" size="sm" onclick={handleRefresh} disabled={refreshing}>
-				<RefreshCw class="mr-2 h-3.5 w-3.5 {refreshing ? 'animate-spin' : ''}" />
+				<RefreshCw class="mr-2 h-3.5 w-3.5 {refreshing ? 'animate-spin motion-reduce:animate-none' : ''}" />
 				Refresh
 			</Button>
 			<Button size="sm" href="/analysis/create">
 				<Plus class="mr-2 h-3.5 w-3.5" />
-				New
+				New analysis
 			</Button>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	<FilterBar
 		searchPlaceholder="Filter loaded runs by name or ID…"
@@ -236,51 +228,26 @@
 	</FilterBar>
 
 	{#if loading}
-		<!-- Skeleton table — reserves space to avoid layout shift -->
-		<Card.Root>
-			<Card.Content class="p-0">
-				<div class="animate-pulse motion-reduce:animate-none divide-y divide-border">
-					<div class="flex items-center gap-3 bg-muted/40 px-3 py-2.5">
-						<div class="h-3 w-24 rounded bg-muted"></div>
-						<div class="ml-auto h-3 w-16 rounded bg-muted"></div>
-					</div>
-					{#each Array(6) as _}
-						<div class="flex items-center gap-3 px-3 py-3">
-							<div class="h-8 w-8 shrink-0 rounded-md bg-muted"></div>
-							<div class="h-3 w-40 rounded bg-muted"></div>
-							<div class="ml-auto flex items-center gap-2">
-								<div class="h-5 w-16 rounded-full bg-muted"></div>
-								<div class="h-5 w-10 rounded-full bg-muted"></div>
-							</div>
-						</div>
-					{/each}
-				</div>
-			</Card.Content>
-		</Card.Root>
+		<LoadingState label="loading analysis runs" />
 	{:else if error}
-		<Card.Root>
-			<Card.Content class="flex flex-col items-center gap-3 py-12">
-				<AlertTriangle class="h-8 w-8 text-destructive" />
-				<p class="text-sm text-muted-foreground">{error}</p>
-				<Button variant="outline" size="sm" onclick={() => loadAll()}>Retry</Button>
-			</Card.Content>
-		</Card.Root>
+		<ErrorAlert message={error} onretry={() => loadAll()} />
 	{:else if runs.length === 0}
-		<Card.Root>
-			<Card.Content class="py-16 text-center">
-				<Microscope class="mx-auto h-12 w-12 text-muted-foreground/50 mb-4" />
-				<h3 class="text-lg font-medium mb-1">No analysis runs found</h3>
-				<p class="text-sm text-muted-foreground mb-4">
-					{statusFilter ? 'No runs match your filter.' : 'No analysis runs yet.'}
-				</p>
-				{#if !statusFilter}
+		<EmptyState
+			icon={Microscope}
+			title="No analysis runs found"
+			description={statusFilter ? 'No runs match your filter.' : 'No analysis runs yet.'}
+		>
+			{#snippet action()}
+				{#if statusFilter}
+					<Button variant="outline" size="sm" onclick={() => selectStatus('')}>Clear filter</Button>
+				{:else}
 					<Button size="sm" href="/analysis/create">
 						<Plus class="mr-2 h-3.5 w-3.5" />
 						Run your first analysis
 					</Button>
 				{/if}
-			</Card.Content>
-		</Card.Root>
+			{/snippet}
+		</EmptyState>
 	{:else}
 		<div class="hidden md:block">
 			<Card.Root>
@@ -322,36 +289,21 @@
 										<td class="px-3 py-2">
 											<div class="flex flex-wrap gap-1">
 												{#each run.tool_slugs.slice(0, 4) as slug}
-													<Badge variant="secondary" class="text-[10px]">{slug}</Badge>
+													<Badge variant="secondary" class="text-[11px]">{slug}</Badge>
 												{/each}
 												{#if run.tool_slugs.length > 4}
-													<Badge variant="outline" class="text-[10px]">+{run.tool_slugs.length - 4}</Badge>
+													<Badge variant="outline" class="text-[11px]">+{run.tool_slugs.length - 4}</Badge>
 												{/if}
 											</div>
 										</td>
 										<td class="px-3 py-2 align-top">
-											<Badge variant="outline" class="text-[10px] {statusColors[run.status] ?? ''}">
-												{#if run.status === 'running'}
-													<LoaderCircle class="mr-1 h-3 w-3 animate-spin motion-reduce:animate-none" />
-												{:else if run.status === 'pending'}
-													<Clock class="mr-1 h-3 w-3" />
-												{:else if run.status === 'completed'}
-													<Check class="mr-1 h-3 w-3" />
-												{:else if run.status === 'failed'}
-													<X class="mr-1 h-3 w-3" />
-												{:else if run.status === 'cancelled'}
-													<Ban class="mr-1 h-3 w-3" />
-												{:else if run.status === 'partial'}
-													<AlertTriangle class="mr-1 h-3 w-3" />
-												{/if}
-												{statusLabel(run.status)}
-											</Badge>
+											<StatusBadge status={run.status} label={statusLabel(run.status)} />
 										</td>
 										<td class="px-3 py-2 align-top">
 											{#if severityBreakdown(run).length > 0}
 												<div class="flex flex-wrap gap-1">
 													{#each severityBreakdown(run) as [sev, count]}
-														<Badge variant="outline" class="text-[10px] {severityColors[sev] ?? ''}">{count} {sev.charAt(0).toUpperCase()}</Badge>
+														<Badge variant="outline" class="text-[11px] {severityColors[sev] ?? ''}">{count} {sev.charAt(0).toUpperCase()}</Badge>
 													{/each}
 												</div>
 											{:else}
@@ -369,7 +321,7 @@
 														{#if cancellingIds.has(run.id)}
 															<LoaderCircle class="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
 														{:else}
-															<StopCircle class="h-3.5 w-3.5 text-amber-400" />
+															<StopCircle class="h-3.5 w-3.5 text-warning-fg" />
 														{/if}
 													</Button>
 												{:else}
@@ -401,12 +353,12 @@
 							<span class="text-sm font-medium truncate">{runName(run)}</span>
 							<span class="font-mono text-xs text-muted-foreground">{run.id.slice(0, 8)}</span>
 						</div>
-						<Badge variant="outline" class="shrink-0 text-[10px] {statusColors[run.status] ?? ''}">{statusLabel(run.status)}</Badge>
+						<StatusBadge status={run.status} label={statusLabel(run.status)} />
 					</div>
 					{#if severityBreakdown(run).length > 0}
 						<div class="flex flex-wrap gap-1 mb-2">
 							{#each severityBreakdown(run) as [sev, count]}
-								<Badge variant="outline" class="text-[10px] {severityColors[sev] ?? ''}">{count} {sev.charAt(0).toUpperCase()}</Badge>
+								<Badge variant="outline" class="text-[11px] {severityColors[sev] ?? ''}">{count} {sev.charAt(0).toUpperCase()}</Badge>
 							{/each}
 						</div>
 					{/if}

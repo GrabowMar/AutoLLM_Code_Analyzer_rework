@@ -14,6 +14,8 @@
 		type StackWritePayload,
 	} from '$lib/api/client';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import X from '@lucide/svelte/icons/x';
 	import Eye from '@lucide/svelte/icons/eye';
@@ -141,26 +143,24 @@
 </script>
 
 <Card.Root>
-	<Card.Header class="pb-3">
-		<Card.Title class="text-base">
+	<Card.Header class="border-b">
+		<Card.Title>
 			{#if editSlug}
 				Edit {editSlug}
-				<span class="text-xs font-normal text-muted-foreground">creates v{currentVersion + 1} — versions are immutable</span>
 			{:else if duplicateFromSlug}
 				Duplicate {duplicateFromSlug} as a new stack
 			{:else}
-				New Stack
+				New stack
 			{/if}
 		</Card.Title>
-		<Card.Description class="text-xs">
+		<Card.Description>
+			{#if editSlug}Saving creates v{currentVersion + 1}; versions are immutable.{/if}
 			User stacks cannot ship a Dockerfile — it is generated from a pinned template with allowlisted base images.
 		</Card.Description>
 	</Card.Header>
 	<Card.Content class="space-y-4">
 		{#if loading}
-			<div class="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-				<LoaderCircle class="h-4 w-4 animate-spin" /> Loading…
-			</div>
+			<LoadingState label="loading stack" class="py-8" />
 		{:else}
 			<div class="grid gap-3 sm:grid-cols-2">
 				<div class="space-y-1.5">
@@ -240,7 +240,7 @@
 										class="flex-1 truncate rounded px-2 py-1 text-left text-[11px] font-mono transition-colors cursor-pointer {selectedPath === path ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}"
 										onclick={() => (selectedPath = path)}
 									>{path}</button>
-									<button type="button" class="p-1 text-muted-foreground hover:text-destructive cursor-pointer" onclick={() => removeFile(path)} aria-label="Remove {path}">
+									<button type="button" class="p-1 text-muted-foreground hover:text-danger-fg cursor-pointer" onclick={() => removeFile(path)} aria-label="Remove {path}">
 										<X class="h-3 w-3" />
 									</button>
 								</div>
@@ -251,10 +251,11 @@
 								type="text"
 								bind:value={newPath}
 								placeholder="frontend/src/App.jsx"
+								aria-label="New file path"
 								class="h-7 flex-1 rounded border border-input bg-surface-1 px-2 text-[11px] font-mono"
 								onkeydown={(e) => e.key === 'Enter' && addFile()}
 							/>
-							<Button variant="outline" size="sm" class="h-7 px-2 text-xs cursor-pointer" onclick={addFile}>
+							<Button variant="outline" size="sm" class="h-7 px-2" aria-label="Add file" onclick={addFile}>
 								<Plus class="h-3 w-3" />
 							</Button>
 						</div>
@@ -265,6 +266,7 @@
 							rows={12}
 							class="text-xs font-mono leading-relaxed"
 							placeholder="file content"
+							aria-label="Content of {selectedPath}"
 						/>
 					{:else}
 						<div class="flex items-center justify-center rounded border border-dashed text-xs text-muted-foreground">Select or add a file</div>
@@ -277,6 +279,7 @@
 				<button
 					type="button"
 					class="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+					aria-expanded={dockerfileOpen}
 					onclick={() => { dockerfileOpen = !dockerfileOpen; if (dockerfileOpen) loadDockerfile(); }}
 				>
 					<Eye class="h-3.5 w-3.5" />
@@ -284,23 +287,23 @@
 				</button>
 				{#if dockerfileOpen}
 					{#if dockerfileLoading}
-						<div class="flex items-center gap-2 text-xs text-muted-foreground"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /> Rendering…</div>
+						<LoadingState label="rendering" class="py-4" />
 					{:else if dockerfileError}
-						<p class="text-[10px] text-destructive">{dockerfileError}</p>
+						<p class="text-xs text-danger-fg">{dockerfileError}</p>
 					{:else}
-						<pre class="max-h-56 overflow-auto rounded border bg-muted/20 p-2 text-[10px] leading-relaxed whitespace-pre-wrap">{dockerfileText}</pre>
+						<pre class="max-h-56 overflow-auto rounded border bg-muted/20 p-2 text-[11px] font-mono leading-relaxed whitespace-pre-wrap">{dockerfileText}</pre>
 					{/if}
 				{/if}
 			</div>
 
 			{#if error}
-				<div class="rounded-md bg-destructive/10 border border-destructive/30 px-4 py-3 text-sm text-destructive">{error}</div>
+				<ErrorAlert message={error} />
 			{/if}
 
 			<div class="flex items-center justify-end gap-2 border-t pt-4">
 				<Button variant="outline" size="sm" onclick={onCancel} disabled={saving}>Cancel</Button>
 				<Button size="sm" onclick={() => onSave(payload(), isNewSlug)} disabled={saving || !name.trim() || !slug.trim()}>
-					{#if saving}<LoaderCircle class="mr-1.5 h-3.5 w-3.5 animate-spin" />{/if}
+					{#if saving}<LoaderCircle class="animate-spin" />{/if}
 					{isNewSlug ? 'Create stack' : `Save as v${currentVersion + 1}`}
 				</Button>
 			</div>

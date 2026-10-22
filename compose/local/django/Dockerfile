@@ -43,6 +43,16 @@ RUN groupadd --gid 1000 dev-user \
   && echo dev-user ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/dev-user \
   && chmod 0440 /etc/sudoers.d/dev-user
 
+# docker CLI for the devcontainer; DOCKER_HOST points it at the apps-dind
+# sandbox (see .devcontainer/docker-compose.devcontainer.yml).
+COPY --from=docker.io/library/docker:29.9.1-cli /usr/local/bin/docker /usr/local/bin/docker
+
+# Empty, dev-user-owned mount points for the devcontainer's named volumes
+# (see .devcontainer/docker-compose.devcontainer.yml). Docker seeds a new named
+# volume with the image directory's ownership, so dev-user can write to them.
+RUN mkdir -p /home/dev-user/.venv /home/dev-user/.cache ${APP_HOME}/frontend/node_modules \
+  && chown dev-user:dev-user /home/dev-user/.venv /home/dev-user/.cache ${APP_HOME}/frontend/node_modules
+
 ENV PATH="/${APP_HOME}/.venv/bin:$PATH"
 ENV PYTHONPATH="${APP_HOME}/.venv/lib/python3.13/site-packages:$PYTHONPATH"
 

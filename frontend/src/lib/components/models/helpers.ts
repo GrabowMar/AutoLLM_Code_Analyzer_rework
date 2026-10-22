@@ -30,15 +30,15 @@ export function costEfficiencyGrade(score: number): {
   grade: string;
   color: string;
 } {
-  if (score >= 0.9) return { grade: "A+", color: "text-emerald-500" };
-  if (score >= 0.8) return { grade: "A", color: "text-emerald-500" };
-  if (score >= 0.7) return { grade: "A-", color: "text-emerald-400" };
-  if (score >= 0.6) return { grade: "B+", color: "text-blue-500" };
-  if (score >= 0.5) return { grade: "B", color: "text-blue-500" };
-  if (score >= 0.4) return { grade: "B-", color: "text-blue-400" };
-  if (score >= 0.3) return { grade: "C+", color: "text-amber-500" };
-  if (score >= 0.2) return { grade: "C", color: "text-amber-500" };
-  return { grade: "D", color: "text-red-500" };
+  if (score >= 0.9) return { grade: "A+", color: "text-success-fg" };
+  if (score >= 0.8) return { grade: "A", color: "text-success-fg" };
+  if (score >= 0.7) return { grade: "A-", color: "text-success-fg" };
+  if (score >= 0.6) return { grade: "B+", color: "text-info-fg" };
+  if (score >= 0.5) return { grade: "B", color: "text-info-fg" };
+  if (score >= 0.4) return { grade: "B-", color: "text-info-fg" };
+  if (score >= 0.3) return { grade: "C+", color: "text-warning-fg" };
+  if (score >= 0.2) return { grade: "C", color: "text-warning-fg" };
+  return { grade: "D", color: "text-danger-fg" };
 }
 
 export function getMeta(m: LLMModelDetail): Record<string, unknown> {

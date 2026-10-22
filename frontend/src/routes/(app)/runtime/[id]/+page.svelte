@@ -1,19 +1,22 @@
 <script lang="ts">
 	import { formatDateTime as formatDate } from '$lib/utils/formatters';
-	import { containerStatusColors as statusColors } from '$lib/constants/colors';
+	import { containerTones } from '$lib/constants/colors';
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
+	import * as Tabs from '$lib/components/ui/tabs';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Play from '@lucide/svelte/icons/play';
 	import Square from '@lucide/svelte/icons/square';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import {
 		getContainer,
 		getContainerLogs,
@@ -25,8 +28,6 @@
 		removeContainer,
 		type ContainerInstance,
 		type ContainerAction,
-		type ContainerStatus,
-		type ActionStatus
 	} from '$lib/api/client';
 	import { subscribe } from '$lib/api/sse';
 	import { toast } from 'svelte-sonner';
@@ -39,15 +40,8 @@
 	let health = $state('');
 	let loading = $state(true);
 	let error = $state('');
-	let activeTab = $state<'overview' | 'logs' | 'actions'>('overview');
+	let activeTab = $state('overview');
 	let actionLoading = $state(false);
-
-	const actionStatusColors: Record<ActionStatus, string> = {
-		pending: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
-		running: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
-		completed: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
-		failed: 'bg-red-500/15 text-red-400 border-red-500/30'
-	};
 
 	async function load() {
 		loading = true;
@@ -131,91 +125,81 @@
 	});
 </script>
 
-<svelte:head>
-	<title>Container — LLM Eval Lab</title>
-</svelte:head>
-
 <div class="space-y-6">
-	<div class="flex items-center gap-3">
-		<Button variant="ghost" size="sm" onclick={() => goto('/runtime')}>
-			<ArrowLeft class="mr-1 h-4 w-4" />Back
-		</Button>
-		{#if container}
-			<Badge class={statusColors[container.status]}>{container.status}</Badge>
-			<h1 class="text-xl font-bold font-mono truncate">{container.name}</h1>
-		{/if}
-		<div class="ml-auto flex gap-2">
+	<PageHeader
+		title={container?.name ?? 'Container'}
+		description="Container lifecycle, logs and action history."
+		back={{ href: '/runtime', label: 'Runtime' }}
+	>
+		{#snippet meta()}
+			{#if container}<StatusBadge status={container.status} tones={containerTones} />{/if}
+		{/snippet}
+		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={load}>
-				<RefreshCw class="mr-1 h-4 w-4" />Refresh
+				<RefreshCw />Refresh
 			</Button>
 			{#if container?.status === 'stopped'}
 				<Button size="sm" variant="outline" onclick={() => act('start')} disabled={actionLoading}>
-					<Play class="mr-1 h-3 w-3" />Start
+					<Play />Start
 				</Button>
-			{/if}
-			{#if container?.status === 'failed'}
-				<span class="text-xs text-destructive self-center" title={container.last_error}>
-					⚠ Build failed{container.last_error ? `: ${container.last_error}` : ''}
-				</span>
 			{/if}
 			{#if container?.status === 'running'}
 				<Button size="sm" variant="outline" onclick={() => act('stop')} disabled={actionLoading}>
-					<Square class="mr-1 h-3 w-3" />Stop
+					<Square />Stop
 				</Button>
 				<Button size="sm" variant="outline" onclick={() => act('restart')} disabled={actionLoading}>
-					<RotateCcw class="mr-1 h-3 w-3" />Restart
+					<RotateCcw />Restart
 				</Button>
 			{/if}
 			{#if container && container.status !== 'removed'}
 				<Button size="sm" variant="destructive" onclick={() => act('remove')} disabled={actionLoading}>
-					<Trash2 class="mr-1 h-3 w-3" />Remove
+					<Trash2 />Remove
 				</Button>
 			{/if}
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	{#if loading}
-		<Card.Root>
-			<Card.Content class="flex items-center justify-center py-20">
-				<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
-			</Card.Content>
-		</Card.Root>
+		<LoadingState label="loading container" />
 	{:else if error}
-		<Card.Root><Card.Content class="p-6 text-destructive text-sm">{error}</Card.Content></Card.Root>
+		<ErrorAlert message={error} onretry={load} />
 	{:else if container}
-		<!-- Tabs -->
-		<div class="flex gap-1 border-b border-border">
-			{#each (['overview', 'logs', 'actions'] as const) as tab (tab)}
-				<button
-					class="px-4 py-2 text-sm font-medium capitalize transition-colors {activeTab === tab ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}"
-					onclick={() => (activeTab = tab)}
-				>
-					{tab}
-					{#if tab === 'actions' && actions.length > 0}
-						<span class="ml-1 text-xs text-muted-foreground">({actions.length})</span>
-					{/if}
-				</button>
-			{/each}
-		</div>
+		{#if container.last_error}
+			<ErrorAlert
+				title={container.status === 'failed' ? 'Build failed' : 'Last error'}
+				message={container.last_error}
+			/>
+		{/if}
 
-		{#if activeTab === 'overview'}
-			<div class="grid gap-4 sm:grid-cols-2">
-				<Card.Root>
-					<Card.Header><Card.Title class="text-sm">Container Info</Card.Title></Card.Header>
+		<Tabs.Root bind:value={activeTab}>
+			<Tabs.List>
+				<Tabs.Trigger value="overview">Overview</Tabs.Trigger>
+				<Tabs.Trigger value="logs">Logs</Tabs.Trigger>
+				<Tabs.Trigger value="actions">
+					Actions
+					{#if actions.length > 0}
+						<span class="text-xs text-muted-foreground">({actions.length})</span>
+					{/if}
+				</Tabs.Trigger>
+			</Tabs.List>
+
+			<Tabs.Content value="overview">
+				<Card.Root class="max-w-2xl">
+					<Card.Header><Card.Title class="text-sm">Container info</Card.Title></Card.Header>
 					<Card.Content class="text-sm space-y-2">
-						<div class="flex justify-between">
+						<div class="flex justify-between gap-4">
 							<span class="text-muted-foreground">ID</span>
 							<span class="font-mono text-xs">{container.id.slice(0, 8)}…</span>
 						</div>
-						<div class="flex justify-between">
+						<div class="flex justify-between gap-4">
 							<span class="text-muted-foreground">Image</span>
-							<span class="font-mono text-xs">{container.image || '—'}</span>
+							<span class="font-mono text-xs truncate">{container.image || '—'}</span>
 						</div>
-						<div class="flex justify-between">
+						<div class="flex justify-between gap-4">
 							<span class="text-muted-foreground">App port</span>
 							<span>
 								{#if container.app_port}
-									<a href={container.app_url ?? '#'} target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">
+									<a href={container.app_url ?? '#'} target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">
 										{container.app_port}
 									</a>
 								{:else}
@@ -223,76 +207,65 @@
 								{/if}
 							</span>
 						</div>
-						<div class="flex justify-between">
+						<div class="flex justify-between gap-4">
 							<span class="text-muted-foreground">Health</span>
 							<span class="capitalize">{health || '—'}</span>
 						</div>
-						<div class="flex justify-between">
+						<div class="flex justify-between gap-4">
 							<span class="text-muted-foreground">Created</span>
 							<span class="text-xs">{formatDate(container.created_at)}</span>
 						</div>
 					</Card.Content>
 				</Card.Root>
-				{#if container.last_error}
-					<Card.Root>
-						<Card.Header><Card.Title class="text-sm text-destructive">Error</Card.Title></Card.Header>
-						<Card.Content>
-							<p class="text-xs text-destructive">{container.last_error}</p>
-						</Card.Content>
-					</Card.Root>
-				{/if}
-			</div>
+			</Tabs.Content>
 
-		{:else if activeTab === 'logs'}
-			<Card.Root>
-				<Card.Header class="flex flex-row items-center justify-between">
-					<Card.Title class="text-sm">Container Logs</Card.Title>
-					<Button size="sm" variant="outline" onclick={loadLogs}>
-						<RefreshCw class="h-3 w-3" />
-					</Button>
-				</Card.Header>
-				<Card.Content>
-					<pre class="bg-background rounded p-3 text-xs font-mono overflow-auto max-h-[500px] whitespace-pre-wrap break-all">{logs || 'No logs available'}</pre>
-				</Card.Content>
-			</Card.Root>
-
-		{:else if activeTab === 'actions'}
-			{#if actions.length === 0}
+			<Tabs.Content value="logs">
 				<Card.Root>
-					<Card.Content class="py-16 text-center">
-						<h3 class="text-lg font-medium mb-1">No actions recorded</h3>
-						<p class="text-sm text-muted-foreground">Container lifecycle actions will appear here.</p>
+					<Card.Header class="flex flex-row items-center justify-between">
+						<Card.Title class="text-sm">Container logs</Card.Title>
+						<Button size="sm" variant="outline" onclick={loadLogs} aria-label="Refresh logs">
+							<RefreshCw class="h-3 w-3" />
+						</Button>
+					</Card.Header>
+					<Card.Content>
+						<pre class="bg-background rounded p-3 text-xs font-mono overflow-auto max-h-[500px] whitespace-pre-wrap break-all">{logs || 'No logs available'}</pre>
 					</Card.Content>
 				</Card.Root>
-			{:else}
-				<div class="space-y-3">
-					{#each actions as a (a.id)}
-						<Card.Root>
-							<Card.Content class="p-4">
-								<div class="flex items-center justify-between gap-2 mb-2">
-									<div class="flex items-center gap-2">
-										<span class="font-medium text-sm capitalize">{a.action_type}</span>
-										<Badge class={actionStatusColors[a.status]}>{a.status}</Badge>
+			</Tabs.Content>
+
+			<Tabs.Content value="actions">
+				{#if actions.length === 0}
+					<EmptyState title="No actions recorded" description="Container lifecycle actions will appear here." />
+				{:else}
+					<div class="space-y-3">
+						{#each actions as a (a.id)}
+							<Card.Root>
+								<Card.Content class="p-4">
+									<div class="flex items-center justify-between gap-2 mb-2">
+										<div class="flex items-center gap-2">
+											<span class="font-medium text-sm capitalize">{a.action_type}</span>
+											<StatusBadge status={a.status} />
+										</div>
+										<span class="text-xs text-muted-foreground">{formatDate(a.created_at)}</span>
 									</div>
-									<span class="text-xs text-muted-foreground">{formatDate(a.created_at)}</span>
-								</div>
-								{#if a.status === 'running'}
-									<div class="text-xs text-muted-foreground mb-1">{a.progress_percent}%</div>
-									<div class="w-full bg-muted rounded-full h-1.5">
-										<div class="bg-primary h-1.5 rounded-full transition-all" style="width: {a.progress_percent}%"></div>
-									</div>
-								{/if}
-								{#if a.error_message}
-									<p class="text-xs text-destructive mt-2">{a.error_message}</p>
-								{/if}
-								{#if a.log_output}
-									<pre class="mt-2 text-xs font-mono bg-muted/40 rounded p-2 overflow-auto max-h-32 whitespace-pre-wrap">{a.log_output}</pre>
-								{/if}
-							</Card.Content>
-						</Card.Root>
-					{/each}
-				</div>
-			{/if}
-		{/if}
+									{#if a.status === 'running'}
+										<div class="text-xs text-muted-foreground mb-1">{a.progress_percent}%</div>
+										<div class="w-full bg-muted rounded-full h-1.5">
+											<div class="bg-primary h-1.5 rounded-full transition-all" style="width: {a.progress_percent}%"></div>
+										</div>
+									{/if}
+									{#if a.error_message}
+										<p class="text-xs text-danger-fg mt-2">{a.error_message}</p>
+									{/if}
+									{#if a.log_output}
+										<pre class="mt-2 text-xs font-mono bg-muted/40 rounded p-2 overflow-auto max-h-32 whitespace-pre-wrap">{a.log_output}</pre>
+									{/if}
+								</Card.Content>
+							</Card.Root>
+						{/each}
+					</div>
+				{/if}
+			</Tabs.Content>
+		</Tabs.Root>
 	{/if}
 </div>

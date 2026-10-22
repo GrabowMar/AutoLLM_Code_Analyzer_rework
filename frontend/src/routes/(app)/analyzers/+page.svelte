@@ -18,6 +18,16 @@
 	import XCircle from '@lucide/svelte/icons/circle-x';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import Search from '@lucide/svelte/icons/search';
+	import SearchX from '@lucide/svelte/icons/search-x';
+	import Store from '@lucide/svelte/icons/store';
+	import PackageOpen from '@lucide/svelte/icons/package-open';
+	import * as Tabs from '$lib/components/ui/tabs';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import type { Tone } from '$lib/constants/colors';
 	import {
 		getToolCatalog,
 		getWorkspace,
@@ -35,7 +45,14 @@
 		type TestResult,
 	} from '$lib/api/analyzers';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import { severityColors, statusColors } from '$lib/constants/analysis';
+	import { severityColors } from '$lib/constants/analysis';
+
+	// Tool install / workspace lifecycle → badge tone.
+	const analyzerTones: Partial<Record<string, Tone>> = {
+		installed: 'success',
+		installing: 'info',
+		provisioning: 'info',
+	};
 
 	// Generic confirmation dialog for destructive actions (uninstall / teardown).
 	let confirmState = $state<{
@@ -247,48 +264,32 @@
 	onDestroy(stopPolling);
 </script>
 
-<svelte:head><title>Analyzers - LLM Lab</title></svelte:head>
-
 <div class="space-y-6">
-	<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-		<div class="page-header min-w-0">
-			<h1>Analyzers</h1>
-			<p>
-				Browse the tool shop, install tools into your analyzer workspace, configure and test them.
-			</p>
-		</div>
-		<Button variant="outline" size="sm" onclick={loadAll}>
-			<RefreshCw class="size-4" /> Refresh
-		</Button>
-	</div>
+	<PageHeader
+		title="Analyzers"
+		description="Browse the tool shop, install tools into your analyzer workspace, configure and test them."
+	>
+		{#snippet actions()}
+			<Button variant="outline" size="sm" onclick={loadAll} disabled={loading}>
+				<RefreshCw class="size-4" /> Refresh
+			</Button>
+		{/snippet}
+	</PageHeader>
 
-	<!-- Tabs -->
-	<div class="flex gap-1 border-b" role="tablist" aria-label="Analyzer sections">
-		{#each [['shop', 'Shop'], ['installed', `Installed (${installed.length})`], ['workspace', 'Workspace']] as [key, label]}
-			<button
-				role="tab"
-				aria-selected={activeTab === key}
-				class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors {activeTab === key
-					? 'border-primary text-primary'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
-				onclick={() => (activeTab = key as Tab)}
-			>
-				{label}
-			</button>
-		{/each}
-	</div>
+	<Tabs.Root bind:value={activeTab} class="space-y-6">
+		<Tabs.List aria-label="Analyzer sections">
+			<Tabs.Trigger value="shop">Shop</Tabs.Trigger>
+			<Tabs.Trigger value="installed">Installed ({installed.length})</Tabs.Trigger>
+			<Tabs.Trigger value="workspace">Workspace</Tabs.Trigger>
+		</Tabs.List>
 
 	{#if loading}
-		<!-- Skeleton tool cards -->
-		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-hidden="true">
-			{#each Array(6) as _, i (i)}
-				<div class="skeleton h-36"></div>
-			{/each}
-		</div>
-	{:else if activeTab === 'shop'}
+		<LoadingState label="loading analyzers" />
+	{:else}
+	<Tabs.Content value="shop" class="space-y-4">
 		<!-- Category filter + search -->
 		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div class="flex flex-wrap gap-2">
+			<div class="flex flex-wrap gap-2" role="group" aria-label="Filter by category">
 				{#each categories as cat (cat)}
 					<button
 						class="fb-chip {categoryFilter === cat ? 'fb-chip-on' : ''}"
@@ -301,32 +302,34 @@
 			</div>
 			<div class="relative w-full sm:w-60">
 				<Search class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-				<Input type="search" placeholder="Search tools…" class="pl-8" bind:value={searchQuery} />
+				<Input type="search" placeholder="Search tools…" aria-label="Search tools" class="pl-8" bind:value={searchQuery} />
 			</div>
 		</div>
 
 		{#if visibleCatalog.length === 0}
-			<div class="empty-state rounded-md border border-dashed text-sm text-muted-foreground">
-				{#if catalog.length === 0}
-					The tool catalog is empty.
-				{:else}
-					No tools match your filters.
-					<button
-						class="ml-1 text-primary underline"
-						onclick={() => {
-							searchQuery = '';
-							categoryFilter = 'all';
-						}}
-					>
-						Clear filters
-					</button>
-				{/if}
-			</div>
+			{#if catalog.length === 0}
+				<EmptyState icon={Store} title="The tool catalog is empty" />
+			{:else}
+				<EmptyState icon={SearchX} title="No tools match your filters">
+					{#snippet action()}
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={() => {
+								searchQuery = '';
+								categoryFilter = 'all';
+							}}
+						>
+							Clear filters
+						</Button>
+					{/snippet}
+				</EmptyState>
+			{/if}
 		{/if}
 
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 			{#each visibleCatalog as tool (tool.slug)}
-				<Card.Root class="flex flex-col transition-colors hover:border-primary/30">
+				<Card.Root class="flex flex-col">
 					<Card.Header>
 						<div class="flex items-start justify-between gap-2">
 							<Card.Title class="text-base">{tool.name}</Card.Title>
@@ -378,15 +381,17 @@
 				</Card.Root>
 			{/each}
 		</div>
-	{:else if activeTab === 'installed'}
+	</Tabs.Content>
+
+	<Tabs.Content value="installed">
 		{#if installed.length === 0}
-			<div class="empty-state rounded-md border border-dashed text-sm text-muted-foreground">
-				<p>
-					No tools installed yet. Visit the
-					<button class="text-primary underline" onclick={() => (activeTab = 'shop')}>Shop</button>
-					to add some.
-				</p>
-			</div>
+			<EmptyState icon={PackageOpen} title="No tools installed yet" description="Install analyzers from the shop to use them in analysis runs.">
+				{#snippet action()}
+					<Button size="sm" onclick={() => (activeTab = 'shop')}>
+						<Store class="size-4" /> Browse the shop
+					</Button>
+				{/snippet}
+			</EmptyState>
 		{:else}
 			<div class="space-y-3">
 				{#each installed as it (it.id)}
@@ -395,7 +400,7 @@
 							<div class="min-w-0">
 								<div class="flex items-center gap-2">
 									<span class="font-medium">{it.tool_name}</span>
-									<Badge class={statusColors[it.status] ?? ''}>{it.status}</Badge>
+									<StatusBadge status={it.status} tones={analyzerTones} />
 									{#if it.installed_version}
 										<span class="text-xs text-muted-foreground truncate">{it.installed_version}</span>
 									{/if}
@@ -428,7 +433,9 @@
 				{/each}
 			</div>
 		{/if}
-	{:else if activeTab === 'workspace'}
+	</Tabs.Content>
+
+	<Tabs.Content value="workspace">
 		<Card.Root>
 			<Card.Header>
 				<Card.Title>Analyzer workspace</Card.Title>
@@ -439,18 +446,16 @@
 			<Card.Content class="space-y-4">
 				<div class="flex items-center gap-3">
 					<span class="text-sm text-muted-foreground">Status</span>
-					<Badge class={statusColors[workspace?.status ?? ''] ?? ''}>
-						{workspace?.status ?? 'unknown'}
-					</Badge>
+					<StatusBadge status={workspace?.status} tones={analyzerTones} />
 					{#if workspace?.status === 'provisioning'}
-						<Loader class="size-4 animate-spin text-muted-foreground" />
+						<Loader class="size-4 animate-spin text-muted-foreground motion-reduce:animate-none" />
 					{/if}
 				</div>
 				{#if workspace?.container_name}
 					<div class="text-sm text-muted-foreground">Container: <code>{workspace.container_name}</code></div>
 				{/if}
 				{#if workspace?.error_message}
-					<p class="text-sm text-destructive">{workspace.error_message}</p>
+					<ErrorAlert message={workspace.error_message} />
 				{/if}
 				<div class="text-sm text-muted-foreground">
 					{workspace?.installed_count ?? 0} tool(s) installed
@@ -476,7 +481,9 @@
 				</div>
 			</Card.Content>
 		</Card.Root>
+	</Tabs.Content>
 	{/if}
+	</Tabs.Root>
 </div>
 
 <!-- Configure & test dialog -->
@@ -504,16 +511,18 @@
 			{#if activeSchema && activeSchema.config_schema.length > 0}
 				{#each activeSchema.config_schema as field}
 					<div class="space-y-1.5">
-						<Label>{field.label}</Label>
+						<Label for="cfg-{field.name}">{field.label}</Label>
 						{#if field.type === 'boolean'}
 							<div>
 								<Switch
+									id="cfg-{field.name}"
 									checked={!!configDraft[field.name]}
 									onCheckedChange={(v) => (configDraft = { ...configDraft, [field.name]: v })}
 								/>
 							</div>
 						{:else if field.type === 'select'}
 							<select
+								id="cfg-{field.name}"
 								class="std-select w-full"
 								value={configDraft[field.name] ?? field.default}
 								onchange={(e) =>
@@ -525,6 +534,7 @@
 							</select>
 						{:else}
 							<Input
+								id="cfg-{field.name}"
 								type={field.type === 'number' ? 'number' : 'text'}
 								placeholder={field.placeholder}
 								value={String(configDraft[field.name] ?? field.default ?? '')}
@@ -545,7 +555,7 @@
 				<div class="rounded-md border p-3 text-sm">
 					<div class="flex items-center gap-2 font-medium">
 						{#if testResult.available}
-							<CheckCircle2 class="size-4 text-emerald-500" /> Available
+							<CheckCircle2 class="size-4 text-success-fg" /> Available
 						{:else}
 							<XCircle class="size-4 text-destructive" /> Unavailable
 						{/if}

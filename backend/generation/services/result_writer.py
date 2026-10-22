@@ -36,6 +36,14 @@ def publish_progress(
     )
 
 
+def publish_phase(job: GenerationJob, phase: str) -> None:
+    """Publish an agent-run phase change (``queued`` → ``running``)."""
+    realtime.publish(
+        f"generation:{job.id}",
+        {"type": "progress", "status": job.status, "phase": phase},
+    )
+
+
 def update_batch(job: GenerationJob) -> None:
     """Update batch counters if job belongs to a batch."""
     if not job.batch:
@@ -46,7 +54,8 @@ def update_batch(job: GenerationJob) -> None:
         status=GenerationJob.Status.COMPLETED,
     ).count()
     batch.failed_jobs = jobs.filter(status=GenerationJob.Status.FAILED).count()
-    done = batch.completed_jobs + batch.failed_jobs
+    cancelled = jobs.filter(status=GenerationJob.Status.CANCELLED).count()
+    done = batch.completed_jobs + batch.failed_jobs + cancelled
     if done >= batch.total_jobs:
         if batch.failed_jobs == 0:
             batch.status = "completed"

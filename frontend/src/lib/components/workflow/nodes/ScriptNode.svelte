@@ -22,14 +22,14 @@
 	{#if keys.length === 0}
 		<p class="text-muted-foreground italic">Configure via JSON</p>
 	{:else}
-		<div class="space-y-0.5 font-mono text-[10px]">
+		<div class="space-y-0.5 font-mono text-[11px]">
 			{#each keys.slice(0, 4) as key (key)}
 				<div class="flex justify-between gap-2">
 					<span class="text-muted-foreground truncate">{key}</span>
 					<span class="truncate max-w-[120px]" title={String(cfg[key])}>{String(cfg[key]).slice(0, 20)}</span>
 				</div>
 			{/each}
-			{#if keys.length > 4}<p class="text-muted-foreground/60">+{keys.length - 4} more…</p>{/if}
+			{#if keys.length > 4}<p class="text-muted-foreground">+{keys.length - 4} more…</p>{/if}
 		</div>
 	{/if}
 </NodeShell>

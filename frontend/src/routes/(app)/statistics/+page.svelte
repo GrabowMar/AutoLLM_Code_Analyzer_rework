@@ -4,16 +4,16 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
-	import BarChart3 from '@lucide/svelte/icons/bar-chart-3';
-	import TrendingUp from '@lucide/svelte/icons/trending-up';
-	import Clock from '@lucide/svelte/icons/clock';
-	import Cpu from '@lucide/svelte/icons/cpu';
 	import LineChart from '@lucide/svelte/icons/line-chart';
 	import PieChart from '@lucide/svelte/icons/pie-chart';
 	import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
 	import Activity from '@lucide/svelte/icons/activity';
 	import Code from '@lucide/svelte/icons/code';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import {
 		getStatisticsDashboard,
 		getStatisticsTrends,
@@ -42,7 +42,9 @@
 		}
 	}
 
-	onMount(async () => {
+	async function load() {
+		loading = true;
+		error = null;
 		try {
 			data = await getStatisticsDashboard();
 			trendsData = data.trends;
@@ -51,7 +53,9 @@
 		} finally {
 			loading = false;
 		}
-	});
+	}
+
+	onMount(load);
 
 	$effect(() => {
 		void trendDays;
@@ -60,18 +64,18 @@
 
 
 	const severityBarColor: Record<string, string> = {
-		critical: 'bg-red-500',
-		high: 'bg-orange-500',
-		medium: 'bg-amber-500',
-		low: 'bg-blue-500',
-		info: 'bg-slate-500',
+		critical: 'bg-destructive',
+		high: 'bg-destructive/60',
+		medium: 'bg-warning',
+		low: 'bg-info',
+		info: 'bg-muted-foreground',
 	};
 
 	function scoreColor(val: number, max: number = 10): string {
 		const pct = max === 100 ? val : (val / max) * 100;
-		if (pct >= 80) return 'text-emerald-500';
-		if (pct >= 60) return 'text-amber-500';
-		return 'text-destructive';
+		if (pct >= 80) return 'text-success-fg';
+		if (pct >= 60) return 'text-warning-fg';
+		return 'text-danger-fg';
 	}
 
 	function pct01(v: number | null | undefined): string {
@@ -110,33 +114,21 @@
 			? [
 					{
 						title: 'Total Analyses',
-						icon: BarChart3,
-						color: 'text-blue-500',
-						bg: 'bg-blue-500/10',
 						value: fmtNumber(data.overview.total_analyses),
 						delta: `${data.overview.analyses_completed} completed`,
 					},
 					{
 						title: 'Success Rate',
-						icon: TrendingUp,
-						color: 'text-emerald-500',
-						bg: 'bg-emerald-500/10',
 						value: `${data.overview.analyses_success_rate}%`,
 						delta: `Apps: ${data.overview.apps_success_rate}%`,
 					},
 					{
 						title: 'Avg. Duration',
-						icon: Clock,
-						color: 'text-amber-500',
-						bg: 'bg-amber-500/10',
 						value: fmtDuration(data.overview.avg_analysis_duration_seconds),
 						delta: 'per analysis',
 					},
 					{
 						title: 'Active Models',
-						icon: Cpu,
-						color: 'text-violet-500',
-						bg: 'bg-violet-500/10',
 						value: fmtNumber(data.overview.models_in_use),
 						delta: `${new Set(data.models.map((m) => m.provider)).size} providers`,
 					},
@@ -145,58 +137,30 @@
 	);
 </script>
 
-<svelte:head>
-	<title>Statistics - LLM Lab</title>
-</svelte:head>
-
-<div class="space-y-4 sm:space-y-6">
-	<div class="page-header">
-		<h1>Statistics</h1>
-		<p>Platform-wide analytics and performance metrics.</p>
-	</div>
+<div class="space-y-6">
+	<PageHeader title="Statistics" description="Platform-wide analytics and performance metrics.">
+		{#snippet meta()}
+			{#if data}
+				{@const health = data.analyzer_health}
+				<StatusBadge
+					status={health.offline === 0 ? 'healthy' : 'degraded'}
+					label="{health.offline === 0 ? 'System healthy' : 'Degraded'} · {health.online}/{health.total} analyzers online"
+				/>
+			{/if}
+		{/snippet}
+	</PageHeader>
 
 	{#if loading}
-		<Card.Root>
-			<Card.Content class="flex items-center justify-center py-20">
-				<LoaderCircle class="h-8 w-8 animate-spin text-muted-foreground" />
-			</Card.Content>
-		</Card.Root>
+		<LoadingState label="loading statistics" />
 	{:else if error}
-		<div class="rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive" style="font-family: var(--font-mono);">
-			<span class="font-semibold">error:</span> {error}
-		</div>
+		<ErrorAlert message={error} onretry={load} />
 	{:else if data}
-		<!-- System Health -->
-		{@const health = data.analyzer_health}
-		{@const healthy = health.offline === 0}
-		<div
-			class="flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 {healthy
-				? 'border-emerald-500/30 bg-emerald-500/5'
-				: 'border-amber-500/30 bg-amber-500/5'}"
-		>
-			<Activity class="h-5 w-5 {healthy ? 'text-emerald-500' : 'text-amber-500'}" />
-			<div class="flex-1">
-				<span class="text-sm font-medium {healthy ? 'text-emerald-500' : 'text-amber-500'}">
-					{healthy ? 'System Healthy' : 'Degraded'}
-				</span>
-				<span class="ml-2 text-xs text-muted-foreground">
-					{health.online}/{health.total} analyzers online
-				</span>
-			</div>
-			<Badge
-				variant="outline"
-				class="border-emerald-500/30 bg-emerald-500/15 text-[10px] text-emerald-500"
-			>
-				{healthy ? 'Operational' : 'Partial'}
-			</Badge>
-		</div>
-
 		<!-- KPIs -->
-		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 			{#each kpis as kpi}
 				<div class="kpi-card">
-					<div class="text-xs text-muted-foreground uppercase tracking-wider">{kpi.title}</div>
-					<div class="text-2xl font-semibold font-mono tabular-nums">{kpi.value}</div>
+					<div class="kpi-label">{kpi.title}</div>
+					<div class="kpi-value">{kpi.value}</div>
 					<div class="text-xs text-muted-foreground">{kpi.delta}</div>
 				</div>
 			{/each}
@@ -216,6 +180,7 @@
 									variant={trendDays === d ? 'default' : 'ghost'}
 									class="h-6 px-2 text-xs"
 									onclick={() => { trendDays = d; }}
+									aria-pressed={trendDays === d}
 								>
 									{d}d
 								</Button>
@@ -225,19 +190,17 @@
 				</Card.Header>
 				<Card.Content>
 					{#if trendsLoading}
-						<div class="flex h-40 items-center justify-center">
-							<LoaderCircle class="h-5 w-5 animate-spin text-muted-foreground" />
-						</div>
+						<LoadingState label="loading trends" class="h-40 py-0" />
 					{:else}
 						{@const activeTrends = trendsData ?? data.trends}
 						<div class="flex h-40 items-end gap-1.5">
 							{#each activeTrends.series as point}
 								<div class="flex flex-1 flex-col items-center justify-end gap-1" title="{point.date}: {point.total} analyses">
 									<div
-										class="w-full rounded-t bg-blue-500/70 transition-all duration-300"
+										class="w-full rounded-t bg-chart-1 transition-all duration-300"
 										style="height: {Math.round((point.total / trendMax) * 140)}px"
 									></div>
-									<span class="text-[9px] text-muted-foreground">{dayLabel(point.date)}</span>
+									<span class="text-[11px] text-muted-foreground">{dayLabel(point.date)}</span>
 								</div>
 							{/each}
 						</div>
@@ -262,12 +225,12 @@
 								<span class="w-14 text-xs capitalize text-muted-foreground">{sev.severity}</span>
 								<div class="h-3 flex-1 overflow-hidden rounded-full bg-muted">
 									<div
-										class="h-full rounded-full {severityBarColor[sev.severity] ?? 'bg-slate-500'}"
+										class="h-full rounded-full {severityBarColor[sev.severity] ?? 'bg-muted-foreground'}"
 										style="width: {sev.percent}%"
 									></div>
 								</div>
 								<span class="w-10 text-right font-mono text-xs">{sev.count}</span>
-								<span class="w-8 text-right text-[10px] text-muted-foreground">{sev.percent}%</span>
+								<span class="w-8 text-right text-[11px] text-muted-foreground">{sev.percent}%</span>
 							</div>
 						{/each}
 					</div>
@@ -291,7 +254,7 @@
 			</Card.Header>
 			<Card.Content class="p-0">
 				{#if data.models.length === 0}
-					<p class="p-6 text-center text-sm text-muted-foreground">No model data yet.</p>
+					<EmptyState compact title="No model data yet" description="Model metrics appear once applications are generated and analyzed." />
 				{:else}
 					<div class="table-scroll-wrapper">
 						<table class="w-full text-sm">
@@ -316,7 +279,7 @@
 													class="font-medium text-sm hover:text-primary hover:underline underline-offset-2 transition-colors"
 													onclick={(e) => { if (!m.model_id) e.preventDefault(); }}
 												>{m.name}</a>
-												<div class="text-[10px] text-muted-foreground">{m.provider}</div>
+												<div class="text-[11px] text-muted-foreground">{m.provider}</div>
 											</div>
 										</td>
 										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs">{m.apps}</td>
@@ -325,7 +288,7 @@
 										<td class="px-3 py-2 text-right align-top">
 											{#if m.empirical_quality != null}
 												<span class="font-mono tabular-nums text-xs font-bold {scoreColor(m.empirical_quality, 1)}">{pct01(m.empirical_quality)}</span>
-												<span class="ml-1 text-[9px] text-muted-foreground">n={m.n_trials}</span>
+												<span class="ml-1 text-[11px] text-muted-foreground">n={m.n_trials}</span>
 											{:else}
 												<span class="text-xs text-muted-foreground">—</span>
 											{/if}
@@ -350,7 +313,7 @@
 					</Card.Header>
 					<Card.Content class="p-0">
 						{#if data.tools.length === 0}
-							<p class="p-6 text-center text-sm text-muted-foreground">No analyzer runs yet.</p>
+							<EmptyState compact title="No analyzer runs yet" description="Tool metrics appear after the first analysis completes." />
 						{:else}
 							<div class="table-scroll-wrapper">
 								<table class="w-full text-sm">
@@ -369,12 +332,12 @@
 											<tr class="border-b transition-colors hover:bg-muted/50 group {i % 2 === 0 ? '' : 'bg-muted/15'}">
 												<td class="px-3 py-2 align-top text-xs font-medium">{t.name}</td>
 												<td class="px-3 py-2 align-top">
-													<Badge variant="secondary" class="text-[10px] capitalize">{t.type}</Badge>
+													<Badge variant="secondary" class="text-[11px] capitalize">{t.type}</Badge>
 												</td>
 												<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs">{t.scans}</td>
 												<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs">{t.findings}</td>
 												<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs">{t.avg_per_scan.toFixed(1)}</td>
-												<td class="px-3 py-2 align-top font-mono text-[10px] text-muted-foreground">
+												<td class="px-3 py-2 align-top font-mono text-[11px] text-muted-foreground">
 													{t.top_rule || '—'}
 												</td>
 											</tr>
@@ -390,19 +353,19 @@
 			<Card.Root>
 				<Card.Header>
 					<div class="flex items-center gap-2">
-						<AlertTriangle class="h-4 w-4 text-amber-500" />
+						<AlertTriangle class="h-4 w-4 text-muted-foreground" />
 						<Card.Title>Top Findings</Card.Title>
 					</div>
 				</Card.Header>
 				<Card.Content class="space-y-3">
 					{#if data.top_findings.length === 0}
-						<p class="text-center text-xs text-muted-foreground">No findings yet.</p>
+						<EmptyState compact title="No findings yet" />
 					{:else}
 						{#each data.top_findings as f}
 							<div class="flex items-start gap-2">
 								<Badge
 									variant="outline"
-									class="shrink-0 text-[9px] {severityColors[f.severity] ?? ''}"
+									class="shrink-0 text-[11px] {severityColors[f.severity] ?? ''}"
 								>
 									{f.severity}
 								</Badge>
@@ -430,8 +393,8 @@
 						<div class="grid gap-4 sm:grid-cols-3">
 							{#each [{ label: 'Total Apps Generated', value: fmtNumber(cg.total_apps) }, { label: 'Success Rate', value: `${cg.success_rate}%` }, { label: 'Avg Gen Time', value: fmtDuration(cg.avg_duration_seconds) }, { label: 'Lines of Code', value: fmtNumber(cg.total_lines_of_code) }, { label: 'Total Tokens', value: fmtNumber(cg.total_tokens) }, { label: 'Total Cost', value: fmtCost(cg.total_cost_usd) }] as stat}
 								<div class="kpi-card">
-									<div class="text-xs text-muted-foreground uppercase tracking-wider">{stat.label}</div>
-									<div class="text-2xl font-semibold font-mono tabular-nums">{stat.value}</div>
+									<div class="kpi-label">{stat.label}</div>
+									<div class="font-display text-2xl font-semibold tabular-nums">{stat.value}</div>
 								</div>
 							{/each}
 						</div>
@@ -448,15 +411,15 @@
 				</Card.Header>
 				<Card.Content class="space-y-2">
 					{#if data.recent_activity.length === 0}
-						<p class="text-center text-xs text-muted-foreground">No recent activity.</p>
+						<EmptyState compact title="No recent activity" />
 					{:else}
 						{#each data.recent_activity.slice(0, 8) as item}
 							<div class="flex items-center justify-between gap-2 text-xs">
 								<div class="flex min-w-0 items-center gap-2">
-									<Badge variant="outline" class="text-[9px] capitalize">{item.kind}</Badge>
+									<Badge variant="outline" class="text-[11px] capitalize">{item.kind}</Badge>
 									<span class="truncate">{item.title}</span>
 								</div>
-								<span class="shrink-0 text-[10px] text-muted-foreground">
+								<span class="shrink-0 text-[11px] text-muted-foreground">
 									{new Date(item.created_at).toLocaleDateString()}
 								</span>
 							</div>

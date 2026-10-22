@@ -129,8 +129,9 @@
 	<div class="flex items-center gap-1 overflow-x-auto">
 		{#each sections as section}
 			<button
-				class="flex items-center gap-1.5 px-3 py-2.5 sm:py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap {activeSection === section.id ? 'bg-primary/10 text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}"
+				class="flex items-center gap-1.5 px-3 py-2.5 sm:py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap {activeSection === section.id ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}"
 				onclick={() => scrollToSection(section.id)}
+				aria-current={activeSection === section.id ? 'location' : undefined}
 			>
 				<section.icon class="h-3.5 w-3.5" />
 				{section.label}
@@ -164,19 +165,19 @@
 				<div class="flex items-center justify-around mb-3">
 					<div class="text-center">
 						<div class="text-2xl font-bold text-primary">{model.context_window_display}</div>
-						<div class="text-[10px] text-muted-foreground uppercase">Context</div>
+						<div class="section-label">Context</div>
 					</div>
 					<div class="text-center">
-						<div class="text-2xl font-bold text-emerald-500">{model.max_output_tokens ? formatTokens(model.max_output_tokens) : '—'}</div>
-						<div class="text-[10px] text-muted-foreground uppercase">Max Output</div>
+						<div class="text-2xl font-bold text-success-fg">{model.max_output_tokens ? formatTokens(model.max_output_tokens) : '—'}</div>
+						<div class="section-label">Max Output</div>
 					</div>
 				</div>
 				<div class="flex flex-wrap gap-1 justify-center">
 					{#if model.is_free}
-						<Badge variant="secondary" class="gap-1 text-emerald-600 dark:text-emerald-400"><Gift class="h-3 w-3" /> Free</Badge>
+						<Badge variant="secondary" class="gap-1 text-success-fg"><Gift class="h-3 w-3" /> Free</Badge>
 					{/if}
 					{#if (meta.openrouter_top_provider as Record<string, unknown>)?.is_moderated}
-						<Badge variant="secondary" class="gap-1 text-blue-600 dark:text-blue-400"><Shield class="h-3 w-3" /> Moderated</Badge>
+						<Badge variant="secondary" class="gap-1 text-info-fg"><Shield class="h-3 w-3" /> Moderated</Badge>
 					{/if}
 				</div>
 			</Card.Content>
@@ -195,7 +196,6 @@
 				{#if hfId}
 					<Separator orientation="vertical" class="h-4" />
 					<a href="https://huggingface.co/{hfId}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-primary hover:underline">
-						<span>🤗</span>
 						<code class="text-xs">{hfId}</code>
 						<ExternalLink class="h-3 w-3" />
 					</a>
@@ -223,12 +223,12 @@
 			<!-- Core Skills -->
 			<div>
 				<div class="flex items-center gap-2 mb-2">
-					<Sparkles class="h-3.5 w-3.5 text-amber-500" />
-					<span class="text-xs font-bold uppercase text-muted-foreground">Skills</span>
+					<Sparkles class="h-3.5 w-3.5 text-muted-foreground" />
+					<span class="section-label">Skills</span>
 				</div>
 				<div class="flex flex-wrap gap-1.5">
 					{#each getCoreSkills(model) as skill}
-						<Badge variant={skill.active ? 'default' : 'outline'} class="{skill.active ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20' : 'opacity-50'} gap-1">
+						<Badge variant={skill.active ? 'default' : 'outline'} class="{skill.active ? 'border-success/30 bg-success/10 text-success-fg' : 'opacity-50'} gap-1">
 							<skill.icon class="h-3 w-3" />
 							{skill.name}
 						</Badge>
@@ -243,7 +243,7 @@
 				<div>
 					<div class="flex items-center gap-2 mb-2">
 						<Box class="h-3.5 w-3.5 text-primary" />
-						<span class="text-xs font-bold uppercase text-muted-foreground">Architecture</span>
+						<span class="section-label">Architecture</span>
 					</div>
 					<div class="grid grid-cols-2 gap-2 text-sm mb-2">
 						<div>
@@ -270,8 +270,8 @@
 				<!-- Supported Parameters -->
 				<div>
 					<div class="flex items-center gap-2 mb-2">
-						<Settings class="h-3.5 w-3.5 text-blue-500" />
-						<span class="text-xs font-bold uppercase text-muted-foreground">Supported Parameters</span>
+						<Settings class="h-3.5 w-3.5 text-muted-foreground" />
+						<span class="section-label">Supported Parameters</span>
 					</div>
 					{#if supportedParams.length}
 						<div class="flex flex-wrap gap-1">
@@ -294,8 +294,8 @@
 				<!-- Per-Request Limits -->
 				<div>
 					<div class="flex items-center gap-2 mb-2">
-						<Gauge class="h-3.5 w-3.5 text-red-500" />
-						<span class="text-xs font-bold uppercase text-muted-foreground">Per-Request Limits</span>
+						<Gauge class="h-3.5 w-3.5 text-muted-foreground" />
+						<span class="section-label">Per-Request Limits</span>
 					</div>
 					{#if Object.keys(perRequestLimits).length}
 						<div class="space-y-1 text-sm">
@@ -323,12 +323,12 @@
 					{@const visibleEntries = capMatrixExpanded ? sortedEntries : sortedEntries.slice(0, 8)}
 					<div class="md:col-span-2">
 						<div class="flex items-center gap-2 mb-2">
-							<CircleCheck class="h-3.5 w-3.5 text-emerald-500" />
-							<span class="text-xs font-bold uppercase text-muted-foreground">Capability Matrix</span>
+							<CircleCheck class="h-3.5 w-3.5 text-muted-foreground" />
+							<span class="section-label">Capability Matrix</span>
 						</div>
 						<div class="flex flex-wrap gap-1">
 							{#each visibleEntries as [key, value]}
-								<Badge variant="outline" class="{value ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/30' : 'opacity-40'} text-xs gap-1">
+								<Badge variant="outline" class="{value ? 'border-success/30 text-success-fg' : 'opacity-40'} text-xs gap-1">
 									{#if value}<Check class="h-2.5 w-2.5" />{:else}<X class="h-2.5 w-2.5" />{/if}
 									{key.replace(/_/g, ' ')}
 								</Badge>
@@ -354,8 +354,8 @@
 					{#if instructType}
 						<div>
 							<div class="flex items-center gap-2 mb-2">
-								<GraduationCap class="h-3.5 w-3.5 text-purple-500" />
-								<span class="text-xs font-bold uppercase text-muted-foreground">Instruct Type</span>
+								<GraduationCap class="h-3.5 w-3.5 text-muted-foreground" />
+								<span class="section-label">Instruct Type</span>
 							</div>
 							<Badge variant="secondary">{instructType}</Badge>
 						</div>
@@ -363,8 +363,8 @@
 					{#if Object.keys(defaultParams).length}
 						<div>
 							<div class="flex items-center gap-2 mb-2">
-								<Settings class="h-3.5 w-3.5 text-purple-500" />
-								<span class="text-xs font-bold uppercase text-muted-foreground">Default Parameters</span>
+								<Settings class="h-3.5 w-3.5 text-muted-foreground" />
+								<span class="section-label">Default Parameters</span>
 							</div>
 							<div class="space-y-1 text-sm">
 								{#each Object.entries(defaultParams) as [key, value]}
@@ -411,7 +411,7 @@
 		<Card.Root>
 			<Card.Header class="pb-2"><Card.Title class="text-sm font-medium">Tier</Card.Title></Card.Header>
 			<Card.Content class="space-y-1">
-				<div class="text-xl font-bold {model.is_free ? 'text-emerald-500' : ''}">{model.is_free ? 'Free' : 'Paid'}</div>
+				<div class="text-xl font-bold {model.is_free ? 'text-success-fg' : ''}">{model.is_free ? 'Free' : 'Paid'}</div>
 				<div class="text-xs text-muted-foreground">{model.is_free ? 'No cost' : 'Usage-based'}</div>
 			</Card.Content>
 		</Card.Root>
@@ -475,8 +475,8 @@
 				</div>
 				<div class="flex flex-col justify-center items-center rounded-lg bg-muted/30 px-6 py-3 min-w-[140px]">
 					<div class="text-xs text-muted-foreground mb-1">Estimated Cost</div>
-					<div class="text-2xl font-bold tabular-nums {calcTotalCost === 0 ? 'text-emerald-500' : 'text-foreground'}">{calcTotalCost === 0 ? 'Free' : `$${calcTotalCost.toFixed(4)}`}</div>
-					<div class="text-[10px] text-muted-foreground mt-0.5">{calcInputTokens}K in + {calcOutputTokens}K out</div>
+					<div class="text-2xl font-bold tabular-nums {calcTotalCost === 0 ? 'text-success-fg' : 'text-foreground'}">{calcTotalCost === 0 ? 'Free' : `$${calcTotalCost.toFixed(4)}`}</div>
+					<div class="text-[11px] text-muted-foreground mt-0.5">{calcInputTokens}K in + {calcOutputTokens}K out</div>
 				</div>
 			</div>
 			<div class="flex flex-wrap gap-2 mt-3">
@@ -539,7 +539,7 @@
 			<Card.Root>
 				<Card.Header class="pb-2">
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
-						<Code class="h-4 w-4 text-purple-500" />
+						<Code class="h-4 w-4 text-muted-foreground" />
 						OpenRouter Metadata
 						<Badge variant="outline" class="text-xs">{Object.keys(caps).length} keys</Badge>
 					</Card.Title>
@@ -566,7 +566,7 @@
 			<Card.Root>
 				<Card.Header class="pb-2">
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
-						<Layers class="h-4 w-4 text-emerald-500" />
+						<Layers class="h-4 w-4 text-muted-foreground" />
 						Enriched Dataset
 						<Badge variant="outline" class="text-xs">{Object.keys(meta).length} keys</Badge>
 					</Card.Title>
@@ -593,8 +593,9 @@
 	<Card.Root>
 		<Card.Content class="p-3">
 			<button
-				class="flex w-full items-center gap-2 text-left"
+				class="flex w-full cursor-pointer items-center gap-2 text-left"
 				onclick={() => rawJsonOpen = !rawJsonOpen}
+				aria-expanded={rawJsonOpen}
 			>
 				<Code class="h-4 w-4 text-muted-foreground" />
 				<span class="text-sm font-bold">Raw JSON Payload</span>
@@ -611,7 +612,7 @@
 						<Copy class="h-3 w-3" />
 						Copy
 					</Button>
-					<pre class="rounded-lg bg-zinc-950 dark:bg-zinc-900 text-zinc-300 p-4 text-xs overflow-auto max-h-[400px]">{JSON.stringify(caps, null, 2)}</pre>
+					<pre class="terminal max-h-[400px] overflow-auto">{JSON.stringify(caps, null, 2)}</pre>
 				</div>
 			{/if}
 		</Card.Content>

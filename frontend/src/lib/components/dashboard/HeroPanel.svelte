@@ -21,8 +21,7 @@
 	<div class="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
 		<div class="space-y-1.5">
 			<div
-				class="flex items-center gap-2 text-xs font-medium text-muted-foreground"
-				style="font-family: var(--font-mono);"
+				class="flex items-center gap-2 text-xs font-medium text-muted-foreground font-mono"
 			>
 				<Sparkles class="h-3 w-3 text-primary" />
 				<span>{greeting()}</span>
@@ -46,12 +45,12 @@
 					>
 				{/if}
 			</h1>
-			<p class="text-sm text-muted-foreground" style="font-family: var(--font-mono);">
+			<p class="text-sm text-muted-foreground font-mono">
 				// llm evaluation · code generation · security analysis
 			</p>
 		</div>
 		<div class="flex flex-wrap items-center gap-2">
-			<Button href="/sample-generator" size="sm" class="hover-glow gap-1.5">
+			<Button href="/sample-generator" size="sm" class="gap-1.5">
 				<Wand2 class="h-3.5 w-3.5" />
 				Generate App
 			</Button>
@@ -77,8 +76,7 @@
 	</div>
 	{#if lastRefreshed}
 		<p
-			class="relative mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground"
-			style="font-family: var(--font-mono);"
+			class="relative mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground font-mono"
 		>
 			<span class="status-dot status-dot-live h-1.5 w-1.5 text-primary"></span>
 			live · updated {timeAgo(lastRefreshed.toISOString())}

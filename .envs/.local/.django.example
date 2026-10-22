@@ -42,6 +42,11 @@ FRONTEND_PUBLIC_ORIGIN=http://localhost:8000
 # APPS_DOMAIN=example.com
 # APPS_SUBDOMAIN_PROXY=True
 
+# Without it, apps are served at <APPS_PUBLIC_ORIGIN>/apps/<name>/ by Django's path
+# proxy (login required; APPS_PUBLIC_ORIGIN defaults to FRONTEND_PUBLIC_ORIGIN).
+# Either way the apps themselves run as nested containers in the apps-dind service.
+# APPS_PUBLIC_ORIGIN=https://example.com
+
 # Hosts / CORS
 # Set these when accessing the app from a non-localhost domain.
 # ------------------------------------------------------------------------------

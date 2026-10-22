@@ -1,17 +1,17 @@
 <script lang="ts">
 	import { formatDateTime as fmt } from '$lib/utils/formatters';
-	import { pipelineRunStatusColors as statusColors } from '$lib/constants/colors';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import Layers from '@lucide/svelte/icons/layers';
 	import Plus from '@lucide/svelte/icons/plus';
 	import XCircle from '@lucide/svelte/icons/x-circle';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import {
 		listBatches,
 		createBatch,
@@ -98,11 +98,14 @@
 
 <Card.Root>
 	<Card.Header class="flex flex-row items-center justify-between space-y-0">
-		<Card.Title class="flex items-center gap-1.5">
-			<Layers class="h-4 w-4" />Batches ({batches.length})
-		</Card.Title>
-		<Button variant="outline" size="sm" onclick={() => (showForm = !showForm)} class="gap-1.5">
-			<Plus class="h-3.5 w-3.5" />{showForm ? 'Cancel' : 'New Batch'}
+		<div class="space-y-1">
+			<Card.Title class="flex items-center gap-1.5">
+				<Layers class="h-4 w-4 text-muted-foreground" aria-hidden="true" />Batches
+			</Card.Title>
+			<Card.Description>{batches.length} parameter sweep{batches.length === 1 ? '' : 's'}</Card.Description>
+		</div>
+		<Button variant="outline" size="sm" onclick={() => (showForm = !showForm)} aria-expanded={showForm}>
+			<Plus class="h-3.5 w-3.5" />{showForm ? 'Cancel' : 'New batch'}
 		</Button>
 	</Card.Header>
 	<Card.Content class="space-y-3">
@@ -117,44 +120,43 @@
 					<Input id="batch-desc" bind:value={newDescription} class="h-8 text-xs" placeholder="optional" />
 				</div>
 				<div class="space-y-1">
-					<Label class="text-xs" for="batch-matrix">Parameter Matrix (JSON)</Label>
+					<Label class="text-xs" for="batch-matrix">Parameter matrix (JSON)</Label>
 					<textarea
 						id="batch-matrix"
 						bind:value={matrixText}
 						rows={5}
-						class="w-full rounded-md border bg-background p-2 text-xs font-mono resize-y focus:outline-none focus:ring-1 focus:ring-ring"
+						aria-describedby="batch-matrix-help"
+						class="w-full rounded-md border border-input bg-background p-2 text-xs font-mono resize-y focus:outline-none focus:ring-2 focus:ring-ring/30"
 					></textarea>
-					<p class="text-[10px] text-muted-foreground">One run per combination of values. Empty for a single run.</p>
+					<p id="batch-matrix-help" class="text-[11px] text-muted-foreground">One run per combination of values. Empty for a single run.</p>
 				</div>
 				<div class="space-y-1">
 					<Label class="text-xs" for="batch-repeats">Repeats per combination</Label>
-					<Input id="batch-repeats" type="number" min="1" max="20" bind:value={repeatsText} class="h-8 text-xs w-24" />
-					<p class="text-[10px] text-muted-foreground">Independent runs per combination; each gets a "trial" param. Use &gt;1 to measure between-run variance.</p>
+					<Input id="batch-repeats" type="number" min="1" max="20" bind:value={repeatsText} class="h-8 text-xs w-24" aria-describedby="batch-repeats-help" />
+					<p id="batch-repeats-help" class="text-[11px] text-muted-foreground">Independent runs per combination; each gets a "trial" param. Use &gt;1 to measure between-run variance.</p>
 				</div>
-				{#if formError}<p class="text-xs text-destructive">{formError}</p>{/if}
+				{#if formError}<p class="text-xs text-destructive" role="alert">{formError}</p>{/if}
 				<Button size="sm" onclick={create} disabled={saving} class="w-full">
-					{saving ? 'Starting…' : 'Start Batch'}
+					{saving ? 'Starting…' : 'Start batch'}
 				</Button>
 			</div>
 		{/if}
 
 		{#if loading}
-			<div class="flex justify-center py-6"><LoaderCircle class="h-5 w-5 animate-spin text-muted-foreground" /></div>
+			<LoadingState class="py-6" label="loading batches" />
 		{:else if batches.length === 0}
-			<p class="text-xs text-muted-foreground italic">No batches. Click <strong>New Batch</strong> to start one with parameter matrix.</p>
+			<EmptyState compact icon={Layers} title="No batches" description="Start a batch to run this workflow across a parameter matrix." />
 		{:else}
 			<div class="space-y-1.5">
 				{#each batches as b (b.id)}
-					<div class="flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-xs">
+					<div class="flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
 						<div class="flex-1 min-w-0">
 							<p class="font-medium truncate">{b.name}</p>
-							<p class="text-[10px] text-muted-foreground">Started {fmt(b.created_at)}</p>
+							<p class="text-[11px] text-muted-foreground">Started {fmt(b.created_at)}</p>
 						</div>
-						<Badge variant="outline" class="shrink-0 text-[10px] {statusColors[b.status] ?? ''}">
-							{b.status}
-						</Badge>
+						<StatusBadge status={b.status} />
 						{#if b.status === 'pending' || b.status === 'running'}
-							<Button variant="ghost" size="icon" class="h-7 w-7 text-destructive hover:text-destructive" onclick={() => cancel(b.id)} title="Cancel">
+							<Button variant="ghost" size="icon" class="h-7 w-7 text-destructive hover:text-destructive" onclick={() => cancel(b.id)} title="Cancel" aria-label="Cancel batch {b.name}">
 								<XCircle class="h-3.5 w-3.5" />
 							</Button>
 						{/if}

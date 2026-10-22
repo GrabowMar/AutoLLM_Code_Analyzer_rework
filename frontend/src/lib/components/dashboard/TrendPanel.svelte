@@ -14,7 +14,7 @@
 	let { trends, loading = false }: Props = $props();
 </script>
 
-<Card.Root class="gradient-border-top h-full">
+<Card.Root class="h-full">
 	<Card.Header>
 		<div class="flex items-center justify-between">
 			<div class="flex items-center gap-2">
@@ -25,7 +25,7 @@
 				</div>
 			</div>
 			<div class="text-right">
-				<div class="text-xl font-bold" style="font-family: var(--font-display);">
+				<div class="text-xl font-bold font-display">
 					{trends?.total ?? 0}
 				</div>
 				<p class="text-[11px] text-muted-foreground">total runs</p>

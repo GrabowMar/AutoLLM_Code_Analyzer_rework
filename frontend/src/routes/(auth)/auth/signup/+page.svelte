@@ -5,8 +5,9 @@
 	import { getAuth } from '$lib/stores/auth.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import LoadingState from '$lib/components/LoadingState.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { Alert, AlertDescription } from '$lib/components/ui/alert';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 
 	const auth = getAuth();
 
@@ -70,96 +71,91 @@
 </script>
 
 <svelte:head>
-	<title>Sign Up - LLM Lab</title>
+	<title>Sign Up · LLM Lab</title>
 </svelte:head>
 
-<!-- Mobile: borderless inline form. Desktop: bordered card -->
-<div class="w-full sm:rounded-md sm:border sm:border-border sm:bg-card sm:py-6 sm:shadow-sm">
-		<div class="space-y-1.5 sm:px-6">
-			<h2 class="text-xl font-semibold leading-none tracking-tight sm:text-2xl">
-				{bootstrapRequired ? 'Create Initial Admin Account' : 'Create Account'}
-			</h2>
-			<p class="text-xs text-muted-foreground sm:text-sm">
-				{#if bootstrapRequired}
-					No accounts exist yet. Set up the first administrator for this instance.
-				{:else}
-					Enter your email and choose a password.
-				{/if}
-			</p>
-		</div>
-		<div class="pt-4 sm:px-6">
-			{#if error}
-				<Alert variant="destructive" class="mb-4">
-					<AlertDescription>{error}</AlertDescription>
-				</Alert>
-			{/if}
-			{#if bootstrapStatusLoading}
-				<p class="text-sm text-muted-foreground">Loading sign up options...</p>
+	<div class="space-y-1.5">
+		<h2 class="text-xl font-semibold leading-none tracking-tight sm:text-2xl">
+			{bootstrapRequired ? 'Create Initial Admin Account' : 'Create Account'}
+		</h2>
+		<p class="text-xs text-muted-foreground sm:text-sm">
+			{#if bootstrapRequired}
+				No accounts exist yet. Set up the first administrator for this instance.
 			{:else}
-			<form onsubmit={handleSubmit} class="space-y-4">
-				{#if bootstrapRequired}
-					<div class="space-y-2">
-						<Label for="name">Admin name</Label>
-						<Input
-							id="name"
-							type="text"
-							placeholder="Administrator"
-							bind:value={name}
-							required
-							autocomplete="name"
-							class="h-11 text-base sm:h-9 sm:text-sm"
-						/>
-					</div>
-					<p class="text-sm text-muted-foreground">
-						Email is not required for the first administrator. The system will create the login
-						email automatically as <span class="font-medium text-foreground">{bootstrapLoginEmail}</span>.
-					</p>
-				{:else}
-					<div class="space-y-2">
-						<Label for="email">Email</Label>
-						<Input
-							id="email"
-							type="email"
-							placeholder="you@example.com"
-							bind:value={email}
-							required
-							autocomplete="email"
-							class="h-11 text-base sm:h-9 sm:text-sm"
-						/>
-					</div>
-				{/if}
-				<div class="space-y-2">
-					<Label for="password">Password</Label>
-					<Input
-						id="password"
-						type="password"
-						bind:value={password}
-						required
-						autocomplete="new-password"
-						class="h-11 text-base sm:h-9 sm:text-sm"
-					/>
-				</div>
-				<div class="space-y-2">
-					<Label for="password2">Confirm Password</Label>
-					<Input
-						id="password2"
-						type="password"
-						bind:value={password2}
-						required
-						autocomplete="new-password"
-						class="h-11 text-base sm:h-9 sm:text-sm"
-					/>
-				</div>
-				<Button type="submit" class="h-11 w-full text-base sm:h-9 sm:text-sm" disabled={submitting}>
-					{submitting ? 'Creating account...' : bootstrapRequired ? 'Create Admin Account' : 'Sign Up'}
-				</Button>
-			</form>
+				Enter your email and choose a password.
 			{/if}
-		</div>
-		<div class="pt-4 text-center text-sm sm:px-6">
-			<p class="text-muted-foreground">
-				Already have an account?
-				<a href="/auth/login" class="underline hover:text-foreground">Log in</a>
-			</p>
-		</div>
+		</p>
+	</div>
+	<div class="pt-4">
+		{#if error}
+			<ErrorAlert message={error} class="mb-4" />
+		{/if}
+		{#if bootstrapStatusLoading}
+			<LoadingState label="loading sign up options" class="py-8" />
+		{:else}
+		<form onsubmit={handleSubmit} class="space-y-4">
+			{#if bootstrapRequired}
+				<div class="space-y-2">
+					<Label for="name">Admin name</Label>
+					<Input
+						id="name"
+						type="text"
+						placeholder="Administrator"
+						bind:value={name}
+						required
+						autocomplete="name"
+						class="h-11 text-base sm:h-9 sm:text-sm"
+					/>
+				</div>
+				<p class="text-sm text-muted-foreground">
+					Email is not required for the first administrator. The system will create the login
+					email automatically as <span class="font-medium text-foreground">{bootstrapLoginEmail}</span>.
+				</p>
+			{:else}
+				<div class="space-y-2">
+					<Label for="email">Email</Label>
+					<Input
+						id="email"
+						type="email"
+						placeholder="you@example.com"
+						bind:value={email}
+						required
+						autocomplete="email"
+						class="h-11 text-base sm:h-9 sm:text-sm"
+					/>
+				</div>
+			{/if}
+			<div class="space-y-2">
+				<Label for="password">Password</Label>
+				<Input
+					id="password"
+					type="password"
+					bind:value={password}
+					required
+					autocomplete="new-password"
+					class="h-11 text-base sm:h-9 sm:text-sm"
+				/>
+			</div>
+			<div class="space-y-2">
+				<Label for="password2">Confirm Password</Label>
+				<Input
+					id="password2"
+					type="password"
+					bind:value={password2}
+					required
+					autocomplete="new-password"
+					class="h-11 text-base sm:h-9 sm:text-sm"
+				/>
+			</div>
+			<Button type="submit" class="h-11 w-full text-base sm:h-9 sm:text-sm" disabled={submitting}>
+				{submitting ? 'Creating account...' : bootstrapRequired ? 'Create Admin Account' : 'Sign Up'}
+			</Button>
+		</form>
+		{/if}
+	</div>
+	<div class="pt-4 text-center text-sm">
+		<p class="text-muted-foreground">
+			Already have an account?
+			<a href="/auth/login" class="underline hover:text-foreground">Log in</a>
+		</p>
 	</div>

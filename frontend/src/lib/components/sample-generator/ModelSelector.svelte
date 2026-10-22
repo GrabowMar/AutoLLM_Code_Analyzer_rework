@@ -7,7 +7,8 @@
 	import Search from '@lucide/svelte/icons/search';
 	import Check from '@lucide/svelte/icons/check';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 
 	interface Props {
 		models: LLMModelSummary[];
@@ -125,9 +126,9 @@
 
 <div class="space-y-2">
 	<div class="flex flex-wrap items-center justify-between gap-2">
-		<Label class="text-xs uppercase tracking-wide text-muted-foreground">Models</Label>
+		<Label class="text-xs">Models</Label>
 		{#if mode === 'multi' && onSelectAll && onClearAll}
-			<div class="flex gap-1 text-[10px]">
+			<div class="flex gap-1 text-[11px]">
 				<button type="button" class="text-primary hover:underline cursor-pointer" onclick={onSelectAll}>Select all</button>
 				<span class="text-muted-foreground">|</span>
 				<button type="button" class="text-muted-foreground hover:underline cursor-pointer" onclick={onClearAll}>Clear</button>
@@ -139,23 +140,19 @@
 	<!-- Search + free-only in one row -->
 	<div class="flex items-center gap-2">
 		<div class="relative flex-1">
-			<Search class="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
-			<Input bind:value={search} placeholder="Search models…" class="h-8 pl-8 text-xs transition-all hover:border-primary/45 focus-visible:ring-primary/20" />
+			<Search class="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+			<Input bind:value={search} placeholder="Search models…" aria-label="Search models" class="h-8 pl-8 text-xs" />
 		</div>
-		<label class="flex shrink-0 cursor-pointer items-center gap-1.5 text-[10px] text-muted-foreground">
+		<label class="flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
 			<input type="checkbox" bind:checked={freeOnly} class="rounded border-input cursor-pointer" />
 			Free only
 		</label>
 	</div>
 
 	{#if loading}
-		<div class="flex items-center justify-center rounded-md border py-8 text-sm text-muted-foreground">
-			<LoaderCircle class="mr-2 h-4 w-4 animate-spin text-primary" /> Loading models…
-		</div>
+		<LoadingState label="loading models" class="rounded-md border py-8" />
 	{:else if providerGroups.size === 0}
-		<div class="rounded-md border py-6 text-center text-xs text-muted-foreground">
-			No models match your filters.
-		</div>
+		<EmptyState compact class="rounded-md border" title="No models match your filters" />
 	{:else if mode === 'multi'}
 		<!-- Accordion grouped by provider (Multi-Select) -->
 		<div class="overflow-y-auto rounded-md border divide-y divide-border/50 {maxHeight}">
@@ -166,15 +163,16 @@
 					<!-- Provider header — click to expand/collapse -->
 					<button
 						type="button"
-						class="flex w-full items-center gap-2 bg-muted/20 px-3 py-1.5 text-left text-xs font-medium transition-colors hover:bg-muted/40 cursor-pointer {selCount > 0 ? 'text-foreground font-semibold bg-primary/[0.02]' : 'text-muted-foreground'}"
+						class="flex w-full items-center gap-2 bg-muted/20 px-3 py-1.5 text-left text-xs font-medium transition-colors hover:bg-muted/40 cursor-pointer {selCount > 0 ? 'text-foreground font-semibold' : 'text-muted-foreground'}"
+						aria-expanded={expanded}
 						onclick={() => toggleProvider(provider)}
 					>
 						<ChevronRight class="h-3 w-3 shrink-0 transition-transform duration-150 {expanded ? 'rotate-90' : ''}" />
 						<span class="min-w-0 flex-1 truncate">{provider}</span>
 						{#if selCount > 0}
-							<Badge variant="secondary" class="shrink-0 text-[9px] px-1.5 py-0 bg-primary/10 text-primary border-primary/20">{selCount}/{providerModels.length}</Badge>
+							<Badge class="shrink-0">{selCount}/{providerModels.length}</Badge>
 						{:else}
-							<span class="shrink-0 tabular-nums text-[10px] opacity-40">{providerModels.length}</span>
+							<span class="shrink-0 tabular-nums text-[11px] text-muted-foreground">{providerModels.length}</span>
 						{/if}
 					</button>
 
@@ -185,6 +183,7 @@
 								<button
 									type="button"
 									class="flex w-full items-start gap-2 pl-7 pr-3 py-2 text-left text-xs transition-colors hover:bg-muted/40 cursor-pointer {selectedIds.has(m.id) ? 'bg-primary/5 text-foreground font-semibold' : 'text-muted-foreground'}"
+									aria-pressed={selectedIds.has(m.id)}
 									onclick={() => toggleMulti(m.id, provider)}
 								>
 									<!-- Checkbox indicator -->
@@ -195,10 +194,10 @@
 										<div class="flex flex-wrap items-center gap-1.5">
 											<span class="font-medium text-foreground">{m.model_name}</span>
 											{#if m.is_free}
-												<Badge variant="secondary" class="text-[9px] px-1 py-0 scale-90">Free</Badge>
+												<Badge variant="secondary">Free</Badge>
 											{/if}
 										</div>
-										<div class="mt-0.5 text-[9px] text-muted-foreground font-mono">
+										<div class="mt-0.5 text-[11px] font-normal text-muted-foreground font-mono">
 											{m.context_window_display} · in {formatPrice(m.input_price_per_million)} / out {formatPrice(m.output_price_per_million)} per 1M
 										</div>
 									</div>
@@ -216,6 +215,7 @@
 				<button
 					type="button"
 					class="flex w-full items-center gap-2 border-b px-3 py-2 text-left text-xs transition-colors hover:bg-muted/40 cursor-pointer {selectedId === '' ? 'bg-primary/5 text-foreground font-semibold' : 'text-muted-foreground'}"
+					aria-pressed={selectedId === ''}
 					onclick={() => selectSingle('')}
 				>
 					<div class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border transition-colors {selectedId === '' ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/30'}">
@@ -231,15 +231,16 @@
 					<!-- Provider header — click to expand/collapse -->
 					<button
 						type="button"
-						class="flex w-full items-center gap-2 bg-muted/20 px-3 py-1.5 text-left text-xs font-medium transition-colors hover:bg-muted/40 cursor-pointer {hasActive ? 'text-foreground font-semibold bg-primary/[0.02]' : 'text-muted-foreground'}"
+						class="flex w-full items-center gap-2 bg-muted/20 px-3 py-1.5 text-left text-xs font-medium transition-colors hover:bg-muted/40 cursor-pointer {hasActive ? 'text-foreground font-semibold' : 'text-muted-foreground'}"
+						aria-expanded={expanded}
 						onclick={() => toggleProvider(provider)}
 					>
 						<ChevronRight class="h-3 w-3 shrink-0 transition-transform duration-150 {expanded ? 'rotate-90' : ''}" />
 						<span class="min-w-0 flex-1 truncate">{provider}</span>
 						{#if hasActive}
-							<Badge variant="secondary" class="shrink-0 text-[9px] px-1.5 py-0 bg-primary/10 text-primary border-primary/20">Selected</Badge>
+							<Badge class="shrink-0">Selected</Badge>
 						{:else}
-							<span class="shrink-0 tabular-nums text-[10px] opacity-40">{providerModels.length}</span>
+							<span class="shrink-0 tabular-nums text-[11px] text-muted-foreground">{providerModels.length}</span>
 						{/if}
 					</button>
 
@@ -250,6 +251,7 @@
 								<button
 									type="button"
 									class="flex w-full items-start gap-2 pl-7 pr-3 py-2 text-left text-xs transition-colors hover:bg-muted/40 cursor-pointer {selectedId === m.id ? 'bg-primary/5 text-foreground font-semibold' : 'text-muted-foreground'}"
+									aria-pressed={selectedId === m.id}
 									onclick={() => selectSingle(m.id)}
 								>
 									<!-- Circular radio indicator -->
@@ -262,10 +264,10 @@
 										<div class="flex flex-wrap items-center gap-1.5">
 											<span class="font-medium text-foreground">{m.model_name}</span>
 											{#if m.is_free}
-												<Badge variant="secondary" class="text-[9px] px-1 py-0 scale-90">Free</Badge>
+												<Badge variant="secondary">Free</Badge>
 											{/if}
 										</div>
-										<div class="mt-0.5 text-[9px] text-muted-foreground font-mono">
+										<div class="mt-0.5 text-[11px] font-normal text-muted-foreground font-mono">
 											{m.context_window_display} · in {formatPrice(m.input_price_per_million)} / out {formatPrice(m.output_price_per_million)} per 1M
 										</div>
 									</div>
