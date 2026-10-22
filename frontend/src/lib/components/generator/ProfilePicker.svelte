@@ -8,7 +8,9 @@
 	 *
 	 * Props:
 	 * - `selectedId` (bindable `number | null`): profile pk, or null for Auto.
-	 * - `profiles`: preloaded list (otherwise fetched on mount).
+	 * - `profiles`: preloaded list (otherwise fetched on mount). It may hold an
+	 *   older version next to the latest of its slug (a pinned version): that one
+	 *   is marked "older", and its preview renders that version's blocks.
 	 * - `appIds`: selected app spec pks — drives the Auto suggestions (debounced).
 	 * - `stackSlug`: scopes suggestions; profiles for another stack are flagged
 	 *   (scaffolding rejects a profile whose stack differs from the chosen stack).
@@ -20,6 +22,7 @@
 	import {
 		getGenerationProfiles,
 		getProfilePreview,
+		previewDraftProfile,
 		suggestProfiles,
 		type GenerationProfile,
 		type ProfilePreview,
@@ -82,6 +85,11 @@
 	let previewError = $state('');
 
 	const profiles = $derived(providedProfiles ?? fetched);
+	// Newest version of each slug in the list: anything below it is a pinned older version.
+	const newestVersion = $derived(
+		profiles.reduce((acc, p) => acc.set(p.slug, Math.max(acc.get(p.slug) ?? 0, p.version)), new Map<string, number>())
+	);
+	const isOlder = (p: GenerationProfile) => (newestVersion.get(p.slug) ?? 0) > p.version;
 	const selected = $derived(selectedId != null ? profiles.find((p) => p.id === selectedId) : undefined);
 	const appKey = $derived([...appIds].sort((a, b) => a - b).join(','));
 	const suggestedIds = $derived(new Set(suggestions.map((s) => s.profile_id).filter((id) => id != null)));
@@ -166,10 +174,18 @@
 		}
 		const slug = previewProfileSlug;
 		const app = previewAppSlug || undefined;
+		// The slug endpoint renders the latest version; an older one renders from its own blocks.
+		const older = selected && isOlder(selected) ? selected : null;
 		const controller = new AbortController();
 		previewLoading = true;
 		previewError = '';
-		getProfilePreview(slug, app, { signal: controller.signal })
+		(older
+			? previewDraftProfile(
+					{ block_refs: older.block_refs, app_slug: app, llm_config: older.llm_config },
+					{ signal: controller.signal }
+				)
+			: getProfilePreview(slug, app, { signal: controller.signal })
+		)
 			.then((result) => {
 				preview = result;
 			})
@@ -215,6 +231,9 @@
 		<span class="flex min-w-0 flex-wrap items-center gap-1.5">
 			<span class="truncate font-medium">{profile.name}</span>
 			<span class="font-mono text-[11px] text-muted-foreground">v{profile.version}</span>
+			{#if isOlder(profile)}
+				<span class={cn(chip, 'border-warning/30 bg-warning/10 text-warning-fg')}>older · latest v{newestVersion.get(profile.slug)}</span>
+			{/if}
 			{#if profile.is_default}
 				<span class={cn(chip, 'border-border bg-muted text-muted-foreground')}>default</span>
 			{/if}
@@ -244,7 +263,7 @@
 			disabled={disabled || loading}
 			items={[
 				{ value: AUTO, label: 'Auto' },
-				...profiles.map((p) => ({ value: String(p.id), label: p.name })),
+				...profiles.map((p) => ({ value: String(p.id), label: isOlder(p) ? `${p.name} v${p.version}` : p.name })),
 			]}
 		>
 			<Select.Trigger id={triggerId} class="min-h-9 py-1.5 data-[size=default]:h-auto" aria-busy={loading}>

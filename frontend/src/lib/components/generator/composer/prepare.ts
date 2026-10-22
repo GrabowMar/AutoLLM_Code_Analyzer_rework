@@ -1,15 +1,23 @@
 /**
  * What the composer opens with: the mode's session draft (or defaults),
- * optionally replaced by a job's settings (`?from_job=`) and adjusted by the
- * `?model=` / `?app=` deep links. Each source that can't be applied adds a
- * note instead of failing the page.
+ * optionally replaced by a job's settings (`?from_job=`) or a batch's whole
+ * grid (`?from_batch=`), and adjusted by the `?model=` / `?app=` deep links.
+ * Each source that can't be applied adds a note instead of failing the page.
  */
 import {
+  getGenerationBatch,
+  getGenerationBatchJobs,
   getGenerationJob,
+  getGenerationProfiles,
+  getProfileVersions,
   getRunPreset,
+  type GenerationBatchRequest,
+  type GenerationBatchSummary,
   type GenerationJob,
+  type GenerationProfile,
   type HarnessPresetConfig,
   type LLMParams,
+  type PresetRef,
   type RunPreset,
 } from "$lib/api/generation";
 import { formatApiError } from "$lib/api/core";
@@ -20,6 +28,7 @@ import { loadPresets } from "../presets.svelte";
 import {
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_TRIALS,
+  MAX_TRIALS,
   NO_PINS,
   cleanAgentOverrides,
   defaultDraft,
@@ -48,6 +57,7 @@ export interface ComposerSource {
   modelSlug: string | null;
   appSlug: string | null;
   fromJobId: string | null;
+  fromBatchId?: string | null;
 }
 
 /** Keys of `job` whose values differ from `base` (what the inline layer added). */
@@ -73,13 +83,51 @@ function modeOf(job: GenerationJob): ComposerMode {
     : "agent";
 }
 
-async function fetchPreset(id: number | undefined): Promise<RunPreset | null> {
+async function fetchPreset(
+  id: number | null | undefined,
+): Promise<RunPreset | null> {
   if (id == null) return null;
   try {
     return await getRunPreset(id);
   } catch {
     return null;
   }
+}
+
+function presetRef(preset: RunPreset | null): PresetRef | null {
+  return preset
+    ? { id: preset.id, slug: preset.slug, version: preset.version }
+    : null;
+}
+
+export type ProfileLookup =
+  | { status: "found"; profile: GenerationProfile }
+  | { status: "missing" }
+  | { status: "error"; message: string };
+
+/**
+ * One exact profile version, by pk and slug. `GET /profiles/` lists only the
+ * latest version of each slug, so an older one is found in the slug's
+ * version list. Missing: deleted, archived or not visible.
+ */
+export async function lookupProfileVersion(
+  id: number,
+  slug: string | null | undefined,
+): Promise<ProfileLookup> {
+  if (!slug) return { status: "missing" };
+  try {
+    const row = (await getProfileVersions(slug)).find((p) => p.id === id);
+    return row ? { status: "found", profile: row } : { status: "missing" };
+  } catch (e) {
+    if (isNotFoundError(e)) return { status: "missing" };
+    return { status: "error", message: formatApiError(e, "request failed") };
+  }
+}
+
+function warningFrom(problems: string[]): string {
+  return problems.length
+    ? `Couldn't carry everything over: ${problems.join("; ")}.`
+    : "";
 }
 
 /**
@@ -103,9 +151,18 @@ export async function draftFromJob(
   const mode = modeOf(job);
   const problems: string[] = [];
   const snapshot = isRecord(job.resolved_bundle) ? job.resolved_bundle : {};
-  const app = isRecord(snapshot.app_requirement)
+  // A job whose snapshot failed has none: its own app spec fields remain.
+  const snapshotApp = isRecord(snapshot.app_requirement)
     ? snapshot.app_requirement
     : null;
+  const app: Record<string, unknown> | null =
+    snapshotApp ??
+    (job.app_requirement_id != null || job.app_slug
+      ? {
+          id: job.app_requirement_id ?? undefined,
+          slug: job.app_slug ?? undefined,
+        }
+      : null);
 
   const [models, specs, sampling] = await Promise.all([
     loadModelCatalog().catch(() => []),
@@ -132,6 +189,12 @@ export async function draftFromJob(
     else
       problems.push(`app spec ${String(app.slug ?? app.id)} no longer exists`);
   }
+  if (
+    mode !== "custom" &&
+    !app &&
+    !(mode === "agent" && job.task_description?.trim())
+  )
+    problems.push("the job's task (app spec) wasn't recorded");
 
   // Preset effects were applied into the job's fields; what differs from the
   // pinned preset is the inline layer.
@@ -172,30 +235,53 @@ export async function draftFromJob(
       draft,
       pins: { ...NO_PINS, sampling: samplingPin },
       notice: `Prompt, model and settings loaded from job ${shortId} (${label}). No seed is set.`,
-      warning: problems.length
-        ? `Couldn't carry everything over: ${problems.join("; ")}.`
-        : "",
+      warning: warningFrom(problems),
     };
   }
 
   if (mode === "scaffolding") {
+    // The exact profile version the job used, even when a newer one exists.
+    let profileId = typeof job.profile === "number" ? job.profile : null;
+    const profileSlug =
+      job.bundle_slug ??
+      (typeof snapshot.bundle_slug === "string" ? snapshot.bundle_slug : null);
+    let pinnedProfile: GenerationProfile | null = null;
+    if (profileId != null) {
+      const found = await lookupProfileVersion(profileId, profileSlug);
+      const version =
+        typeof snapshot.bundle_version === "number"
+          ? `@v${snapshot.bundle_version}`
+          : "";
+      if (found.status === "found") pinnedProfile = found.profile;
+      else if (found.status === "missing") {
+        problems.push(
+          `profile ${profileSlug ?? `#${profileId}`}${version} no longer exists, so Auto is used`,
+        );
+        profileId = null;
+      } else {
+        problems.push(
+          `profile ${profileSlug ?? `#${profileId}`}${version} couldn't be loaded (${found.message}); it stays selected`,
+        );
+      }
+    }
     const draft: DraftByMode["scaffolding"] = {
       appIds,
       stackSlug: job.stack_slug ?? "",
-      profileId: typeof job.profile === "number" ? job.profile : null,
+      profileId,
+      profileSlug: profileId != null ? profileSlug : null,
       modelIds: model ? [model.id] : [],
       samplingPresetId: samplingPin?.id ?? null,
       llmParams: inlineLLM,
       trials: DEFAULT_TRIALS,
     };
+    const loaded =
+      profileId != null ? "Task, model, stack, profile" : "Task, model, stack";
     return {
       mode,
       draft,
-      pins: { ...NO_PINS, sampling: samplingPin },
-      notice: `Task, model, stack, profile and settings loaded from job ${shortId} (${label}). Trials reset to ${DEFAULT_TRIALS}.`,
-      warning: problems.length
-        ? `Couldn't carry everything over: ${problems.join("; ")}.`
-        : "",
+      pins: { ...NO_PINS, sampling: samplingPin, profile: pinnedProfile },
+      notice: `${loaded} and settings loaded from job ${shortId} (${label}). Trials reset to ${DEFAULT_TRIALS}.`,
+      warning: warningFrom(problems),
     };
   }
 
@@ -277,10 +363,197 @@ export async function draftFromJob(
     notice:
       `Task, model, stack and presets loaded from job ${shortId} (${label}${harnessText ? `, ${harnessText}` : ""}). ` +
       `New base seed; trials reset to ${DEFAULT_TRIALS}. For an exact reproduction use Replay on the job page.`,
-    warning: problems.length
-      ? `Couldn't carry everything over: ${problems.join("; ")}.`
-      : "",
+    warning: warningFrom(problems),
   };
+}
+
+function numberIds(value: unknown): number[] {
+  return Array.isArray(value)
+    ? [...new Set(value.filter((v): v is number => Number.isInteger(v)))]
+    : [];
+}
+
+/**
+ * Build a draft that sets up `batch`'s whole grid again from its stored
+ * request: every app spec (or the free-form task), model, harness preset,
+ * the sampling / budget presets, the inline overrides, the stack and the
+ * trials, with a new base seed (none when the batch drew random seeds).
+ */
+export async function draftFromBatch(
+  batch: GenerationBatchSummary,
+): Promise<PreparedComposer> {
+  const request: GenerationBatchRequest = isRecord(batch.request)
+    ? batch.request
+    : {};
+  const mode: ComposerMode =
+    batch.mode === "scaffolding" ? "scaffolding" : "agent";
+  const problems: string[] = [];
+  const shortId = batch.id.slice(0, 8);
+  const wantedApps = numberIds(request.app_requirement_ids);
+  const wantedModels = numberIds(request.model_ids);
+
+  const [models, specs, sampling, budget] = await Promise.all([
+    loadModelCatalog().catch(() => null),
+    wantedApps.length
+      ? loadAppSpecCatalog().catch(() => null)
+      : Promise.resolve([]),
+    fetchPreset(request.sampling_preset_id),
+    mode === "agent" ? fetchPreset(request.budget_preset_id) : null,
+  ]);
+
+  let modelIds = wantedModels;
+  if (!models) problems.push("the model catalog didn't load");
+  else {
+    modelIds = wantedModels.filter((id) => models.some((m) => m.id === id));
+    const gone = wantedModels.length - modelIds.length;
+    if (gone > 0)
+      problems.push(
+        `${gone} model${gone === 1 ? " is" : "s are"} no longer in the catalog`,
+      );
+  }
+  let appIds = wantedApps;
+  if (!specs) problems.push("app specs didn't load");
+  else if (wantedApps.length) {
+    appIds = wantedApps.filter((id) => specs.some((a) => a.id === id));
+    const gone = wantedApps.length - appIds.length;
+    if (gone > 0)
+      problems.push(
+        `${gone} app spec${gone === 1 ? " no longer exists" : "s no longer exist"}`,
+      );
+  }
+  if (request.sampling_preset_id != null && !sampling)
+    problems.push("its sampling preset couldn't be loaded");
+
+  const trials =
+    typeof request.trials === "number" &&
+    Number.isInteger(request.trials) &&
+    request.trials >= 1 &&
+    request.trials <= MAX_TRIALS
+      ? request.trials
+      : DEFAULT_TRIALS;
+  const llmParams = cleanLLMParams((request.llm_params ?? {}) as LLMParams);
+  const stackSlug = request.stack_slug ?? batch.stack_slug ?? "";
+
+  if (mode === "scaffolding") {
+    let profileId = request.profile_id ?? null;
+    let pinnedProfile: GenerationProfile | null = null;
+    if (profileId != null) {
+      const id = profileId;
+      const latest = await getGenerationProfilesSafe();
+      pinnedProfile = latest?.find((p) => p.id === id) ?? null;
+      if (!pinnedProfile) {
+        // An older version: its slug is on the batch's runs ("slug@v").
+        const slug = await batchProfileSlug(batch.id);
+        const found = await lookupProfileVersion(id, slug);
+        if (found.status === "found") pinnedProfile = found.profile;
+        else if (found.status === "missing") {
+          problems.push(
+            `its prompt profile ${slug ?? `#${id}`} no longer exists, so Auto is used`,
+          );
+          profileId = null;
+        } else {
+          problems.push(
+            `its prompt profile couldn't be loaded (${found.message}); it stays selected`,
+          );
+        }
+      }
+    }
+    // The mode-default columns were sent as-is; a different value was an override.
+    if (
+      llmParams.temperature == null &&
+      typeof request.temperature === "number" &&
+      request.temperature !== 0.3
+    )
+      llmParams.temperature = request.temperature;
+    const draft: DraftByMode["scaffolding"] = {
+      appIds,
+      stackSlug,
+      profileId,
+      profileSlug: pinnedProfile?.slug ?? null,
+      modelIds,
+      samplingPresetId: sampling?.id ?? null,
+      llmParams,
+      trials,
+    };
+    return {
+      mode,
+      draft,
+      pins: {
+        ...NO_PINS,
+        sampling: presetRef(sampling),
+        profile: pinnedProfile,
+      },
+      notice: `The grid of batch ${shortId} is loaded: ${appIds.length} app spec${appIds.length === 1 ? "" : "s"} × ${modelIds.length} model${modelIds.length === 1 ? "" : "s"} × ${trials} trial${trials === 1 ? "" : "s"}, with its stack, profile and settings.`,
+      warning: warningFrom(problems),
+    };
+  }
+
+  const harnessPresetIds = numberIds(request.harness_preset_ids);
+  if (harnessPresetIds.length === 0 && (request.harnesses ?? []).length > 0)
+    problems.push(
+      "its harnesses predate presets; the default harness preset is used",
+    );
+  if (request.profile_id != null)
+    problems.push("its prompt profile isn't part of the agent composer");
+  const { stop: _stop, response_format: _format, ...agentLLM } = llmParams;
+  if (agentLLM.max_tokens == null && typeof request.max_tokens === "number")
+    agentLLM.max_tokens = request.max_tokens;
+  const description = (request.description ?? "").trim();
+  const draft: DraftByMode["agent"] = {
+    taskKind: appIds.length === 0 && description ? "freeform" : "specs",
+    appIds,
+    description: request.description ?? "",
+    stackSlug,
+    modelIds,
+    harnessPresetIds,
+    samplingPresetId: sampling?.id ?? null,
+    llmParams: agentLLM,
+    budgetPresetId: budget?.id ?? null,
+    agentConfig: cleanAgentOverrides(request.agent_config),
+    trials,
+    baseSeed: request.base_seed == null ? null : randomSeed(),
+  };
+  if (request.budget_preset_id != null && !budget)
+    problems.push("its budget preset couldn't be loaded");
+  const runs =
+    (appIds.length || (description ? 1 : 0)) *
+    modelIds.length *
+    harnessPresetIds.length *
+    trials;
+  return {
+    mode,
+    draft,
+    pins: { sampling: presetRef(sampling), budget: presetRef(budget) },
+    notice:
+      `The grid of batch ${shortId} is loaded (${runs} run${runs === 1 ? "" : "s"}: tasks, models, harness presets, presets, overrides, stack and trials). ` +
+      (request.base_seed == null
+        ? "Like the original, every run draws its own seed."
+        : "New base seed: the runs are new trials, not replays."),
+    warning: warningFrom(problems),
+  };
+}
+
+async function batchProfileSlug(batchId: string): Promise<string | null> {
+  try {
+    const ref = (await getGenerationBatchJobs(batchId)).find(
+      (j) => j.profile_ref,
+    )?.profile_ref;
+    if (!ref) return null;
+    const at = ref.lastIndexOf("@");
+    return at > 0 ? ref.slice(0, at) : ref;
+  } catch {
+    return null;
+  }
+}
+
+async function getGenerationProfilesSafe(): Promise<
+  GenerationProfile[] | null
+> {
+  try {
+    return await getGenerationProfiles();
+  } catch {
+    return null;
+  }
 }
 
 /** Apply `?model=` / `?app=`: they replace the draft's selection with exactly that item. */
@@ -347,7 +620,22 @@ export async function prepareComposer(
   source: ComposerSource,
 ): Promise<PreparedComposer> {
   let prepared = storedComposer(source.mode);
-  if (source.fromJobId) {
+  if (source.fromBatchId) {
+    try {
+      prepared = await draftFromBatch(
+        await getGenerationBatch(source.fromBatchId),
+      );
+    } catch (e) {
+      prepared = {
+        ...prepared,
+        warning: `Couldn't load batch ${source.fromBatchId.slice(0, 8)}: ${
+          isNotFoundError(e)
+            ? "it doesn't exist or isn't visible to you."
+            : formatApiError(e, "request failed")
+        }`,
+      } as PreparedComposer;
+    }
+  } else if (source.fromJobId) {
     try {
       prepared = await draftFromJob(await getGenerationJob(source.fromJobId));
     } catch (e) {

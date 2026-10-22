@@ -260,7 +260,9 @@ class _ExperimentBase:
     sampling_preset: RunPreset | None
     budget_preset: RunPreset | None
     sampling_llm_params: dict[str, Any]
-    # budget preset -> sampling preset policy -> experiment.agent_config (minus harness)
+    # budget preset -> sampling preset policy -> experiment.agent_config (minus
+    # harness): explicit experiment overrides beat presets, as inline
+    # agent_config does for POST /jobs/agent/.
     agent_config: dict[str, Any]
     issues: list[ConditionIssue]
     harness_defaults: dict[str, RunPreset | None] = field(default_factory=dict)
@@ -449,6 +451,9 @@ def experiment_layers(
     * ``agent_config`` (``job.agent_config``, agent mode; merged over the
       platform defaults) = budget preset -> sampling preset
       ``sampling_policy`` -> ``experiment.agent_config``, plus the harness.
+      The experiment's explicit overrides beat the presets (an
+      ``agent_config.sampling_policy`` wins over the sampling preset's), the
+      same order ad-hoc batches give inline ``agent_config``.
     * ``harness_options``: the condition's harness preset.
     * stack: ``experiment.stack_slug``, else the profile's, else the platform default.
 

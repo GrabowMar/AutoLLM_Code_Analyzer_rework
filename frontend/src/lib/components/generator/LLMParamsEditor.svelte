@@ -319,6 +319,25 @@
 	$effect(() => {
 		invalid = hasLocalErrors;
 	});
+	// Unmounted (e.g. inside a collapsed panel), the editor holds no unapplied
+	// value: release the parent's flag rather than leave it blocking a submit.
+	$effect(() => () => {
+		invalid = false;
+	});
+
+	// A collapsed section never hides an invalid value: it stays open (and its
+	// toggle says so) until the value is fixed or cleared, so a blocked submit
+	// always has a visible reason. Collapsing is refused meanwhile, so fixing
+	// the value never makes the field vanish mid-edit.
+	const moreHasError = $derived(
+		moreFields.some((f) => !!numberErrorFor(f, false)) || !!numberErrorFor(REASONING_BUDGET, true)
+	);
+	const advancedHasError = $derived(
+		(showStopAndFormat && stopDraftActive && !!stopDraft?.error) ||
+			(showProvider && providerDraftActive && !!providerDraft?.error)
+	);
+	const moreShown = $derived(moreOpen || moreHasError);
+	const advancedShown = $derived(advancedOpen || advancedHasError);
 
 	const effortItems = REASONING_EFFORTS.map((e) => ({ value: e, label: e }));
 	const responseFormatItems = [{ value: 'json_object', label: 'JSON object' }];
@@ -353,7 +372,14 @@
 	</div>
 {/snippet}
 
-{#snippet sectionToggle(open: boolean, label: string, count: number, toggle: () => void, controls: string)}
+{#snippet sectionToggle(
+	open: boolean,
+	label: string,
+	count: number,
+	toggle: () => void,
+	controls: string,
+	hasError: boolean
+)}
 	<button
 		type="button"
 		class="flex cursor-pointer items-start gap-1 rounded text-left text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
@@ -363,7 +389,9 @@
 	>
 		<ChevronRight class={cn('mt-px size-3.5 shrink-0 transition-transform duration-150', open && 'rotate-90')} aria-hidden="true" />
 		{label}
-		{#if count > 0}
+		{#if hasError}
+			<span class="rounded-full bg-destructive/10 px-1.5 text-[11px] text-danger-fg">invalid value</span>
+		{:else if count > 0}
 			<span class="rounded-full bg-primary/15 px-1.5 text-[11px] text-success-fg">{count} set</span>
 		{/if}
 	</button>
@@ -403,13 +431,14 @@
 
 	<div class="space-y-3">
 		{@render sectionToggle(
-			moreOpen,
+			moreShown,
 			'More sampling (top-k, min-p, penalties, reasoning budget)',
 			moreSetCount,
-			() => (moreOpen = !moreOpen),
-			`${idPrefix}-more`
+			() => (moreOpen = moreHasError || !moreOpen),
+			`${idPrefix}-more`,
+			moreHasError
 		)}
-		{#if moreOpen}
+		{#if moreShown}
 			<div id="{idPrefix}-more" class="grid gap-3 @md/llm:grid-cols-2 @3xl/llm:grid-cols-4">
 				{#each moreFields as field (field.key)}
 					{@render numberInput(field, false)}
@@ -422,13 +451,14 @@
 	{#if hasAdvanced}
 		<div class="space-y-3">
 			{@render sectionToggle(
-				advancedOpen,
+				advancedShown,
 				showStopAndFormat ? 'Advanced (stop, response format, provider routing)' : 'Advanced (provider routing)',
 				advancedSetCount,
-				() => (advancedOpen = !advancedOpen),
-				`${idPrefix}-advanced`
+				() => (advancedOpen = advancedHasError || !advancedOpen),
+				`${idPrefix}-advanced`,
+				advancedHasError
 			)}
-			{#if advancedOpen}
+			{#if advancedShown}
 				<div id="{idPrefix}-advanced" class="grid gap-3 @md/llm:grid-cols-2">
 					{#if showStopAndFormat}
 						<div class="min-w-0 space-y-1.5">

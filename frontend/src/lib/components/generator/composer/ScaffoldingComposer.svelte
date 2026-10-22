@@ -5,8 +5,13 @@
 	 * tally, the profile/stack consistency check and the effective sampling
 	 * params (`/jobs/llm-preview/`); success opens the batch page.
 	 *
-	 * Props: `initial` (draft), `pins` (sampling preset version from a job),
-	 * `keyState` (OpenRouter key status: a missing key blocks the start).
+	 * Props: `initial` (draft), `pins` (sampling preset and exact profile
+	 * version from a job or batch), `keyState` (OpenRouter key status: a
+	 * missing key blocks the start).
+	 *
+	 * The profile is an exact version: one the latest-only list lacks (an
+	 * older version pinned by a job or a stored draft) stays selectable, and
+	 * a profile that no longer exists switches to Auto with a visible warning.
 	 */
 	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -19,6 +24,7 @@
 		type LLMParams,
 	} from '$lib/api/generation';
 	import { apiFieldErrors, formatApiError } from '$lib/api/core';
+	import { lookupProfileVersion } from './prepare';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
@@ -42,7 +48,7 @@
 		type PresetPins,
 		type ScaffoldingDraft,
 	} from './draft';
-	import type { ChecklistItem, IssueAction, SummaryIssue } from './issues';
+	import { presetLookupIssue, type ChecklistItem, type IssueAction, type SummaryIssue } from './issues';
 	import { trackLLMPreview } from './llm-preview.svelte';
 	import { trackPresets } from './preset-lookup.svelte';
 
@@ -60,6 +66,10 @@
 	let appIds = $state(new Set(init.appIds));
 	let stackSlug = $state(init.stackSlug);
 	let profileId = $state<number | null>(init.profileId);
+	let profileSlug = $state<string | null>(init.profileSlug ?? untrack(() => pins.profile?.slug) ?? null);
+	// The exact version a job, batch or draft pinned, when the latest-only list lacks it.
+	let pinnedProfile = $state<GenerationProfile | null>(untrack(() => pins.profile ?? null));
+	let profileIssue = $state<SummaryIssue | null>(null);
 	let modelIds = $state(new Set(init.modelIds));
 	let samplingPresetId = $state<number | null>(init.samplingPresetId);
 	let llmParams = $state<LLMParams>(init.llmParams);
@@ -98,11 +108,53 @@
 		if (samplingPresetId != null && samplingPresets.isMissing(samplingPresetId)) samplingPresetId = null;
 	});
 
-	const profile = $derived(profileId != null ? profiles.find((p) => p.id === profileId) : undefined);
+	const pickerProfiles = $derived(
+		pinnedProfile && !profiles.some((p) => p.id === pinnedProfile!.id) ? [...profiles, pinnedProfile] : profiles
+	);
+	const profile = $derived(profileId != null ? pickerProfiles.find((p) => p.id === profileId) : undefined);
+
+	// A selected id the latest-only list lacks: look the exact version up by
+	// its slug. Only a profile that no longer exists falls back to Auto, and
+	// the Run summary says so; a failed lookup keeps the selection.
+	let lookingUp: number | null = null;
 	$effect(() => {
-		// A draft's profile that no longer exists falls back to Auto.
-		if (profilesLoaded && profileId != null && !profiles.some((p) => p.id === profileId)) profileId = null;
+		if (!profilesLoaded || profileId == null || profile) return;
+		const id = profileId;
+		const slug = profileSlug;
+		untrack(() => void resolveProfile(id, slug));
 	});
+
+	async function resolveProfile(id: number, slug: string | null) {
+		if (lookingUp === id) return;
+		lookingUp = id;
+		const found = await lookupProfileVersion(id, slug);
+		lookingUp = null;
+		if (profileId !== id) return;
+		const label = slug ?? `#${id}`;
+		if (found.status === 'found') {
+			pinnedProfile = found.profile;
+			profileIssue = null;
+		} else if (found.status === 'missing') {
+			profileId = null;
+			profileSlug = null;
+			profileIssue = {
+				code: 'profile_unavailable',
+				severity: 'warn',
+				detail: `The selected profile ${label} no longer exists or isn't visible to you, so Auto is used.`,
+			};
+		} else {
+			profileIssue = {
+				code: 'profile_lookup_failed',
+				severity: 'error',
+				detail: `The selected profile ${label} couldn't be loaded (${found.message}). It stays selected; retry to check it.`,
+			};
+		}
+	}
+
+	function retryProfile() {
+		profileIssue = null;
+		if (profileId != null) void resolveProfile(profileId, profileSlug);
+	}
 
 	// ── effective params ────────────────────────────────────────────────
 	const llm = trackLLMPreview(() => ({
@@ -146,6 +198,7 @@
 
 	const issues = $derived.by((): SummaryIssue[] => {
 		const out: SummaryIssue[] = [];
+		if (profileIssue) out.push(profileIssue);
 		if (stackMismatch && profile) {
 			out.push({
 				code: 'profile_stack_mismatch',
@@ -165,6 +218,8 @@
 		} else if (keyState === 'invalid') {
 			out.push({ code: 'missing_api_key', severity: 'warn', detail: 'Your OpenRouter key was rejected at its last validation; runs may fail.' });
 		}
+		const lookup = presetLookupIssue([samplingPresets.lookupError]);
+		if (lookup) out.push(lookup);
 		if (runCount > LARGE_BATCH) {
 			out.push({ code: 'large_batch', severity: 'warn', detail: `${runCount} runs in one batch.` });
 		}
@@ -186,6 +241,8 @@
 		const out: Record<string, IssueAction> = {
 			missing_api_key: { label: 'Open Settings', href: '/users/settings#credentials' },
 			single_trial: { label: `Use ${DEFAULT_TRIALS} trials`, onclick: () => (trials = DEFAULT_TRIALS) },
+			preset_lookup_failed: { label: 'Retry', onclick: () => samplingPresets.retry() },
+			profile_lookup_failed: { label: 'Retry', onclick: retryProfile },
 		};
 		if (profile) {
 			const target = profile.scaffolding_slug;
@@ -271,6 +328,7 @@
 			appIds: sortedIds(appIds),
 			stackSlug,
 			profileId,
+			profileSlug: profileId != null ? (profile?.slug ?? profileSlug) : null,
 			modelIds: sortedIds(modelIds),
 			samplingPresetId,
 			llmParams: cleanLLMParams($state.snapshot(llmParams) as LLMParams),
@@ -294,11 +352,13 @@
 					{#if profilesLoaded}
 						<ProfilePicker
 							bind:selectedId={profileId}
-							{profiles}
+							profiles={pickerProfiles}
 							appIds={[...appIds]}
 							{stackSlug}
 							idPrefix="scaffolding-profile"
 							onchange={(picked) => {
+								profileSlug = picked?.slug ?? null;
+								profileIssue = null;
 								// A profile belongs to one stack; follow it so the pair stays valid.
 								if (picked) stackSlug = picked.scaffolding_slug;
 							}}
@@ -386,7 +446,12 @@
 						<dd class="font-mono">{stackSlug || '—'}</dd>
 						<dt class="text-muted-foreground">Profile</dt>
 						<dd class="min-w-0 break-words">
-							{#if profile}{profile.name} <span class="font-mono text-muted-foreground">v{profile.version}</span>{:else}Auto (per app){/if}
+							{#if profile}
+								{profile.name} <span class="font-mono text-muted-foreground">v{profile.version}</span>
+								{#if !profiles.some((p) => p.id === profile.id)}<span class="text-warning-fg">· older version</span>{/if}
+							{:else if profileId != null}
+								<span class="text-muted-foreground">#{profileId} (looking it up…)</span>
+							{:else}Auto (per app){/if}
 						</dd>
 					</dl>
 				</div>

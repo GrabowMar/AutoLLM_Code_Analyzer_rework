@@ -19,6 +19,9 @@ export {
   loadAppSpecCatalog,
   loadModelCatalog,
   modelIneligibility,
+  refreshCatalog,
+  watchCatalog,
+  type CatalogName,
   type ModelEligibilityRules,
 } from "./catalog";
 export {

@@ -43,6 +43,7 @@ from backend.generation.services.batches import experiment_batch_q
 from backend.generation.services.batches import refresh_batch
 from backend.generation.services.dispatcher import dispatch_evaluation
 from backend.generation.services.dispatcher import dispatch_job
+from backend.generation.services.job_cloning import cell_taken_by
 from backend.generation.services.job_cloning import clone_job
 from backend.generation.services.job_listing import job_list_item
 from backend.generation.services.job_listing import with_list_fields
@@ -241,11 +242,20 @@ def _dispatch_and_serialize(new_job: GenerationJob) -> GenerationJobSchema:
 
 @router.post("/jobs/{job_id}/retry/", response={200: GenerationJobSchema, 400: dict})
 def retry_job(request, job_id: str):
-    """Re-create a failed/cancelled job, re-resolving templates."""
+    """Re-create a failed/cancelled job, re-resolving templates.
+
+    The retry replaces the failed trial: it takes over the job's experiment
+    cell and batch and runs under the cell's seed (common random numbers).
+    """
     original = _load_job_for_cloning(request, job_id)
     if original.status not in ("failed", "cancelled"):
         return 400, {"message": "Only failed or cancelled jobs can be retried"}
-    new_job = clone_job(original, request.auth, reuse_snapshot=False, new_seed=True)
+    if cell_taken_by(original) is not None:
+        return 400, {
+            "message": "This experiment cell already has a live or completed run (a relaunch or an earlier "
+            "retry); another one would count as an extra trial",
+        }
+    new_job = clone_job(original, request.auth, reuse_snapshot=False, new_seed=True, keep_cell=True)
     return _dispatch_and_serialize(new_job)
 
 
@@ -262,7 +272,8 @@ def replay_job(request, job_id: str):
         request.auth,
         reuse_snapshot=True,
         new_seed=False,
-        # Replays verify reproducibility; keep them out of the trial counts.
+        # Replays verify reproducibility; keep them out of the trial counts
+        # (no batch, no experiment cell).
         keep_batch=False,
     )
     return _dispatch_and_serialize(new_job)
@@ -276,7 +287,10 @@ def rerun_job(request, job_id: str):
         return 400, {"message": "Job is still in progress"}
     if not isinstance(original.resolved_bundle, dict) or not original.resolved_bundle:
         return 400, {"message": "Job has no resolved bundle snapshot to rerun"}
-    # An extra trial grows the batch rather than displacing a failure.
+    # An extra trial grows the batch rather than displacing a failure. It
+    # joins no experiment cell: its fresh seed is unpaired, and one extra
+    # trial of one condition would unbalance the design (raise the
+    # experiment's repeats and relaunch instead).
     new_job = clone_job(original, request.auth, reuse_snapshot=True, new_seed=True)
     return _dispatch_and_serialize(new_job)
 

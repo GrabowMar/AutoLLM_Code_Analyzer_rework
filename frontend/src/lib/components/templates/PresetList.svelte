@@ -113,7 +113,7 @@
 					<span class="text-sm font-semibold">{preset.name}</span>
 					<span class="font-mono text-[11px] text-muted-foreground">{preset.slug}@v{preset.version}</span>
 					{#if preset.is_default}
-						<Badge>Default</Badge>
+						<Badge class="text-success-fg">Default</Badge>
 					{:else if preset.is_system}
 						<Badge variant="secondary">System</Badge>
 					{:else}
@@ -180,7 +180,7 @@
 							<li class="flex flex-col gap-0.5 text-xs sm:flex-row sm:items-baseline sm:gap-3">
 								<span class="flex shrink-0 items-center gap-1.5">
 									<span class="font-mono text-foreground">v{version.version}</span>
-									{#if version.version === preset.latest_version}<span class="text-[11px] text-primary">latest</span>{/if}
+									{#if version.version === preset.latest_version}<span class="text-[11px] text-success-fg">latest</span>{/if}
 									{#if version.is_archived}<span class="text-[11px] text-muted-foreground">archived</span>{/if}
 								</span>
 								<span class="min-w-0 flex-1 break-words font-mono text-muted-foreground">

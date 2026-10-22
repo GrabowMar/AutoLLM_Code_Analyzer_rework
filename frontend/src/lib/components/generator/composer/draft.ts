@@ -8,6 +8,7 @@ import { browser } from "$app/environment";
 import type {
   AgentConfigOverrides,
   GenerationMode,
+  GenerationProfile,
   LLMParams,
   PresetRef,
 } from "$lib/api/generation";
@@ -53,8 +54,10 @@ export interface AgentDraft {
 export interface ScaffoldingDraft {
   appIds: number[];
   stackSlug: string;
-  /** null = Auto (resolved per app). */
+  /** null = Auto (resolved per app). An exact version (pk), possibly not the latest. */
   profileId: number | null;
+  /** Slug of `profileId`, so a superseded version can still be looked up. */
+  profileSlug: string | null;
   modelIds: number[];
   samplingPresetId: number | null;
   llmParams: LLMParams;
@@ -80,6 +83,8 @@ export interface DraftByMode {
 export interface PresetPins {
   sampling: PresetRef | null;
   budget: PresetRef | null;
+  /** Scaffolding: the exact profile version (kept selectable when it is not the latest). */
+  profile?: GenerationProfile | null;
 }
 
 export const NO_PINS: PresetPins = { sampling: null, budget: null };
@@ -115,6 +120,7 @@ export function defaultDraft<M extends ComposerMode>(mode: M): DraftByMode[M] {
       appIds: [],
       stackSlug: "",
       profileId: null,
+      profileSlug: null,
       modelIds: [],
       samplingPresetId: null,
       llmParams: {},
@@ -158,6 +164,11 @@ function idOrNull(value: unknown): number | null | undefined {
 
 function str(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function strOrNull(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return typeof value === "string" && value ? value : undefined;
 }
 
 function intOrNull(
@@ -240,6 +251,7 @@ function sanitize<M extends ComposerMode>(
       appIds: ids(raw.appIds),
       stackSlug: str(raw.stackSlug),
       profileId: idOrNull(raw.profileId),
+      profileSlug: strOrNull(raw.profileSlug),
       modelIds: ids(raw.modelIds),
       samplingPresetId: idOrNull(raw.samplingPresetId),
       llmParams: params(raw.llmParams),

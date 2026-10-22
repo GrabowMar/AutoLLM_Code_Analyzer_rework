@@ -30,8 +30,9 @@
 		type PresetRef,
 		type RunPreset,
 	} from '$lib/api/generation';
-	import { formatApiError } from '$lib/api/core';
+	import { apiErrorStatus, formatApiError } from '$lib/api/core';
 	import { cn } from '$lib/utils';
+	import { isNotFoundError } from './batches/batch-utils';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
@@ -81,7 +82,9 @@
 	let loading = $state(true);
 	let error = $state('');
 	let extra = $state<RunPreset | null>(null);
-	let extraFailed = $state(false);
+	// '' | 'missing' (a 404) | the error of a failed lookup (retryable; the id stays selected).
+	let extraError = $state('');
+	let extraAttempt = $state(0);
 	let refreshOnFocus = false;
 
 	const triggerId = $derived(`${idPrefix ?? `preset-${kind}`}-select`);
@@ -135,23 +138,26 @@
 
 	$effect(() => {
 		const id = extraId;
+		void extraAttempt; // re-run on Retry
 		if (id == null) {
 			extra = null;
-			extraFailed = false;
+			extraError = '';
 			return;
 		}
 		if (untrack(() => extra?.id === id)) return;
 		let cancelled = false;
-		extraFailed = false;
+		extraError = '';
 		getRunPreset(id)
 			.then((preset) => {
 				if (!cancelled) extra = preset;
 			})
-			.catch(() => {
-				if (!cancelled) {
-					extra = null;
-					extraFailed = true;
-				}
+			.catch((e: unknown) => {
+				if (cancelled) return;
+				extra = null;
+				const status = apiErrorStatus(e);
+				extraError = isNotFoundError(e)
+					? 'missing'
+					: formatApiError(e, `Could not load this preset${status ? ` (the server answered ${status})` : ''}.`);
 			});
 		return () => {
 			cancelled = true;
@@ -246,8 +252,10 @@
 					{@render presetLine(selected)}
 				{:else if selectedId == null && noneOption}
 					{@render noneLine(noneOption)}
-				{:else if selectedId != null && extraFailed}
+				{:else if selectedId != null && extraError === 'missing'}
 					<span class="text-muted-foreground">Preset #{selectedId} (not available)</span>
+				{:else if selectedId != null && extraError}
+					<span class="text-muted-foreground">Preset #{selectedId} (not loaded)</span>
 				{:else if presets.length === 0}
 					<span class="text-muted-foreground">No presets</span>
 				{:else}
@@ -316,6 +324,12 @@
 					</Button>
 				{/if}
 			</div>
+		{/if}
+		{#if selectedId != null && extraError && extraError !== 'missing' && !selected}
+			<p class="flex flex-wrap items-center gap-x-2 text-[11px] text-warning-fg" role="status">
+				<span>{extraError} It stays selected.</span>
+				<Button variant="link" size="sm" class="h-auto px-0 text-[11px]" onclick={() => (extraAttempt += 1)}>Retry</Button>
+			</p>
 		{/if}
 		{#if error && all.length > 0}
 			<p class="text-[11px] text-danger-fg">{error}</p>

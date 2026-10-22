@@ -45,7 +45,8 @@ Each section is a list; a missing section counts as empty.
 ```
 
 - Only assets you can see are exported (system rows and your own; for stacks, approved stacks and your own).
-- A profile brings along the blocks it references and the **user stack it targets**, so the package imports elsewhere without a dangling stack. Builtin stacks are never exported.
+- A profile exports at its latest version and brings along the blocks it references and the **user stack it targets**, so the package imports elsewhere without a dangling stack. Builtin stacks are never exported.
+- A referenced block you cannot see (another user's private block, or one that no longer exists) is left out, and the package lists it in a top-level `omitted_blocks: [{profile, type, slug, version, reason}]` (present only when something was left out; bundle packages carry it too). The profile keeps the reference, so importing it elsewhere needs that block to exist there. The Library's Packages dialog warns before the export. Creating or editing a profile refuses such refs (400 `Unknown block <slug> v<version>`).
 - Presets export at their latest visible version.
 - An export with nothing in it is a 400.
 

@@ -612,6 +612,56 @@ def test_profile_preview_with_app_slug_renders_prompts(client):
 
 
 @pytest.mark.django_db
+def test_profile_previews_and_suggest_hide_another_users_private_spec(client):
+    client.force_login(UserFactory())
+    hidden = AppRequirementTemplateFactory(is_default=False, created_by=UserFactory(), description="TOP SECRET SPEC")
+
+    saved = client.get(f"/api/generation/profiles/system-scaffolding-standard/preview/?app_slug={hidden.slug}")
+    draft = client.post(
+        "/api/generation/profiles/preview-draft/",
+        data=json.dumps({"block_refs": [], "app_slug": hidden.slug}),
+        content_type="application/json",
+    )
+    suggest = client.get(f"/api/generation/profiles/suggest/?app_ids={hidden.id}")
+
+    assert saved.status_code == 404
+    assert draft.status_code == 404
+    assert suggest.status_code == 200
+    assert suggest.json() == []
+
+
+@pytest.mark.django_db
+def test_profile_block_refs_must_be_visible_to_the_author(client):
+    owner = UserFactory()
+    private = ContentBlockFactory(is_system=False, created_by=owner, slug="owner-private-rules", content="SECRET")
+    user = UserFactory()
+    client.force_login(user)
+    own = ContentBlockFactory(is_system=False, created_by=user)
+    client.post("/api/generation/profiles/", data=json.dumps(_bundle_payload(own)), content_type="application/json")
+
+    created = client.post(
+        "/api/generation/profiles/",
+        data=json.dumps(_bundle_payload(private, slug="points-at-private")),
+        content_type="application/json",
+    )
+    updated = client.put(
+        "/api/generation/profiles/manual-bundle/",
+        data=json.dumps(_bundle_payload(private, description="now with a private block")),
+        content_type="application/json",
+    )
+    nothing = _bundle_payload(own, slug="points-at-nothing", block_refs=[{"type": "x", "slug": "nope", "version": 3}])
+    missing = client.post("/api/generation/profiles/", data=json.dumps(nothing), content_type="application/json")
+
+    # Same answer for a private block and a missing one (no existence leak).
+    for response in (created, updated, missing):
+        assert response.status_code == 400
+    assert created.json()["detail"] == "Unknown block owner-private-rules v1"
+    assert missing.json()["detail"] == "Unknown block nope v3"
+    assert not GenerationProfile.objects.filter(slug__in=["points-at-private", "points-at-nothing"]).exists()
+    assert GenerationProfile.objects.filter(slug="manual-bundle").count() == 1
+
+
+@pytest.mark.django_db
 def test_block_new_version_creates_user_owned_next_version(client):
     user = UserFactory()
     client.force_login(user)

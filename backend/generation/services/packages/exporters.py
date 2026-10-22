@@ -9,8 +9,6 @@ from typing import Any
 import yaml
 from django.utils import timezone
 
-from backend.generation.models import ContentBlock
-from backend.generation.models import GenerationProfile
 from backend.generation.services.packages.constants import BUNDLE_PACKAGE_KIND
 from backend.generation.services.packages.constants import BUNDLE_PACKAGE_SCHEMA_VERSION
 from backend.generation.services.packages.constants import TEMPLATE_PACKAGE_KIND
@@ -23,17 +21,34 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
 
     from backend.generation.models import AppRequirementTemplate
+    from backend.generation.models import ContentBlock
+    from backend.generation.models import GenerationProfile
     from backend.generation.models import RunPreset
 
 
-def export_bundle_package(bundle: GenerationProfile) -> dict[str, Any]:
-    return {
+# Why a profile's block ref was left out of a package (``omitted_blocks``).
+# Deliberately vague: an export must not tell another user's private block
+# apart from a deleted one.
+OMITTED_BLOCK_REASON = "missing or not visible to you"
+
+
+def export_bundle_package(bundle: GenerationProfile, user: AbstractUser | None) -> dict[str, Any]:
+    """A bundle package of *bundle* with the referenced blocks *user* can see.
+
+    Refs to other blocks are listed in ``omitted_blocks`` (present only when
+    non-empty); the profile keeps them, so importing it elsewhere needs them.
+    """
+    blocks, omitted = _bundle_blocks([bundle], user)
+    package = {
         "bundle_package_schema_version": BUNDLE_PACKAGE_SCHEMA_VERSION,
         "kind": BUNDLE_PACKAGE_KIND,
         "exported_at": timezone.now().isoformat(),
         "bundle": _serialize_bundle(bundle),
-        "blocks": [_serialize_block(block) for block in _blocks_for_bundle_refs(bundle.block_refs or [])],
+        "blocks": [_serialize_block(block) for block in blocks],
     }
+    if omitted:
+        package["omitted_blocks"] = omitted
+    return package
 
 
 def export_template_package(
@@ -48,8 +63,9 @@ def export_template_package(
     """A v3 template package of the named assets *user* can see.
 
     Profiles bring the blocks they reference and the user stack they target
-    (builtin stacks ship with every install). Presets are exported at their
-    latest visible version.
+    (builtin stacks ship with every install). A profile ref to a block *user*
+    cannot see (another user's private block) is left out and reported in
+    ``omitted_blocks``. Presets are exported at their latest visible version.
     """
     app_template_slugs = app_template_slugs or []
     bundle_slugs = bundle_slugs or []
@@ -57,7 +73,12 @@ def export_template_package(
     stack_slugs = list(stack_slugs or [])
     preset_refs = preset_refs or []
 
-    bundles = list(visible_profiles_for(user).filter(slug__in=bundle_slugs).order_by("name"))
+    # Latest version of each slug (the queryset is slug-ordered, newest first):
+    # older versions would import as renamed duplicates.
+    latest: dict[str, GenerationProfile] = {}
+    for bundle in visible_profiles_for(user).filter(slug__in=bundle_slugs):
+        latest.setdefault(bundle.slug, bundle)
+    bundles = sorted(latest.values(), key=lambda bundle: bundle.name)
     explicit_blocks = []
     for ref in block_refs:
         block = (
@@ -71,15 +92,13 @@ def export_template_package(
         if block:
             explicit_blocks.append(block)
 
-    bundle_blocks = _blocks_for_bundle_refs(
-        [ref for bundle in bundles for ref in (bundle.block_refs or [])],
-    )
+    bundle_blocks, omitted = _bundle_blocks(bundles, user)
     blocks = _dedupe_blocks([*explicit_blocks, *bundle_blocks])
     for bundle in bundles:
         if bundle.scaffolding_slug and bundle.scaffolding_slug not in stack_slugs:
             stack_slugs.append(bundle.scaffolding_slug)
 
-    return {
+    package: dict[str, Any] = {
         "template_package_schema_version": TEMPLATE_PACKAGE_SCHEMA_VERSION,
         "kind": TEMPLATE_PACKAGE_KIND,
         "exported_at": timezone.now().isoformat(),
@@ -94,6 +113,9 @@ def export_template_package(
             "presets": [_serialize_preset(preset) for preset in _exportable_presets(user, preset_refs)],
         },
     }
+    if omitted:
+        package["omitted_blocks"] = omitted
+    return package
 
 
 def _exportable_presets(user: AbstractUser, preset_refs: list[dict[str, Any]]) -> list[RunPreset]:
@@ -172,16 +194,36 @@ def _dump_package(package: dict[str, Any], fmt: str) -> tuple[str, str]:
     return json.dumps(package, indent=2, sort_keys=True), "application/json"
 
 
-def _blocks_for_bundle_refs(block_refs: list[dict[str, Any]]) -> list[ContentBlock]:
+def _bundle_blocks(
+    bundles: list[GenerationProfile],
+    user: AbstractUser | None,
+) -> tuple[list[ContentBlock], list[dict[str, Any]]]:
+    """(blocks the profiles reference that *user* can see, the refs left out).
+
+    Only visible blocks are exported: a profile may point at another user's
+    private block (``block_refs`` are free-form), and exporting it would hand
+    that block's content to the profile's owner.
+    """
+    visible = visible_blocks_for(user)
     blocks: list[ContentBlock] = []
-    for ref in block_refs:
-        block = ContentBlock.objects.filter(
-            slug=ref.get("slug"),
-            version=int(ref.get("version", 1)),
-        ).first()
-        if block:
-            blocks.append(block)
-    return _dedupe_blocks(blocks)
+    omitted: list[dict[str, Any]] = []
+    for bundle in bundles:
+        for ref in bundle.block_refs or []:
+            slug, version = ref.get("slug"), int(ref.get("version", 1))
+            block = visible.filter(slug=slug, version=version).first()
+            if block:
+                blocks.append(block)
+                continue
+            entry = {
+                "profile": bundle.slug,
+                "type": ref.get("type") or "",
+                "slug": slug,
+                "version": version,
+                "reason": OMITTED_BLOCK_REASON,
+            }
+            if entry not in omitted:
+                omitted.append(entry)
+    return _dedupe_blocks(blocks), omitted
 
 
 def _dedupe_blocks(blocks: list[ContentBlock]) -> list[ContentBlock]:

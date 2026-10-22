@@ -1,8 +1,9 @@
 <script lang="ts">
 	/**
-	 * StacksList — stack cards. Builtin stacks can only be duplicated; user stacks
-	 * can be edited (new version) and archived (the server refuses stacks you do
-	 * not own). A user stack awaiting approval runs only for its owner.
+	 * StacksList — stack cards. Every stack can be duplicated; only your own user
+	 * stacks can be edited (new version) and archived — another user's approved
+	 * stack is listed (you may run it) but the server refuses changes to it. A
+	 * user stack awaiting approval runs only for its owner.
 	 */
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -24,6 +25,11 @@
 		onArchive?: (s: Stack) => void;
 	}
 	let { stacks, loading, compact, activeSlug = null, onEdit, onDuplicate, onArchive }: Props = $props();
+
+	// `is_own` is newer than some API responses: a missing field means "not yours".
+	function canChange(stack: Stack): boolean {
+		return !stack.is_builtin && (stack as Stack & { is_own?: boolean }).is_own === true;
+	}
 </script>
 
 {#if loading}
@@ -47,7 +53,7 @@
 							</h3>
 							<p class="font-mono text-[11px] text-muted-foreground">{stack.slug}@v{stack.version}</p>
 						</div>
-						<Badge variant={stack.has_frontend ? 'default' : 'secondary'} class="shrink-0">
+						<Badge variant={stack.has_frontend ? 'default' : 'secondary'} class="shrink-0 {stack.has_frontend ? 'text-success-fg' : ''}">
 							{stack.has_frontend ? 'full-stack' : 'backend-only'}
 						</Badge>
 					</div>
@@ -72,7 +78,7 @@
 					{/if}
 				</div>
 				<div class="flex flex-wrap gap-1.5 border-t px-4 py-2.5">
-					{#if !stack.is_builtin && onEdit}
+					{#if canChange(stack) && onEdit}
 						<Button variant="outline" size="sm" title="Edit as a new version" onclick={() => onEdit(stack)}>
 							<Pencil /> Edit
 						</Button>
@@ -88,7 +94,7 @@
 							<Copy />{#if stack.is_builtin}<span>Duplicate</span>{/if}
 						</Button>
 					{/if}
-					{#if !stack.is_builtin && onArchive}
+					{#if canChange(stack) && onArchive}
 						<Button
 							variant="outline"
 							size="sm"

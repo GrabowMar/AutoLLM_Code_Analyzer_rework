@@ -11,7 +11,8 @@ import {
   type PresetKind,
   type RunPreset,
 } from "$lib/api/generation";
-import { formatApiError } from "$lib/api/core";
+import { apiErrorStatus, formatApiError } from "$lib/api/core";
+import { isNotFoundError } from "../batches/batch-utils";
 import {
   invalidatePresets,
   loadPresets,
@@ -24,9 +25,14 @@ export interface PresetTracker<K extends PresetKind> {
   /** The list request finished (successfully or not). */
   readonly loaded: boolean;
   readonly error: string;
+  /**
+   * A wanted id the list lacks could not be looked up (network error, 5xx):
+   * it stays selected and is not "missing"; `retry()` looks it up again.
+   */
+  readonly lookupError: string;
   /** A preset by id: from the list, or a fetched older/archived version. */
   find(id: number | null | undefined): RunPreset<K> | undefined;
-  /** The id was looked up and does not exist (or is not visible). */
+  /** The lookup answered 404: the id does not exist (or is not visible). */
   isMissing(id: number): boolean;
   /** The latest version of the same slug, when `preset` is not it. */
   newerVersion(preset: RunPreset<K>): RunPreset<K> | undefined;
@@ -43,6 +49,7 @@ export function trackPresets<K extends PresetKind>(
     list: [] as RunPreset<K>[],
     loaded: false,
     error: "",
+    lookupError: "",
     extras: {} as Record<number, RunPreset<K> | "missing">,
   });
   const requested = new Set<number>();
@@ -78,8 +85,20 @@ export function trackPresets<K extends PresetKind>(
         .then((preset) => {
           state.extras[id] = preset as RunPreset<K>;
         })
-        .catch(() => {
-          state.extras[id] = "missing";
+        .catch((e: unknown) => {
+          // Only a 404 means gone. Anything else (an outage, a backend
+          // reload) must not make the composers swap the selection: keep
+          // it, say so, and let retry() look it up again.
+          if (isNotFoundError(e)) {
+            state.extras[id] = "missing";
+            return;
+          }
+          requested.delete(id);
+          const status = apiErrorStatus(e);
+          state.lookupError = formatApiError(
+            e,
+            status ? `the server answered ${status}` : "the request failed",
+          );
         });
     }
   });
@@ -93,6 +112,9 @@ export function trackPresets<K extends PresetKind>(
     },
     get error() {
       return state.error;
+    },
+    get lookupError() {
+      return state.lookupError;
     },
     find(id) {
       if (id == null) return undefined;
@@ -125,6 +147,7 @@ export function trackPresets<K extends PresetKind>(
       untrack(() => {
         requested.clear();
         state.extras = {};
+        state.lookupError = "";
       });
       invalidatePresets(kind);
     },

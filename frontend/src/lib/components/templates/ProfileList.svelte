@@ -85,7 +85,7 @@
 							</span>
 							<span>stack <span class="font-mono text-foreground">{p.scaffolding_slug}</span></span>
 							{#if Object.keys(p.llm_config ?? {}).length > 0}
-								<span class="font-mono text-primary">{Object.keys(p.llm_config).length} llm default{Object.keys(p.llm_config).length > 1 ? 's' : ''}</span>
+								<span class="font-mono text-success-fg">{Object.keys(p.llm_config).length} llm default{Object.keys(p.llm_config).length > 1 ? 's' : ''}</span>
 							{/if}
 						</div>
 					</div>
