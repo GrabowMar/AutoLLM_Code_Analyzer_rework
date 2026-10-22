@@ -13,6 +13,7 @@ import {
   type RunPreset,
 } from "$lib/api/generation";
 import { formatApiError } from "$lib/api/core";
+import { isNotFoundError } from "../batches/batch-utils";
 import { findModel, loadAppSpecCatalog, loadModelCatalog } from "../catalog";
 import { cleanLLMParams } from "../llm-params";
 import { loadPresets } from "../presets.svelte";
@@ -81,6 +82,20 @@ async function fetchPreset(id: number | undefined): Promise<RunPreset | null> {
   }
 }
 
+/**
+ * The harness a pre-preset agent job ran: its agent_config names it, or (for
+ * jobs that ran the then-default harness) only the snapshot does.
+ */
+function legacyHarness(
+  job: GenerationJob,
+  snapshot: Record<string, unknown>,
+): string | null {
+  const agent = isRecord(snapshot.agent) ? snapshot.agent : {};
+  const harness = isRecord(snapshot.harness) ? snapshot.harness : {};
+  const name = job.agent_config?.harness ?? agent.harness ?? harness.name;
+  return typeof name === "string" && name ? name : null;
+}
+
 /** Build a draft that reproduces `job`'s task, model, stack and exact preset versions. */
 export async function draftFromJob(
   job: GenerationJob,
@@ -100,9 +115,11 @@ export async function draftFromJob(
     fetchPreset(job.sampling_preset?.id),
   ]);
 
-  const model = job.model_id_str
-    ? findModel(models, job.model_id_str)
-    : undefined;
+  const model =
+    (job.model_pk != null
+      ? models.find((m) => m.id === job.model_pk)
+      : undefined) ??
+    (job.model_id_str ? findModel(models, job.model_id_str) : undefined);
   if (job.model_id_str && !model)
     problems.push(`model ${job.model_id_str} is no longer in the catalog`);
 
@@ -196,12 +213,13 @@ export async function draftFromJob(
 
   let harnessPresetIds: number[] = [];
   let harnessText = "";
+  const legacyName = legacyHarness(job, snapshot);
   if (job.harness_preset) {
     harnessPresetIds = [job.harness_preset.id];
     harnessText = `${job.harness_preset.name} v${job.harness_preset.version}`;
-  } else if (job.agent_config?.harness) {
+  } else if (legacyName) {
     // Jobs from before presets: that harness's system preset.
-    const name = job.agent_config.harness;
+    const name = legacyName;
     const list = await loadPresets("harness").catch(
       () => [] as RunPreset<"harness">[],
     );
@@ -335,7 +353,11 @@ export async function prepareComposer(
     } catch (e) {
       prepared = {
         ...prepared,
-        warning: `Couldn't load job ${source.fromJobId.slice(0, 8)}: ${formatApiError(e, "request failed")}`,
+        warning: `Couldn't load job ${source.fromJobId.slice(0, 8)}: ${
+          isNotFoundError(e)
+            ? "it doesn't exist or isn't visible to you."
+            : formatApiError(e, "request failed")
+        }`,
       } as PreparedComposer;
     }
   }

@@ -129,7 +129,7 @@
 				<div class="min-w-0">
 					<dt class="section-label">Batch</dt>
 					<dd class="truncate">
-						<a href={batchHref(job.batch_id)} class="text-primary hover:underline">{job.batch_name || 'Open batch'}</a>
+						<a href={batchHref(job.batch_id)} class="text-success-fg hover:underline">{job.batch_name || 'Open batch'}</a>
 					</dd>
 				</div>
 			{/if}

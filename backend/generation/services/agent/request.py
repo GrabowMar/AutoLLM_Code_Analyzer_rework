@@ -478,12 +478,13 @@ def _model_issues(plan: AgentRunPlan) -> None:
             },
         )
         if not tools_ok:
-            labels = ", ".join(sorted({h.label for h in tool_harnesses}))
+            names = sorted({h.label for h in tool_harnesses})
+            verb = "needs" if len(names) == 1 else "need"
             plan.issues.append(
                 Issue(
                     "models_without_tools",
                     "error",
-                    f"{model.model_id} does not support tools; {labels} need tool-calling models",
+                    f"{model.model_id} does not support tools; {', '.join(names)} {verb} tool-calling models",
                     model.id,
                 ),
             )

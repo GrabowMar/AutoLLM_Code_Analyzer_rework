@@ -51,9 +51,8 @@
 	const samplingPresets = trackPresets('sampling', () => [samplingPresetId]);
 	const samplingPreset = $derived(samplingPresets.find(samplingPresetId) ?? null);
 	$effect(() => {
-		if (samplingPresetId != null && samplingPresets.isMissing(samplingPresetId)) {
-			samplingPresetId = samplingPresets.systemDefault()?.id ?? null;
-		}
+		// A draft's preset that no longer exists: back to the mode default (no preset).
+		if (samplingPresetId != null && samplingPresets.isMissing(samplingPresetId)) samplingPresetId = null;
 	});
 
 	const llm = trackLLMPreview(() => ({
@@ -205,29 +204,31 @@
 					errors={llmErrors}
 					bind:invalid={llmInvalid}
 				/>
-				<NumberField
-					id="custom-seed"
-					label="Seed"
-					class="border-t border-border/60 pt-4 sm:max-w-xs"
-					bind:value={seed}
-					min={0}
-					max={MAX_SEED}
-					placeholder="none"
-					bind:invalid={seedInvalid}
-					error={serverFieldErrors.seed}
-					hint="Forwarded to models that accept one; blank sends none."
-				>
-					<Button
-						variant="outline"
-						size="icon"
-						class="size-8 shrink-0"
-						aria-label="Pick a random seed"
-						title="Random seed"
-						onclick={() => (seed = randomSeed())}
+				<div class="border-t border-border/60 pt-4">
+					<NumberField
+						id="custom-seed"
+						label="Seed"
+						class="sm:max-w-xs"
+						bind:value={seed}
+						min={0}
+						max={MAX_SEED}
+						placeholder="none"
+						bind:invalid={seedInvalid}
+						error={serverFieldErrors.seed}
+						hint="Forwarded to models that accept one; blank sends none."
 					>
-						<Dices />
-					</Button>
-				</NumberField>
+						<Button
+							variant="outline"
+							size="icon"
+							class="size-8 shrink-0"
+							aria-label="Pick a random seed"
+							title="Random seed"
+							onclick={() => (seed = randomSeed())}
+						>
+							<Dices />
+						</Button>
+					</NumberField>
+				</div>
 			</ComposerSection>
 		</div>
 

@@ -66,7 +66,12 @@
 	let section = $state('starters');
 	let error = $state('');
 	let conflictStrategy = $state<string>('rename');
-	let lastImport = $state<{ source: string; result: TemplatePackageImportResult } | null>(null);
+	let lastImport = $state<{
+		source: string;
+		result: TemplatePackageImportResult;
+		/** Per section, the returned items that were already in the library before the import. */
+		existing: Record<string, Set<string>>;
+	} | null>(null);
 
 	const conflictItems = [
 		{ value: 'rename', label: 'Keep both (rename)', description: 'Conflicting imports get a new slug, e.g. name-2.' },
@@ -99,15 +104,60 @@
 	const importSummary = $derived(
 		lastImport
 			? Object.entries(lastImport.result)
-					.filter(([, items]) => Array.isArray(items))
-					.map(([key, items]) => ({ key, label: sectionLabel(key), items: items as string[] }))
+					.filter(([, items]) => Array.isArray(items) && items.length > 0)
+					.map(([key, items]) => {
+						const existing = lastImport?.existing[key] ?? new Set<string>();
+						return {
+							key,
+							label: sectionLabel(key),
+							items: (items as string[]).map((item) => ({ item, existing: existing.has(item) })),
+						};
+					})
 			: []
 	);
 	const importTotal = $derived(importSummary.reduce((n, s) => n + s.items.length, 0));
+	const importHeadline = $derived.by(() => {
+		const added: string[] = [];
+		const kept: string[] = [];
+		for (const s of importSummary) {
+			const fresh = s.items.filter((i) => !i.existing).length;
+			if (fresh) added.push(counted(s.key, fresh));
+			if (s.items.length - fresh) kept.push(counted(s.key, s.items.length - fresh));
+		}
+		const parts = [];
+		if (added.length) parts.push(`added ${added.join(', ')}`);
+		if (kept.length) parts.push(`${kept.join(', ')} already in your library (reused or updated)`);
+		return parts.join('; ');
+	});
 
-	async function afterImport(source: string, result: TemplatePackageImportResult) {
-		lastImport = { source, result };
+	// The import response lists created *and* reused rows; snapshot what the
+	// library held before, so the feedback can tell the two apart.
+	function libraryKeys(): Record<string, Set<string>> {
+		return {
+			app_specs: new Set(appTemplates.map((t) => t.slug)),
+			blocks: new Set(contentBlocks.map((b) => `${b.slug}:${b.version}`)),
+			profiles: new Set(profiles.map((p) => `${p.slug}@${p.version}`)),
+			stacks: new Set(stacks.map((st) => st.slug)),
+			presets: new Set(presets.map((p) => `${p.kind}/${p.slug}:${p.version}`)),
+		};
+	}
+
+	async function afterImport(source: string, result: TemplatePackageImportResult, before: Record<string, Set<string>>) {
 		await onImported();
+		// Profiles come back as bare slugs: compare the latest version after the
+		// reload, so an overwrite (a new version) counts as added.
+		const latestProfile = new Map(profiles.map((p) => [p.slug, p.version]));
+		const existing: Record<string, Set<string>> = {};
+		for (const [key, items] of Object.entries(result)) {
+			if (!Array.isArray(items)) continue;
+			const known = before[key] ?? new Set<string>();
+			existing[key] = new Set(
+				items.filter((item) =>
+					key === 'profiles' ? known.has(`${item}@${latestProfile.get(item)}`) : known.has(item)
+				)
+			);
+		}
+		lastImport = { source, result, existing };
 	}
 
 	// ── Starters ──────────────────────────────────────────────────
@@ -117,11 +167,12 @@
 		starterImportSlug = starter.slug;
 		error = '';
 		lastImport = null;
+		const before = libraryKeys();
 		try {
 			const result = await importStarterTemplatePackage(starter.slug, {
 				conflict_strategy: conflictStrategy as PackageConflictStrategy,
 			});
-			await afterImport(starter.name, result);
+			await afterImport(starter.name, result, before);
 		} catch (e) {
 			error = formatApiError(e, 'Starter import failed.');
 		} finally {
@@ -137,8 +188,9 @@
 			['stacks', starter.stack_count],
 			['presets', starter.preset_count],
 		];
+		// Only what the starter contains: "0 blocks" chips are noise.
 		return counts
-			.filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+			.filter((entry): entry is [string, number] => typeof entry[1] === 'number' && entry[1] > 0)
 			.map(([key, n]) => counted(key, n));
 	}
 
@@ -227,12 +279,13 @@
 		importing = true;
 		error = '';
 		lastImport = null;
+		const before = libraryKeys();
 		try {
 			const result = await importTemplatePackage({
 				package_text: packageText,
 				conflict_strategy: conflictStrategy as PackageConflictStrategy,
 			});
-			await afterImport(packageFileName || 'pasted package', result);
+			await afterImport(packageFileName || 'pasted package', result, before);
 			packageText = '';
 			packageFileName = '';
 		} catch (e) {
@@ -435,19 +488,18 @@
 					<CircleCheck class="mt-0.5 size-4 shrink-0 text-success-fg" aria-hidden="true" />
 					<span>
 						Imported <span class="font-medium">{lastImport.source}</span>:
-						{importTotal === 0
-							? 'the package was empty.'
-							: importSummary
-									.filter((s) => s.items.length > 0)
-									.map((s) => counted(s.key, s.items.length))
-									.join(', ') + '.'}
+						{importTotal === 0 ? 'the package was empty.' : `${importHeadline}.`}
 					</span>
 				</p>
 				{#if importTotal > 0}
 					<dl class="grid gap-x-3 gap-y-1 pl-6 text-xs sm:grid-cols-[auto_1fr]">
-						{#each importSummary.filter((s) => s.items.length > 0) as entry (entry.key)}
+						{#each importSummary as entry (entry.key)}
 							<dt class="text-muted-foreground capitalize">{entry.label}</dt>
-							<dd class="break-words font-mono">{entry.items.join(', ')}</dd>
+							<dd class="break-words font-mono">
+								{#each entry.items as { item, existing }, i (item)}
+									<span class={existing ? 'text-muted-foreground' : ''}>{item}{#if existing}<span class="font-sans">{' (existing)'}</span>{/if}</span>{#if i < entry.items.length - 1}{', '}{/if}
+								{/each}
+							</dd>
 						{/each}
 					</dl>
 				{/if}

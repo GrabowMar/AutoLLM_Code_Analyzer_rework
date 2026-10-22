@@ -23,7 +23,7 @@
 	const TONES = { error: toneClasses.danger, warn: toneClasses.warning, info: toneClasses.neutral } as const;
 	const ICONS = { error: CircleAlert, warn: TriangleAlert, info: Info } as const;
 	const linkClass =
-		'cursor-pointer rounded font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40';
+		'cursor-pointer rounded font-medium text-success-fg underline underline-offset-2 hover:decoration-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40';
 </script>
 
 {#if groups.length > 0}

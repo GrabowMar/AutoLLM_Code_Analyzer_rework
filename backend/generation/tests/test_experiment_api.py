@@ -227,7 +227,7 @@ def test_launch_requires_app_requirements(auth_client):
         res = client.post(f"/api/generation/experiments/{exp.id}/launch/")
 
     assert res.status_code == 400
-    assert "app requirement" in res.json()["detail"].lower()
+    assert "app spec" in res.json()["detail"].lower()
 
 
 def test_launch_creates_jobs_and_dispatches(auth_client):

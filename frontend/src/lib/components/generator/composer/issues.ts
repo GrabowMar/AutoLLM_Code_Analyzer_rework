@@ -52,8 +52,16 @@ const TITLES: Record<string, string> = {
   random_seeds: "Random seeds",
   profile_stack_mismatch: "Profile and stack disagree",
   auto_profile: "Profile chosen per app",
+  no_profile_for_stack: "No prompt profile for this stack",
   llm_preview_failed: "Effective parameters unavailable",
 };
+
+/**
+ * A blocked Start button reads as plainly unavailable (muted fill), not as a
+ * faded primary that looks clickable; a busy one keeps the primary look.
+ */
+export const BLOCKED_START_CLASS =
+  "disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 disabled:shadow-none";
 
 export function issueTitle(code: string): string {
   return TITLES[code] ?? code.replace(/_/g, " ");

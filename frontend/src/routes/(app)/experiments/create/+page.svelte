@@ -9,6 +9,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import {
 		getAgentConfig,
+		previewEffectiveLLMParams,
 		type AgentConfigInfo,
 		type BudgetPresetConfig,
 		type LLMParams,
@@ -16,7 +17,7 @@
 		type SamplingPresetConfig,
 	} from '$lib/api/generation';
 	import { createExperiment, type ExperimentMode } from '$lib/api/experiments';
-	import { apiFieldErrors, formatApiError } from '$lib/api/core';
+	import { apiFieldErrors, formatApiError, isAbortError } from '$lib/api/core';
 	import {
 		AppSpecPicker,
 		LLMParamsEditor,
@@ -117,8 +118,30 @@
 		{ value: 'scaffolding', label: 'Template scaffolding', icon: FileCode, title: 'Template prompts fill a fixed skeleton' },
 	];
 
+	// Template scaffolding has no implicit sampling preset: the system default
+	// adds nothing there and would only mislabel runs that sample at the mode
+	// default (temperature 0.3), so it is sent as "no preset".
+	const effectiveSamplingPresetId = $derived(
+		mode === 'scaffolding' && samplingPreset?.is_default ? null : samplingPresetId
+	);
+
+	// Scaffolding placeholders come from the server (mode default → preset).
+	let scaffoldingBase = $state<{ values: LLMParams; sources: Record<string, string> } | null>(null);
+	$effect(() => {
+		if (mode !== 'scaffolding') return;
+		const presetId = effectiveSamplingPresetId;
+		const controller = new AbortController();
+		previewEffectiveLLMParams({ mode: 'scaffolding', sampling_preset_id: presetId }, { signal: controller.signal })
+			.then((result) => (scaffoldingBase = { values: result.effective, sources: result.sources }))
+			.catch((e: unknown) => {
+				if (!isAbortError(e)) scaffoldingBase = null;
+			});
+		return () => controller.abort();
+	});
+
 	// Placeholders show what the experiment-wide overrides sit on.
 	const samplingInherited = $derived.by(() => {
+		if (mode === 'scaffolding' && scaffoldingBase) return scaffoldingBase;
 		const params = ((samplingPreset?.config as SamplingPresetConfig | undefined)?.llm_params ?? {}) as LLMParams;
 		return {
 			values: params,
@@ -198,7 +221,7 @@
 				base_seed: baseSeed,
 				mode,
 				stack_slug: stackSlug || null,
-				sampling_preset_id: samplingPresetId,
+				sampling_preset_id: effectiveSamplingPresetId,
 				budget_preset_id: mode === 'agent' ? budgetPresetId : null,
 				agent_config: mode === 'agent' ? ($state.snapshot(budgetOverrides) as BudgetPresetConfig) : {},
 				llm_defaults: experimentLLMDefaults(),
@@ -306,6 +329,12 @@
 				idPrefix="exp-sampling"
 				onchange={(p) => (samplingPreset = p)}
 			/>
+			{#if mode === 'scaffolding' && samplingPreset?.is_default}
+				<p class="text-[11px] text-muted-foreground">
+					Template scaffolding has no default preset: with this one selected, no preset is recorded and runs sample at
+					the template-mode defaults shown below.
+				</p>
+			{/if}
 			<div class="space-y-1.5">
 				<p class="text-sm font-medium">Experiment overrides</p>
 				<LLMParamsEditor
@@ -314,7 +343,9 @@
 					mode={mode === 'agent' ? 'agent' : 'scaffolding'}
 					idPrefix="exp-llm"
 					bind:invalid={llmInvalid}
-					hint="Blank fields keep the sampling preset's value (or the provider default). Conditions may add their own overrides as a declared ablation."
+					hint={mode === 'agent'
+						? "Blank fields keep the sampling preset's value (or the provider default). Conditions may add their own overrides as a declared ablation."
+						: "Blank fields keep the value shown: the sampling preset's, else the template-mode default. A condition's profile LLM defaults sit below the preset; conditions may add their own overrides as a declared ablation."}
 				/>
 			</div>
 		</Card.Content>

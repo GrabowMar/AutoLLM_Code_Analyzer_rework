@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as Card from '$lib/components/ui/card';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import { jobDisplayStatus, jobPhaseTones } from '$lib/components/generator/batches';
 	import { containerTones } from '$lib/constants/colors';
 	import { Button } from '$lib/components/ui/button';
 	import { formatDuration } from '$lib/utils/formatters';
@@ -136,7 +137,11 @@
 											{jobDescription(job)}
 										</a>
 										<span class="text-[11px] text-muted-foreground block">
-											<span class="capitalize font-medium text-primary/70">{job.mode}</span>
+											<span class="capitalize font-medium text-foreground/80">{job.mode}</span>
+											{#if job.harness}
+												<span class="mx-1 opacity-40">&middot;</span>
+												<span class="font-mono" title="Harness">{job.harness}</span>
+											{/if}
 											<span class="mx-1 opacity-40">&middot;</span>
 											<span class="font-mono tabular-nums">{timeAgo(job.created_at)}</span>
 										</span>
@@ -147,7 +152,7 @@
 							<!-- Job Status -->
 							<td class="px-3 py-2.5 align-middle">
 								<div class="flex flex-col gap-1">
-									<StatusBadge status={job.status} class="w-fit" />
+									<StatusBadge status={jobDisplayStatus(job)} tones={jobPhaseTones} class="w-fit" />
 									{#if job.error_message}
 										<div class="flex items-center gap-1 mt-0.5">
 											<AlertTriangle class="h-3 w-3 text-destructive shrink-0" />
@@ -233,7 +238,7 @@
 										id="provision-app-btn-{job.id}"
 										variant="outline"
 										size="sm"
-										class="h-8 w-fit gap-1.5 border-primary/30 text-xs font-semibold text-primary hover:bg-primary/10"
+										class="h-8 w-fit gap-1.5 border-primary/30 text-xs font-semibold text-success-fg hover:bg-primary/10"
 										disabled={isBusy != null}
 										onclick={() => onBuild(job.id)}
 									>

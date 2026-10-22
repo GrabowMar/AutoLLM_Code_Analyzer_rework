@@ -20,6 +20,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Segmented } from '$lib/components/ui/segmented';
+	import * as Select from '$lib/components/ui/select';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
@@ -52,6 +53,8 @@
 	}: Props = $props();
 
 	const DIFFICULTY_ORDER = ['basic', 'standard', 'advanced'];
+	// More categories than this collapse into a dropdown (chips would fill the screen).
+	const MAX_CATEGORY_CHIPS = 8;
 
 	let fetched = $state<AppRequirementTemplate[]>([]);
 	let loading = $state(false);
@@ -72,6 +75,9 @@
 		}
 		return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
 	});
+	const categoryItems = $derived(
+		categories.map(([name, count]) => ({ value: name, label: `${name} (${count})` }))
+	);
 	const difficulties = $derived(
 		DIFFICULTY_ORDER.filter((d) => specs.some((s) => s.difficulty === d))
 	);
@@ -195,18 +201,30 @@
 				{disabled}
 			/>
 		</div>
+		{#if categories.length > MAX_CATEGORY_CHIPS}
+			<Select.Simple
+				size="sm"
+				class="w-auto min-w-[11rem] max-w-full"
+				aria-label="Filter by category"
+				bind:value={category}
+				items={categoryItems}
+				placeholder="All categories ({specs.length})"
+				clearLabel="All categories ({specs.length})"
+				{disabled}
+			/>
+		{/if}
 		{#if difficulties.length > 0}
 			<Segmented aria-label="Difficulty" size="sm" bind:value={difficulty} items={difficultyItems} {disabled} />
 		{/if}
 	</div>
 
-	{#if categories.length > 1}
+	{#if categories.length > 1 && categories.length <= MAX_CATEGORY_CHIPS}
 		<div class="flex flex-wrap gap-1.5" role="group" aria-label="Filter by category">
 			<button
 				type="button"
 				class={cn(
 					'cursor-pointer rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
-					category === '' ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
+					category === '' ? 'border-primary/40 bg-primary/10 text-success-fg' : 'border-border text-muted-foreground hover:text-foreground'
 				)}
 				aria-pressed={category === ''}
 				{disabled}
@@ -219,7 +237,7 @@
 					type="button"
 					class={cn(
 						'cursor-pointer rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
-						category === name ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
+						category === name ? 'border-primary/40 bg-primary/10 text-success-fg' : 'border-border text-muted-foreground hover:text-foreground'
 					)}
 					aria-pressed={category === name}
 					{disabled}

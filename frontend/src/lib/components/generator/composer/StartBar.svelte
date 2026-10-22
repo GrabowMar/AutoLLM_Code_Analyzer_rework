@@ -8,7 +8,9 @@
 	 * `errors`, `label` (Start button text), `canStart`, `busy`, `reason` (why Start
 	 * is disabled), `onstart()`, `summaryHref` (anchor of the full summary).
 	 */
+	import { cn } from '$lib/utils';
 	import { Button } from '$lib/components/ui/button';
+	import { BLOCKED_START_CLASS } from './issues';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Play from '@lucide/svelte/icons/play';
 
@@ -49,7 +51,7 @@
 				</p>
 			{/if}
 		</div>
-		<Button size="sm" class="shrink-0" disabled={!canStart || busy} onclick={onstart}>
+		<Button size="sm" class={cn('shrink-0', !canStart && !busy && BLOCKED_START_CLASS)} disabled={!canStart || busy} onclick={onstart}>
 			{#if busy}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Play />{/if}
 			{label}
 		</Button>

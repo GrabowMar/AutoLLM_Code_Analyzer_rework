@@ -9,6 +9,7 @@
 	import { getGenerationJobs, type GenerationJobList } from '$lib/api/generation';
 	import { formatApiError } from '$lib/api/core';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import { jobDisplayStatus, jobPhaseTones } from '$lib/components/generator/batches';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
@@ -93,12 +94,15 @@
 							{#each jobs as job (job.id)}
 								<tr class="border-b last:border-0 hover:bg-muted/30">
 									<td class="py-2 pr-3 font-mono text-xs">{job.id.substring(0, 8)}</td>
-									<td class="py-2 pr-3"><Badge variant="outline" class="text-xs">{job.mode}</Badge></td>
+									<td class="py-2 pr-3">
+										<Badge variant="outline" class="text-xs">{job.mode}</Badge>
+										{#if job.harness}<span class="ml-1 font-mono text-[11px] text-muted-foreground" title="Harness">{job.harness}</span>{/if}
+									</td>
 									<td class="py-2 pr-3 text-xs text-muted-foreground truncate max-w-[200px]">
 										{job.template_name ?? job.scaffolding_name ?? '—'}
 									</td>
 									<td class="py-2 pr-3">
-										<StatusBadge status={job.status} />
+										<StatusBadge status={jobDisplayStatus(job)} tones={jobPhaseTones} />
 									</td>
 									<td class="py-2 pr-3 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(job.created_at)}</td>
 									<td class="py-2 pr-3">

@@ -24,7 +24,7 @@
 	import EffectiveParams from './EffectiveParams.svelte';
 	import SummaryChecklist from './SummaryChecklist.svelte';
 	import SummaryIssues from './SummaryIssues.svelte';
-	import type { ChecklistItem, IssueAction, SummaryIssue } from './issues';
+	import { BLOCKED_START_CLASS, type ChecklistItem, type IssueAction, type SummaryIssue } from './issues';
 	import Check from '@lucide/svelte/icons/check';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
@@ -307,7 +307,7 @@
 		{/if}
 
 		<div class="hidden space-y-1.5 border-t border-border/60 pt-3 @4xl/composer:block">
-			<Button class="w-full" disabled={!canStart || submitting} onclick={onstart}>
+			<Button class={cn('w-full', !canStart && !submitting && BLOCKED_START_CLASS)} disabled={!canStart || submitting} onclick={onstart}>
 				{#if submitting}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Play />{/if}
 				{startLabel}
 			</Button>

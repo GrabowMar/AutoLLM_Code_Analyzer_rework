@@ -107,20 +107,20 @@
 				<tbody>
 					{#each visible as job (job.id)}
 						<tr>
-							<td data-label="Task" class="max-w-40">
+							<td data-label="Task" class="md:max-w-40">
 								<a
 									href="/applications/{job.id}"
-									class="block truncate font-medium transition-colors hover:text-primary hover:underline"
+									class="block min-w-0 break-words font-medium md:truncate transition-colors hover:text-primary hover:underline"
 									title="Open this run ({shortId(job.id)})"
 									aria-label="Open run: {job.template_name || 'Task'}, {job.model_name ?? 'model'}{job.repeat_index != null ? `, trial ${job.repeat_index + 1}` : ''}"
 								>{job.template_name || 'Task'}</a>
 							</td>
-							<td data-label="Model" class="max-w-44">
-								<span class="block truncate" title={job.model_id_str ?? ''}>{job.model_name ?? '—'}</span>
+							<td data-label="Model" class="md:max-w-44">
+								<span class="block min-w-0 break-words md:truncate" title={job.model_id_str ?? ''}>{job.model_name ?? '—'}</span>
 							</td>
 							{#if variantHeader}
-								<td data-label={variantHeader} class="max-w-48">
-									<span class="block truncate font-mono text-xs">{variantOf(job)}</span>
+								<td data-label={variantHeader} class="md:max-w-48">
+									<span class="block min-w-0 break-all font-mono text-xs md:truncate md:break-normal">{variantOf(job)}</span>
 								</td>
 							{/if}
 							<td data-label="Trial" class="font-mono text-xs tabular-nums">
@@ -136,7 +136,7 @@
 									{/if}
 								</span>
 								{#if job.error_message}
-									<span class="mt-0.5 block max-w-44 truncate text-[11px] text-danger-fg" title={job.error_message}>{job.error_message}</span>
+									<span class="mt-0.5 line-clamp-2 min-w-0 break-words text-[11px] text-danger-fg md:block md:max-w-44 md:truncate" title={job.error_message}>{job.error_message}</span>
 								{/if}
 							</td>
 							{#if graded}
@@ -153,7 +153,7 @@
 									{/if}
 								</td>
 							{/if}
-							<td data-label="Cost" class="text-right font-mono text-xs tabular-nums">{formatUsd(job.cost_usd)}</td>
+							<td data-label="Cost" class="font-mono text-xs tabular-nums md:text-right">{formatUsd(job.cost_usd)}</td>
 							<td data-label="Duration" class="hidden whitespace-nowrap text-right lg:table-cell font-mono text-xs tabular-nums">
 								{formatDuration(job.duration_seconds)}
 							</td>

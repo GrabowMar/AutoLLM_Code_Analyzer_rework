@@ -100,7 +100,7 @@ back={{ href: `/applications/${job.id}`, label: job.model_name ?? 'Job' }}
 <div class="lg:col-span-2 space-y-4">
 <!-- Quick Info -->
 <Card.Root>
-<Card.Content class="pt-6">
+<Card.Content>
 <dl class="grid grid-cols-2 sm:grid-cols-4 gap-4">
 <div>
 <dt class="section-label">Model</dt>
@@ -112,7 +112,7 @@ back={{ href: `/applications/${job.id}`, label: job.model_name ?? 'Job' }}
 </div>
 <div>
 <dt class="section-label">Temperature</dt>
-<dd class="text-sm font-medium mt-0.5">{job.temperature}</dd>
+<dd class="text-sm font-medium mt-0.5">{job.temperature ?? (job.mode === 'agent' ? 'default' : '—')}</dd>
 </div>
 <div>
 <dt class="section-label">Max Tokens</dt>
@@ -141,8 +141,8 @@ Error Message
 {#if job.result_data?.error_status_code === 401 || /OpenRouter.*key/i.test(job.error_message)}
 <div class="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning-fg">
 <span>This job failed because OpenRouter rejected the API key.</span>
-<Button variant="outline" size="sm" href="/users/settings#api">
-Open API Access settings
+<Button variant="outline" size="sm" href="/users/settings#credentials">
+Open API credentials
 </Button>
 </div>
 {/if}

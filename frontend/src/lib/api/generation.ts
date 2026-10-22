@@ -382,8 +382,16 @@ export interface GenerationJob {
   status: string;
   model_name: string | null;
   model_id_str: string | null;
+  /** LLMModel pk (`model_id_str` is the OpenRouter id). */
+  model_pk?: number | null;
   batch_id: string | null;
   batch_name: string | null;
+  app_requirement_id?: number | null;
+  app_slug?: string | null;
+  /** Experiment UUID, when an experiment launched the job. */
+  experiment_id?: string | null;
+  condition_id?: number | null;
+  repeat_index?: number | null;
   template_name: string | null;
   /** @deprecated never returned by the backend; kept for legacy readers. */
   scaffolding_name?: string | null;
@@ -512,7 +520,9 @@ export async function getGenerationJob(id: string): Promise<GenerationJob> {
 export async function getGenerationJobsStats(): Promise<{
   total: number;
   completed: number;
+  /** Includes `queued`: running jobs still waiting for a sandbox slot. */
   running: number;
+  queued?: number;
   failed: number;
   pending: number;
   cancelled: number;

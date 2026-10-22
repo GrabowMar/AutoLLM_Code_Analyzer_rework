@@ -206,7 +206,7 @@
 										<span class="text-sm font-medium text-foreground">{preset.name}</span>
 										<span class="font-mono text-[11px] text-muted-foreground">v{preset.version}</span>
 										{#if preset.is_default}
-											<span class={cn(chip, 'border-transparent bg-primary/15 text-primary')}>default</span>
+											<span class={cn(chip, 'border-transparent bg-primary/15 text-success-fg')}>default</span>
 										{:else if preset.is_system}
 											<span class={cn(chip, 'border-border bg-muted text-muted-foreground')}>system</span>
 										{:else}

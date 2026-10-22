@@ -174,7 +174,7 @@
 									<button
 										type="button"
 										class={cn(
-											'flex w-full min-w-32 cursor-pointer flex-col gap-1.5 rounded-md border px-2.5 py-2 text-left transition-colors duration-150',
+											'flex w-full min-w-32 cursor-pointer flex-col gap-1.5 rounded-md border px-2.5 py-2 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
 											selectedKey === cell.key
 												? 'border-primary/60 bg-primary/10'
 												: 'border-transparent hover:border-border hover:bg-muted/50'
@@ -306,7 +306,7 @@
 									{/if}
 									<a
 										href="/applications/{job.id}"
-										class="inline-flex items-center gap-0.5 font-medium text-primary hover:underline"
+										class="inline-flex items-center gap-0.5 font-medium text-success-fg hover:underline"
 										aria-label="Open {trial.label} ({shortId(job.id)})"
 									>
 										Open<ArrowUpRight class="h-3 w-3" />

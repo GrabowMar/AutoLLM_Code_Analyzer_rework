@@ -23,7 +23,7 @@
 	<Card.Root class="gap-4">
 		<Card.Header class="flex-row items-start gap-3">
 			<span
-				class="mt-px flex size-6 shrink-0 items-center justify-center rounded-full border border-primary/40 bg-primary/10 font-mono text-xs font-semibold text-primary"
+				class="mt-px flex size-6 shrink-0 items-center justify-center rounded-full border border-primary/40 bg-primary/10 font-mono text-xs font-semibold text-success-fg"
 				aria-hidden="true">{step}</span
 			>
 			<div class="min-w-0 flex-1 space-y-1">
