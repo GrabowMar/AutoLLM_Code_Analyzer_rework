@@ -5,6 +5,7 @@ from backend.generation.models import CopilotIteration
 from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
+from backend.generation.models import RunPreset
 
 
 @admin.register(AppRequirementTemplate)
@@ -37,14 +38,25 @@ class GenerationJobAdmin(admin.ModelAdmin):
         "id",
         "mode",
         "status",
+        "phase",
         "model",
         "created_by",
         "started_at",
         "completed_at",
     ]
-    list_filter = ["mode", "status"]
+    list_filter = ["mode", "status", "phase"]
     readonly_fields = ["id", "started_at", "completed_at", "duration_seconds"]
-    raw_id_fields = ["model", "created_by", "batch"]
+    raw_id_fields = ["model", "created_by", "batch", "harness_preset", "sampling_preset", "budget_preset"]
+
+
+@admin.register(RunPreset)
+class RunPresetAdmin(admin.ModelAdmin):
+    list_display = ["kind", "slug", "version", "name", "is_system", "is_archived", "created_by", "created_at"]
+    list_filter = ["kind", "is_system", "is_archived"]
+    search_fields = ["slug", "name"]
+    # Content is immutable per version (jobs reference it); edit through the API.
+    readonly_fields = ["kind", "slug", "version", "config", "content_hash", "is_system", "created_at", "updated_at"]
+    raw_id_fields = ["created_by"]
 
 
 @admin.register(GenerationArtifact)

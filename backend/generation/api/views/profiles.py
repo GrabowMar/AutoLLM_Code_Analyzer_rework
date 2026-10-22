@@ -352,6 +352,7 @@ def export_package(
         bundle_slugs=payload.bundle_slugs,
         block_refs=[{"type": ref.type, "slug": ref.slug, "version": ref.version} for ref in payload.block_refs],
         stack_slugs=payload.stack_slugs,
+        preset_refs=[{"kind": ref.kind, "slug": ref.slug} for ref in payload.preset_refs],
     )
     asset_count = sum(len(items) for items in package.get("assets", {}).values())
     if asset_count == 0:
@@ -373,11 +374,17 @@ def import_package(request, payload: TemplatePackageImportSchema):
         )
     except ValueError as exc:
         return 400, {"detail": str(exc)}
+    return _import_result(imported)
+
+
+def _import_result(imported: dict) -> dict[str, list[str]]:
+    """Names of the created or reused rows per section (blocks and presets with their version)."""
     return {
         "app_specs": [item.slug for item in imported["app_specs"]],
         "blocks": [f"{item.slug}:{item.version}" for item in imported["blocks"]],
         "profiles": [item.slug for item in imported["profiles"]],
         "stacks": [item.slug for item in imported["stacks"]],
+        "presets": [f"{item.kind}/{item.slug}:{item.version}" for item in imported["presets"]],
     }
 
 
@@ -402,12 +409,7 @@ def import_package_starter(
         raise HttpError(404, str(exc)) from exc
     except ValueError as exc:
         return 400, {"detail": str(exc)}
-    return {
-        "app_specs": [item.slug for item in imported["app_specs"]],
-        "blocks": [f"{item.slug}:{item.version}" for item in imported["blocks"]],
-        "profiles": [item.slug for item in imported["profiles"]],
-        "stacks": [item.slug for item in imported["stacks"]],
-    }
+    return _import_result(imported)
 
 
 @router.get("/profiles/{slug}/", response=GenerationProfileSchema)

@@ -48,18 +48,29 @@ A harness is the agent program that drives the model. Benchmarks compare (harnes
 | --- | --- | --- | --- |
 | `opencode` ([OpenCode](https://opencode.ai) 1.18.35) | Full IDE-style agent: read/edit/write/grep/glob/bash/todo/task tools | required | Its own model-agnostic default prompt (captured verbatim in `data/agent/harness_prompts/`) for the `build` agent **and** the `general` subagent; OpenCode otherwise picks a per-family prompt for both. Web fetch/search and skills off; config/AGENTS.md discovery, plugins and auto-update off; session title passed in (no hidden title call); `doom_loop` explicitly denied |
 | `mini-swe-agent` ([mini-swe-agent](https://mini-swe-agent.com) 2.4.6) | Minimal research baseline: one `bash` tool, fresh subshell per command | required | Native `mini.yaml` templates; `yolo`, `step_limit` = request budget, cost limit off (the gateway owns cost) |
-| `aider` ([Aider](https://aider.chat) 0.86.2) | Edit-format pair programmer, one headless `--message` turn plus its native lint-fix reflection | not needed | Edit format `diff` for every model (Aider otherwise picks it per model); weak/editor model = the run's model; the same model-metadata file for every model (context window, output cap), since Aider's own database does not know gateway-routed ids; repo map 1024 tokens; no commits or shell-command suggestions; all scaffold sources added to the chat |
+| `aider` ([Aider](https://aider.chat) 0.86.2) | Edit-format pair programmer, one headless `--message` turn plus its native lint-fix reflection | not needed | Edit format `diff` for every model by default (Aider otherwise picks it per model); weak/editor model = the run's model; the same model-metadata file for every model (context window, output cap), since Aider's own database does not know gateway-routed ids; repo map 1024 tokens by default; no commits or shell-command suggestions; all scaffold sources added to the chat |
+
+**Harness options.** A few pinned values can be changed, but only through a harness preset (below) and only where the pinned source was checked to apply the value identically to every model family (each adapter's docstring records what was checked):
+
+| Harness | Option | Values (default) |
+| --- | --- | --- |
+| `aider` | `edit_format` | `diff` \| `whole` \| `udiff` \| `diff-fenced` (`diff`) |
+| `aider` | `map_tokens` | 0–8192 (1024); 0 disables the repo map |
+| `mini-swe-agent` | `command_timeout_seconds` | 10–600 (30), mini's `environment.timeout` |
+| `opencode` | none | OpenCode picks its editing tools by model id, so tool toggles would be model-specific |
+
+Options are rendered only into the arguments and config a harness already emits, and only when they differ from the default, so a default section is byte-identical to one from before options existed. `GET /generation/agent/config/` lists every harness with its `option_schema` and `default_options`.
 
 Every harness gets the brief from a file or stdin, never argv. Agents restart their dev server with "kill every process mentioning `app.py`", and a brief in argv once made OpenCode kill itself. Harness artifacts (Aider's `.aider*` caches, histories) never enter the sample.
 
 ### The brief and the evaluation contract
 
-The brief (`data/agent/brief.md.jinja2`, `BRIEF_VERSION` 2) is the only task-specific text an agent receives, identical for every harness and model:
+The brief (`data/agent/brief.md.jinja2`, `BRIEF_VERSION` 3) is the only task-specific text an agent receives, identical for every harness and model:
 
 - an **autonomy** statement: nobody will answer questions, finish with a summary,
-- the **app spec**, verbatim: requirements, data model, every endpoint with its request/response shapes,
+- the **app spec**, verbatim: requirements, data model, every endpoint with its request/response shapes. A task `description` sent with an app spec follows the spec's own description as an **Additional context** section; without an app spec the description *is* the task (a free-form task, which has no conformance suite and is not graded),
 - an **accounts contract** (`services/evaluation/contract.py`). Specs say *which* writes need a signed-in user but almost never *how* to sign in, so each agent invented its own scheme and write endpoints were ungradable. Unless the spec defines its own auth endpoints, the app exposes `POST /api/auth/register` and `POST /api/auth/login` (→ `{"token"}`) and accepts `Authorization: Bearer`. Endpoints reserved for signed-in users answer 401 anonymously. An admin account's password comes from `ADMIN_PASSWORD`; the evaluation sets it to a fresh random value, so a hard-coded credential fails,
-- the **runtime contract**: entry point, port 8000, `/api/health`, SPA served for non-API paths, SQLite in an initially empty `./data/`, pinned dependencies, platform-owned build files,
+- the **runtime contract**: entry point and start command, port, `/api/health`, SPA served for non-API paths, SQLite in an initially empty `./data/`, pinned dependencies, platform-owned build files. Builtin stacks take this text from `data/agent/stacks.yaml`; a user-authored stack states the command its generated Dockerfile runs (`python <file>` or `uvicorn <module>:app …`, from its `server_kind`),
 - the notice that the result is **checked automatically** against all of the above (the checks themselves stay hidden),
 - the **budget**, with the request budget stated as the primary limit.
 
@@ -137,7 +148,7 @@ Agent results set `result_data.materialize = "verbatim"`. The runtime writes the
 
 | Threat | Control |
 | --- | --- |
-| Harness switches its system prompt per model family (OpenCode: build agent *and* `general` subagent) | OpenCode's own model-agnostic default prompt, captured verbatim per release and pinned for both; Aider's edit format pinned to `diff` for every model |
+| Harness switches its system prompt per model family (OpenCode: build agent *and* `general` subagent) | OpenCode's own model-agnostic default prompt, captured verbatim per release and pinned for both; Aider's edit format pinned (`diff` unless a harness preset picks another) for every model |
 | Harness or model-family sampling defaults (OpenCode sets per-family temperatures, Aider sends 0, others send nothing) | Sampling policy `provider_default` (default): the gateway strips every sampling/reasoning knob the harness sends. Only params the run configures explicitly reach the model, forced on every call. `harness_native` is available and recorded |
 | One harness sends no `max_tokens` and gets a provider default, another sends its own | The gateway forces one per-call output cap (`min(max_tokens, model limit)`) on every call |
 | Params a model can't take silently ignored (e.g. `seed`/`temperature` on some closed models) | Forwarded only if OpenRouter lists them for that model; otherwise recorded in `gateway.dropped_params` and in the experiment comparability report |
@@ -162,7 +173,10 @@ Agent results set `result_data.materialize = "verbatim"`. The runtime writes the
 
 Known residual variation, recorded but not controlled:
 
-- OpenCode appends an environment block to its system prompt that names the model and today's date.
+- Per-model behaviour inside the pinned harness releases, which no setting removes (the limit of "byte-identical treatment within a harness"):
+  - OpenCode appends an environment block to its system prompt that names the model and today's date, and gives GPT-family model ids an `apply_patch` tool instead of `edit`/`write`.
+  - Aider applies generic settings by model-name substring (reminder placement, lazy/overeager prompt additions, `use_temperature`). Every model reaches it as `openai/<vendor>/<model>`, so those still apply.
+  - Capabilities differ by design: a param a model does not take is dropped (and recorded), and the output cap and context window follow the model. The run preview lists this per model before launch.
 - Providers within the routing policy may still differ in serving stack; stratify by `agent.providers`.
 - Debian packages in `agent-base` resolve when the image is built; the built image id is recorded per run.
 - Package registries change over time under policy `packages`. Pinned dependency files limit this; `resolved_python_deps` records what the evaluated build actually installed. Policy `none` removes it.
@@ -172,15 +186,58 @@ Known residual variation, recorded but not controlled:
 
 Agent runs are not deterministic even with a seed (tool timing, provider batching), so **repeats are the unit of analysis**: use `trials` (or experiment `repeats`) of 3 or more, with a `base_seed` so the seed matrix and the run order are reproducible.
 
+### Fairness rules
+
+These hold for every agent batch and experiment; the code enforces them and the tests pin them:
+
+1. **Within a harness**, every model gets a byte-identical harness section except the derived per-model fields (model slug, context window, output cap, step limit). Harness presets carry no per-model keys.
+2. **Default runs never change identity.** With the default presets, `prompt_hash`, `run_fingerprint` and the `agent`, `gateway`, `harness` and brief values equal what they were before presets existed (`backend/generation/tests/test_default_run_golden.py`, captured from the pre-preset code).
+3. **Batch- or experiment-wide:** the stack, the budget preset (limits and network policy) and the sampling preset (sampling params and sampling policy). What may vary per condition: the model and the harness preset; in experiments also `param_overrides` and the profile, which comparability always reports.
+4. The brief stays harness- and model-agnostic.
+5. Under `provider_default`, only explicitly configured params reach the model; unsupported ones are dropped and recorded, and the preview shows them per model.
+6. Not tunable per run: harness versions, sandbox resources, the egress allowlist, protected files, the evaluator, and the default provider routing. Routing changes only through an explicit inline `llm_params.provider`, never through a preset.
+7. Snapshots are immutable. Presets are versioned and immutable in content; jobs record which presets they used.
+8. Preset values are copied into the job's own fields at creation (`llm_params`, `agent_config`, `harness_options`), so retry, replay and rerun reproduce the configuration without reading the preset again.
+
+### Run presets
+
+A run preset (`RunPreset`, `services/presets.py`) is a named, versioned piece of agent-run configuration. There are three kinds; each is normalized before it is stored or hashed:
+
+| Kind | Config | Notes |
+| --- | --- | --- |
+| `harness` | `{"harness": <name>, "options": {<non-default options>}}` | Options at their defaults are dropped, so `{}` and `{"edit_format": "diff"}` are the same preset content. A user preset with every option at its default is refused: use `<harness>-default` |
+| `sampling` | `{"llm_params": {...}, "sampling_policy"?: ...}` | Model-agnostic sampling settings (temperature, top_p, reasoning effort, output cap, …) applied identically to every model. `provider`, `stop` and `response_format` are refused: routing and output formatting are not sampling properties |
+| `budget` | sparse subset of `wall_clock_seconds`, `max_llm_requests`, `max_total_tokens`, `max_cost_usd`, `network_policy` | `{}` = the platform defaults (the `AGENT_*` settings) |
+
+- **Versions.** A content change creates version + 1; a name or description change does not. `content_hash` = sha256 of the canonical `{kind, config}` (integral floats hash as ints, so `0` and `0.0` agree). Delete archives every version; jobs keep their references (`PROTECT`).
+- **Slugs** are global per kind, whoever owns them: `^[a-z0-9][a-z0-9-]{1,80}$`, and `*-default` plus every system preset file's slug are reserved. A taken slug is a plain "slug already in use", never naming the owner.
+- **System presets** live in `data/presets/<kind>-<slug>.yaml`: `harness/opencode-default`, `harness/mini-swe-agent-default`, `harness/aider-default`, `sampling/provider-default`, `budget/platform-default`. They are seeded first in `seed_all`, idempotent by content hash (a changed file becomes a new version). A request-time guard (`ensure_system_presets`) recreates missing defaults, so the default run path never depends on seeding having worked.
+- **Stored presets are re-validated** whenever a run uses them; a preset a harness release no longer accepts is an `invalid_preset` error in the preview and a 400 on create, never a crash.
+- **Starter presets.** The `agent-benchmark-starter` package ([Template packages](/docs/TEMPLATE_PACKAGES)) adds `aider-whole-file`, `aider-no-repo-map`, `mini-long-commands`, `temperature-zero`, `reasoning-high`, `smoke` (30 requests, 60 min, $3) and `extended` (250 requests, 180 min, $25). Their USD and wall-clock caps stay generous safety nets, so the request budget still binds.
+
+How a batch applies them (later wins), copied into job fields at creation:
+
+- `job.agent_config` = budget preset → the sampling preset's `sampling_policy` → inline `agent_config` (+ the harness),
+- `job.llm_params` = legacy `max_tokens` → profile `llm_config` → sampling preset `llm_params` → inline `llm_params`,
+- `job.harness_options` = the harness preset's options (never part of `agent_config` or the snapshot's `agent` section).
+
+The `harness_preset`, `sampling_preset` and `budget_preset` foreign keys on the job, and `snapshot.presets` (`{id, slug, version, content_hash, name}` per kind), are provenance only. Leaving a preset out means the system default for its kind.
+
 ### Identity keys
 
 - `prompt_hash`: brief sha + contract version. The *task* identity, shared across harnesses, models and seeds; the grouping key for comparisons. The brief states the budget, so changing the budget changes it.
-- `bundle_key` (`method_key` in the snapshot): `agent:<harness>@<version>`, prefixed with `profile@version/` when a profile supplied the stack/`llm_config`. The *method* identity and condition slicing key.
-- `run_fingerprint`: prompt hash + model + gateway policy + harness section + image tags + agent config + stack content hash. Equal fingerprints mean replicate runs.
+- `bundle_key` (`method_key` in the snapshot): `[profile@version/]agent:<harness>@<version>`, plus a content-addressed suffix for each part that departs from the defaults:
+  - `+opts:<sha8>`: non-default harness options,
+  - `+llm:<sha8>`: explicit LLM params other than `max_tokens` and `seed`, and a non-default sampling policy,
+  - `+budget:<sha8>`: an effective budget (limits or network policy) that differs from the platform defaults.
+
+  Hashing content rather than preset names means renaming a preset (or importing it under another slug) never splits a slice, and a default run keeps the key it always had. The *method* identity and condition slicing key.
+- `run_fingerprint`: prompt hash + model + gateway policy + harness section + image tags + agent config + stack content hash. Equal fingerprints mean exact replays.
+- `config_fingerprint`: the same inputs minus the seed. The *condition* identity that replicates (trials) share, used to group trials in batch views. Jobs created before presets have none.
 
 When you change something, version it:
 
-- `BRIEF_VERSION` (`services/agent/brief.py`) for the brief.
+- `BRIEF_VERSION` (`services/agent/brief.py`) for the brief (v3 added the "Additional context" section and user-stack start commands; briefs without either are byte-identical to v2).
 - `CONTRACT_VERSION` for the contract.
 - The tester's `VERSION` / `EVALUATOR_VERSION` for grading.
 - `SANDBOX_REVISION` (`harnesses/base.py`) when the sandbox environment changes without an image change.
@@ -191,6 +248,7 @@ When you change something, version it:
 | Setting | Default | |
 | --- | --- | --- |
 | `AGENT_DEFAULT_HARNESS` | `opencode` | |
+| `GENERATION_DEFAULT_STACK` | `flask-react` | stack when neither the request nor a profile names one (agent and scaffolding) |
 | `AGENT_OPENCODE_VERSION` / `AGENT_MINI_SWE_AGENT_VERSION` / `AGENT_AIDER_VERSION` | `1.18.35` / `2.4.6` / `0.86.2` | releases baked into the images |
 | `AGENT_MAX_LLM_REQUESTS` | 100 | the binding budget (successful calls) |
 | `AGENT_WALL_CLOCK_SECONDS` | 3600 | safety net |
@@ -202,27 +260,37 @@ When you change something, version it:
 | `AGENT_MAX_CONCURRENT_RUNS` | 1 | sandbox slots per process (runs and evaluations share them) |
 | `AGENT_SANDBOX_MEM_LIMIT` / `_NANO_CPUS` | `3g` / 2 CPUs | must fit apps-dind's own cap |
 
-API:
+API (prefix `/api/generation`):
 
-- `POST /generation/jobs/agent/` takes `{stack_slug, app_requirement_ids | description, model_ids, harnesses, trials, base_seed, llm_params, agent_config, profile_id}`. It creates apps × models × harnesses × trials jobs in one batch, with common seeds and blocked random order. Tool-calling harnesses only accept tool-calling models.
-- `GET /generation/agent/harnesses/` lists the available harnesses.
-- `POST /generation/jobs/<id>/evaluate/` re-grades a job.
+- `POST /jobs/agent/` takes `{stack_slug?, app_requirement_ids, description, model_ids, harness_preset_ids, sampling_preset_id?, budget_preset_id?, llm_params?, agent_config?, max_tokens?, profile_id?, trials, base_seed?}`. It creates tasks × models × harness presets × trials jobs in one batch, with one seed per (task, trial) cell shared by every model and harness preset (`derive_experiment_seed(base_seed, app slug or "task", trial)`) and blocked random order.
+  - The stack is `stack_slug`, else the profile's stack, else `GENERATION_DEFAULT_STACK`; whatever its source, it must exist and be usable by the requester.
+  - Without presets or harnesses the default harness's system preset runs. The legacy `harnesses: [<name>]` maps each name to its system default preset; it cannot be combined with `harness_preset_ids`, nor can `agent_config.harness`.
+  - Any error-level problem refuses the whole batch with `400 {detail, code, errors: [...]}` before anything is written.
+- `POST /jobs/agent/preview/` takes the same body and writes nothing. It returns the run count, the effective agent config and LLM params with the source of each value, every harness preset with its effective options, a per-model table (tool support, context window and its source, output cap, forced and dropped params, whether the seed is forwarded), the maximum cost (budget cap × runs) and warnings grouped by severity: errors `no_tasks`, `no_models`, `models_without_tools`, `missing_api_key`, `duplicate_harness_config`, `invalid_preset`, `reasoning_exceeds_output_cap`, `resolution_failed`; warnings `params_dropped` (the seed never counts), `harness_native_sampling`, `context_window_fallback`, `cost_cap_may_bind`, `wall_clock_may_bind`, `whole_file_small_output`, `large_batch`, `ungraded_task`; infos `non_default_harness_options`, `budget_changes_brief`, `single_trial`, `random_seeds`.
+- `GET /agent/config/` returns the defaults, limits, policies, the default stack and output cap, and every harness with its option schema. `GET /agent/harnesses/` lists the harnesses.
+- Presets: `GET /presets/?kind=&include_archived=` (latest version per slug: system and your own), `POST /presets/validate/`, `POST /presets/`, `GET /presets/<id>/` (any visible version), `GET /presets/<kind>/<slug>/versions/`, `PUT /presets/<kind>/<slug>/` (content change → new version) and `DELETE /presets/<kind>/<slug>/` (archive).
+- `POST /jobs/<id>/evaluate/` re-grades a job.
 
 ## Template modes (scaffolding, custom)
 
 The Generation Library concepts still drive scaffolding mode:
 
 - **App specs** (`AppRequirementTemplate`): what to build, validated against `data/requirements/schema.json`. Agent mode uses the same specs.
-- **Generation profiles** (`GenerationProfile`): versioned content blocks + stack + `llm_config`. In agent mode a profile contributes only its stack and `llm_config`; its prompt blocks do not apply.
+- **Generation profiles** (`GenerationProfile`): prompt material for template scaffolding — versioned content blocks + stack + `llm_config`. In agent mode a profile contributes only its stack and `llm_config`; its prompt blocks do not apply.
 - **Stacks** (`runtime.Stack`): versioned skeletons. The agent's starting workspace and the build recipe for every mode.
 
-Scaffolding renders prompts from the profile's blocks (`prompt_renderer.py`), calls the model twice (backend, then frontend with a scan of the backend), parses the code blocks into files, and runs one repair round on files that fail static checks. Sampling params layer `profile llm_config → experiment llm_defaults → condition param_overrides → per-run llm_params` (`services/llm_params.py`). Its snapshot keys (`prompt_hash`, `bundle_key`, `run_fingerprint`) mean the same as in agent mode.
+System profiles come from `data/blocks/catalog.yaml` (and per-app pilots from `data/requirements/manifests/`). They name system blocks by slug only; the seeder pins each to the latest system block version, so a prompt-file edit reaches every profile that uses it as a new profile version. A new system version always takes the next free version number, so a user's own version of a system block never collides with the seeder. `is_default` marks the default profile *of its stack* (at most one per stack); the global default, used when no stack is given, is the catalog's `default_bundle_slug` (`system-scaffolding-standard`). Profiles, blocks, app specs, stacks and presets travel between installs as [template packages](/docs/TEMPLATE_PACKAGES).
+
+Scaffolding renders prompts from the profile's blocks (`prompt_renderer.py`), calls the model twice (backend, then frontend with a scan of the backend), parses the code blocks into files, and runs one repair round on files that fail static checks. Its snapshot keys (`prompt_hash`, `bundle_key`, `run_fingerprint`) mean the same as in agent mode.
+
+Sampling in the template modes starts from the **mode default** (`temperature` 0.3, `max_tokens` 32000), then layers profile `llm_config` → sampling preset `llm_params` → experiment `llm_defaults` → condition `param_overrides` → per-run `llm_params` (`services/llm_params.py`, `services/sampling.py`). A sampling preset applies only when one is chosen (no implicit default here, since the mode default already differs from provider defaults), and only its `llm_params` count; its `sampling_policy` is an agent-mode setting. The snapshot records the preset as provenance. `POST /jobs/llm-preview/ {mode, profile_id?, sampling_preset_id?, llm_params?}` returns the effective params with the source of each (`mode_default`, `profile`, `preset`, `inline`). An explicit scaffolding `stack_slug` that disagrees with the profile's stack is a 400.
 
 ## Job lifecycle (all modes)
 
 1. The API view creates the job(s), freezes the snapshot, and calls `dispatcher.dispatch_job`, which runs `GenerationService.execute` on a daemon thread.
-2. Status moves `pending → running → completed | failed | cancelled`. Progress streams over the `generation:<job_id>` SSE channel (agent runs also publish `queued`/`running` phases). A cancel request always wins, even if it races the end of a run.
-3. The OpenRouter key is the **job owner's**, resolved by `credentials/services/resolver.py`.
-4. A completed job can be built and started by the runtime app, then analyzed ([analysis pipeline](/docs/ANALYSIS_PIPELINE)).
+2. Status moves `pending → running → completed | failed | cancelled`. Progress streams over the `generation:<job_id>` SSE channel. While running, `GenerationJob.phase` records `queued` (waiting for a sandbox slot), `running` or `evaluating`, so lists and counts survive a reload; it is cleared when the job ends. A cancel request always wins, even if it races the end of a run.
+3. Agent and scaffolding creates, and experiment launches, group their jobs in a `GenerationBatch` that records the request (base seed, trials, stack, preset ids, apps, models), so a batch's seed matrix and run order can be audited. A batch's status is derived from its jobs: `pending`/`running` while any job is active, then `completed` (all completed), `cancelled` (all cancelled), `failed` (none completed) or `partial`. `GET /batches/`, `GET /batches/<id>/`, `GET /batches/<id>/jobs/` and `POST /batches/<id>/cancel/` serve the batch views; `GET /jobs/` filters by `batch_id` and `harness`.
+4. The OpenRouter key is the **job owner's**, resolved by `credentials/services/resolver.py`.
+5. A completed job can be built and started by the runtime app, then analyzed ([analysis pipeline](/docs/ANALYSIS_PIPELINE)).
 
-For designed runs (models × harnesses × apps × repeats) see [Experiments](/docs/EXPERIMENTS). Experiments run in agent mode by default (`Experiment.mode`). Conditions can name a harness; launches use common random numbers and blocked randomised order. The preview reports the budget cap as an upper-bound cost and a comparability report per condition.
+For designed runs (models × harness presets × apps × repeats) see [Experiments](/docs/EXPERIMENTS). Experiments run in agent mode by default (`Experiment.mode`), with the stack and the sampling and budget presets set experiment-wide and a harness preset per condition; launches use common random numbers and blocked randomised order. The preview reports the budget cap as an upper-bound cost and a comparability report per condition.

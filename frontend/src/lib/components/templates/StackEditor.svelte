@@ -4,7 +4,11 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import * as Select from '$lib/components/ui/select';
 	import { untrack } from 'svelte';
+	import { formatApiError } from '$lib/api/core';
+	import { numberInputValue } from '$lib/components/generator/llm-params';
 	import { slugify } from '$lib/components/templates/slugify';
 	import {
 		getStackBaseImages,
@@ -12,7 +16,7 @@
 		previewStackDockerfile,
 		type StackDetail,
 		type StackWritePayload,
-	} from '$lib/api/client';
+	} from '$lib/api/generation';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
@@ -35,7 +39,8 @@
 	const sourceSlug = untrack(() => editSlug ?? duplicateFromSlug);
 	const isNewSlug = untrack(() => editSlug) === null;
 
-	let loading = $state(sourceSlug !== null);
+	let loading = $state(true);
+	let loadError = $state('');
 	let name = $state('');
 	let slug = $state(untrack(() => editSlug) ?? '');
 	let slugTouched = $state(false);
@@ -60,6 +65,8 @@
 	});
 
 	async function load() {
+		loading = true;
+		loadError = '';
 		try {
 			baseImages = await getStackBaseImages();
 			if (!backendBaseImage && baseImages.python.length) backendBaseImage = baseImages.python[0];
@@ -86,6 +93,8 @@
 				);
 				selectedPath = Object.keys(files)[0] ?? '';
 			}
+		} catch (e) {
+			loadError = formatApiError(e, 'Could not load the stack.');
 		} finally {
 			loading = false;
 		}
@@ -135,8 +144,8 @@
 		try {
 			const res = await previewStackDockerfile(payload());
 			dockerfileText = res.dockerfile;
-		} catch (e: any) {
-			dockerfileError = e?.detail ?? e?.message ?? 'Preview failed';
+		} catch (e) {
+			dockerfileError = formatApiError(e, 'Preview failed.');
 		}
 		dockerfileLoading = false;
 	}
@@ -161,6 +170,8 @@
 	<Card.Content class="space-y-4">
 		{#if loading}
 			<LoadingState label="loading stack" class="py-8" />
+		{:else if loadError}
+			<ErrorAlert message={loadError} onretry={load} />
 		{:else}
 			<div class="grid gap-3 sm:grid-cols-2">
 				<div class="space-y-1.5">
@@ -180,20 +191,39 @@
 			<div class="grid gap-3 sm:grid-cols-3">
 				<div class="space-y-1.5">
 					<Label class="text-xs" for="stack-backend-image">Backend base image</Label>
-					<select id="stack-backend-image" bind:value={backendBaseImage} class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs">
-						{#each baseImages.python as img}<option value={img}>{img}</option>{/each}
-					</select>
+					<Select.Simple
+						id="stack-backend-image"
+						bind:value={backendBaseImage}
+						items={baseImages.python.map((img) => ({ value: img, label: img }))}
+						placeholder="No allowlisted images"
+					/>
 				</div>
 				<div class="space-y-1.5">
 					<Label class="text-xs" for="stack-server-kind">Server</Label>
-					<select id="stack-server-kind" bind:value={serverKind} class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs">
-						<option value="python">python {backendFilename}</option>
-						<option value="uvicorn">uvicorn {backendFilename.replace('.py', '')}:app</option>
-					</select>
+					<Select.Simple
+						id="stack-server-kind"
+						bind:value={serverKind}
+						items={[
+							{ value: 'python', label: `python ${backendFilename}` },
+							{ value: 'uvicorn', label: `uvicorn ${backendFilename.replace('.py', '')}:app` },
+						]}
+					/>
 				</div>
 				<div class="space-y-1.5">
 					<Label class="text-xs" for="stack-port">Port</Label>
-					<input id="stack-port" type="number" bind:value={defaultPort} min={1024} max={65535} class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs" />
+					<Input
+						id="stack-port"
+						type="number"
+						inputmode="numeric"
+						min={1024}
+						max={65535}
+						value={numberInputValue(defaultPort)}
+						oninput={(e: Event) => {
+							const value = Number((e.currentTarget as HTMLInputElement).value);
+							if (Number.isInteger(value) && value > 0) defaultPort = value;
+						}}
+						class="h-9 text-sm"
+					/>
 				</div>
 				<div class="space-y-1.5">
 					<Label class="text-xs" for="stack-backend-filename">Backend file</Label>
@@ -201,13 +231,17 @@
 				</div>
 				<div class="space-y-1.5">
 					<Label class="text-xs" for="stack-patch">Patch profile</Label>
-					<select id="stack-patch" bind:value={patchProfile} class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs">
-						<option value="none">none</option>
-						<option value="flask">flask (sqlite/port/create_all fixes)</option>
-					</select>
+					<Select.Simple
+						id="stack-patch"
+						bind:value={patchProfile}
+						items={[
+							{ value: 'none', label: 'none' },
+							{ value: 'flask', label: 'flask (sqlite/port/create_all fixes)' },
+						]}
+					/>
 				</div>
-				<label class="flex items-center gap-2 self-end pb-2 text-xs cursor-pointer">
-					<input type="checkbox" bind:checked={hasFrontend} class="accent-primary" />
+				<label class="flex cursor-pointer items-center gap-2 self-end pb-2 text-sm">
+					<Checkbox bind:checked={hasFrontend} />
 					Has frontend (built with npm)
 				</label>
 			</div>
@@ -216,9 +250,12 @@
 				<div class="grid gap-3 sm:grid-cols-2">
 					<div class="space-y-1.5">
 						<Label class="text-xs" for="stack-frontend-image">Frontend base image</Label>
-						<select id="stack-frontend-image" bind:value={frontendBaseImage} class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs">
-							{#each baseImages.node as img}<option value={img}>{img}</option>{/each}
-						</select>
+						<Select.Simple
+							id="stack-frontend-image"
+							bind:value={frontendBaseImage}
+							items={baseImages.node.map((img) => ({ value: img, label: img }))}
+							placeholder="No allowlisted images"
+						/>
 					</div>
 					<div class="space-y-1.5">
 						<Label class="text-xs" for="stack-frontend-component">Main component</Label>
@@ -247,13 +284,13 @@
 							{/each}
 						</div>
 						<div class="flex gap-1">
-							<input
+							<Input
 								type="text"
 								bind:value={newPath}
 								placeholder="frontend/src/App.jsx"
 								aria-label="New file path"
-								class="h-7 flex-1 rounded border border-input bg-surface-1 px-2 text-[11px] font-mono"
-								onkeydown={(e) => e.key === 'Enter' && addFile()}
+								class="h-7 flex-1 px-2 text-[11px] font-mono"
+								onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && addFile()}
 							/>
 							<Button variant="outline" size="sm" class="h-7 px-2" aria-label="Add file" onclick={addFile}>
 								<Plus class="h-3 w-3" />

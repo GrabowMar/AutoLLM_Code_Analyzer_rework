@@ -30,6 +30,7 @@ CATEGORY_MAP: dict[str, str] = {
     "api": "Reference",
     "ANALYZER_GUIDE": "Reference",
     "MODELS_REFERENCE": "Reference",
+    "TEMPLATE_PACKAGES": "Reference",
     "AUTOMATION_GUIDE": "Reference",
     "deployment-guide": "Operations",
     "TROUBLESHOOTING": "Operations",

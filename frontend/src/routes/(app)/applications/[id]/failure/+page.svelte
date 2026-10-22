@@ -1,6 +1,6 @@
 <script lang="ts">
 import { formatDateTime as fmtDate, formatNumber as fmt } from '$lib/utils/formatters';
-import { page } from '$app/stores';
+import { page } from '$app/state';
 import * as Card from '$lib/components/ui/card';
 import { Badge } from '$lib/components/ui/badge';
 import { Button } from '$lib/components/ui/button';
@@ -28,7 +28,7 @@ import LoadingState from '$lib/components/LoadingState.svelte';
 import EmptyState from '$lib/components/EmptyState.svelte';
 import { copyText } from '$lib/components/applications/utils';
 
-const jobId = $derived($page.params.id ?? '');
+const jobId = $derived(page.params.id ?? '');
 let loading = $state(true);
 let job = $state<GenerationJob | null>(null);
 let artifacts = $state<GenerationArtifact[]>([]);
@@ -89,8 +89,8 @@ back={{ href: `/applications/${job.id}`, label: job.model_name ?? 'Job' }}
 <Copy class="h-3.5 w-3.5" />Copy error
 </Button>
 <Button variant="outline" size="sm" href="/applications/{job!.id}">View Full Detail</Button>
-<Button size="sm" href="/sample-generator">
-<RefreshCw class="h-3.5 w-3.5" />Retry Generation
+<Button size="sm" href="/sample-generator?from_job={job!.id}" title="New batch with this run's task, model, stack and presets">
+<RefreshCw class="h-3.5 w-3.5" />Re-generate
 </Button>
 {/snippet}
 </PageHeader>

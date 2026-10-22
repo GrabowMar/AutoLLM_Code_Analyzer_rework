@@ -1,6 +1,7 @@
 """Persistence and realtime publishing helpers for generation jobs."""
 
 from backend.generation.models import GenerationJob
+from backend.generation.services.batches import refresh_batch
 from backend.realtime import events as realtime
 
 
@@ -37,7 +38,14 @@ def publish_progress(
 
 
 def publish_phase(job: GenerationJob, phase: str) -> None:
-    """Publish an agent-run phase change (``queued`` → ``running``)."""
+    """Persist and publish an agent-run phase change (``queued`` → ``running`` → ``evaluating``).
+
+    Persisted so lists and batch counts can tell queued from running after
+    a reload; only while the job is still RUNNING, so a cancel is never
+    overwritten. The orchestrator clears the phase when the run ends.
+    """
+    job.phase = phase
+    GenerationJob.objects.filter(id=job.id, status=GenerationJob.Status.RUNNING).update(phase=phase)
     realtime.publish(
         f"generation:{job.id}",
         {"type": "progress", "status": job.status, "phase": phase},
@@ -45,31 +53,6 @@ def publish_phase(job: GenerationJob, phase: str) -> None:
 
 
 def update_batch(job: GenerationJob) -> None:
-    """Update batch counters if job belongs to a batch."""
-    if not job.batch:
-        return
-    batch = job.batch
-    jobs = batch.jobs.all()
-    batch.completed_jobs = jobs.filter(
-        status=GenerationJob.Status.COMPLETED,
-    ).count()
-    batch.failed_jobs = jobs.filter(status=GenerationJob.Status.FAILED).count()
-    cancelled = jobs.filter(status=GenerationJob.Status.CANCELLED).count()
-    done = batch.completed_jobs + batch.failed_jobs + cancelled
-    if done >= batch.total_jobs:
-        if batch.failed_jobs == 0:
-            batch.status = "completed"
-        elif batch.completed_jobs == 0:
-            batch.status = "failed"
-        else:
-            batch.status = "partial"
-    elif done > 0:
-        batch.status = "running"
-    batch.save(
-        update_fields=[
-            "status",
-            "completed_jobs",
-            "failed_jobs",
-            "updated_at",
-        ],
-    )
+    """Refresh the cached counters and status of the job's batch, if any."""
+    if job.batch_id:
+        refresh_batch(job.batch)

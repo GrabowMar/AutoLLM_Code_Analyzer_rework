@@ -32,6 +32,7 @@ def clear_stuck_generation_jobs(older_than_minutes: int = 60) -> int:
         updated_at__lt=threshold,
     ).update(
         status=GenerationJob.Status.FAILED,
+        phase=GenerationJob.Phase.NONE,
         error_message=(f"Marked failed by maintenance: stuck for >{older_than_minutes}m"),
     )
 

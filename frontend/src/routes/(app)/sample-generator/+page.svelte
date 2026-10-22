@@ -1,452 +1,220 @@
 <script lang="ts">
-	import { formatDuration as formatDurationShared, formatDateTime } from '$lib/utils/formatters';
-	import { onMount, untrack } from 'svelte';
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { Button } from '$lib/components/ui/button';
-	import * as Tabs from '$lib/components/ui/tabs';
+	import { page } from '$app/state';
+	import { MediaQuery } from 'svelte/reactivity';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import { Alert, AlertDescription } from '$lib/components/ui/alert';
+	import { Button } from '$lib/components/ui/button';
+	import { Segmented } from '$lib/components/ui/segmented';
+	import { OpenRouterKeyBanner, type OpenRouterKeyState } from '$lib/components/generator';
 	import {
-		getModels,
-		getStacks,
-		getAppTemplates,
-		getGenerationProfiles,
-		createCustomJob,
-		createScaffoldingBatch,
-		createAgentBatch,
-		getAgentHarnesses,
-		getGenerationJobs,
-		getGenerationJob,
-		cancelGenerationJob,
-		type AgentHarness,
-		type LLMModelSummary,
-		type Stack,
-		type AppRequirementTemplate,
-		type GenerationProfile,
-		type GenerationJob,
-		type PaginatedJobs,
-	} from '$lib/api/client';
-	import type { SampleGeneratorMode } from './+page';
-	import Layers from '@lucide/svelte/icons/layers';
-	import Code from '@lucide/svelte/icons/code';
+		AgentComposer,
+		ScaffoldingComposer,
+		SinglePromptComposer,
+		prepareComposer,
+		storedComposer,
+		type ComposerMode,
+		type ComposerSource,
+		type PreparedComposer,
+	} from '$lib/components/generator/composer';
 	import Bot from '@lucide/svelte/icons/bot';
-	import { subscribe } from '$lib/api/sse';
-	import GeneratorForm, {
-		type CustomPayload,
-		type ScaffoldingPayload,
-		type AgentPayload,
-	} from '$lib/components/sample-generator/GeneratorForm.svelte';
-	import GenerationResults from '$lib/components/sample-generator/GenerationResults.svelte';
-	import GenerationHistory from '$lib/components/sample-generator/GenerationHistory.svelte';
-	import OpenRouterKeyBanner from '$lib/components/sample-generator/OpenRouterKeyBanner.svelte';
+	import Info from '@lucide/svelte/icons/info';
+	import Layers from '@lucide/svelte/icons/layers';
+	import Library from '@lucide/svelte/icons/library';
+	import MessageSquareCode from '@lucide/svelte/icons/message-square-code';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import X from '@lucide/svelte/icons/x';
 
 	let { data } = $props();
 
-	type TabId = SampleGeneratorMode;
-	const activeTab = $derived(data.mode);
-
-	let models = $state<LLMModelSummary[]>([]);
-	let harnesses = $state<AgentHarness[]>([]);
-	let modelsLoading = $state(true);
-	let customModelId = $state<number | ''>('');
-
-	let stacks = $state<Stack[]>([]);
-	let appTemplates = $state<AppRequirementTemplate[]>([]);
-	let profiles = $state<GenerationProfile[]>([]);
-	let scaffoldingLoading = $state(true);
-
-	let customSubmitting = $state(false);
-	let customError = $state('');
-	let customJob = $state<GenerationJob | null>(null);
-	let customPolling = $state(false);
-
-	let scaffoldingSubmitting = $state(false);
-	let scaffoldingError = $state('');
-	let scaffoldingResult = $state<{ batch_id: string; job_count: number; status: string } | null>(null);
-
-	let agentSubmitting = $state(false);
-	let agentError = $state('');
-	let agentResult = $state<{ batch_id: string; job_count: number; status: string } | null>(null);
-	let agentJob = $state<GenerationJob | null>(null);
-	let agentPolling = $state(false);
-
-	let historyData = $state<PaginatedJobs | null>(null);
-	let historyLoading = $state(true);
-	let historyPage = $state(1);
-	let historyModeFilter = $state<string>(untrack(() => data.mode));
-	let historyStatusFilter = $state('');
-
-	let lastRestoredJobId = $state<string | null>(null);
-	let lastAppliedModelSlug = $state<string | null>(null);
-
-	const modeLabels: Record<string, string> = {
+	const MODES = {
+		agent: {
+			label: 'Agent',
+			icon: Bot,
+			badge: 'Recommended',
+			description: 'An agent harness builds each app in a sandbox; app specs are then graded by hidden tests.',
+		},
+		scaffolding: {
+			label: 'Template scaffolding',
+			icon: Layers,
+			badge: undefined,
+			description: 'A prompt profile fills a stack template in one pass per app spec and model.',
+		},
+		custom: {
+			label: 'Single prompt',
+			icon: MessageSquareCode,
+			badge: undefined,
+			description: 'One raw system and user prompt to one model; nothing is added or graded.',
+		},
+	} as const;
+	// Below `sm` the three full labels don't fit one row: short labels, no badge.
+	const wide = new MediaQuery('min-width: 640px', true);
+	const SHORT_LABELS: Record<ComposerMode, string> = {
 		agent: 'Agent',
-		custom: 'Custom',
 		scaffolding: 'Scaffolding',
-		copilot: 'Copilot (legacy)',
+		custom: 'Single prompt',
 	};
+	const modeItems = $derived(
+		(Object.keys(MODES) as ComposerMode[]).map((value) => ({
+			value,
+			label: wide.current ? MODES[value].label : SHORT_LABELS[value],
+			icon: MODES[value].icon,
+			badge: wide.current ? MODES[value].badge : undefined,
+			title: MODES[value].description,
+		}))
+	);
 
-	function sampleGeneratorUrl(opts: {
-		mode?: TabId;
-		model?: string | null;
-		job?: string | null;
-	} = {}) {
-		const params = new URLSearchParams();
-		params.set('mode', opts.mode ?? activeTab);
-		const model = opts.model !== undefined ? opts.model : data.modelSlug;
-		const job = opts.job !== undefined ? opts.job : data.jobId;
-		if (model) params.set('model', model);
-		if (job) params.set('job', job);
-		const qs = params.toString();
-		return `/sample-generator${qs ? `?${qs}` : ''}`;
+	let prepared = $state<PreparedComposer | null>(null);
+	let preparing = $state(false);
+	let keyState = $state<OpenRouterKeyState>('loading');
+	let dismissedFor = $state<PreparedComposer | null>(null);
+
+	// Each prepare call gets a token; a newer URL or mode switch supersedes it.
+	let token = 0;
+	// The URL state the composer currently reflects (consumed params excluded).
+	let appliedKey = '';
+
+	const mode = $derived<ComposerMode>(prepared?.mode ?? data.mode);
+	const showMessages = $derived(!!prepared && dismissedFor !== prepared && !!(prepared.notice || prepared.warning));
+
+	function sourceKey(source: ComposerSource): string {
+		return JSON.stringify([source.mode, source.modelSlug, source.appSlug, source.fromJobId]);
 	}
 
-	function switchTab(tab: TabId) {
-		historyModeFilter = tab;
-		historyPage = 1;
-		loadHistory();
-		goto(sampleGeneratorUrl({ mode: tab, job: null }), {
-			replaceState: true,
-			keepFocus: true,
-			noScroll: true,
-		});
+	// One-shot params (?model, ?app, ?from_job) are consumed: the URL keeps only
+	// the mode, and the draft (sessionStorage) carries the selection from here on.
+	function settleUrl(next: ComposerMode) {
+		appliedKey = sourceKey({ mode: next, modelSlug: null, appSlug: null, fromJobId: null });
+		const search = page.url.search;
+		if (search === `?mode=${next}` || (search === '' && next === 'agent')) return;
+		void goto(`/sample-generator?mode=${next}`, { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
-	function syncJobInUrl(job: GenerationJob | null) {
-		if (!job) return;
-		const url = sampleGeneratorUrl({ mode: job.mode as TabId, job: job.id });
-		goto(url, { replaceState: true, keepFocus: true, noScroll: true });
-	}
-
-	function applyModelSlugFromUrl() {
-		if (!data.modelSlug || models.length === 0) return;
-		if (lastAppliedModelSlug === data.modelSlug) return;
-		const m = models.find((x) => x.canonical_slug === data.modelSlug);
-		if (!m) return;
-		lastAppliedModelSlug = data.modelSlug;
-		if (activeTab === 'custom') customModelId = m.id;
-	}
-
-	$effect(() => {
-		applyModelSlugFromUrl();
-	});
-
-	$effect(() => {
-		if (modelsLoading || models.length === 0) return;
-		if (activeTab === 'custom' && customModelId === '' && !data.modelSlug) {
-			customModelId = models[0].id;
+	async function open(source: ComposerSource, invalidFromJob: string | null) {
+		const mine = ++token;
+		if (!source.fromJobId && !source.modelSlug && !source.appSlug) {
+			preparing = false;
+			const stored = storedComposer(source.mode);
+			prepared = invalidFromJob ? { ...stored, warning: `“${invalidFromJob}” is not a job id.` } : stored;
+			settleUrl(source.mode);
+			return;
 		}
-	});
-
-	async function restoreJobFromUrl(jobId: string) {
-		if (lastRestoredJobId === jobId) return;
+		preparing = true;
 		try {
-			const job = await getGenerationJob(jobId);
-			lastRestoredJobId = jobId;
-			// Legacy copilot jobs have no tab any more: their page has the details.
-			if (job.mode === 'copilot') {
-				goto(`/applications/${jobId}`);
-				return;
-			}
-			if (job.mode !== activeTab) {
-				goto(sampleGeneratorUrl({ mode: job.mode as TabId, job: jobId }), {
-					replaceState: true,
-					noScroll: true,
-				});
-				return;
-			}
-			if (job.mode === 'custom') {
-				customJob = job;
-				if (job.status === 'running' || job.status === 'pending') pollCustomJob(job.id);
-			} else if (job.mode === 'agent') {
-				agentJob = job;
-				if (job.status === 'running' || job.status === 'pending') pollAgentJob(job.id);
-			}
-		} catch {
-			// invalid job id
+			const result = await prepareComposer(source);
+			if (mine !== token) return;
+			prepared = result;
+			settleUrl(result.mode);
+		} finally {
+			if (mine === token) preparing = false;
 		}
 	}
 
 	$effect(() => {
-		if (data.jobId) restoreJobFromUrl(data.jobId);
-		else {
-			lastRestoredJobId = null;
-		}
+		const source: ComposerSource = {
+			mode: data.mode,
+			modelSlug: data.modelSlug,
+			appSlug: data.appSlug,
+			fromJobId: data.fromJobId,
+		};
+		const invalidFromJob = data.invalidFromJob;
+		const key = sourceKey(source);
+		if (key === appliedKey) return;
+		appliedKey = key;
+		untrack(() => void open(source, invalidFromJob));
 	});
 
-	onMount(async () => {
-		const [modelsRes, harnessList] = await Promise.all([
-			getModels({ per_page: 100 }),
-			getAgentHarnesses().catch(() => [] as AgentHarness[]),
-			loadScaffoldingData(),
-			loadHistory(),
-		]);
-		models = modelsRes.items;
-		harnesses = harnessList;
-		modelsLoading = false;
-		applyModelSlugFromUrl();
-		if (data.jobId) restoreJobFromUrl(data.jobId);
-	});
-
-	async function loadScaffoldingData() {
-		try {
-			const [stackList, apps, profileList] = await Promise.all([
-				getStacks(),
-				getAppTemplates(),
-				getGenerationProfiles(),
-			]);
-			stacks = stackList;
-			appTemplates = apps;
-			profiles = profileList;
-		} finally {
-			scaffoldingLoading = false;
-		}
+	function switchMode(next: ComposerMode) {
+		if (prepared?.mode === next && !preparing) return;
+		token += 1;
+		preparing = false;
+		prepared = storedComposer(next);
+		settleUrl(next);
 	}
-
-	async function loadHistory() {
-		historyLoading = true;
-		try {
-			historyData = await getGenerationJobs({
-				page: historyPage,
-				per_page: 15,
-				mode: historyModeFilter || undefined,
-				status: historyStatusFilter || undefined,
-			});
-		} catch {
-			historyData = null;
-		} finally {
-			historyLoading = false;
-		}
-	}
-
-	async function submitCustomJob(payload: CustomPayload) {
-		customSubmitting = true;
-		customError = '';
-		customJob = null;
-		try {
-			const job = await createCustomJob(payload);
-			customJob = job;
-			syncJobInUrl(job);
-			pollCustomJob(job.id);
-			loadHistory();
-		} catch (err: any) {
-			const detail = err?.detail ?? err?.message ?? 'Failed to create job';
-			const remediation = err?.remediation ? ` ${err.remediation}` : '';
-			customError = detail + remediation;
-		} finally {
-			customSubmitting = false;
-		}
-	}
-
-	async function pollCustomJob(id: string) {
-		customPolling = true;
-		let sseCleanup: (() => void) | null = null;
-		try {
-			sseCleanup = subscribe([`generation:${id}`], async () => {
-				try {
-					const job = await getGenerationJob(id);
-					customJob = job;
-					if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
-						loadHistory();
-						sseCleanup?.();
-						sseCleanup = null;
-						customPolling = false;
-					}
-				} catch {
-					// ignore
-				}
-			});
-			while (customPolling) {
-				await new Promise((r) => setTimeout(r, 4000));
-				if (!customPolling) break;
-				const job = await getGenerationJob(id);
-				customJob = job;
-				if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
-					loadHistory();
-					break;
-				}
-			}
-		} finally {
-			sseCleanup?.();
-			customPolling = false;
-		}
-	}
-
-	async function submitScaffoldingBatch(payload: ScaffoldingPayload) {
-		scaffoldingSubmitting = true;
-		scaffoldingError = '';
-		scaffoldingResult = null;
-		try {
-			const result = await createScaffoldingBatch(payload);
-			scaffoldingResult = result;
-			loadHistory();
-		} catch (err: any) {
-			const detail = err?.detail ?? err?.message ?? 'Failed to create batch';
-			const remediation = err?.remediation ? ` ${err.remediation}` : '';
-			scaffoldingError = detail + remediation;
-		} finally {
-			scaffoldingSubmitting = false;
-		}
-	}
-
-	async function submitAgentBatch(payload: AgentPayload) {
-		agentSubmitting = true;
-		agentError = '';
-		agentResult = null;
-		try {
-			agentResult = await createAgentBatch(payload);
-			loadHistory();
-		} catch (err: any) {
-			const detail = err?.detail ?? err?.message ?? 'Failed to start agent runs';
-			const remediation = err?.remediation ? ` ${err.remediation}` : '';
-			agentError = detail + remediation;
-		} finally {
-			agentSubmitting = false;
-		}
-	}
-
-	async function pollAgentJob(id: string) {
-		agentPolling = true;
-		let sseCleanup: (() => void) | null = null;
-		const done = (job: GenerationJob) =>
-			job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled';
-		try {
-			sseCleanup = subscribe([`generation:${id}`], async () => {
-				try {
-					const job = await getGenerationJob(id);
-					agentJob = job;
-					if (done(job)) {
-						loadHistory();
-						sseCleanup?.();
-						sseCleanup = null;
-						agentPolling = false;
-					}
-				} catch {
-					// ignore
-				}
-			});
-			// Agent runs take minutes; SSE carries the transitions, this is a slow fallback.
-			while (agentPolling) {
-				await new Promise((r) => setTimeout(r, 10000));
-				if (!agentPolling || agentJob?.id !== id) break;
-				const job = await getGenerationJob(id);
-				agentJob = job;
-				if (done(job)) {
-					loadHistory();
-					break;
-				}
-			}
-		} finally {
-			sseCleanup?.();
-			agentPolling = false;
-		}
-	}
-
-	async function cancelJob(id: string) {
-		try {
-			await cancelGenerationJob(id);
-			loadHistory();
-		} catch {
-			// ignore
-		}
-	}
-
-	function onHistoryFilterChange() {
-		historyPage = 1;
-		loadHistory();
-	}
-
-	function onHistoryPageChange(page: number) {
-		historyPage = page;
-		loadHistory();
-	}
-
-	function openJobInSidebar(mode: string, id: string) {
-		goto(sampleGeneratorUrl({ mode: mode as TabId, job: id }), {
-			keepFocus: true,
-			noScroll: true,
-		});
-	}
-
-	const formatDuration = (seconds: number | null) => formatDurationShared(seconds, 0);
-	const formatDate = formatDateTime;
 </script>
 
 <div class="space-y-6">
 	<PageHeader
 		title="Sample Generator"
-		description="Agent runs build each app with a sandboxed coding agent (OpenCode, mini-swe-agent or Aider) under a fixed brief, budget and gateway-recorded LLM calls, then grade it with a hidden conformance suite. Custom prompts and template Scaffolding remain available for one-shot comparisons."
+		description="Compose generation runs, check exactly what will run and what it may cost, then start them."
 	>
 		{#snippet actions()}
-			<Button variant="outline" size="sm" href="/templates">
-				<Layers /> Generation Library
-			</Button>
+			<Button href="/sample-generator/batches" variant="outline" size="sm"><Layers />Batches</Button>
+			<Button href="/templates" variant="outline" size="sm"><Library />Library</Button>
 		{/snippet}
+		<p class="max-w-3xl text-xs text-muted-foreground">
+			<span class="font-medium text-foreground">App spec</span>: the task, graded by hidden tests ·
+			<span class="font-medium text-foreground">Harness</span>: the agent program that drives the model ·
+			<span class="font-medium text-foreground">Preset</span>: saved, versioned harness, sampling or budget settings ·
+			<span class="font-medium text-foreground">Stack</span>: the app skeleton
+		</p>
 	</PageHeader>
 
-	<Tabs.Root value={activeTab} onValueChange={(v) => switchTab(v as TabId)}>
-		<Tabs.List>
-			<Tabs.Trigger value="agent">
-				<Bot />Agent
-			</Tabs.Trigger>
-			<Tabs.Trigger value="custom"><Code />Custom</Tabs.Trigger>
-			<Tabs.Trigger value="scaffolding"><Layers />Scaffolding</Tabs.Trigger>
-		</Tabs.List>
+	<div class="space-y-3">
+		<div class="flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
+			<Segmented
+				aria-label="Generation mode"
+				value={mode}
+				items={modeItems}
+				class="self-start"
+				onValueChange={(v) => switchMode(v as ComposerMode)}
+			/>
+			<p class="min-w-0 text-xs text-muted-foreground">
+				{#if mode === 'agent' && !wide.current}<span class="font-medium text-primary">Recommended.</span>{/if}
+				{MODES[mode].description}
+			</p>
+		</div>
+		<OpenRouterKeyBanner bind:keyState />
+	</div>
 
-		<!-- One panel; GeneratorForm switches its content on activeTab. -->
-		<Tabs.Content value={activeTab}>
-		<div class="grid gap-6 {activeTab !== 'scaffolding' ? 'lg:grid-cols-[1fr_360px]' : ''}">
-			<div class="space-y-4">
-				{#if activeTab === 'agent'}
-					<OpenRouterKeyBanner />
-				{/if}
-				<GeneratorForm
-					activeTab={activeTab}
-					{models}
-					{harnesses}
-					{modelsLoading}
-					{stacks}
-					{appTemplates}
-					{profiles}
-					{scaffoldingLoading}
-					{customSubmitting}
-					{customError}
-					{scaffoldingSubmitting}
-					{scaffoldingError}
-					{scaffoldingResult}
-					{agentSubmitting}
-					{agentError}
-					{agentResult}
-					bind:customModelId
-					onSubmitCustom={submitCustomJob}
-					onSubmitScaffolding={submitScaffoldingBatch}
-					onSubmitAgent={submitAgentBatch}
-				/>
-			</div>
-
-			{#if activeTab !== 'scaffolding'}
-				<GenerationResults
-					mode={activeTab === 'agent' ? 'agent' : 'custom'}
-					job={activeTab === 'agent' ? agentJob : customJob}
-					{formatDuration}
-					onCancel={cancelJob}
-				/>
+	{#if showMessages && prepared}
+		<div class="space-y-2">
+			{#if prepared.notice}
+				<Alert class="border-info/30 bg-info/10" role="status">
+					<Info class="text-info-fg" />
+					<div class="flex items-start justify-between gap-2">
+						<AlertDescription class="min-w-0 text-foreground">{prepared.notice}</AlertDescription>
+						<Button
+							variant="ghost"
+							size="icon"
+							class="size-6 shrink-0"
+							aria-label="Dismiss"
+							onclick={() => (dismissedFor = prepared)}><X /></Button
+						>
+					</div>
+				</Alert>
+			{/if}
+			{#if prepared.warning}
+				<Alert class="border-warning/30 bg-warning/10">
+					<TriangleAlert class="text-warning-fg" />
+					<div class="flex items-start justify-between gap-2">
+						<AlertDescription class="min-w-0 text-warning-fg">{prepared.warning}</AlertDescription>
+						<Button
+							variant="ghost"
+							size="icon"
+							class="size-6 shrink-0"
+							aria-label="Dismiss"
+							onclick={() => (dismissedFor = prepared)}><X /></Button
+						>
+					</div>
+				</Alert>
 			{/if}
 		</div>
-		</Tabs.Content>
-		</Tabs.Root>
+	{/if}
 
-	<GenerationHistory
-		{historyData}
-		{historyLoading}
-		bind:historyModeFilter
-		bind:historyStatusFilter
-		{modeLabels}
-		{formatDuration}
-		{formatDate}
-		onRefresh={loadHistory}
-		onFilterChange={onHistoryFilterChange}
-		onPageChange={onHistoryPageChange}
-		onCancelJob={cancelJob}
-		onOpenJob={openJobInSidebar}
-	/>
+	{#if preparing || !prepared}
+		<LoadingState label={data.fromJobId ? 'loading the job’s settings' : 'loading'} />
+	{:else}
+		{#key prepared}
+			{#if prepared.mode === 'agent'}
+				<AgentComposer initial={prepared.draft} pins={prepared.pins} />
+			{:else if prepared.mode === 'scaffolding'}
+				<ScaffoldingComposer initial={prepared.draft} pins={prepared.pins} {keyState} />
+			{:else}
+				<SinglePromptComposer initial={prepared.draft} pins={prepared.pins} {keyState} />
+			{/if}
+		{/key}
+	{/if}
 </div>

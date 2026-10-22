@@ -1,49 +1,104 @@
 <script lang="ts">
+	/**
+	 * StacksList — stack cards. Builtin stacks can only be duplicated; user stacks
+	 * can be edited (new version) and archived (the server refuses stacks you do
+	 * not own). A user stack awaiting approval runs only for its owner.
+	 */
 	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import Layers from '@lucide/svelte/icons/layers';
-	import type { Stack } from '$lib/api/client';
+	import Pencil from '@lucide/svelte/icons/pencil';
+	import Copy from '@lucide/svelte/icons/copy';
+	import Archive from '@lucide/svelte/icons/archive';
+	import type { Stack } from '$lib/api/generation';
 
 	interface Props {
 		stacks: Stack[];
 		loading: boolean;
 		compact: boolean;
+		activeSlug?: string | null;
 		onEdit?: (s: Stack) => void;
 		onDuplicate?: (s: Stack) => void;
 		onArchive?: (s: Stack) => void;
 	}
-	let { stacks, loading, compact, onEdit, onDuplicate, onArchive }: Props = $props();
+	let { stacks, loading, compact, activeSlug = null, onEdit, onDuplicate, onArchive }: Props = $props();
 </script>
 
 {#if loading}
 	<LoadingState label="loading stacks" />
 {:else if stacks.length === 0}
-	<EmptyState icon={Layers} title="No stacks found" description="If the search is empty, run migrations to seed the builtin stacks." />
+	<EmptyState icon={Layers} title="No stacks found" description="Clear the search, or run migrations to seed the builtin stacks." />
 {:else}
-	<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-2 {compact ? 'xl:grid-cols-1' : 'xl:grid-cols-3'}">
+	<div class="grid gap-3 sm:grid-cols-2 {compact ? 'xl:grid-cols-1' : 'xl:grid-cols-3'}">
 		{#each stacks as stack (stack.slug)}
-			<div class="rounded-md border border-border bg-card text-card-foreground">
-				<div class="p-4 space-y-3">
+			<div
+				class="flex flex-col rounded-md border border-border bg-card text-card-foreground {activeSlug === stack.slug
+					? 'ring-2 ring-primary'
+					: ''}"
+			>
+				<div class="flex-1 space-y-2 p-4">
 					<div class="flex items-start justify-between gap-2">
 						<div class="min-w-0">
-							<h3 class="font-semibold text-sm truncate flex items-center gap-1.5">
-								<Layers class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-								{stack.slug}
+							<h3 class="flex items-center gap-1.5 truncate text-sm font-semibold">
+								<Layers class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+								<span class="truncate">{stack.name || stack.slug}</span>
 							</h3>
+							<p class="font-mono text-[11px] text-muted-foreground">{stack.slug}@v{stack.version}</p>
 						</div>
 						<Badge variant={stack.has_frontend ? 'default' : 'secondary'} class="shrink-0">
 							{stack.has_frontend ? 'full-stack' : 'backend-only'}
 						</Badge>
 					</div>
-					{#if stack.aliases.length}
-						<div class="flex flex-wrap gap-1 min-h-[22px]">
-							{#each stack.aliases as alias}
-								<Badge variant="outline" class="font-mono">{alias}</Badge>
-							{/each}
-						</div>
-					{:else}
-						<div class="min-h-[22px]"></div>
+					<div class="flex flex-wrap gap-1">
+						{#if stack.is_builtin}
+							<Badge variant="secondary">Builtin</Badge>
+						{:else}
+							<Badge variant="outline">Custom</Badge>
+						{/if}
+						<!-- Strict check: older API responses omit is_approved. -->
+						{#if !stack.is_builtin && stack.is_approved === false}
+							<Badge variant="outline" class="border-warning/30 bg-warning/10 text-warning-fg">
+								Pending approval — only you can run it
+							</Badge>
+						{/if}
+						{#each stack.aliases ?? [] as alias (alias)}
+							<Badge variant="outline" class="font-mono">{alias}</Badge>
+						{/each}
+					</div>
+					{#if stack.description}
+						<p class="line-clamp-2 text-xs text-muted-foreground">{stack.description}</p>
+					{/if}
+				</div>
+				<div class="flex flex-wrap gap-1.5 border-t px-4 py-2.5">
+					{#if !stack.is_builtin && onEdit}
+						<Button variant="outline" size="sm" title="Edit as a new version" onclick={() => onEdit(stack)}>
+							<Pencil /> Edit
+						</Button>
+					{/if}
+					{#if onDuplicate}
+						<Button
+							variant="outline"
+							size="sm"
+							title="Duplicate as a new stack"
+							aria-label="Duplicate {stack.slug}"
+							onclick={() => onDuplicate(stack)}
+						>
+							<Copy />{#if stack.is_builtin}<span>Duplicate</span>{/if}
+						</Button>
+					{/if}
+					{#if !stack.is_builtin && onArchive}
+						<Button
+							variant="outline"
+							size="sm"
+							class="hover:bg-destructive/10 hover:text-danger-fg"
+							title="Archive all versions (jobs keep their pinned snapshots)"
+							aria-label="Archive {stack.slug}"
+							onclick={() => onArchive(stack)}
+						>
+							<Archive />
+						</Button>
 					{/if}
 				</div>
 			</div>

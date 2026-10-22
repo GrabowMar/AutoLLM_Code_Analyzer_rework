@@ -4,11 +4,12 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import * as Select from '$lib/components/ui/select';
 	import { untrack } from 'svelte';
 	import { slugify } from '$lib/components/templates/slugify';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
-	import type { ContentBlock } from '$lib/api/client';
+	import type { ContentBlock } from '$lib/api/generation';
 
 	export interface BlockSavePayload {
 		mode: 'create' | 'new-version';
@@ -97,29 +98,35 @@
 		<div class="grid gap-3 sm:grid-cols-3">
 			<div class="space-y-1.5">
 				<Label class="text-xs" for="block-type">Type</Label>
-				<select
+				<Select.Simple
 					id="block-type"
 					bind:value={blockType}
 					disabled={initial !== null}
-					class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs disabled:opacity-60"
-				>
-					{#each blockTypeOptions as t}<option value={t}>{t}</option>{/each}
-				</select>
+					items={blockTypeOptions.map((t) => ({ value: t, label: t }))}
+				/>
 			</div>
 			{#if blockType === 'prompt_stage'}
 				<div class="space-y-1.5">
 					<Label class="text-xs" for="block-stage">Stage</Label>
-					<select id="block-stage" bind:value={stage} class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs">
-						<option value="backend">backend</option>
-						<option value="frontend">frontend</option>
-					</select>
+					<Select.Simple
+						id="block-stage"
+						bind:value={stage}
+						items={[
+							{ value: 'backend', label: 'backend' },
+							{ value: 'frontend', label: 'frontend' },
+						]}
+					/>
 				</div>
 				<div class="space-y-1.5">
 					<Label class="text-xs" for="block-role">Role</Label>
-					<select id="block-role" bind:value={role} class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs">
-						<option value="system">system</option>
-						<option value="user">user</option>
-					</select>
+					<Select.Simple
+						id="block-role"
+						bind:value={role}
+						items={[
+							{ value: 'system', label: 'system' },
+							{ value: 'user', label: 'user' },
+						]}
+					/>
 				</div>
 			{/if}
 		</div>

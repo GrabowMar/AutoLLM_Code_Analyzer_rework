@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { listExperiments, type Experiment } from '$lib/api/experiments';
+	import { formatApiError } from '$lib/api/core';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
@@ -22,8 +24,8 @@
 		error = '';
 		try {
 			experiments = await listExperiments();
-		} catch (err: any) {
-			error = err?.detail ?? err?.message ?? 'Failed to load experiments';
+		} catch (e) {
+			error = formatApiError(e, 'Failed to load experiments.');
 		} finally {
 			loading = false;
 		}
@@ -33,7 +35,7 @@
 <div class="space-y-6">
 	<PageHeader
 		title="Experiments"
-		description="Designed runs: apps × models × prompt bundles × repeats, with a reproducibility seed."
+		description="Designed comparisons: apps × conditions (model × harness preset, or model × prompt profile) × repeats, with shared seeds per cell."
 	>
 		{#snippet actions()}
 			<Button href="/experiments/create" size="sm">
@@ -51,7 +53,7 @@
 		<EmptyState
 			icon={GitCompareArrows}
 			title="No experiments yet"
-			description="Create one to compare models and prompt variants across a set of apps."
+			description="Create one to compare models and harness configurations across a set of apps."
 		>
 			{#snippet action()}
 				<Button href="/experiments/create" size="sm"><Plus class="h-4 w-4" />New experiment</Button>
@@ -64,7 +66,7 @@
 					<Card.Root class="card-lift h-full">
 						<Card.Header class="pb-2">
 							<div class="flex items-start justify-between gap-2">
-								<Card.Title class="text-base">{exp.name}</Card.Title>
+								<Card.Title class="min-w-0 break-words text-base">{exp.name}</Card.Title>
 								<StatusBadge status={exp.status} />
 							</div>
 							{#if exp.description}
@@ -72,10 +74,14 @@
 							{/if}
 						</Card.Header>
 						<Card.Content>
-							<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+							<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+								<Badge variant="outline">{exp.mode === 'agent' ? 'Agent' : 'Template scaffolding'}</Badge>
 								<span>{exp.app_requirement_ids.length} apps</span>
 								<span>{exp.condition_count} conditions</span>
 								<span>{exp.repeats}× repeats</span>
+								{#if exp.stack_slug}
+									<span class="font-mono">{exp.stack_slug}</span>
+								{/if}
 								{#if exp.base_seed !== null}
 									<span>seed {exp.base_seed}</span>
 								{/if}

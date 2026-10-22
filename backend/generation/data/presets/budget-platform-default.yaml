@@ -1,0 +1,8 @@
+# System run preset (seeded by backend/generation/seeding.py:seed_presets).
+# Empty on purpose: the platform's AGENT_* settings apply. The resolved budget
+# is recorded in every job snapshot's ``agent`` section (authoritative).
+kind: budget
+slug: platform-default
+name: Platform defaults
+description: The platform's default limits (request budget, wall clock, tokens, USD) and network policy.
+config: {}

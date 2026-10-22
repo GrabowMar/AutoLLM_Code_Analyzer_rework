@@ -597,8 +597,12 @@ def assess_validity(snapshot: dict[str, Any], result: dict[str, Any]) -> dict[st
     if termination == "harness_error":
         note("harness_error", "warn", "the harness exited with an error")
     dropped = (snapshot.get("gateway") or {}).get("dropped_params") or {}
-    if dropped:
+    if set(dropped) - {"seed"}:
         note("params_not_applied", "warn", "configured params this model cannot take: " + ", ".join(sorted(dropped)))
+    elif dropped:
+        # Every run has a seed, so a model without seed support drops it on
+        # every run: worth recording, not a reason to doubt the sample.
+        note("params_not_applied", "info", "this model takes no seed: the run is not seed-reproducible")
     requested = (snapshot.get("llm") or {}).get("model_slug")
     served = [m for m in agent.get("served_models") or {} if m != requested]
     if served:

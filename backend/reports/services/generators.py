@@ -608,7 +608,7 @@ def generate_experiment_report(config: dict[str, Any]) -> dict[str, Any]:
     exclude_truncated = bool(config.get("exclude_truncated", True))
     ai_slugs = AnalyzerTool.ai_slugs()
 
-    conditions = list(experiment.conditions.select_related("model", "profile"))
+    conditions = list(experiment.conditions.select_related("model", "profile", "harness_preset"))
     rows = []
     for condition in conditions:
         jobs = GenerationJob.objects.filter(experiment=experiment, condition=condition)
@@ -618,10 +618,11 @@ def generate_experiment_report(config: dict[str, Any]) -> dict[str, Any]:
         rows.append(
             {
                 "condition_id": condition.id,
-                "label": condition.label or f"{condition.model.model_id} / {condition.profile.slug}",
+                # Agent conditions may have no profile: the harness preset names the method.
+                "label": condition.label or f"{condition.model.model_id} / {condition.method_label()}",
                 "model_id": condition.model.model_id,
                 "model_name": condition.model.model_name,
-                "bundle_key": f"{condition.profile.slug}@{condition.profile.version}",
+                "bundle_key": condition.method_ref(),
                 "generation": _job_summary(jobs),
                 "loc": loc_for_jobs(jobs),
                 "findings": _severity_counts(findings),

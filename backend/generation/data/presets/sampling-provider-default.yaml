@@ -1,0 +1,9 @@
+# System run preset (seeded by backend/generation/seeding.py:seed_presets).
+# No explicit params: every model samples at its provider's defaults, and the
+# harness's own sampling settings are stripped (sampling policy provider_default).
+kind: sampling
+slug: provider-default
+name: Provider defaults
+description: No sampling parameters are set; every model samples at its provider's defaults.
+config:
+  llm_params: {}

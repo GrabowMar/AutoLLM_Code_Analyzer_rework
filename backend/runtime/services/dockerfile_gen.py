@@ -9,6 +9,7 @@ values interpolated here come from the allowlist, not from free user input.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -55,14 +56,24 @@ CMD {command}
 _COPY_FRONTEND = "COPY --from=frontend-builder /frontend/dist ./static\n"
 
 
+def start_command(*, server_kind: str, backend_filename: str, port: int) -> list[str]:
+    """The argv a generated-mode stack's container starts its backend with.
+
+    Also what the agent brief states as the start command for such stacks,
+    so the brief and the Dockerfile cannot disagree.
+    """
+    if server_kind == "uvicorn":
+        module = backend_filename.removesuffix(".py")
+        return ["uvicorn", f"{module}:app", "--host", "0.0.0.0", "--port", str(port)]  # noqa: S104 - container bind
+    return ["python", backend_filename]
+
+
 def generate_dockerfile(stack: Stack) -> str:
     """Render the Dockerfile for a ``generated``-mode stack row."""
     port = stack.default_port
-    module = stack.backend_filename.removesuffix(".py")
-    if stack.server_kind == "uvicorn":
-        command = f'["uvicorn", "{module}:app", "--host", "0.0.0.0", "--port", "{port}"]'
-    else:
-        command = f'["python", "{stack.backend_filename}"]'
+    command = json.dumps(
+        start_command(server_kind=stack.server_kind, backend_filename=stack.backend_filename, port=port),
+    )
 
     parts = []
     if stack.has_frontend:
