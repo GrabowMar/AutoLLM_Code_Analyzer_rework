@@ -17,6 +17,7 @@ from typing import Any
 import yaml
 from jinja2 import Environment
 from jinja2 import StrictUndefined
+from jinja2 import select_autoescape
 
 from backend.generation.services.evaluation import contract as contract_mod
 
@@ -78,7 +79,12 @@ def render_brief(
 ) -> str:
     """Render the brief text; *app* is a snapshot app_requirement dict or None."""
     app = app or {"name": "the application described below"}
-    env = Environment(undefined=StrictUndefined, keep_trailing_newline=True, autoescape=False)
+    # The brief is Markdown for an LLM, never served as HTML: escaping only applies to .html/.xml.
+    env = Environment(
+        undefined=StrictUndefined,
+        keep_trailing_newline=True,
+        autoescape=select_autoescape(enabled_extensions=("html", "xml"), default_for_string=False),
+    )
     template = env.from_string(BRIEF_TEMPLATE_PATH.read_text(encoding="utf-8"))
     endpoints = [*(app.get("api_endpoints") or []), *(app.get("admin_api_endpoints") or [])]
     text = template.render(
