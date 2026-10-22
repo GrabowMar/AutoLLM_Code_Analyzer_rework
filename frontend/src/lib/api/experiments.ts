@@ -20,6 +20,12 @@ export interface Experiment {
   continuation_limit: number;
   enable_repair: boolean;
   llm_defaults: LLMParams;
+  /** Experiment-wide stack; null (legacy) = each condition's profile stack. */
+  stack_slug?: string | null;
+  /** Sampling preset pk (experiment-wide). */
+  sampling_preset?: number | null;
+  /** Budget preset pk (experiment-wide). */
+  budget_preset?: number | null;
   app_requirement_ids: number[];
   condition_count: number;
   created_at: string;
@@ -29,10 +35,13 @@ export interface Experiment {
 export interface ExperimentCondition {
   id: number;
   label: string;
-  profile: number;
+  /** Profile pk; optional (null) for agent-mode conditions. */
+  profile: number | null;
   model: number;
   /** Agent harness for agent-mode experiments ("" = experiment default). */
   harness: string;
+  /** Harness preset pk; when set, `harness` is the preset's harness name. */
+  harness_preset?: number | null;
   model_name: string | null;
   bundle_slug: string | null;
   bundle_version: number | null;
@@ -113,6 +122,9 @@ export interface CreateExperimentPayload {
   repeats?: number;
   base_seed?: number | null;
   mode?: ExperimentMode;
+  stack_slug?: string | null;
+  sampling_preset_id?: number | null;
+  budget_preset_id?: number | null;
   agent_config?: AgentConfig;
   continuation_limit?: number;
   enable_repair?: boolean;
@@ -122,9 +134,12 @@ export interface CreateExperimentPayload {
 export type UpdateExperimentPayload = Partial<CreateExperimentPayload>;
 
 export interface CreateConditionPayload {
-  profile_id: number;
+  /** Required for scaffolding conditions; optional for agent conditions. */
+  profile_id?: number | null;
   model_id: number;
   harness?: string;
+  /** Agent conditions: the harness preset (sets `harness` server-side). */
+  harness_preset_id?: number | null;
   label?: string;
   param_overrides?: LLMParams;
 }

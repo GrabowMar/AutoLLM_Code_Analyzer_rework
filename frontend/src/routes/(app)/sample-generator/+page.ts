@@ -1,26 +1,36 @@
+import { redirect } from "@sveltejs/kit";
+import type { GenerationMode } from "$lib/api/generation";
 import type { PageLoad } from "./$types";
 
-export type SampleGeneratorMode = "agent" | "custom" | "scaffolding";
+const MODES: GenerationMode[] = ["agent", "scaffolding", "custom"];
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const MODES: SampleGeneratorMode[] = ["agent", "custom", "scaffolding"];
-
-function parseMode(
-  raw: string | null,
-  modelSlug: string | null,
-): SampleGeneratorMode {
-  if (raw && MODES.includes(raw as SampleGeneratorMode)) {
-    return raw as SampleGeneratorMode;
-  }
-  // Model-page links use ?model= only — open Custom tab for preselection
-  if (modelSlug) return "custom";
-  // Agent mode is the primary generation method (old ?mode=copilot links land here too).
-  return "agent";
-}
-
+/**
+ * URL contract: `?mode=agent|scaffolding|custom` (default agent; unknown
+ * values such as the retired `copilot` land on agent), `?model=<slug>` and
+ * `?app=<slug>` preselect, `?from_job=<uuid>` starts from a job's settings.
+ * Legacy `?job=<uuid>` links open the job page.
+ */
 export const load: PageLoad = ({ url }) => {
-  const modelSlug = url.searchParams.get("model")?.trim() || null;
-  const mode = parseMode(url.searchParams.get("mode"), modelSlug);
-  const jobId = url.searchParams.get("job")?.trim() || null;
+  const param = (name: string) => url.searchParams.get(name)?.trim() || null;
 
-  return { mode, modelSlug, jobId };
+  const legacyJob = param("job");
+  if (legacyJob && UUID_RE.test(legacyJob)) {
+    redirect(301, `/applications/${legacyJob}`);
+  }
+
+  const rawMode = param("mode");
+  const mode: GenerationMode = MODES.includes(rawMode as GenerationMode)
+    ? (rawMode as GenerationMode)
+    : "agent";
+  const fromJob = param("from_job");
+
+  return {
+    mode,
+    modelSlug: param("model"),
+    appSlug: param("app"),
+    fromJobId: fromJob && UUID_RE.test(fromJob) ? fromJob : null,
+    invalidFromJob: fromJob && !UUID_RE.test(fromJob) ? fromJob : null,
+  };
 };

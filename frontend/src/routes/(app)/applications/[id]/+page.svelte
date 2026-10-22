@@ -1,10 +1,16 @@
 <script lang="ts">
-import { page } from '$app/stores';
+// Job detail. Data reloads whenever the route id changes (retry/replay/rerun
+// navigate to the new job in place); while the job is pending or running it
+// follows the job's SSE channel, with a slow poll as a safety net.
+import { untrack } from 'svelte';
+import { page } from '$app/state';
 import { goto } from '$app/navigation';
 import * as Tabs from '$lib/components/ui/tabs';
 import PageHeader from '$lib/components/PageHeader.svelte';
 import LoadingState from '$lib/components/LoadingState.svelte';
 import EmptyState from '$lib/components/EmptyState.svelte';
+import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 import { Button } from '$lib/components/ui/button';
 import {
 	getGenerationJob,
@@ -14,11 +20,16 @@ import {
 	cancelGenerationJob,
 	deleteGenerationJob,
 	retryGenerationJob,
+	replayGenerationJob,
+	rerunGenerationJob,
 	type GenerationJob,
 	type GenerationArtifact,
 	type CopilotIteration,
-} from '$lib/api/client';
-import { onMount } from 'svelte';
+	type JobPhase,
+} from '$lib/api/generation';
+import { formatApiError } from '$lib/api/core';
+import { subscribe } from '$lib/api/sse';
+import { isNotFoundError } from '$lib/components/generator/batches';
 import { toast } from 'svelte-sonner';
 
 import Eye from '@lucide/svelte/icons/eye';
@@ -48,37 +59,48 @@ import ApplicationTools from '$lib/components/applications/ApplicationTools.svel
 import ApplicationAnalyses from '$lib/components/applications/ApplicationAnalyses.svelte';
 import ApplicationLogs from '$lib/components/applications/ApplicationLogs.svelte';
 import AgentRunSummary from '$lib/components/applications/AgentRunSummary.svelte';
+import JobProvenance from '$lib/components/applications/JobProvenance.svelte';
 import {
 	type CodeFootprint,
 	type VirtualFile,
 } from '$lib/components/applications/utils';
 
-const jobId = $derived($page.params.id ?? '');
+const LIVE_POLL_MS = 15_000;
+
+const jobId = $derived(page.params.id ?? '');
 let loading = $state(true);
+let notFound = $state(false);
+let loadError = $state('');
 let job = $state<GenerationJob | null>(null);
 let artifacts = $state<GenerationArtifact[]>([]);
 let iterations = $state<CopilotIteration[]>([]);
 let activeSection = $state('overview');
+let deleteOpen = $state(false);
+let deleting = $state(false);
+let cloneBusy = $state<string | null>(null);
+let seq = 0;
 
-const sections = $derived(
-	[
+function sectionsFor(j: GenerationJob | null): { id: string; label: string; icon: any }[] {
+	return [
 		{ id: 'overview', label: 'Overview', icon: Eye },
-		job?.mode === 'agent' ? { id: 'agent', label: 'Agent Run', icon: Bot } : null,
+		j?.mode === 'agent' ? { id: 'agent', label: 'Agent Run', icon: Bot } : null,
 		{ id: 'prompts', label: 'Prompts', icon: Terminal },
 		{ id: 'files', label: 'Files & Code', icon: FolderTree },
 		{ id: 'container', label: 'Container', icon: Server },
 		{ id: 'tools', label: 'Tools', icon: Wrench },
 		{ id: 'analyses', label: 'Analyses', icon: ChartBar },
 		{ id: 'logs', label: 'Logs', icon: FileText },
-		job?.mode === 'scaffolding' && job?.result_data?.backend_scan
+		j?.mode === 'scaffolding' && j?.result_data?.backend_scan
 			? { id: 'scan', label: 'API Scan', icon: Shield }
 			: null,
 		{ id: 'dependencies', label: 'Dependencies', icon: Package },
 		{ id: 'artifacts', label: 'Artifacts', icon: Database },
-		job?.mode === 'copilot' ? { id: 'iterations', label: 'Copilot Iterations', icon: Bot } : null,
+		j?.mode === 'copilot' ? { id: 'iterations', label: 'Copilot Iterations', icon: Bot } : null,
 		{ id: 'metrics', label: 'Cost & Metrics', icon: ChartBar },
-	].filter(Boolean) as { id: string; label: string; icon: any }[]
-);
+	].filter(Boolean) as { id: string; label: string; icon: any }[];
+}
+
+const sections = $derived(sectionsFor(job));
 
 const provider = $derived(job?.model_id_str?.split('/')[0] ?? '—');
 
@@ -172,6 +194,10 @@ const costData = $derived.by(() => {
 		totalPrompt = job.metrics.prompt_tokens ?? 0;
 		totalCompletion = job.metrics.completion_tokens ?? 0;
 	}
+	// Agent runs log no per-stage artifacts; the gateway's cost is in metrics.
+	if (totalCost === 0 && typeof job?.metrics?.cost === 'number') {
+		totalCost = job.metrics.cost;
+	}
 
 	const totalTokens = totalPrompt + totalCompletion;
 	const tokensPerSec = job?.duration_seconds ? totalTokens / job.duration_seconds : 0;
@@ -191,43 +217,78 @@ const fixesData = $derived.by(() => {
 	return { total: retry + autofix + llm, retry, autofix, llm };
 });
 
-const frameworkInfo = $derived.by(() => {
-	const name = job?.scaffolding_name ?? '';
-	let backend = '—', frontend = '—', database = '—';
-	if (name) {
-		const parts = name.split(/\s*\+\s*/);
-		if (parts.length >= 2) {
-			frontend = parts[0].trim();
-			backend = parts[1].trim();
-		} else if (parts.length === 1) {
-			backend = parts[0].trim();
-		}
-		const lower = name.toLowerCase();
-		if (lower.includes('postgres')) database = 'PostgreSQL';
-		else if (lower.includes('mysql')) database = 'MySQL';
-		else if (lower.includes('sqlite')) database = 'SQLite';
-		else if (lower.includes('mongo')) database = 'MongoDB';
-	}
-	return { backend, frontend, database };
-});
-
-async function fetchData() {
+async function fetchData(id: string, silent = false) {
+	const mine = ++seq;
 	try {
-		const [j, arts] = await Promise.all([
-			getGenerationJob(jobId),
-			getJobArtifacts(jobId),
-		]);
+		const [j, arts] = await Promise.all([getGenerationJob(id), getJobArtifacts(id)]);
+		if (mine !== seq) return;
 		job = j;
 		artifacts = arts;
+		notFound = false;
+		loadError = '';
+		if (!sectionsFor(j).some((sec) => sec.id === activeSection)) activeSection = 'overview';
 		if (j.mode === 'copilot') {
-			iterations = await getCopilotIterations(jobId);
+			const its = await getCopilotIterations(id);
+			if (mine === seq) iterations = its;
 		}
-	} catch {
-		toast.error('Failed to load job details');
+	} catch (e) {
+		if (mine !== seq) return;
+		if (isNotFoundError(e)) {
+			notFound = true;
+			job = null;
+		} else if (!silent || !job) {
+			loadError = formatApiError(e, 'Failed to load job details.');
+		}
+		// A failed live refresh keeps the current render; the next event or poll retries.
 	} finally {
-		loading = false;
+		if (mine === seq) loading = false;
 	}
 }
+
+// Route id → data (also after retry/replay/rerun navigate to the new job).
+$effect(() => {
+	const id = jobId;
+	untrack(() => {
+		job = null;
+		artifacts = [];
+		iterations = [];
+		loading = true;
+		notFound = false;
+		loadError = '';
+		deleteOpen = false;
+		fetchData(id);
+	});
+});
+
+const liveId = $derived(job && (job.status === 'pending' || job.status === 'running') ? job.id : null);
+
+$effect(() => {
+	const id = liveId;
+	if (!id) return;
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	// Events come in bursts (phase + status); one refetch per burst is enough.
+	const schedule = () => {
+		if (timer) return;
+		timer = setTimeout(() => {
+			timer = null;
+			fetchData(id, true);
+		}, 750);
+	};
+	const stop = subscribe([`generation:${id}`], (event) => {
+		const phase = event.data.phase;
+		if (typeof phase === 'string' && job?.id === id) job.phase = phase as JobPhase;
+		schedule();
+	});
+	// Covers events missed while the stream (re)connects.
+	const poll = setInterval(() => {
+		if (!document.hidden) schedule();
+	}, LIVE_POLL_MS);
+	return () => {
+		stop();
+		clearInterval(poll);
+		if (timer) clearTimeout(timer);
+	};
+});
 
 async function handleExport() {
 	try {
@@ -261,32 +322,36 @@ function downloadCode() {
 
 async function handleCancel() {
 	if (!job) return;
+	const id = job.id;
 	try {
-		const result = await cancelGenerationJob(job.id);
+		const result = await cancelGenerationJob(id);
 		if (result.success) {
 			toast.success('Job cancelled');
-			job = { ...job, status: 'cancelled' };
+			await fetchData(id, true);
 		} else {
-			toast.error('Cannot cancel this job');
+			toast.error(result.message || 'This job can no longer be cancelled');
 		}
-	} catch {
-		toast.error('Failed to cancel job');
+	} catch (e) {
+		toast.error(formatApiError(e, 'Failed to cancel job'));
 	}
 }
 
-async function handleDelete() {
+async function confirmDelete() {
 	if (!job) return;
-	if (!confirm('Are you sure you want to delete this job? This cannot be undone.')) return;
+	deleting = true;
 	try {
 		const result = await deleteGenerationJob(job.id);
 		if (result.success) {
 			toast.success('Job deleted');
-			goto('/applications');
+			deleteOpen = false;
+			goto(job.batch_id ? `/sample-generator/batches/${job.batch_id}` : '/applications');
 		} else {
-			toast.error('Cannot delete this job');
+			toast.error(result.message || 'Cannot delete this job');
 		}
-	} catch {
-		toast.error('Failed to delete job');
+	} catch (e) {
+		toast.error(formatApiError(e, 'Failed to delete job'));
+	} finally {
+		deleting = false;
 	}
 }
 
@@ -296,16 +361,36 @@ async function handleRetry() {
 		const newJob = await retryGenerationJob(job.id);
 		toast.success('Job retried — new job created');
 		goto(`/applications/${newJob.id}`);
-	} catch {
-		toast.error('Failed to retry job');
+	} catch (e) {
+		toast.error(formatApiError(e, 'Failed to retry job'));
 	}
 }
 
-onMount(fetchData);
+async function handleClone(kind: 'replay' | 'rerun') {
+	if (!job || cloneBusy) return;
+	cloneBusy = kind;
+	try {
+		const created = kind === 'replay' ? await replayGenerationJob(job.id) : await rerunGenerationJob(job.id);
+		toast.success(kind === 'replay' ? 'Replay started — same snapshot and seed' : 'Another trial started — new seed');
+		goto(`/applications/${created.id}`);
+	} catch (e) {
+		toast.error(formatApiError(e, kind === 'replay' ? 'Could not replay this run' : 'Could not start another trial'));
+	} finally {
+		cloneBusy = null;
+	}
+}
 </script>
 
 {#if loading}
 	<LoadingState label="loading application" />
+{:else if !job && !notFound}
+	<div class="space-y-6">
+		<PageHeader title="Application" back={{ href: '/applications', label: 'Applications' }} />
+		<ErrorAlert message={loadError || 'Failed to load job details.'} onretry={() => {
+				loading = true;
+				fetchData(jobId);
+			}} />
+	</div>
 {:else if !job}
 	<div class="space-y-6">
 		<PageHeader title="Application" back={{ href: '/applications', label: 'Applications' }} />
@@ -327,7 +412,7 @@ onMount(fetchData);
 			onRetry={handleRetry}
 			onExport={handleExport}
 			onDownloadCode={downloadCode}
-			onDelete={handleDelete}
+			onDelete={() => (deleteOpen = true)}
 		/>
 
 		<Tabs.Root bind:value={activeSection}>
@@ -339,7 +424,15 @@ onMount(fetchData);
 			</Tabs.List>
 
 			<Tabs.Content value="overview">
-				<ApplicationOverview {job} {provider} {codeFootprint} {fixesData} {frameworkInfo} {costData} />
+				<div class="space-y-4">
+					<ApplicationOverview {job} {provider} {codeFootprint} {fixesData} />
+					<JobProvenance
+						{job}
+						busy={cloneBusy}
+						onReplay={() => handleClone('replay')}
+						onRerun={() => handleClone('rerun')}
+					/>
+				</div>
 			</Tabs.Content>
 			{#if job.mode === 'agent'}
 				<Tabs.Content value="agent"><AgentRunSummary {job} /></Tabs.Content>
@@ -363,4 +456,14 @@ onMount(fetchData);
 			</Tabs.Content>
 		</Tabs.Root>
 	</div>
+
+	<ConfirmDialog
+		bind:open={deleteOpen}
+		title="Delete this job?"
+		description="Deletes the job, its generated files and its run record. This cannot be undone."
+		confirmLabel="Delete job"
+		destructive
+		busy={deleting}
+		onConfirm={confirmDelete}
+	/>
 {/if}

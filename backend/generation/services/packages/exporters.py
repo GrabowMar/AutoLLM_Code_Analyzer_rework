@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
 
     from backend.generation.models import AppRequirementTemplate
+    from backend.generation.models import RunPreset
 
 
 def export_bundle_package(bundle: GenerationProfile) -> dict[str, Any]:
@@ -42,11 +43,19 @@ def export_template_package(
     bundle_slugs: list[str] | None = None,
     block_refs: list[dict[str, Any]] | None = None,
     stack_slugs: list[str] | None = None,
+    preset_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """A v3 template package of the named assets *user* can see.
+
+    Profiles bring the blocks they reference and the user stack they target
+    (builtin stacks ship with every install). Presets are exported at their
+    latest visible version.
+    """
     app_template_slugs = app_template_slugs or []
     bundle_slugs = bundle_slugs or []
     block_refs = block_refs or []
-    stack_slugs = stack_slugs or []
+    stack_slugs = list(stack_slugs or [])
+    preset_refs = preset_refs or []
 
     bundles = list(visible_profiles_for(user).filter(slug__in=bundle_slugs).order_by("name"))
     explicit_blocks = []
@@ -66,6 +75,9 @@ def export_template_package(
         [ref for bundle in bundles for ref in (bundle.block_refs or [])],
     )
     blocks = _dedupe_blocks([*explicit_blocks, *bundle_blocks])
+    for bundle in bundles:
+        if bundle.scaffolding_slug and bundle.scaffolding_slug not in stack_slugs:
+            stack_slugs.append(bundle.scaffolding_slug)
 
     return {
         "template_package_schema_version": TEMPLATE_PACKAGE_SCHEMA_VERSION,
@@ -79,12 +91,39 @@ def export_template_package(
             "blocks": [_serialize_block(block) for block in blocks],
             "profiles": [_serialize_bundle(bundle) for bundle in bundles],
             "stacks": [_serialize_stack(row) for row in _exportable_stacks(user, stack_slugs)],
+            "presets": [_serialize_preset(preset) for preset in _exportable_presets(user, preset_refs)],
         },
     }
 
 
+def _exportable_presets(user: AbstractUser, preset_refs: list[dict[str, Any]]) -> list[RunPreset]:
+    """Latest visible version of each referenced ``{kind, slug}`` (unknown refs are skipped)."""
+    from backend.generation.models import RunPreset
+    from backend.generation.services.presets import visible_q
+
+    presets: dict[tuple[str, str], RunPreset] = {}
+    for ref in preset_refs:
+        key = (str(ref.get("kind", "")), str(ref.get("slug", "")))
+        if key in presets:
+            continue
+        preset = RunPreset.objects.filter(visible_q(user), kind=key[0], slug=key[1]).order_by("-version").first()
+        if preset is not None:
+            presets[key] = preset
+    return sorted(presets.values(), key=lambda p: (p.kind, p.slug))
+
+
+def _serialize_preset(preset: RunPreset) -> dict[str, Any]:
+    return {
+        "kind": preset.kind,
+        "slug": preset.slug,
+        "name": preset.name,
+        "description": preset.description,
+        "config": preset.config or {},
+    }
+
+
 def _exportable_stacks(user: AbstractUser, stack_slugs: list[str]):
-    """User-authored stacks only — builtins ship with every install."""
+    """User-authored stacks only — builtins ship with every install (unknown slugs are skipped)."""
     from django.db.models import Q
 
     from backend.runtime.models import Stack
@@ -164,6 +203,7 @@ def _serialize_app_template(template: AppRequirementTemplate) -> dict[str, Any]:
         "api_endpoints": template.api_endpoints or [],
         "data_model": template.data_model or {},
         "admin_api_endpoints": template.admin_api_endpoints or [],
+        "difficulty": template.difficulty or "",
     }
 
 

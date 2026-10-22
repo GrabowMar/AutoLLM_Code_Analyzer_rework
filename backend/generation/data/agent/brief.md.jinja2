@@ -10,6 +10,10 @@ You are working alone: nobody will answer questions or review intermediate steps
 {% if description %}{{ description }}
 
 {% endif -%}
+{% if additional_context %}## Additional context
+{{ additional_context }}
+
+{% endif -%}
 {% if app.backend_requirements %}## Backend requirements
 {% for req in app.backend_requirements %}- {{ req }}
 {% endfor %}

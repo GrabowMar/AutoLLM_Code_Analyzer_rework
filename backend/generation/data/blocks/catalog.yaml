@@ -1,25 +1,13 @@
-bundle_schema_version: 1
+# System generation profiles (seeded by backend/generation/seeding.py).
+#
+# - block_refs name system blocks by slug only: the seeder pins each to the
+#   latest system version, so editing a prompt file reaches every profile
+#   that uses it (as a new profile version). Do not add `version:`; the lint
+#   (`manage.py lint_generation_data`) rejects it.
+# - is_default marks the default profile of its stack: at most one per stack.
+# - default_bundle_slug is the global default (no stack given), and the
+#   prompt material scaffolding falls back to before any profile is seeded.
 default_bundle_slug: system-scaffolding-standard
-
-default_block_refs:
-  - type: prompt_stage
-    slug: base-backend-system
-    version: 1
-  - type: prompt_stage
-    slug: base-backend-user
-    version: 1
-  - type: prompt_stage
-    slug: base-frontend-system
-    version: 1
-  - type: prompt_stage
-    slug: base-frontend-user
-    version: 1
-  - type: prompt_tone
-    slug: tone-standard
-    version: 1
-  - type: prompt_rules
-    slug: rules-flask-global
-    version: 1
 
 profiles:
   - slug: system-scaffolding-standard
@@ -30,22 +18,16 @@ profiles:
     block_refs:
       - type: prompt_stage
         slug: base-backend-system
-        version: 1
       - type: prompt_stage
         slug: base-backend-user
-        version: 1
       - type: prompt_stage
         slug: base-frontend-system
-        version: 1
       - type: prompt_stage
         slug: base-frontend-user
-        version: 1
       - type: prompt_tone
         slug: tone-standard
-        version: 1
       - type: prompt_rules
         slug: rules-flask-global
-        version: 1
 
   # app-content-recipe-list is NOT defined here: it's a per-app override of
   # system-scaffolding-standard, owned by
@@ -61,22 +43,16 @@ profiles:
     block_refs:
       - type: prompt_stage
         slug: fastapi-backend-system
-        version: 1
       - type: prompt_stage
         slug: fastapi-backend-user
-        version: 1
       - type: prompt_stage
         slug: vue-frontend-system
-        version: 1
       - type: prompt_stage
         slug: vue-frontend-user
-        version: 1
       - type: prompt_tone
         slug: tone-standard
-        version: 1
       - type: prompt_rules
         slug: rules-fastapi-global
-        version: 1
 
   - slug: system-fastapi-react-standard
     name: FastAPI + React standard
@@ -86,19 +62,13 @@ profiles:
     block_refs:
       - type: prompt_stage
         slug: fastapi-backend-system
-        version: 1
       - type: prompt_stage
         slug: fastapi-backend-user
-        version: 1
       - type: prompt_stage
         slug: base-frontend-system
-        version: 1
       - type: prompt_stage
         slug: base-frontend-user
-        version: 1
       - type: prompt_tone
         slug: tone-standard
-        version: 1
       - type: prompt_rules
         slug: rules-fastapi-global
-        version: 1

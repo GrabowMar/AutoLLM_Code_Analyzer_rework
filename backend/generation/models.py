@@ -7,6 +7,11 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 
+def default_stack_slug() -> str:
+    """``settings.GENERATION_DEFAULT_STACK``, read when a row is created (not frozen at import)."""
+    return settings.GENERATION_DEFAULT_STACK
+
+
 class AppRequirementTemplate(models.Model):
     """Application specification template (e.g., todo app, blog platform)."""
 
@@ -152,8 +157,8 @@ class GenerationProfile(models.Model):
     scaffolding_slug = models.SlugField(
         _("scaffolding slug"),
         max_length=200,
-        default="flask-react",
-        help_text="Canonical stack slug from runtime/scaffolding/manifest.json",
+        default=default_stack_slug,
+        help_text="Canonical stack slug (runtime Stack)",
     )
     block_refs = models.JSONField(
         _("block references"),
@@ -192,6 +197,67 @@ class GenerationProfile(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} v{self.version}"
+
+
+class RunPreset(models.Model):
+    """A named, versioned piece of agent-run configuration (services/presets.py).
+
+    ``harness``: harness + its non-default options; ``sampling``: model-agnostic
+    LLM params (+ sampling policy) applied identically to every model;
+    ``budget``: request/time/token/USD limits and network policy. Content is
+    immutable per version (a content edit creates version+1); a job applies a
+    preset's values into its own fields at creation, so the FKs on
+    :class:`GenerationJob` are provenance only.
+    """
+
+    class Kind(models.TextChoices):
+        HARNESS = "harness", _("Harness")
+        SAMPLING = "sampling", _("Sampling")
+        BUDGET = "budget", _("Budget")
+
+    kind = models.CharField(_("kind"), max_length=20, choices=Kind.choices)
+    slug = models.SlugField(_("slug"), max_length=100)
+    version = models.PositiveIntegerField(_("version"), default=1)
+    name = models.CharField(_("name"), max_length=200)
+    description = models.TextField(_("description"), blank=True, default="")
+    config = models.JSONField(_("config"), default=dict, blank=True, help_text="Normalized config for the kind")
+    content_hash = models.CharField(_("content hash"), max_length=64, blank=True, default="")
+    is_system = models.BooleanField(_("system preset"), default=False)
+    is_archived = models.BooleanField(
+        _("archived"),
+        default=False,
+        help_text="Hidden from pickers but kept for jobs that reference it",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="run_presets",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("Run Preset")
+        verbose_name_plural = _("Run Presets")
+        ordering = ["kind", "slug", "-version"]
+        constraints = [
+            # Slugs are global per kind (whatever the owner), so a slug@version
+            # names exactly one configuration.
+            models.UniqueConstraint(
+                fields=["kind", "slug", "version"],
+                name="generation_runpreset_kind_slug_version_uniq",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(version__gte=1),
+                name="generation_runpreset_version_gte_1",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind}/{self.slug} v{self.version}"
 
 
 class Experiment(models.Model):
@@ -256,6 +322,31 @@ class Experiment(models.Model):
         blank=True,
         help_text="Sampling params applied to every condition unless overridden (see llm_params.SAMPLING_KEYS)",
     )
+    # Experiment-wide run settings (services/experiments.experiment_layers).
+    # A blank stack (null in the API) is the legacy behaviour: each condition
+    # runs on its profile's stack.
+    stack_slug = models.CharField(
+        _("stack slug"),
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Canonical stack every condition runs on (blank = each condition's profile stack)",
+    )
+    # Pinned preset versions; launch copies their values into each job.
+    sampling_preset = models.ForeignKey(
+        RunPreset,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sampling_experiments",
+    )
+    budget_preset = models.ForeignKey(
+        RunPreset,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="budget_experiments",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -281,7 +372,7 @@ class Experiment(models.Model):
 
 
 class ExperimentCondition(models.Model):
-    """One cell of the model x profile matrix for an :class:`Experiment`."""
+    """One condition of an :class:`Experiment`: a model plus a profile and/or harness preset."""
 
     experiment = models.ForeignKey(
         Experiment,
@@ -289,9 +380,13 @@ class ExperimentCondition(models.Model):
         related_name="conditions",
     )
     label = models.CharField(_("label"), max_length=200, blank=True, default="")
+    # Required for scaffolding conditions (its prompts); optional in agent
+    # mode, where it only contributes its stack and llm_config.
     profile = models.ForeignKey(
         GenerationProfile,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="experiment_conditions",
     )
     model = models.ForeignKey(
@@ -312,6 +407,15 @@ class ExperimentCondition(models.Model):
         default="",
         help_text="Agent harness for agent-mode experiments (blank = the experiment's agent_config / default)",
     )
+    # The pinned harness preset (agent mode); ``harness`` then holds its
+    # harness name so the legacy column stays meaningful.
+    harness_preset = models.ForeignKey(
+        RunPreset,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="experiment_conditions",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -320,15 +424,39 @@ class ExperimentCondition(models.Model):
         verbose_name_plural = _("Experiment Conditions")
         ordering = ["id"]
         constraints = [
+            # NULLs compare equal: two profile-less (or preset-less) conditions
+            # for the same model and harness are duplicates, not distinct rows.
             models.UniqueConstraint(
-                fields=["experiment", "profile", "model", "harness"],
-                name="generation_experimentcondition_harness_uniq",
+                fields=["experiment", "model", "profile", "harness", "harness_preset"],
+                name="generation_experimentcondition_config_uniq",
+                nulls_distinct=False,
             ),
         ]
 
     def __str__(self) -> str:
-        harness = f" / {self.harness}" if self.harness else ""
-        return self.label or f"{self.model_id} / {self.profile.slug}{harness}"
+        return self.label or f"{self.model_id} / {self.method_label()}"
+
+    def method_label(self) -> str:
+        """What runs besides the model: the profile and the harness preset (or harness name)."""
+        parts = []
+        if self.profile_id is not None:
+            parts.append(self.profile.slug)
+        if self.harness_preset_id is not None:
+            parts.append(f"{self.harness_preset.slug} v{self.harness_preset.version}")
+        elif self.harness:
+            parts.append(self.harness)
+        return " / ".join(parts) or "default harness"
+
+    def method_ref(self) -> str:
+        """Short slicing label: ``profile@v``, ``preset@v`` (or the harness name), joined by ``/``."""
+        parts = []
+        if self.profile_id is not None:
+            parts.append(f"{self.profile.slug}@{self.profile.version}")
+        if self.harness_preset_id is not None:
+            parts.append(f"{self.harness_preset.slug}@{self.harness_preset.version}")
+        elif self.harness:
+            parts.append(self.harness)
+        return "/".join(parts)
 
 
 class GenerationBatch(models.Model):
@@ -340,6 +468,7 @@ class GenerationBatch(models.Model):
         COMPLETED = "completed", _("Completed")
         PARTIAL = "partial", _("Partial")
         FAILED = "failed", _("Failed")
+        CANCELLED = "cancelled", _("Cancelled")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(_("batch name"), max_length=200, blank=True, default="")
@@ -350,9 +479,15 @@ class GenerationBatch(models.Model):
         choices=Status.choices,
         default=Status.PENDING,
     )
+    # Cached from the live job rows by services/batches.refresh_batch (the
+    # API derives status and counts from the jobs themselves).
     total_jobs = models.PositiveIntegerField(_("total jobs"), default=0)
     completed_jobs = models.PositiveIntegerField(_("completed jobs"), default=0)
     failed_jobs = models.PositiveIntegerField(_("failed jobs"), default=0)
+    # What was asked for (base seed, run-order seed, trials, stack, preset ids,
+    # app and model ids, inline overrides): the seed matrix and run order of a
+    # batch stay auditable from the batch itself.
+    request = models.JSONField(_("request"), default=dict, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -389,6 +524,12 @@ class GenerationJob(models.Model):
         FAILED = "failed", _("Failed")
         CANCELLED = "cancelled", _("Cancelled")
 
+    class Phase(models.TextChoices):
+        NONE = "", _("None")
+        QUEUED = "queued", _("Queued")
+        RUNNING = "running", _("Running")
+        EVALUATING = "evaluating", _("Evaluating")
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     mode = models.CharField(
         _("generation mode"),
@@ -400,6 +541,17 @@ class GenerationJob(models.Model):
         max_length=20,
         choices=Status.choices,
         default=Status.PENDING,
+    )
+    # Where a RUNNING agent job is: waiting for a sandbox slot, in the
+    # sandbox, or being evaluated. Status is RUNNING for all three (it is set
+    # before the slot wait), so this is the only persisted queued/running
+    # distinction; "" whenever the job is not running.
+    phase = models.CharField(
+        _("phase"),
+        max_length=20,
+        choices=Phase.choices,
+        blank=True,
+        default="",
     )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -523,6 +675,34 @@ class GenerationJob(models.Model):
     # per-job budget / network overrides (services/agent/config.py).
     task_description = models.TextField(_("task description"), blank=True, default="")
     agent_config = models.JSONField(_("agent config overrides"), default=dict, blank=True)
+    # Non-default harness options (sparse; services/agent/harnesses). Kept out
+    # of agent_config on purpose: that one is merged into the fingerprinted
+    # snapshot ``agent`` section, options only shape the ``harness`` section.
+    harness_options = models.JSONField(_("harness options"), default=dict, blank=True)
+    # Provenance only: preset values were applied into llm_params /
+    # agent_config / harness_options at creation, so retries and replays
+    # reproduce the configuration without reading these.
+    harness_preset = models.ForeignKey(
+        RunPreset,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="harness_jobs",
+    )
+    sampling_preset = models.ForeignKey(
+        RunPreset,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sampling_jobs",
+    )
+    budget_preset = models.ForeignKey(
+        RunPreset,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="budget_jobs",
+    )
 
     # Copilot mode (legacy)
     copilot_description = models.TextField(

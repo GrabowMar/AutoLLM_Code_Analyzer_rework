@@ -28,6 +28,12 @@
 		onCancel: () => void;
 	}
 	let { form = $bindable(), isEdit, saving, error, onSave, onCancel }: Props = $props();
+
+	// App spec slugs are snake_case, like the seeded spec files.
+	function specSlug(name: string): string {
+		return slugify(name).replace(/-/g, '_');
+	}
+	let slugTouched = $state(false);
 </script>
 
 <Card.Root>
@@ -47,11 +53,11 @@
 			<div class="space-y-1.5">
 				<Label for="app-name" class="text-xs">Name</Label>
 				<Input id="app-name" bind:value={form.name} placeholder="e.g. Chat Messenger" class="h-9 text-xs"
-					oninput={() => { if (!isEdit) form.slug = slugify(form.name); }} />
+					oninput={() => { if (!isEdit && !slugTouched) form.slug = specSlug(form.name); }} />
 			</div>
 			<div class="space-y-1.5">
 				<Label for="app-slug" class="text-xs">Slug</Label>
-				<Input id="app-slug" bind:value={form.slug} placeholder="e.g. chat_messenger" class="h-9 text-xs font-mono" />
+				<Input id="app-slug" bind:value={form.slug} disabled={isEdit} oninput={() => (slugTouched = true)} placeholder="e.g. chat_messenger" class="h-9 text-xs font-mono" />
 			</div>
 			<div class="space-y-1.5 sm:col-span-2">
 				<Label for="app-desc" class="text-xs">Description</Label>
@@ -77,7 +83,7 @@
 
 		<div class="flex justify-end gap-2 pt-4 border-t">
 			<Button variant="outline" size="sm" onclick={onCancel}>Cancel</Button>
-			<Button size="sm" onclick={onSave} disabled={saving || !form.name || !form.slug}>
+			<Button size="sm" onclick={onSave} disabled={saving || !form.name.trim() || !form.slug.trim()}>
 				{#if saving}
 					<LoaderCircle class="animate-spin" /> Saving…
 				{:else}

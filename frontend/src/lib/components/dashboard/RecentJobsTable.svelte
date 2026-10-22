@@ -24,7 +24,7 @@
 					<Card.Description>Latest application generation runs.</Card.Description>
 				</div>
 			</div>
-			<Button variant="ghost" size="sm" href="/sample-generator" class="text-xs">
+			<Button variant="ghost" size="sm" href="/applications" class="text-xs">
 				View all
 				<ArrowRight class="ml-1 h-3 w-3" />
 			</Button>
@@ -47,7 +47,7 @@
 					{#each jobs as app (app.id)}
 						<tr class="transition-colors hover:bg-muted/30">
 							<td class="px-4 py-2.5" data-label="Job">
-								<span class="text-sm font-medium">{app.name}</span>
+								<a href="/applications/{app.id}" class="text-sm font-medium transition-colors hover:text-primary">{app.name}</a>
 							</td>
 							<td class="hide-mobile px-4 py-2.5" data-label="Model">
 								<span class="text-sm text-muted-foreground">{app.model}</span>

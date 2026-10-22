@@ -1,0 +1,9 @@
+# System run preset (seeded by backend/generation/seeding.py:seed_presets).
+# Content changes create a new version; jobs keep pointing at the old one.
+kind: harness
+slug: opencode-default
+name: OpenCode (default)
+description: OpenCode with its pinned, model-agnostic default configuration.
+config:
+  harness: opencode
+  options: {}

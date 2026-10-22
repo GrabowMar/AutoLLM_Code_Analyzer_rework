@@ -1,4 +1,4 @@
-"""Validate requirement specs against schema.json and check stack-parity of catalog bundles.
+"""Validate generation data: requirement specs, catalog and manifests, run presets, starter packages.
 
 Pure data checks (no DB access) — thin wrapper around
 :mod:`backend.generation.services.data_lint`.
@@ -13,7 +13,10 @@ from backend.generation.services.data_lint import lint_all
 
 
 class Command(BaseCommand):
-    help = "Validate requirement specs against schema.json and check stack-parity of catalog bundles"
+    help = (
+        "Validate generation data: requirement specs (schema.json), catalog/manifest profiles, "
+        "system run presets and starter packages"
+    )
 
     def handle(self, *args, **options) -> None:
         errors = lint_all()

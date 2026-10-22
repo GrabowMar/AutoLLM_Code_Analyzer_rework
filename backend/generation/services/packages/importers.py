@@ -1,4 +1,18 @@
-"""Parse, validate, and import bundle/template package payloads."""
+"""Parse, validate, and import bundle/template package payloads.
+
+Import order is app specs → blocks → stacks → profiles → presets, all in one
+transaction. Stacks come before profiles so a stack renamed on conflict can
+be remapped into the profiles that reference it, as blocks are remapped into
+their ``block_refs``.
+
+Conflict strategies (``rename`` | ``overwrite`` | ``error``) share one rule:
+identical content that the importer can already see is reused, never
+duplicated. Otherwise ``overwrite`` replaces the importer's *own* item --
+profiles, blocks and presets get a new version (versions are immutable),
+app specs are updated in place (one mutable row per slug), stacks are always
+renamed -- and anything else is renamed (``rename``/``overwrite``) or refused
+(``error``).
+"""
 
 from __future__ import annotations
 
@@ -8,23 +22,34 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 import yaml
+from django.conf import settings
 from django.db import transaction
+from django.db.models import Max
 from django.utils.text import slugify
 
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import ContentBlock
 from backend.generation.models import GenerationProfile
+from backend.generation.services.llm_params import validate_llm_params
 from backend.generation.services.packages.constants import ALLOWED_CONFLICT_STRATEGIES
 from backend.generation.services.packages.constants import BUNDLE_PACKAGE_KIND
 from backend.generation.services.packages.constants import BUNDLE_PACKAGE_SCHEMA_VERSION
+from backend.generation.services.packages.constants import SUPPORTED_TEMPLATE_PACKAGE_SCHEMA_VERSIONS
 from backend.generation.services.packages.constants import TEMPLATE_PACKAGE_KIND
 from backend.generation.services.packages.constants import TEMPLATE_PACKAGE_SCHEMA_VERSION
 from backend.generation.services.packages.visibility import visible_blocks_for
+from backend.generation.services.versioning import content_hash
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
 
+    from backend.generation.models import RunPreset
+
 logger = logging.getLogger(__name__)
+
+ASSET_SECTIONS = ("app_specs", "blocks", "profiles", "stacks", "presets")
+_DIFFICULTIES = {"", "basic", "standard", "advanced"}
+_MAX_PRESET_SLUG_BASE = 70  # leaves room for a "-<n>" rename suffix (slugs are at most 81 chars)
 
 
 def parse_bundle_package_text(package_text: str) -> dict[str, Any]:
@@ -45,12 +70,20 @@ def parse_bundle_package_text(package_text: str) -> dict[str, Any]:
 
 
 def parse_template_package_text(package_text: str) -> dict[str, Any]:
-    data = _parse_package_text(package_text)
+    return upgrade_template_package(_parse_package_text(package_text))
+
+
+def upgrade_template_package(data: dict[str, Any]) -> dict[str, Any]:
+    """Validate a template package document and upgrade it to the current schema (v3).
+
+    v1 used ``app_templates``/``bundles`` and had no stacks; v1 and v2 had no
+    presets. Each section must be a list.
+    """
     if data.get("kind") != TEMPLATE_PACKAGE_KIND:
         msg = f"Unsupported package kind: {data.get('kind')!r}"
         raise ValueError(msg)
     schema_version = data.get("template_package_schema_version")
-    if schema_version not in (1, TEMPLATE_PACKAGE_SCHEMA_VERSION):
+    if schema_version not in SUPPORTED_TEMPLATE_PACKAGE_SCHEMA_VERSIONS:
         msg = f"Unsupported template package schema version: {schema_version!r}"
         raise ValueError(msg)
     assets = data.get("assets")
@@ -58,8 +91,15 @@ def parse_template_package_text(package_text: str) -> dict[str, Any]:
         msg = "Template package is missing a valid 'assets' section"
         raise ValueError(msg)
     if schema_version == 1:
-        data["assets"] = _upgrade_v1_assets(assets)
-    return data
+        assets = _upgrade_v1_assets(assets)
+    assets = dict(assets)
+    for section in ASSET_SECTIONS:
+        if assets.get(section) is None:
+            assets[section] = []
+        if not isinstance(assets[section], list):
+            msg = f"Template package 'assets.{section}' must be a list"
+            raise ValueError(msg)
+    return {**data, "template_package_schema_version": TEMPLATE_PACKAGE_SCHEMA_VERSION, "assets": assets}
 
 
 def _upgrade_v1_assets(assets: dict[str, Any]) -> dict[str, Any]:
@@ -102,12 +142,18 @@ def import_template_package(
     conflict_strategy: str = "rename",
 ) -> dict[str, list[Any]]:
     package = parse_template_package_text(package_text)
-    assets = package.get("assets") or {}
-    return _import_assets(
-        assets=assets,
-        user=user,
-        conflict_strategy=conflict_strategy,
-    )
+    return import_template_package_data(package=package, user=user, conflict_strategy=conflict_strategy)
+
+
+def import_template_package_data(
+    *,
+    package: dict[str, Any],
+    user: AbstractUser,
+    conflict_strategy: str = "rename",
+) -> dict[str, list[Any]]:
+    """Import an already-parsed package document (validated and upgraded here)."""
+    package = upgrade_template_package(package)
+    return _import_assets(assets=package["assets"], user=user, conflict_strategy=conflict_strategy)
 
 
 def _import_assets(
@@ -121,12 +167,8 @@ def _import_assets(
         raise ValueError(msg)
 
     block_ref_map: dict[tuple[str, int], tuple[str, int]] = {}
-    imported: dict[str, list[Any]] = {
-        "app_specs": [],
-        "blocks": [],
-        "profiles": [],
-        "stacks": [],
-    }
+    stack_slug_map: dict[str, str] = {}
+    imported: dict[str, list[Any]] = {section: [] for section in ASSET_SECTIONS}
 
     # Pre-rename package files may still carry a prompt_templates section for
     # the removed PromptTemplate model; the rest imports normally.
@@ -138,8 +180,8 @@ def _import_assets(
         )
 
     # Accept raw v1 keys too (import_bundle_package builds assets directly).
-    app_specs = assets.get("app_specs", assets.get("app_templates", []))
-    profiles = assets.get("profiles", assets.get("bundles", []))
+    app_specs = assets.get("app_specs", assets.get("app_templates", [])) or []
+    profiles = assets.get("profiles", assets.get("bundles", [])) or []
 
     with transaction.atomic():
         for raw_app in app_specs:
@@ -150,16 +192,20 @@ def _import_assets(
             )
             imported["app_specs"].append(template)
 
-        for raw_block in assets.get("blocks", []):
-            original_slug = str(raw_block.get("slug", "")).strip()
-            original_version = int(raw_block.get("version", 1))
+        for raw_block in assets.get("blocks") or []:
             block = _import_block(
                 raw_block,
                 user=user,
                 conflict_strategy=conflict_strategy,
             )
-            block_ref_map[(original_slug, original_version)] = (block.slug, block.version)
+            original = (str(raw_block.get("slug", "")).strip(), int(raw_block.get("version", 1)))
+            block_ref_map[original] = (block.slug, block.version)
             imported["blocks"].append(block)
+
+        for raw_stack in assets.get("stacks") or []:
+            stack = _import_stack(raw_stack, user=user, conflict_strategy=conflict_strategy)
+            stack_slug_map[str(raw_stack.get("slug", "")).strip()] = stack.slug
+            imported["stacks"].append(stack)
 
         for raw_bundle in profiles:
             bundle = _import_bundle(
@@ -167,26 +213,40 @@ def _import_assets(
                 user=user,
                 conflict_strategy=conflict_strategy,
                 block_ref_map=block_ref_map,
+                stack_slug_map=stack_slug_map,
             )
             imported["profiles"].append(bundle)
 
-        for raw_stack in assets.get("stacks", []):
-            imported["stacks"].append(
-                _import_stack(raw_stack, user=user, conflict_strategy=conflict_strategy),
+        for raw_preset in assets.get("presets") or []:
+            imported["presets"].append(
+                _import_preset(raw_preset, user=user, conflict_strategy=conflict_strategy),
             )
 
     return imported
+
+
+# ── stacks ────────────────────────────────────────────────────────────
+
+_STACK_CONTENT_FIELDS = (
+    "has_frontend",
+    "default_port",
+    "patch_profile",
+    "frontend_component",
+    "backend_filename",
+    "backend_base_image",
+    "frontend_base_image",
+    "server_kind",
+)
 
 
 def _import_stack(raw_stack: Any, *, user: AbstractUser, conflict_strategy: str):
     """Import a user stack, re-validating against this install's allowlist.
 
     Imported stacks are always ``generated`` dockerfile mode and enter the
-    approval queue like locally created ones.
+    approval queue like locally created ones. The importer's own identical
+    stack is reused; any other slug conflict is renamed (``overwrite`` would
+    mutate an immutable stack version) or refused (``error``).
     """
-    from django.conf import settings
-
-    from backend.generation.services.versioning import content_hash
     from backend.runtime.models import Stack
     from backend.runtime.services.scaffolding import is_known_stack_slug
     from backend.runtime.services.stack_validation import validate_stack_config
@@ -201,10 +261,11 @@ def _import_stack(raw_stack: Any, *, user: AbstractUser, conflict_strategy: str)
         raise ValueError(msg)
 
     files = raw_stack.get("files") or {}
+    has_frontend = bool(raw_stack.get("has_frontend"))
     payload = {
         "name": str(raw_stack.get("name", slug)),
         "description": str(raw_stack.get("description", "")),
-        "has_frontend": bool(raw_stack.get("has_frontend")),
+        "has_frontend": has_frontend,
         "default_port": int(raw_stack.get("default_port", 8000)),
         "patch_profile": raw_stack.get("patch_profile")
         if raw_stack.get("patch_profile") in ("flask", "none")
@@ -212,7 +273,7 @@ def _import_stack(raw_stack: Any, *, user: AbstractUser, conflict_strategy: str)
         "frontend_component": str(raw_stack.get("frontend_component", "")),
         "backend_filename": str(raw_stack.get("backend_filename", "app.py")),
         "backend_base_image": str(raw_stack.get("backend_base_image", "")),
-        "frontend_base_image": str(raw_stack.get("frontend_base_image", "")),
+        "frontend_base_image": str(raw_stack.get("frontend_base_image", "")) if has_frontend else "",
         "server_kind": raw_stack.get("server_kind")
         if raw_stack.get("server_kind") in ("python", "uvicorn")
         else "python",
@@ -229,6 +290,15 @@ def _import_stack(raw_stack: Any, *, user: AbstractUser, conflict_strategy: str)
         raise ValueError(msg)
 
     if Stack.objects.filter(slug=slug).exists() or is_known_stack_slug(slug):
+        latest = Stack.objects.filter(slug=slug).order_by("-version").first()
+        if (
+            latest is not None
+            and not latest.is_builtin
+            and not latest.is_archived
+            and latest.created_by_id == user.id
+            and _stack_matches(latest, payload, files)
+        ):
+            return latest
         if conflict_strategy == "error":
             msg = f"Stack conflict for slug {slug}"
             raise ValueError(msg)
@@ -248,6 +318,13 @@ def _import_stack(raw_stack: Any, *, user: AbstractUser, conflict_strategy: str)
         dockerfile_mode=Stack.DockerfileMode.GENERATED,
         **payload,
     )
+
+
+def _stack_matches(row: Any, payload: dict[str, Any], files: dict[str, Any]) -> bool:
+    return all(getattr(row, field) == payload[field] for field in _STACK_CONTENT_FIELDS) and (row.files or {}) == files
+
+
+# ── app specs ─────────────────────────────────────────────────────────
 
 
 def _import_app_template(
@@ -270,20 +347,7 @@ def _import_app_template(
 
     if conflict_strategy == "overwrite" and existing.created_by_id == user.id:
         _assign_fields(existing, payload)
-        existing.save(
-            update_fields=[
-                "name",
-                "category",
-                "description",
-                "backend_requirements",
-                "frontend_requirements",
-                "admin_requirements",
-                "api_endpoints",
-                "data_model",
-                "admin_api_endpoints",
-                "updated_at",
-            ],
-        )
+        existing.save(update_fields=[*payload.keys() - {"slug"}, "updated_at"])
         return existing
 
     if conflict_strategy == "error":
@@ -298,6 +362,9 @@ def _import_app_template(
     )
 
 
+# ── blocks ────────────────────────────────────────────────────────────
+
+
 def _import_block(
     raw_block: Any,
     *,
@@ -307,10 +374,12 @@ def _import_block(
     payload = _validate_block_payload(raw_block)
     slug = payload["slug"]
     version = payload["version"]
+    block_hash = _block_content_hash(payload)
     existing = ContentBlock.objects.filter(slug=slug, version=version).first()
     if existing is None:
         return ContentBlock.objects.create(
             **payload,
+            content_hash=block_hash,
             is_system=False,
             created_by=user,
         )
@@ -319,18 +388,15 @@ def _import_block(
         return existing
 
     if conflict_strategy == "overwrite" and existing.created_by_id == user.id:
-        _assign_fields(existing, payload)
-        existing.save(
-            update_fields=[
-                "block_type",
-                "name",
-                "description",
-                "content",
-                "metadata",
-                "updated_at",
-            ],
+        # Profiles pin (slug, version), so the replacement is a new version;
+        # the package's own profiles are remapped onto it.
+        next_version = (ContentBlock.objects.filter(slug=slug).aggregate(top=Max("version"))["top"] or 0) + 1
+        return ContentBlock.objects.create(
+            **{**payload, "version": next_version},
+            content_hash=block_hash,
+            is_system=False,
+            created_by=user,
         )
-        return existing
 
     if conflict_strategy == "error":
         msg = f"Block conflict for {slug} v{version}"
@@ -339,9 +405,20 @@ def _import_block(
     payload["slug"] = _unique_block_slug(slug, version)
     return ContentBlock.objects.create(
         **payload,
+        content_hash=block_hash,
         is_system=False,
         created_by=user,
     )
+
+
+def _block_content_hash(payload: dict[str, Any]) -> str:
+    """The seeder's block hash (``seeding._upsert_content_block_version``)."""
+    return content_hash(
+        {"block_type": payload["block_type"], "content": payload["content"], "metadata": payload["metadata"] or {}},
+    )
+
+
+# ── profiles ──────────────────────────────────────────────────────────
 
 
 def _import_bundle(
@@ -350,16 +427,22 @@ def _import_bundle(
     user: AbstractUser,
     conflict_strategy: str,
     block_ref_map: dict[tuple[str, int], tuple[str, int]],
+    stack_slug_map: dict[str, str] | None = None,
 ) -> GenerationProfile:
     payload = _validate_bundle_payload(raw_bundle)
+    # A stack renamed on import keeps its profiles pointing at it.
+    payload["scaffolding_slug"] = (stack_slug_map or {}).get(payload["scaffolding_slug"], payload["scaffolding_slug"])
     normalized_refs = []
     for raw_ref in payload["block_refs"]:
         ref = _validate_block_ref(raw_ref)
+        if ref["version"] is None:
+            ref["version"] = _default_ref_version(ref["slug"], user=user, block_ref_map=block_ref_map)
         mapped = block_ref_map.get((ref["slug"], ref["version"]))
         if mapped:
             ref["slug"], ref["version"] = mapped
+            block = ContentBlock.objects.filter(slug=ref["slug"], version=ref["version"]).first()
         else:
-            existing = (
+            block = (
                 visible_blocks_for(user)
                 .filter(
                     slug=ref["slug"],
@@ -367,11 +450,21 @@ def _import_bundle(
                 )
                 .first()
             )
-            if not existing:
+            if not block:
                 msg = f"Bundle references missing block {ref['slug']} v{ref['version']}"
                 raise ValueError(msg)
+        if not ref["type"] and block is not None:
+            # An untyped ref would be ignored by prompt assembly.
+            ref["type"] = block.block_type
         normalized_refs.append(ref)
     payload["block_refs"] = normalized_refs
+    profile_hash = content_hash(
+        {
+            "scaffolding_slug": payload["scaffolding_slug"],
+            "block_refs": payload["block_refs"],
+            "llm_config": payload["llm_config"],
+        },
+    )
 
     # Compare against the latest version of the slug — multiple versions can
     # now exist, and an unordered .first() would pick an arbitrary one.
@@ -380,6 +473,7 @@ def _import_bundle(
         return GenerationProfile.objects.create(
             **payload,
             version=1,
+            content_hash=profile_hash,
             is_system=False,
             is_default=False,
             created_by=user,
@@ -388,19 +482,16 @@ def _import_bundle(
     if _bundle_matches(existing, payload) and _is_visible_systemish(existing, user):
         return existing
 
-    if conflict_strategy == "overwrite" and existing.created_by_id == user.id:
-        _assign_fields(existing, payload)
-        existing.save(
-            update_fields=[
-                "name",
-                "description",
-                "scaffolding_slug",
-                "block_refs",
-                "llm_config",
-                "updated_at",
-            ],
+    if conflict_strategy == "overwrite" and existing.created_by_id == user.id and not existing.is_system:
+        # Versions are immutable: "overwrite" adds version+1 of the importer's profile.
+        return GenerationProfile.objects.create(
+            **payload,
+            version=existing.version + 1,
+            content_hash=profile_hash,
+            is_system=False,
+            is_default=existing.is_default,
+            created_by=user,
         )
-        return existing
 
     if conflict_strategy == "error":
         msg = f"Bundle conflict for slug {payload['slug']}"
@@ -409,17 +500,160 @@ def _import_bundle(
     payload["slug"] = _unique_slug(GenerationProfile, payload["slug"])
     return GenerationProfile.objects.create(
         **payload,
+        content_hash=profile_hash,
         is_system=False,
         is_default=False,
         created_by=user,
     )
 
 
+def _default_ref_version(
+    slug: str,
+    *,
+    user: AbstractUser,
+    block_ref_map: dict[tuple[str, int], tuple[str, int]],
+) -> int:
+    """Version for a ref that names only a slug.
+
+    The package's own block of that slug wins, then the latest system version
+    (how starters reference seeded prompt files), then the importer's latest
+    own version.
+    """
+    package_versions = [version for (ref_slug, version) in block_ref_map if ref_slug == slug]
+    if package_versions:
+        return max(package_versions)
+    for qs in (
+        ContentBlock.objects.filter(slug=slug, is_system=True),
+        visible_blocks_for(user).filter(slug=slug),
+    ):
+        latest = qs.order_by("-version").values_list("version", flat=True).first()
+        if latest is not None:
+            return latest
+    msg = f"Bundle references missing block {slug}"
+    raise ValueError(msg)
+
+
+# ── presets ───────────────────────────────────────────────────────────
+
+
+def _import_preset(raw_preset: Any, *, user: AbstractUser, conflict_strategy: str) -> RunPreset:
+    """Import a run preset; slugs are global per kind (any owner), like ``POST /presets/``.
+
+    * identical content under the same slug that the importer can see
+      (system or own) is reused;
+    * a harness preset whose options are all defaults *is* that harness's
+      system default preset, which is reused;
+    * ``overwrite`` of the importer's own preset adds a new version (never in
+      place; a name/description difference alone updates the metadata);
+    * anything else under a taken or reserved slug is renamed, or refused
+      with ``error``.
+    """
+    from backend.generation.models import RunPreset
+    from backend.generation.services.presets import PresetError
+    from backend.generation.services.presets import config_hash
+    from backend.generation.services.presets import create_preset
+    from backend.generation.services.presets import slug_problem
+    from backend.generation.services.presets import system_default_preset
+    from backend.generation.services.presets import update_preset
+
+    payload = _validate_preset_payload(raw_preset)
+    kind, slug, config = payload["kind"], payload["slug"], payload["config"]
+    label = f"Preset {kind}/{slug}"
+
+    if kind == "harness" and not config.get("options"):
+        default = system_default_preset("harness", config["harness"])
+        if default is None:
+            msg = f"{label}: the system default preset of {config['harness']} is unavailable"
+            raise ValueError(msg)
+        return default
+
+    digest = config_hash(kind, config)
+    latest = RunPreset.objects.filter(kind=kind, slug=slug).order_by("-version").first()
+    try:
+        if latest is not None:
+            own = not latest.is_system and latest.created_by_id == user.id
+            usable = (latest.is_system or own) and not latest.is_archived
+            if usable and latest.content_hash == digest:
+                metadata_differs = (latest.name, latest.description) != (payload["name"], payload["description"])
+                if conflict_strategy == "overwrite" and own and metadata_differs:
+                    return update_preset(user, kind=kind, slug=slug, name=payload["name"], **_preset_body(payload))
+                return latest
+            if conflict_strategy == "overwrite" and own and not latest.is_archived:
+                return update_preset(user, kind=kind, slug=slug, name=payload["name"], **_preset_body(payload))
+            if conflict_strategy == "error":
+                msg = f"{label}: slug already in use"
+                raise ValueError(msg)
+            slug = _unique_preset_slug(kind, slug)
+        elif problem := slug_problem(kind, slug):
+            if conflict_strategy == "error":
+                msg = f"{label}: {problem}"
+                raise ValueError(msg)
+            slug = _unique_preset_slug(kind, slug)
+        return create_preset(user, kind=kind, slug=slug, name=payload["name"], **_preset_body(payload))
+    except PresetError as exc:
+        msg = f"{label}: {exc.detail}"
+        raise ValueError(msg) from exc
+
+
+def _preset_body(payload: dict[str, Any]) -> dict[str, Any]:
+    return {"description": payload["description"], "config": payload["config"]}
+
+
+def _validate_preset_payload(raw_preset: Any) -> dict[str, Any]:
+    from backend.generation.services.presets import KINDS
+    from backend.generation.services.presets import check_config
+
+    if not isinstance(raw_preset, dict):
+        msg = "Each preset must be an object"
+        raise ValueError(msg)
+    slug = str(raw_preset.get("slug", "")).strip()
+    kind = str(raw_preset.get("kind", "")).strip()
+    if not slug:
+        msg = "Each preset must include a slug"
+        raise ValueError(msg)
+    if kind not in KINDS:
+        msg = f"Preset {slug}: kind must be one of {', '.join(KINDS)}"
+        raise ValueError(msg)
+    normalized, errors = check_config(kind, raw_preset.get("config"))
+    if errors or normalized is None:
+        msg = f"Preset {kind}/{slug}: {'; '.join(errors)}"
+        raise ValueError(msg)
+    return {
+        "kind": kind,
+        "slug": slug,
+        "name": str(raw_preset.get("name") or slug).strip(),
+        "description": str(raw_preset.get("description") or "").strip(),
+        "config": normalized,
+    }
+
+
+def _unique_preset_slug(kind: str, base_slug: str) -> str:
+    from backend.generation.services.presets import SLUG_PATTERN
+    from backend.generation.services.presets import slug_problem
+
+    candidate = slugify(base_slug).replace("_", "-").strip("-")[:_MAX_PRESET_SLUG_BASE].strip("-")
+    if not SLUG_PATTERN.match(candidate):
+        candidate = "imported-preset"
+    if slug_problem(kind, candidate) is None:
+        return candidate
+    idx = 2
+    while slug_problem(kind, f"{candidate}-{idx}") is not None:
+        idx += 1
+    return f"{candidate}-{idx}"
+
+
+# ── payload validation ────────────────────────────────────────────────
+
+
 def _parse_package_text(package_text: str) -> dict[str, Any]:
     try:
         data = json.loads(package_text)
     except json.JSONDecodeError:
-        data = yaml.safe_load(package_text)
+        try:
+            data = yaml.safe_load(package_text)
+        except yaml.YAMLError as exc:
+            msg = f"Package is neither valid JSON nor valid YAML: {exc}"
+            raise ValueError(msg) from exc
     if not isinstance(data, dict):
         msg = "Package must be a JSON or YAML object"
         raise ValueError(msg)
@@ -435,7 +669,7 @@ def _validate_app_template_payload(raw_template: Any) -> dict[str, Any]:
     if not slug or not name:
         msg = "App template requires name and slug"
         raise ValueError(msg)
-    return {
+    payload = {
         "name": name,
         "slug": slug,
         "category": str(raw_template.get("category", "")).strip(),
@@ -447,6 +681,15 @@ def _validate_app_template_payload(raw_template: Any) -> dict[str, Any]:
         "data_model": raw_template.get("data_model") or {},
         "admin_api_endpoints": raw_template.get("admin_api_endpoints") or [],
     }
+    # v3 exports carry the difficulty; older packages leave it unset (and
+    # unmatched against, so they still reuse identical specs).
+    if "difficulty" in raw_template:
+        difficulty = str(raw_template.get("difficulty") or "").strip()
+        if difficulty not in _DIFFICULTIES:
+            msg = f"App template {slug}: difficulty must be one of basic, standard, advanced"
+            raise ValueError(msg)
+        payload["difficulty"] = difficulty
+    return payload
 
 
 def _validate_block_payload(raw_block: Any) -> dict[str, Any]:
@@ -489,21 +732,24 @@ def _validate_bundle_payload(raw_bundle: Any) -> dict[str, Any]:
     if not isinstance(block_refs, list):
         msg = f"Bundle {slug} has invalid block_refs"
         raise ValueError(msg)
-    llm_config = raw_bundle.get("llm_config") or {}
-    if not isinstance(llm_config, dict):
-        msg = f"Bundle {slug} has invalid llm_config"
-        raise ValueError(msg)
+    try:
+        llm_config = validate_llm_params(raw_bundle.get("llm_config") or {})
+    except ValueError as exc:
+        msg = f"Bundle {slug} has invalid llm_config: {exc}"
+        raise ValueError(msg) from exc
+    default_stack = settings.GENERATION_DEFAULT_STACK
     return {
         "name": name,
         "slug": slug,
         "description": str(raw_bundle.get("description", "")).strip(),
-        "scaffolding_slug": str(raw_bundle.get("scaffolding_slug", "flask-react")).strip() or "flask-react",
+        "scaffolding_slug": str(raw_bundle.get("scaffolding_slug", default_stack)).strip() or default_stack,
         "block_refs": block_refs,
         "llm_config": llm_config,
     }
 
 
 def _validate_block_ref(raw_ref: Any) -> dict[str, Any]:
+    """``{type, slug, version}``; ``version`` is None when the ref names only a slug."""
     if not isinstance(raw_ref, dict):
         msg = "Each block reference must be an object"
         raise ValueError(msg)
@@ -511,10 +757,11 @@ def _validate_block_ref(raw_ref: Any) -> dict[str, Any]:
     if not slug:
         msg = "Block reference missing slug"
         raise ValueError(msg)
+    version = raw_ref.get("version")
     return {
         "type": str(raw_ref.get("type", "")).strip() or "",
         "slug": slug,
-        "version": int(raw_ref.get("version", 1)),
+        "version": None if version is None else int(version),
     }
 
 
@@ -542,6 +789,7 @@ def _app_template_matches(existing: AppRequirementTemplate, payload: dict[str, A
         and (existing.api_endpoints or []) == payload["api_endpoints"]
         and (existing.data_model or {}) == payload["data_model"]
         and (existing.admin_api_endpoints or []) == payload["admin_api_endpoints"]
+        and ("difficulty" not in payload or existing.difficulty == payload["difficulty"])
     )
 
 

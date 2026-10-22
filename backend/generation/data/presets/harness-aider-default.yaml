@@ -1,0 +1,9 @@
+# System run preset (seeded by backend/generation/seeding.py:seed_presets).
+# Content changes create a new version; jobs keep pointing at the old one.
+kind: harness
+slug: aider-default
+name: Aider (default)
+description: Aider with the diff edit format and a 1024-token repo map for every model.
+config:
+  harness: aider
+  options: {}

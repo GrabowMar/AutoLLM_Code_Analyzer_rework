@@ -189,6 +189,9 @@ MEDIA_URL = "/media/"
 # Full run records (LLM call log, harness events, patch) land under
 # GENERATION_RUNS_ROOT/<job_id>/; job rows keep summaries plus sha256s.
 GENERATION_RUNS_ROOT = str(Path(MEDIA_ROOT) / "generation_runs")
+# Stack a generation request runs on when neither the request nor its profile
+# names one.
+GENERATION_DEFAULT_STACK = env.str("GENERATION_DEFAULT_STACK", default="flask-react")
 # Harness releases baked into the sandbox images (images/agent-*). Changing one
 # changes the image tag and every new job's run_fingerprint.
 AGENT_DEFAULT_HARNESS = env.str("AGENT_DEFAULT_HARNESS", default="opencode")

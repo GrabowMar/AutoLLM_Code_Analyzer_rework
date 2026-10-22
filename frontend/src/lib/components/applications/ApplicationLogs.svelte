@@ -8,6 +8,7 @@ import { containerTones } from '$lib/constants/colors';
 import Terminal from '@lucide/svelte/icons/terminal';
 import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 import { getContainers, getContainerLogs, type ContainerInstance } from '$lib/api/runtime';
+import { formatApiError } from '$lib/api/core';
 
 interface Props { jobId: string }
 let { jobId }: Props = $props();
@@ -27,7 +28,7 @@ async function refresh() {
 		const r = await getContainerLogs(container.id, tail);
 		logs = r.logs ?? '';
 	} catch (e) {
-		logs = `Failed to fetch logs: ${(e as Error).message}`;
+		logs = `Failed to fetch logs: ${formatApiError(e, 'request failed')}`;
 	} finally {
 		loading = false;
 	}

@@ -16,6 +16,7 @@ from backend.generation.services.packages.exporters import export_bundle_package
 from backend.generation.services.packages.exporters import export_template_package
 from backend.generation.services.packages.importers import import_bundle_package
 from backend.generation.services.packages.importers import import_template_package
+from backend.generation.services.packages.importers import import_template_package_data
 from backend.generation.services.packages.importers import parse_bundle_package_text
 from backend.generation.services.packages.importers import parse_template_package_text
 from backend.generation.services.packages.starters import build_starter_template_package
@@ -39,6 +40,7 @@ __all__ = [
     "import_bundle_package",
     "import_starter_template_package",
     "import_template_package",
+    "import_template_package_data",
     "list_starter_template_packages",
     "parse_bundle_package_text",
     "parse_template_package_text",

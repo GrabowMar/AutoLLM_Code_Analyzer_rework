@@ -115,12 +115,81 @@ export function parseAllauthAuthResponse(
   };
 }
 
-function isAbortError(error: unknown): boolean {
+/** True for an aborted fetch (timeouts, or a superseded request cancelled via AbortController). */
+export function isAbortError(error: unknown): boolean {
   if (error instanceof DOMException && error.name === "AbortError") return true;
   if (error instanceof Error && /aborted/i.test(error.message)) return true;
   return false;
 }
 
+/** Request locations Ninja/Pydantic put first in a validation error `loc`. */
+const ERROR_LOCATIONS = new Set([
+  "body",
+  "query",
+  "path",
+  "header",
+  "cookie",
+  "form",
+  "file",
+]);
+
+/** `["body", "payload", "llm_params", "temperature"]` → `"llm_params.temperature"`. */
+function validationFieldPath(loc: unknown): string {
+  if (!Array.isArray(loc)) return "";
+  const parts = loc.map((part) => String(part));
+  const location = parts[0];
+  if (location !== undefined && ERROR_LOCATIONS.has(location)) {
+    parts.shift();
+    // Ninja nests body fields under the view's argument name ("payload", "data").
+    if (location === "body" && parts.length > 0) parts.shift();
+  }
+  return parts.join(".");
+}
+
+function validationMessage(msg: unknown): string {
+  return typeof msg === "string" ? msg.replace(/^Value error, /, "") : "";
+}
+
+/** Ninja 422 `detail: [{loc, msg}]` entries as `{field, message}` pairs. */
+function validationErrors(
+  detail: unknown,
+): { field: string; message: string }[] {
+  if (!Array.isArray(detail)) return [];
+  return detail
+    .map((item) => {
+      if (typeof item === "string") return { field: "", message: item };
+      if (!item || typeof item !== "object") return { field: "", message: "" };
+      const entry = item as Record<string, unknown>;
+      return {
+        field: validationFieldPath(entry.loc),
+        message: validationMessage(entry.msg ?? entry.message),
+      };
+    })
+    .filter((entry) => entry.message.length > 0);
+}
+
+/**
+ * Per-field messages from a 422 validation error (first message per field),
+ * keyed by dotted path without the request location, e.g. `trials` or
+ * `llm_params.temperature`. Empty for every other error shape.
+ */
+export function apiFieldErrors(error: unknown): Record<string, string> {
+  if (!error || typeof error !== "object") return {};
+  const result: Record<string, string> = {};
+  for (const { field, message } of validationErrors(
+    (error as Record<string, unknown>).detail,
+  )) {
+    if (field && !(field in result)) result[field] = message;
+  }
+  return result;
+}
+
+/**
+ * Human-readable message for anything `apiFetch` (or fetch itself) throws:
+ * `{detail: str}`, Ninja 422 `{detail: [{loc, msg}]}`, `{message}`,
+ * `{detail, remediation}` (API-key preflight), allauth `{errors: [...]}`,
+ * `Error`s and strings.
+ */
 export function formatApiError(
   error: unknown,
   fallback = "Request failed.",
@@ -140,13 +209,18 @@ export function formatApiError(
 
   if (typeof detail === "string") {
     message = detail;
+  } else if (Array.isArray(detail)) {
+    message = validationErrors(detail)
+      .map(({ field, message: msg }) => (field ? `${field}: ${msg}` : msg))
+      .join("; ");
   } else if (detail && typeof detail === "object") {
     const nested = detail as Record<string, unknown>;
     message = typeof nested.detail === "string" ? nested.detail : "";
-  } else if (typeof body.message === "string") {
+  }
+  if (!message && typeof body.message === "string") {
     message = body.message;
-  } else if (Array.isArray(body.errors)) {
-    message = body.errors
+  } else if (!message && Array.isArray(body.errors)) {
+    const messages = body.errors
       .map((item) =>
         item && typeof item === "object"
           ? (item as Record<string, unknown>).message
@@ -154,8 +228,13 @@ export function formatApiError(
       )
       .filter(
         (item): item is string => typeof item === "string" && item.length > 0,
+      );
+    // Join as sentences without doubling the messages' own full stops.
+    message = messages
+      .map((item, i) =>
+        i < messages.length - 1 && !/[.!?]$/.test(item) ? `${item}.` : item,
       )
-      .join(". ");
+      .join(" ");
   }
 
   return [message || fallback, remediation].filter(Boolean).join(" ");

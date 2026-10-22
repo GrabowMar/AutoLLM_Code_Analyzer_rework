@@ -1,131 +1,222 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import { Segmented } from '$lib/components/ui/segmented';
 	import { Textarea } from '$lib/components/ui/textarea';
-	import { getAppTemplates, type AppRequirementTemplate, type LLMParams } from '$lib/api/generation';
+	import {
+		getAgentConfig,
+		type AgentConfigInfo,
+		type BudgetPresetConfig,
+		type LLMParams,
+		type RunPreset,
+		type SamplingPresetConfig,
+	} from '$lib/api/generation';
 	import { createExperiment, type ExperimentMode } from '$lib/api/experiments';
-	import { getAgentHarnesses, type AgentConfig, type AgentHarness } from '$lib/api/generation';
-	import LLMParamsEditor from '$lib/components/sample-generator/LLMParamsEditor.svelte';
+	import { apiFieldErrors, formatApiError } from '$lib/api/core';
+	import {
+		AppSpecPicker,
+		LLMParamsEditor,
+		PresetPicker,
+		StackSelect,
+		cleanLLMParams,
+	} from '$lib/components/generator';
+	import { numberInputValue } from '$lib/components/generator/llm-params';
+	import BudgetFields from '$lib/components/templates/BudgetFields.svelte';
 	import { slugify } from '$lib/components/templates/slugify';
+	import { resolvePreset } from '$lib/components/templates/presets';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
-	import LoadingState from '$lib/components/LoadingState.svelte';
-	import EmptyState from '$lib/components/EmptyState.svelte';
+	import Bot from '@lucide/svelte/icons/bot';
+	import Dices from '@lucide/svelte/icons/dices';
+	import FileCode from '@lucide/svelte/icons/file-code';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import Search from '@lucide/svelte/icons/search';
+
+	const MAX_SEED = 2 ** 31 - 1;
 
 	let name = $state('');
-	let slug = $state('');
+	let slugInput = $state('');
 	let slugTouched = $state(false);
+	const slug = $derived(slugTouched ? slugInput : slugify(name));
 	let description = $state('');
 	let hypothesis = $state('');
-	let repeats = $state(3);
-	let baseSeed = $state<string>('');
-	let llmDefaults = $state<LLMParams>({});
 	let mode = $state<ExperimentMode>('agent');
-	// '' = server default (AGENT_* settings)
-	let wallMinutes = $state<number | ''>('');
-	let maxRequests = $state<number | ''>('');
-	let maxCost = $state<number | ''>('');
-	let harness = $state('');
-	let samplingPolicy = $state<'' | 'provider_default' | 'harness_native'>('');
-	let harnesses = $state<AgentHarness[]>([]);
+	let stackSlug = $state('');
 
-	let apps = $state<AppRequirementTemplate[]>([]);
-	let appsLoading = $state(true);
+	let samplingPresetId = $state<number | null>(null);
+	let samplingPreset = $state<RunPreset | null>(null);
+	let llmDefaults = $state<LLMParams>({});
+	let llmInvalid = $state(false);
+
+	let budgetPresetId = $state<number | null>(null);
+	let budgetPreset = $state<RunPreset | null>(null);
+	let budgetOverrides = $state<BudgetPresetConfig>({});
+	let budgetInvalid = $state(false);
+
+	let repeats = $state<number | null>(3);
+	let baseSeed = $state<number | null>(null);
+	let seedError = $state('');
 	let selectedAppIds = $state<Set<number>>(new Set());
-	let appSearch = $state('');
-	let categoryFilter = $state('');
 
+	let agentConfig = $state<AgentConfigInfo | null>(null);
+	let agentConfigError = $state('');
 	let submitting = $state(false);
 	let error = $state('');
+	let fieldErrors = $state<Record<string, string>>({});
 
-	onMount(async () => {
-		getAgentHarnesses()
-			.then((list) => (harnesses = list))
-			.catch(() => {});
+	async function loadAgentConfig() {
+		agentConfigError = '';
 		try {
-			apps = await getAppTemplates();
-		} catch {
-			// list still usable without apps preloaded; user can retry via reload
-		} finally {
-			appsLoading = false;
+			agentConfig = await getAgentConfig();
+		} catch (e) {
+			agentConfigError = formatApiError(e, 'Could not load the platform defaults.');
 		}
+	}
+
+	onMount(loadAgentConfig);
+
+	// Pickers auto-select the default preset without an onchange; resolve the
+	// selected preset so the override placeholders show what they sit on.
+	$effect(() => {
+		const id = samplingPresetId;
+		if (id == null) {
+			samplingPreset = null;
+			return;
+		}
+		if (untrack(() => samplingPreset?.id) === id) return;
+		let cancelled = false;
+		resolvePreset('sampling', id).then((p) => {
+			if (!cancelled) samplingPreset = p;
+		});
+		return () => {
+			cancelled = true;
+		};
 	});
 
 	$effect(() => {
-		if (!slugTouched) slug = slugify(name);
+		const id = budgetPresetId;
+		if (id == null) {
+			budgetPreset = null;
+			return;
+		}
+		if (untrack(() => budgetPreset?.id) === id) return;
+		let cancelled = false;
+		resolvePreset('budget', id).then((p) => {
+			if (!cancelled) budgetPreset = p;
+		});
+		return () => {
+			cancelled = true;
+		};
 	});
 
-	const categories = $derived([...new Set(apps.map((a) => a.category).filter(Boolean))].sort());
+	const modeItems = [
+		{ value: 'agent', label: 'Agent', icon: Bot, badge: 'Recommended', title: 'A sandboxed coding agent builds each app' },
+		{ value: 'scaffolding', label: 'Template scaffolding', icon: FileCode, title: 'Template prompts fill a fixed skeleton' },
+	];
 
-	const filteredApps = $derived(
-		apps.filter((a) => {
-			if (categoryFilter && a.category !== categoryFilter) return false;
-			if (!appSearch) return true;
-			const q = appSearch.toLowerCase();
-			return a.name.toLowerCase().includes(q) || (a.description ?? '').toLowerCase().includes(q);
-		}),
+	// Placeholders show what the experiment-wide overrides sit on.
+	const samplingInherited = $derived.by(() => {
+		const params = ((samplingPreset?.config as SamplingPresetConfig | undefined)?.llm_params ?? {}) as LLMParams;
+		return {
+			values: params,
+			sources: Object.fromEntries(Object.keys(params).map((key) => [key, 'preset'])),
+		};
+	});
+	const budgetInherited = $derived(
+		budgetPreset ? { values: (budgetPreset.config ?? {}) as BudgetPresetConfig, source: 'preset' } : null
 	);
 
-	function toggleApp(id: number) {
-		const next = new Set(selectedAppIds);
-		next.has(id) ? next.delete(id) : next.add(id);
-		selectedAppIds = next;
+	const repeatsProblem = $derived(
+		repeats == null
+			? 'Required'
+			: !Number.isInteger(repeats) || repeats < 1 || repeats > 20
+				? 'Between 1 and 20'
+				: ''
+	);
+
+	function onSeedInput(event: Event) {
+		const el = event.currentTarget as HTMLInputElement;
+		const raw = el.value.trim();
+		if (raw === '') {
+			seedError = el.validity.badInput ? 'Incomplete number' : '';
+			if (!el.validity.badInput) baseSeed = null;
+			return;
+		}
+		const value = Number(raw);
+		if (!Number.isInteger(value) || value < 0 || value > MAX_SEED) {
+			seedError = `A whole number from 0 to ${MAX_SEED.toLocaleString()}`;
+			return;
+		}
+		seedError = '';
+		baseSeed = value;
 	}
 
-	function selectAllFiltered() {
-		selectedAppIds = new Set(filteredApps.map((a) => a.id));
+	function rollSeed() {
+		baseSeed = Math.floor(Math.random() * MAX_SEED);
+		seedError = '';
 	}
 
-	function clearApps() {
-		selectedAppIds = new Set();
-	}
+	const missing = $derived.by(() => {
+		const list: string[] = [];
+		if (!name.trim()) list.push('a name');
+		if (!slug.trim()) list.push('a slug');
+		if (!stackSlug) list.push('a stack');
+		if (selectedAppIds.size === 0) list.push('at least one app spec');
+		return list;
+	});
+	const invalid = $derived(
+		llmInvalid || (mode === 'agent' && budgetInvalid) || !!repeatsProblem || !!seedError
+	);
+	const canSubmit = $derived(!submitting && missing.length === 0 && !invalid);
 
-	function agentConfig(): AgentConfig {
-		const config: AgentConfig = {};
-		if (wallMinutes !== '') config.wall_clock_seconds = Math.round(wallMinutes * 60);
-		if (maxRequests !== '') config.max_llm_requests = maxRequests;
-		if (maxCost !== '') config.max_cost_usd = maxCost;
-		if (harness) config.harness = harness;
-		if (samplingPolicy) config.sampling_policy = samplingPolicy;
-		return config;
+	function experimentLLMDefaults(): LLMParams {
+		const params = cleanLLMParams($state.snapshot(llmDefaults) as LLMParams);
+		if (mode === 'agent') {
+			// The gateway drops these for agent runs; never store them silently.
+			delete params.stop;
+			delete params.response_format;
+		}
+		return params;
 	}
 
 	async function submit() {
-		if (!name.trim() || !slug.trim()) return;
+		if (!canSubmit) return;
 		submitting = true;
 		error = '';
+		fieldErrors = {};
 		try {
 			const experiment = await createExperiment({
-				name,
-				slug,
+				name: name.trim(),
+				slug: slug.trim(),
 				description,
 				hypothesis,
 				app_requirement_ids: [...selectedAppIds],
-				repeats,
-				base_seed: baseSeed.trim() ? Number(baseSeed) : null,
-				llm_defaults: llmDefaults,
+				repeats: repeats ?? 3,
+				base_seed: baseSeed,
 				mode,
-				agent_config: mode === 'agent' ? agentConfig() : {},
+				stack_slug: stackSlug || null,
+				sampling_preset_id: samplingPresetId,
+				budget_preset_id: mode === 'agent' ? budgetPresetId : null,
+				agent_config: mode === 'agent' ? ($state.snapshot(budgetOverrides) as BudgetPresetConfig) : {},
+				llm_defaults: experimentLLMDefaults(),
 			});
 			goto(`/experiments/${experiment.id}`);
-		} catch (err: any) {
-			error = err?.detail ?? err?.message ?? 'Failed to create experiment';
+		} catch (e) {
+			fieldErrors = apiFieldErrors(e);
+			error = formatApiError(e, 'Failed to create the experiment.');
 		} finally {
 			submitting = false;
 		}
 	}
 </script>
 
-<div class="mx-auto max-w-3xl space-y-6">
+<div class="mx-auto w-full max-w-3xl space-y-6">
 	<PageHeader
 		title="New experiment"
-		description="Pick the apps to test; conditions (model × prompt bundle) and launch happen on the next page."
+		description="A designed comparison: every condition runs on every app, several times, with the same seed per (app, repeat) cell. Conditions are added on the next page."
 		back={{ href: '/experiments', label: 'Experiments' }}
 	/>
 
@@ -138,17 +229,23 @@
 			<div class="grid gap-4 sm:grid-cols-2">
 				<div class="space-y-1.5">
 					<Label for="exp-name">Name <span class="text-destructive" aria-hidden="true">*</span></Label>
-					<Input id="exp-name" bind:value={name} required placeholder="Tone ablation on recipe apps" />
+					<Input id="exp-name" bind:value={name} required placeholder="Harness comparison on CRUD apps" />
+					{#if fieldErrors.name}<p class="text-[11px] text-danger-fg">{fieldErrors.name}</p>{/if}
 				</div>
 				<div class="space-y-1.5">
 					<Label for="exp-slug">Slug <span class="text-destructive" aria-hidden="true">*</span></Label>
 					<Input
 						id="exp-slug"
 						required
-						bind:value={slug}
-						oninput={() => (slugTouched = true)}
-						placeholder="tone-ablation"
+						value={slug}
+						oninput={(e: Event) => {
+							slugTouched = true;
+							slugInput = (e.currentTarget as HTMLInputElement).value;
+						}}
+						placeholder="harness-comparison"
+						class="font-mono"
 					/>
+					{#if fieldErrors.slug}<p class="text-[11px] text-danger-fg">{fieldErrors.slug}</p>{/if}
 				</div>
 			</div>
 			<div class="space-y-1.5">
@@ -169,85 +266,146 @@
 
 	<Card.Root>
 		<Card.Header>
-			<Card.Title>Run settings</Card.Title>
-			<Card.Description>Trials per cell, seeding and LLM defaults shared by every condition.</Card.Description>
+			<Card.Title>Method</Card.Title>
+			<Card.Description>How apps are generated, and the stack every condition runs on.</Card.Description>
 		</Card.Header>
 		<Card.Content class="space-y-4">
-			<div class="space-y-1.5">
-				<Label for="exp-mode">Generation method</Label>
-				<select id="exp-mode" bind:value={mode} class="std-select h-9 w-full px-2" aria-describedby="exp-mode-help">
-					<option value="agent">Agent: sandboxed coding agent (OpenCode) builds each app</option>
-					<option value="scaffolding">Scaffolding: template prompts fill a fixed skeleton</option>
-				</select>
-				<p id="exp-mode-help" class="text-xs text-muted-foreground">
+			<div class="space-y-2">
+				<Segmented aria-label="Generation method" bind:value={mode} items={modeItems} />
+				<p class="text-xs text-muted-foreground">
 					{#if mode === 'agent'}
-						Every condition gets the same brief, tools, system prompt and budget; a condition's profile only supplies its stack and LLM config.
+						Each condition is a model × harness preset. Every condition gets the same brief, stack, budget and sampling
+						settings, so differences come from the model and the harness.
 					{:else}
-						Prompts are rendered from each condition's profile blocks.
+						Each condition is a model × prompt profile; prompts are rendered from the profile's blocks.
 					{/if}
 				</p>
 			</div>
-			{#if mode === 'agent'}
-				<div class="grid gap-4 sm:grid-cols-2">
-					<div class="space-y-1.5">
-						<Label for="exp-harness">Default harness</Label>
-						<select id="exp-harness" bind:value={harness} class="std-select h-9 w-full px-2">
-							<option value="">Server default (OpenCode)</option>
-							{#each harnesses as h (h.name)}
-								<option value={h.name}>{h.label} {h.version}</option>
-							{/each}
-						</select>
-						<p class="text-xs text-muted-foreground">Conditions can pick their own harness for model × harness designs.</p>
-					</div>
-					<div class="space-y-1.5">
-						<Label for="exp-sampling">Sampling</Label>
-						<select id="exp-sampling" bind:value={samplingPolicy} class="std-select h-9 w-full px-2">
-							<option value="">Default (provider defaults)</option>
-							<option value="provider_default">Provider defaults: strip harness-sent sampling</option>
-							<option value="harness_native">Harness native: pass harness sampling through</option>
-						</select>
-					</div>
+			<div class="space-y-1.5">
+				<StackSelect bind:value={stackSlug} defaultSlug={agentConfig?.default_stack_slug} id="exp-stack" />
+				<p class="text-xs text-muted-foreground">
+					Experiment-wide. A condition whose profile targets another stack is rejected.
+				</p>
+				{#if fieldErrors.stack_slug}<p class="text-[11px] text-danger-fg">{fieldErrors.stack_slug}</p>{/if}
+			</div>
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title>Model settings</Card.Title>
+			<Card.Description>
+				Apply identically to every model and condition; per-model support (dropped parameters, output caps) shows in the
+				preview.
+			</Card.Description>
+		</Card.Header>
+		<Card.Content class="space-y-4">
+			<PresetPicker
+				kind="sampling"
+				bind:selectedId={samplingPresetId}
+				idPrefix="exp-sampling"
+				onchange={(p) => (samplingPreset = p)}
+			/>
+			<div class="space-y-1.5">
+				<p class="text-sm font-medium">Experiment overrides</p>
+				<LLMParamsEditor
+					bind:params={llmDefaults}
+					inherited={samplingInherited}
+					mode={mode === 'agent' ? 'agent' : 'scaffolding'}
+					idPrefix="exp-llm"
+					bind:invalid={llmInvalid}
+					hint="Blank fields keep the sampling preset's value (or the provider default). Conditions may add their own overrides as a declared ablation."
+				/>
+			</div>
+		</Card.Content>
+	</Card.Root>
+
+	{#if mode === 'agent'}
+		<Card.Root>
+			<Card.Header>
+				<Card.Title>Budget</Card.Title>
+				<Card.Description>
+					Per-run limits, the same for every condition. The request budget binds; wall clock, tokens and cost are
+					safety nets. Runs that hit a limit still count, with their termination recorded.
+				</Card.Description>
+			</Card.Header>
+			<Card.Content class="space-y-4">
+				{#if agentConfigError}
+					<ErrorAlert message={agentConfigError} onretry={loadAgentConfig} />
+				{/if}
+				<PresetPicker
+					kind="budget"
+					bind:selectedId={budgetPresetId}
+					idPrefix="exp-budget"
+					onchange={(p) => (budgetPreset = p)}
+				/>
+				<div class="space-y-1.5">
+					<p class="text-sm font-medium">Experiment overrides</p>
+					<BudgetFields
+						bind:values={budgetOverrides}
+						config={agentConfig}
+						inherited={budgetInherited}
+						idPrefix="exp-budget-overrides"
+						bind:invalid={budgetInvalid}
+					/>
 				</div>
-				<div class="grid gap-4 sm:grid-cols-3">
-					<div class="space-y-1.5">
-						<Label for="exp-wall">Wall clock per run (min)</Label>
-						<input id="exp-wall" type="number" min={1} max={240} bind:value={wallMinutes} placeholder="default 60" class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" />
-					</div>
-					<div class="space-y-1.5">
-						<Label for="exp-requests">Max LLM requests per run</Label>
-						<input id="exp-requests" type="number" min={1} max={2000} bind:value={maxRequests} placeholder="default 100" class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" />
-					</div>
-					<div class="space-y-1.5">
-						<Label for="exp-cost">Max cost per run (USD)</Label>
-						<input id="exp-cost" type="number" min={0.001} step={0.05} bind:value={maxCost} placeholder="default 5.00" class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30" />
-					</div>
-					<p class="sm:col-span-3 text-xs text-muted-foreground">The request budget binds; wall clock and cost are safety nets (a cost cap gives expensive models fewer steps). Runs that hit a limit still count as samples with their termination recorded.</p>
-				</div>
-			{/if}
+			</Card.Content>
+		</Card.Root>
+	{/if}
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title>Repeats &amp; seed</Card.Title>
+			<Card.Description>Independent trials per cell; comparisons need more than one.</Card.Description>
+		</Card.Header>
+		<Card.Content>
 			<div class="grid gap-4 sm:grid-cols-2">
 				<div class="space-y-1.5">
 					<Label for="exp-repeats">Repeats per cell</Label>
-					<input
+					<Input
 						id="exp-repeats"
 						type="number"
+						inputmode="numeric"
 						min={1}
 						max={20}
-						bind:value={repeats}
+						step={1}
+						value={numberInputValue(repeats)}
+						oninput={(e: Event) => {
+							const raw = (e.currentTarget as HTMLInputElement).value.trim();
+							repeats = raw === '' ? null : Number(raw);
+						}}
+						aria-invalid={repeatsProblem ? true : undefined}
 						aria-describedby="exp-repeats-help"
-						class="flex h-9 w-full rounded-md border border-input bg-surface-1 px-3 py-1 text-sm shadow-xs transition-all hover:border-primary/40 focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
 					/>
-					<p id="exp-repeats-help" class="text-xs text-muted-foreground">Independent trials — comparisons need n &gt; 1.</p>
+					<p id="exp-repeats-help" class="text-xs {repeatsProblem ? 'text-danger-fg' : 'text-muted-foreground'}">
+						{repeatsProblem || 'Agent runs vary between trials; 3 or more lets you report a spread.'}
+					</p>
 				</div>
 				<div class="space-y-1.5">
 					<Label for="exp-seed">Base seed (optional)</Label>
-					<Input id="exp-seed" type="number" bind:value={baseSeed} placeholder="random" aria-describedby="exp-seed-help" />
-					<p id="exp-seed-help" class="text-xs text-muted-foreground">Set for a reproducible seed matrix across launches.</p>
+					<div class="flex gap-2">
+						<Input
+							id="exp-seed"
+							type="number"
+							inputmode="numeric"
+							min={0}
+							max={MAX_SEED}
+							step={1}
+							value={numberInputValue(baseSeed)}
+							placeholder="random per run"
+							aria-invalid={seedError ? true : undefined}
+							aria-describedby="exp-seed-help"
+							class="font-mono"
+							oninput={onSeedInput}
+						/>
+						<Button variant="outline" size="sm" class="h-9 shrink-0" onclick={rollSeed} title="Pick a random base seed">
+							<Dices /> Random
+						</Button>
+					</div>
+					<p id="exp-seed-help" class="text-xs {seedError ? 'text-danger-fg' : 'text-muted-foreground'}">
+						{seedError || 'Set it for a reproducible seed matrix across launches; every condition shares the seed of an (app, repeat) cell.'}
+					</p>
 				</div>
-			</div>
-			<div class="space-y-1.5">
-				<p class="text-sm font-medium">LLM defaults</p>
-				<p class="text-xs text-muted-foreground">Applied to every condition; conditions can override per cell.</p>
-				<LLMParamsEditor bind:params={llmDefaults} idPrefix="exp-defaults" />
 			</div>
 		</Card.Content>
 	</Card.Root>
@@ -255,58 +413,10 @@
 	<Card.Root>
 		<Card.Header>
 			<Card.Title>Apps</Card.Title>
-			<Card.Description>{selectedAppIds.size} of {apps.length} selected</Card.Description>
+			<Card.Description>The app specs every condition builds; runs are graded against them.</Card.Description>
 		</Card.Header>
-		<Card.Content class="space-y-3">
-			<div class="flex flex-wrap items-center gap-2">
-				<div class="relative flex-1 min-w-[180px]">
-					<Search class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-					<Input bind:value={appSearch} placeholder="Search apps…" aria-label="Search apps" class="pl-8 h-8 text-sm" />
-				</div>
-				<select bind:value={categoryFilter} aria-label="Filter by category" class="std-select h-8 px-2">
-					<option value="">All categories</option>
-					{#each categories as cat (cat)}
-						<option value={cat}>{cat}</option>
-					{/each}
-				</select>
-				<Button variant="outline" size="sm" onclick={selectAllFiltered}>Select all</Button>
-				<Button variant="outline" size="sm" onclick={clearApps}>Clear</Button>
-			</div>
-
-			{#if appsLoading}
-				<LoadingState class="py-8" label="loading apps" />
-			{:else if filteredApps.length === 0}
-				<EmptyState
-					compact
-					title={apps.length === 0 ? 'No app templates available' : 'No matching apps'}
-					description={apps.length === 0 ? 'Reload the page to retry, or add app templates first.' : 'Try a different search or category.'}
-				/>
-			{:else}
-				<div class="grid max-h-80 gap-1.5 overflow-y-auto sm:grid-cols-2">
-					{#each filteredApps as app (app.id)}
-						<label
-							class="flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-sm transition-colors {selectedAppIds.has(
-								app.id,
-							)
-								? 'border-primary/50 bg-primary/5'
-								: 'border-transparent hover:bg-muted/40'}"
-						>
-							<input
-								type="checkbox"
-								class="mt-0.5 accent-primary"
-								checked={selectedAppIds.has(app.id)}
-								onchange={() => toggleApp(app.id)}
-							/>
-							<span>
-								<span class="font-medium">{app.name}</span>
-								{#if app.category}
-									<span class="ml-1.5 text-xs text-muted-foreground">{app.category}</span>
-								{/if}
-							</span>
-						</label>
-					{/each}
-				</div>
-			{/if}
+		<Card.Content>
+			<AppSpecPicker bind:selectedIds={selectedAppIds} label="" aria-label="App specs" idPrefix="exp-apps" />
 		</Card.Content>
 	</Card.Root>
 
@@ -314,11 +424,18 @@
 		<ErrorAlert message={error} />
 	{/if}
 
-	<div class="flex justify-end gap-2">
-		<Button variant="outline" onclick={() => goto('/experiments')}>Cancel</Button>
-		<Button onclick={submit} disabled={submitting || !name.trim() || !slug.trim()}>
-			{#if submitting}<LoaderCircle class="h-4 w-4 animate-spin" />{/if}
-			Create experiment
-		</Button>
+	<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+		{#if missing.length > 0}
+			<p class="text-xs text-muted-foreground sm:mr-auto">Still needed: {missing.join(', ')}.</p>
+		{:else if invalid}
+			<p class="text-xs text-warning-fg sm:mr-auto">Fix the highlighted fields first.</p>
+		{/if}
+		<div class="flex justify-end gap-2">
+			<Button variant="outline" href="/experiments">Cancel</Button>
+			<Button onclick={submit} disabled={!canSubmit}>
+				{#if submitting}<LoaderCircle class="h-4 w-4 animate-spin" />{/if}
+				Create experiment
+			</Button>
+		</div>
 	</div>
 </div>

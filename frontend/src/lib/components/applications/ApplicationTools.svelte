@@ -48,6 +48,8 @@ async function refresh() {
 		if (container) {
 			try { inspect = await inspectContainer(container.id); } catch { inspect = null; }
 		}
+	} catch {
+		container = null;
 	} finally {
 		loading = false;
 	}

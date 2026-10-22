@@ -5,6 +5,8 @@ import json
 import pytest
 from django.test import Client
 
+from backend.generation.models import AppRequirementTemplate
+from backend.generation.models import GenerationProfile
 from backend.generation.tests.factories import AppRequirementTemplateFactory
 from backend.generation.tests.factories import ContentBlockFactory
 from backend.generation.tests.factories import GenerationProfileFactory
@@ -197,7 +199,8 @@ def test_template_package_export_and_import(client):
     assert export_response.status_code == 200
     package = json.loads(export_response.content.decode())
     assert package["kind"] == "llm-lab-template-package"
-    assert package["template_package_schema_version"] == 2
+    assert package["template_package_schema_version"] == 3
+    assert package["assets"]["presets"] == []
     assert package["assets"]["profiles"][0]["slug"] == bundle.slug
     assert package["assets"]["blocks"][0]["slug"] == block.slug
 
@@ -538,9 +541,11 @@ def test_list_and_import_starter_package(client):
     list_response = client.get("/api/generation/packages/starters/")
 
     assert list_response.status_code == 200
-    starters = list_response.json()
-    assert starters[0]["slug"] == "fastapi-stack-starter"
-    assert starters[0]["bundle_count"] == 2
+    starters = {starter["slug"]: starter for starter in list_response.json()}
+    fastapi = starters["fastapi-stack-starter"]
+    assert (fastapi["app_spec_count"], fastapi["profile_count"], fastapi["preset_count"]) == (3, 2, 0)
+    # Pre-v3 aliases of the same counts.
+    assert (fastapi["app_template_count"], fastapi["bundle_count"]) == (3, 2)
 
     import_response = client.post(
         "/api/generation/packages/starters/fastapi-stack-starter/import/",
@@ -550,11 +555,17 @@ def test_list_and_import_starter_package(client):
 
     assert import_response.status_code == 200
     payload = import_response.json()
-    # The real seeded catalog (auto-seeded post-migrate) already has these
-    # slugs, so "rename" mangles them with a numeric suffix — check the
-    # renamed copies were created, not the exact unsuffixed names.
-    assert any(slug.startswith("analytics_campaign_monitor") for slug in payload["app_specs"])
-    assert any(slug.startswith("system-fastapi-react-standard") for slug in payload["profiles"])
+    # Everything in this starter is already seeded (post-migrate), and the
+    # starter references the same files and system blocks, so import reuses
+    # the seeded rows instead of creating renamed copies.
+    assert sorted(payload["app_specs"]) == [
+        "analytics_campaign_monitor",
+        "commerce_subscription_billing",
+        "operations_incident_center",
+    ]
+    assert sorted(payload["profiles"]) == ["system-fastapi-react-standard", "system-fastapi-vue-standard"]
+    assert not GenerationProfile.objects.filter(created_by=user).exists()
+    assert not AppRequirementTemplate.objects.filter(created_by=user).exists()
 
 
 @pytest.mark.django_db
@@ -763,3 +774,17 @@ def test_package_import_rejects_stack_with_disallowed_base_image(client):
 
     assert response.status_code == 400
     assert "backend_base_image" in response.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_create_profile_defaults_to_the_configured_stack(client, settings):
+    settings.GENERATION_DEFAULT_STACK = "fastapi-react"
+    client.force_login(UserFactory())
+    block = ContentBlockFactory()
+    payload = _bundle_payload(block, slug="default-stack-profile")
+    del payload["scaffolding_slug"]
+
+    response = client.post("/api/generation/profiles/", data=json.dumps(payload), content_type="application/json")
+
+    assert response.status_code == 200, response.content
+    assert response.json()["scaffolding_slug"] == "fastapi-react"

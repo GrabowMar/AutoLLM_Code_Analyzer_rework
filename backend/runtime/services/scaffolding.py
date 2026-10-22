@@ -58,6 +58,7 @@ def _row_config(row: Any) -> dict[str, Any]:
         "default_port": row.default_port,
         "patch_profile": row.patch_profile,
         "aliases": row.aliases or [],
+        "server_kind": row.server_kind,
     }
     if row.frontend_component:
         config["frontend_component"] = row.frontend_component

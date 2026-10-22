@@ -85,6 +85,9 @@ class LLMModelListSchema(Schema):
     supports_function_calling: bool
     supports_streaming: bool
     supports_json_mode: bool
+    # OpenRouter lists "reasoning" / "include_reasoning" among the model's
+    # supported parameters (catalog sync metadata).
+    supports_reasoning: bool = False
 
     @staticmethod
     def from_model(obj: LLMModel) -> "LLMModelListSchema":
@@ -127,7 +130,16 @@ class LLMModelListSchema(Schema):
             supports_function_calling=obj.supports_function_calling,
             supports_streaming=obj.supports_streaming,
             supports_json_mode=obj.supports_json_mode,
+            supports_reasoning=model_supports_reasoning(obj),
         )
+
+
+REASONING_PARAMETERS = frozenset({"reasoning", "include_reasoning"})
+
+
+def model_supports_reasoning(obj: LLMModel) -> bool:
+    supported = (obj.metadata or {}).get("openrouter_supported_parameters")
+    return isinstance(supported, list) and not REASONING_PARAMETERS.isdisjoint(supported)
 
 
 class SyncResultSchema(Schema):

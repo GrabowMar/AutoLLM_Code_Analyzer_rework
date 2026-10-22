@@ -3,7 +3,7 @@ profile_slug: app-content-recipe-list
 name: Recipe Book (minimal bundle)
 description: Content app with minimal tone — matches small seed/recipe scope in JSON
 base_profile_slug: system-scaffolding-standard
+# Extra system blocks by slug; the seeder pins the latest system version.
 extra_block_refs:
   - type: prompt_tone
     slug: tone-minimal
-    version: 1

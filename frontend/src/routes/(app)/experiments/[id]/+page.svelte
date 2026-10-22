@@ -1,28 +1,46 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
+	import * as Select from '$lib/components/ui/select';
 	import { toneClasses, statusTone } from '$lib/constants/colors';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
+	import { Label } from '$lib/components/ui/label';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import { Badge } from '$lib/components/ui/badge';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
-	import ModelSelector from '$lib/components/sample-generator/ModelSelector.svelte';
-	import ProfilePicker from '$lib/components/sample-generator/ProfilePicker.svelte';
-	import LLMParamsEditor from '$lib/components/sample-generator/LLMParamsEditor.svelte';
-	import { getModels } from '$lib/api/models';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import {
-		getAgentHarnesses,
+		LLMParamsEditor,
+		ModelPicker,
+		PresetPicker,
+		ProfilePicker,
+		cleanLLMParams,
+		harnessOptionChips,
+		loadAppSpecCatalog,
+		loadModelCatalog,
+		summarizeBudget,
+		summarizeLLMParams,
+	} from '$lib/components/generator';
+	import { cn } from '$lib/utils';
+	import { formatApiError } from '$lib/api/core';
+	import { formatCost } from '$lib/utils/formatters';
+	import type { LLMModelSummary } from '$lib/api/models';
+	import {
+		getAgentConfig,
 		getGenerationProfiles,
-		type AgentHarness,
+		type AgentConfigInfo,
+		type AppRequirementTemplate,
 		type GenerationProfile,
+		type HarnessPresetConfig,
 		type LLMParams,
+		type PresetKind,
+		type RunPreset,
+		type SamplingPresetConfig,
 	} from '$lib/api/generation';
-	import { Label } from '$lib/components/ui/label';
-	import type { LLMModelSummary } from '$lib/api/client';
 	import {
 		getExperiment,
 		listConditions,
@@ -33,172 +51,531 @@
 		getExperimentStatus,
 		exportExperiment,
 		archiveExperiment,
+		type CreateConditionPayload,
 		type Experiment,
+		type ExperimentBatch,
+		type ExperimentComparability,
 		type ExperimentCondition,
 		type ExperimentPreview,
 		type ExperimentStatusReport,
 	} from '$lib/api/experiments';
+	import { presetHarness, resolvePreset } from '$lib/components/templates/presets';
+	import Archive from '@lucide/svelte/icons/archive';
+	import Calculator from '@lucide/svelte/icons/calculator';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import Download from '@lucide/svelte/icons/download';
+	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Plus from '@lucide/svelte/icons/plus';
-	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import Rocket from '@lucide/svelte/icons/rocket';
-	import Calculator from '@lucide/svelte/icons/calculator';
-	import Download from '@lucide/svelte/icons/download';
-	import Archive from '@lucide/svelte/icons/archive';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
+	import Rocket from '@lucide/svelte/icons/rocket';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+
+	const POLL_MS = 10_000;
+	const LIVE_RUN_STATUSES = new Set(['pending', 'queued', 'running']);
 
 	const experimentId = $derived(page.params.id!);
 
 	let experiment = $state<Experiment | null>(null);
 	let conditions = $state<ExperimentCondition[]>([]);
 	let loading = $state(true);
+	let loadError = $state('');
 	let error = $state('');
 
-	let models = $state<LLMModelSummary[]>([]);
+	// Catalogs for labels and the condition form (failures only degrade labels).
+	let agentConfig = $state<AgentConfigInfo | null>(null);
 	let profiles = $state<GenerationProfile[]>([]);
-	let newConditionModelId = $state<number | ''>('');
-	let newConditionProfileId = $state<number | ''>('');
-	let newConditionOverrides = $state<LLMParams>({});
-	let newConditionHarness = $state('');
-	let harnesses = $state<AgentHarness[]>([]);
-	const selectedHarness = $derived(harnesses.find((h) => h.name === newConditionHarness));
-	// A tool-calling harness can only drive tool-calling models.
-	const conditionModels = $derived(
-		selectedHarness && !selectedHarness.requires_tool_calling ? models : models.filter((m) => m.supports_function_calling),
-	);
-	let showConditionOverrides = $state(false);
-	let addingCondition = $state(false);
+	let profilesLoaded = $state(false);
+	let models = $state<LLMModelSummary[]>([]);
+	let appSpecs = $state<AppRequirementTemplate[]>([]);
+	let presetById = $state<Record<number, RunPreset>>({});
+	const requestedPresets = new Set<number>();
 
-	let previewing = $state(false);
-	let previewResult = $state<ExperimentPreview | null>(null);
-	let launching = $state(false);
-	let launchError = $state('');
+	const isAgent = $derived(experiment?.mode === 'agent');
+	const isDraft = $derived(experiment?.status === 'draft');
 
-	let status = $state<ExperimentStatusReport | null>(null);
-	let statusPolling = $state(false);
+	// ── loading ────────────────────────────────────────────────────
+	let loadToken = 0;
 
-	onMount(load);
-
-	async function load() {
+	async function load(id: string) {
+		const token = ++loadToken;
 		loading = true;
+		loadError = '';
 		error = '';
+		previewResult = null;
+		launchedBatch = null;
+		status = null;
 		try {
-			const [exp, conds, modelsRes, profilesRes, harnessList] = await Promise.all([
-				getExperiment(experimentId),
-				listConditions(experimentId),
-				getModels({ per_page: 100 }),
-				getGenerationProfiles(),
-				getAgentHarnesses().catch(() => [] as AgentHarness[]),
-			]);
-			harnesses = harnessList;
+			const [exp, conds] = await Promise.all([getExperiment(id), listConditions(id)]);
+			if (token !== loadToken) return;
 			experiment = exp;
 			conditions = conds;
-			models = modelsRes.items;
-			profiles = profilesRes;
-			if (exp.status !== 'draft') {
-				await refreshStatus();
-			}
-		} catch (err: any) {
-			error = err?.detail ?? err?.message ?? 'Failed to load experiment';
+			if (exp.status !== 'draft') void refreshStatus();
+		} catch (e) {
+			if (token === loadToken) loadError = formatApiError(e, 'Failed to load the experiment.');
 		} finally {
-			loading = false;
+			if (token === loadToken) loading = false;
 		}
 	}
 
-	async function refreshStatus() {
-		statusPolling = true;
-		try {
-			status = await getExperimentStatus(experimentId);
-		} finally {
-			statusPolling = false;
+	// Reload when navigating between experiments (the component is reused).
+	$effect(() => {
+		const id = experimentId;
+		untrack(() => load(id));
+	});
+
+	onMount(() => {
+		getAgentConfig()
+			.then((c) => (agentConfig = c))
+			.catch(() => {});
+		getGenerationProfiles()
+			.then((list) => {
+				profiles = list;
+				profilesLoaded = true;
+			})
+			.catch(() => {});
+		loadModelCatalog()
+			.then((list) => (models = list))
+			.catch(() => {});
+		loadAppSpecCatalog()
+			.then((list) => (appSpecs = list))
+			.catch(() => {});
+	});
+
+	// Preset labels: experiment-wide presets plus every condition's harness preset.
+	const wantedPresets = $derived.by(() => {
+		const list: [PresetKind, number][] = [];
+		if (experiment?.sampling_preset != null) list.push(['sampling', experiment.sampling_preset]);
+		if (experiment?.budget_preset != null) list.push(['budget', experiment.budget_preset]);
+		for (const c of conditions) if (c.harness_preset != null) list.push(['harness', c.harness_preset]);
+		if (newHarnessPresetId != null) list.push(['harness', newHarnessPresetId]);
+		return list;
+	});
+
+	$effect(() => {
+		for (const [kind, id] of wantedPresets) {
+			if (requestedPresets.has(id)) continue;
+			requestedPresets.add(id);
+			resolvePreset(kind, id).then((preset) => {
+				if (preset) presetById = { ...presetById, [id]: preset };
+				else requestedPresets.delete(id);
+			});
 		}
+	});
+
+	// ── labels ─────────────────────────────────────────────────────
+	const appName = $derived(new Map(appSpecs.map((a) => [a.id, a.name])));
+	const defaultHarness = $derived(agentConfig?.harnesses.find((h) => h.is_default));
+
+	function harnessInfo(name: string) {
+		return agentConfig?.harnesses.find((h) => h.name === name);
 	}
+
+	function presetLabel(id: number | null | undefined): string {
+		if (id == null) return '';
+		const preset = presetById[id];
+		return preset ? `${preset.name} v${preset.version}` : `preset #${id}`;
+	}
+
+	function conditionHarnessLabel(cond: ExperimentCondition): string {
+		if (cond.harness_preset != null) return presetLabel(cond.harness_preset);
+		if (cond.harness) return harnessInfo(cond.harness)?.label ?? cond.harness;
+		return defaultHarness ? `${defaultHarness.label} (default)` : 'default harness';
+	}
+
+	function conditionChips(cond: ExperimentCondition): string[] {
+		const preset = cond.harness_preset != null ? presetById[cond.harness_preset] : undefined;
+		if (!preset) return [];
+		const config = preset.config as HarnessPresetConfig;
+		return harnessOptionChips(config.options, harnessInfo(config.harness)?.option_schema ?? []);
+	}
+
+	function conditionLabel(cond: ExperimentCondition): string {
+		const parts = [cond.model_name ?? `model #${cond.model}`];
+		if (isAgent) parts.push(conditionHarnessLabel(cond));
+		if (cond.bundle_slug) parts.push(`${cond.bundle_slug}@v${cond.bundle_version}`);
+		return cond.label || parts.join(' × ');
+	}
+
+	const conditionById = $derived(new Map(conditions.map((c) => [c.id, c])));
+	const samplingPreset = $derived(experiment?.sampling_preset != null ? presetById[experiment.sampling_preset] : undefined);
+
+	// ── add condition ──────────────────────────────────────────────
+	let newModelId = $state<number | null>(null);
+	let newHarnessPresetId = $state<number | null>(null);
+	let newProfileId = $state<number | null>(null);
+	let showProfile = $state(false);
+	let newOverrides = $state<LLMParams>({});
+	let overridesInvalid = $state(false);
+	let showOverrides = $state(false);
+	let addingCondition = $state(false);
+	let addError = $state('');
+
+	const newHarnessName = $derived.by(() => {
+		const preset = newHarnessPresetId != null ? presetById[newHarnessPresetId] : undefined;
+		return preset ? presetHarness(preset) : '';
+	});
+	// Unknown harness (catalog not loaded yet) counts as needing tools, the safe side.
+	const requireTools = $derived(isAgent && (harnessInfo(newHarnessName)?.requires_tool_calling ?? true));
+	const selectedModel = $derived(models.find((m) => m.id === newModelId));
+	const modelIneligible = $derived(requireTools && !!selectedModel && !selectedModel.supports_function_calling);
+	const conditionProfileId = $derived(isAgent ? (showProfile ? newProfileId : null) : newProfileId);
+
+	const duplicateCondition = $derived(
+		newModelId != null &&
+			conditions.some(
+				(c) =>
+					c.model === newModelId &&
+					(c.profile ?? null) === conditionProfileId &&
+					(isAgent ? (c.harness_preset ?? null) === newHarnessPresetId : true)
+			)
+	);
+
+	const addBlocker = $derived.by(() => {
+		if (newModelId == null) return 'Pick a model.';
+		if (isAgent && newHarnessPresetId == null) return 'Pick a harness preset.';
+		if (!isAgent && newProfileId == null) return 'Pick a specific profile: a condition pins one profile version.';
+		if (modelIneligible) return 'This harness needs a model with tool calling.';
+		if (overridesInvalid) return 'Fix the highlighted override fields.';
+		if (duplicateCondition) return 'This experiment already has that condition.';
+		return '';
+	});
+
+	// What the per-condition overrides sit on: profile → sampling preset → experiment overrides.
+	const overridesInherited = $derived.by(() => {
+		const values: Record<string, unknown> = {};
+		const sources: Record<string, string> = {};
+		const layer = (params: LLMParams | undefined, source: string) => {
+			for (const [key, value] of Object.entries(params ?? {})) {
+				values[key] = value;
+				sources[key] = source;
+			}
+		};
+		const profile = profiles.find((p) => p.id === conditionProfileId);
+		layer(profile?.llm_config, 'profile');
+		layer((samplingPreset?.config as SamplingPresetConfig | undefined)?.llm_params, 'preset');
+		layer(experiment?.llm_defaults, 'llm_defaults');
+		return { values: values as LLMParams, sources };
+	});
+
+	const agentProfileItems = $derived(
+		profiles.map((p) => {
+			const otherStack = !!experiment?.stack_slug && p.scaffolding_slug !== experiment.stack_slug;
+			return {
+				value: String(p.id),
+				label: `${p.name} v${p.version}`,
+				description: otherStack
+					? `${p.scaffolding_slug} — not this experiment's stack`
+					: `${p.scaffolding_slug} · ${summarizeLLMParams(p.llm_config) || 'no LLM defaults'}`,
+				disabled: otherStack,
+			};
+		})
+	);
 
 	async function addCondition() {
-		if (!newConditionModelId || !newConditionProfileId) return;
+		if (addBlocker || !experiment || newModelId == null) return;
 		addingCondition = true;
-		error = '';
+		addError = '';
+		const overrides = cleanLLMParams($state.snapshot(newOverrides) as LLMParams);
+		if (isAgent) {
+			delete overrides.stop;
+			delete overrides.response_format;
+		}
+		const payload: CreateConditionPayload = { model_id: newModelId, param_overrides: overrides };
+		if (isAgent) payload.harness_preset_id = newHarnessPresetId;
+		if (conditionProfileId != null) payload.profile_id = conditionProfileId;
 		try {
-			const cond = await createCondition(experimentId, {
-				model_id: newConditionModelId as number,
-				profile_id: newConditionProfileId as number,
-				harness: experiment?.mode === 'agent' ? newConditionHarness : '',
-				param_overrides: newConditionOverrides,
-			});
+			const cond = await createCondition(experimentId, payload);
 			conditions = [...conditions, cond];
-			newConditionModelId = '';
-			newConditionProfileId = '';
-			newConditionOverrides = {};
-			newConditionHarness = '';
-			showConditionOverrides = false;
+			// Keep the harness preset and profile: the next condition usually varies the model.
+			newModelId = null;
+			newOverrides = {};
+			showOverrides = false;
 			previewResult = null;
-		} catch (err: any) {
-			error = err?.detail ?? err?.message ?? 'Failed to add condition';
+		} catch (e) {
+			addError = formatApiError(e, 'Failed to add the condition.');
 		} finally {
 			addingCondition = false;
 		}
 	}
 
-	async function removeCondition(id: number) {
+	async function removeCondition(cond: ExperimentCondition) {
+		error = '';
 		try {
-			await deleteCondition(experimentId, id);
-			conditions = conditions.filter((c) => c.id !== id);
+			await deleteCondition(experimentId, cond.id);
+			conditions = conditions.filter((c) => c.id !== cond.id);
 			previewResult = null;
-		} catch (err: any) {
-			error = err?.detail ?? err?.message ?? 'Failed to remove condition';
+		} catch (e) {
+			error = formatApiError(e, 'Failed to remove the condition.');
 		}
 	}
 
-	async function runPreview() {
+	// ── preview & launch ───────────────────────────────────────────
+	let previewing = $state(false);
+	let previewResult = $state<ExperimentPreview | null>(null);
+	let launching = $state(false);
+	let launchError = $state('');
+	let launchConfirmOpen = $state(false);
+	let launchedBatch = $state<ExperimentBatch | null>(null);
+
+	async function runPreview(): Promise<boolean> {
 		previewing = true;
 		error = '';
 		try {
 			previewResult = await previewExperiment(experimentId);
-		} catch (err: any) {
-			error = err?.detail ?? err?.message ?? 'Failed to preview experiment';
+			return true;
+		} catch (e) {
+			error = formatApiError(e, 'Failed to preview the experiment.');
+			return false;
 		} finally {
 			previewing = false;
 		}
+	}
+
+	async function askLaunch() {
+		launchError = '';
+		if (!previewResult && !(await runPreview())) return;
+		launchConfirmOpen = true;
 	}
 
 	async function doLaunch() {
 		launching = true;
 		launchError = '';
 		try {
-			await launchExperiment(experimentId);
+			launchedBatch = await launchExperiment(experimentId);
 			experiment = await getExperiment(experimentId);
 			await refreshStatus();
-		} catch (err: any) {
-			const detail = err?.detail ?? err?.message ?? 'Failed to launch experiment';
-			const remediation = err?.remediation ? ` ${err.remediation}` : '';
-			launchError = detail + remediation;
+		} catch (e) {
+			launchError = formatApiError(e, 'Failed to launch the experiment.');
 		} finally {
 			launching = false;
+			launchConfirmOpen = false;
 		}
 	}
+
+	// ── archive / export ───────────────────────────────────────────
+	let archiveConfirmOpen = $state(false);
+	let archiving = $state(false);
 
 	async function doArchive() {
+		archiving = true;
+		error = '';
 		try {
 			experiment = await archiveExperiment(experimentId);
-		} catch (err: any) {
-			error = err?.detail ?? err?.message ?? 'Failed to archive experiment';
+		} catch (e) {
+			error = formatApiError(e, 'Failed to archive the experiment.');
+		} finally {
+			archiving = false;
+			archiveConfirmOpen = false;
 		}
 	}
 
+	let exporting = $state(false);
+
 	async function doExport() {
-		const data = await exportExperiment(experimentId);
-		const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = `experiment-${experiment?.slug ?? experimentId}.json`;
-		a.click();
-		URL.revokeObjectURL(url);
+		exporting = true;
+		error = '';
+		try {
+			const data = await exportExperiment(experimentId);
+			const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `experiment-${experiment?.slug ?? experimentId}.json`;
+			a.click();
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			error = formatApiError(e, 'Export failed.');
+		} finally {
+			exporting = false;
+		}
 	}
+
+	// ── progress ───────────────────────────────────────────────────
+	let status = $state<ExperimentStatusReport | null>(null);
+	let statusLoading = $state(false);
+	let statusError = $state('');
+
+	let statusInFlight = false;
+
+	/** `silent` (polling) keeps the button and grid as they are while it loads. */
+	async function refreshStatus(silent = false) {
+		if (statusInFlight) return;
+		const id = experimentId;
+		statusInFlight = true;
+		if (!silent) statusLoading = true;
+		try {
+			const next = await getExperimentStatus(id);
+			if (id !== experimentId) return;
+			status = next;
+			statusError = '';
+		} catch (e) {
+			// A failed refresh keeps the last grid on screen.
+			statusError = formatApiError(e, 'Could not refresh the progress.');
+		} finally {
+			statusInFlight = false;
+			statusLoading = false;
+		}
+	}
+
+	const hasLiveRuns = $derived(
+		!!status && status.grid.some((cell) => cell.runs.some((run) => LIVE_RUN_STATUSES.has(run.status)))
+	);
+
+	$effect(() => {
+		if (!hasLiveRuns) return;
+		const timer = setInterval(() => {
+			if (document.visibilityState === 'visible') void refreshStatus(true);
+		}, POLL_MS);
+		return () => clearInterval(timer);
+	});
+
+	const progressGroups = $derived.by(() => {
+		if (!status) return [];
+		const byCondition = new Map<number, ExperimentStatusReport['grid']>();
+		for (const cell of status.grid) {
+			const list = byCondition.get(cell.condition_id) ?? [];
+			list.push(cell);
+			byCondition.set(cell.condition_id, list);
+		}
+		const ordered = [
+			...conditions.map((c) => c.id).filter((id) => byCondition.has(id)),
+			...[...byCondition.keys()].filter((id) => !conditionById.has(id)),
+		];
+		return ordered.map((id) => ({
+			id,
+			label: conditionById.has(id) ? conditionLabel(conditionById.get(id)!) : `Condition #${id}`,
+			cells: [...(byCondition.get(id) ?? [])].sort((a, b) =>
+				(appName.get(a.app_id) ?? '').localeCompare(appName.get(b.app_id) ?? '')
+			),
+		}));
+	});
+
+	// ── comparability ──────────────────────────────────────────────
+	type CompRow = ExperimentComparability['conditions'][number] & {
+		output_cap?: number | null;
+		harness_options?: Record<string, unknown> | null;
+		harness_preset?: { id: number; slug: string; version: number; name?: string } | null;
+		stack_slug?: string | null;
+		stack?: string | null;
+		profile?: string | null;
+		param_overrides?: Record<string, unknown> | null;
+	};
+
+	interface CompColumn {
+		id: string;
+		label: string;
+		keys: string[];
+		cell: (row: CompRow) => string;
+	}
+
+	function formatParams(params: Record<string, unknown> | null | undefined): string {
+		const entries = Object.entries(params ?? {});
+		return entries.length ? entries.map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' ') : '—';
+	}
+
+	const compRows = $derived((previewResult?.comparability?.conditions ?? []) as CompRow[]);
+	const differsOn = $derived(new Set(previewResult?.comparability?.differs_on ?? []));
+	const compColumns = $derived.by((): CompColumn[] => {
+		const rows = compRows;
+		const has = (key: keyof CompRow) => rows.some((r) => r[key] !== undefined && r[key] !== null);
+		const columns: CompColumn[] = [
+			{
+				id: 'harness',
+				label: 'Harness',
+				keys: ['harness', 'harness_version', 'harness_options'],
+				cell: (r) => {
+					const options = Object.keys(r.harness_options ?? {}).length ? ` ${formatParams(r.harness_options)}` : '';
+					return `${r.harness}@${r.harness_version}${options}`;
+				},
+			},
+			{ id: 'sampling', label: 'Sampling', keys: ['sampling_policy'], cell: (r) => r.sampling_policy.replace(/_/g, ' ') },
+			{ id: 'forced', label: 'Forced params', keys: ['forced_params'], cell: (r) => formatParams(r.forced_params) },
+		];
+		if (has('output_cap')) {
+			columns.push({
+				id: 'cap',
+				label: 'Output cap',
+				keys: ['output_cap'],
+				cell: (r) => (r.output_cap != null ? r.output_cap.toLocaleString() : '—'),
+			});
+		}
+		if (has('stack_slug') || has('stack')) {
+			columns.push({ id: 'stack', label: 'Stack', keys: ['stack', 'stack_slug'], cell: (r) => r.stack_slug ?? r.stack ?? '—' });
+		}
+		if (has('profile')) {
+			columns.push({ id: 'profile', label: 'Profile', keys: ['profile'], cell: (r) => r.profile ?? '—' });
+		}
+		if (rows.some((r) => Object.keys(r.param_overrides ?? {}).length > 0)) {
+			columns.push({ id: 'overrides', label: 'Overrides', keys: ['param_overrides'], cell: (r) => formatParams(r.param_overrides) });
+		}
+		columns.push({
+			id: 'seed',
+			label: 'Seed',
+			keys: ['seed_forwarded'],
+			cell: (r) => (r.seed_forwarded ? 'forwarded' : 'not supported'),
+		});
+		return columns;
+	});
+
+	function columnDiffers(column: CompColumn): boolean {
+		return column.keys.some((k) => differsOn.has(k));
+	}
+
+	function compRowLabel(row: CompRow): string {
+		const cond = conditionById.get(row.condition_id);
+		const preset = row.harness_preset?.name ?? (cond?.harness_preset != null ? presetLabel(cond.harness_preset) : '');
+		return preset ? `${row.model} × ${preset}` : row.model;
+	}
+
+	const designItems = $derived.by(() => {
+		if (!experiment) return [];
+		const items: { label: string; value: string; mono?: boolean }[] = [
+			{ label: 'Method', value: isAgent ? 'Agent' : 'Template scaffolding' },
+			{ label: 'Stack', value: experiment.stack_slug || 'each condition profile’s stack', mono: !!experiment.stack_slug },
+			{
+				label: 'Apps',
+				value: experiment.app_requirement_ids.length
+					? experiment.app_requirement_ids.map((id) => appName.get(id) ?? `#${id}`).join(', ')
+					: 'none',
+			},
+			{ label: 'Repeats', value: `${experiment.repeats}× per cell` },
+			{
+				label: 'Seed',
+				value: experiment.base_seed != null ? String(experiment.base_seed) : 'random per run',
+				mono: experiment.base_seed != null,
+			},
+			{
+				label: 'Sampling preset',
+				value: experiment.sampling_preset != null ? presetLabel(experiment.sampling_preset) : 'Provider defaults (platform default)',
+			},
+			{
+				label: 'Experiment overrides',
+				value: summarizeLLMParams(experiment.llm_defaults) || 'none',
+				mono: !!summarizeLLMParams(experiment.llm_defaults),
+			},
+		];
+		if (isAgent) {
+			items.push(
+				{
+					label: 'Budget preset',
+					value: experiment.budget_preset != null ? presetLabel(experiment.budget_preset) : 'Platform defaults',
+				},
+				{ label: 'Budget overrides', value: summarizeBudget(experiment.agent_config) || 'none' }
+			);
+			// Experiments from before presets may carry these experiment-wide.
+			const legacy = [
+				experiment.agent_config?.harness ? `harness ${experiment.agent_config.harness}` : '',
+				experiment.agent_config?.sampling_policy ? `sampling ${experiment.agent_config.sampling_policy.replace(/_/g, ' ')}` : '',
+			].filter(Boolean);
+			if (legacy.length) items.push({ label: 'Legacy settings', value: legacy.join(' · ') });
+		}
+		return items;
+	});
 </script>
 
-<div class="mx-auto max-w-4xl space-y-6">
+<div class="mx-auto w-full max-w-5xl space-y-6">
 	<PageHeader
 		title={experiment?.name ?? 'Experiment'}
 		description={experiment?.description || undefined}
@@ -207,48 +584,32 @@
 		{#snippet meta()}
 			{#if experiment}
 				<StatusBadge status={experiment.status} />
-				<Badge variant="outline">{experiment.mode === 'agent' ? 'Agent (OpenCode)' : 'Scaffolding'}</Badge>
+				<Badge variant="outline">{isAgent ? 'Agent' : 'Template scaffolding'}</Badge>
 			{/if}
 		{/snippet}
 		{#snippet actions()}
 			{#if experiment}
-				<Button variant="outline" size="sm" onclick={doExport}>
-					<Download class="h-3.5 w-3.5" />
+				<Button variant="outline" size="sm" onclick={doExport} disabled={exporting}>
+					{#if exporting}<LoaderCircle class="animate-spin" />{:else}<Download />{/if}
 					Export
 				</Button>
 				{#if experiment.status !== 'archived'}
-					<Button variant="outline" size="sm" onclick={doArchive}>
-						<Archive class="h-3.5 w-3.5" />
+					<Button variant="outline" size="sm" onclick={() => (archiveConfirmOpen = true)}>
+						<Archive />
 						Archive
 					</Button>
 				{/if}
 			{/if}
 		{/snippet}
-		{#if experiment}
-			{#if experiment.hypothesis}
-				<p class="text-sm italic text-muted-foreground">"{experiment.hypothesis}"</p>
-			{/if}
-			<div class="flex flex-wrap gap-x-6 gap-y-1 pt-1 text-xs text-muted-foreground">
-				<span>{experiment.app_requirement_ids.length} apps</span>
-				<span>{experiment.repeats}× repeats per cell</span>
-				{#if Object.keys(experiment.llm_defaults ?? {}).length > 0}
-					<span class="font-mono">{Object.entries(experiment.llm_defaults).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ')}</span>
-				{:else}
-					<span>default sampling</span>
-				{/if}
-				{#if experiment.base_seed !== null}
-					<span>base seed {experiment.base_seed}</span>
-				{:else}
-					<span>random seed per run</span>
-				{/if}
-			</div>
+		{#if experiment?.hypothesis}
+			<p class="text-sm italic text-muted-foreground">“{experiment.hypothesis}”</p>
 		{/if}
 	</PageHeader>
 
-	{#if loading}
+	{#if loading && !experiment}
 		<LoadingState label="loading experiment" />
-	{:else if error && !experiment}
-		<ErrorAlert message={error} onretry={load} />
+	{:else if loadError}
+		<ErrorAlert message={loadError} onretry={() => load(experimentId)} />
 	{:else if experiment}
 		{#if error}
 			<ErrorAlert message={error} />
@@ -256,145 +617,246 @@
 
 		<Card.Root>
 			<Card.Header>
-				<Card.Title>Conditions</Card.Title>
+				<Card.Title>Design</Card.Title>
+				<Card.Description>Shared by every condition; a condition only varies what its row below says.</Card.Description>
+			</Card.Header>
+			<Card.Content>
+				<dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+					{#each designItems as item (item.label)}
+						<div class="min-w-0">
+							<dt class="section-label">{item.label}</dt>
+							<dd class={cn('break-words', item.mono && 'font-mono text-xs')}>{item.value}</dd>
+						</div>
+					{/each}
+				</dl>
+			</Card.Content>
+		</Card.Root>
+
+		<Card.Root>
+			<Card.Header>
+				<Card.Title>Conditions <span class="font-mono text-sm font-normal text-muted-foreground">({conditions.length})</span></Card.Title>
 				<Card.Description>
-					{#if experiment.mode === 'agent'}
-						Each condition is a model × harness pair (the profile supplies only the stack and LLM config); every app runs under every condition with the same brief, budget and seed per cell.
+					{#if isAgent}
+						Each condition is a model × harness preset. Every app runs under every condition with the same brief, stack,
+						budget, sampling settings and seed per (app, repeat) cell.
 					{:else}
-						Each condition is a model × profile pair; every app runs under every condition.
+						Each condition is a model × prompt profile; every app runs under every condition.
 					{/if}
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="space-y-3">
 				{#if conditions.length > 0}
-					<div class="space-y-1.5">
+					<ul class="space-y-1.5">
 						{#each conditions as cond (cond.id)}
-							<div class="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-								<span>
-									<span class="font-medium">{cond.model_name ?? `model #${cond.model}`}</span>
-									<span class="text-muted-foreground"> × </span>
-									<span class="font-mono text-xs">{cond.bundle_slug}@{cond.bundle_version}</span>
-									{#if experiment.mode === 'agent'}
-										<span class="text-muted-foreground"> × </span>
-										<Badge variant="outline" class="font-mono">{cond.harness || 'default harness'}</Badge>
+							{@const chips = conditionChips(cond)}
+							{@const overrides = summarizeLLMParams(cond.param_overrides)}
+							<li class="flex flex-col gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center">
+								<div class="min-w-0 flex-1 space-y-1">
+									<div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+										<span class="font-medium">{cond.model_name ?? `model #${cond.model}`}</span>
+										{#if isAgent}
+											<span class="text-muted-foreground" aria-hidden="true">×</span>
+											<Badge variant="outline">{conditionHarnessLabel(cond)}</Badge>
+										{/if}
+										{#if cond.bundle_slug}
+											<span class="text-muted-foreground" aria-hidden="true">×</span>
+											<span class="font-mono text-xs">{cond.bundle_slug}@v{cond.bundle_version}</span>
+										{/if}
+									</div>
+									{#if chips.length > 0}
+										<div class="flex flex-wrap gap-1">
+											{#each chips as chip (chip)}
+												<span class="rounded-full border border-border px-1.5 font-mono text-[11px] text-muted-foreground">{chip}</span>
+											{/each}
+										</div>
 									{/if}
-								</span>
-								{#if experiment.status === 'draft'}
+									{#if overrides}
+										<p class="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+											<Badge variant="outline" class="border-warning/30 bg-warning/10 text-warning-fg">ablation</Badge>
+											<span class="font-mono">{overrides}</span>
+										</p>
+									{/if}
+								</div>
+								{#if isDraft}
 									<Button
 										variant="ghost"
 										size="icon"
-										class="h-7 w-7 text-muted-foreground hover:text-destructive"
-										onclick={() => removeCondition(cond.id)}
-										aria-label="Remove condition {cond.model_name ?? `model #${cond.model}`} × {cond.bundle_slug}"
+										class="h-7 w-7 self-end text-muted-foreground hover:text-destructive sm:self-center"
+										onclick={() => removeCondition(cond)}
+										aria-label="Remove condition {conditionLabel(cond)}"
 									>
 										<Trash2 class="h-3.5 w-3.5" />
 									</Button>
 								{/if}
-							</div>
+							</li>
 						{/each}
-					</div>
+					</ul>
 				{:else}
 					<EmptyState
 						compact
 						icon={GitCompareArrows}
 						title="No conditions yet"
-						description={experiment.status === 'draft' ? 'Add at least one model × profile pair below.' : undefined}
+						description={isDraft
+							? isAgent
+								? 'Add at least one model × harness preset below.'
+								: 'Add at least one model × profile below.'
+							: undefined}
 					/>
 				{/if}
 
-				{#if experiment.status === 'draft'}
-					<div class="space-y-3 rounded-md border bg-muted/30 p-3">
+				{#if isDraft}
+					<div class="space-y-4 rounded-md border bg-muted/30 p-3">
 						<p class="section-label">Add condition</p>
-						{#if experiment.mode === 'agent'}
-							<div class="space-y-1">
-								<Label class="text-xs" for="cond-harness">Harness</Label>
-								<select id="cond-harness" bind:value={newConditionHarness} class="std-select h-9 w-full px-2">
-									<option value="">Experiment default</option>
-									{#each harnesses as h (h.name)}
-										<option value={h.name}>{h.label} {h.version}{h.requires_tool_calling ? '' : ' (no tool calling needed)'}</option>
-									{/each}
-								</select>
+						<div class="grid gap-4 md:grid-cols-2">
+							<div class="min-w-0 space-y-3">
+								{#if isAgent}
+									<PresetPicker
+										kind="harness"
+										bind:selectedId={newHarnessPresetId}
+										idPrefix="cond-harness"
+										label="Harness preset"
+									/>
+									{#if newHarnessName && harnessInfo(newHarnessName) && !harnessInfo(newHarnessName)?.requires_tool_calling}
+										<p class="text-[11px] text-muted-foreground">This harness also drives models without tool calling.</p>
+									{/if}
+									<div>
+										<button
+											type="button"
+											class="flex cursor-pointer items-center gap-1 rounded text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+											aria-expanded={showProfile}
+											aria-controls="cond-profile-panel"
+											onclick={() => (showProfile = !showProfile)}
+										>
+											<ChevronRight class={cn('size-3.5 transition-transform duration-150', showProfile && 'rotate-90')} aria-hidden="true" />
+											Profile LLM defaults (optional)
+											{#if showProfile && newProfileId != null}<span class="text-primary">(1 set)</span>{/if}
+										</button>
+										{#if showProfile}
+											<div id="cond-profile-panel" class="mt-2 space-y-1.5">
+												<Label class="text-xs" for="cond-profile">Profile</Label>
+												<Select.Simple
+													id="cond-profile"
+													size="sm"
+													value={newProfileId != null ? String(newProfileId) : ''}
+													items={agentProfileItems}
+													placeholder="No profile"
+													clearLabel="No profile"
+													onValueChange={(v) => (newProfileId = v ? Number(v) : null)}
+												/>
+												<p class="text-[11px] text-muted-foreground">
+													Agent runs use only the profile's LLM defaults (below the sampling preset), not its prompts.
+												</p>
+											</div>
+										{/if}
+									</div>
+								{:else}
+									<ProfilePicker
+										bind:selectedId={newProfileId}
+										profiles={profilesLoaded ? profiles : undefined}
+										appIds={experiment.app_requirement_ids}
+										stackSlug={experiment.stack_slug ?? ''}
+										idPrefix="cond-profile"
+									/>
+								{/if}
 							</div>
-						{/if}
-						<div class="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-							<div class="space-y-1">
-								<span class="text-xs font-medium">Model</span>
-								<ModelSelector
-									models={experiment.mode === 'agent' ? conditionModels : models}
+							<div class="min-w-0">
+								<ModelPicker
 									mode="single"
-									bind:selectedId={newConditionModelId}
-									maxHeight="max-h-48"
+									bind:selectedId={newModelId}
+									{requireTools}
+									maxHeight="max-h-64"
+									label="Model"
+									idPrefix="cond-model"
 								/>
 							</div>
-							<div class="space-y-1">
-								<span class="text-xs font-medium">Profile</span>
-								<ProfilePicker {profiles} bind:selectedId={newConditionProfileId} />
-							</div>
-							<div class="flex items-end">
-								<Button
-									size="sm"
-									disabled={!newConditionModelId || !newConditionProfileId || addingCondition}
-									onclick={addCondition}
-								>
-									<Plus class="h-3.5 w-3.5" />
-									Add
-								</Button>
-							</div>
 						</div>
-						<button
-							type="button"
-							class="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-							onclick={() => (showConditionOverrides = !showConditionOverrides)}
-							aria-expanded={showConditionOverrides}
-						>
-							{showConditionOverrides ? 'Hide' : 'Show'} per-condition param overrides
-							{#if Object.keys(newConditionOverrides).length > 0}
-								<span class="text-primary">({Object.keys(newConditionOverrides).length} set)</span>
+
+						<div>
+							<button
+								type="button"
+								class="flex cursor-pointer items-center gap-1 rounded text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+								aria-expanded={showOverrides}
+								aria-controls="cond-overrides-panel"
+								onclick={() => (showOverrides = !showOverrides)}
+							>
+								<ChevronRight class={cn('size-3.5 transition-transform duration-150', showOverrides && 'rotate-90')} aria-hidden="true" />
+								Per-condition overrides (ablation)
+								{#if Object.keys(cleanLLMParams(newOverrides)).length > 0}
+									<span class="text-primary">({Object.keys(cleanLLMParams(newOverrides)).length} set)</span>
+								{/if}
+							</button>
+							{#if showOverrides}
+								<div id="cond-overrides-panel" class="mt-2 space-y-2">
+									<p class="flex items-start gap-1.5 text-[11px] text-warning-fg">
+										<TriangleAlert class="mt-px size-3.5 shrink-0" aria-hidden="true" />
+										Overrides make this condition differ from the others on purpose; the comparability check lists them.
+									</p>
+									<LLMParamsEditor
+										bind:params={newOverrides}
+										inherited={overridesInherited}
+										mode={isAgent ? 'agent' : 'scaffolding'}
+										idPrefix="cond-overrides"
+										bind:invalid={overridesInvalid}
+										hint=""
+									/>
+								</div>
 							{/if}
-						</button>
-						{#if showConditionOverrides}
-							<LLMParamsEditor
-								bind:params={newConditionOverrides}
-								inherited={experiment.llm_defaults ?? {}}
-								idPrefix="cond-overrides"
-							/>
+						</div>
+
+						{#if addError}
+							<ErrorAlert message={addError} />
 						{/if}
+						<div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+							{#if addBlocker && (newModelId != null || duplicateCondition)}
+								<p class="text-xs text-muted-foreground sm:mr-auto">{addBlocker}</p>
+							{/if}
+							<Button size="sm" class="self-end" disabled={!!addBlocker || addingCondition} onclick={addCondition}>
+								{#if addingCondition}<LoaderCircle class="animate-spin" />{:else}<Plus />{/if}
+								Add condition
+							</Button>
+						</div>
 					</div>
 				{/if}
 			</Card.Content>
 		</Card.Root>
 
-		{#if experiment.status === 'draft'}
+		{#if isDraft}
 			<Card.Root>
 				<Card.Header>
 					<Card.Title>Preview &amp; launch</Card.Title>
-					<Card.Description>Preview the job count and estimated cost before launching the full matrix.</Card.Description>
+					<Card.Description>Check the run count, the cost bound and what each condition will actually run with.</Card.Description>
 				</Card.Header>
 				<Card.Content class="space-y-3">
-					<div class="flex items-center gap-2">
-						<Button variant="outline" size="sm" onclick={runPreview} disabled={previewing}>
-							{#if previewing}<LoaderCircle class="h-3.5 w-3.5 animate-spin" />{:else}<Calculator class="h-3.5 w-3.5" />{/if}
+					<div class="flex flex-wrap items-center gap-2">
+						<Button variant="outline" size="sm" onclick={runPreview} disabled={previewing || conditions.length === 0}>
+							{#if previewing}<LoaderCircle class="animate-spin" />{:else}<Calculator />{/if}
 							Preview
 						</Button>
 						<Button
 							size="sm"
-							onclick={doLaunch}
-							disabled={launching || conditions.length === 0 || experiment.app_requirement_ids.length === 0}
+							onclick={askLaunch}
+							disabled={launching || previewing || conditions.length === 0 || experiment.app_requirement_ids.length === 0}
 						>
-							{#if launching}<LoaderCircle class="h-3.5 w-3.5 animate-spin" />{:else}<Rocket class="h-3.5 w-3.5" />{/if}
+							{#if launching}<LoaderCircle class="animate-spin" />{:else}<Rocket />{/if}
 							Launch
 						</Button>
+						{#if conditions.length === 0}
+							<span class="text-xs text-muted-foreground">Add a condition first.</span>
+						{:else if experiment.app_requirement_ids.length === 0}
+							<span class="text-xs text-muted-foreground">This experiment has no apps.</span>
+						{/if}
 					</div>
 
 					{#if previewResult}
 						<div class="rounded-md border bg-muted/30 p-3 text-sm tabular-nums">
 							<div class="flex flex-wrap gap-x-6 gap-y-1">
-								<span><span class="font-medium">{previewResult.total_jobs}</span> jobs</span>
+								<span><span class="font-medium">{previewResult.total_jobs}</span> runs</span>
 								<span><span class="font-medium">{previewResult.conditions}</span> conditions</span>
 								<span><span class="font-medium">{previewResult.apps}</span> apps</span>
+								<span><span class="font-medium">{previewResult.repeats}</span>× repeats</span>
 								<span>
-									{previewResult.cost_estimate_kind === 'budget_upper_bound' ? 'cost cap' : 'est. cost'}
-									<span class="font-medium">${previewResult.estimated_cost.toFixed(4)}</span>
+									{previewResult.cost_estimate_kind === 'budget_upper_bound' ? 'cost cap (upper bound)' : 'est. cost'}
+									<span class="font-medium">{formatCost(previewResult.estimated_cost)}</span>
 								</span>
 							</div>
 						</div>
@@ -408,28 +870,32 @@
 									</div>
 								{/if}
 								{#if comp.differs_on.length}
-									<p class="text-xs text-muted-foreground">Conditions differ on: <span class="font-mono">{comp.differs_on.join(', ')}</span></p>
+									<p class="text-xs text-muted-foreground">
+										Conditions differ on: <span class="font-mono text-foreground">{comp.differs_on.join(', ')}</span>
+									</p>
+								{:else}
+									<p class="text-xs text-muted-foreground">Conditions differ only in model and harness preset.</p>
 								{/if}
 								<div class="overflow-x-auto rounded-md border">
-									<table class="w-full text-xs">
+									<table class="w-full min-w-[40rem] text-xs">
 										<thead class="bg-muted/40 text-left text-muted-foreground">
 											<tr>
-												<th class="px-2 py-1.5 font-medium">Model</th>
-												<th class="px-2 py-1.5 font-medium">Harness</th>
-												<th class="px-2 py-1.5 font-medium">Sampling</th>
-												<th class="px-2 py-1.5 font-medium">Forced params</th>
-												<th class="px-2 py-1.5 font-medium">Seed</th>
-												<th class="px-2 py-1.5 font-medium">Problems</th>
+												<th scope="col" class="px-2 py-1.5 font-medium">Condition</th>
+												{#each compColumns as column (column.id)}
+													<th scope="col" class={cn('px-2 py-1.5 font-medium', columnDiffers(column) && 'text-warning-fg')}>
+														{column.label}{#if columnDiffers(column)}{' '}<span class="font-normal">· differs</span>{/if}
+													</th>
+												{/each}
+												<th scope="col" class="px-2 py-1.5 font-medium">Problems</th>
 											</tr>
 										</thead>
 										<tbody class="divide-y">
-											{#each comp.conditions as row (row.condition_id)}
+											{#each compRows as row (row.condition_id)}
 												<tr>
-													<td class="px-2 py-1.5 font-mono">{row.model}</td>
-													<td class="px-2 py-1.5 font-mono">{row.harness}@{row.harness_version}</td>
-													<td class="px-2 py-1.5">{row.sampling_policy.replace(/_/g, ' ')}</td>
-													<td class="px-2 py-1.5 font-mono">{JSON.stringify(row.forced_params)}</td>
-													<td class="px-2 py-1.5">{row.seed_forwarded ? 'forwarded' : 'not supported'}</td>
+													<td class="px-2 py-1.5 font-mono">{compRowLabel(row)}</td>
+													{#each compColumns as column (column.id)}
+														<td class={cn('px-2 py-1.5 font-mono', columnDiffers(column) && 'bg-warning/5')}>{column.cell(row)}</td>
+													{/each}
 													<td class="px-2 py-1.5 {row.problems.length ? 'text-warning-fg' : 'text-muted-foreground'}">
 														{row.problems.length ? row.problems.join('; ') : '—'}
 													</td>
@@ -438,6 +904,27 @@
 										</tbody>
 									</table>
 								</div>
+							</div>
+						{:else if previewResult.per_condition.length > 0}
+							<div class="overflow-x-auto rounded-md border">
+								<table class="w-full text-xs">
+									<thead class="bg-muted/40 text-left text-muted-foreground">
+										<tr>
+											<th scope="col" class="px-2 py-1.5 font-medium">Condition</th>
+											<th scope="col" class="px-2 py-1.5 text-right font-medium">Runs</th>
+											<th scope="col" class="px-2 py-1.5 text-right font-medium">Est. cost</th>
+										</tr>
+									</thead>
+									<tbody class="divide-y">
+										{#each previewResult.per_condition as row (row.condition_id)}
+											<tr>
+												<td class="px-2 py-1.5">{conditionById.has(row.condition_id) ? conditionLabel(conditionById.get(row.condition_id)!) : row.label}</td>
+												<td class="px-2 py-1.5 text-right tabular-nums">{row.jobs}</td>
+												<td class="px-2 py-1.5 text-right tabular-nums">{formatCost(row.estimated_cost)}</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
 							</div>
 						{/if}
 					{/if}
@@ -452,41 +939,71 @@
 				<Card.Header class="flex flex-row items-start justify-between gap-2 space-y-0">
 					<div class="space-y-1">
 						<Card.Title>Progress</Card.Title>
-						<Card.Description>Each square is one run; open it in the sample generator.</Card.Description>
+						<Card.Description>
+							One square per run, labelled with its repeat index; open one for its details.
+							{#if hasLiveRuns}Refreshes every {POLL_MS / 1000} s while runs are active.{/if}
+						</Card.Description>
 					</div>
-					<Button variant="outline" size="sm" onclick={refreshStatus} disabled={statusPolling}>
-						{#if statusPolling}<LoaderCircle class="h-3.5 w-3.5 animate-spin" />{:else}<RefreshCw class="h-3.5 w-3.5" />{/if}
+					<Button variant="outline" size="sm" onclick={() => refreshStatus()} disabled={statusLoading}>
+						{#if statusLoading}<LoaderCircle class="animate-spin" />{:else}<RefreshCw />{/if}
 						Refresh
 					</Button>
 				</Card.Header>
-				<Card.Content class="space-y-3">
+				<Card.Content class="space-y-4">
+					{#if launchedBatch}
+						<p class="text-sm" role="status">
+							Launched as batch
+							<a class="font-medium text-primary underline-offset-2 hover:underline" href="/sample-generator/batches/{launchedBatch.id}">
+								{launchedBatch.name}
+							</a>.
+						</p>
+					{/if}
+					{#if statusError}
+						<ErrorAlert message={statusError} onretry={() => refreshStatus()} />
+					{/if}
 					{#if !status}
-						<EmptyState compact title="No progress yet" description="Refresh to fetch the latest run status." />
+						{#if statusLoading}
+							<LoadingState label="loading progress" class="py-8" />
+						{:else if !statusError}
+							<EmptyState compact title="No progress yet" description="Refresh to fetch the latest run status." />
+						{/if}
 					{:else}
-						<div class="flex flex-wrap gap-2">
+						<div class="flex flex-wrap items-center gap-2">
 							{#each Object.entries(status.by_status) as [s, count] (s)}
 								<StatusBadge status={s} label="{s.replace(/_/g, ' ')}: {count}" />
 							{/each}
 							<span class="text-xs text-muted-foreground tabular-nums">
-								{status.jobs_created} / {status.total_cells} cells · running cost ${status.running_cost.toFixed(4)}
+								{status.jobs_created} / {status.total_cells} runs · cost so far {formatCost(status.running_cost)}
 							</span>
 						</div>
-						<div class="grid gap-1.5 sm:grid-cols-2">
-							{#each status.grid as cell (cell.condition_id + ':' + cell.app_id)}
-								<div class="rounded-md border px-2.5 py-1.5 text-xs">
-									<div class="flex flex-wrap gap-1">
-										{#each cell.runs as run (run.job_id)}
-											<a
-												href={`/sample-generator?job=${run.job_id}`}
-												class="rounded border px-1.5 py-0.5 tabular-nums {toneClasses[statusTone(run.status)]}"
-												title={`repeat ${run.repeat_index} · ${run.status}`}
-												aria-label={`Repeat ${run.repeat_index}, ${run.status}`}
-											>
-												{run.repeat_index}
-											</a>
+						{#if progressGroups.length === 0}
+							<EmptyState compact title="No runs yet" />
+						{/if}
+						<div class="space-y-3">
+							{#each progressGroups as group (group.id)}
+								<section class="space-y-1.5" aria-label={group.label}>
+									<p class="text-xs font-medium">{group.label}</p>
+									<div class="grid gap-1.5 sm:grid-cols-2">
+										{#each group.cells as cell (cell.condition_id + ':' + cell.app_id)}
+											{@const app = appName.get(cell.app_id) ?? `App #${cell.app_id}`}
+											<div class="flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs">
+												<span class="min-w-0 flex-1 truncate text-muted-foreground" title={app}>{app}</span>
+												<div class="flex shrink-0 flex-wrap gap-1">
+													{#each [...cell.runs].sort((a, b) => a.repeat_index - b.repeat_index) as run (run.job_id)}
+														<a
+															href="/applications/{run.job_id}"
+															class="rounded border px-1.5 py-0.5 tabular-nums transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 {toneClasses[statusTone(run.status)]}"
+															title="{app} · repeat {run.repeat_index} · {run.status}"
+															aria-label="{app}, repeat {run.repeat_index}, {run.status}"
+														>
+															{run.repeat_index}
+														</a>
+													{/each}
+												</div>
+											</div>
 										{/each}
 									</div>
-								</div>
+								</section>
 							{/each}
 						</div>
 					{/if}
@@ -495,3 +1012,26 @@
 		{/if}
 	{/if}
 </div>
+
+<ConfirmDialog
+	bind:open={launchConfirmOpen}
+	title={previewResult ? `Launch ${previewResult.total_jobs} runs?` : 'Launch the experiment?'}
+	description={previewResult
+		? `${previewResult.conditions} conditions × ${previewResult.apps} apps × ${previewResult.repeats} repeats. ${
+				previewResult.cost_estimate_kind === 'budget_upper_bound' ? 'Cost cap (upper bound)' : 'Estimated cost'
+			}: ${formatCost(previewResult.estimated_cost)}. The experiment's design is frozen once it launches.`
+		: ''}
+	confirmLabel="Launch"
+	busy={launching}
+	onConfirm={doLaunch}
+/>
+
+<ConfirmDialog
+	bind:open={archiveConfirmOpen}
+	title="Archive this experiment?"
+	description="It moves out of the active list. Its runs and results are kept."
+	confirmLabel="Archive"
+	destructive
+	busy={archiving}
+	onConfirm={doArchive}
+/>

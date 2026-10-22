@@ -2,6 +2,8 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { formatApiError } from '$lib/api/core';
 	import { containerTones } from '$lib/constants/colors';
 	import { toast } from 'svelte-sonner';
 	import Play from '@lucide/svelte/icons/play';
@@ -77,11 +79,7 @@
 			toast.success(successMsg);
 			await refresh(true);
 		} catch (e) {
-			const msg =
-				(e && typeof e === 'object' && 'message' in e && typeof (e as any).message === 'string')
-					? (e as any).message
-					: (e instanceof Error ? e.message : 'unknown error');
-			toast.error(`${name} failed: ${msg}`);
+			toast.error(`${name} failed: ${formatApiError(e, 'unknown error')}`);
 		} finally {
 			busy = null;
 		}
@@ -94,14 +92,30 @@
 		container && doAction('stop', () => stopContainer(container!.id), 'Container stopping');
 	const onRestart = () =>
 		container && doAction('restart', () => restartContainer(container!.id), 'Container restarting');
+	// Remove and rebuild both discard the current container: confirm first.
+	let confirmAction = $state<'remove' | 'rebuild' | null>(null);
+	let confirmOpen = $state(false);
 	const onRemove = () => {
 		if (!container) return;
-		if (!confirm('Remove this container? Generated code is preserved.')) return;
-		doAction('remove', () => removeContainer(container!.id), 'Container removed');
+		confirmAction = 'remove';
+		confirmOpen = true;
 	};
-	const onRebuild = async () => {
+	const onRebuild = () => {
 		if (!container) return;
-		if (!confirm('Rebuild? This removes the failed container and starts a fresh build.')) return;
+		confirmAction = 'rebuild';
+		confirmOpen = true;
+	};
+	function runConfirmed() {
+		const action = confirmAction;
+		confirmOpen = false;
+		if (action === 'remove' && container) {
+			doAction('remove', () => removeContainer(container!.id), 'Container removed');
+		} else if (action === 'rebuild') {
+			rebuild();
+		}
+	}
+	async function rebuild() {
+		if (!container) return;
 		busy = 'rebuild';
 		try {
 			await removeContainer(container.id);
@@ -109,15 +123,11 @@
 			toast.success('Rebuild started');
 			await refresh(true);
 		} catch (e) {
-			const msg =
-				(e && typeof e === 'object' && 'message' in e && typeof (e as any).message === 'string')
-					? (e as any).message
-					: (e instanceof Error ? e.message : 'unknown error');
-			toast.error(`Rebuild failed: ${msg}`);
+			toast.error(`Rebuild failed: ${formatApiError(e, 'unknown error')}`);
 		} finally {
 			busy = null;
 		}
-	};
+	}
 
 	onMount(() => {
 		refresh();
@@ -214,3 +224,14 @@
 		{/if}
 	{/if}
 </div>
+
+<ConfirmDialog
+	bind:open={confirmOpen}
+	title={confirmAction === 'rebuild' ? 'Rebuild the container?' : 'Remove this container?'}
+	description={confirmAction === 'rebuild'
+		? 'Removes the failed container and starts a fresh build.'
+		: 'Stops and removes the container. The generated code is kept.'}
+	confirmLabel={confirmAction === 'rebuild' ? 'Rebuild' : 'Remove container'}
+	destructive
+	onConfirm={runConfirmed}
+/>

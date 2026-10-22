@@ -163,3 +163,78 @@ def test_upsert_profile_version_creates_v1_for_new_slug():
     )
     assert (created, updated) == (1, 0)
     assert GenerationProfile.objects.get(slug="brand-new-bundle", version=1)
+
+
+def test_seeder_takes_the_next_free_version_after_a_user_version():
+    """A user's own vN+1 of a system block must not make the next seed pass collide."""
+    from backend.users.tests.factories import UserFactory
+
+    seed_content_blocks()
+    system = ContentBlock.objects.filter(slug="tone-standard", is_system=True).order_by("-version").first()
+    ContentBlock.objects.create(
+        block_type=system.block_type,
+        slug="tone-standard",
+        version=system.version + 1,
+        name="My tone",
+        content="my own tone",
+        is_system=False,
+        created_by=UserFactory(),
+    )
+    # Simulate an edited source file.
+    system.content_hash = "stale-hash-simulating-an-edited-source-file"
+    system.save(update_fields=["content_hash"])
+
+    seed_content_blocks()
+
+    newest = ContentBlock.objects.filter(slug="tone-standard", is_system=True).order_by("-version").first()
+    assert newest.version == system.version + 2
+    assert ContentBlock.objects.get(slug="tone-standard", version=system.version + 1).is_system is False
+
+
+def test_system_profiles_pin_the_latest_system_block_version():
+    seed_all()
+    block = ContentBlock.objects.filter(slug="tone-standard", is_system=True).order_by("-version").first()
+    block.content_hash = "stale-hash-simulating-an-edited-source-file"
+    block.save(update_fields=["content_hash"])
+
+    seed_content_blocks()
+    seed_profiles()
+
+    bumped = block.version + 1
+    for slug in ("system-scaffolding-standard", "system-fastapi-vue-standard", "system-fastapi-react-standard"):
+        latest = GenerationProfile.objects.filter(slug=slug, is_system=True).order_by("-version").first()
+        refs = {ref["slug"]: ref["version"] for ref in latest.block_refs}
+        assert refs["tone-standard"] == bumped, slug
+        # Older profile versions keep pointing at what they pinned.
+        assert latest.version > 1
+
+
+def test_seed_profiles_skips_a_profile_whose_block_is_missing(monkeypatch, tmp_path):
+    from backend.generation import seeding
+
+    catalog = tmp_path / "catalog.yaml"
+    catalog.write_text(
+        "default_bundle_slug: broken-profile\n"
+        "profiles:\n"
+        "  - slug: broken-profile\n"
+        "    name: Broken\n"
+        "    scaffolding_slug: flask-react\n"
+        "    block_refs:\n"
+        "      - {type: prompt_tone, slug: no-such-block}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(seeding, "CATALOG_PATH", catalog)
+
+    assert seed_profiles() == (0, 0)
+    assert not GenerationProfile.objects.filter(slug="broken-profile").exists()
+
+
+def test_global_default_profile_is_the_catalog_default_bundle():
+    from backend.generation.services.profile_resolver import get_default_profile
+
+    seed_all()
+
+    # Every stack has its own default; without a stack the catalog names one.
+    assert get_default_profile().slug == "system-scaffolding-standard"
+    assert get_default_profile(scaffolding_slug="fastapi-vue").slug == "system-fastapi-vue-standard"
+    assert get_default_profile(scaffolding_slug="fastapi-react").slug == "system-fastapi-react-standard"
