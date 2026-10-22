@@ -162,7 +162,7 @@
 				onValueChange={(v) => switchMode(v as ComposerMode)}
 			/>
 			<p class="min-w-0 text-xs text-muted-foreground">
-				{#if mode === 'agent' && !wide.current}<span class="font-medium text-primary">Recommended.</span>{/if}
+				{#if mode === 'agent' && !wide.current}<span class="font-medium text-success-fg">Recommended.</span>{/if}
 				{MODES[mode].description}
 			</p>
 		</div>

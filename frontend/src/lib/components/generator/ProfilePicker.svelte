@@ -219,7 +219,7 @@
 				<span class={cn(chip, 'border-border bg-muted text-muted-foreground')}>default</span>
 			{/if}
 			{#if suggestedIds.has(profile.id)}
-				<span class={cn(chip, 'border-transparent bg-primary/15 text-primary')}>suggested</span>
+				<span class={cn(chip, 'border-transparent bg-primary/15 text-success-fg')}>suggested</span>
 			{/if}
 			{#if stackSlug && profile.scaffolding_slug !== stackSlug}
 				<span class={cn(chip, 'border-warning/30 bg-warning/10 text-warning-fg')}>other stack</span>

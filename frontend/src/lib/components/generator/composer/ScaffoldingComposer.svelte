@@ -94,9 +94,8 @@
 	const samplingPresets = trackPresets('sampling', () => [samplingPresetId]);
 	const samplingPreset = $derived(samplingPresets.find(samplingPresetId) ?? null);
 	$effect(() => {
-		if (samplingPresetId != null && samplingPresets.isMissing(samplingPresetId)) {
-			samplingPresetId = samplingPresets.systemDefault()?.id ?? null;
-		}
+		// A draft's preset that no longer exists: back to the mode default (no preset).
+		if (samplingPresetId != null && samplingPresets.isMissing(samplingPresetId)) samplingPresetId = null;
 	});
 
 	const profile = $derived(profileId != null ? profiles.find((p) => p.id === profileId) : undefined);
@@ -128,6 +127,20 @@
 	// ── tally + checks ──────────────────────────────────────────────────
 	const runCount = $derived(appIds.size * modelIds.size * (trials ?? 0));
 	const stackMismatch = $derived(!!profile && !!stackSlug && profile.scaffolding_slug !== stackSlug);
+	// Auto resolves per app: the app's pilot profile for the stack, else the
+	// stack's default or system profile. Without any, the server falls back to
+	// another stack's prompts and refuses the batch, so say so before Start.
+	const autoUnavailable = $derived(
+		profileId == null &&
+			profilesLoaded &&
+			!!stackSlug &&
+			!profiles.some(
+				(p) =>
+					!p.is_archived &&
+					p.scaffolding_slug === stackSlug &&
+					(p.is_default || p.slug.startsWith('system-') || p.slug.startsWith('app-'))
+			)
+	);
 	const ready = $derived(appIds.size > 0 && modelIds.size > 0 && !!stackSlug);
 	const localInvalid = $derived(llmInvalid || trialsInvalid || trials == null);
 
@@ -140,6 +153,13 @@
 				detail: `${profile.name} targets ${profile.scaffolding_slug}, but the stack is ${stackSlug}. Scaffolding rejects mismatched runs.`,
 			});
 		}
+		if (autoUnavailable) {
+			out.push({
+				code: 'no_profile_for_stack',
+				severity: 'error',
+				detail: `No prompt profile targets ${stackSlug}, so Auto would use another stack's prompts. Pick a stack that has a profile, or create one for ${stackSlug} in the Library.`,
+			});
+		}
 		if (keyState === 'missing') {
 			out.push({ code: 'missing_api_key', severity: 'error', detail: 'Runs call models with your OpenRouter key and none is configured.' });
 		} else if (keyState === 'invalid') {
@@ -148,7 +168,7 @@
 		if (runCount > LARGE_BATCH) {
 			out.push({ code: 'large_batch', severity: 'warn', detail: `${runCount} runs in one batch.` });
 		}
-		if (profileId == null && appIds.size > 0) {
+		if (profileId == null && appIds.size > 0 && !autoUnavailable) {
 			out.push({
 				code: 'auto_profile',
 				severity: 'info',
@@ -170,6 +190,10 @@
 		if (profile) {
 			const target = profile.scaffolding_slug;
 			out.profile_stack_mismatch = { label: `Use the ${target} stack`, onclick: () => (stackSlug = target) };
+		}
+		if (defaultStack && defaultStack !== stackSlug) {
+			const target = defaultStack;
+			out.no_profile_for_stack = { label: `Use the ${target} stack`, onclick: () => (stackSlug = target) };
 		}
 		return out;
 	});

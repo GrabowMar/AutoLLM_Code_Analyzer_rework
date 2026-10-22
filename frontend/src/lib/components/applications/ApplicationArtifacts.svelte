@@ -92,7 +92,7 @@ function toggleArtifact(id: number) {
 												{#each (art.request_payload?.messages ?? []) as msg}
 													<div class="border rounded-md">
 														<div class="px-3 py-1.5 border-b bg-muted/30 flex items-center gap-2">
-															<Badge variant="outline" class="text-[11px] {msg.role === 'system' ? 'bg-info/15 text-info-fg' : msg.role === 'user' ? 'bg-success/15 text-success-fg' : 'bg-primary/15 text-primary'}">{msg.role}</Badge>
+															<Badge variant="outline" class="text-[11px] {msg.role === 'system' ? 'bg-info/15 text-info-fg' : msg.role === 'user' ? 'bg-success/15 text-success-fg' : 'bg-primary/15 text-success-fg'}">{msg.role}</Badge>
 															<span class="text-xs text-muted-foreground">{(msg.content?.length ?? 0)} chars</span>
 														</div>
 														<pre class="p-3 text-xs font-mono whitespace-pre-wrap break-all max-h-48 overflow-auto">{msg.content ?? ''}</pre>
@@ -105,7 +105,7 @@ function toggleArtifact(id: number) {
 													<div class="section-label">Response</div>
 													<div class="border rounded-md">
 														<div class="px-3 py-1.5 border-b bg-muted/30 flex items-center gap-2">
-															<Badge variant="outline" class="text-[11px] bg-primary/15 text-primary">assistant</Badge>
+															<Badge variant="outline" class="text-[11px] bg-primary/15 text-success-fg">assistant</Badge>
 															<span class="text-xs text-muted-foreground">finish: {art.response_payload.choices[0]?.finish_reason ?? '—'}</span>
 														</div>
 														<pre class="p-3 text-xs font-mono whitespace-pre-wrap break-all max-h-48 overflow-auto">{art.response_payload.choices[0]?.message?.content ?? '(empty)'}</pre>

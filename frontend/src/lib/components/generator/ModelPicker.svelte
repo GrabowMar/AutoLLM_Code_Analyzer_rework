@@ -353,7 +353,7 @@
 						<ProviderIcon provider={group.provider} size={14} />
 						<span class="min-w-0 flex-1 truncate">{group.provider}</span>
 						{#if group.selectedCount > 0}
-							<span class={cn(chip, 'border-transparent bg-primary/15 text-primary')}>{group.selectedCount}/{group.models.length}</span>
+							<span class={cn(chip, 'border-transparent bg-primary/15 text-success-fg')}>{group.selectedCount}/{group.models.length}</span>
 						{:else}
 							<span class="tabular-nums text-[11px] text-muted-foreground">{group.models.length}</span>
 						{/if}
@@ -401,7 +401,7 @@
 											{/if}
 											<span class={cn(chip, 'border-border text-foreground')} title="Context window">{m.context_window_display} ctx</span>
 											<span
-												class={cn(chip, m.is_free ? 'border-transparent bg-primary/15 text-primary' : 'border-border text-foreground')}
+												class={cn(chip, m.is_free ? 'border-transparent bg-primary/15 text-success-fg' : 'border-border text-foreground')}
 												title="Input / output price per 1M tokens">{priceLabel(m)}</span
 											>
 										</span>

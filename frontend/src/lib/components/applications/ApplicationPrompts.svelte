@@ -33,7 +33,7 @@ const promptEntries = $derived.by<PromptEntry[]>(() => {
 		if (job.custom_user_prompt)
 			entries.push({ label: 'User Prompt', badge: 'USR', badgeColor: 'bg-success/15 text-success-fg', content: job.custom_user_prompt });
 		if (job.result_data?.content)
-			entries.push({ label: 'Response', badge: 'RES', badgeColor: 'bg-primary/15 text-primary', content: job.result_data.content.substring(0, 2000) + (job.result_data.content.length > 2000 ? '\n...(truncated for preview)' : '') });
+			entries.push({ label: 'Response', badge: 'RES', badgeColor: 'bg-primary/15 text-success-fg', content: job.result_data.content.substring(0, 2000) + (job.result_data.content.length > 2000 ? '\n...(truncated for preview)' : '') });
 	}
 
 	if (job.mode === 'agent') {
@@ -46,7 +46,7 @@ const promptEntries = $derived.by<PromptEntry[]>(() => {
 			entries.push({ label: `Task brief (v${snap.brief.version})`, badge: 'USR', badgeColor: 'bg-success/15 text-success-fg', content: snap.brief.text });
 		const final = job.result_data?.agent?.harness_report?.final_message;
 		if (final)
-			entries.push({ label: 'Agent final message', badge: 'RES', badgeColor: 'bg-primary/15 text-primary', content: final });
+			entries.push({ label: 'Agent final message', badge: 'RES', badgeColor: 'bg-primary/15 text-success-fg', content: final });
 	}
 
 	for (const art of artifacts) {
@@ -55,7 +55,7 @@ const promptEntries = $derived.by<PromptEntry[]>(() => {
 		for (const msg of msgs) {
 			const roleLabel = msg.role === 'system' ? 'System' : msg.role === 'user' ? 'User' : 'Assistant';
 			const roleBadge = msg.role === 'system' ? 'SYS' : msg.role === 'user' ? 'USR' : 'AST';
-			const roleColor = msg.role === 'system' ? 'bg-info/15 text-info-fg' : msg.role === 'user' ? 'bg-success/15 text-success-fg' : 'bg-primary/15 text-primary';
+			const roleColor = msg.role === 'system' ? 'bg-info/15 text-info-fg' : msg.role === 'user' ? 'bg-success/15 text-success-fg' : 'bg-primary/15 text-success-fg';
 			entries.push({
 				label: `${art.stage} — ${roleLabel}`,
 				badge: roleBadge,
@@ -70,7 +70,7 @@ const promptEntries = $derived.by<PromptEntry[]>(() => {
 			entries.push({
 				label: `${art.stage} — Response`,
 				badge: 'RES',
-				badgeColor: 'bg-primary/15 text-primary',
+				badgeColor: 'bg-primary/15 text-success-fg',
 				content: respContent.substring(0, 3000) + (respContent.length > 3000 ? '\n...(truncated)' : ''),
 				meta: { stage: art.stage, model: respModel, finish: choices[0]?.finish_reason ?? '—' },
 			});

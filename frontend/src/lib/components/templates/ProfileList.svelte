@@ -14,11 +14,13 @@
 		profiles: GenerationProfile[];
 		loading: boolean;
 		activeSlug: string | null;
+		/** System profiles are read-only for non-staff users: offer Duplicate instead of Edit. */
+		canEditSystem?: boolean;
 		onEdit: (p: GenerationProfile) => void;
 		onDuplicate: (p: GenerationProfile) => void;
 		onArchive: (p: GenerationProfile) => void;
 	}
-	let { profiles, loading, activeSlug, onEdit, onDuplicate, onArchive }: Props = $props();
+	let { profiles, loading, activeSlug, canEditSystem = false, onEdit, onDuplicate, onArchive }: Props = $props();
 
 	let historySlug = $state<string | null>(null);
 	let historyLoading = $state(false);
@@ -88,20 +90,22 @@
 						</div>
 					</div>
 					<div class="flex gap-1.5 ml-2 shrink-0 self-center">
-						<Button variant="outline" size="sm" title="Edit as a new version — versions are immutable" onclick={() => onEdit(p)}>
-							<Pencil /> Edit
-						</Button>
+						{#if !p.is_system || canEditSystem}
+							<Button variant="outline" size="sm" title="Edit as a new version — versions are immutable" onclick={() => onEdit(p)}>
+								<Pencil /> Edit
+							</Button>
+						{/if}
 						<Button
 							variant="outline"
 							size="sm"
 							title="Version history"
-							aria-label="Version history"
+							aria-label="Version history of {p.name}"
 							aria-expanded={historySlug === p.slug}
 							onclick={() => toggleHistory(p)}
 						>
 							<History />
 						</Button>
-						<Button variant="outline" size="sm" title="Duplicate as a new profile" aria-label="Duplicate profile" onclick={() => onDuplicate(p)}>
+						<Button variant="outline" size="sm" title="Duplicate as a new profile" aria-label="Duplicate {p.name}" onclick={() => onDuplicate(p)}>
 							<Copy />
 						</Button>
 						{#if !p.is_system}
@@ -110,7 +114,7 @@
 								size="sm"
 								class="hover:bg-destructive/10 hover:text-danger-fg"
 								title="Archive all versions (jobs keep their snapshots)"
-								aria-label="Archive profile"
+								aria-label="Archive {p.name}"
 								onclick={() => onArchive(p)}
 							>
 								<Archive />

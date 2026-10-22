@@ -12,6 +12,9 @@
 	 *   select the kind's default preset (the composer never offers "none").
 	 * - `filter(preset)`: restrict the list (e.g. harness presets of one harness).
 	 * - `optionSchema`: harness option schema, for nicer option labels in summaries.
+	 * - `noneOption` (`{ label, description? }`): offer "no preset" (selectedId = null)
+	 *   as the first item, e.g. template modes whose mode defaults apply without one.
+	 *   Pair with `autoSelectDefault={false}`.
 	 * - `label` (default "Sampling preset" etc.; '' hides it), `idPrefix`, `disabled`,
 	 *   `showManage` (default true): "Manage" opens the Library presets tab in a new
 	 *   tab; the list reloads when the window regains focus.
@@ -51,6 +54,7 @@
 		autoSelectDefault?: boolean;
 		filter?: (preset: RunPreset) => boolean;
 		optionSchema?: HarnessOptionField[];
+		noneOption?: { label: string; description?: string } | null;
 		label?: string;
 		idPrefix?: string;
 		disabled?: boolean;
@@ -65,6 +69,7 @@
 		autoSelectDefault = true,
 		filter,
 		optionSchema = [],
+		noneOption = null,
 		label,
 		idPrefix,
 		disabled = false,
@@ -153,8 +158,10 @@
 		};
 	});
 
+	const NONE = 'none';
+
 	function pick(value: string) {
-		const id = value ? Number(value) : null;
+		const id = value && value !== NONE ? Number(value) : null;
 		selectedId = id;
 		onchange?.(presets.find((p) => p.id === id) ?? (extra?.id === id ? extra : null));
 	}
@@ -180,7 +187,7 @@
 			<span class="truncate font-medium">{preset.name}</span>
 			<span class="font-mono text-[11px] text-muted-foreground">v{preset.version}</span>
 			{#if preset.is_default}
-				<span class={cn(chip, 'border-transparent bg-primary/15 text-primary')}>default</span>
+				<span class={cn(chip, 'border-transparent bg-primary/15 text-success-fg')}>default</span>
 			{:else if preset.is_system}
 				<span class={cn(chip, 'border-border bg-muted text-muted-foreground')}>system</span>
 			{/if}
@@ -189,6 +196,13 @@
 			{/if}
 		</span>
 		<span class="truncate text-[11px] text-muted-foreground">{summarizePreset(preset, optionSchema)}</span>
+	</span>
+{/snippet}
+
+{#snippet noneLine(option: { label: string; description?: string })}
+	<span class="flex min-w-0 flex-col">
+		<span class="truncate font-medium">{option.label}</span>
+		{#if option.description}<span class="truncate text-[11px] text-muted-foreground">{option.description}</span>{/if}
 	</span>
 {/snippet}
 
@@ -215,10 +229,13 @@
 	{:else}
 		<Select.Root
 			type="single"
-			value={selectedId != null ? String(selectedId) : ''}
+			value={selectedId != null ? String(selectedId) : noneOption ? NONE : ''}
 			onValueChange={pick}
 			disabled={disabled || loading}
-			items={[...(extra ? [extra] : []), ...presets].map((p) => ({ value: String(p.id), label: `${p.name} v${p.version}` }))}
+			items={[
+				...(noneOption ? [{ value: NONE, label: noneOption.label }] : []),
+				...[...(extra ? [extra] : []), ...presets].map((p) => ({ value: String(p.id), label: `${p.name} v${p.version}` })),
+			]}
 		>
 			<Select.Trigger id={triggerId} class="min-h-9 py-1.5 data-[size=default]:h-auto" aria-busy={loading}>
 				{#if loading}
@@ -227,6 +244,8 @@
 					</span>
 				{:else if selected}
 					{@render presetLine(selected)}
+				{:else if selectedId == null && noneOption}
+					{@render noneLine(noneOption)}
 				{:else if selectedId != null && extraFailed}
 					<span class="text-muted-foreground">Preset #{selectedId} (not available)</span>
 				{:else if presets.length === 0}
@@ -236,6 +255,12 @@
 				{/if}
 			</Select.Trigger>
 			<Select.Content class="max-w-[min(32rem,calc(100vw-2rem))]">
+				{#if noneOption}
+					<Select.Item value={NONE} label={noneOption.label}>
+						{@render noneLine(noneOption)}
+					</Select.Item>
+					<Select.Separator />
+				{/if}
 				{#if extra}
 					<Select.Group>
 						<Select.GroupHeading>Pinned version</Select.GroupHeading>

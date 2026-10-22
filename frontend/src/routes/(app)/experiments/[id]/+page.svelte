@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { onMount, untrack } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
+	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import * as Select from '$lib/components/ui/select';
 	import { toneClasses, statusTone } from '$lib/constants/colors';
 	import { Badge } from '$lib/components/ui/badge';
@@ -24,14 +25,15 @@
 		loadModelCatalog,
 		summarizeBudget,
 		summarizeLLMParams,
+		summarizePreset,
 	} from '$lib/components/generator';
 	import { cn } from '$lib/utils';
-	import { formatApiError } from '$lib/api/core';
-	import { formatCost } from '$lib/utils/formatters';
+	import { formatApiError, isAbortError } from '$lib/api/core';
 	import type { LLMModelSummary } from '$lib/api/models';
 	import {
 		getAgentConfig,
 		getGenerationProfiles,
+		previewEffectiveLLMParams,
 		type AgentConfigInfo,
 		type AppRequirementTemplate,
 		type GenerationProfile,
@@ -54,8 +56,9 @@
 		type CreateConditionPayload,
 		type Experiment,
 		type ExperimentBatch,
-		type ExperimentComparability,
+		type ExperimentComparabilityRow,
 		type ExperimentCondition,
+		type ExperimentLaunchError,
 		type ExperimentPreview,
 		type ExperimentStatusReport,
 	} from '$lib/api/experiments';
@@ -71,6 +74,7 @@
 	import Rocket from '@lucide/svelte/icons/rocket';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 
 	const POLL_MS = 10_000;
 	const LIVE_RUN_STATUSES = new Set(['pending', 'queued', 'running']);
@@ -105,6 +109,8 @@
 		error = '';
 		previewResult = null;
 		launchedBatch = null;
+		launchErrors = [];
+		launchError = '';
 		status = null;
 		try {
 			const [exp, conds] = await Promise.all([getExperiment(id), listConditions(id)]);
@@ -172,14 +178,21 @@
 		return agentConfig?.harnesses.find((h) => h.name === name);
 	}
 
-	function presetLabel(id: number | null | undefined): string {
+	function presetLabel(id: number | null | undefined, ref?: { name: string; version: number } | null): string {
 		if (id == null) return '';
-		const preset = presetById[id];
+		const preset = presetById[id] ?? ref;
 		return preset ? `${preset.name} v${preset.version}` : `preset #${id}`;
 	}
 
+	/** "Name v2 · temperature 0 · …" once the preset's config is loaded. */
+	function presetWithSummary(id: number, ref?: { name: string; version: number } | null): string {
+		const preset = presetById[id];
+		const summary = preset ? summarizePreset(preset) : '';
+		return summary ? `${presetLabel(id, ref)} · ${summary}` : presetLabel(id, ref);
+	}
+
 	function conditionHarnessLabel(cond: ExperimentCondition): string {
-		if (cond.harness_preset != null) return presetLabel(cond.harness_preset);
+		if (cond.harness_preset != null) return presetLabel(cond.harness_preset, cond.harness_preset_ref);
 		if (cond.harness) return harnessInfo(cond.harness)?.label ?? cond.harness;
 		return defaultHarness ? `${defaultHarness.label} (default)` : 'default harness';
 	}
@@ -242,8 +255,34 @@
 		return '';
 	});
 
+	// Scaffolding: the server resolves mode default → profile → preset → experiment
+	// overrides ("inline" there is this experiment's llm_defaults).
+	let scaffoldingInherited = $state<{ values: LLMParams; sources: Record<string, string> } | null>(null);
+	$effect(() => {
+		if (!experiment || isAgent || !showOverrides) return;
+		const body = {
+			mode: 'scaffolding' as const,
+			profile_id: conditionProfileId,
+			sampling_preset_id: experiment.sampling_preset ?? null,
+			llm_params: $state.snapshot(experiment.llm_defaults ?? {}) as LLMParams,
+		};
+		const controller = new AbortController();
+		previewEffectiveLLMParams(body, { signal: controller.signal })
+			.then((result) => {
+				const sources = Object.fromEntries(
+					Object.entries(result.sources).map(([key, source]) => [key, source === 'inline' ? 'llm_defaults' : source])
+				);
+				scaffoldingInherited = { values: result.effective, sources };
+			})
+			.catch((e: unknown) => {
+				if (!isAbortError(e)) scaffoldingInherited = null;
+			});
+		return () => controller.abort();
+	});
+
 	// What the per-condition overrides sit on: profile → sampling preset → experiment overrides.
 	const overridesInherited = $derived.by(() => {
+		if (!isAgent && scaffoldingInherited) return scaffoldingInherited;
 		const values: Record<string, unknown> = {};
 		const sources: Record<string, string> = {};
 		const layer = (params: LLMParams | undefined, source: string) => {
@@ -288,6 +327,7 @@
 		try {
 			const cond = await createCondition(experimentId, payload);
 			conditions = [...conditions, cond];
+			launchErrors = [];
 			// Keep the harness preset and profile: the next condition usually varies the model.
 			newModelId = null;
 			newOverrides = {};
@@ -306,6 +346,7 @@
 			await deleteCondition(experimentId, cond.id);
 			conditions = conditions.filter((c) => c.id !== cond.id);
 			previewResult = null;
+			launchErrors = [];
 		} catch (e) {
 			error = formatApiError(e, 'Failed to remove the condition.');
 		}
@@ -316,12 +357,18 @@
 	let previewResult = $state<ExperimentPreview | null>(null);
 	let launching = $state(false);
 	let launchError = $state('');
+	let launchErrors = $state<ExperimentLaunchError[]>([]);
 	let launchConfirmOpen = $state(false);
 	let launchedBatch = $state<ExperimentBatch | null>(null);
+
+	// Blocking problems from the latest preview (or a refused launch): the
+	// backend refuses the whole launch while any remain.
+	const blockingErrors = $derived(launchErrors.length ? launchErrors : (previewResult?.launch_errors ?? []));
 
 	async function runPreview(): Promise<boolean> {
 		previewing = true;
 		error = '';
+		launchErrors = [];
 		try {
 			previewResult = await previewExperiment(experimentId);
 			return true;
@@ -333,21 +380,36 @@
 		}
 	}
 
+	/** Launch (draft) or top up failed / cancelled cells (running, completed): preview first, then confirm. */
 	async function askLaunch() {
 		launchError = '';
-		if (!previewResult && !(await runPreview())) return;
+		if (!isDraft || !previewResult) {
+			if (!(await runPreview())) return;
+		}
+		if (blockingErrors.length > 0) return;
+		if (previewResult && (previewResult.pending_jobs ?? previewResult.total_jobs) === 0) {
+			launchError = 'Every cell already has a run; there is nothing to launch.';
+			return;
+		}
 		launchConfirmOpen = true;
 	}
 
 	async function doLaunch() {
 		launching = true;
 		launchError = '';
+		launchErrors = [];
 		try {
 			launchedBatch = await launchExperiment(experimentId);
+			previewResult = null;
 			experiment = await getExperiment(experimentId);
 			await refreshStatus();
 		} catch (e) {
-			launchError = formatApiError(e, 'Failed to launch the experiment.');
+			const body = e as { errors?: unknown } | null;
+			if (body && Array.isArray(body.errors) && body.errors.length > 0) {
+				launchErrors = body.errors as ExperimentLaunchError[];
+			} else {
+				launchError = formatApiError(e, 'Failed to launch the experiment.');
+			}
 		} finally {
 			launching = false;
 			launchConfirmOpen = false;
@@ -453,15 +515,9 @@
 	});
 
 	// ── comparability ──────────────────────────────────────────────
-	type CompRow = ExperimentComparability['conditions'][number] & {
-		output_cap?: number | null;
-		harness_options?: Record<string, unknown> | null;
-		harness_preset?: { id: number; slug: string; version: number; name?: string } | null;
-		stack_slug?: string | null;
-		stack?: string | null;
-		profile?: string | null;
-		param_overrides?: Record<string, unknown> | null;
-	};
+	// Older backends sent fewer keys (and `stack` for the stack); every key is optional here.
+	type CompRow = Pick<ExperimentComparabilityRow, 'condition_id' | 'model' | 'problems'> &
+		Partial<Omit<ExperimentComparabilityRow, 'condition_id' | 'model' | 'problems'>> & { stack?: string | null };
 
 	interface CompColumn {
 		id: string;
@@ -487,10 +543,15 @@
 				keys: ['harness', 'harness_version', 'harness_options'],
 				cell: (r) => {
 					const options = Object.keys(r.harness_options ?? {}).length ? ` ${formatParams(r.harness_options)}` : '';
-					return `${r.harness}@${r.harness_version}${options}`;
+					return `${r.harness ?? '—'}@${r.harness_version ?? '?'}${options}`;
 				},
 			},
-			{ id: 'sampling', label: 'Sampling', keys: ['sampling_policy'], cell: (r) => r.sampling_policy.replace(/_/g, ' ') },
+			{
+				id: 'sampling',
+				label: 'Sampling',
+				keys: ['sampling_policy'],
+				cell: (r) => (r.sampling_policy ?? '—').replace(/_/g, ' '),
+			},
 			{ id: 'forced', label: 'Forced params', keys: ['forced_params'], cell: (r) => formatParams(r.forced_params) },
 		];
 		if (has('output_cap')) {
@@ -501,11 +562,21 @@
 				cell: (r) => (r.output_cap != null ? r.output_cap.toLocaleString() : '—'),
 			});
 		}
-		if (has('stack_slug') || has('stack')) {
+		// The stack is experiment-wide; its column only matters for legacy (per-profile) stacks.
+		if ((has('stack_slug') || has('stack')) && (!experiment?.stack_slug || differsOn.has('stack_slug'))) {
 			columns.push({ id: 'stack', label: 'Stack', keys: ['stack', 'stack_slug'], cell: (r) => r.stack_slug ?? r.stack ?? '—' });
 		}
 		if (has('profile')) {
 			columns.push({ id: 'profile', label: 'Profile', keys: ['profile'], cell: (r) => r.profile ?? '—' });
+		}
+		if (rows.some((r) => r.provider_routing != null && r.provider_routing !== 'default') || differsOn.has('provider_routing')) {
+			columns.push({
+				id: 'routing',
+				label: 'Provider routing',
+				keys: ['provider_routing'],
+				cell: (r) =>
+					r.provider_routing == null || r.provider_routing === 'default' ? 'default' : formatParams(r.provider_routing),
+			});
 		}
 		if (rows.some((r) => Object.keys(r.param_overrides ?? {}).length > 0)) {
 			columns.push({ id: 'overrides', label: 'Overrides', keys: ['param_overrides'], cell: (r) => formatParams(r.param_overrides) });
@@ -529,6 +600,28 @@
 		return preset ? `${row.model} × ${preset}` : row.model;
 	}
 
+	/** Dollar amounts: cents for caps and totals, more digits only for sub-cent costs. */
+	function formatUsd(value: number): string {
+		if (value === 0) return '$0.00';
+		return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
+	}
+
+	function previewCost(preview: ExperimentPreview): string {
+		return formatUsd(preview.estimated_cost);
+	}
+
+	function plural(n: number, one: string, many = `${one}s`): string {
+		return n === 1 ? one : many;
+	}
+
+	function errorConditionLabel(err: ExperimentLaunchError): string {
+		const cond = conditionById.get(err.condition_id);
+		return cond ? conditionLabel(cond) : `Condition #${err.condition_id}`;
+	}
+
+	const launchRuns = $derived(previewResult ? (previewResult.pending_jobs ?? previewResult.total_jobs) : 0);
+	const failedRuns = $derived((status?.by_status.failed ?? 0) + (status?.by_status.cancelled ?? 0));
+
 	const designItems = $derived.by(() => {
 		if (!experiment) return [];
 		const items: { label: string; value: string; mono?: boolean }[] = [
@@ -548,7 +641,12 @@
 			},
 			{
 				label: 'Sampling preset',
-				value: experiment.sampling_preset != null ? presetLabel(experiment.sampling_preset) : 'Provider defaults (platform default)',
+				value:
+					experiment.sampling_preset != null
+						? presetWithSummary(experiment.sampling_preset, experiment.sampling_preset_ref)
+						: isAgent
+							? 'Provider defaults (platform default)'
+							: 'none (template mode defaults)',
 			},
 			{
 				label: 'Experiment overrides',
@@ -560,7 +658,10 @@
 			items.push(
 				{
 					label: 'Budget preset',
-					value: experiment.budget_preset != null ? presetLabel(experiment.budget_preset) : 'Platform defaults',
+					value:
+						experiment.budget_preset != null
+							? presetWithSummary(experiment.budget_preset, experiment.budget_preset_ref)
+							: 'Platform defaults',
 				},
 				{ label: 'Budget overrides', value: summarizeBudget(experiment.agent_config) || 'none' }
 			);
@@ -574,6 +675,30 @@
 		return items;
 	});
 </script>
+
+{#snippet blockingList()}
+	{#if blockingErrors.length > 0}
+		<Alert variant="destructive">
+			<CircleAlert />
+			<div class="min-w-0 space-y-1">
+				<p class="font-medium">
+					{#if launchErrors.length > 0}
+						The launch was refused; nothing was created.
+					{:else}
+						{blockingErrors.length === 1 ? 'One problem blocks' : `${blockingErrors.length} problems block`} the launch.
+					{/if}
+				</p>
+				<AlertDescription>
+					<ul class="list-disc space-y-0.5 pl-4 text-xs">
+						{#each blockingErrors as err, i (i)}
+							<li><span class="font-medium">{errorConditionLabel(err)}:</span> {err.detail}</li>
+						{/each}
+					</ul>
+				</AlertDescription>
+			</div>
+		</Alert>
+	{/if}
+{/snippet}
 
 <div class="mx-auto w-full max-w-5xl space-y-6">
 	<PageHeader
@@ -835,7 +960,11 @@
 						<Button
 							size="sm"
 							onclick={askLaunch}
-							disabled={launching || previewing || conditions.length === 0 || experiment.app_requirement_ids.length === 0}
+							disabled={launching ||
+								previewing ||
+								conditions.length === 0 ||
+								experiment.app_requirement_ids.length === 0 ||
+								blockingErrors.length > 0}
 						>
 							{#if launching}<LoaderCircle class="animate-spin" />{:else}<Rocket />{/if}
 							Launch
@@ -844,19 +973,26 @@
 							<span class="text-xs text-muted-foreground">Add a condition first.</span>
 						{:else if experiment.app_requirement_ids.length === 0}
 							<span class="text-xs text-muted-foreground">This experiment has no apps.</span>
+						{:else if blockingErrors.length > 0}
+							<span class="text-xs text-danger-fg">Fix the blocking problems below, then preview again.</span>
 						{/if}
 					</div>
+
+					{@render blockingList()}
 
 					{#if previewResult}
 						<div class="rounded-md border bg-muted/30 p-3 text-sm tabular-nums">
 							<div class="flex flex-wrap gap-x-6 gap-y-1">
-								<span><span class="font-medium">{previewResult.total_jobs}</span> runs</span>
-								<span><span class="font-medium">{previewResult.conditions}</span> conditions</span>
-								<span><span class="font-medium">{previewResult.apps}</span> apps</span>
+								<span><span class="font-medium">{previewResult.total_jobs}</span> {plural(previewResult.total_jobs, 'run')}</span>
+								{#if previewResult.pending_jobs != null && previewResult.pending_jobs !== previewResult.total_jobs}
+									<span><span class="font-medium">{previewResult.pending_jobs}</span> still to run</span>
+								{/if}
+								<span><span class="font-medium">{previewResult.conditions}</span> {plural(previewResult.conditions, 'condition')}</span>
+								<span><span class="font-medium">{previewResult.apps}</span> {plural(previewResult.apps, 'app')}</span>
 								<span><span class="font-medium">{previewResult.repeats}</span>× repeats</span>
 								<span>
 									{previewResult.cost_estimate_kind === 'budget_upper_bound' ? 'cost cap (upper bound)' : 'est. cost'}
-									<span class="font-medium">{formatCost(previewResult.estimated_cost)}</span>
+									<span class="font-medium">{previewCost(previewResult)}</span>
 								</span>
 							</div>
 						</div>
@@ -896,8 +1032,19 @@
 													{#each compColumns as column (column.id)}
 														<td class={cn('px-2 py-1.5 font-mono', columnDiffers(column) && 'bg-warning/5')}>{column.cell(row)}</td>
 													{/each}
-													<td class="px-2 py-1.5 {row.problems.length ? 'text-warning-fg' : 'text-muted-foreground'}">
-														{row.problems.length ? row.problems.join('; ') : '—'}
+													<td class="min-w-[12rem] px-2 py-1.5">
+														{#if row.problems.length === 0}
+															<span class="text-muted-foreground">—</span>
+														{:else}
+															<ul class="space-y-0.5">
+																{#each row.problems as problem, i (i)}
+																	{@const blocking = row.errors?.includes(problem)}
+																	<li class={blocking ? 'text-danger-fg' : 'text-warning-fg'}>
+																		{#if blocking}<span class="font-medium">Blocks launch:</span>{' '}{/if}{problem}
+																	</li>
+																{/each}
+															</ul>
+														{/if}
 													</td>
 												</tr>
 											{/each}
@@ -920,7 +1067,9 @@
 											<tr>
 												<td class="px-2 py-1.5">{conditionById.has(row.condition_id) ? conditionLabel(conditionById.get(row.condition_id)!) : row.label}</td>
 												<td class="px-2 py-1.5 text-right tabular-nums">{row.jobs}</td>
-												<td class="px-2 py-1.5 text-right tabular-nums">{formatCost(row.estimated_cost)}</td>
+												<td class="px-2 py-1.5 text-right tabular-nums">
+													{formatUsd(row.estimated_cost)}
+												</td>
 											</tr>
 										{/each}
 									</tbody>
@@ -944,12 +1093,30 @@
 							{#if hasLiveRuns}Refreshes every {POLL_MS / 1000} s while runs are active.{/if}
 						</Card.Description>
 					</div>
-					<Button variant="outline" size="sm" onclick={() => refreshStatus()} disabled={statusLoading}>
-						{#if statusLoading}<LoaderCircle class="animate-spin" />{:else}<RefreshCw />{/if}
-						Refresh
-					</Button>
+					<div class="flex flex-wrap justify-end gap-2">
+						{#if experiment.status !== 'archived' && failedRuns > 0 && !hasLiveRuns}
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={askLaunch}
+								disabled={launching || previewing}
+								title="Create new runs for the failed and cancelled cells, with their original seeds"
+							>
+								{#if launching || previewing}<LoaderCircle class="animate-spin" />{:else}<Rocket />{/if}
+								Re-run failed
+							</Button>
+						{/if}
+						<Button variant="outline" size="sm" onclick={() => refreshStatus()} disabled={statusLoading}>
+							{#if statusLoading}<LoaderCircle class="animate-spin" />{:else}<RefreshCw />{/if}
+							Refresh
+						</Button>
+					</div>
 				</Card.Header>
 				<Card.Content class="space-y-4">
+					{@render blockingList()}
+					{#if launchError}
+						<ErrorAlert title="Launch failed" message={launchError} />
+					{/if}
 					{#if launchedBatch}
 						<p class="text-sm" role="status">
 							Launched as batch
@@ -973,7 +1140,7 @@
 								<StatusBadge status={s} label="{s.replace(/_/g, ' ')}: {count}" />
 							{/each}
 							<span class="text-xs text-muted-foreground tabular-nums">
-								{status.jobs_created} / {status.total_cells} runs · cost so far {formatCost(status.running_cost)}
+								{status.jobs_created} / {status.total_cells} runs · cost so far {formatUsd(status.running_cost)}
 							</span>
 						</div>
 						{#if progressGroups.length === 0}
@@ -1015,13 +1182,19 @@
 
 <ConfirmDialog
 	bind:open={launchConfirmOpen}
-	title={previewResult ? `Launch ${previewResult.total_jobs} runs?` : 'Launch the experiment?'}
+	title={!previewResult
+		? 'Launch the experiment?'
+		: isDraft
+			? `Launch ${launchRuns} ${plural(launchRuns, 'run')}?`
+			: `Re-run ${launchRuns} ${plural(launchRuns, 'cell')}?`}
 	description={previewResult
-		? `${previewResult.conditions} conditions × ${previewResult.apps} apps × ${previewResult.repeats} repeats. ${
-				previewResult.cost_estimate_kind === 'budget_upper_bound' ? 'Cost cap (upper bound)' : 'Estimated cost'
-			}: ${formatCost(previewResult.estimated_cost)}. The experiment's design is frozen once it launches.`
+		? isDraft
+			? `${previewResult.conditions} ${plural(previewResult.conditions, 'condition')} × ${previewResult.apps} ${plural(previewResult.apps, 'app')} × ${previewResult.repeats} ${plural(previewResult.repeats, 'repeat')}. ${
+					previewResult.cost_estimate_kind === 'budget_upper_bound' ? 'Cost cap (upper bound)' : 'Estimated cost'
+				}: ${previewCost(previewResult)} for the whole matrix. The experiment's design is frozen once it launches.`
+			: `Re-runs the ${launchRuns} failed or cancelled cell${launchRuns === 1 ? '' : 's'} with the seeds of their (app, repeat) cells. Completed runs are kept.`
 		: ''}
-	confirmLabel="Launch"
+	confirmLabel={isDraft ? 'Launch' : 'Re-run'}
 	busy={launching}
 	onConfirm={doLaunch}
 />

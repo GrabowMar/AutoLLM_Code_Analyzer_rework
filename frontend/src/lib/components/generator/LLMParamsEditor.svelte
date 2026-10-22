@@ -356,20 +356,20 @@
 {#snippet sectionToggle(open: boolean, label: string, count: number, toggle: () => void, controls: string)}
 	<button
 		type="button"
-		class="flex cursor-pointer items-center gap-1 rounded text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+		class="flex cursor-pointer items-start gap-1 rounded text-left text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
 		aria-expanded={open}
 		aria-controls={controls}
 		onclick={toggle}
 	>
-		<ChevronRight class={cn('size-3.5 transition-transform duration-150', open && 'rotate-90')} aria-hidden="true" />
+		<ChevronRight class={cn('mt-px size-3.5 shrink-0 transition-transform duration-150', open && 'rotate-90')} aria-hidden="true" />
 		{label}
 		{#if count > 0}
-			<span class="rounded-full bg-primary/15 px-1.5 text-[11px] text-primary">{count} set</span>
+			<span class="rounded-full bg-primary/15 px-1.5 text-[11px] text-success-fg">{count} set</span>
 		{/if}
 	</button>
 {/snippet}
 
-<div class="space-y-3" data-slot="llm-params-editor">
+<div class="@container/llm space-y-3" data-slot="llm-params-editor">
 	<div class="flex flex-wrap items-start justify-between gap-2">
 		{#if intro}
 			<p class="min-w-0 flex-1 text-xs text-muted-foreground">{intro}</p>
@@ -381,7 +381,7 @@
 		{/if}
 	</div>
 
-	<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+	<div class="grid gap-3 @md/llm:grid-cols-2 @3xl/llm:grid-cols-4">
 		{#each basicFields as field (field.key)}
 			{@render numberInput(field, false)}
 		{/each}
@@ -410,7 +410,7 @@
 			`${idPrefix}-more`
 		)}
 		{#if moreOpen}
-			<div id="{idPrefix}-more" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+			<div id="{idPrefix}-more" class="grid gap-3 @md/llm:grid-cols-2 @3xl/llm:grid-cols-4">
 				{#each moreFields as field (field.key)}
 					{@render numberInput(field, false)}
 				{/each}
@@ -429,7 +429,7 @@
 				`${idPrefix}-advanced`
 			)}
 			{#if advancedOpen}
-				<div id="{idPrefix}-advanced" class="grid gap-3 sm:grid-cols-2">
+				<div id="{idPrefix}-advanced" class="grid gap-3 @md/llm:grid-cols-2">
 					{#if showStopAndFormat}
 						<div class="min-w-0 space-y-1.5">
 							<Label class="text-xs" for="{idPrefix}-stop">Stop sequences</Label>
@@ -468,7 +468,7 @@
 						</div>
 					{/if}
 					{#if showProvider}
-						<div class={cn('min-w-0 space-y-1.5', showStopAndFormat && 'sm:col-span-2')}>
+						<div class={cn('min-w-0 space-y-1.5', showStopAndFormat && '@md/llm:col-span-2')}>
 							<Label class="text-xs" for="{idPrefix}-provider">Provider routing (JSON)</Label>
 							<Textarea
 								id="{idPrefix}-provider"

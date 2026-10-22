@@ -101,7 +101,18 @@ function formatWallClock(seconds: number): string {
   return `${Number.isInteger(minutes) ? minutes : minutes.toFixed(1)} min`;
 }
 
-/** "30 requests · 60 min · $3 · network none" — empty for platform defaults. */
+/** "$3", "$2.50", "$0.005": whole dollars stay short, cents always show two digits. */
+function formatCostCap(usd: number): string {
+  if (Number.isInteger(usd)) return `$${usd}`;
+  return `$${usd.toFixed(usd < 0.01 ? 3 : 2)}`;
+}
+
+const NETWORK_TEXT: Record<string, string> = {
+  none: "no network",
+  packages: "package registries only",
+};
+
+/** "30 requests · 60 min · $3 cap · no network" — empty for platform defaults. */
 export function summarizeBudget(
   config: BudgetPresetConfig | null | undefined,
 ): string {
@@ -111,10 +122,14 @@ export function summarizeBudget(
     parts.push(`${config.max_llm_requests} requests`);
   if (config.wall_clock_seconds != null)
     parts.push(formatWallClock(config.wall_clock_seconds));
-  if (config.max_cost_usd != null) parts.push(`$${config.max_cost_usd}`);
+  if (config.max_cost_usd != null)
+    parts.push(`${formatCostCap(config.max_cost_usd)} cap`);
   if (config.max_total_tokens != null)
     parts.push(`${formatTokens(config.max_total_tokens)} tokens`);
-  if (config.network_policy) parts.push(`network ${config.network_policy}`);
+  if (config.network_policy)
+    parts.push(
+      NETWORK_TEXT[config.network_policy] ?? `network ${config.network_policy}`,
+    );
   return parts.join(" · ");
 }
 

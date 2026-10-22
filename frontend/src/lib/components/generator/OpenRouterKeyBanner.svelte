@@ -72,7 +72,7 @@
 	});
 
 	const linkClass =
-		'font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 rounded';
+		'font-medium text-success-fg underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 rounded';
 </script>
 
 {#if resolved === 'loading'}

@@ -313,9 +313,9 @@ def launch(request, experiment_id: str):
             "code": "missing_api_key",
         }
     if not experiment.conditions.exists():
-        return 400, {"detail": "Add at least one condition (model x bundle) before launching."}
+        return 400, {"detail": "Add at least one condition before launching."}
     if not experiment.app_requirements.exists():
-        return 400, {"detail": "Add at least one app requirement before launching."}
+        return 400, {"detail": "Add at least one app spec before launching."}
     try:
         return launch_experiment(experiment, request.auth)
     except ExperimentError as exc:
