@@ -46,7 +46,7 @@
 		type PresetKind,
 		type RunPreset,
 	} from '$lib/api/generation';
-	import { invalidatePresets } from '$lib/components/generator';
+	import { invalidatePresets, refreshCatalog } from '$lib/components/generator';
 	import StacksList from '$lib/components/templates/StacksList.svelte';
 	import StackEditor from '$lib/components/templates/StackEditor.svelte';
 	import AppTemplateList from '$lib/components/templates/AppTemplateList.svelte';
@@ -285,8 +285,14 @@
 		starterPackagesLoading = false;
 	}
 
+	/** The generator pickers cache the app spec list; tell them it changed here. */
+	function appSpecsChanged() {
+		refreshCatalog('app-specs').catch(() => {});
+	}
+
 	async function refreshAllAssets() {
 		invalidatePresets();
+		appSpecsChanged();
 		await Promise.all([loadApp(), loadBlocks(), loadProfiles(), loadStacks(), loadPresets()]);
 	}
 
@@ -530,6 +536,7 @@
 			} else {
 				await createAppTemplate({ ...data, slug: appForm.slug.trim() });
 			}
+			appSpecsChanged();
 			cancelAppForm();
 			await loadApp();
 		} catch (e) {
@@ -545,6 +552,7 @@
 			confirmLabel: 'Delete app spec',
 			action: async () => {
 				await deleteAppTemplate(t.slug);
+				appSpecsChanged();
 				if (editingApp?.slug === t.slug) cancelAppForm();
 				await loadApp();
 			},
@@ -772,6 +780,7 @@
 							loading={stacksLoading}
 							compact={isEditingOrCreating}
 							activeSlug={editingStackSlug ?? duplicatingStackSlug}
+							canModerate={isStaff}
 							onEdit={startEditStack}
 							onDuplicate={startDuplicateStack}
 							onArchive={archiveStackRow}

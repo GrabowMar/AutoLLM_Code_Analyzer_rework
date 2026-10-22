@@ -1230,7 +1230,7 @@ export interface Stack {
   file_count: number;
   /** Builtin stacks are always usable; a user stack needs approval except for its owner. */
   is_approved: boolean;
-  /** The requester created it (only then may they edit or archive it). */
+  /** The requester created it (they, and staff, may edit or archive a user stack). */
   is_own?: boolean;
   dockerfile_mode: "bundled" | "generated";
   backend_base_image: string;

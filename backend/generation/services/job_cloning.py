@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from django.db import transaction
 
+from backend.generation.models import Experiment
+from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
 from backend.generation.services.agent.snapshot import apply_agent_snapshot_to_job
 from backend.generation.services.agent.snapshot import reseed_agent_snapshot
@@ -72,19 +74,49 @@ def _batch_cell_seed(original: GenerationJob) -> int | None:
     return batch_cell_seed(request["base_seed"], app.slug if app else None, original.repeat_index)
 
 
-def cell_taken_by(original: GenerationJob) -> GenerationJob | None:
-    """A live or completed job already filling *original*'s experiment cell, if any.
+class CellTakenError(Exception):
+    """The trial cell a retry would take over already has a live or completed job."""
 
-    A relaunch tops failed cells up and an earlier retry takes the cell
-    over; a second replacement would count as an extra trial of one
-    condition and unbalance the design.
+    def __init__(self, taken_by: GenerationJob) -> None:
+        self.taken_by = taken_by
+        super().__init__(
+            "This trial cell already has a live or completed run (a relaunch or an earlier retry); "
+            "another one would count as an extra trial",
+        )
+
+
+def cell_taken_by(original: GenerationJob) -> GenerationJob | None:
+    """A live or completed job already filling *original*'s trial cell, if any.
+
+    An experiment cell is (experiment, condition, app, repeat); an ad-hoc
+    batch cell is (batch, model, app or free-form task, trial, harness
+    preset for agent runs / profile for scaffolding). A relaunch tops
+    failed experiment cells up and an earlier retry takes a cell over; a
+    second replacement would count as an extra trial of one condition and
+    unbalance the design. Reruns and replays carry no repeat index, so they
+    never fill a cell.
     """
-    if original.experiment_id is None or original.condition_id is None or original.repeat_index is None:
+    if original.repeat_index is None:
+        return None
+    if original.experiment_id is not None:
+        if original.condition_id is None:
+            return None
+        cell: dict = {"experiment_id": original.experiment_id, "condition_id": original.condition_id}
+    elif original.batch_id is not None:
+        cell = {"batch_id": original.batch_id, "experiment_id": None, "model_id": original.model_id}
+        if original.mode == GenerationJob.Mode.AGENT:
+            cell["harness_preset_id"] = original.harness_preset_id
+            harness = (original.agent_config or {}).get("harness")
+            if original.harness_preset_id is None and harness:
+                # Pre-preset batches: the harness name is the condition.
+                cell["agent_config__harness"] = harness
+        elif original.mode == GenerationJob.Mode.SCAFFOLDING:
+            cell["profile_id"] = original.profile_id
+    else:
         return None
     return (
         GenerationJob.objects.filter(
-            experiment_id=original.experiment_id,
-            condition_id=original.condition_id,
+            **cell,
             app_requirement_id=original.app_requirement_id,
             repeat_index=original.repeat_index,
         )
@@ -92,6 +124,20 @@ def cell_taken_by(original: GenerationJob) -> GenerationJob | None:
         .exclude(status__in=(GenerationJob.Status.FAILED, GenerationJob.Status.CANCELLED))
         .first()
     )
+
+
+def _lock_cell(original: GenerationJob) -> None:
+    """Row-lock what owns *original*'s cell until the transaction ends, so concurrent retries serialize.
+
+    The batch row covers ad-hoc cells (and retries of one experiment job);
+    the experiment row covers an experiment cell whose earlier attempts sit
+    in different launch batches. Always experiment first, then batch, so
+    two retries cannot deadlock.
+    """
+    if original.experiment_id is not None:
+        Experiment.objects.select_for_update().filter(id=original.experiment_id).values_list("id").first()
+    if original.batch_id is not None:
+        GenerationBatch.objects.select_for_update().filter(id=original.batch_id).values_list("id").first()
 
 
 def clone_job(
@@ -121,9 +167,15 @@ def clone_job(
     join no experiment, so experiment reports, relaunch coverage and
     rankings never count them as trials. Preset provenance is always kept.
     The clone is created atomically: a snapshot that cannot be built leaves
-    no orphaned job.
+    no orphaned job. A cell takeover checks the cell under a row lock and
+    raises :class:`CellTakenError` when it is already filled.
     """
     with transaction.atomic():
+        if keep_cell:
+            _lock_cell(original)
+            taken_by = cell_taken_by(original)
+            if taken_by is not None:
+                raise CellTakenError(taken_by)
         new_job = GenerationJob.objects.create(
             mode=original.mode,
             created_by=user,

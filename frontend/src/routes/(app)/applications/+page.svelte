@@ -26,6 +26,7 @@
 	import JobCards from '$lib/components/applications/JobCards.svelte';
 	import { onMount, onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
+	import { formatApiError } from '$lib/api/core';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import AppWindow from '@lucide/svelte/icons/app-window';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
@@ -293,8 +294,8 @@
 			const newJob = await retryGenerationJob(id);
 			toast.success('Job retried — new job created');
 			goto(`/applications/${newJob.id}`);
-		} catch {
-			toast.error('Failed to retry job');
+		} catch (e) {
+			toast.error(formatApiError(e, 'Failed to retry job'));
 		}
 	}
 

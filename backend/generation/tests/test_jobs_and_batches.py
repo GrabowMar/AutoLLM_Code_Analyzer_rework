@@ -59,6 +59,7 @@ def _model(**kw):
 
 
 def _app(slug=None, **kw):
+    kw.setdefault("is_default", True)  # a catalog spec: usable by every user
     return AppRequirementTemplateFactory(
         slug=slug or f"notes-{uuid.uuid4().hex[:6]}",
         description="",

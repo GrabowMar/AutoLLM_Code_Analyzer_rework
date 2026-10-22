@@ -85,6 +85,11 @@ export interface PresetPins {
   budget: PresetRef | null;
   /** Scaffolding: the exact profile version (kept selectable when it is not the latest). */
   profile?: GenerationProfile | null;
+  /**
+   * Scaffolding: the batch whose runs name the selected profile's slug, when
+   * reading it failed while preparing (the composer reads it again).
+   */
+  profileBatchId?: string | null;
 }
 
 export const NO_PINS: PresetPins = { sampling: null, budget: null };

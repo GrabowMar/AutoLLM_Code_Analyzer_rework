@@ -1,9 +1,11 @@
 <script lang="ts">
 	/**
-	 * StacksList — stack cards. Every stack can be duplicated; only your own user
-	 * stacks can be edited (new version) and archived — another user's approved
-	 * stack is listed (you may run it) but the server refuses changes to it. A
-	 * user stack awaiting approval runs only for its owner.
+	 * StacksList — stack cards. Every stack can be duplicated; user stacks can
+	 * be edited (new version) and archived by their owner and by staff
+	 * (`canModerate`), as the server allows — anyone else sees another user's
+	 * approved stack listed (they may run it) without those actions. Builtin
+	 * stacks are shipped code: never edited or archived. A user stack awaiting
+	 * approval runs only for its owner.
 	 */
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -20,15 +22,26 @@
 		loading: boolean;
 		compact: boolean;
 		activeSlug?: string | null;
+		/** Staff: may edit and archive every user stack, not only their own. */
+		canModerate?: boolean;
 		onEdit?: (s: Stack) => void;
 		onDuplicate?: (s: Stack) => void;
 		onArchive?: (s: Stack) => void;
 	}
-	let { stacks, loading, compact, activeSlug = null, onEdit, onDuplicate, onArchive }: Props = $props();
+	let {
+		stacks,
+		loading,
+		compact,
+		activeSlug = null,
+		canModerate = false,
+		onEdit,
+		onDuplicate,
+		onArchive,
+	}: Props = $props();
 
 	// `is_own` is newer than some API responses: a missing field means "not yours".
 	function canChange(stack: Stack): boolean {
-		return !stack.is_builtin && (stack as Stack & { is_own?: boolean }).is_own === true;
+		return !stack.is_builtin && ((stack as Stack & { is_own?: boolean }).is_own === true || canModerate);
 	}
 </script>
 
@@ -53,7 +66,8 @@
 							</h3>
 							<p class="font-mono text-[11px] text-muted-foreground">{stack.slug}@v{stack.version}</p>
 						</div>
-						<Badge variant={stack.has_frontend ? 'default' : 'secondary'} class="shrink-0 {stack.has_frontend ? 'text-success-fg' : ''}">
+						<!-- Outline, not the tinted default variant: green-on-tint is under 4.5:1 in light mode. -->
+						<Badge variant={stack.has_frontend ? 'outline' : 'secondary'} class="shrink-0 {stack.has_frontend ? 'text-success-fg' : ''}">
 							{stack.has_frontend ? 'full-stack' : 'backend-only'}
 						</Badge>
 					</div>

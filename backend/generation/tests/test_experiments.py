@@ -24,7 +24,7 @@ def auth_client(client):
 
 
 def _create_scaffolding_batch(client, *, trials: int | None = None, **overrides):
-    app_req = AppRequirementTemplateFactory()
+    app_req = AppRequirementTemplateFactory(is_default=True)
     models = [LLMModelFactory(), LLMModelFactory()]
     payload = {
         "stack_slug": "flask-react",
