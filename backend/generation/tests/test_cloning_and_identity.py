@@ -8,7 +8,10 @@ import uuid
 from unittest import mock
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
+from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
 from backend.generation.models import GenerationProfile
 from backend.generation.models import RunPreset
@@ -17,8 +20,11 @@ from backend.generation.services.agent.config import validate_agent_config
 from backend.generation.services.agent.snapshot import build_agent_snapshot
 from backend.generation.services.agent.snapshot import reseed_agent_snapshot
 from backend.generation.services.experiments import launch_experiment
+from backend.generation.services.job_cloning import CellTakenError
 from backend.generation.services.job_cloning import cell_seed
+from backend.generation.services.job_cloning import cell_taken_by
 from backend.generation.services.job_cloning import clone_job
+from backend.generation.services.profile_resolver import apply_snapshot_to_job
 from backend.generation.services.profile_resolver import batch_cell_seed
 from backend.generation.services.profile_resolver import build_resolved_snapshot
 from backend.generation.services.profile_resolver import derive_experiment_seed
@@ -106,6 +112,23 @@ def _agent_experiment(user, *, base_seed=123, repeats=1):
 def _launch(experiment, user):
     with mock.patch(LAUNCH_DISPATCH):
         return launch_experiment(experiment, user)
+
+
+def _scaffolding_experiment(user, *, base_seed):
+    """Two conditions (models) on the seeded system profile, one app, one repeat."""
+    profile = GenerationProfile.objects.filter(slug="system-scaffolding-standard").order_by("-version").first()
+    assert profile is not None, "system-scaffolding-standard must be auto-seeded"
+    experiment = ExperimentFactory(created_by=user, mode="scaffolding", repeats=1, base_seed=base_seed)
+    app = _app()
+    experiment.app_requirements.set([app])
+    c1 = ExperimentConditionFactory(experiment=experiment, model=_model(), profile=profile)
+    c2 = ExperimentConditionFactory(experiment=experiment, model=_model(), profile=profile)
+    return experiment, app, c1, c2
+
+
+def _batch_job(batch, user, **kw):
+    kw.setdefault("status", S.FAILED)
+    return GenerationJob.objects.create(created_by=user, batch=batch, **kw)
 
 
 # ── which clones join the experiment cell ────────────────────────────
@@ -230,6 +253,129 @@ class TestCloneCells:
             retry_res = client.post(f"{API}/jobs/{jobs[1].id}/retry/")
         retry = GenerationJob.objects.get(id=retry_res.json()["id"])
         assert (retry.batch_id, retry.repeat_index, retry.experiment_seed) == (jobs[1].batch_id, 0, paired)
+
+    def test_ad_hoc_batch_cell_takes_one_retry(self, user_client):
+        client, _user = user_client
+        app, model = _app(), _model()
+        res = _post(
+            client,
+            "/jobs/agent/",
+            {"app_requirement_ids": [app.id], "model_ids": [model.id], "base_seed": 5, "trials": 2},
+        )
+        assert res.status_code == 200, res.content
+        batch_id = res.json()["batch_id"]
+        failed = GenerationJob.objects.get(batch_id=batch_id, repeat_index=0)
+        GenerationJob.objects.filter(id=failed.id).update(status=S.FAILED)
+
+        with mock.patch(JOBS_DISPATCH) as dispatch:
+            first = client.post(f"{API}/jobs/{failed.id}/retry/")
+            second = client.post(f"{API}/jobs/{failed.id}/retry/")
+        assert first.status_code == 200, first.content
+        assert second.status_code == 400
+        assert "extra trial" in second.json()["message"]
+        dispatch.assert_called_once()
+        assert GenerationJob.objects.filter(batch_id=batch_id, repeat_index=0).count() == 2
+        assert GenerationBatch.objects.get(id=batch_id).total_jobs == 3
+
+        # Once the replacement has failed too, the cell is open again.
+        GenerationJob.objects.filter(id=first.json()["id"]).update(status=S.FAILED)
+        with mock.patch(JOBS_DISPATCH):
+            assert client.post(f"{API}/jobs/{failed.id}/retry/").status_code == 200
+
+    def test_ad_hoc_cells_are_model_task_trial_and_condition(self):
+        user = UserFactory()
+        batch = GenerationBatch.objects.create(name="b", mode="agent", created_by=user)
+        app, other_app = _app(), _app()
+        m1, m2 = _model(), _model()
+        p1 = preset_service.system_default_preset("harness", "opencode")
+        p2 = preset_service.system_default_preset("harness", "aider")
+        cell = {"mode": "agent", "model": m1, "app_requirement": app, "repeat_index": 0, "harness_preset": p1}
+        failed = _batch_job(batch, user, **cell)
+        assert cell_taken_by(failed) is None
+        # Another model, task, trial or harness preset is another cell.
+        for change in ({"model": m2}, {"app_requirement": other_app}, {"repeat_index": 1}, {"harness_preset": p2}):
+            _batch_job(batch, user, **{**cell, **change, "status": S.PENDING})
+        # So are reruns (no repeat index), failed / cancelled attempts and other batches.
+        _batch_job(batch, user, **{**cell, "repeat_index": None, "status": S.COMPLETED})
+        _batch_job(batch, user, **{**cell, "status": S.CANCELLED})
+        other_batch = GenerationBatch.objects.create(name="o", mode="agent", created_by=user)
+        _batch_job(other_batch, user, **{**cell, "status": S.COMPLETED})
+        assert cell_taken_by(failed) is None
+
+        live = _batch_job(batch, user, **{**cell, "status": S.RUNNING})
+        assert cell_taken_by(failed) == live
+
+        # A free-form task (no app spec) is its own cell; scaffolding cells are per profile.
+        task = _batch_job(batch, user, **{**cell, "app_requirement": None})
+        assert cell_taken_by(task) is None
+        scaffolding = {"mode": "scaffolding", "model": m1, "app_requirement": app, "repeat_index": 0}
+        profile_a, profile_b = GenerationProfileFactory(), GenerationProfileFactory()
+        failed_a = _batch_job(batch, user, **scaffolding, profile=profile_a)
+        _batch_job(batch, user, **scaffolding, profile=profile_b, status=S.COMPLETED)
+        assert cell_taken_by(failed_a) is None
+        done_a = _batch_job(batch, user, **scaffolding, profile=profile_a, status=S.COMPLETED)
+        assert cell_taken_by(failed_a) == done_a
+
+    def test_the_cell_check_runs_under_a_batch_row_lock(self, user_client):
+        client, user = user_client
+        app, model = _app(), _model()
+        res = _post(client, "/jobs/agent/", {"app_requirement_ids": [app.id], "model_ids": [model.id], "trials": 1})
+        failed = GenerationJob.objects.get(batch_id=res.json()["batch_id"])
+        GenerationJob.objects.filter(id=failed.id).update(status=S.FAILED)
+        failed.refresh_from_db()
+
+        with CaptureQueriesContext(connection) as queries:
+            clone_job(failed, user, reuse_snapshot=False, new_seed=True, keep_cell=True)
+        sql = [q["sql"] for q in queries.captured_queries]
+        lock = next(i for i, q in enumerate(sql) if "FOR UPDATE" in q and GenerationBatch._meta.db_table in q)
+        insert = next(i for i, q in enumerate(sql) if q.startswith(f'INSERT INTO "{GenerationJob._meta.db_table}"'))
+        assert lock < insert
+        # The service refuses the second takeover itself, whatever the caller checked before.
+        with pytest.raises(CellTakenError):
+            clone_job(failed, user, reuse_snapshot=False, new_seed=True, keep_cell=True)
+
+    def test_launch_reads_covered_cells_under_the_experiment_row_lock(self, user_client):
+        # The lock clone_job takes first: a concurrent retry and a top-up can't both fill a cell.
+        _client, user = user_client
+        experiment, *_ = _agent_experiment(user)
+        with CaptureQueriesContext(connection) as queries:
+            _launch(experiment, user)
+        sql = [q["sql"] for q in queries.captured_queries]
+        table = experiment._meta.db_table
+        lock = next(i for i, q in enumerate(sql) if "FOR UPDATE" in q and f'FROM "{table}"' in q)
+        insert = next(i for i, q in enumerate(sql) if q.startswith(f'INSERT INTO "{GenerationJob._meta.db_table}"'))
+        assert lock < insert
+
+    def test_scaffolding_cell_seed_is_shared_by_launch_retry_and_top_up(self, user_client):
+        client, user = user_client
+        experiment, app, c1, c2 = _scaffolding_experiment(user, base_seed=4321)
+
+        def flaky_snapshot(job, **kw):
+            if job.condition_id == c2.id:
+                msg = "transient"
+                raise RuntimeError(msg)
+            return apply_snapshot_to_job(job, **kw)
+
+        with mock.patch("backend.generation.services.experiments.apply_snapshot_to_job", side_effect=flaky_snapshot):
+            _launch(experiment, user)
+        broken = experiment.jobs.get(condition=c2)
+        assert (broken.status, broken.experiment_seed) == (S.FAILED, None)
+        # Scaffolding keeps its historical per-condition derivation: existing experiments keep their seeds.
+        seed_x = derive_experiment_seed(4321, c2.id, app.id, 0)
+        assert cell_seed(broken) == seed_x
+        assert experiment.jobs.get(condition=c1).experiment_seed == derive_experiment_seed(4321, c1.id, app.id, 0)
+
+        with mock.patch(JOBS_DISPATCH):
+            res = client.post(f"{API}/jobs/{broken.id}/retry/")
+        assert res.status_code == 200, res.content
+        retry = GenerationJob.objects.get(id=res.json()["id"])
+        assert (retry.condition_id, retry.repeat_index) == (c2.id, 0)
+        assert retry.experiment_seed == retry.resolved_bundle["seed"] == seed_x
+
+        GenerationJob.objects.filter(id=retry.id).update(status=S.FAILED)
+        _launch(experiment, user)  # the relaunch tops the cell up
+        top_up = experiment.jobs.filter(condition=c2).exclude(id__in=(broken.id, retry.id)).get()
+        assert top_up.experiment_seed == top_up.resolved_bundle["seed"] == seed_x
 
     def test_custom_retry_keeps_the_explicit_seed(self, user_client):
         client, user = user_client
@@ -399,12 +545,32 @@ class TestAppSpecVisibility:
         client.force_login(owner)
         assert _post(client, "/jobs/agent/preview/", body).status_code == 200
 
-    def test_catalog_and_ownerless_specs_stay_usable(self, user_client):
+    def test_catalog_specs_stay_usable(self, user_client):
         client, _user = user_client
-        model = _model()
-        for spec in (_app(), _app(is_default=False)):
-            res = _post(client, "/jobs/agent/preview/", {"app_requirement_ids": [spec.id], "model_ids": [model.id]})
-            assert res.status_code == 200, res.content
+        res = _post(client, "/jobs/agent/preview/", {"app_requirement_ids": [_app().id], "model_ids": [_model().id]})
+        assert res.status_code == 200, res.content
+
+    def test_a_deleted_owners_private_spec_is_unknown_to_everyone_else(self, client):
+        owner = UserFactory()
+        private = _app(is_default=False, created_by=owner, description="TOP SECRET SPEC")
+        owner.delete()  # created_by is SET_NULL: the spec loses its owner, not its privacy
+        private.refresh_from_db()
+        assert private.created_by_id is None
+        body = {"app_requirement_ids": [private.id], "model_ids": [_model().id]}
+
+        client.force_login(UserFactory())
+        assert _post(client, "/jobs/agent/preview/", body).status_code == 404
+        assert _post(client, "/jobs/agent/", body).status_code == 404
+        assert _post(client, "/jobs/scaffolding/", body).status_code == 404
+        experiment = client.post(
+            f"{API}/experiments/",
+            data=json.dumps({"name": "Leak", "slug": "leak", "app_requirement_ids": [private.id]}),
+            content_type="application/json",
+        )
+        assert experiment.status_code == 404
+        assert client.get(f"{API}/app-specs/{private.slug}/").status_code == 404
+        assert private.slug not in {spec["slug"] for spec in client.get(f"{API}/app-specs/").json()}
+        assert not GenerationJob.objects.filter(app_requirement=private).exists()
 
 
 # ── unknown parameter support ────────────────────────────────────────
@@ -477,6 +643,20 @@ def test_batch_summary_exposes_the_request(user_client):
     assert listed["request"]["base_seed"] == 31
 
 
+@pytest.mark.parametrize("agent", [True, False])
+def test_experiment_cell_seed_matches_the_historical_launch_formula(agent):
+    """Launches derive seeds through experiment_cell_seed; the seeds of existing experiments must not move."""
+    for base_seed, condition_id, app_id, repeat in ((0, 1, 1, 0), (123, 7, 42, 2), (2_147_483_646, 999, 3, 19)):
+        parts = (app_id, repeat) if agent else (condition_id, app_id, repeat)
+        assert experiment_cell_seed(
+            base_seed,
+            agent=agent,
+            condition_id=condition_id,
+            app_id=app_id,
+            repeat_index=repeat,
+        ) == derive_experiment_seed(base_seed, *parts)
+
+
 class TestOwnDefaultProfile:
     def test_own_default_for_a_stack_wins_over_the_system_default(self):
         user, other = UserFactory(), UserFactory()
@@ -503,6 +683,19 @@ class TestOwnDefaultProfile:
             created_by=user,
         )
         assert get_default_profile(scaffolding_slug="flask-react", user=user) == system
+
+    def test_a_default_moved_to_another_stack_stops_winning_for_the_old_one(self):
+        user = UserFactory()
+        system = get_default_profile(scaffolding_slug="flask-react", user=user)
+        fastapi_system = get_default_profile(scaffolding_slug="fastapi-react", user=user)
+        own = {"slug": "my-default", "is_system": False, "is_default": True, "created_by": user}
+        GenerationProfileFactory(**own, version=1, scaffolding_slug="flask-react")
+        moved = GenerationProfileFactory(**own, version=2, scaffolding_slug="fastapi-react")
+
+        # v1 still says "default for flask-react", but it is not the latest version any more.
+        assert get_default_profile(scaffolding_slug="flask-react", user=user) == system
+        assert get_default_profile(scaffolding_slug="fastapi-react", user=user) == moved
+        assert moved != fastapi_system
 
 
 def test_stacks_say_which_ones_are_the_requesters(user_client):

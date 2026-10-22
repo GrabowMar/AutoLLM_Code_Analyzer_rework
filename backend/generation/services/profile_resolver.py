@@ -240,17 +240,21 @@ def suggest_profile_for_app(
 
 
 def _own_stack_default(qs, scaffolding_slug: str, user: AbstractUser | None) -> GenerationProfile | None:
-    """The latest version of the user's own profile marked default for *scaffolding_slug*.
+    """The user's own profile whose latest version is the default for *scaffolding_slug*.
 
-    Only latest versions count: unticking "default" in a new version must
-    not let an older version that had it keep winning.
+    Only latest versions count, whatever stack they target: unticking
+    "default" in a new version, or moving the profile to another stack,
+    must not let an older version keep winning for the old stack.
     """
     if not (user and getattr(user, "is_authenticated", False)):
         return None
     latest: dict[str, GenerationProfile] = {}
-    for profile in qs.filter(scaffolding_slug=scaffolding_slug, is_system=False, created_by=user):
+    for profile in qs.filter(is_system=False, created_by=user):
         latest.setdefault(profile.slug, profile)  # qs is ordered slug, -version
-    return next((p for p in latest.values() if p.is_default), None)
+    return next(
+        (p for p in latest.values() if p.is_default and p.scaffolding_slug == scaffolding_slug),
+        None,
+    )
 
 
 def get_default_profile(

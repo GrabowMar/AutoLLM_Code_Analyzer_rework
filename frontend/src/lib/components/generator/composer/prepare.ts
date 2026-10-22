@@ -94,6 +94,50 @@ async function fetchPreset(
   }
 }
 
+type PresetLookup =
+  | { status: "none" }
+  | { status: "found"; preset: RunPreset }
+  | { status: "missing" }
+  | { status: "error"; message: string };
+
+/** One preset by id, telling a 404 (gone) apart from a failed request. */
+async function lookupPreset(
+  id: number | null | undefined,
+): Promise<PresetLookup> {
+  if (id == null) return { status: "none" };
+  try {
+    return { status: "found", preset: await getRunPreset(id) };
+  } catch (e) {
+    if (isNotFoundError(e)) return { status: "missing" };
+    return { status: "error", message: formatApiError(e, "request failed") };
+  }
+}
+
+function foundPreset(lookup: PresetLookup): RunPreset | null {
+  return lookup.status === "found" ? lookup.preset : null;
+}
+
+/**
+ * The preset id a batch ran with stays in the draft whatever its lookup
+ * said: the composer's preset tracking drops it only on a 404, so a
+ * transient failure here never swaps the batch's preset for the default.
+ */
+function keptPresetId(
+  id: number | null | undefined,
+  lookup: PresetLookup,
+  label: string,
+  problems: string[],
+): number | null {
+  if (id == null) return null;
+  if (lookup.status === "missing")
+    problems.push(`its ${label} preset no longer exists`);
+  else if (lookup.status === "error")
+    problems.push(
+      `its ${label} preset couldn't be loaded (${lookup.message}); it stays selected`,
+    );
+  return id;
+}
+
 function presetRef(preset: RunPreset | null): PresetRef | null {
   return preset
     ? { id: preset.id, slug: preset.slug, version: preset.version }
@@ -114,7 +158,18 @@ export async function lookupProfileVersion(
   id: number,
   slug: string | null | undefined,
 ): Promise<ProfileLookup> {
-  if (!slug) return { status: "missing" };
+  if (!slug) {
+    // Without the slug only latest versions can be checked; not finding the id
+    // there says nothing about an older version, so keep it rather than drop it.
+    try {
+      const row = (await getGenerationProfiles()).find((p) => p.id === id);
+      return row
+        ? { status: "found", profile: row }
+        : { status: "error", message: "its version could not be identified" };
+    } catch (e) {
+      return { status: "error", message: formatApiError(e, "request failed") };
+    }
+  }
   try {
     const row = (await getProfileVersions(slug)).find((p) => p.id === id);
     return row ? { status: "found", profile: row } : { status: "missing" };
@@ -122,6 +177,51 @@ export async function lookupProfileVersion(
     if (isNotFoundError(e)) return { status: "missing" };
     return { status: "error", message: formatApiError(e, "request failed") };
   }
+}
+
+export type SlugLookup =
+  | { status: "found"; slug: string }
+  | { status: "none" }
+  | { status: "error"; message: string };
+
+/**
+ * The slug of the profile a batch's runs used ("slug@v" on the runs): an
+ * older version can only be looked up by it. `none`: no run records one;
+ * `error`: the runs couldn't be loaded, which says nothing about the profile.
+ */
+export async function batchProfileSlug(batchId: string): Promise<SlugLookup> {
+  try {
+    const ref = (await getGenerationBatchJobs(batchId)).find(
+      (j) => j.profile_ref,
+    )?.profile_ref;
+    if (!ref) return { status: "none" };
+    const at = ref.lastIndexOf("@");
+    return { status: "found", slug: at > 0 ? ref.slice(0, at) : ref };
+  } catch (e) {
+    return { status: "error", message: formatApiError(e, "request failed") };
+  }
+}
+
+/**
+ * {@link lookupProfileVersion} for a profile whose slug may be unknown: the
+ * slug is then read from `batchId`'s runs. A failure to read them is an
+ * error (the profile stays selected), not "missing". Returns the slug found.
+ */
+export async function lookupBatchProfileVersion(
+  id: number,
+  slug: string | null,
+  batchId: string | null,
+): Promise<{ lookup: ProfileLookup; slug: string | null }> {
+  if (slug || !batchId)
+    return { lookup: await lookupProfileVersion(id, slug), slug };
+  const fromRuns = await batchProfileSlug(batchId);
+  if (fromRuns.status === "error")
+    return {
+      lookup: { status: "error", message: fromRuns.message },
+      slug: null,
+    };
+  const found = fromRuns.status === "found" ? fromRuns.slug : null;
+  return { lookup: await lookupProfileVersion(id, found), slug: found };
 }
 
 function warningFrom(problems: string[]): string {
@@ -392,14 +492,18 @@ export async function draftFromBatch(
   const wantedApps = numberIds(request.app_requirement_ids);
   const wantedModels = numberIds(request.model_ids);
 
-  const [models, specs, sampling, budget] = await Promise.all([
+  const [models, specs, samplingLookup, budgetLookup] = await Promise.all([
     loadModelCatalog().catch(() => null),
     wantedApps.length
       ? loadAppSpecCatalog().catch(() => null)
       : Promise.resolve([]),
-    fetchPreset(request.sampling_preset_id),
-    mode === "agent" ? fetchPreset(request.budget_preset_id) : null,
+    lookupPreset(request.sampling_preset_id),
+    mode === "agent"
+      ? lookupPreset(request.budget_preset_id)
+      : Promise.resolve<PresetLookup>({ status: "none" }),
   ]);
+  const sampling = foundPreset(samplingLookup);
+  const budget = foundPreset(budgetLookup);
 
   let modelIds = wantedModels;
   if (!models) problems.push("the model catalog didn't load");
@@ -421,8 +525,12 @@ export async function draftFromBatch(
         `${gone} app spec${gone === 1 ? " no longer exists" : "s no longer exist"}`,
       );
   }
-  if (request.sampling_preset_id != null && !sampling)
-    problems.push("its sampling preset couldn't be loaded");
+  const samplingPresetId = keptPresetId(
+    request.sampling_preset_id,
+    samplingLookup,
+    "sampling",
+    problems,
+  );
 
   const trials =
     typeof request.trials === "number" &&
@@ -436,25 +544,34 @@ export async function draftFromBatch(
 
   if (mode === "scaffolding") {
     let profileId = request.profile_id ?? null;
+    let profileSlug: string | null = null;
     let pinnedProfile: GenerationProfile | null = null;
+    // Set when the slug couldn't be read: the composer reads it from the runs again.
+    let profileBatchId: string | null = null;
     if (profileId != null) {
       const id = profileId;
       const latest = await getGenerationProfilesSafe();
       pinnedProfile = latest?.find((p) => p.id === id) ?? null;
       if (!pinnedProfile) {
         // An older version: its slug is on the batch's runs ("slug@v").
-        const slug = await batchProfileSlug(batch.id);
-        const found = await lookupProfileVersion(id, slug);
-        if (found.status === "found") pinnedProfile = found.profile;
-        else if (found.status === "missing") {
+        const { lookup, slug } = await lookupBatchProfileVersion(
+          id,
+          null,
+          batch.id,
+        );
+        profileSlug = slug;
+        if (lookup.status === "found") pinnedProfile = lookup.profile;
+        else if (lookup.status === "missing") {
           problems.push(
             `its prompt profile ${slug ?? `#${id}`} no longer exists, so Auto is used`,
           );
           profileId = null;
+          profileSlug = null;
         } else {
           problems.push(
-            `its prompt profile couldn't be loaded (${found.message}); it stays selected`,
+            `its prompt profile ${slug ?? `#${id}`} couldn't be loaded (${lookup.message}); it stays selected`,
           );
+          if (!slug) profileBatchId = batch.id;
         }
       }
     }
@@ -469,9 +586,9 @@ export async function draftFromBatch(
       appIds,
       stackSlug,
       profileId,
-      profileSlug: pinnedProfile?.slug ?? null,
+      profileSlug: pinnedProfile?.slug ?? profileSlug,
       modelIds,
-      samplingPresetId: sampling?.id ?? null,
+      samplingPresetId,
       llmParams,
       trials,
     };
@@ -482,6 +599,7 @@ export async function draftFromBatch(
         ...NO_PINS,
         sampling: presetRef(sampling),
         profile: pinnedProfile,
+        profileBatchId,
       },
       notice: `The grid of batch ${shortId} is loaded: ${appIds.length} app spec${appIds.length === 1 ? "" : "s"} × ${modelIds.length} model${modelIds.length === 1 ? "" : "s"} × ${trials} trial${trials === 1 ? "" : "s"}, with its stack, profile and settings.`,
       warning: warningFrom(problems),
@@ -506,15 +624,18 @@ export async function draftFromBatch(
     stackSlug,
     modelIds,
     harnessPresetIds,
-    samplingPresetId: sampling?.id ?? null,
+    samplingPresetId,
     llmParams: agentLLM,
-    budgetPresetId: budget?.id ?? null,
+    budgetPresetId: keptPresetId(
+      request.budget_preset_id,
+      budgetLookup,
+      "budget",
+      problems,
+    ),
     agentConfig: cleanAgentOverrides(request.agent_config),
     trials,
     baseSeed: request.base_seed == null ? null : randomSeed(),
   };
-  if (request.budget_preset_id != null && !budget)
-    problems.push("its budget preset couldn't be loaded");
   const runs =
     (appIds.length || (description ? 1 : 0)) *
     modelIds.length *
@@ -531,19 +652,6 @@ export async function draftFromBatch(
         : "New base seed: the runs are new trials, not replays."),
     warning: warningFrom(problems),
   };
-}
-
-async function batchProfileSlug(batchId: string): Promise<string | null> {
-  try {
-    const ref = (await getGenerationBatchJobs(batchId)).find(
-      (j) => j.profile_ref,
-    )?.profile_ref;
-    if (!ref) return null;
-    const at = ref.lastIndexOf("@");
-    return at > 0 ? ref.slice(0, at) : ref;
-  } catch {
-    return null;
-  }
 }
 
 async function getGenerationProfilesSafe(): Promise<

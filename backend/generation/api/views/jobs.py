@@ -43,7 +43,7 @@ from backend.generation.services.batches import experiment_batch_q
 from backend.generation.services.batches import refresh_batch
 from backend.generation.services.dispatcher import dispatch_evaluation
 from backend.generation.services.dispatcher import dispatch_job
-from backend.generation.services.job_cloning import cell_taken_by
+from backend.generation.services.job_cloning import CellTakenError
 from backend.generation.services.job_cloning import clone_job
 from backend.generation.services.job_listing import job_list_item
 from backend.generation.services.job_listing import with_list_fields
@@ -250,12 +250,11 @@ def retry_job(request, job_id: str):
     original = _load_job_for_cloning(request, job_id)
     if original.status not in ("failed", "cancelled"):
         return 400, {"message": "Only failed or cancelled jobs can be retried"}
-    if cell_taken_by(original) is not None:
-        return 400, {
-            "message": "This experiment cell already has a live or completed run (a relaunch or an earlier "
-            "retry); another one would count as an extra trial",
-        }
-    new_job = clone_job(original, request.auth, reuse_snapshot=False, new_seed=True, keep_cell=True)
+    try:
+        # The cell check runs inside the clone's transaction, under a row lock.
+        new_job = clone_job(original, request.auth, reuse_snapshot=False, new_seed=True, keep_cell=True)
+    except CellTakenError as exc:
+        return 400, {"message": str(exc)}
     return _dispatch_and_serialize(new_job)
 
 
