@@ -70,6 +70,7 @@ def _app(slug="notes"):
     return AppRequirementTemplateFactory(
         slug=slug,
         name="Notes",
+        is_default=True,  # a catalog spec: visible to every user (the API refuses hidden ones)
         description="",
         backend_requirements=["Notes have a title"],
         api_endpoints=[

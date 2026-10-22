@@ -230,6 +230,9 @@ def _summary(
         "graded": bool(agg.get("app_count")),
         "mean_pass_rate": round(float(mean), 4) if mean is not None else None,
         "experiment": {"id": experiment.id, "name": experiment.name} if experiment is not None else None,
+        # What the batch was created from (seed, presets, apps, models, overrides):
+        # lets a client set up the same grid again.
+        "request": request,
     }
 
 

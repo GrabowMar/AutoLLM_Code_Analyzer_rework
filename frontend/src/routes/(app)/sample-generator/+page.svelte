@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { onDestroy, untrack } from 'svelte';
+	import { beforeNavigate, goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { MediaQuery } from 'svelte/reactivity';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -80,24 +80,42 @@
 	const showMessages = $derived(!!prepared && dismissedFor !== prepared && !!(prepared.notice || prepared.warning));
 
 	function sourceKey(source: ComposerSource): string {
-		return JSON.stringify([source.mode, source.modelSlug, source.appSlug, source.fromJobId]);
+		return JSON.stringify([source.mode, source.modelSlug, source.appSlug, source.fromJobId, source.fromBatchId ?? null]);
 	}
 
-	// One-shot params (?model, ?app, ?from_job) are consumed: the URL keeps only
-	// the mode, and the draft (sessionStorage) carries the selection from here on.
+	// One-shot params (?model, ?app, ?from_job, ?from_batch) are consumed: the URL
+	// keeps only the mode, and the draft (sessionStorage) carries the selection.
 	function settleUrl(next: ComposerMode) {
-		appliedKey = sourceKey({ mode: next, modelSlug: null, appSlug: null, fromJobId: null });
+		// A prepare that finished after the user left must not pull them back.
+		if (page.url.pathname !== '/sample-generator') return;
+		appliedKey = sourceKey({ mode: next, modelSlug: null, appSlug: null, fromJobId: null, fromBatchId: null });
 		const search = page.url.search;
 		if (search === `?mode=${next}` || (search === '' && next === 'agent')) return;
 		void goto(`/sample-generator?mode=${next}`, { replaceState: true, noScroll: true, keepFocus: true });
 	}
 
-	async function open(source: ComposerSource, invalidFromJob: string | null) {
+	function currentSource(): ComposerSource {
+		return {
+			mode: data.mode,
+			modelSlug: data.modelSlug,
+			appSlug: data.appSlug,
+			fromJobId: data.fromJobId,
+			fromBatchId: data.fromBatchId,
+		};
+	}
+
+	function invalidIdWarning(): string {
+		if (data.invalidFromBatch) return `“${data.invalidFromBatch}” is not a batch id.`;
+		if (data.invalidFromJob) return `“${data.invalidFromJob}” is not a job id.`;
+		return '';
+	}
+
+	async function open(source: ComposerSource, invalidWarning: string) {
 		const mine = ++token;
-		if (!source.fromJobId && !source.modelSlug && !source.appSlug) {
+		if (!source.fromJobId && !source.fromBatchId && !source.modelSlug && !source.appSlug) {
 			preparing = false;
 			const stored = storedComposer(source.mode);
-			prepared = invalidFromJob ? { ...stored, warning: `“${invalidFromJob}” is not a job id.` } : stored;
+			prepared = invalidWarning ? { ...stored, warning: invalidWarning } : stored;
 			settleUrl(source.mode);
 			return;
 		}
@@ -113,17 +131,26 @@
 	}
 
 	$effect(() => {
-		const source: ComposerSource = {
-			mode: data.mode,
-			modelSlug: data.modelSlug,
-			appSlug: data.appSlug,
-			fromJobId: data.fromJobId,
-		};
-		const invalidFromJob = data.invalidFromJob;
+		const source = currentSource();
+		const invalidWarning = invalidIdWarning();
 		const key = sourceKey(source);
 		if (key === appliedKey) return;
 		appliedKey = key;
-		untrack(() => void open(source, invalidFromJob));
+		untrack(() => void open(source, invalidWarning));
+	});
+
+	// Leaving the page invalidates an in-flight prepare (loading a job or batch
+	// can take seconds), so its late result never navigates back here. If that
+	// navigation fails or is cancelled, the page stays: prepare it again.
+	beforeNavigate((nav) => {
+		if (nav.to?.url.pathname === '/sample-generator') return;
+		const left = ++token;
+		nav.complete.catch(() => {
+			if (token === left && preparing) void open(currentSource(), invalidIdWarning());
+		});
+	});
+	onDestroy(() => {
+		token += 1;
 	});
 
 	function switchMode(next: ComposerMode) {
@@ -205,7 +232,9 @@
 	{/if}
 
 	{#if preparing || !prepared}
-		<LoadingState label={data.fromJobId ? 'loading the job’s settings' : 'loading'} />
+		<LoadingState
+			label={data.fromBatchId ? 'loading the batch’s grid' : data.fromJobId ? 'loading the job’s settings' : 'loading'}
+		/>
 	{:else}
 		{#key prepared}
 			{#if prepared.mode === 'agent'}

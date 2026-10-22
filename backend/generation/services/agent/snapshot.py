@@ -60,6 +60,7 @@ from backend.generation.services.evaluation import contract as contract_mod
 from backend.generation.services.llm_params import merge_llm_params
 from backend.generation.services.profile_resolver import _attach_model_provenance
 from backend.generation.services.profile_resolver import app_requirement_to_dict
+from backend.generation.services.profile_resolver import coerce_float_params
 from backend.generation.services.versioning import canonical_json
 from backend.generation.services.versioning import short_hash
 from backend.runtime.services.scaffolding import canonical_stack_slug
@@ -118,7 +119,17 @@ _METHOD_EXCLUDED_LLM_KEYS = ("max_tokens", "seed")
 
 
 def _supported_params(model: LLMModel | None) -> set[str] | None:
-    """OpenRouter's supported-parameter list for *model*, or None if unknown."""
+    """OpenRouter's supported-parameter list for *model*, or None if unknown.
+
+    Unknown (no list, or an empty one, as some router pseudo-models have)
+    is not "supports nothing": those params are forwarded unverified rather
+    than dropped. Dropping them would silently change every default run on
+    such a model (its seed would stop being forwarded), while forwarding
+    stays honest: the default routing sets ``require_parameters``, so a
+    provider that cannot honour a param fails the run instead of ignoring
+    it. The snapshot records ``llm.supported_params_source = "unknown"`` and
+    the preview warns ``support_unknown`` before launch.
+    """
     if model is None:
         return None
     supported = (model.metadata or {}).get("openrouter_supported_parameters")
@@ -188,9 +199,13 @@ def resolve_llm(
     No implicit temperature: sampling params exist only when a layer sets
     them; everything else samples at the provider default (see sampling
     policy). Returns ``{llm, explicit_llm, gateway, output_cap,
-    context_window, context_window_source, seed_forwarded}``.
+    context_window, context_window_source, seed_forwarded, params_support,
+    unverified_params}``: ``params_support`` is ``"catalog"`` or
+    ``"unknown"`` (see :func:`_supported_params`), and ``unverified_params``
+    the forwarded params no catalog list vouches for.
     """
-    llm = merge_llm_params(*llm_layers)
+    # Float-kind params as floats, whichever layer set them (see coerce_float_params).
+    llm = coerce_float_params(merge_llm_params(*llm_layers))
     explicit = dict(llm)
     routing_source = "explicit" if isinstance(llm.get("provider"), dict) else "default"
     if routing_source == "default":
@@ -202,6 +217,9 @@ def resolve_llm(
     llm["model_canonical_slug"] = model.canonical_slug
     context_window_source = "catalog" if model.context_window else "fallback"
     llm["context_window_source"] = context_window_source
+    # Provenance like context_window_source (the llm section is not fingerprinted).
+    params_support = "catalog" if _supported_params(model) is not None else "unknown"
+    llm["supported_params_source"] = params_support
     context_window = model.context_window or FALLBACK_CONTEXT_WINDOW
     model_output_cap = model.max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS
     output_cap = min(int(llm.get("max_tokens") or DEFAULT_MAX_OUTPUT_TOKENS), model_output_cap)
@@ -214,6 +232,12 @@ def resolve_llm(
         "context_window": context_window,
         "context_window_source": context_window_source,
         "seed_forwarded": "seed" in gateway["forced_params"],
+        "params_support": params_support,
+        "unverified_params": (
+            sorted(k for k in gateway["forced_params"] if k not in ("provider", "max_tokens"))
+            if params_support == "unknown"
+            else []
+        ),
     }
 
 
@@ -442,17 +466,20 @@ def agent_config_fingerprint(snapshot: dict[str, Any]) -> str:
     return _short_hash({"identity": "config", **inputs, "gateway": gateway})
 
 
-def reseed_agent_snapshot(snapshot: dict[str, Any], seed: int, model: LLMModel | None) -> dict[str, Any]:
-    """Copy of *snapshot* with a new seed (an additional trial of the same configuration)."""
+def reseed_agent_snapshot(snapshot: dict[str, Any], seed: int) -> dict[str, Any]:
+    """Copy of *snapshot* with a new seed (an additional trial of the same configuration).
+
+    Only the seed changes. The frozen gateway policy is kept as it is rather
+    than recomputed from today's catalog: a catalog sync that changed the
+    model's supported parameters must not make the extra trial force or drop
+    other params than its siblings. A seed the original forwarded is
+    replaced; one it dropped (unsupported) stays dropped.
+    """
     snapshot = json.loads(json.dumps(snapshot))
     snapshot["seed"] = seed
-    snapshot["gateway"] = gateway_policy(
-        snapshot["llm"],
-        seed,
-        model,
-        sampling_policy=snapshot["gateway"].get("sampling_policy", "provider_default"),
-        max_output_tokens=snapshot["gateway"]["max_output_tokens"],
-    )
+    forced = snapshot["gateway"].get("forced_params") or {}
+    if "seed" in forced:
+        forced["seed"] = seed
     snapshot["run_fingerprint"] = agent_run_fingerprint(snapshot)
     snapshot["config_fingerprint"] = agent_config_fingerprint(snapshot)
     return snapshot

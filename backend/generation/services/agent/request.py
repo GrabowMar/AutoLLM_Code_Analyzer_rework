@@ -284,6 +284,21 @@ def _layered(layers: list[tuple[str, dict[str, Any] | None]]) -> tuple[dict[str,
     return merged, {k: sources[k] for k in merged if k in sources}
 
 
+def usable_app_specs(user: AbstractUser):
+    """App specs *user* may run jobs on: every spec except another user's private one.
+
+    Another user's spec is "unknown" (404), never resolved into a snapshot
+    the caller could read back. Catalog specs (``is_default``) and the
+    user's own are usable; so are ownerless rows -- system or legacy specs
+    that are nobody's private material.
+    """
+    from backend.generation.models import AppRequirementTemplate
+
+    return AppRequirementTemplate.objects.exclude(
+        Q(is_default=False) & Q(created_by__isnull=False) & ~Q(created_by=user),
+    )
+
+
 def _stack_slug(request: AgentRequest, profile: GenerationProfile | None, user: AbstractUser) -> str:
     raw = request.stack_slug or (profile.scaffolding_slug if profile else "") or settings.GENERATION_DEFAULT_STACK
     if not is_known_stack_slug(raw):
@@ -297,7 +312,6 @@ def _stack_slug(request: AgentRequest, profile: GenerationProfile | None, user: 
 
 def plan_agent_request(request: AgentRequest, user: AbstractUser) -> AgentRunPlan:
     """Resolve *request* for *user* (``RequestError`` for malformed requests, see the module docstring)."""
-    from backend.generation.models import AppRequirementTemplate
     from backend.generation.models import GenerationProfile
     from backend.llm_models.models import LLMModel
 
@@ -319,7 +333,7 @@ def plan_agent_request(request: AgentRequest, user: AbstractUser) -> AgentRunPla
             raise RequestError(404, "Unknown profile id", "unknown_profile")
     stack_slug = _stack_slug(request, profile, user)
 
-    app_reqs = list(AppRequirementTemplate.objects.filter(id__in=request.app_requirement_ids).order_by("id"))
+    app_reqs = list(usable_app_specs(user).filter(id__in=request.app_requirement_ids).order_by("id"))
     if len(app_reqs) != len(set(request.app_requirement_ids)):
         raise RequestError(404, "Unknown app requirement id", "unknown_app_requirement")
     models = list(LLMModel.objects.filter(id__in=request.model_ids).order_by("id"))
@@ -475,6 +489,7 @@ def _model_issues(plan: AgentRunPlan) -> None:
                 "forced_params": {k: v for k, v in gateway["forced_params"].items() if k != "seed"},
                 "dropped_params": dropped,
                 "seed_forwarded": run["seed_forwarded"],
+                "params_support": run["params_support"],
             },
         )
         if not tools_ok:
@@ -494,6 +509,19 @@ def _model_issues(plan: AgentRunPlan) -> None:
                     "params_dropped",
                     "warn",
                     f"{model.model_id} cannot take {', '.join(sorted(dropped))}; those params are not applied",
+                    model.id,
+                ),
+            )
+        if run["unverified_params"]:
+            plan.issues.append(
+                Issue(
+                    "support_unknown",
+                    "warn",
+                    f"The catalog lists no supported parameters for {model.model_id}: "
+                    f"{', '.join(run['unverified_params'])} "
+                    f"{'is' if len(run['unverified_params']) == 1 else 'are'} forwarded unverified. "
+                    "With the default routing a provider that cannot honour one fails the run rather than "
+                    "ignoring it; re-sync the model catalog to check",
                     model.id,
                 ),
             )

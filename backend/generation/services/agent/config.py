@@ -72,6 +72,26 @@ def default_agent_config() -> dict[str, Any]:
     }
 
 
+def coerce_limit_types(config: dict[str, Any]) -> dict[str, Any]:
+    """*config* with each numeric limit in its declared type (in place; returned for chaining).
+
+    An integral float int limit becomes an int; a float limit stored as an
+    int (a budget preset's ``max_cost_usd: 3``) becomes a float, so it
+    freezes into the snapshot ``agent`` section -- and fingerprints -- like
+    the same value sent inline. Defaults are already in their declared types.
+    Values of the wrong type are left for :func:`validate_agent_config`.
+    """
+    for key, (kind, _lo, _hi) in _LIMITS.items():
+        value = config.get(key)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            continue
+        if kind is int and isinstance(value, float) and value.is_integer():
+            config[key] = int(value)
+        elif kind is float and isinstance(value, int):
+            config[key] = float(value)
+    return config
+
+
 def validate_agent_config(data: dict[str, Any] | None) -> dict[str, Any]:
     """Validate a user-supplied override dict; ``None`` values mean "inherit".
 
@@ -82,7 +102,7 @@ def validate_agent_config(data: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(data, dict):
         msg = "agent config must be an object"
         raise ValueError(msg)  # noqa: TRY004 - one exception type for every validation problem
-    config = {k: v for k, v in data.items() if v is not None}
+    config = coerce_limit_types({k: v for k, v in data.items() if v is not None})
     errors: list[str] = []
     unknown = set(config) - {*_LIMITS, "network_policy", "harness", "sampling_policy"}
     if unknown:
@@ -92,10 +112,9 @@ def validate_agent_config(data: dict[str, Any] | None) -> dict[str, Any]:
             continue
         value = config[key]
         ok_type = isinstance(value, (int, float)) and not isinstance(value, bool)
-        if kind is int and ok_type and float(value).is_integer():
-            value = config[key] = int(value)
         if not ok_type or (kind is int and not isinstance(value, int)) or not lo <= value <= hi:
-            errors.append(f"{key} must be a {kind.__name__} between {lo} and {hi}")
+            article = "an integer" if kind is int else "a number"
+            errors.append(f"{key} must be {article} between {lo} and {hi}")
     if "network_policy" in config and config["network_policy"] not in NETWORK_POLICIES:
         errors.append(f"network_policy must be one of {', '.join(NETWORK_POLICIES)}")
     if "sampling_policy" in config and config["sampling_policy"] not in SAMPLING_POLICIES:
@@ -111,13 +130,13 @@ def validate_agent_config(data: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def merge_agent_config(*layers: dict[str, Any] | None) -> dict[str, Any]:
-    """Defaults, then each override layer in order (later wins)."""
+    """Defaults, then each override layer in order (later wins); limits in their declared types."""
     merged = default_agent_config()
     for layer in layers:
         for key, value in (layer or {}).items():
             if value is not None:
                 merged[key] = value
-    return merged
+    return coerce_limit_types(merged)
 
 
 def default_provider_routing() -> dict[str, Any]:

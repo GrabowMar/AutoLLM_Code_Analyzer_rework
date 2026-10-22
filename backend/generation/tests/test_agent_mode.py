@@ -369,7 +369,7 @@ class TestAgentSnapshot:
     def test_reseed_keeps_prompt_changes_fingerprint(self):
         model = _model()
         snap = _snapshot(model=model)
-        other = reseed_agent_snapshot(snap, 99, model)
+        other = reseed_agent_snapshot(snap, 99)
         assert other["prompt_hash"] == snap["prompt_hash"]
         assert other["gateway"]["forced_params"]["seed"] == 99
         assert other["run_fingerprint"] != snap["run_fingerprint"]

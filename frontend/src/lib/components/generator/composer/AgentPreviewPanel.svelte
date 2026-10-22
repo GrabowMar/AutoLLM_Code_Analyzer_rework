@@ -24,7 +24,7 @@
 	import EffectiveParams from './EffectiveParams.svelte';
 	import SummaryChecklist from './SummaryChecklist.svelte';
 	import SummaryIssues from './SummaryIssues.svelte';
-	import { BLOCKED_START_CLASS, type ChecklistItem, type IssueAction, type SummaryIssue } from './issues';
+	import { type ChecklistItem, type IssueAction, type SummaryIssue } from './issues';
 	import Check from '@lucide/svelte/icons/check';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
@@ -244,7 +244,7 @@
 											<tr class="border-t border-border/60 align-top">
 												<td class="min-w-[9rem] px-2 py-1.5">
 													<span class="font-medium text-foreground">{m.name}</span>
-													{#if dropped.length > 0 || m.context_window_source === 'fallback'}
+													{#if dropped.length > 0 || m.context_window_source === 'fallback' || m.params_support === 'unknown'}
 														<span class="mt-1 flex flex-wrap gap-1">
 															{#each dropped as [key, reason] (key)}
 																<span
@@ -252,6 +252,13 @@
 																	title={reason}>−{key}</span
 																>
 															{/each}
+															{#if m.params_support === 'unknown'}
+																<span
+																	class={cn(chip, 'border-warning/30 bg-warning/10 text-warning-fg')}
+																	title="The catalog lists no supported parameters for this model: its params are forwarded unverified"
+																	>support unknown</span
+																>
+															{/if}
 															{#if m.context_window_source === 'fallback'}
 																<span class={cn(chip, 'border-border text-muted-foreground')} title="Context window not in the catalog; a fallback is assumed">ctx fallback</span>
 															{/if}
@@ -307,7 +314,7 @@
 		{/if}
 
 		<div class="hidden space-y-1.5 border-t border-border/60 pt-3 @4xl/composer:block">
-			<Button class={cn('w-full', !canStart && !submitting && BLOCKED_START_CLASS)} disabled={!canStart || submitting} onclick={onstart}>
+			<Button class="w-full" disabled={!canStart || submitting} aria-busy={submitting} onclick={onstart}>
 				{#if submitting}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Play />{/if}
 				{startLabel}
 			</Button>

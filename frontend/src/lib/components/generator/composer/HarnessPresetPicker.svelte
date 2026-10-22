@@ -256,7 +256,14 @@
 				</div>
 			</div>
 		{/each}
-		{#if pending > 0}
+		{#if pending > 0 && presets.lookupError}
+			<p class="flex flex-wrap items-center gap-x-2 text-[11px] text-warning-fg" role="status">
+				<span>
+					{pending} selected preset version{pending === 1 ? '' : 's'} couldn't be loaded ({presets.lookupError}); still selected.
+				</span>
+				<Button variant="link" size="sm" class="h-auto px-0 text-[11px]" onclick={() => presets.retry()}>Retry</Button>
+			</p>
+		{:else if pending > 0}
 			<p class="text-[11px] text-muted-foreground" role="status">Loading {pending} pinned preset version{pending === 1 ? '' : 's'}…</p>
 		{/if}
 	{/if}

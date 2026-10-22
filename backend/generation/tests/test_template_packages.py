@@ -156,6 +156,88 @@ def test_export_skips_presets_the_user_cannot_see():
     assert response.status_code == 400  # nothing to export
 
 
+def test_export_leaves_out_another_users_private_block_referenced_by_own_profile():
+    owner = UserFactory()
+    ContentBlockFactory(is_system=False, created_by=owner, slug="owner-private-rules", content="OWNER SECRET PROMPT")
+    user = UserFactory()
+    client = _client(user)
+    own = ContentBlockFactory(is_system=False, created_by=user, slug="my-rules", content="mine")
+    # Written directly: the profile API now refuses refs the author cannot see,
+    # but rows from before that check (or a staff-edited system profile) exist.
+    GenerationProfileFactory(
+        is_system=False,
+        created_by=user,
+        slug="mine-x",
+        block_refs=[
+            {"type": own.block_type, "slug": own.slug, "version": 1},
+            {"type": "prompt_rules", "slug": "owner-private-rules", "version": 1},
+        ],
+    )
+    omitted = [
+        {
+            "profile": "mine-x",
+            "type": "prompt_rules",
+            "slug": "owner-private-rules",
+            "version": 1,
+            "reason": "missing or not visible to you",
+        },
+    ]
+
+    response = client.post(
+        "/api/generation/packages/export/?format=json",
+        data=json.dumps({"bundle_slugs": ["mine-x"]}),
+        content_type="application/json",
+    )
+    bundle_response = client.get("/api/generation/profiles/mine-x/export/?format=json")
+
+    assert response.status_code == 200
+    assert bundle_response.status_code == 200
+    for raw, blocks_of in (
+        (response.content.decode(), lambda pkg: pkg["assets"]["blocks"]),
+        (bundle_response.content.decode(), lambda pkg: pkg["blocks"]),
+    ):
+        assert "OWNER SECRET PROMPT" not in raw
+        package = json.loads(raw)
+        assert [block["slug"] for block in blocks_of(package)] == ["my-rules"]
+        assert package["omitted_blocks"] == omitted
+
+
+def test_export_without_hidden_refs_has_no_omitted_blocks():
+    user = UserFactory()
+    block = ContentBlockFactory(is_system=False, created_by=user, slug="clean-rules")
+    GenerationProfileFactory(
+        is_system=False,
+        created_by=user,
+        slug="clean-profile",
+        block_refs=[{"type": block.block_type, "slug": block.slug, "version": 1}],
+    )
+
+    package = _export(_client(user), {"bundle_slugs": ["clean-profile"]})
+
+    assert [b["slug"] for b in package["assets"]["blocks"]] == ["clean-rules"]
+    assert "omitted_blocks" not in package
+
+
+def test_export_takes_the_latest_version_of_a_profile():
+    user = UserFactory()
+    old = ContentBlockFactory(is_system=False, created_by=user, slug="old-rules")
+    new = ContentBlockFactory(is_system=False, created_by=user, slug="new-rules")
+    for version, block in ((1, old), (2, new)):
+        GenerationProfileFactory(
+            is_system=False,
+            created_by=user,
+            slug="two-versions",
+            version=version,
+            block_refs=[{"type": block.block_type, "slug": block.slug, "version": 1}],
+        )
+
+    package = _export(_client(user), {"bundle_slugs": ["two-versions"]})
+
+    # One profile per slug (two would import as a renamed duplicate), with only its blocks.
+    assert [(p["slug"], p["version"]) for p in package["assets"]["profiles"]] == [("two-versions", 2)]
+    assert [b["slug"] for b in package["assets"]["blocks"]] == ["new-rules"]
+
+
 # ── import: stacks and profiles ───────────────────────────────────────
 
 

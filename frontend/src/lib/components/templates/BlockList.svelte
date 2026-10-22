@@ -49,7 +49,7 @@
 							<div class="flex items-center gap-2 px-3 py-2">
 								<button
 									type="button"
-									class="text-xs font-mono truncate hover:text-primary transition-colors cursor-pointer"
+									class="text-xs font-mono truncate hover:text-success-fg transition-colors cursor-pointer"
 									aria-expanded={expandedId === b.id}
 									onclick={() => (expandedId = expandedId === b.id ? null : b.id)}
 								>{b.slug}</button>

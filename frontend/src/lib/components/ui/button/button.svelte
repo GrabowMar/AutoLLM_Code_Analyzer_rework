@@ -20,7 +20,10 @@
 	let { class: className, variant = 'default', size = 'default', href, children, ...restProps }: ButtonProps = $props();
 
 	const variantClasses: Record<ButtonVariant, string> = {
-		default: 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-md hover:-translate-y-px active:translate-y-0',
+		// Disabled reads as plainly unavailable (muted fill), not as a faded primary
+		// that still looks clickable; a busy one (aria-busy) keeps the primary look.
+		default:
+			'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-md hover:-translate-y-px active:translate-y-0 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 disabled:shadow-none aria-busy:disabled:bg-primary aria-busy:disabled:text-primary-foreground',
 		destructive: 'bg-destructive text-white shadow-sm hover:bg-destructive/90 hover:shadow-md',
 		outline: 'border border-border bg-transparent hover:bg-accent hover:text-accent-foreground hover:border-primary/50',
 		secondary: 'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80',

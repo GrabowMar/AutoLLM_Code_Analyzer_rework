@@ -293,8 +293,22 @@ export async function apiFetch(
       }
       throw { status: 401, message: "Unauthorized" };
     }
-    const body = await res.json().catch(() => ({}));
-    throw body;
+    const body: unknown = await res.json().catch(() => ({}));
+    const error: Record<string, unknown> =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : { detail: body };
+    // Non-enumerable: the thrown value stays the response body for every
+    // existing reader, while `apiErrorStatus` can tell a 404 from an outage.
+    Object.defineProperty(error, "httpStatus", { value: res.status });
+    throw error;
   }
   return res;
+}
+
+/** HTTP status of an error thrown by `apiFetch`, or null (network failure, abort, other errors). */
+export function apiErrorStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") return null;
+  const status = (error as { httpStatus?: unknown }).httpStatus;
+  return typeof status === "number" ? status : null;
 }

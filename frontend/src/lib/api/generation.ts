@@ -741,6 +741,8 @@ export interface AgentPreviewModel {
   /** Params the model does not support, with the reason (seed never listed). */
   dropped_params: Record<string, string>;
   seed_forwarded: boolean;
+  /** "unknown": the catalog lists no supported parameters, so params are forwarded unverified. */
+  params_support?: "catalog" | "unknown";
 }
 
 export interface AgentPreview {
@@ -911,6 +913,33 @@ export interface GenerationBatchSummary {
   graded: boolean;
   mean_pass_rate: number | null;
   experiment: { id: string; name: string } | null;
+  /** What the batch was created from; {} for batches that predate it. */
+  request?: GenerationBatchRequest;
+}
+
+/**
+ * `GenerationBatch.request`: the create body as the server resolved it (preset
+ * ids included). Every key is optional: older batches lack some or all of them.
+ */
+export interface GenerationBatchRequest {
+  mode?: string;
+  base_seed?: number | null;
+  order_seed?: number | null;
+  trials?: number | null;
+  stack_slug?: string | null;
+  app_requirement_ids?: number[];
+  description?: string;
+  model_ids?: number[];
+  profile_id?: number | null;
+  harnesses?: string[];
+  harness_preset_ids?: number[];
+  sampling_preset_id?: number | null;
+  budget_preset_id?: number | null;
+  llm_params?: LLMParams;
+  agent_config?: Record<string, unknown>;
+  max_tokens?: number | null;
+  temperature?: number | null;
+  experiment_id?: string;
 }
 
 export interface PaginatedGenerationBatches {
@@ -1083,14 +1112,18 @@ export async function getProfilePreview(
   return res.json();
 }
 
-export async function previewDraftProfile(data: {
-  block_refs: BlockRef[];
-  app_slug?: string;
-  llm_config?: LLMParams;
-}): Promise<ProfilePreview> {
+export async function previewDraftProfile(
+  data: {
+    block_refs: BlockRef[];
+    app_slug?: string;
+    llm_config?: LLMParams;
+  },
+  options: RequestOptions = {},
+): Promise<ProfilePreview> {
   const res = await apiFetch("/generation/profiles/preview-draft/", {
     method: "POST",
     body: JSON.stringify(data),
+    signal: options.signal,
   });
   return res.json();
 }
@@ -1197,6 +1230,8 @@ export interface Stack {
   file_count: number;
   /** Builtin stacks are always usable; a user stack needs approval except for its owner. */
   is_approved: boolean;
+  /** The requester created it (only then may they edit or archive it). */
+  is_own?: boolean;
   dockerfile_mode: "bundled" | "generated";
   backend_base_image: string;
   frontend_base_image: string;

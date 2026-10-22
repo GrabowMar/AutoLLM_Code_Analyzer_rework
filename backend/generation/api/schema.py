@@ -39,6 +39,8 @@ class StackSchema(Schema):
     # Builtin stacks are always approved; a user stack needs approval unless
     # the viewer owns it (the list only returns stacks the viewer may run).
     is_approved: bool = True
+    # The requester created it (only then may they edit or archive it).
+    is_own: bool = False
     server_kind: str = "python"
     dockerfile_mode: str = "bundled"
     backend_base_image: str = ""
@@ -696,6 +698,9 @@ class BatchSummarySchema(Schema):
     graded: bool = False
     mean_pass_rate: float | None = None
     experiment: BatchExperimentRefSchema | None = None
+    # GenerationBatch.request: the create body as resolved (base seed, preset
+    # ids, app / model ids, inline overrides); {} for batches that predate it.
+    request: dict = {}
 
 
 class PaginatedBatchesSchema(Schema):

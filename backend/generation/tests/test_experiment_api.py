@@ -33,7 +33,7 @@ def auth_client(client):
 
 def test_create_experiment(auth_client):
     client, _user = auth_client
-    app = AppRequirementTemplateFactory()
+    app = AppRequirementTemplateFactory(is_default=True)
 
     res = client.post(
         "/api/generation/experiments/",
@@ -54,6 +54,58 @@ def test_create_experiment(auth_client):
     assert body["status"] == "draft"
     assert body["repeats"] == 5
     assert body["app_requirement_ids"] == [app.id]
+
+
+def test_create_experiment_accepts_own_private_and_catalog_specs(auth_client):
+    client, user = auth_client
+    own = AppRequirementTemplateFactory(is_default=False, created_by=user)
+    catalog = AppRequirementTemplateFactory(is_default=True)
+
+    res = client.post(
+        "/api/generation/experiments/",
+        data=json.dumps({"name": "Mine", "slug": "mine", "app_requirement_ids": [own.id, catalog.id]}),
+        content_type="application/json",
+    )
+
+    assert res.status_code == 200, res.content
+    assert sorted(res.json()["app_requirement_ids"]) == sorted([own.id, catalog.id])
+
+
+def test_create_experiment_refuses_another_users_private_spec(auth_client):
+    client, user = auth_client
+    catalog = AppRequirementTemplateFactory(is_default=True)
+    hidden = AppRequirementTemplateFactory(is_default=False, created_by=UserFactory(), description="TOP SECRET SPEC")
+
+    res = client.post(
+        "/api/generation/experiments/",
+        data=json.dumps({"name": "Peek", "slug": "peek", "app_requirement_ids": [catalog.id, hidden.id]}),
+        content_type="application/json",
+    )
+
+    # 404 like an unknown id (not silently dropped), and no row is left behind.
+    assert res.status_code == 404
+    assert str(hidden.id) in res.json()["detail"]
+    assert not Experiment.objects.filter(created_by=user, slug="peek").exists()
+
+
+def test_update_experiment_refuses_another_users_private_spec(auth_client):
+    client, user = auth_client
+    catalog = AppRequirementTemplateFactory(is_default=True)
+    exp = ExperimentFactory(created_by=user, repeats=2)
+    exp.app_requirements.add(catalog)
+    hidden = AppRequirementTemplateFactory(is_default=False, created_by=UserFactory())
+
+    res = client.patch(
+        f"/api/generation/experiments/{exp.id}/",
+        data=json.dumps({"repeats": 9, "app_requirement_ids": [catalog.id, hidden.id]}),
+        content_type="application/json",
+    )
+
+    assert res.status_code == 404
+    exp.refresh_from_db()
+    # Nothing in the PATCH was applied.
+    assert exp.repeats == 2
+    assert list(exp.app_requirements.values_list("id", flat=True)) == [catalog.id]
 
 
 def test_create_experiment_rejects_duplicate_slug_for_same_owner(auth_client):

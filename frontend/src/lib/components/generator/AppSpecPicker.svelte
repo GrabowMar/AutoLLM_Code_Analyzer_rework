@@ -24,7 +24,7 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
-	import { loadAppSpecCatalog } from './catalog';
+	import { loadAppSpecCatalog, watchCatalog } from './catalog';
 	import { navigateList } from './list-keyboard';
 	import Check from '@lucide/svelte/icons/check';
 	import Search from '@lucide/svelte/icons/search';
@@ -128,7 +128,13 @@
 	}
 
 	onMount(() => {
-		if (!providedSpecs) void load();
+		if (providedSpecs) return;
+		void load();
+		// Specs created or deleted in the Library since the list was cached show up here.
+		return watchCatalog('app-specs', (list) => {
+			fetched = list;
+			error = '';
+		});
 	});
 
 	function commit(next: Set<number>) {

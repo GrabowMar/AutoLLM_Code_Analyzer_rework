@@ -47,6 +47,37 @@ _APPEND_TO_SYSTEM = frozenset(
 
 DEFAULT_PROFILE_SLUG = "system-scaffolding-standard"
 
+# Sampling params that are real numbers. A layer may hold an equal int (a
+# preset or profile stored ``temperature: 0``; inline API values arrive as
+# floats), and the fingerprints hash plain JSON, where 0 and 0.0 differ.
+FLOAT_PARAM_KEYS = (
+    "temperature",
+    "top_p",
+    "min_p",
+    "frequency_penalty",
+    "presence_penalty",
+    "repetition_penalty",
+)
+
+
+def coerce_float_params(params: dict[str, Any]) -> dict[str, Any]:
+    """*params* with every float-kind sampling value as a float (in place; returned for chaining).
+
+    Why here and not by canonicalizing the fingerprint input (integral
+    floats -> ints, as ``canonical_json`` does for preset hashes and method
+    keys): default runs carry integral floats (``agent.max_cost_usd`` 5.0),
+    so canonicalizing would change every default run's ``run_fingerprint``
+    and stop it pooling with the runs before it. Coercing the values to
+    their declared type where they enter a snapshot leaves defaults
+    byte-identical (their values are floats already) while a preset's
+    ``temperature: 0`` and an inline ``0.0`` freeze, and fingerprint, alike.
+    """
+    for key in FLOAT_PARAM_KEYS:
+        value = params.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            params[key] = float(value)
+    return params
+
 
 def load_catalog() -> dict[str, Any]:
     if not CATALOG_PATH.is_file():
@@ -208,23 +239,42 @@ def suggest_profile_for_app(
     return default, "system-default"
 
 
+def _own_stack_default(qs, scaffolding_slug: str, user: AbstractUser | None) -> GenerationProfile | None:
+    """The latest version of the user's own profile marked default for *scaffolding_slug*.
+
+    Only latest versions count: unticking "default" in a new version must
+    not let an older version that had it keep winning.
+    """
+    if not (user and getattr(user, "is_authenticated", False)):
+        return None
+    latest: dict[str, GenerationProfile] = {}
+    for profile in qs.filter(scaffolding_slug=scaffolding_slug, is_system=False, created_by=user):
+        latest.setdefault(profile.slug, profile)  # qs is ordered slug, -version
+    return next((p for p in latest.values() if p.is_default), None)
+
+
 def get_default_profile(
     scaffolding_slug: str | None = None,
     user: AbstractUser | None = None,
 ) -> GenerationProfile | None:
     """Latest version of the applicable default profile.
 
-    With a stack: that stack's default (``is_default`` means "default for its
-    stack"), else a system profile for it. Otherwise -- and as the last
-    resort -- the global default named by ``catalog.yaml:
-    default_bundle_slug``; every stack has a default, so ordering by slug
-    must never pick the global one.
+    With a stack: the user's own default for it (``is_default`` means
+    "default for its stack"; a user who marks a profile default for a stack
+    means it to win over the shipped one), else the system default for it,
+    else a system profile for it. Otherwise -- and as the last resort -- the
+    global default named by ``catalog.yaml: default_bundle_slug``; every
+    stack has a default, so ordering by slug must never pick the global one.
     """
     qs = _visible_profiles(user)
     if scaffolding_slug:
+        own_default = _own_stack_default(qs, scaffolding_slug, user)
+        if own_default:
+            return own_default
         matching_default = qs.filter(
             scaffolding_slug=scaffolding_slug,
             is_default=True,
+            is_system=True,
         ).first()
         if matching_default:
             return matching_default
@@ -333,7 +383,7 @@ def build_resolved_snapshot(
     base_params: dict[str, Any] = {"temperature": temperature, "max_tokens": max_tokens}
     if top_p is not None:
         base_params["top_p"] = top_p
-    llm_section = merge_llm_params(base_params, profile_llm, llm_overrides)
+    llm_section = coerce_float_params(merge_llm_params(base_params, profile_llm, llm_overrides))
     _attach_model_provenance(llm_section, model)
 
     snapshot: dict[str, Any] = {
@@ -391,7 +441,9 @@ def build_custom_snapshot(
     Custom jobs have no blocks or app spec, but freezing the merged sampling
     params here lets execution read one path for every mode.
     """
-    llm_section = merge_llm_params({"temperature": temperature, "max_tokens": max_tokens}, llm_overrides)
+    llm_section = coerce_float_params(
+        merge_llm_params({"temperature": temperature, "max_tokens": max_tokens}, llm_overrides),
+    )
     _attach_model_provenance(llm_section, model)
     snapshot = {
         "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
@@ -540,6 +592,30 @@ def derive_experiment_seed(base_seed: int, *parts: Any) -> int:
     encoded = json.dumps([base_seed, *[str(p) for p in parts]])
     digest = hashlib.sha256(encoded.encode()).digest()
     return int.from_bytes(digest[:4], "big") % 2_147_483_647
+
+
+def experiment_cell_seed(
+    base_seed: int,
+    *,
+    agent: bool,
+    condition_id: int | None,
+    app_id: int,
+    repeat_index: int,
+) -> int:
+    """The seed of one experiment cell, as an experiment launch derives it.
+
+    Agent mode uses common random numbers: every condition of an (app,
+    repeat) block shares one seed, so paired comparisons differ only in the
+    condition. Scaffolding keeps its historical per-condition derivation so
+    old launches stay reproducible.
+    """
+    parts = (app_id, repeat_index) if agent else (condition_id, app_id, repeat_index)
+    return derive_experiment_seed(base_seed, *parts)
+
+
+def batch_cell_seed(base_seed: int, app_slug: str | None, trial: int) -> int:
+    """The seed of one (task, trial) cell of an ad-hoc agent batch, shared by every model and harness preset."""
+    return derive_experiment_seed(base_seed, app_slug or "task", trial)
 
 
 def scaffolding_slug_from_manifest(job: GenerationJob) -> str:

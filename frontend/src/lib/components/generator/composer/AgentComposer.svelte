@@ -65,7 +65,7 @@
 		type PresetPins,
 		type TaskKind,
 	} from './draft';
-	import { previewIssues, type ChecklistItem, type IssueAction } from './issues';
+	import { presetLookupIssue, previewIssues, type ChecklistItem, type IssueAction, type SummaryIssue } from './issues';
 	import { trackPresets } from './preset-lookup.svelte';
 	import Dices from '@lucide/svelte/icons/dices';
 	import Save from '@lucide/svelte/icons/save';
@@ -153,7 +153,8 @@
 		if (fallback) harnessPresetIds = [fallback.id];
 	});
 
-	// Draft ids that no longer exist (deleted, or not visible) are dropped.
+	// Draft ids that no longer exist (a 404: deleted, or not visible) are
+	// dropped; a lookup that merely failed keeps them (see presetIssues).
 	$effect(() => {
 		const gone = harnessPresetIds.filter((id) => harnessPresets.isMissing(id));
 		if (gone.length > 0) harnessPresetIds = harnessPresetIds.filter((id) => !gone.includes(id));
@@ -302,7 +303,15 @@
 
 	const shownPreview = $derived(ready ? (preview?.data ?? null) : null);
 	const modelNames = $derived(new Map((shownPreview?.models ?? []).map((m) => [m.model_id, m.name])));
-	const issues = $derived(shownPreview ? previewIssues(shownPreview.warnings, (id) => modelNames.get(id)) : []);
+	const presetTrackers = [harnessPresets, samplingPresets, budgetPresets];
+	const presetIssues = $derived.by((): SummaryIssue[] => {
+		const issue = presetLookupIssue(presetTrackers.map((t) => t.lookupError));
+		return issue ? [issue] : [];
+	});
+	const issues = $derived([
+		...presetIssues,
+		...(shownPreview ? previewIssues(shownPreview.warnings, (id) => modelNames.get(id)) : []),
+	]);
 	const errorCount = $derived(issues.filter((i) => i.severity === 'error').length);
 
 	// ── start ───────────────────────────────────────────────────────────
@@ -365,6 +374,10 @@
 			missing_api_key: { label: 'Add a key in Settings', href: '/users/settings#credentials' },
 			single_trial: { label: `Use ${DEFAULT_TRIALS} trials`, onclick: () => (trials = DEFAULT_TRIALS) },
 			random_seeds: { label: 'Use a base seed', onclick: () => (baseSeed = randomSeed()) },
+			preset_lookup_failed: {
+				label: 'Retry',
+				onclick: () => presetTrackers.filter((t) => t.lookupError).forEach((t) => t.retry()),
+			},
 		};
 		const withoutTools = (shownPreview?.models ?? []).filter((m) => !m.tool_harness_ok).map((m) => m.model_id);
 		if (withoutTools.length > 0) {
