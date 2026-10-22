@@ -50,6 +50,7 @@ def _app(slug="notes"):
         return existing
     return AppRequirementTemplateFactory(
         slug=slug,
+        is_default=True,
         name="Notes",
         description="",
         backend_requirements=["Notes have a title"],

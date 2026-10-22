@@ -135,6 +135,7 @@ def fixture_rows():
     )
     app = AppRequirementTemplateFactory(
         slug=APP_SLUG,
+        is_default=True,
         name="Golden Notes",
         category="Productivity",
         description="",

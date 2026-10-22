@@ -9,9 +9,9 @@
  * often in this same tab. So a cached list is served at once, but a picker
  * that mounts once it is older than its revalidation age refetches it in the
  * background and swaps the fresh list in; regaining window focus refreshes
- * the lists mounted pickers show (and marks the rest stale); and after a TTL
- * a list is never served again. `refreshCatalog()` forces a refetch after a
- * change made elsewhere.
+ * the lists mounted pickers show (and marks the rest stale, so the next load
+ * refetches them); and after a TTL a list is never served again.
+ * `refreshCatalog()` forces a refetch after a change made elsewhere.
  */
 import { browser } from "$app/environment";
 import { getModels, type LLMModelSummary } from "$lib/api/models";
@@ -48,7 +48,8 @@ class Catalog<T> {
   load(force = false): Promise<T> {
     if (!browser) return this.fetcher();
     const entry = this.entry;
-    if (force || !entry || Date.now() - entry.at > MAX_AGE_MS) {
+    // A stale list (marked on window focus) is as untrustworthy as an expired one.
+    if (force || !entry || entry.stale || Date.now() - entry.at > MAX_AGE_MS) {
       return this.start();
     }
     return entry.request;

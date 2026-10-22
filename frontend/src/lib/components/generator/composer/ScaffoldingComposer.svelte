@@ -24,7 +24,7 @@
 		type LLMParams,
 	} from '$lib/api/generation';
 	import { apiFieldErrors, formatApiError } from '$lib/api/core';
-	import { lookupProfileVersion } from './prepare';
+	import { lookupBatchProfileVersion } from './prepare';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
@@ -69,6 +69,8 @@
 	let profileSlug = $state<string | null>(init.profileSlug ?? untrack(() => pins.profile?.slug) ?? null);
 	// The exact version a job, batch or draft pinned, when the latest-only list lacks it.
 	let pinnedProfile = $state<GenerationProfile | null>(untrack(() => pins.profile ?? null));
+	// A batch whose runs name the profile's slug, when preparing couldn't read it.
+	const profileBatchId = untrack(() => pins.profileBatchId ?? null);
 	let profileIssue = $state<SummaryIssue | null>(null);
 	let modelIds = $state(new Set(init.modelIds));
 	let samplingPresetId = $state<number | null>(init.samplingPresetId);
@@ -120,17 +122,18 @@
 	$effect(() => {
 		if (!profilesLoaded || profileId == null || profile) return;
 		const id = profileId;
-		const slug = profileSlug;
-		untrack(() => void resolveProfile(id, slug));
+		// The slug is not a trigger: a lookup that learns it must not start another.
+		untrack(() => void resolveProfile(id, profileSlug));
 	});
 
 	async function resolveProfile(id: number, slug: string | null) {
 		if (lookingUp === id) return;
 		lookingUp = id;
-		const found = await lookupProfileVersion(id, slug);
+		const { lookup: found, slug: knownSlug } = await lookupBatchProfileVersion(id, slug, profileBatchId);
 		lookingUp = null;
 		if (profileId !== id) return;
-		const label = slug ?? `#${id}`;
+		if (knownSlug && !profileSlug) profileSlug = knownSlug;
+		const label = knownSlug ?? `#${id}`;
 		if (found.status === 'found') {
 			pinnedProfile = found.profile;
 			profileIssue = null;

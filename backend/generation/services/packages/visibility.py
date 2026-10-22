@@ -15,6 +15,13 @@ if TYPE_CHECKING:
 
 
 def visible_app_templates_for(user: AbstractUser | None):
+    """App specs *user* may see and run jobs on: catalog specs (``is_default``) and their own.
+
+    The one rule for the Library, every create/preview path (agent,
+    scaffolding, experiments) and exports. A spec without an owner is not
+    public: ``created_by`` is SET_NULL, so a deleted user's private specs
+    lose their owner and must stay unknown (404) to everyone else.
+    """
     qs = AppRequirementTemplate.objects.all()
     if user and getattr(user, "is_authenticated", False):
         return qs.filter(Q(is_default=True) | Q(created_by=user))

@@ -64,6 +64,7 @@ def _model(**kw):
 
 
 def _app(**kw):
+    kw.setdefault("is_default", True)  # a catalog spec: usable by every user
     return AppRequirementTemplateFactory(
         slug=kw.pop("slug", "todo"),
         name="Todo",

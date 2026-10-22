@@ -40,13 +40,13 @@ from backend.generation.services.agent.request import Issue
 from backend.generation.services.agent.request import RequestError
 from backend.generation.services.agent.request import plan_agent_request
 from backend.generation.services.agent.request import preview_payload
-from backend.generation.services.agent.request import usable_app_specs
 from backend.generation.services.agent.snapshot import DEFAULT_MAX_OUTPUT_TOKENS
 from backend.generation.services.agent.snapshot import apply_agent_snapshot_to_job
 from backend.generation.services.batches import refresh_batch
 from backend.generation.services.dispatcher import dispatch_job
 from backend.generation.services.llm_params import merge_llm_params
 from backend.generation.services.llm_params import validate_llm_params
+from backend.generation.services.packages import visible_app_templates_for
 from backend.generation.services.profile_resolver import apply_snapshot_to_job
 from backend.generation.services.profile_resolver import batch_cell_seed
 from backend.generation.services.profile_resolver import build_custom_snapshot
@@ -177,8 +177,10 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
     profile = _visible_profile(request.auth, payload.profile_id) if payload.profile_id is not None else None
     stack_slug = _scaffolding_stack(payload.stack_slug, profile, request.auth)
 
-    # Another user's private spec is unknown (services/agent/request.py).
-    app_reqs = list(usable_app_specs(request.auth).filter(id__in=payload.app_requirement_ids).order_by("id"))
+    # Another user's private spec is unknown (services/packages/visibility.py).
+    app_reqs = list(
+        visible_app_templates_for(request.auth).filter(id__in=payload.app_requirement_ids).order_by("id"),
+    )
     if len(app_reqs) != len(set(payload.app_requirement_ids)):
         raise HttpError(404, "Unknown app requirement id")
     models = list(LLMModel.objects.filter(id__in=payload.model_ids).order_by("id"))

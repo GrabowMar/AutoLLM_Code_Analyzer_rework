@@ -113,7 +113,8 @@
 					<span class="text-sm font-semibold">{preset.name}</span>
 					<span class="font-mono text-[11px] text-muted-foreground">{preset.slug}@v{preset.version}</span>
 					{#if preset.is_default}
-						<Badge class="text-success-fg">Default</Badge>
+						<!-- Outline, not the tinted default variant: green-on-tint is under 4.5:1 in light mode. -->
+						<Badge variant="outline" class="text-success-fg">Default</Badge>
 					{:else if preset.is_system}
 						<Badge variant="secondary">System</Badge>
 					{:else}

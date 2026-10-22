@@ -13,6 +13,7 @@ from backend.generation.api.schema import StackSchema
 from backend.generation.api.schema import StackWriteSchema
 from backend.generation.api.views._router import router
 from backend.generation.models import AppRequirementTemplate
+from backend.generation.services.packages import visible_app_templates_for
 from backend.generation.services.versioning import content_hash
 from backend.runtime.services.dockerfile_gen import generate_dockerfile
 from backend.runtime.services.scaffolding import load_manifest
@@ -20,12 +21,8 @@ from backend.runtime.services.stack_validation import validate_stack_config
 from backend.runtime.services.stack_validation import validate_stack_files
 
 
-def _visible_templates(model, user):
-    return model.objects.filter(Q(is_default=True) | Q(created_by=user))
-
-
-def _mutable_template_or_403(model, user, *, slug: str):
-    obj = get_object_or_404(_visible_templates(model, user), slug=slug)
+def _mutable_template_or_403(user, *, slug: str):
+    obj = get_object_or_404(visible_app_templates_for(user), slug=slug)
     if obj.created_by_id == getattr(user, "id", None):
         return obj
     if getattr(user, "is_staff", False) and obj.is_default:
@@ -269,7 +266,7 @@ def approve_stack(request, slug: str):
 @router.get("/app-specs/", response=list[AppRequirementTemplateSchema])
 def list_app_templates(request):
     """List all app requirement templates."""
-    return _visible_templates(AppRequirementTemplate, request.auth)
+    return visible_app_templates_for(request.auth)
 
 
 @router.post("/app-specs/", response=AppRequirementTemplateSchema)
@@ -282,12 +279,12 @@ def create_app_template(request, payload: AppRequirementCreateSchema):
 
 @router.get("/app-specs/{slug}/", response=AppRequirementTemplateSchema)
 def get_app_template(request, slug: str):
-    return get_object_or_404(_visible_templates(AppRequirementTemplate, request.auth), slug=slug)
+    return get_object_or_404(visible_app_templates_for(request.auth), slug=slug)
 
 
 @router.put("/app-specs/{slug}/", response=AppRequirementTemplateSchema)
 def update_app_template(request, slug: str, payload: AppRequirementCreateSchema):
-    template = _mutable_template_or_403(AppRequirementTemplate, request.auth, slug=slug)
+    template = _mutable_template_or_403(request.auth, slug=slug)
     for attr, value in payload.dict().items():
         setattr(template, attr, value)
     template.save()
@@ -296,6 +293,6 @@ def update_app_template(request, slug: str, payload: AppRequirementCreateSchema)
 
 @router.delete("/app-specs/{slug}/")
 def delete_app_template(request, slug: str):
-    template = _mutable_template_or_403(AppRequirementTemplate, request.auth, slug=slug)
+    template = _mutable_template_or_403(request.auth, slug=slug)
     template.delete()
     return {"success": True}

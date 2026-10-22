@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 from django.conf import settings
+from django.db import transaction
 
 from backend.generation.models import Experiment
 from backend.generation.models import GenerationBatch
@@ -63,7 +64,7 @@ from backend.generation.services.presets import provenance
 from backend.generation.services.presets import system_default_preset
 from backend.generation.services.presets import visible_q
 from backend.generation.services.profile_resolver import apply_snapshot_to_job
-from backend.generation.services.profile_resolver import derive_experiment_seed
+from backend.generation.services.profile_resolver import experiment_cell_seed
 from backend.generation.services.sampling import MODE_DEFAULT_MAX_TOKENS
 from backend.generation.services.sampling import MODE_DEFAULT_TEMPERATURE
 from backend.generation.services.versioning import canonical_json
@@ -829,6 +830,7 @@ def _batch_request(
     }
 
 
+@transaction.atomic
 def launch_experiment(experiment: Experiment, user: AbstractUser) -> GenerationBatch:
     """Create jobs for every matrix cell lacking a live or completed job, and dispatch them.
 
@@ -848,6 +850,9 @@ def launch_experiment(experiment: Experiment, user: AbstractUser) -> GenerationB
 
     apps = list(experiment.app_requirements.all())
     cells = _cells([p.condition for p in plans], apps, experiment.repeats)
+    # Same row lock clone_job takes first, so a concurrent retry and this top-up
+    # cannot both fill one cell (an extra, unpaired trial).
+    Experiment.objects.select_for_update().filter(id=experiment.id).values_list("id", flat=True).first()
     covered = _covered_cells(experiment)
     pending_cells = [c for c in cells if _cell_key(c) not in covered]
     layers_by_condition = {p.condition.id: p.layers for p in plans}
@@ -899,12 +904,14 @@ def launch_experiment(experiment: Experiment, user: AbstractUser) -> GenerationB
             budget_preset=layers.budget_preset,
         )
         if experiment.base_seed is not None:
-            # Agent mode uses common random numbers: every condition of an
-            # (app, repeat) cell gets the same seed, so paired comparisons
-            # differ only in the condition. (Scaffolding keeps its historical
-            # per-condition derivation so old launches stay reproducible.)
-            parts = (app_req.id, cell.repeat_index) if is_agent else (condition.id, app_req.id, cell.repeat_index)
-            job.experiment_seed = derive_experiment_seed(experiment.base_seed, *parts)
+            # The one cell-seed formula a retry re-derives too (job_cloning.cell_seed).
+            job.experiment_seed = experiment_cell_seed(
+                experiment.base_seed,
+                agent=is_agent,
+                condition_id=condition.id,
+                app_id=app_req.id,
+                repeat_index=cell.repeat_index,
+            )
 
         try:
             if is_agent:
