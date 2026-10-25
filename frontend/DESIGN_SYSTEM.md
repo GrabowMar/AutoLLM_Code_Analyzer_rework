@@ -62,7 +62,7 @@ Rules (see `src/lib/components/charts/theme.ts`):
   <PageHeader title="Experiments" description="One sentence on what this page is for."
               back={{ href: '/experiments', label: 'Experiments' }}>   <!-- detail/create pages only -->
     {#snippet meta()}<StatusBadge status={x.status} />{/snippet}         <!-- optional -->
-    {#snippet actions()}<Button href="/experiments/create" size="sm"><Plus />New experiment</Button>{/snippet}
+    {#snippet actions()}<Button href="/experiments/new" size="sm"><Plus />New experiment</Button>{/snippet}
   </PageHeader>
 
   {#if error}<ErrorAlert message={error} onretry={load} />{/if}
@@ -143,6 +143,29 @@ mutated); `onchange` fires only on user edits; catalogs load once per page (`loa
 - API errors: show `formatApiError(e)` (handles `{detail}`, 422 `{detail: [{loc, msg}]}`, `{message}`,
   `{detail, remediation}`); map 422s onto fields with `apiFieldErrors(e)`; ignore `isAbortError(e)` from
   superseded requests.
+
+## Experiments building blocks (`src/lib/components/experiments/`)
+
+Import from `$lib/components/experiments`. Endpoint pieces (`SlotMeter`, `EndpointChip`, …) come from
+`$lib/components/inference`.
+
+| Component / module            | Use for                                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------------ |
+| `ExperimentComposer`          | the single-page design form (`/experiments/new`); sticky `PlanRail` on ≥ 56rem, `StartBar` below |
+| `ExperimentRow`               | one experiment in a list (progress, ETA, endpoints, inline lifecycle buttons)                    |
+| `CapacityStrip`               | one-line executor / lanes / endpoint capacity summary                                            |
+| `monitor/ConditionGrid`       | condition × app × repeat squares (CSS grid, sticky label column, endpoint groups)                |
+| `monitor/EndpointLane`        | one endpoint's live slots, loaded models, this user's active jobs, blocked reason                |
+| `Leaderboard`, `PairedDeltas` | results: ranked conditions with CIs; Δ vs the pre-registered baseline (forest plot)              |
+| `ComparabilityTable`          | what each condition actually runs with; differing columns highlighted                            |
+| `live.svelte.ts`              | `ExperimentLive`: SSE + polling fallback; never hand-roll polling on experiment pages            |
+| `cells.ts`, `format.ts`       | cell codes (`CELL_STATES` square styles), progress mapping, ETA / hours / Δ / p formats          |
+
+- Scaling to ~30 models: everything is grouped by endpoint (picker, selection chips, plan rows, lanes, grid);
+  condition labels are `model · harness`; compare against one baseline, never N² pairs.
+- Cell squares carry meaning by shape as well as hue (solid = finished, ring = waiting, dashed = waiting
+  for a model load) and always have an `aria-label`/`title`.
+- Statistics: never show a pooled pass rate across conditions; p-values only when results are not interim.
 
 ## Color & type rules
 

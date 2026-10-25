@@ -195,8 +195,8 @@ class ExperimentCreateV2(Schema):
     continuation_limit: int = Field(1, ge=0, le=5)
     enable_repair: bool = True
     llm_defaults: LLMParamsSchema | None = None
-    # v2
-    conditions: ConditionSetSpec
+    # v2 (a draft may start without conditions; a launch needs at least one)
+    conditions: ConditionSetSpec | None = None
     execution: ExecutionSpecSchema | None = None
     post_run: PostRunSpec | None = None
     schedules: list[ScheduleSpec] | None = None
@@ -375,12 +375,34 @@ class ConditionEndpointRef(Schema):
 
 
 class ExperimentConditionV2(ExperimentConditionSchema):
-    """The existing condition schema plus where it runs."""
+    """The existing condition schema plus where it runs (``endpoint`` null = OpenRouter)."""
 
     endpoint: ConditionEndpointRef | None = None
     served_model_name: str = ""
     digest: str = ""
     pinned_digest: str = ""
+    display_label: str = ""
+
+    @staticmethod
+    def resolve_endpoint(obj) -> dict | None:
+        endpoint = obj.model.endpoint if obj.model.endpoint_id else None
+        if endpoint is None or endpoint.is_system:
+            return None
+        return {"slug": endpoint.slug, "kind": endpoint.kind}
+
+    @staticmethod
+    def resolve_served_model_name(obj) -> str:
+        return obj.model.served_model_name or ""
+
+    @staticmethod
+    def resolve_digest(obj) -> str:
+        return obj.model.digest or ""
+
+    @staticmethod
+    def resolve_display_label(obj) -> str:
+        from backend.generation.services.experiments import condition_label
+
+        return condition_label(obj)
 
 
 class ExperimentDetail(ExperimentListItem):
@@ -392,6 +414,9 @@ class ExperimentDetail(ExperimentListItem):
     stack_slug: str | None = None
     sampling_preset_ref: NamedPresetRefSchema | None = None
     budget_preset_ref: NamedPresetRefSchema | None = None
+    # The pinned preset pks (v1 field names, kept for compatibility).
+    sampling_preset: int | None = None
+    budget_preset: int | None = None
     app_requirement_ids: list[int] = []
     max_concurrency: int | None = None
     infra_retries: int = 2
@@ -611,6 +636,7 @@ class ExperimentStatusV2Schema(Schema):
     lanes: StatusLanes = StatusLanes()
     executor: StatusExecutor = StatusExecutor()
     latest_post_run: PostRunOut | None = None
+    legacy_pending: int = 0
 
 
 class CellsCondition(Schema):

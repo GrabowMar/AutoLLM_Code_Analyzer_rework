@@ -19,15 +19,18 @@ trajectory, chat log) is kept as its self-report. Both, plus the patch and
 the final workspace, are written under ``GENERATION_RUNS_ROOT/<job_id>/``
 with sha256s in the job row.
 
-After the run, still inside the same resource slot, the platform evaluates
+After the run the platform evaluates
 the sample (``services/evaluation``): build, run without egress, hidden
 conformance suite. ``result_data.agent.validity`` lists everything an
 analysis should know before pooling the sample (limits that are not
 model-neutral, params a model could not take, evaluation infrastructure
 errors, ...).
 
-Runs start in FIFO order of dispatch (``RunQueue``), so the order an
-experiment shuffles its jobs into is the order they actually run in.
+The executor (``backend.execution``) admits runs in each lane's frozen
+``sequence`` order, so the order an experiment shuffles its jobs into is the
+order they actually run in. :meth:`AgentRunner.run_stage` is the sandbox
+stage; the evaluation stage runs later in the executor's eval pool, after the
+sandbox slot is released (``GenerationService.evaluate``).
 """
 
 from __future__ import annotations
@@ -35,23 +38,17 @@ from __future__ import annotations
 import ast
 import gzip
 import hashlib
-import itertools
 import json
 import logging
 import re
-import threading
 import time
 from collections import Counter
-from collections import deque
 from pathlib import Path
 from typing import Any
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from backend.credentials.services.resolver import MissingApiKeyError
-from backend.credentials.services.resolver import get_openrouter_key
 from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationJob
 from backend.generation.services import result_writer
@@ -73,83 +70,18 @@ logger = logging.getLogger(__name__)
 RESULT_SCHEMA_VERSION = 2
 
 
-class RunQueue:
-    """FIFO admission to the sandbox slots (``AGENT_MAX_CONCURRENT_RUNS``).
+class AgentRunError(Exception):
+    """An agent job could not produce a sample (infrastructure / configuration).
 
-    A plain semaphore admits waiting threads in arbitrary order; experiments
-    rely on dispatch order being run order (they interleave conditions so
-    that time-of-day effects -- provider load, alias repointing -- cannot line
-    up with one condition). ``reserve`` is called at dispatch time, in
-    dispatch order; ``enter`` blocks until the job is at the head and a slot
-    is free.
+    ``infra`` marks failures of the platform rather than of the configuration
+    (apps daemon, gateway, transport errors with no successful LLM call): the
+    executor retries those as a new attempt with the same snapshot and seed.
     """
 
-    def __init__(self, slots: int) -> None:
-        self.slots = max(1, slots)
-        self.cv = threading.Condition()
-        self.active = 0
-        self.waiting: deque[str] = deque()
-        self.tickets: dict[str, int] = {}
-        self.counter = itertools.count(1)
-
-    def reserve(self, job_id: str) -> int:
-        with self.cv:
-            if job_id not in self.tickets:
-                self.tickets[job_id] = next(self.counter)
-                self.waiting.append(job_id)
-            return self.tickets[job_id]
-
-    def enter(self, job_id: str, is_cancelled) -> int:
-        ticket = self.reserve(job_id)
-        while True:
-            with self.cv:
-                if self.waiting and self.waiting[0] == job_id and self.active < self.slots:
-                    self.waiting.popleft()
-                    self.active += 1
-                    self.cv.notify_all()
-                    return ticket
-                self.cv.wait(timeout=5)
-                head = self.waiting[0] if self.waiting else None
-            if is_cancelled():
-                self.drop(job_id)
-                raise AgentRunCancelled
-            if head and head != job_id and not _is_live(head):
-                # A reserved job that died before reaching the queue must not
-                # block everyone behind it.
-                self.drop(head)
-
-    def leave(self, job_id: str) -> None:
-        with self.cv:
-            self.active -= 1
-            self.tickets.pop(job_id, None)
-            self.cv.notify_all()
-
-    def drop(self, job_id: str) -> None:
-        with self.cv:
-            if job_id in self.waiting:
-                self.waiting.remove(job_id)
-            self.tickets.pop(job_id, None)
-            self.cv.notify_all()
-
-
-_queue: RunQueue | None = None
-_queue_lock = threading.Lock()
-
-
-def run_queue() -> RunQueue:
-    global _queue  # noqa: PLW0603
-    with _queue_lock:
-        if _queue is None:
-            _queue = RunQueue(settings.AGENT_MAX_CONCURRENT_RUNS)
-        return _queue
-
-
-class AgentRunError(Exception):
-    """An agent job could not produce a sample (infrastructure / configuration)."""
-
-    def __init__(self, message: str, *, remediation: str | None = None) -> None:
+    def __init__(self, message: str, *, remediation: str | None = None, infra: bool = False) -> None:
         super().__init__(message)
         self.remediation = remediation
+        self.infra = infra
 
     def display(self) -> str:
         return f"{self} {self.remediation}" if self.remediation else str(self)
@@ -157,16 +89,6 @@ class AgentRunError(Exception):
 
 class AgentRunCancelled(Exception):  # noqa: N818 - control flow, not an error
     """The job was cancelled before or during its run."""
-
-
-def _is_live(key: str) -> bool:
-    if ":" in key:  # "<job id>:evaluate" entries are short and always processed
-        return True
-    try:
-        status = GenerationJob.objects.filter(id=key).values_list("status", flat=True).first()
-    except (ValueError, ValidationError):
-        return True  # not a job id: never evict what we cannot check
-    return status in (GenerationJob.Status.PENDING, GenerationJob.Status.RUNNING)
 
 
 def _is_cancelled(job: GenerationJob) -> bool:
@@ -179,8 +101,8 @@ def _is_cancelled(job: GenerationJob) -> bool:
 class _Heartbeat:
     """Cancellation check that also touches ``updated_at`` once a minute.
 
-    Runs last up to hours without any other write to the row; the heartbeat
-    keeps maintenance's "stuck job" sweep from failing a healthy run.
+    Lease renewal is the executor heartbeat's job; touching ``updated_at``
+    keeps the row visibly alive for list views and maintenance.
     """
 
     def __init__(self, job: GenerationJob, every_seconds: float = 60) -> None:
@@ -192,7 +114,13 @@ class _Heartbeat:
         if time.monotonic() - self.last >= self.every:
             self.last = time.monotonic()
             GenerationJob.objects.filter(id=self.job.id).update(updated_at=timezone.now())
-        return _is_cancelled(self.job)
+        # Cancelled, requeued (another attempt) or reclaimed: this sandbox no longer owns the job.
+        return not GenerationJob.objects.filter(
+            id=self.job.id,
+            status=GenerationJob.Status.RUNNING,
+            attempt=self.job.attempt,
+            lease_owner=self.job.lease_owner or "",
+        ).exists()
 
 
 def _jsonl(data: bytes | None) -> list[dict]:
@@ -217,73 +145,114 @@ class AgentRunner:
     def __init__(self, job: GenerationJob) -> None:
         self.job = job
 
-    def execute(self) -> None:
+    def run_stage(self) -> str:
+        """The sandbox stage: run the harness, record the evidence; returns the stage outcome.
+
+        ``"evaluate"`` (``AGENT_AUTO_EVALUATE``: the sandbox slot is released and
+        the eval pool grades the sample), ``"done"`` or, for a local-endpoint run
+        that ended after the proxy returned an infra error, ``"infra_interrupted"``.
+        Raises ``AgentRunError`` (``infra=True`` for platform failures),
+        ``AgentRunCancelled`` or ``LeaseLost``.
+        """
+        from backend.execution.transitions import OUTCOME_DONE
+        from backend.execution.transitions import OUTCOME_EVALUATE
+        from backend.execution.transitions import OUTCOME_INFRA_INTERRUPTED
+        from backend.execution.transitions import guarded_save
+        from backend.inference.access import LLMAccessError
+        from backend.inference.gateway_wiring import for_job
+
         job = self.job
         snapshot = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
-        queue = run_queue()
+        if snapshot.get("mode") != "agent":
+            apply_agent_snapshot_to_job(job)
+            snapshot = job.resolved_bundle
+        if int(snapshot.get("bundle_schema_version") or 0) < AGENT_SNAPSHOT_SCHEMA_VERSION:
+            msg = "This job was frozen by an earlier agent-mode version and cannot be replayed exactly."
+            raise AgentRunError(msg, remediation="Use Retry to re-create it under the current procedure.")
         try:
-            if snapshot.get("mode") != "agent":
-                apply_agent_snapshot_to_job(job)
-                snapshot = job.resolved_bundle
-            if int(snapshot.get("bundle_schema_version") or 0) < AGENT_SNAPSHOT_SCHEMA_VERSION:
-                msg = "This job was frozen by an earlier agent-mode version and cannot be replayed exactly."
-                raise AgentRunError(msg, remediation="Use Retry to re-create it under the current procedure.")
-            try:
-                api_key = get_openrouter_key(job.created_by)
-            except MissingApiKeyError as exc:
-                raise AgentRunError(str(exc), remediation=exc.remediation) from exc
-        except Exception:
-            queue.drop(str(job.id))
-            raise
+            wiring = for_job(job, snapshot)
+        except LLMAccessError as exc:
+            raise AgentRunError(str(exc), remediation=exc.remediation, infra=exc.retryable) from exc
+        if _is_cancelled(job):
+            raise AgentRunCancelled
 
-        self._progress("queued")
-        queued_at = time.time()
-        ticket = queue.enter(str(job.id), lambda: _is_cancelled(job))
+        self._progress("running")
+        started_at = time.time()
+        seed = seed_files(job)
+        sandbox = AgentSandbox(str(job.id), job.attempt, wiring=wiring, snapshot=snapshot)
         try:
-            if _is_cancelled(job):
-                raise AgentRunCancelled
-            self._progress("running")
-            started_at = time.time()
-            seed = seed_files(job)
-            sandbox = AgentSandbox(str(job.id), api_key=api_key, snapshot=snapshot)
-            try:
-                result = sandbox.run(
-                    seed=seed,
-                    brief=snapshot["brief"]["text"],
-                    is_cancelled=_Heartbeat(job),
-                )
-            except SandboxError as exc:
-                raise AgentRunError(
-                    str(exc),
-                    remediation="Check the apps daemon (apps-dind) and server logs.",
-                ) from exc
-            except Exception as exc:
-                logger.exception("Agent sandbox for job %s failed", job.id)
-                msg = f"Agent sandbox failed: {exc}"
-                raise AgentRunError(msg, remediation="Check that the apps daemon is reachable.") from exc
+            result = sandbox.run(
+                seed=seed,
+                brief=snapshot["brief"]["text"],
+                is_cancelled=_Heartbeat(job),
+            )
+        except SandboxError as exc:
+            raise AgentRunError(
+                str(exc),
+                remediation="Check the apps daemon (apps-dind) and server logs.",
+                infra=True,
+            ) from exc
+        except Exception as exc:
+            logger.exception("Agent sandbox for job %s failed", job.id)
+            msg = f"Agent sandbox failed: {exc}"
+            raise AgentRunError(msg, remediation="Check that the apps daemon is reachable.", infra=True) from exc
 
-            if result.termination == "cancelled":
-                raise AgentRunCancelled
-            self._record(snapshot, seed, result)
-            job.result_data["agent"]["schedule"] = {
-                "run_order": ticket,
-                "queued_at": queued_at,
-                "started_at": started_at,
-                "queue_seconds": round(started_at - queued_at, 2),
-            }
-            if settings.AGENT_AUTO_EVALUATE:
-                self._progress("evaluating")
-                self._evaluate()
-            job.result_data["agent"]["validity"] = assess_validity(job.resolved_bundle, job.result_data)
-        finally:
-            queue.leave(str(job.id))
+        if result.termination == "cancelled":
+            raise AgentRunCancelled
+        self._record(snapshot, seed, result)
+        # _record replaces result_data wholesale: the schedule goes in after it.
+        execution = self._execution()
+        job.result_data["agent"]["schedule"] = {
+            "run_order": execution.get("started_seq"),
+            "sequence": job.sequence,
+            "attempt": job.attempt,
+            "queued_at": execution.get("queued_at"),
+            "claimed_at": execution.get("claimed_at"),
+            "started_at": started_at,
+            "queue_seconds": execution.get("queue_seconds"),
+            "prefetch_load_s": execution.get("prefetch_load_s"),
+        }
+        job.result_data["agent"]["validity"] = assess_validity(
+            job.resolved_bundle,
+            job.result_data,
+            execution=execution,
+            attempt=job.attempt,
+        )
+        guarded_save(job, ["result_data", "metrics", "resolved_bundle", "prompt_hash", "bundle_key"])
+        if snapshot.get("endpoint") and execution.get("infra_errors"):
+            job.error_message = "; ".join(
+                f"{e.get('code')} ({e.get('status')})" for e in execution["infra_errors"][-3:]
+            )
+            return OUTCOME_INFRA_INTERRUPTED
+        return OUTCOME_EVALUATE if settings.AGENT_AUTO_EVALUATE else OUTCOME_DONE
+
+    def execute(self) -> None:
+        """Sandbox stage then (``AGENT_AUTO_EVALUATE``) the evaluation, inline: the shell / test path."""
+        from backend.execution.transitions import OUTCOME_EVALUATE
+
+        if self.run_stage() == OUTCOME_EVALUATE:
+            self._progress("evaluating")
+            self._evaluate()
+            self.job.result_data["agent"]["validity"] = assess_validity(
+                self.job.resolved_bundle,
+                self.job.result_data,
+                execution=self._execution(),
+                attempt=self.job.attempt,
+            )
+
+    def _execution(self) -> dict[str, Any]:
+        """The job's live ``execution`` record (the proxy appends infra errors to it while the run is going)."""
+        execution = execution_record(self.job)
+        self.job.execution = {k: v for k, v in execution.items() if k != "relay_interruptions"}
+        return execution
 
     def _evaluate(self) -> None:
+        from backend.execution.transitions import guarded_save
         from backend.generation.services.evaluation.runner import evaluate_job
 
         # Persist the sample first: evaluation builds from result_data.files.
-        self.job.save(update_fields=["result_data", "metrics", "updated_at"])
-        evaluate_job(self.job)
+        guarded_save(self.job, ["result_data", "metrics"])
+        evaluate_job(self.job, save=guarded_save)
 
     # -- evidence --------------------------------------------------------
 
@@ -293,7 +262,11 @@ class AgentRunner:
         gateway_events = _jsonl(result.gateway_logs.get("gateway_events.jsonl"))
         ok_calls = [c for c in calls if c.get("status") == 200 and not (c.get("response") or {}).get("error")]
         if not ok_calls:
-            raise AgentRunError(self._first_llm_error(calls, result), remediation=self._remediation(calls))
+            raise AgentRunError(
+                self._first_llm_error(calls, result),
+                remediation=self._remediation(calls),
+                infra=_transport_failure(calls),
+            )
 
         budget_events = [e for e in gateway_events if e.get("event") == "budget_exhausted"]
         termination = result.termination
@@ -464,8 +437,12 @@ class AgentRunner:
         return "See the job's LLM call log for details."
 
     def _write_run_record(self, result, ws) -> dict[str, Any]:
-        """Persist the full evidence on disk; return {name: {path, sha256, bytes}}."""
-        root = Path(settings.GENERATION_RUNS_ROOT) / str(self.job.id)
+        """Persist the full evidence on disk; return {name: {path, sha256, bytes}}.
+
+        Attempt 0 writes under ``<job_id>/``; a retried attempt under
+        ``<job_id>/a<attempt>/``, so the evidence of each attempt is kept.
+        """
+        root = run_record_dir(self.job)
         root.mkdir(parents=True, exist_ok=True)
         blobs = {
             "llm_calls.jsonl.gz": gzip.compress(result.gateway_logs.get("calls.jsonl", b"")),
@@ -537,6 +514,47 @@ class AgentRunner:
         result_writer.publish_phase(self.job, phase)
 
 
+def execution_record(job: GenerationJob) -> dict[str, Any]:
+    """``job``'s live ``execution`` record plus ``relay_interruptions`` (what :func:`assess_validity` reads).
+
+    Read from the row, not the instance: the proxy appends infra errors and
+    the chat client adds ``llm_queue_wait_s`` while the run is going.
+    ``relay_interruptions`` counts this attempt's LLM requests that were
+    re-sent after a relay lease was lost.
+    """
+    from backend.inference.models import LLMRequest
+
+    row = GenerationJob.objects.filter(id=job.id).values_list("execution", flat=True).first()
+    execution = dict(row) if isinstance(row, dict) else {}
+    interruptions = LLMRequest.objects.filter(job_id=job.id, job_attempt=job.attempt, attempt__gt=0).count()
+    if interruptions:
+        execution["relay_interruptions"] = interruptions
+    return execution
+
+
+def run_record_dir(job: GenerationJob) -> Path:
+    """Where the run evidence of ``job``'s current attempt lives."""
+    root = Path(settings.GENERATION_RUNS_ROOT) / str(job.id)
+    return root / f"a{job.attempt}" if job.attempt else root
+
+
+# Transport failures (gateway upstream error, proxy unavailable / wait, relay lease expiry):
+# with no successful call they say nothing about the model, so the attempt is retried.
+_TRANSPORT_STATUSES = {502, 503, 504}
+_TRANSPORT_CODES = {"upstream_error", "endpoint_unavailable", "proxy_wait", "lease_expired", "unavailable", "timeout"}
+
+
+def _transport_failure(calls: list[dict]) -> bool:
+    for call in calls:
+        response = call.get("response") or {}
+        err = response.get("error") or call.get("error")
+        if not err and call.get("status") == 200:
+            continue
+        code = err.get("code") if isinstance(err, dict) else None
+        return call.get("status") in _TRANSPORT_STATUSES or code in _TRANSPORT_CODES
+    return False
+
+
 _STUB_RE = re.compile(r"def\s+\w+\s*\([^)]*\)\s*(?:->[^:]+)?:\s*\n\s+(?:pass|\.\.\.)\s*$", re.MULTILINE)
 
 
@@ -574,7 +592,13 @@ _NON_NEUTRAL_LIMITS = {
 }
 
 
-def assess_validity(snapshot: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+def assess_validity(
+    snapshot: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    execution: dict[str, Any] | None = None,
+    attempt: int | None = None,
+) -> dict[str, Any]:
     agent = result.get("agent") or {}
     evaluation = result.get("evaluation")
     notes: list[dict[str, str]] = []
@@ -623,10 +647,33 @@ def assess_validity(snapshot: dict[str, Any], result: dict[str, Any]) -> dict[st
         note("not_evaluated", "warn", "no platform evaluation yet")
     elif evaluation.get("status") == "infra_error":
         note("evaluation_infra_error", "exclude", "the platform could not evaluate this sample; re-evaluate it")
+    _execution_notes(note, execution or {}, attempt, agent)
+    if result.get("infra_interrupted"):
+        note("infra_interrupted", "exclude", "the run kept being interrupted by infrastructure errors")
     return {
         "valid": not any(n["severity"] == "exclude" for n in notes),
         "notes": notes,
     }
+
+
+CONTENDED_SHARE = 0.1
+
+
+def _execution_notes(note, execution: dict[str, Any], attempt: int | None, agent: dict[str, Any]) -> None:
+    """Validity notes from the executor's runtime record (spec §C.6, §C.9)."""
+    if attempt:
+        note("infra_retried", "warn", f"this is attempt {attempt + 1}: earlier attempts hit infrastructure failures")
+    interruptions = execution.get("relay_interruptions")
+    if interruptions:
+        note("relay_interruptions", "info", f"{interruptions} LLM requests were re-sent after a relay interruption")
+    wait = float(execution.get("llm_queue_wait_s") or 0.0)
+    wall = float(agent.get("wall_seconds") or 0.0)
+    if wall > 0 and wait > CONTENDED_SHARE * wall:
+        note(
+            "contended",
+            "warn",
+            f"the run waited {wait:.0f} s of its {wall:.0f} s wall clock for endpoint request slots",
+        )
 
 
 def _safe_json(data: bytes | None) -> dict:

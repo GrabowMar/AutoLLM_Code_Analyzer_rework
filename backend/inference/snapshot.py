@@ -1,4 +1,4 @@
-"""Snapshot / fingerprint helpers for non-OpenRouter models (spec §D.5). Implemented (Foundation).
+"""Snapshot / fingerprint helpers for non-OpenRouter models (spec §D.5).
 
 Every snapshot change for local models is guarded by :func:`is_local`, so
 OpenRouter snapshots and fingerprints stay byte-identical.
@@ -63,6 +63,8 @@ def endpoint_section(model) -> dict[str, Any] | None:
         "keep_alive": endpoint.keep_alive,
         "max_concurrency": endpoint.max_concurrency,
         "client_timeout_s": chain(endpoint).harness_client_s,
+        # Provenance (not fingerprinted): decides whether ``think`` is sent.
+        "capabilities": list(((model.metadata or {}).get("ollama") or {}).get("capabilities") or []),
     }
 
 

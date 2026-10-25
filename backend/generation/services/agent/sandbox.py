@@ -5,6 +5,10 @@ Topology per job (all nested containers of apps-dind, never the host daemon)::
     [agent: harness]   --internal net-->  [gateway]  --bridge-->  OpenRouter
                                                     \\--CONNECT--> package registries (policy "packages")
 
+For a model on a local endpoint the gateway is the ``llm-gateway-local``
+overlay on the dedicated ``llmlab-gw-egress`` network, whose only reachable
+upstream is the executor's internal LLM proxy (see ``inference.gateway_wiring``).
+
 The agent container is attached *only* to a per-job ``internal`` network, so
 it has no route anywhere except the gateway. It runs as an unprivileged user
 with all capabilities dropped, no-new-privileges, and memory/CPU/PID caps.
@@ -37,6 +41,7 @@ from backend.generation.services.agent.harnesses.base import WORKSPACE_DIR
 from backend.generation.services.agent.harnesses.base import proxy_env
 from backend.generation.services.agent.harnesses.base import run_script
 from backend.generation.services.agent.images import IMAGES_DIR
+from backend.generation.services.agent.images import gateway_image_plan
 from backend.generation.services.agent.images import harness_image_plan
 from backend.generation.services.agent.images import image_tag
 from backend.generation.services.agent.workspace import make_tar
@@ -45,6 +50,8 @@ from backend.runtime.services import docker_manager
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from backend.inference.gateway_wiring import GatewayWiring
 
 logger = logging.getLogger(__name__)
 
@@ -128,12 +135,36 @@ def reap_orphans(client=None, *, older_than_seconds: int = 0) -> int:
 
 
 class AgentSandbox:
-    """One job's network + gateway + agent containers."""
+    """One job's network + gateway + agent containers.
 
-    def __init__(self, job_id: str, *, api_key: str, snapshot: dict[str, Any]) -> None:
+    *wiring* (``inference.gateway_wiring.for_job``) says which gateway image,
+    upstream, credentials and egress network the job uses; passing only
+    *api_key* is the OpenRouter wiring. *attempt* suffixes container and
+    network names (``-a<attempt>``) so leftovers of an earlier attempt never
+    collide with a retry; it is runtime-only and not in the snapshot.
+    """
+
+    def __init__(
+        self,
+        job_id: str,
+        attempt: int = 0,
+        *,
+        snapshot: dict[str, Any],
+        api_key: str = "",
+        wiring: GatewayWiring | None = None,
+    ) -> None:
+        from backend.inference.gateway_wiring import OPENROUTER_UPSTREAM
+        from backend.inference.gateway_wiring import GatewayWiring
+
         self.job_id = str(job_id)
-        self.short = self.job_id.replace("-", "")[:12]
-        self.api_key = api_key
+        self.short = f"{self.job_id.replace('-', '')[:12]}-a{int(attempt)}"
+        self.wiring = wiring or GatewayWiring(
+            image_local=False,
+            upstream=OPENROUTER_UPSTREAM,
+            api_key=api_key,
+            network="bridge",
+        )
+        self.api_key = self.wiring.api_key
         self.snapshot = snapshot
         self.client = docker_manager.new_client()
         self.network = None
@@ -160,8 +191,21 @@ class AgentSandbox:
         section = self.snapshot["harness"]
         adapter = get_harness(section["name"])
         recorded = self.snapshot.get("images") or {}
-        gateway_tag, gateway_id = ensure_image(self.client, "llm-gateway", expect_tag=recorded.get("gateway", ""))
+        gateway_plan = gateway_image_plan(self.wiring.image_local)
+        for index, (name, args, _tag) in enumerate(gateway_plan):
+            # Only the last image (the one that runs) is pinned by the snapshot.
+            last = index == len(gateway_plan) - 1
+            gateway_tag, gateway_id = ensure_image(
+                self.client,
+                name,
+                args,
+                expect_tag=recorded.get("gateway", "") if last else "",
+            )
         images = {"gateway": gateway_tag, "gateway_id": gateway_id}
+        if self.wiring.network != "bridge":
+            from backend.inference.gateway_wiring import ensure_egress_network
+
+            ensure_egress_network(self.client)
         plan = harness_image_plan(adapter.image, adapter.build_args(section["version"]))
         for (name, args, _tag), role in zip(plan, ("base", "harness"), strict=True):
             tag, image_id = ensure_image(self.client, name, args, expect_tag=recorded.get(role, ""))
@@ -254,15 +298,21 @@ class AgentSandbox:
                 "max_cost_usd": agent_cfg["max_cost_usd"],
             },
             "connect_allowlist": list(PACKAGE_REGISTRY_HOSTS) if agent_cfg["network_policy"] == "packages" else [],
-            "upstream": "https://openrouter.ai/api/v1",
+            "upstream": self.wiring.upstream,
             "referer": settings.OPENROUTER_HTTP_REFERER,
             "title": f"LLM Lab agent job {self.short}",
         }
+        if self.wiring.upstream_timeout_s is not None:
+            gateway_cfg["upstream_timeout_s"] = self.wiring.upstream_timeout_s
         self.gateway = self.client.containers.create(
             tag,
             name=f"llmlab-gateway-{self.short}",
-            environment={"OPENROUTER_API_KEY": self.api_key, "GATEWAY_CONFIG": json.dumps(gateway_cfg)},
-            network="bridge",
+            environment={
+                "OPENROUTER_API_KEY": self.wiring.api_key,
+                "GATEWAY_CONFIG": json.dumps(gateway_cfg),
+                **self.wiring.extra_env,
+            },
+            network=self.wiring.network,
             labels=self.labels,
             mem_limit="256m",
             nano_cpus=500_000_000,

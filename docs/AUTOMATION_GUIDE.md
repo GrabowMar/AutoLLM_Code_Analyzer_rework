@@ -1,44 +1,13 @@
 # Automation guide
 
-Compose generation and analysis into pipelines, fan them out over batches of models and templates, and run them on a cron schedule.
+Automation is now part of each experiment: **Schedules** and **Post-run** on the experiment's Automation tab (`/experiments/{id}`). The `/automation` pages redirect to `/experiments`, and the `/api/automation/` router is no longer mounted.
 
-## Concepts
+| What you used to build | What to use now |
+|---|---|
+| A pipeline with a `generate` step on a cron schedule | An experiment with a `top_up`, `add_replicates` or `clone_and_run` schedule |
+| A batch fanning a pipeline out over models × templates | One experiment whose conditions are the cross-product (models × harness presets, or models × profiles) |
+| `analyze` and `report` steps after generation | The experiment's post-run: analyzers over the completed jobs, then the experiment report |
 
-- **Pipeline** — a named definition made of ordered **steps**. Step kinds: `generate`, `analyze`, `report`, `wait`, `notify`, `script`.
-- **PipelineRun / PipelineStepRun** — one execution of a pipeline and of each step, with per-step retries and logs.
-- **Batch / BatchItem** — a fan-out: one pipeline run per combination of a parameter matrix (models × templates × …).
-- **Schedule** — a cron expression attached to a pipeline; when due, it triggers a run.
+See [Experiments → Automation](/docs/EXPERIMENTS#automation) for how schedules fire (cron in a timezone, a 15-minute minimum interval, no burst catch-up, skip while active) and how post-runs run (once per completion, sequential analyses, owner-scoped report).
 
-Steps don't reimplement anything: a `generate` step runs the same generation service, and an `analyze` step calls the same `execute(run)` as the interactive UI — see [Generation process](/docs/GENERATION_PROCESS) and [Analysis pipeline](/docs/ANALYSIS_PIPELINE).
-
-## The pipeline DSL
-
-A pipeline's definition is a JSON config with a `steps` list. Each step needs a unique `name`, a known `kind`, kind-specific config fields, and optionally `depends_on` (referencing other steps by name):
-
-```json
-{
-  "steps": [
-    {"name": "gen", "kind": "generate", "config": {"model": "{{params.model}}"}},
-    {"name": "scan", "kind": "analyze", "depends_on": ["gen"],
-     "config": {"job_id": "{{steps.gen.output.job_id}}", "tools": ["bandit", "ruff"]}}
-  ]
-}
-```
-
-Two substitution scopes are available in step configs (`engine/params.py`): `{{params.<key>}}` for run parameters and `{{steps.<name>.output.<key>}}` for upstream step outputs. Unresolvable references pass through unchanged.
-
-`validate_pipeline_dsl` (`backend/automation/services.py`) checks the structure on create/update; the API returns the errors as a structured 400 payload rather than saving a broken pipeline.
-
-## Building pipelines in the UI
-
-The `/automation` hub combines workflows and [experiments](/docs/EXPERIMENTS), with search and type/status filters. Start at `/automation/create` and choose a workflow or an experiment. Workflows use a node-based editor: steps are nodes, `depends_on` edges are drawn between them, and the run view overlays live statuses on the same graph.
-
-## Execution and scheduling
-
-Triggering a run creates the `PipelineRun` plus pending step runs, then dispatches via Celery (`run_pipeline_task`) — falling back to a daemon thread if the broker is unreachable. Schedules additionally need something ticking the scheduler: Celery beat or the fallback command, see [Background services](/docs/BACKGROUND_SERVICES).
-
-Batches put the matrix in `Batch.config` (`{"pipeline_id": ..., "matrix": {"models": [...], "templates": [...]}}`) and expand to one run per combination. An optional `"repeats": N` (1–20) runs every combination N times; with repeats > 1 each run gets a 1-based `trial` param (usable as `{{params.trial}}` in step configs). Model comparisons need n > 1 — between-run variance is the point of repeating.
-
-## API
-
-Everything is under `/api/automation/` ([API reference](/docs/api-reference)): CRUD plus clone for `/pipelines/`, run triggering and inspection (`/pipelines/{id}/runs/`, `/runs/{id}/`, `/runs/{id}/logs/`, `cancel`, `retry`), `/batches/` with cancel, and `/schedules/` with an enabled toggle.
+The `backend.automation` app, its tables and its engine stay in the codebase for existing data; nothing creates new pipeline runs.

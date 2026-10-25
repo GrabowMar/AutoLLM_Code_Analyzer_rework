@@ -14,11 +14,13 @@
 	 * - `hideWhenOk` (default false): render nothing when the user's own key or the
 	 *   deployment fallback key will be used.
 	 * - `keyState` (bindable, output): the resolved {@link OpenRouterKeyState}.
+	 * - `involved` (default true): whether any OpenRouter model takes part. With
+	 *   false (every selected model runs on a local endpoint) nothing renders, the
+	 *   status is not fetched and `keyState` reports 'ok' (no key is needed).
 	 * - `class`.
 	 * A failed status request shows a neutral note with Retry, never "key required";
 	 * the server preflight (preview `missing_api_key`) stays authoritative.
 	 */
-	import { onMount } from 'svelte';
 	import { getOpenRouterCredentialStatus, type CredentialStatus } from '$lib/api/credentials';
 	import { toneClasses } from '$lib/constants/colors';
 	import { cn } from '$lib/utils';
@@ -32,10 +34,16 @@
 	interface Props {
 		hideWhenOk?: boolean;
 		keyState?: OpenRouterKeyState;
+		involved?: boolean;
 		class?: string;
 	}
 
-	let { hideWhenOk = false, keyState = $bindable('loading'), class: className }: Props = $props();
+	let {
+		hideWhenOk = false,
+		keyState = $bindable('loading'),
+		involved = true,
+		class: className,
+	}: Props = $props();
 
 	const SETTINGS_HREF = '/users/settings#credentials';
 
@@ -43,7 +51,10 @@
 	let loading = $state(true);
 	let failed = $state(false);
 
+	let requested = false;
+
 	const resolved = $derived.by((): OpenRouterKeyState => {
+		if (!involved) return 'ok';
 		if (loading) return 'loading';
 		if (failed || !status) return 'unknown';
 		if (status.configured) return status.last_validation_status === 'invalid' ? 'invalid' : 'ok';
@@ -55,6 +66,7 @@
 	});
 
 	async function load() {
+		requested = true;
 		loading = true;
 		failed = false;
 		try {
@@ -67,15 +79,18 @@
 		}
 	}
 
-	onMount(() => {
-		void load();
+	// Fetched once, the first time an OpenRouter model is involved.
+	$effect(() => {
+		if (involved && !requested) void load();
 	});
 
 	const linkClass =
 		'font-medium text-success-fg underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 rounded';
 </script>
 
-{#if resolved === 'loading'}
+{#if !involved}
+	<!-- every model runs on a local endpoint: no OpenRouter key needed -->
+{:else if resolved === 'loading'}
 	<div class={cn('flex items-center gap-2 px-1 text-xs text-muted-foreground', className)} role="status">
 		<LoaderCircle class="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
 		Checking your OpenRouter key…

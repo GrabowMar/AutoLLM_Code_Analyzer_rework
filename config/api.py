@@ -16,7 +16,7 @@ api = NinjaAPI(
 # get_object_or_404); services raise backend.common.exceptions.* so they stay
 # free of ninja imports — this handler maps those to HTTP responses. Typed
 # {4xx: schema} tuple returns are reserved for structured validation payloads
-# (e.g. automation's DslValidationResult).
+# (e.g. a validation result listing every error).
 @api.exception_handler(APIError)
 def handle_api_error(request, exc: APIError):
     return api.create_response(
@@ -42,7 +42,5 @@ api.add_router("/docs/", "backend.docs.api.views.router")
 api.add_router("/system/", "backend.system.api.views.router")
 api.add_router("/inference/", "backend.inference.api.views.router")
 api.add_router("/execution/", "backend.execution.api_views.router")
-# Spec §F.4 replaces the automation router with the two above. It stays mounted
-# until the experiments frontend (Track D) and the automation test skips
-# (Track C) land, so nothing that uses it today breaks; remove this line then.
-api.add_router("/automation/", "backend.automation.api.views.router")
+# The /automation/ router is unmounted (spec §F.4/§H): schedules and post-runs
+# live on experiments now. backend.automation keeps its app, tables and code.

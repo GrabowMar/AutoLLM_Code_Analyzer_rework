@@ -71,7 +71,10 @@ export function jobDisplayStatus(
   job: Pick<GenerationJobList, "status" | "phase">,
 ): string {
   const live = job.status === "pending" || job.status === "running";
-  if (live && job.phase === "queued") return "queued";
+  // Generated and waiting for an evaluation slot: `eval_queued` (executor)
+  // or the legacy thread-dispatch `queued` phase; batch counts merge both.
+  if (live && (job.phase === "queued" || job.phase === "eval_queued"))
+    return "queued";
   if (live && job.phase === "evaluating") return "evaluating";
   return job.status;
 }

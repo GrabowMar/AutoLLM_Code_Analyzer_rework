@@ -14,6 +14,7 @@ import random
 from django.conf import settings
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from ninja.errors import HttpError
 
 from backend.credentials.services.resolver import MissingApiKeyError
@@ -62,6 +63,45 @@ from backend.runtime.services.scaffolding import is_known_stack_slug
 from backend.runtime.services.stack_validation import stack_usable_by
 
 logger = logging.getLogger(__name__)
+
+
+def _visible_models(user, model_ids) -> list[LLMModel]:
+    """Models by pk through ``LLMModel.objects.visible_to``: an unknown or invisible pk is a 404."""
+    ids = list(model_ids)
+    models = list(LLMModel.objects.visible_to(user).select_related("endpoint").filter(id__in=ids).order_by("id"))
+    if len(models) != len(set(ids)):
+        raise HttpError(404, "Unknown model id")
+    return models
+
+
+def _preflight(request, models: list[LLMModel]) -> tuple[int, dict] | None:
+    """400 when the job could not run: no OpenRouter key (only if some model is OpenRouter) or a blocking
+    local-endpoint issue (disabled, forbidden, model unavailable)."""
+    if any(not m.is_local for m in models):
+        err = _preflight_api_key(request)
+        if err is not None:
+            return err
+    local = [m for m in models if m.is_local]
+    if local:
+        from backend.inference.access import launch_issues
+
+        blocking = [i for i in launch_issues(request.auth, local, check_openrouter_key=False) if i["blocking"]]
+        if blocking:
+            return 400, {
+                "detail": "; ".join(i["detail"] for i in blocking),
+                "code": blocking[0]["code"],
+                "errors": blocking,
+            }
+    return None
+
+
+def _enqueue_in_order(jobs: list[GenerationJob]) -> None:
+    """Hand jobs to the executor in this order: one ``queued_at`` for the batch, ``sequence`` = position."""
+    queued_at = timezone.now()
+    for index, job in enumerate(jobs):
+        job.sequence = index
+        job.queued_at = queued_at
+        dispatch_job(job)
 
 
 def _preflight_api_key(request) -> tuple[int, dict] | None:
@@ -129,11 +169,11 @@ def _scaffolding_stack(requested: str | None, profile: GenerationProfile | None,
 @router.post("/jobs/custom/", response={200: GenerationJobSchema, 400: dict})
 def create_custom_job(request, payload: CustomJobCreateSchema):
     """Create a custom mode generation job."""
-    err = _preflight_api_key(request)
+    llm_overrides = _validated_llm_params(payload)
+    (model,) = _visible_models(request.auth, [payload.model_id])
+    err = _preflight(request, [model])
     if err is not None:
         return err
-    llm_overrides = _validated_llm_params(payload)
-    model = get_object_or_404(LLMModel, id=payload.model_id)
     preset, preset_llm = _sampling_preset(request.auth, payload.sampling_preset_id)
     job_llm_params = merge_llm_params(preset_llm, llm_overrides)
     job = GenerationJob.objects.create(
@@ -166,9 +206,6 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
     Everything is resolved before the first row is written (stack, profiles,
     preset), so a refused request creates nothing.
     """
-    err = _preflight_api_key(request)
-    if err is not None:
-        return err
     llm_overrides = _validated_llm_params(payload)
     if not payload.app_requirement_ids:
         raise HttpError(400, "Pick at least one app spec")
@@ -183,9 +220,10 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
     )
     if len(app_reqs) != len(set(payload.app_requirement_ids)):
         raise HttpError(404, "Unknown app requirement id")
-    models = list(LLMModel.objects.filter(id__in=payload.model_ids).order_by("id"))
-    if len(models) != len(set(payload.model_ids)):
-        raise HttpError(404, "Unknown model id")
+    models = _visible_models(request.auth, payload.model_ids)
+    err = _preflight(request, models)
+    if err is not None:
+        return err
     preset, preset_llm = _sampling_preset(request.auth, payload.sampling_preset_id)
     job_llm_params = merge_llm_params(preset_llm, llm_overrides)
 
@@ -251,8 +289,7 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
 
     # Every snapshot failed -> the batch is failed now, not pending forever.
     refresh_batch(batch)
-    for job in created:
-        dispatch_job(job)
+    _enqueue_in_order(created)
 
     return BatchCreateResponseSchema(batch_id=batch.id, job_count=batch.total_jobs, status=batch.status)
 
@@ -307,10 +344,19 @@ def _agent_plan(request, payload: AgentJobCreateSchema):
 @router.post("/jobs/agent/preview/", response={200: dict, 400: dict})
 def preview_agent_jobs(request, payload: AgentJobCreateSchema):
     """What ``POST /jobs/agent/`` would create, resolved per model and harness preset (no writes)."""
+    models = _visible_models(request.auth, payload.model_ids)
     plan = _agent_plan(request, payload)
     extra: list[Issue] = []
-    if not has_resolvable_key(request.auth):
+    if any(not m.is_local for m in models) and not has_resolvable_key(request.auth):
         extra.append(Issue("missing_api_key", "error", "No OpenRouter API key is configured for your account."))
+    local = [m for m in models if m.is_local]
+    if local:
+        from backend.inference.access import launch_issues
+
+        for issue in launch_issues(request.auth, local, check_openrouter_key=False):
+            extra.append(
+                Issue(issue["code"], "error" if issue["blocking"] else "warn", issue["detail"], issue["model_id"]),
+            )
     return preview_payload(plan, extra_issues=extra)
 
 
@@ -325,7 +371,7 @@ def create_agent_jobs(request, payload: AgentJobCreateSchema):
     each trial, so conditions are compared paired and are never confounded
     with run time.
     """
-    err = _preflight_api_key(request)
+    err = _preflight(request, _visible_models(request.auth, payload.model_ids))
     if err is not None:
         return err
     plan = _agent_plan(request, payload)
@@ -385,8 +431,7 @@ def create_agent_jobs(request, payload: AgentJobCreateSchema):
     if failed:
         # Counts and status from the rows (every snapshot failed -> failed).
         refresh_batch(batch)
-    for job in _blocked_shuffle(created, order_seed):
-        dispatch_job(job)
+    _enqueue_in_order(_blocked_shuffle(created, order_seed))
     return BatchCreateResponseSchema(batch_id=batch.id, job_count=batch.total_jobs, status=batch.status)
 
 

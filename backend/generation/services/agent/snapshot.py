@@ -54,6 +54,8 @@ from backend.generation.services.agent.config import default_provider_routing
 from backend.generation.services.agent.config import merge_agent_config
 from backend.generation.services.agent.harnesses import get_harness
 from backend.generation.services.agent.harnesses.base import SANDBOX_REVISION
+from backend.generation.services.agent.harnesses.base import LocalRender
+from backend.generation.services.agent.images import gateway_image_plan
 from backend.generation.services.agent.images import harness_image_plan
 from backend.generation.services.agent.images import image_tag
 from backend.generation.services.evaluation import contract as contract_mod
@@ -63,6 +65,10 @@ from backend.generation.services.profile_resolver import app_requirement_to_dict
 from backend.generation.services.profile_resolver import coerce_float_params
 from backend.generation.services.versioning import canonical_json
 from backend.generation.services.versioning import short_hash
+from backend.inference.snapshot import effective_num_ctx
+from backend.inference.snapshot import endpoint_section
+from backend.inference.snapshot import is_local
+from backend.inference.snapshot import llm_source
 from backend.runtime.services.scaffolding import canonical_stack_slug
 from backend.runtime.services.scaffolding import get_stack_config
 from backend.runtime.services.scaffolding import stack_snapshot_entry
@@ -77,7 +83,10 @@ if TYPE_CHECKING:
 # Readers accept any version >= this (runner.py). The presets,
 # harness_options and config_fingerprint keys and llm.context_window_source
 # were added without a bump: they are additive, so v2 snapshots stay
-# replayable.
+# replayable. So are the local-endpoint additions (spec §D.5): the
+# ``endpoint`` section and the ``llm_source`` fingerprint input exist only
+# for models on a non-OpenRouter endpoint, so OpenRouter snapshots and
+# fingerprints are byte-identical.
 AGENT_SNAPSHOT_SCHEMA_VERSION = 2
 AGENT_RUN_TITLE = "llm-lab-agent-run"
 PRESET_KINDS = ("harness", "sampling", "budget")
@@ -129,9 +138,17 @@ def _supported_params(model: LLMModel | None) -> set[str] | None:
     provider that cannot honour a param fails the run instead of ignoring
     it. The snapshot records ``llm.supported_params_source = "unknown"`` and
     the preview warns ``support_unknown`` before launch.
+
+    Local models (Ollama / OpenAI-compatible endpoints) use the endpoint's
+    static parameter table instead (``supported_params_source =
+    "endpoint_static"``).
     """
     if model is None:
         return None
+    if is_local(model):
+        from backend.inference.params import STATIC_PARAMS
+
+        return set(STATIC_PARAMS.get((model.endpoint.kind, model.endpoint.api_flavor), ()))
     supported = (model.metadata or {}).get("openrouter_supported_parameters")
     return set(supported) if isinstance(supported, list) and supported else None
 
@@ -143,9 +160,15 @@ def gateway_policy(
     *,
     sampling_policy: str,
     max_output_tokens: int,
+    local: bool = False,
 ) -> dict[str, Any]:
-    """What the gateway forces and strips on every request of this run."""
+    """What the gateway forces and strips on every request of this run.
+
+    *local* (a model on a non-OpenRouter endpoint) forces no ``provider``
+    routing; OpenRouter policies are unchanged.
+    """
     supported = _supported_params(model)
+    where = f"{model.endpoint.slug} ({model.endpoint.kind})" if local and model is not None else "OpenRouter"
     forced: dict[str, Any] = {}
     dropped: dict[str, str] = {}
     candidates = {k: llm[k] for k in GATEWAY_PARAM_KEYS if llm.get(k) is not None}
@@ -156,13 +179,14 @@ def gateway_policy(
             # Forwarding it with require_parameters would leave no provider;
             # without it the provider would silently ignore it. Either way
             # the run would not be what the snapshot claims.
-            dropped[key] = "not supported by this model on OpenRouter"
+            dropped[key] = f"not supported by this model on {where}"
             continue
         forced[key] = value
     for key in NOT_APPLICABLE_KEYS:
         if llm.get(key) is not None:
             dropped[key] = "not applicable to agent runs"
-    forced["provider"] = llm["provider"]
+    if not local:
+        forced["provider"] = llm["provider"]
     # One per-call output cap for every harness (some send none and would get
     # a provider-specific default, others send their own).
     forced["max_tokens"] = max_output_tokens
@@ -207,23 +231,45 @@ def resolve_llm(
     # Float-kind params as floats, whichever layer set them (see coerce_float_params).
     llm = coerce_float_params(merge_llm_params(*llm_layers))
     explicit = dict(llm)
-    routing_source = "explicit" if isinstance(llm.get("provider"), dict) else "default"
-    if routing_source == "default":
-        llm["provider"] = default_provider_routing()
+    local = is_local(model)
+    if local:
+        # OpenRouter provider routing means nothing to a local endpoint.
+        llm["provider"] = None
+        routing_source = "not_applicable"
+    else:
+        routing_source = "explicit" if isinstance(llm.get("provider"), dict) else "default"
+        if routing_source == "default":
+            llm["provider"] = default_provider_routing()
     llm["provider_routing_source"] = routing_source
     _attach_model_provenance(llm, model)
     # The dated snapshot behind an alias like "vendor/model": an alias can be
     # repointed mid-experiment, the canonical slug cannot.
     llm["model_canonical_slug"] = model.canonical_slug
-    context_window_source = "catalog" if model.context_window else "fallback"
+    if local:
+        # Harness limits and the output cap must match what the server runs
+        # with (num_ctx), not a 128k fallback.
+        context_window = effective_num_ctx(model) or model.context_window or FALLBACK_CONTEXT_WINDOW
+        context_window_source = "endpoint_num_ctx"
+        params_support = "endpoint_static"
+    else:
+        context_window = model.context_window or FALLBACK_CONTEXT_WINDOW
+        context_window_source = "catalog" if model.context_window else "fallback"
+        # Provenance like context_window_source (the llm section is not fingerprinted).
+        params_support = "catalog" if _supported_params(model) is not None else "unknown"
     llm["context_window_source"] = context_window_source
-    # Provenance like context_window_source (the llm section is not fingerprinted).
-    params_support = "catalog" if _supported_params(model) is not None else "unknown"
     llm["supported_params_source"] = params_support
-    context_window = model.context_window or FALLBACK_CONTEXT_WINDOW
     model_output_cap = model.max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS
     output_cap = min(int(llm.get("max_tokens") or DEFAULT_MAX_OUTPUT_TOKENS), model_output_cap)
-    gateway = gateway_policy(llm, seed, model, sampling_policy=sampling_policy, max_output_tokens=output_cap)
+    if local:
+        output_cap = min(output_cap, int(context_window))
+    gateway = gateway_policy(
+        llm,
+        seed,
+        model,
+        sampling_policy=sampling_policy,
+        max_output_tokens=output_cap,
+        **({"local": True} if local else {}),
+    )
     return {
         "llm": llm,
         "explicit_llm": explicit,
@@ -272,6 +318,7 @@ def resolve_agent_run(
         raise ValueError(msg)
     options = harness.normalize_options(harness_options)
     run = resolve_llm(model=model, llm_layers=llm_layers, seed=seed, sampling_policy=agent_config["sampling_policy"])
+    local_render = local_render_inputs(model)
     section = harness.snapshot_section(
         model_slug=model.model_id,
         context_window=run["context_window"],
@@ -279,6 +326,8 @@ def resolve_agent_run(
         agent_config=agent_config,
         title=AGENT_RUN_TITLE,
         options=options,
+        # Only passed for local models, so OpenRouter sections render exactly as before.
+        **({"local": local_render} if local_render is not None else {}),
     )
     section["sandbox_revision"] = SANDBOX_REVISION
     section["requires_tool_calling"] = harness.requires_tool_calling
@@ -291,6 +340,17 @@ def resolve_agent_run(
         "stack_slug": stack_slug,
         "stack_config": stack_config,
     }
+
+
+def local_render_inputs(model: LLMModel | None) -> LocalRender | None:
+    """What a harness renders differently for a local model (client timeout, capabilities); None for OpenRouter."""
+    section = endpoint_section(model)
+    if section is None:
+        return None
+    return LocalRender(
+        client_timeout_s=int(section["client_timeout_s"]),
+        capabilities=tuple(section.get("capabilities") or ()),
+    )
 
 
 def method_key(
@@ -370,10 +430,12 @@ def build_agent_snapshot(
         agent_config=agent_config,
     )
     plan = harness_image_plan(harness.image, harness.build_args(section["version"]))
+    endpoint = endpoint_section(model)
     images = {
         "base": plan[0][2],
         "harness": plan[1][2],
-        "gateway": image_tag("llm-gateway"),
+        # Local models run the overlay image, whose tag also pins the base gateway.
+        "gateway": gateway_image_plan(local=True)[-1][2] if endpoint else image_tag("llm-gateway"),
     }
 
     snapshot: dict[str, Any] = {
@@ -413,6 +475,8 @@ def build_agent_snapshot(
     }
     if stack_entry := stack_snapshot_entry(stack_slug):
         snapshot["stack"] = stack_entry
+    if endpoint:
+        snapshot["endpoint"] = endpoint
     snapshot["prompt_hash"] = agent_prompt_hash(snapshot)
     snapshot["run_fingerprint"] = agent_run_fingerprint(snapshot)
     snapshot["config_fingerprint"] = agent_config_fingerprint(snapshot)
@@ -436,7 +500,7 @@ def agent_prompt_hash(snapshot: dict[str, Any]) -> str:
 
 def _fingerprint_inputs(snapshot: dict[str, Any]) -> dict[str, Any]:
     h = {k: v for k, v in snapshot["harness"].items() if k != "title"}
-    return {
+    inputs = {
         "prompt_hash": snapshot["prompt_hash"],
         "model_slug": snapshot["llm"].get("model_slug"),
         "gateway": snapshot["gateway"],
@@ -446,6 +510,10 @@ def _fingerprint_inputs(snapshot: dict[str, Any]) -> dict[str, Any]:
         "stack_content_hash": (snapshot.get("stack") or {}).get("content_hash"),
         "scaffolding_slug": snapshot["scaffolding_slug"],
     }
+    # Local models only: which weights on which server flavour (absent for OpenRouter).
+    if src := llm_source(snapshot):
+        inputs["llm_source"] = src
+    return inputs
 
 
 def agent_run_fingerprint(snapshot: dict[str, Any]) -> str:

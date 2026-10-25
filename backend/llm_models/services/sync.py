@@ -194,7 +194,9 @@ def upsert_openrouter_models(models_payload: list[dict]) -> int:
 
 
 def refresh_model_from_openrouter(model: LLMModel, api_key: str) -> bool:
-    """Refresh a single model from the OpenRouter catalog."""
+    """Refresh a single model from the OpenRouter catalog (never a local endpoint model)."""
+    if model.endpoint_id is not None:
+        return False
     models_payload = fetch_openrouter_models(api_key)
     if not models_payload:
         return False

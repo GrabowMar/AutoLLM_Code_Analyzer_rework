@@ -1,350 +1,552 @@
-"""Experiment CRUD, matrix preview, launch, status, and export endpoints.
+"""Experiments API v2 (spec §F.1): design, launch and lifecycle, read models, schedules and post-runs.
 
-Rules (services/experiments.py has the layering):
+Every route is owner-scoped through :func:`_owned_experiment_or_404`, and
+every child object in a path (condition, schedule) is looked up scoped to its
+experiment. Models resolve through ``LLMModel.objects.visible_to(user)``.
+
+Rules (``services/experiments.py`` has the layering):
 
 * The stack, sampling preset and budget preset are experiment-wide. With a
-  stack set, every condition profile must target it (400 otherwise); a null
-  stack keeps the legacy behaviour (each condition's profile stack).
+  stack set, every condition profile must target it; a null stack keeps the
+  legacy behaviour (each condition's profile stack).
 * A condition is a model plus a harness preset (agent; the profile is
   optional there) or a profile (scaffolding, required). Conditions that would
-  duplicate an existing one are refused.
+  duplicate an existing one are refused (single create) or skipped (sets).
+* Static paths (``/experiments/preview/``, ``/cron-preview/``) are registered
+  before the ``{experiment_id}`` routes so they can never be shadowed.
+
+Requests run inside ``ATOMIC_REQUESTS``. The create-and-launch route commits
+the draft in its own savepoint before launching in a second one, so a failed
+launch rolls back only the launch and the draft survives (400 with
+``experiment_id``). Validation runs before the first write, so other 4xx
+responses leave nothing behind.
 """
 
 from __future__ import annotations
 
-from django.db import IntegrityError
+import json
+import uuid
+from typing import Any
+
 from django.db import transaction
-from django.db.models import Q
+from django.http import Http404
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from ninja.errors import HttpError
+from ninja.responses import Status
+from pydantic import ValidationError
 
-from backend.credentials.services.resolver import MissingApiKeyError
-from backend.credentials.services.resolver import has_resolvable_key
+from backend.generation.api.schema import BatchSummarySchema
 from backend.generation.api.schema import ExperimentConditionCreateSchema
-from backend.generation.api.schema import ExperimentConditionSchema
-from backend.generation.api.schema import ExperimentCreateSchema
-from backend.generation.api.schema import ExperimentSchema
-from backend.generation.api.schema import ExperimentUpdateSchema
-from backend.generation.api.schema import GenerationBatchSchema
+from backend.generation.api.schemas_experiments import CancelBody
+from backend.generation.api.schemas_experiments import CancelResult
+from backend.generation.api.schemas_experiments import CellsPayload
+from backend.generation.api.schemas_experiments import CloneBody
+from backend.generation.api.schemas_experiments import ConditionBulkResult
+from backend.generation.api.schemas_experiments import ConditionSetSpec
+from backend.generation.api.schemas_experiments import CronPreviewOut
+from backend.generation.api.schemas_experiments import ErrorResponseSchema
+from backend.generation.api.schemas_experiments import ExperimentConditionV2
+from backend.generation.api.schemas_experiments import ExperimentCreateV2
+from backend.generation.api.schemas_experiments import ExperimentDetail
+from backend.generation.api.schemas_experiments import ExperimentPreviewV2
+from backend.generation.api.schemas_experiments import ExperimentResults
+from backend.generation.api.schemas_experiments import ExperimentState
+from backend.generation.api.schemas_experiments import ExperimentStatusV2Schema
+from backend.generation.api.schemas_experiments import ExperimentUpdateV2
+from backend.generation.api.schemas_experiments import LaunchBody
+from backend.generation.api.schemas_experiments import LaunchResult
+from backend.generation.api.schemas_experiments import PaginatedExperiments
+from backend.generation.api.schemas_experiments import PostRunConfigOut
+from backend.generation.api.schemas_experiments import PostRunOut
+from backend.generation.api.schemas_experiments import PostRunSpec
+from backend.generation.api.schemas_experiments import RequeueLegacyResult
+from backend.generation.api.schemas_experiments import ResumeBody
+from backend.generation.api.schemas_experiments import ScheduleOut
+from backend.generation.api.schemas_experiments import ScheduleRunNowResult
+from backend.generation.api.schemas_experiments import ScheduleSpec
+from backend.generation.api.schemas_experiments import ScheduleUpdateSchema
+from backend.generation.api.schemas_experiments import SuccessSchema
 from backend.generation.api.views._router import router
-from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import Experiment
 from backend.generation.models import ExperimentCondition
+from backend.generation.models import ExperimentSchedule
 from backend.generation.models import GenerationJob
-from backend.generation.models import GenerationProfile
-from backend.generation.services.agent.config import validate_agent_config
-from backend.generation.services.agent.harnesses import default_harness_name
-from backend.generation.services.agent.harnesses import get_harness
+from backend.generation.services import experiment_automation as automation
+from backend.generation.services import experiments as svc
+from backend.generation.services.batches import batch_summaries
+from backend.generation.services.experiment_results import ResultFilters
+from backend.generation.services.experiment_results import compute as compute_results
 from backend.generation.services.experiments import ExperimentError
-from backend.generation.services.experiments import check_design
-from backend.generation.services.experiments import condition_label
-from backend.generation.services.experiments import duplicate_condition
-from backend.generation.services.experiments import experiment_preset
-from backend.generation.services.experiments import experiment_status
-from backend.generation.services.experiments import export_experiment
-from backend.generation.services.experiments import launch_experiment
-from backend.generation.services.experiments import preview_experiment
-from backend.generation.services.experiments import resolve_stack
-from backend.generation.services.experiments import stack_mismatch
-from backend.generation.services.llm_params import validate_llm_params
-from backend.generation.services.packages import visible_app_templates_for
-from backend.generation.services.presets import preset_config_for_use
-from backend.llm_models.models import LLMModel
 
-# PATCH fields an explicit null clears; for the others it is ignored.
-_NULLABLE_FIELDS = {"base_seed", "stack_slug", "sampling_preset", "budget_preset"}
+_ERRORS = {400: ErrorResponseSchema}
 
 
 def _owned_experiment_or_404(user, experiment_id: str) -> Experiment:
+    try:
+        uuid.UUID(str(experiment_id))
+    except ValueError as exc:  # a malformed id is a missing experiment, not a 500
+        raise Http404 from exc
     return get_object_or_404(
-        Experiment.objects.select_related("sampling_preset", "budget_preset"),
+        Experiment.objects.select_related(
+            "sampling_preset",
+            "budget_preset",
+            "cloned_from",
+            "created_by_schedule",
+            "created_by",
+        ),
         id=experiment_id,
         created_by=user,
     )
 
 
-def _draft_or_400(experiment: Experiment) -> None:
-    if experiment.status != Experiment.Status.DRAFT:
-        raise HttpError(400, "Only draft experiments can be edited. Archive and clone to make changes.")
+def _fail(exc: ExperimentError, **extra: Any):
+    """A 400 ``{detail, code, errors}`` response; other statuses become ``HttpError``."""
+    if exc.status == 400:
+        return Status(400, {**exc.payload(), **extra})
+    raise HttpError(exc.status, exc.detail) from exc
 
 
-def _validated(params: dict | None) -> dict:
+def _call(fn, *args, **kwargs):
+    """Run a service call; ``ExperimentError`` becomes the matching response."""
     try:
-        return validate_llm_params(params or {})
-    except ValueError as exc:
-        raise HttpError(400, str(exc)) from exc
-
-
-def _validated_agent(config: dict | None) -> dict:
-    try:
-        return validate_agent_config(config or {})
-    except ValueError as exc:
-        raise HttpError(400, str(exc)) from exc
-
-
-def _http(call, *args):
-    """Run a service call, turning ``ExperimentError`` into the matching HTTP error."""
-    try:
-        return call(*args)
+        return fn(*args, **kwargs)
     except ExperimentError as exc:
-        raise HttpError(exc.status, exc.detail) from exc
+        return _fail(exc)
 
 
-def _visible_apps(user, ids: list[int]) -> list[AppRequirementTemplate]:
-    """The app specs *ids* names; 404 when any is unknown or another user's private spec.
-
-    Never drops a hidden id silently: the experiment would run fewer apps
-    than requested.
-    """
-    wanted = set(ids)
-    apps = list(visible_app_templates_for(user).filter(id__in=wanted).order_by("id"))
-    missing = sorted(wanted - {app.id for app in apps})
-    if missing:
-        raise HttpError(404, f"Unknown app requirement id {', '.join(str(i) for i in missing)}")
-    return apps
+def _optional_body(request, schema):
+    """An optional JSON body (``{}`` or none at all means the defaults); 422 on invalid content."""
+    raw = request.body or b""
+    if request.content_type != "application/json" or not raw.strip():
+        return schema()
+    try:
+        return schema.model_validate(json.loads(raw))
+    except (ValueError, ValidationError) as exc:
+        raise HttpError(422, f"Invalid request body: {exc}") from exc
 
 
-def _stack(raw: str | None, user) -> str:
-    """Canonical stack slug ("" = legacy per-profile stacks); 404 unknown, 403 unusable."""
-    raw = (raw or "").strip()
-    return _http(resolve_stack, raw, user) if raw else ""
+def _detail(experiment: Experiment) -> dict:
+    experiment.refresh_from_db()
+    return svc.experiment_detail(experiment)
 
 
-@router.get("/experiments/", response=list[ExperimentSchema])
-def list_experiments(request):
-    return (
-        Experiment.objects.filter(created_by=request.auth)
-        .select_related("sampling_preset", "budget_preset")
-        .prefetch_related("app_requirements", "conditions")
+# ── collection (static paths first) ───────────────────────────────────
+
+
+@router.get("/experiments/", response={200: PaginatedExperiments, **_ERRORS})
+def list_experiments(
+    request,
+    page: int = 1,
+    per_page: int = 25,
+    status: str | None = None,
+    mode: str | None = None,
+    search: str | None = None,
+    endpoint: str | None = None,
+    ordering: str = "-updated_at",
+):
+    return _call(
+        svc.list_experiments,
+        request.auth,
+        page=page,
+        per_page=per_page,
+        status=status,
+        mode=mode,
+        search=search,
+        endpoint=endpoint,
+        ordering=ordering,
     )
 
 
-@router.post("/experiments/", response={200: ExperimentSchema, 400: dict})
-def create_experiment(request, payload: ExperimentCreateSchema):
-    if Experiment.objects.filter(created_by=request.auth, slug=payload.slug).exists():
-        return 400, {"detail": f"You already have an experiment with slug {payload.slug!r}"}
-    # Everything is validated before the first write (a 4xx must not leave a row).
-    experiment = Experiment(
-        name=payload.name,
-        slug=payload.slug,
-        description=payload.description,
-        hypothesis=payload.hypothesis,
-        repeats=payload.repeats,
-        base_seed=payload.base_seed,
-        mode=payload.mode,
-        stack_slug=_stack(payload.stack_slug, request.auth),
-        sampling_preset=_http(experiment_preset, request.auth, payload.sampling_preset_id, "sampling"),
-        budget_preset=_http(experiment_preset, request.auth, payload.budget_preset_id, "budget"),
-        agent_config=_validated_agent(payload.agent_config.as_config() if payload.agent_config else {}),
-        continuation_limit=payload.continuation_limit,
-        enable_repair=payload.enable_repair,
-        llm_defaults=_validated(payload.llm_defaults.as_params() if payload.llm_defaults else {}),
-        created_by=request.auth,
-    )
-    apps = _visible_apps(request.auth, payload.app_requirement_ids or [])
-    _http(check_design, experiment)
-    experiment.save()
-    if apps:
-        experiment.app_requirements.set(apps)
-    return experiment
-
-
-@router.get("/experiments/{experiment_id}/", response=ExperimentSchema)
-def get_experiment(request, experiment_id: str):
-    return _owned_experiment_or_404(request.auth, experiment_id)
-
-
-@router.patch("/experiments/{experiment_id}/", response={200: ExperimentSchema, 400: dict})
-def update_experiment(request, experiment_id: str, payload: ExperimentUpdateSchema):
-    experiment = _owned_experiment_or_404(request.auth, experiment_id)
-    _draft_or_400(experiment)
-
-    data = payload.dict(exclude_unset=True)
-    app_ids = data.pop("app_requirement_ids", None)
-    apps = _visible_apps(request.auth, app_ids) if app_ids is not None else None
-    if "llm_defaults" in data:
-        data["llm_defaults"] = _validated(data["llm_defaults"])
-    if "agent_config" in data:
-        data["agent_config"] = _validated_agent(data["agent_config"])
-    if "stack_slug" in data:
-        data["stack_slug"] = _stack(data["stack_slug"], request.auth)
-    for kind in ("sampling", "budget"):
-        if f"{kind}_preset_id" in data:
-            data[f"{kind}_preset"] = _http(experiment_preset, request.auth, data.pop(f"{kind}_preset_id"), kind)
-    for field, value in data.items():
-        if value is None and field not in _NULLABLE_FIELDS:
-            continue
-        setattr(experiment, field, value)
-    # The final state must still agree with the conditions (stack, mode).
-    _http(check_design, experiment)
-    experiment.save()
-    if apps is not None:
-        experiment.app_requirements.set(apps)
-    return experiment
-
-
-@router.delete("/experiments/{experiment_id}/")
-def delete_experiment(request, experiment_id: str):
-    experiment = _owned_experiment_or_404(request.auth, experiment_id)
-    _draft_or_400(experiment)
-    experiment.delete()
-    return {"success": True}
-
-
-@router.post("/experiments/{experiment_id}/archive/", response=ExperimentSchema)
-def archive_experiment(request, experiment_id: str):
-    experiment = _owned_experiment_or_404(request.auth, experiment_id)
-    experiment.status = Experiment.Status.ARCHIVED
-    experiment.save(update_fields=["status", "updated_at"])
-    return experiment
-
-
-@router.get("/experiments/{experiment_id}/conditions/", response=list[ExperimentConditionSchema])
-def list_conditions(request, experiment_id: str):
-    experiment = _owned_experiment_or_404(request.auth, experiment_id)
-    return experiment.conditions.select_related("model", "profile", "harness_preset")
-
-
-def _condition_profile(experiment: Experiment, profile_id: int | None, user) -> GenerationProfile | None:
-    """The condition's profile (required in scaffolding mode) on a stack the experiment can run."""
-    if profile_id is None:
-        if experiment.mode != GenerationJob.Mode.AGENT:
-            raise HttpError(400, "Scaffolding conditions need a profile (profile_id).")
-        return None
-    profile = get_object_or_404(
-        GenerationProfile.objects.filter(Q(is_system=True) | Q(created_by=user)),
-        id=profile_id,
-        is_archived=False,
-    )
-    if experiment.stack_slug:
-        if problem := stack_mismatch(experiment.stack_slug, profile):
-            raise HttpError(400, problem)
-    else:
-        # Legacy (no experiment stack): the condition runs on its profile's stack.
-        _stack(profile.scaffolding_slug or "", user)
-    return profile
-
-
-def _condition_harness(experiment: Experiment, payload: ExperimentConditionCreateSchema, user):
-    """(harness name to store, harness preset) of a new condition: a preset pins its harness name."""
-    harness_name = payload.harness.strip()
-    if payload.harness_preset_id is None and not harness_name:
-        return "", None
-    if experiment.mode != GenerationJob.Mode.AGENT:
-        raise HttpError(400, "A harness only applies to agent-mode experiments.")
-    if payload.harness_preset_id is None:
-        try:
-            get_harness(harness_name)
-        except ValueError as exc:
-            raise HttpError(400, str(exc)) from exc
-        return harness_name, None
-    preset = _http(experiment_preset, user, payload.harness_preset_id, "harness")
-    preset_harness = preset_config_for_use(preset, "harness")["harness"]
-    if harness_name and harness_name != preset_harness:
-        raise HttpError(
-            400,
-            f"harness {harness_name!r} does not match harness preset {preset.slug} ({preset_harness!r}); "
-            "send only harness_preset_id",
-        )
-    return preset_harness, preset
-
-
-@router.post("/experiments/{experiment_id}/conditions/", response={200: ExperimentConditionSchema, 400: dict})
-def create_condition(request, experiment_id: str, payload: ExperimentConditionCreateSchema):
-    experiment = _owned_experiment_or_404(request.auth, experiment_id)
-    _draft_or_400(experiment)
-
-    model = get_object_or_404(LLMModel, id=payload.model_id)
-    profile = _condition_profile(experiment, payload.profile_id, request.auth)
-    harness_name, preset = _condition_harness(experiment, payload, request.auth)
-    if experiment.mode == GenerationJob.Mode.AGENT:
-        # A blank harness runs the experiment's default; check that one too.
-        effective = harness_name or (experiment.agent_config or {}).get("harness") or default_harness_name()
-        try:
-            harness = get_harness(effective)
-        except ValueError as exc:
-            raise HttpError(400, str(exc)) from exc
-        if harness.requires_tool_calling and not model.supports_function_calling:
-            raise HttpError(400, f"{harness.label} needs a tool-calling model; {model.model_id} has none.")
-
-    condition = ExperimentCondition(
-        experiment=experiment,
-        label=payload.label,
-        profile=profile,
-        model=model,
-        harness=harness_name,
-        harness_preset=preset,
-        param_overrides=_validated(payload.param_overrides),
-    )
-    same_row = experiment.conditions.filter(
-        model=model,
-        profile=profile,
-        harness=harness_name,
-        harness_preset=preset,
-    )
-    if same_row.exists():
-        return 400, {
-            "detail": "This experiment already has a condition for that model + profile + harness preset.",
-            "code": "duplicate_condition",
-        }
-    if (twin := duplicate_condition(experiment, condition)) is not None:
-        return 400, {
-            "detail": f"Condition #{twin.id} ({condition_label(twin)}) already runs this exact configuration.",
-            "code": "duplicate_condition",
-        }
+@router.post("/experiments/", response={200: ExperimentDetail, 201: LaunchResult, **_ERRORS})
+def create_experiment(request, payload: ExperimentCreateV2, launch: bool = False):
+    """Create the draft with its conditions in one call; ``?launch=true`` launches it too."""
+    user = request.auth
     try:
         with transaction.atomic():
-            condition.save()
-    except IntegrityError:  # a concurrent create of the same condition
-        return 400, {"detail": "This condition already exists.", "code": "duplicate_condition"}
-    return condition
+            experiment = svc.create_experiment(user, payload.dict(exclude_unset=True))
+    except ExperimentError as exc:
+        return _fail(exc)
+    if not launch:
+        return Status(200, _detail(experiment))
+    try:
+        batch = svc.launch_experiment(experiment, user)
+    except ExperimentError as exc:
+        # The draft stays (its savepoint committed); only the launch rolled back.
+        return _fail(exc, experiment_id=str(experiment.id))
+    return Status(201, _launch_result(experiment, batch))
 
 
-@router.delete("/experiments/{experiment_id}/conditions/{condition_id}/")
+@router.post("/experiments/preview/", response={200: ExperimentPreviewV2, **_ERRORS})
+def preview_design(request, payload: ExperimentCreateV2):
+    """Stateless preview of an unsaved design (the composer's plan rail); writes nothing."""
+    return _call(svc.preview_design, request.auth, payload.dict(exclude_unset=True))
+
+
+@router.get("/cron-preview/", response=CronPreviewOut)
+def cron_preview(request, cron: str, tz: str = "UTC"):
+    return automation.cron_preview(cron, tz)
+
+
+# ── one experiment ────────────────────────────────────────────────────
+
+
+@router.get("/experiments/{experiment_id}/", response=ExperimentDetail)
+def get_experiment(request, experiment_id: str):
+    return svc.experiment_detail(_owned_experiment_or_404(request.auth, experiment_id))
+
+
+@router.patch("/experiments/{experiment_id}/", response={200: ExperimentDetail, **_ERRORS})
+def update_experiment(request, experiment_id: str, payload: ExperimentUpdateV2):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    try:
+        svc.update_experiment(experiment, request.auth, payload.dict(exclude_unset=True))
+    except ExperimentError as exc:
+        return _fail(exc)
+    return Status(200, _detail(experiment))
+
+
+@router.delete("/experiments/{experiment_id}/", response={200: SuccessSchema, **_ERRORS})
+def delete_experiment(request, experiment_id: str):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    try:
+        svc.delete_experiment(experiment)
+    except ExperimentError as exc:
+        return _fail(exc)
+    return Status(200, {"success": True})
+
+
+# ── conditions ────────────────────────────────────────────────────────
+
+
+@router.get("/experiments/{experiment_id}/conditions/", response=list[ExperimentConditionV2])
+def list_conditions(request, experiment_id: str):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    return experiment.conditions.select_related("model__endpoint", "profile", "harness_preset").order_by("id")
+
+
+@router.put("/experiments/{experiment_id}/conditions/", response={200: list[ExperimentConditionV2], **_ERRORS})
+def replace_conditions(request, experiment_id: str, payload: ConditionSetSpec):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    return _call(svc.replace_conditions, experiment, payload.dict(), request.auth)
+
+
+@router.post("/experiments/{experiment_id}/conditions/bulk/", response={200: ConditionBulkResult, **_ERRORS})
+def add_conditions(request, experiment_id: str, payload: ConditionSetSpec):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    try:
+        result = svc.add_conditions(experiment, payload.dict(), request.auth)
+    except ExperimentError as exc:
+        return _fail(exc)
+    created = ExperimentCondition.objects.filter(id__in=[c.id for c in result.conditions]).select_related(
+        "model__endpoint",
+        "profile",
+        "harness_preset",
+    )
+    return Status(200, {"created": list(created.order_by("id")), "skipped": result.skipped})
+
+
+@router.post("/experiments/{experiment_id}/conditions/", response={200: ExperimentConditionV2, **_ERRORS})
+def create_condition(request, experiment_id: str, payload: ExperimentConditionCreateSchema):
+    """One condition. A harness the model cannot drive is not refused here: it blocks the launch."""
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    spec = {
+        "cross": {"model_ids": []},
+        "extra": [
+            {
+                "model_id": payload.model_id,
+                "harness_preset_id": payload.harness_preset_id,
+                "harness": payload.harness or None,
+                "profile_id": payload.profile_id,
+                "label": payload.label,
+                "param_overrides": payload.param_overrides or {},
+            },
+        ],
+    }
+    try:
+        result = svc.add_conditions(experiment, spec, request.auth)
+    except ExperimentError as exc:
+        return _fail(exc)
+    if not result.conditions:
+        skipped = result.skipped[0] if result.skipped else {"reason": "duplicate", "detail": ""}
+        code = "duplicate_condition" if skipped["reason"] == "duplicate" else "stack_mismatch"
+        return Status(400, {"detail": skipped["detail"] or "This condition already exists.", "code": code})
+    condition = result.conditions[0]
+    return Status(
+        200,
+        ExperimentCondition.objects.select_related("model__endpoint", "profile", "harness_preset").get(
+            id=condition.id,
+        ),
+    )
+
+
+@router.delete("/experiments/{experiment_id}/conditions/{condition_id}/", response={200: SuccessSchema, **_ERRORS})
 def delete_condition(request, experiment_id: str, condition_id: int):
     experiment = _owned_experiment_or_404(request.auth, experiment_id)
-    _draft_or_400(experiment)
+    if experiment.status != Experiment.Status.DRAFT:
+        return Status(400, {"detail": "Only draft experiments can be edited.", "code": "not_draft"})
     condition = get_object_or_404(ExperimentCondition, id=condition_id, experiment=experiment)
-    condition.delete()
+    with transaction.atomic():
+        if experiment.baseline_condition_id == condition.id:
+            experiment.baseline_condition = experiment.conditions.exclude(id=condition.id).order_by("id").first()
+            experiment.save(update_fields=["baseline_condition", "updated_at"])
+        condition.delete()
+    return Status(200, {"success": True})
+
+
+# ── preview, launch, lifecycle ────────────────────────────────────────
+
+
+@router.get("/experiments/{experiment_id}/preview/", response=ExperimentPreviewV2)
+def preview(request, experiment_id: str):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    return svc.preview_experiment_v2(experiment, request.auth)
+
+
+@router.post("/experiments/{experiment_id}/preview/", response=ExperimentPreviewV2)
+def preview_post(request, experiment_id: str):
+    """Alias of the GET (kept for older clients)."""
+    return preview(request, experiment_id)
+
+
+def _launch_result(experiment: Experiment, batch) -> dict:
+    outcome = svc.launch_outcome(batch)
+    return {
+        "experiment": _detail(experiment),
+        "batch": {"id": batch.id, "kind": batch.kind, "created_at": batch.created_at, "total_jobs": batch.total_jobs},
+        **outcome,
+    }
+
+
+@router.post("/experiments/{experiment_id}/launch/", response={200: LaunchResult, **_ERRORS})
+def launch(request, experiment_id: str):
+    """Body ``LaunchBody`` (optional)."""
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    body = _optional_body(request, LaunchBody)
+    try:
+        batch = svc.launch_experiment(experiment, request.auth, mode=body.mode, condition_ids=body.condition_ids)
+    except ExperimentError as exc:
+        return _fail(exc)
+    return Status(200, _launch_result(experiment, batch))
+
+
+@router.post("/experiments/{experiment_id}/pause/", response={200: ExperimentState, **_ERRORS})
+def pause(request, experiment_id: str):
+    return _call(svc.pause_experiment, _owned_experiment_or_404(request.auth, experiment_id))
+
+
+@router.post("/experiments/{experiment_id}/resume/", response={200: ExperimentState, **_ERRORS})
+def resume(request, experiment_id: str):
+    """Body ``ResumeBody`` (optional)."""
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    accept = _optional_body(request, ResumeBody).accept_digest_drift
+    return _call(svc.resume_experiment, experiment, request.auth, accept_digest_drift=accept)
+
+
+@router.post("/experiments/{experiment_id}/cancel/", response={200: CancelResult, **_ERRORS})
+def cancel(request, experiment_id: str):
+    """Body ``CancelBody`` (optional)."""
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    return _call(svc.cancel_experiment, experiment, _optional_body(request, CancelBody).scope)
+
+
+@router.post("/experiments/{experiment_id}/archive/", response={200: ExperimentDetail, **_ERRORS})
+def archive(request, experiment_id: str):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    try:
+        svc.archive_experiment(experiment)
+    except ExperimentError as exc:
+        return _fail(exc)
+    return Status(200, _detail(experiment))
+
+
+@router.post("/experiments/{experiment_id}/clone/", response={200: ExperimentDetail, 201: LaunchResult, **_ERRORS})
+def clone(request, experiment_id: str):
+    """Body ``CloneBody`` (optional)."""
+    source = _owned_experiment_or_404(request.auth, experiment_id)
+    body = _optional_body(request, CloneBody)
+    try:
+        with transaction.atomic():
+            copy = svc.clone_experiment(
+                source,
+                request.auth,
+                name=body.name,
+                slug=body.slug,
+                include_schedules=body.include_schedules,
+                include_post_run=body.include_post_run,
+                overrides=body.overrides,
+            )
+    except ExperimentError as exc:
+        return _fail(exc)
+    if not body.launch:
+        return Status(200, _detail(copy))
+    try:
+        batch = svc.launch_experiment(copy, request.auth)
+    except ExperimentError as exc:
+        return _fail(exc, experiment_id=str(copy.id))
+    return Status(201, _launch_result(copy, batch))
+
+
+@router.post("/experiments/{experiment_id}/jobs/requeue-legacy/", response=RequeueLegacyResult)
+def requeue_legacy(request, experiment_id: str):
+    return svc.requeue_legacy_jobs(_owned_experiment_or_404(request.auth, experiment_id))
+
+
+# ── read models ───────────────────────────────────────────────────────
+
+
+@router.get("/experiments/{experiment_id}/status/", response=ExperimentStatusV2Schema)
+def status(request, experiment_id: str):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    return svc.experiment_status_v2(experiment, request.auth)
+
+
+@router.get("/experiments/{experiment_id}/cells/", response=CellsPayload)
+def cells(request, experiment_id: str):
+    return svc.cells_payload(_owned_experiment_or_404(request.auth, experiment_id))
+
+
+@router.get("/experiments/{experiment_id}/results/", response={200: ExperimentResults, **_ERRORS})
+def results(
+    request,
+    experiment_id: str,
+    baseline: int | None = None,
+    exclude_invalid: bool = False,
+    exclude_truncated: bool = True,
+    common_cells: bool = True,
+    fingerprint: str = "all",
+    metric: str = "pass_rate",
+):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    filters = ResultFilters(
+        metric=metric,
+        exclude_invalid=exclude_invalid,
+        exclude_truncated=exclude_truncated,
+        common_cells=common_cells,
+        fingerprint=fingerprint,
+    )
+    try:
+        return Status(200, compute_results(experiment, baseline, filters, request.auth))
+    except ValueError as exc:
+        return Status(400, {"detail": str(exc), "code": "invalid_results_query"})
+
+
+@router.get("/experiments/{experiment_id}/batches/", response=list[BatchSummarySchema])
+def batches(request, experiment_id: str):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    return batch_summaries(experiment.batches.order_by("-created_at"))
+
+
+@router.get("/experiments/{experiment_id}/export/", response={200: dict, **_ERRORS})
+def export(request, experiment_id: str, format: str = "json"):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    if format == "csv":
+        response = HttpResponse(svc.export_experiment_csv(experiment), content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="{experiment.slug}-jobs.csv"'
+        return response
+    if format != "json":
+        return Status(400, {"detail": "format must be json or csv", "code": "invalid_format"})
+    return Status(200, svc.export_experiment(experiment))
+
+
+# ── schedules ─────────────────────────────────────────────────────────
+
+
+def _schedule_or_404(experiment: Experiment, schedule_id: int) -> ExperimentSchedule:
+    return get_object_or_404(ExperimentSchedule, id=schedule_id, experiment=experiment)
+
+
+@router.get("/experiments/{experiment_id}/schedules/", response=list[ScheduleOut])
+def list_schedules(request, experiment_id: str):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    return [svc.schedule_out(s) for s in experiment.schedules.order_by("id")]
+
+
+@router.post("/experiments/{experiment_id}/schedules/", response={200: ScheduleOut, **_ERRORS})
+def create_schedule(request, experiment_id: str, payload: ScheduleSpec):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    if experiment.status == Experiment.Status.ARCHIVED:
+        return Status(400, {"detail": "Archived experiments cannot be scheduled.", "code": "archived"})
+    try:
+        fields = automation.validate_schedule(payload.dict())
+    except ExperimentError as exc:
+        return _fail(exc)
+    schedule = ExperimentSchedule.objects.create(experiment=experiment, created_by=request.auth, **fields)
+    return Status(200, svc.schedule_out(schedule))
+
+
+@router.patch("/experiments/{experiment_id}/schedules/{schedule_id}/", response={200: ScheduleOut, **_ERRORS})
+def update_schedule(request, experiment_id: str, schedule_id: int, payload: ScheduleUpdateSchema):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    schedule = _schedule_or_404(experiment, schedule_id)
+    current = svc.schedule_out(schedule)
+    changes = {k: v for k, v in payload.dict(exclude_unset=True).items() if v is not None}
+    try:
+        fields = automation.validate_schedule({**current, **changes})
+    except ExperimentError as exc:
+        return _fail(exc)
+    for name, value in fields.items():
+        setattr(schedule, name, value)
+    schedule.save()
+    return Status(200, svc.schedule_out(schedule))
+
+
+@router.delete("/experiments/{experiment_id}/schedules/{schedule_id}/", response=SuccessSchema)
+def delete_schedule(request, experiment_id: str, schedule_id: int):
+    experiment = _owned_experiment_or_404(request.auth, experiment_id)
+    _schedule_or_404(experiment, schedule_id).delete()
     return {"success": True}
 
 
-@router.post("/experiments/{experiment_id}/preview/", response=dict)
-def preview(request, experiment_id: str):
+@router.post("/experiments/{experiment_id}/schedules/{schedule_id}/run-now/", response=ScheduleRunNowResult)
+def run_schedule_now(request, experiment_id: str, schedule_id: int):
+    """Fire the schedule's action now (its cron is unchanged). Runs synchronously in this request."""
     experiment = _owned_experiment_or_404(request.auth, experiment_id)
-    return preview_experiment(experiment)
+    schedule = _schedule_or_404(experiment, schedule_id)
+    result = automation.run_schedule_action(schedule.id)
+    return {
+        "outcome": result.get("outcome", "error"),
+        "batch_id": result.get("batch_id"),
+        "experiment_id": result.get("experiment_id"),
+        "jobs_created": result.get("jobs_created", 0),
+    }
 
 
-@router.post("/experiments/{experiment_id}/launch/", response={200: GenerationBatchSchema, 400: dict})
-def launch(request, experiment_id: str):
+# ── post-run ──────────────────────────────────────────────────────────
+
+
+def _post_run_config(experiment: Experiment) -> dict:
+    return {
+        "config": svc.effective_post_run(experiment),
+        "runs": [svc.post_run_out(r) for r in experiment.post_runs.order_by("-created_at")[:20]],
+    }
+
+
+@router.get("/experiments/{experiment_id}/post-run/", response=PostRunConfigOut)
+def get_post_run(request, experiment_id: str):
+    return _post_run_config(_owned_experiment_or_404(request.auth, experiment_id))
+
+
+@router.put("/experiments/{experiment_id}/post-run/", response={200: PostRunConfigOut, **_ERRORS})
+def put_post_run(request, experiment_id: str, payload: PostRunSpec):
     experiment = _owned_experiment_or_404(request.auth, experiment_id)
     if experiment.status == Experiment.Status.ARCHIVED:
-        return 400, {"detail": "Cannot launch an archived experiment."}
-    if not has_resolvable_key(request.auth):
-        msg = "No OpenRouter API key is configured for your account."
-        return 400, {
-            "detail": msg,
-            "remediation": MissingApiKeyError(msg).remediation,
-            "code": "missing_api_key",
-        }
-    if not experiment.conditions.exists():
-        return 400, {"detail": "Add at least one condition before launching."}
-    if not experiment.app_requirements.exists():
-        return 400, {"detail": "Add at least one app spec before launching."}
+        return Status(400, {"detail": "Archived experiments cannot be edited.", "code": "archived"})
     try:
-        return launch_experiment(experiment, request.auth)
+        experiment.post_run = svc.normalize_post_run(payload.dict(), experiment.mode)
     except ExperimentError as exc:
-        # Raised before any row is written.
-        return exc.status, exc.payload()
+        return _fail(exc)
+    experiment.save(update_fields=["post_run", "updated_at"])
+    return Status(200, _post_run_config(experiment))
 
 
-@router.get("/experiments/{experiment_id}/status/", response=dict)
-def status(request, experiment_id: str):
+@router.post("/experiments/{experiment_id}/post-run/run/", response={200: PostRunOut, **_ERRORS})
+def run_post_run(request, experiment_id: str):
     experiment = _owned_experiment_or_404(request.auth, experiment_id)
-    return experiment_status(experiment)
-
-
-@router.get("/experiments/{experiment_id}/export/", response=dict)
-def export(request, experiment_id: str):
-    experiment = _owned_experiment_or_404(request.auth, experiment_id)
-    return export_experiment(experiment)
+    if not experiment.jobs.filter(status=GenerationJob.Status.COMPLETED).exists():
+        return Status(400, {"detail": "The experiment has no completed jobs yet.", "code": "nothing_to_analyze"})
+    try:
+        post_run = automation.create_manual_post_run(experiment)
+    except ExperimentError as exc:
+        return _fail(exc)
+    return Status(200, svc.post_run_out(post_run))

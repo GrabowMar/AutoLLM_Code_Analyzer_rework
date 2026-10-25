@@ -1,18 +1,28 @@
-"""How an agent job's gateway container reaches its LLM (spec §D.6). Contract → Track B.
+"""How an agent job's gateway container reaches its LLM (spec §D.6).
 
-Foundation implements the OpenRouter branch of :func:`for_job` (it must
-reproduce today's sandbox values exactly, so OpenRouter runs stay
-byte-identical); the local branch, :func:`proxy_token` and
-:func:`ensure_egress_network` are Track B's.
+- OpenRouter: today's exact values (``llm-gateway`` image on ``bridge``,
+  upstream OpenRouter, the job owner's key), so OpenRouter runs stay
+  byte-identical.
+- Local: the ``llm-gateway-local`` overlay on the dedicated nested network
+  ``llmlab-gw-egress``, pointed at the executor's internal LLM proxy with a
+  per-job signed token instead of an API key.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from dataclasses import field
 
+from django.conf import settings
+from django.core import signing
+
+logger = logging.getLogger(__name__)
+
 OPENROUTER_UPSTREAM = "https://openrouter.ai/api/v1"
 PROXY_TOKEN_SALT = "llmlab.llm-proxy"  # noqa: S105 — a signing salt, not a secret
+EGRESS_LABEL = "llmlab.infra"
+EGRESS_LABEL_VALUE = "gw-egress"
 
 
 @dataclass(frozen=True)
@@ -56,8 +66,32 @@ def for_job(job, snapshot: dict) -> GatewayWiring:
             extra_env={},
             upstream_timeout_s=None,
         )
-    msg = "inference.gateway_wiring.for_job local branch: Track B"
-    raise NotImplementedError(msg)
+    from backend.inference.access import LLMAccessError
+    from backend.inference.models import LLMEndpoint
+    from backend.inference.timeouts import chain
+
+    section = snapshot["endpoint"]
+    endpoint = LLMEndpoint.objects.filter(pk=section.get("id")).first()
+    if endpoint is None:
+        raise LLMAccessError(
+            code="unavailable",
+            message=f"Endpoint {section.get('slug')} of this job no longer exists",
+            retryable=False,
+        )
+    if not endpoint.enabled:
+        raise LLMAccessError(
+            code="endpoint_disabled",
+            message=f"Endpoint {endpoint.slug} is disabled",
+            retryable=False,
+        )
+    return GatewayWiring(
+        image_local=True,
+        upstream=settings.LLM_PROXY_UPSTREAM,
+        api_key="",
+        network=settings.LLM_GATEWAY_EGRESS_NETWORK,
+        extra_env={"LLMLAB_UPSTREAM_TOKEN": proxy_token(job)},
+        upstream_timeout_s=float(chain(endpoint).gateway_upstream_s),
+    )
 
 
 def proxy_token(job) -> str:
@@ -67,8 +101,19 @@ def proxy_token(job) -> str:
     re-checked against the job's live lease; a requeued attempt's token dies
     because it carries ``attempt``.
     """
-    msg = "inference.gateway_wiring.proxy_token: Track B"
-    raise NotImplementedError(msg)
+    return signing.TimestampSigner(salt=PROXY_TOKEN_SALT).sign_object({"j": str(job.id), "a": int(job.attempt or 0)})
+
+
+def read_proxy_token(token: str, *, max_age: float) -> tuple[str, int]:
+    """``(job_id, attempt)`` of a valid :func:`proxy_token`.
+
+    Raises ``signing.BadSignature`` (or its subclass ``SignatureExpired``).
+    """
+    data = signing.TimestampSigner(salt=PROXY_TOKEN_SALT).unsign_object(token, max_age=max_age)
+    if not isinstance(data, dict) or "j" not in data or "a" not in data:
+        msg = "malformed proxy token"
+        raise signing.BadSignature(msg)
+    return str(data["j"]), int(data["a"])
 
 
 def ensure_egress_network(client) -> None:
@@ -80,5 +125,51 @@ def ensure_egress_network(client) -> None:
     allowlist needs internet). An existing network with different options is
     recreated only when no container uses it.
     """
-    msg = "inference.gateway_wiring.ensure_egress_network: Track B"
-    raise NotImplementedError(msg)
+    from docker.types import IPAMConfig
+    from docker.types import IPAMPool
+
+    name = settings.LLM_GATEWAY_EGRESS_NETWORK
+    wanted_options = {
+        "com.docker.network.bridge.name": settings.LLM_GATEWAY_EGRESS_BRIDGE,
+        "com.docker.network.bridge.enable_icc": "false",
+    }
+    subnet = settings.LLM_GATEWAY_EGRESS_SUBNET
+    for network in client.networks.list(names=[name]):
+        if network.name != name:
+            continue
+        network.reload()
+        attrs = network.attrs or {}
+        options = attrs.get("Options") or {}
+        subnets = [c.get("Subnet") for c in ((attrs.get("IPAM") or {}).get("Config") or [])]
+        matches = (
+            all(options.get(k) == v for k, v in wanted_options.items())
+            and subnets == [subnet]
+            and not attrs.get("Internal")
+            and (attrs.get("Labels") or {}).get(EGRESS_LABEL) == EGRESS_LABEL_VALUE
+        )
+        if matches:
+            return
+        if attrs.get("Containers"):
+            logger.warning(
+                "Network %s differs from the expected egress configuration but is in use; keeping it",
+                name,
+            )
+            return
+        logger.info("Recreating gateway egress network %s with the expected options", name)
+        network.remove()
+    from docker.errors import APIError
+
+    try:
+        client.networks.create(
+            name,
+            driver="bridge",
+            internal=False,
+            options=wanted_options,
+            labels={EGRESS_LABEL: EGRESS_LABEL_VALUE},
+            ipam=IPAMConfig(pool_configs=[IPAMPool(subnet=subnet)]),
+        )
+    except APIError as exc:
+        # Two sandboxes starting at once both saw no network; the other one won.
+        if exc.status_code != 409 or not any(n.name == name for n in client.networks.list(names=[name])):
+            raise
+        logger.debug("Gateway egress network %s was created concurrently", name)

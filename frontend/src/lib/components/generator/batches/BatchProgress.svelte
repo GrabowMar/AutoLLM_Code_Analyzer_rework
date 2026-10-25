@@ -4,6 +4,9 @@
 	 *
 	 * Props:
 	 * - `counts`: `{pending, queued, running, completed, failed, cancelled}`.
+	 *   `queued` = runs that finished generating and wait for an evaluation slot
+	 *   (phase `eval_queued`, plus legacy queued rows); `running` includes
+	 *   evaluating runs; `pending` = waiting for the executor to start them.
 	 * - `total`: jobs in the batch (bar width base; falls back to the counts' sum).
 	 * - `legend` (default false): counts as labelled chips under the bar.
 	 * - `class`: wrapper classes.
@@ -27,7 +30,7 @@
 		{ key: 'failed', label: 'failed', bar: 'bg-destructive' },
 		{ key: 'cancelled', label: 'cancelled', bar: 'bg-muted-foreground/50' },
 		{ key: 'running', label: 'running', bar: 'bg-info' },
-		{ key: 'queued', label: 'queued', bar: 'bg-info/40' },
+		{ key: 'queued', label: 'awaiting evaluation', bar: 'bg-info/40' },
 		{ key: 'pending', label: 'pending', bar: 'bg-muted-foreground/20' },
 	];
 

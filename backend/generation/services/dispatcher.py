@@ -1,60 +1,36 @@
-"""Job dispatcher — schedules generation jobs for execution.
+"""Job dispatch: hand saved jobs to the executor (spec §C.9).
 
-Generation jobs are dispatched in-process via daemon threads. This avoids the
-need for a Celery worker for synchronous-ish background execution. Do NOT also
-call ``run_generation_job.delay()`` for the same job — doing so will cause the
-job to execute twice.
+The web process never runs jobs. ``dispatch_job`` / ``enqueue_jobs`` mark
+rows as executor-owned (``queued_at``, lane, endpoint, priority, sequence)
+and ring the executor doorbell after the surrounding transaction commits;
+the executor (``manage.py run_executor``) claims them in lane order.
+
+The names stay: views and tests patch ``custom.dispatch_job`` and
+``jobs.dispatch_job`` / ``jobs.dispatch_evaluation``.
 """
 
-from backend.common.threading import dispatch_in_thread
-from backend.generation.models import GenerationJob
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from backend.execution import api as execution_api
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from backend.generation.models import GenerationJob
 
 
 def dispatch_job(job: GenerationJob) -> None:
-    """Run a generation job in a daemon thread (no Celery worker required)."""
-    from backend.generation.services.orchestrator import GenerationService
-
-    job_id = job.id
-    if job.mode == GenerationJob.Mode.AGENT:
-        # Claim the FIFO position now, in dispatch order: threads start in an
-        # arbitrary order, and experiments rely on dispatch order = run order.
-        from backend.generation.services.agent.runner import run_queue
-
-        run_queue().reserve(str(job_id))
-
-    def _run() -> None:
-        service = GenerationService()
-        service.execute(
-            GenerationJob.objects.select_related(
-                "model",
-                "created_by",
-                "app_requirement",
-                "batch",
-            ).get(id=job_id),
-        )
-
-    dispatch_in_thread(_run)
+    """Queue one saved job for the executor (idempotent; wakes it after commit)."""
+    execution_api.enqueue_jobs([job])
 
 
-def dispatch_evaluation(job: GenerationJob) -> None:
-    """(Re-)evaluate a finished job on a daemon thread, through the sandbox queue.
+def enqueue_jobs(jobs: Iterable[GenerationJob]) -> int:
+    """Queue saved jobs in this order (ad-hoc jobs get their index as ``sequence``); returns the count."""
+    return execution_api.enqueue_jobs(jobs)
 
-    Evaluation builds and runs the app on the apps daemon, so it takes a run
-    slot like an agent run does instead of competing with one for memory.
-    """
-    from backend.generation.services.agent.runner import run_queue
-    from backend.generation.services.evaluation.runner import evaluate_job
 
-    key = f"{job.id}:evaluate"
-    queue = run_queue()
-    queue.reserve(key)
-    job_id = job.id
-
-    def _run() -> None:
-        queue.enter(key, lambda: False)
-        try:
-            evaluate_job(GenerationJob.objects.select_related("app_requirement").get(id=job_id))
-        finally:
-            queue.leave(key)
-
-    dispatch_in_thread(_run)
+def dispatch_evaluation(job: GenerationJob) -> bool:
+    """Queue a manual (re-)evaluation of a finished job; it ends in the job's previous status."""
+    return execution_api.request_reeval(job)

@@ -41,6 +41,8 @@
 	 * - `params` (bindable sparse inline overrides), `inherited` (layers below).
 	 * - agent only: `policy` (bindable inline sampling_policy override), `inheritedPolicy`.
 	 * - `errors` (llm field errors), `invalid` (bindable output), `disabled`, `onchange()`.
+	 * - `hideProviderRouting`, `localModels`: passed to LLMParamsEditor (no OpenRouter
+	 *   model selected / some models run on local endpoints).
 	 */
 	import type { PresetRef, SamplingPolicy } from '$lib/api/generation';
 	import { Button } from '$lib/components/ui/button';
@@ -64,6 +66,8 @@
 		errors?: Record<string, string>;
 		invalid?: boolean;
 		disabled?: boolean;
+		hideProviderRouting?: boolean;
+		localModels?: boolean;
 		onchange?: () => void;
 	}
 
@@ -79,6 +83,8 @@
 		errors = {},
 		invalid = $bindable(false),
 		disabled = false,
+		hideProviderRouting = false,
+		localModels = false,
 		onchange,
 	}: Props = $props();
 
@@ -197,6 +203,8 @@
 		{errors}
 		{hint}
 		{disabled}
+		{hideProviderRouting}
+		{localModels}
 		onchange={() => onchange?.()}
 	/>
 

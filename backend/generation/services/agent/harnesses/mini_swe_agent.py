@@ -34,6 +34,7 @@ from backend.generation.services.agent.harnesses.base import GATEWAY_BASE_URL
 from backend.generation.services.agent.harnesses.base import OUTPUT_DIR
 from backend.generation.services.agent.harnesses.base import Harness
 from backend.generation.services.agent.harnesses.base import HarnessSummary
+from backend.generation.services.agent.harnesses.base import LocalRender
 from backend.generation.services.agent.harnesses.base import OptionField
 
 MINI = "/opt/harness/venv/bin/mini"
@@ -71,6 +72,7 @@ class MiniSweAgentHarness(Harness):
         agent_config: dict[str, Any],
         title: str,
         options: dict[str, Any] | None = None,
+        local: LocalRender | None = None,
     ) -> dict[str, Any]:
         version = self.version()
         opts = self.effective_options(options)
@@ -88,6 +90,9 @@ class MiniSweAgentHarness(Harness):
                 "model_kwargs": {"api_base": GATEWAY_BASE_URL, "api_key": DUMMY_API_KEY, "drop_params": True},
             },
         }
+        if local is not None:
+            # Local models only: litellm's request timeout must outlive the proxy's 504 re-attach chain.
+            overrides["model"]["model_kwargs"]["timeout"] = int(local.client_timeout_s)
         if opts["command_timeout_seconds"] != COMMAND_TIMEOUT_SECONDS:
             overrides["environment"] = {"timeout": int(opts["command_timeout_seconds"])}
         return {

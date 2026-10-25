@@ -11,7 +11,12 @@
  * by a retry never count; "k/n passed" only counts trials with a conformance
  * result (failed runs are reported next to it, not folded into n).
  */
-import type { GenerationJobList } from "$lib/api/generation";
+import type { GenerationJobList, JobPhase } from "$lib/api/generation";
+import type {
+  CellCode,
+  ExperimentResults,
+  ResultsMatrixRun,
+} from "$lib/api/types/experiments";
 import {
   isGradedOutcome,
   presetRefLabel,
@@ -313,4 +318,164 @@ export function representativeJob(
     }
   }
   return null;
+}
+
+// ── Experiment results (server-computed) ──────────────────────────────
+
+/** Minimal condition info for column headers (from the leaderboard or the detail). */
+export interface ResultsConditionInfo {
+  id: number;
+  label: string;
+  model: string;
+  modelId?: string | null;
+  /** Harness preset / profile; "" when unknown. */
+  variant?: string;
+}
+
+const RUN_STATUS: Record<CellCode, { status: string; phase?: JobPhase }> = {
+  p: { status: "pending" },
+  b: { status: "pending" },
+  w: { status: "pending" },
+  r: { status: "running", phase: "running" },
+  q: { status: "running", phase: "eval_queued" },
+  e: { status: "running", phase: "evaluating" },
+  c: { status: "completed" },
+  f: { status: "completed" },
+  u: { status: "completed" },
+  x: { status: "failed" },
+  k: { status: "cancelled" },
+};
+
+/** One results run as a job list item, so the matrix renders it like any trial. */
+export function jobFromResultsRun(
+  run: ResultsMatrixRun,
+  app: { slug: string; name: string },
+  condition: ResultsConditionInfo,
+): GenerationJobList {
+  const state = RUN_STATUS[run.code] ?? { status: "pending" };
+  return {
+    id: run.job_id,
+    mode: "",
+    status: state.status,
+    phase: state.phase ?? "",
+    model_name: condition.model,
+    model_id_str: condition.modelId ?? null,
+    template_name: app.name,
+    app_slug: app.slug,
+    started_at: null,
+    completed_at: null,
+    duration_seconds: null,
+    error_message: "",
+    created_at: "",
+    condition_id: condition.id,
+    repeat_index: run.repeat_index,
+    eval_status:
+      run.code === "c" ? "passed" : run.code === "f" ? "failed" : null,
+    pass_rate: run.pass_rate,
+    termination: run.termination,
+    validity:
+      run.valid === false ? "exclude" : run.valid === true ? "valid" : null,
+  };
+}
+
+/**
+ * The Results tab's matrix from `results.matrix` (spec §G.5): rows = apps,
+ * columns = conditions (leaderboard order). k/n and means are the server's,
+ * so the matrix applies exactly the leaderboard's filters (common cells,
+ * exclusions); the trial dots come from the runs.
+ */
+export function fromResultsMatrix(
+  results: Pick<ExperimentResults, "matrix" | "leaderboard">,
+  conditions: readonly ResultsConditionInfo[] = [],
+): ResultsMatrix {
+  const info = new Map<number, ResultsConditionInfo>();
+  for (const c of conditions) info.set(c.id, c);
+  for (const row of results.leaderboard) {
+    if (!info.has(row.condition_id)) {
+      info.set(row.condition_id, {
+        id: row.condition_id,
+        label: row.label,
+        model: row.model.name,
+        variant: row.harness,
+      });
+    }
+  }
+  const conditionOf = (id: number): ResultsConditionInfo =>
+    info.get(id) ?? {
+      id,
+      label: `Condition #${id}`,
+      model: `Condition #${id}`,
+    };
+
+  const order = new Map(results.leaderboard.map((r, i) => [r.condition_id, i]));
+  const conditionIds = [
+    ...new Set([
+      ...results.leaderboard.map((r) => r.condition_id),
+      ...results.matrix.cells.map((c) => c.condition_id),
+    ]),
+  ].sort((a, b) => (order.get(a) ?? 1e9) - (order.get(b) ?? 1e9) || a - b);
+
+  const columns: MatrixColumn[] = conditionIds.map((id) => {
+    const c = conditionOf(id);
+    return {
+      key: `c:${id}`,
+      model: c.model,
+      modelId: c.modelId ?? null,
+      variant: c.variant ?? "",
+      conditionId: id,
+    };
+  });
+  const columnByCondition = new Map(columns.map((c) => [c.conditionId!, c]));
+  const rows: MatrixRow[] = results.matrix.apps.map((a) => ({
+    key: `a:${a.id}`,
+    label: a.name || a.slug,
+    slug: a.slug,
+  }));
+  const rowByApp = new Map(results.matrix.apps.map((a, i) => [a.id, rows[i]]));
+  const appById = new Map(results.matrix.apps.map((a) => [a.id, a]));
+
+  const cells = new Map<string, MatrixCell>();
+  const columnTrials = new Map<string, MatrixTrial[]>();
+  for (const cell of results.matrix.cells) {
+    const row = rowByApp.get(cell.app_id);
+    const column = columnByCondition.get(cell.condition_id);
+    const app = appById.get(cell.app_id);
+    if (!row || !column || !app) continue;
+    const condition = conditionOf(cell.condition_id);
+    const trials: MatrixTrial[] = [...cell.runs]
+      .sort((a, b) => a.repeat_index - b.repeat_index)
+      .map((run) => {
+        const job = jobFromResultsRun(run, app, condition);
+        return {
+          job,
+          label: `Trial ${run.repeat_index + 1}`,
+          outcome: trialOutcome(job, true),
+          superseded: false,
+        };
+      });
+    const stats = computeStats(trials);
+    stats.graded = cell.n;
+    stats.passed = cell.k;
+    stats.meanPassRate = cell.mean;
+    const key = cellKey(row.key, column.key);
+    cells.set(key, { key, row, column, trials, stats });
+    const list = columnTrials.get(column.key) ?? [];
+    list.push(...trials);
+    columnTrials.set(column.key, list);
+  }
+
+  const columnStats = new Map<string, CellStats>();
+  for (const column of columns) {
+    const stats = computeStats(columnTrials.get(column.key) ?? []);
+    const lb = results.leaderboard.find(
+      (r) => r.condition_id === column.conditionId,
+    );
+    if (lb) {
+      stats.graded = lb.n_graded;
+      stats.passed = lb.k_passed;
+      stats.meanPassRate = lb.pass_rate_mean;
+    }
+    columnStats.set(column.key, stats);
+  }
+  return { rows, columns, cells, columnStats };
 }

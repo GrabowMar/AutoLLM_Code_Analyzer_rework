@@ -1,26 +1,20 @@
-"""/api/relay/v1/ — relay protocol v1 (spec §E.2), mounted before ``api/`` in config/urls.py.
-
-Foundation stub: every path answers 501 until Track B adds the async views
-(``inference/relay/views.py``: hello, inventory, poll, requests/<rid>/result,
-bye, relay.py, Dockerfile).
-"""
+"""/api/relay/v1/ — relay protocol v1 (spec §E.2), mounted before ``api/`` in config/urls.py."""
 
 from __future__ import annotations
 
-from django.db import transaction
-from django.http import JsonResponse
-from django.urls import re_path
-from django.views.decorators.csrf import csrf_exempt
+from django.urls import path
+
+from backend.inference.relay import views
 
 app_name = "relay"
 
-
-@csrf_exempt
-@transaction.non_atomic_requests
-def not_implemented(request, *args, **kwargs):
-    return JsonResponse({"error": "not_implemented"}, status=501)
-
-
 urlpatterns = [
-    re_path(r"^.*$", not_implemented, name="not-implemented"),
+    path("hello", views.hello, name="hello"),
+    path("inventory", views.inventory, name="inventory"),
+    path("poll", views.poll, name="poll"),
+    path("requests/<uuid:rid>/result", views.result, name="result"),
+    path("bye", views.bye, name="bye"),
+    path("relay.py", views.relay_script, name="script"),
+    path("Dockerfile", views.relay_dockerfile, name="dockerfile"),
+    path("llmlab-relay.service", views.relay_systemd_unit, name="systemd-unit"),
 ]

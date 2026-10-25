@@ -17,6 +17,8 @@ from pathlib import Path
 IMAGES_DIR = Path(__file__).resolve().parents[2] / "images"
 BASE_IMAGE = "agent-base"
 GATEWAY_IMAGE = "llm-gateway"
+# Overlay for non-OpenRouter endpoints, built FROM the gateway tag (spec §D.4).
+GATEWAY_LOCAL_IMAGE = "llm-gateway-local"
 TESTER_IMAGE = "conformance-tester"
 
 
@@ -38,3 +40,15 @@ def harness_image_plan(harness_image: str, harness_buildargs: dict[str, str]) ->
     base_tag = image_tag(BASE_IMAGE)
     args = {**harness_buildargs, "BASE_IMAGE": base_tag}
     return [(BASE_IMAGE, {}, base_tag), (harness_image, args, image_tag(harness_image, args))]
+
+
+def gateway_image_plan(local: bool) -> list[tuple[str, dict[str, str], str]]:
+    """``[(image dir, build args, tag), ...]`` for the gateway: the frozen base, plus the local overlay if *local*.
+
+    The overlay's build arg is the base tag, so the overlay tag pins the base.
+    """
+    base = image_tag(GATEWAY_IMAGE)
+    if not local:
+        return [(GATEWAY_IMAGE, {}, base)]
+    args = {"GATEWAY_BASE": base}
+    return [(GATEWAY_IMAGE, {}, base), (GATEWAY_LOCAL_IMAGE, args, image_tag(GATEWAY_LOCAL_IMAGE, args))]

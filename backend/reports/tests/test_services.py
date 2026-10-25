@@ -534,7 +534,7 @@ def test_generate_experiment_report_per_condition_stats_and_deltas():
     job_b.condition = condition_b
     job_b.save(update_fields=["experiment", "condition"])
 
-    data = generators.generate_experiment_report({"experiment_id": str(experiment.id)})
+    data = generators.generate_experiment_report({"experiment_id": str(experiment.id)}, user=user)
 
     assert data["experiment"]["id"] == str(experiment.id)
     assert data["total_conditions"] == 2
@@ -544,12 +544,57 @@ def test_generate_experiment_report_per_condition_stats_and_deltas():
     assert by_condition[condition_b.id]["model_id"] == "m-b"
     assert by_condition[condition_b.id]["stats"]["trials"] == 1
 
-    assert len(data["comparisons"]) == 1
-    comparison = data["comparisons"][0]
-    delta = comparison["deltas"]["findings_total"]
-    assert delta["a"] == 1.0
-    assert delta["b"] == 3.0
-    assert delta["delta"] == 2.0
+    # The statistics come from experiment_results.compute: a leaderboard and one
+    # paired row per non-baseline condition, never all N^2 pairs.
+    assert "comparisons" not in data
+    results = data["results"]
+    assert {row["condition_id"] for row in results["leaderboard"]} == {condition_a.id, condition_b.id}
+    assert results["paired"]["pairing"] == "app_blocked"
+    assert [row["condition_id"] for row in results["paired"]["rows"]] == [condition_b.id]
+
+
+def test_generate_experiment_report_is_owner_scoped():
+    from backend.generation.tests.factories import ExperimentFactory
+
+    owner, stranger = UserFactory(), UserFactory()
+    experiment = ExperimentFactory(created_by=owner)
+    config = {"experiment_id": str(experiment.id)}
+
+    with pytest.raises(ValueError, match="Experiment not found"):
+        generators.generate_experiment_report(config, user=stranger)
+    with pytest.raises(ValueError, match="Experiment not found"):
+        generators.generate_experiment_report(config)  # no user: nothing is visible
+    assert generators.generate_experiment_report(config, user=owner)["experiment"]["id"] == str(experiment.id)
+    staff = UserFactory(is_staff=True)
+    assert generators.generate_experiment_report(config, user=staff)["experiment"]["id"] == str(experiment.id)
+
+
+def test_create_and_dispatch_refuses_another_users_experiment_report():
+    from backend.generation.tests.factories import ExperimentFactory
+
+    experiment = ExperimentFactory(created_by=UserFactory())
+    with pytest.raises(ValueError, match="Experiment not found"):
+        services.create_and_dispatch(
+            report_type="experiment_report",
+            config={"experiment_id": str(experiment.id)},
+            user=UserFactory(),
+        )
+    assert not Report.objects.filter(report_type="experiment_report").exists()
+
+
+def test_create_and_run_generates_synchronously_with_the_owner():
+    from backend.generation.tests.factories import ExperimentFactory
+
+    owner = UserFactory()
+    experiment = ExperimentFactory(created_by=owner)
+    report = services.report_service.create_and_run(
+        report_type="experiment_report",
+        config={"experiment_id": str(experiment.id)},
+        user=owner,
+    )
+    assert report.status == Report.Status.COMPLETED
+    assert report.report_data["experiment"]["id"] == str(experiment.id)
+    assert report.summary["experiment_id"] == str(experiment.id)
 
 
 def test_generate_experiment_report_registered_in_generators():

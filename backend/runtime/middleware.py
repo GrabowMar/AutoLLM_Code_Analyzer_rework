@@ -9,6 +9,9 @@ Django) at the edge is enough; the name→container lookup happens here.
 
 from __future__ import annotations
 
+from asgiref.sync import iscoroutinefunction
+from asgiref.sync import markcoroutinefunction
+from asgiref.sync import sync_to_async
 from django.conf import settings
 
 # All generated sample-app containers are named ``llm-<hex>`` (see
@@ -33,17 +36,42 @@ def _app_subdomain_label(host: str) -> str | None:
 
 
 class AppSubdomainProxyMiddleware:
-    """Short-circuit ``<name>.<APPS_DOMAIN>`` requests to the app proxy."""
+    """Short-circuit ``<name>.<APPS_DOMAIN>`` requests to the app proxy.
+
+    Sync and async capable: on the async path the (blocking) proxy runs in a
+    worker thread and every other request goes straight to the async chain.
+    """
+
+    sync_capable = True
+    async_capable = True
 
     def __init__(self, get_response):
         self.get_response = get_response
+        self.is_async = iscoroutinefunction(get_response)
+        if self.is_async:
+            markcoroutinefunction(self)
+
+    @staticmethod
+    def _label(request) -> str | None:
+        if not getattr(settings, "APPS_SUBDOMAIN_PROXY", False):
+            return None
+        return _app_subdomain_label(request.get_host())
 
     def __call__(self, request):
-        if getattr(settings, "APPS_SUBDOMAIN_PROXY", False):
-            label = _app_subdomain_label(request.get_host())
-            if label:
-                # Imported lazily to avoid app-registry access at import time.
-                from backend.runtime.proxy import proxy_app_subdomain
+        if self.is_async:
+            return self.__acall__(request)
+        label = self._label(request)
+        if label:
+            # Imported lazily to avoid app-registry access at import time.
+            from backend.runtime.proxy import proxy_app_subdomain
 
-                return proxy_app_subdomain(request, label)
+            return proxy_app_subdomain(request, label)
         return self.get_response(request)
+
+    async def __acall__(self, request):
+        label = self._label(request)
+        if label:
+            from backend.runtime.proxy import proxy_app_subdomain
+
+            return await sync_to_async(proxy_app_subdomain)(request, label)
+        return await self.get_response(request)

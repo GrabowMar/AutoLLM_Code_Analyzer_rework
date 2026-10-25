@@ -9,6 +9,35 @@ CONTEXT_MILLION = 1_000_000
 CONTEXT_THOUSAND = 1_000
 
 
+class LLMModelEndpointRef(Schema):
+    """Where a local model runs (``None`` for the OpenRouter catalog)."""
+
+    id: int
+    slug: str
+    name: str
+    kind: str
+    online: bool
+
+
+def endpoint_ref(obj: LLMModel, online_cache: dict[int, bool] | None = None) -> dict | None:
+    """``{id, slug, name, kind, online}`` for a local model; ``online_cache`` saves one liveness query per endpoint."""
+    if obj.endpoint_id is None or obj.endpoint.is_system:
+        return None
+    endpoint = obj.endpoint
+    cache = online_cache if online_cache is not None else {}
+    if endpoint.pk not in cache:
+        from backend.inference.live import is_online
+
+        cache[endpoint.pk] = is_online(endpoint)
+    return {
+        "id": endpoint.pk,
+        "slug": endpoint.slug,
+        "name": endpoint.name,
+        "kind": endpoint.kind,
+        "online": cache[endpoint.pk],
+    }
+
+
 class LLMModelSchema(ModelSchema):
     """Full model representation for list and detail views."""
 
@@ -16,6 +45,12 @@ class LLMModelSchema(ModelSchema):
     input_price_per_million: float
     output_price_per_million: float
     context_window_display: str
+    endpoint: LLMModelEndpointRef | None = None
+    served_model_name: str = ""
+    digest: str = ""
+    quantization: str = ""
+    parameter_size: str = ""
+    is_local: bool = False
 
     class Meta:
         model = LLMModel
@@ -45,6 +80,14 @@ class LLMModelSchema(ModelSchema):
     @staticmethod
     def resolve_capabilities(obj: LLMModel) -> list[str]:
         return obj.get_capabilities_list()
+
+    @staticmethod
+    def resolve_endpoint(obj: LLMModel) -> dict | None:
+        return endpoint_ref(obj)
+
+    @staticmethod
+    def resolve_is_local(obj: LLMModel) -> bool:
+        return obj.is_local
 
     @staticmethod
     def resolve_input_price_per_million(obj: LLMModel) -> float:
@@ -88,9 +131,17 @@ class LLMModelListSchema(Schema):
     # OpenRouter lists "reasoning" / "include_reasoning" among the model's
     # supported parameters (catalog sync metadata).
     supports_reasoning: bool = False
+    # Local endpoint models (spec §F.3); None / "" / False for the OpenRouter catalog.
+    endpoint: LLMModelEndpointRef | None = None
+    served_model_name: str = ""
+    digest: str = ""
+    quantization: str = ""
+    parameter_size: str = ""
+    is_local: bool = False
+    is_available: bool = True
 
     @staticmethod
-    def from_model(obj: LLMModel) -> "LLMModelListSchema":
+    def from_model(obj: LLMModel, online_cache: dict[int, bool] | None = None) -> "LLMModelListSchema":
         cw = obj.context_window
         if cw >= CONTEXT_MILLION:
             cw_display = f"{cw / CONTEXT_MILLION:.0f}M"
@@ -131,6 +182,13 @@ class LLMModelListSchema(Schema):
             supports_streaming=obj.supports_streaming,
             supports_json_mode=obj.supports_json_mode,
             supports_reasoning=model_supports_reasoning(obj),
+            endpoint=endpoint_ref(obj, online_cache),
+            served_model_name=obj.served_model_name,
+            digest=obj.digest,
+            quantization=obj.quantization,
+            parameter_size=obj.parameter_size,
+            is_local=obj.is_local,
+            is_available=obj.is_available,
         )
 
 
@@ -138,6 +196,9 @@ REASONING_PARAMETERS = frozenset({"reasoning", "include_reasoning"})
 
 
 def model_supports_reasoning(obj: LLMModel) -> bool:
+    if obj.endpoint_id is not None and not obj.endpoint.is_system:
+        caps = ((obj.metadata or {}).get("ollama") or {}).get("capabilities") or []
+        return "thinking" in caps
     supported = (obj.metadata or {}).get("openrouter_supported_parameters")
     return isinstance(supported, list) and not REASONING_PARAMETERS.isdisjoint(supported)
 

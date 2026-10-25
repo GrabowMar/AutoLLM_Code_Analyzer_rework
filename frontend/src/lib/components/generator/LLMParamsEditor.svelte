@@ -29,6 +29,11 @@
 	 * - `invalid` (bindable, output): true while a field holds a value that was
 	 *   not applied (out of range, bad JSON, …) — block submit on it.
 	 * - `hint`: intro line ('' hides it). `disabled`. `onchange(params)` after each edit.
+	 * - `hideProviderRouting`: no provider routing field (e.g. no OpenRouter model
+	 *   is selected: routing only applies to OpenRouter). A routing value that is
+	 *   already set stays visible so it can be cleared.
+	 * - `localModels`: some selected models run on local endpoints; adds a note on
+	 *   which parameters those servers receive.
 	 */
 	import { untrack } from 'svelte';
 	import { cn } from '$lib/utils';
@@ -59,6 +64,8 @@
 		hint?: string;
 		disabled?: boolean;
 		onchange?: (params: LLMParams) => void;
+		hideProviderRouting?: boolean;
+		localModels?: boolean;
 	}
 
 	let {
@@ -71,6 +78,8 @@
 		hint,
 		disabled = false,
 		onchange,
+		hideProviderRouting = false,
+		localModels = false,
 	}: Props = $props();
 
 	const MAX_STOP = 8;
@@ -86,7 +95,7 @@
 	};
 
 	const showStopAndFormat = $derived(mode === 'scaffolding' || mode === 'custom' || mode === 'profile');
-	const showProvider = $derived(mode !== 'preset');
+	const showProvider = $derived(mode !== 'preset' && (!hideProviderRouting || params.provider != null));
 	const defaultText = $derived(mode === 'agent' || mode === 'preset' ? 'provider default' : 'default');
 	const intro = $derived(
 		hint ??
@@ -408,6 +417,13 @@
 			</Button>
 		{/if}
 	</div>
+
+	{#if localModels}
+		<p class="text-[11px] text-muted-foreground" data-slot="llm-local-note">
+			Local endpoints receive only what their API supports: provider routing is never sent, reasoning reaches
+			only models that report thinking, and Ollama's OpenAI flavor ignores top-k, min-p and repetition penalty.
+		</p>
+	{/if}
 
 	<div class="grid gap-3 @md/llm:grid-cols-2 @3xl/llm:grid-cols-4">
 		{#each basicFields as field (field.key)}

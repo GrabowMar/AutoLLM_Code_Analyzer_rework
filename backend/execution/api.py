@@ -1,8 +1,8 @@
 """Contracts the web process uses to hand work to the executor (spec §C.1, §C.9).
 
-Frozen contract (Foundation) → Track A. Implemented: :func:`wake`,
-:func:`enqueue_jobs`, :func:`request_reeval`. :func:`cancel_jobs` delegates to
-``execution.transitions.cancel_jobs`` (Track A).
+:func:`wake`, :func:`enqueue_jobs`, :func:`request_reeval`, :func:`cancel_jobs`
+(delegates to ``execution.transitions.cancel_jobs``) and
+:func:`requeue_legacy_jobs` (thread-era rows, spec §B.3 step 3).
 
 The web process never executes jobs: it writes rows and rings the
 ``executor:wake`` doorbell after commit. Redis carries doorbells only, so a
@@ -148,8 +148,47 @@ def request_reeval(job: GenerationJob) -> bool:
     return True
 
 
-def cancel_jobs(qs, scope: str = "all") -> dict[str, int]:
+def cancel_jobs(qs, scope: str = "all", *, experiment=None) -> dict[str, int]:
     """Cancel jobs (spec §C.8): see ``execution.transitions.cancel_jobs``."""
     from backend.execution.transitions import cancel_jobs as _cancel_jobs
 
-    return _cancel_jobs(qs, scope=scope)
+    return _cancel_jobs(qs, scope=scope, experiment=experiment)
+
+
+def requeue_legacy_jobs(qs) -> int:
+    """Hand thread-era jobs (``queued_at IS NULL``) of ``qs`` to the executor (spec §B.3 step 3).
+
+    Legacy PENDING **and** RUNNING rows (their threads died with the old
+    process) become PENDING with ``queued_at=now()`` and a fresh lane /
+    endpoint / priority; nothing else is cancelled. Each touched batch is
+    refreshed. Returns the number of jobs requeued.
+    """
+    from backend.generation.models import GenerationBatch
+    from backend.generation.models import GenerationJob
+    from backend.generation.services.batches import refresh_batch
+
+    with transaction.atomic():
+        jobs = list(
+            qs.select_for_update()
+            .filter(
+                queued_at__isnull=True,
+                status__in=[GenerationJob.Status.PENDING, GenerationJob.Status.RUNNING],
+            )
+            .order_by("created_at", "id"),
+        )
+        if not jobs:
+            return 0
+        GenerationJob.objects.filter(id__in=[j.id for j in jobs]).update(
+            status=GenerationJob.Status.PENDING,
+            phase=GenerationJob.Phase.NONE,
+            started_at=None,
+            lease_owner="",
+            lease_expires_at=None,
+        )
+        for job in jobs:
+            job.status = GenerationJob.Status.PENDING
+            job.phase = GenerationJob.Phase.NONE
+        enqueue_jobs(jobs)
+    for batch_id in {j.batch_id for j in jobs if j.batch_id}:
+        refresh_batch(GenerationBatch(id=batch_id))
+    return len(jobs)

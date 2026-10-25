@@ -6,6 +6,7 @@ from datetime import timedelta
 from typing import Any
 
 from django.core.cache import cache
+from django.db.models import Q
 from django.utils import timezone
 
 from backend.analysis.models import AnalysisRun
@@ -26,15 +27,60 @@ def clear_stuck_analysis_tasks(older_than_minutes: int = 60) -> int:
 
 
 def clear_stuck_generation_jobs(older_than_minutes: int = 60) -> int:
-    threshold = timezone.now() - timedelta(minutes=older_than_minutes)
-    return GenerationJob.objects.filter(
+    """Fail generation jobs that can no longer finish on their own.
+
+    Only two kinds of rows are touched, never a healthy PENDING job the
+    executor will still claim:
+
+    * legacy thread-era rows (``queued_at IS NULL``) still PENDING/RUNNING and
+      untouched for ``older_than_minutes`` (their threads died with the old
+      process);
+    * executor-owned RUNNING rows whose lease expired more than
+      ``older_than_minutes`` ago (the reconciler normally recovers these
+      within seconds; this is the manual backstop).
+
+    Batches of the touched jobs are refreshed and status events published.
+    """
+    from backend.execution import transitions
+    from backend.generation.models import GenerationBatch
+    from backend.generation.services.batches import refresh_batch
+    from backend.generation.services.result_writer import publish_status
+
+    now = timezone.now()
+    threshold = now - timedelta(minutes=older_than_minutes)
+    legacy = Q(
+        queued_at__isnull=True,
         status__in=[GenerationJob.Status.PENDING, GenerationJob.Status.RUNNING],
         updated_at__lt=threshold,
-    ).update(
-        status=GenerationJob.Status.FAILED,
-        phase=GenerationJob.Phase.NONE,
-        error_message=(f"Marked failed by maintenance: stuck for >{older_than_minutes}m"),
     )
+    expired = Q(
+        queued_at__isnull=False,
+        status=GenerationJob.Status.RUNNING,
+        lease_expires_at__lt=threshold,
+    )
+    stuck = list(GenerationJob.objects.filter(legacy | expired).only("id", "batch_id", "experiment_id"))
+    if not stuck:
+        return 0
+    count = (
+        GenerationJob.objects.filter(id__in=[j.id for j in stuck])
+        .filter(legacy | expired)
+        .update(
+            status=GenerationJob.Status.FAILED,
+            phase=GenerationJob.Phase.NONE,
+            completed_at=now,
+            lease_owner="",
+            lease_expires_at=None,
+            error_message=f"Marked failed by maintenance: stuck for >{older_than_minutes}m",
+            updated_at=now,
+        )
+    )
+    for batch_id in {j.batch_id for j in stuck if j.batch_id}:
+        refresh_batch(GenerationBatch(id=batch_id))
+    for job in GenerationJob.objects.filter(id__in=[j.id for j in stuck]):
+        publish_status(job)
+    for experiment_id in {j.experiment_id for j in stuck if j.experiment_id}:
+        transitions.maybe_complete_experiment(experiment_id)
+    return count
 
 
 def purge_orphan_containers() -> int:

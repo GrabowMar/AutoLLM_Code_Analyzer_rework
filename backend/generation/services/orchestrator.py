@@ -1,19 +1,25 @@
-"""Generation orchestrator — executes generation jobs per mode."""
+"""Generation orchestrator: executes generation jobs per mode.
+
+The executor (``backend.execution``) claims a job and calls
+:meth:`GenerationService.execute` with ``claimed=True`` in a worker thread;
+the job's stage then ends through ``execution.transitions.finish_stage``
+(or ``infra_retry``). Every LLM call goes through ``inference.chat`` with the
+access ``inference.access.resolve_access`` resolves for the job owner.
+"""
 
 import logging
 import time
 
 from django.utils import timezone
 
-from backend.credentials.services.resolver import MissingApiKeyError
-from backend.credentials.services.resolver import get_openrouter_key
+from backend.execution import transitions
+from backend.execution.transitions import LeaseLost
 from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationJob
 from backend.generation.services import result_writer
 from backend.generation.services.agent.runner import AgentRunCancelled
 from backend.generation.services.agent.runner import AgentRunError
 from backend.generation.services.agent.runner import AgentRunner
-from backend.generation.services.agent.runner import run_queue
 from backend.generation.services.backend_scanner import BackendScanner
 from backend.generation.services.code_parser import parse_to_files
 from backend.generation.services.copilot_validation import validate_python_code
@@ -41,134 +47,252 @@ DEFAULT_CONTINUATION_LIMIT = 1
 DEFAULT_ENABLE_REPAIR = True
 
 
+def _is_cancelled(job: GenerationJob) -> bool:
+    return (
+        GenerationJob.objects.filter(id=job.id).values_list("status", flat=True).first()
+        == GenerationJob.Status.CANCELLED
+    )
+
+
+class _InferenceClient:
+    """``chat_completion`` over ``inference.chat`` for one job (the call shape ``_call_llm`` uses).
+
+    OpenRouter models delegate to ``OpenRouterClient`` inside ``chat`` (same
+    behaviour and retries); local models go through the ``LLMRequest`` queue.
+    The job's cancel status is polled while a local call waits.
+    """
+
+    def __init__(self, job: GenerationJob, access) -> None:
+        self.job = job
+        self.access = access
+        self.last_served: dict = {}
+
+    def chat_completion(self, *, model, messages, temperature=None, max_tokens=None, seed=None, params=None):
+        from backend.inference.chat import chat
+
+        params = dict(params or {})
+        if temperature is not None:
+            params.setdefault("temperature", temperature)
+        if max_tokens is not None:
+            params.setdefault("max_tokens", max_tokens)
+        result = chat(
+            self.access,
+            messages=messages,
+            params=params,
+            seed=seed,
+            job=self.job,
+            cancel_check=lambda: _is_cancelled(self.job),
+            priority=self.job.priority,
+        )
+        self.last_served = result.served or {}
+        return result.response
+
+
 class GenerationService:
     """Orchestrates generation for every mode (agent first; template modes secondary)."""
 
     def __init__(self) -> None:
         self.renderer = PromptRenderer()
         self.scanner = BackendScanner()
-        # Per-job client is constructed in ``_call_llm`` so it uses the
-        # job owner's resolved OpenRouter API key.
-        self.client: OpenRouterClient | None = None
         self.continuation_limit = DEFAULT_CONTINUATION_LIMIT
         self.enable_repair = DEFAULT_ENABLE_REPAIR
+        # Successful LLM calls of the current attempt: an infra error after
+        # one of them is no longer "nothing happened" (spec §C.7).
+        self._ok_calls = 0
+        self._access = None
 
-    def _build_client_for(self, job: GenerationJob) -> OpenRouterClient:
-        """Build an OpenRouterClient using ``job.created_by``'s API key."""
-        try:
-            api_key = get_openrouter_key(job.created_by)
-        except MissingApiKeyError as exc:
-            raise OpenRouterError(
-                str(exc),
-                status_code=401,
-                user_facing_message=str(exc),
-                remediation=exc.remediation,
-            ) from exc
-        return OpenRouterClient(api_key=api_key)
+    def _build_client_for(self, job: GenerationJob) -> _InferenceClient:
+        """The chat client for ``job``: ``resolve_access(job.created_by, job.model)`` (raises ``LLMAccessError``)."""
+        from backend.inference.access import resolve_access
 
-    def execute(self, job: GenerationJob) -> None:
-        """Execute a generation job based on its mode."""
-        started_at = timezone.now()
-        # Conditional claim: a cancel (job or batch) that landed between
-        # dispatch and this thread starting must not be overwritten.
-        claimed = (
-            GenerationJob.objects.filter(id=job.id)
-            .exclude(status=GenerationJob.Status.CANCELLED)
-            .update(status=GenerationJob.Status.RUNNING, started_at=started_at, updated_at=started_at)
-        )
-        if not claimed:
-            self._skip_cancelled(job)
+        if job.model is None:
+            msg = "job has no model"
+            raise ValueError(msg)
+        self._access = resolve_access(job.created_by, job.model)
+        return _InferenceClient(job, self._access)
+
+    # ── execution ─────────────────────────────────────────────────────
+
+    def execute(self, job: GenerationJob, claimed: bool = False) -> None:
+        """Run ``job``'s generation stage and end it (``finish_stage`` / ``infra_retry``).
+
+        ``claimed=True``: the executor already moved the job to RUNNING under
+        its lease. ``claimed=False`` (tests, shell): claim it here
+        conditionally (a cancel that already landed wins), and run an
+        evaluation the stage asks for inline.
+        """
+        if not claimed and not self._claim_inline(job):
             return
-        job.status = GenerationJob.Status.RUNNING
-        job.started_at = started_at
-        job.updated_at = started_at
-        result_writer.publish_status(job)
-
+        if job.status == GenerationJob.Status.RUNNING and not claimed:
+            result_writer.publish_status(job)
+        self._ok_calls = 0
+        outcome = transitions.OUTCOME_DONE
+        retry: tuple[str, str] | None = None
         try:
             if job.mode == GenerationJob.Mode.AGENT:
-                AgentRunner(job).execute()
+                outcome = AgentRunner(job).run_stage()
             elif job.mode == GenerationJob.Mode.CUSTOM:
                 self._run_custom(job)
             elif job.mode == GenerationJob.Mode.SCAFFOLDING:
                 self._run_scaffolding(job)
+                if self._evaluate_scaffolding(job):
+                    outcome = transitions.OUTCOME_EVALUATE
             elif job.mode == GenerationJob.Mode.COPILOT:
                 self._run_copilot(job)
             else:
                 msg = f"Unknown mode: {job.mode}"
                 raise ValueError(msg)
-
             job.status = GenerationJob.Status.COMPLETED
+        except LeaseLost:
+            logger.info("Job %s attempt %s: lease lost; stopping quietly", job.id, job.attempt)
+            # A cancel won: give its slot back now (no-op when the job was requeued or reclaimed).
+            transitions._release(job)  # noqa: SLF001
+            return
         except AgentRunCancelled:
             logger.info("Job %s cancelled", job.id)
             job.status = GenerationJob.Status.CANCELLED
+            outcome = transitions.OUTCOME_CANCELLED
         except OpenRouterError as exc:
-            logger.exception("Job %s failed (OpenRouter)", job.id)
-            job.status = GenerationJob.Status.FAILED
-            job.error_message = exc.display()[:2000]
-            existing = job.result_data if isinstance(job.result_data, dict) else {}
-            existing["error_detail"] = str(exc)[:2000]
-            existing["error_status_code"] = exc.status_code
-            existing["error_remediation"] = exc.remediation
-            job.result_data = existing
+            retry = self._llm_infra_reason(job, exc)
+            if retry is None:
+                logger.exception("Job %s failed (LLM)", job.id)
+            self._fail(job, exc.display(), detail=str(exc), status_code=exc.status_code, remediation=exc.remediation)
         except AgentRunError as exc:
             logger.warning("Job %s failed (agent run): %s", job.id, exc)
-            job.status = GenerationJob.Status.FAILED
-            job.error_message = exc.display()[:2000]
-            existing = job.result_data if isinstance(job.result_data, dict) else {}
-            existing["error_detail"] = str(exc)[:2000]
-            existing["error_remediation"] = exc.remediation
-            job.result_data = existing
+            if exc.infra:
+                retry = (transitions.REASON_INFRA, str(exc)[:1000])
+            self._fail(job, exc.display(), detail=str(exc), remediation=exc.remediation)
         except Exception as exc:
             logger.exception("Job %s failed", job.id)
             job.status = GenerationJob.Status.FAILED
             job.error_message = str(exc)[:2000]
-        finally:
-            # A cancel request that raced the run's end still wins.
-            current = GenerationJob.objects.filter(id=job.id).values_list("status", flat=True).first()
-            if current == GenerationJob.Status.CANCELLED:
-                job.status = GenerationJob.Status.CANCELLED
-            job.phase = GenerationJob.Phase.NONE
-            job.completed_at = timezone.now()
-            if job.started_at:
-                job.duration_seconds = (job.completed_at - job.started_at).total_seconds()
-            job.save(
-                update_fields=[
-                    "status",
-                    "phase",
-                    "stack_slug",
-                    "experiment_seed",
-                    "resolved_bundle",
-                    "prompt_hash",
-                    "bundle_key",
-                    "completed_at",
-                    "duration_seconds",
-                    "error_message",
-                    "result_data",
-                    "metrics",
-                    "copilot_current_iteration",
-                    "updated_at",
-                ],
+        if retry is not None:
+            transitions.infra_retry(job, *retry)
+            return
+        if outcome == transitions.OUTCOME_EVALUATE and not claimed:
+            # Inline (tests, shell): the evaluation follows in the same call.
+            self.evaluate(job, finish=False)
+            outcome = transitions.OUTCOME_DONE
+        if outcome == transitions.OUTCOME_EVALUATE:
+            # The sample is saved with the eval_queued transition; the eval pool picks it up.
+            job.status = GenerationJob.Status.RUNNING
+        transitions.finish_stage(job, outcome)
+
+    def evaluate(self, job: GenerationJob, *, finish: bool = True) -> None:
+        """The evaluation stage (``phase=evaluating``): build, run, grade; then validity; then finish.
+
+        Used by the executor's eval pool (``finish=True``) and inline by
+        ``execute(claimed=False)``. An evaluation infra error is recorded on the
+        sample (the reconciler bounds requeues of *lost* evaluations), never a
+        job failure.
+        """
+        from backend.generation.services.evaluation.runner import evaluate_job
+
+        try:
+            evaluate_job(job, save=transitions.guarded_save)
+            if job.mode == GenerationJob.Mode.AGENT and isinstance((job.result_data or {}).get("agent"), dict):
+                from backend.generation.services.agent.runner import assess_validity
+                from backend.generation.services.agent.runner import execution_record
+
+                # Keep the executor's notes (infra_retried, relay_interruptions, contended) next to the grade.
+                job.result_data["agent"]["validity"] = assess_validity(
+                    job.resolved_bundle or {},
+                    job.result_data,
+                    execution=execution_record(job),
+                    attempt=job.attempt,
+                )
+        except LeaseLost:
+            logger.info("Job %s: lease lost during evaluation; stopping quietly", job.id)
+            raise
+        except Exception:
+            logger.exception("Evaluation of job %s failed", job.id)
+        if finish:
+            if job.status == GenerationJob.Status.RUNNING:
+                job.status = GenerationJob.Status.COMPLETED
+            transitions.finish_stage(job, transitions.OUTCOME_DONE)
+
+    def _claim_inline(self, job: GenerationJob) -> bool:
+        started_at = timezone.now()
+        # Conditional claim: a cancel (job or batch) that landed between
+        # creation and this call must not be overwritten.
+        claimed = (
+            GenerationJob.objects.filter(id=job.id)
+            .exclude(status=GenerationJob.Status.CANCELLED)
+            .update(
+                status=GenerationJob.Status.RUNNING,
+                phase=GenerationJob.Phase.RUNNING,
+                started_at=started_at,
+                stage_entered_at=started_at,
+                updated_at=started_at,
             )
-            result_writer.publish_status(job)
-            result_writer.update_batch(job)
+        )
+        if not claimed:
+            self._skip_cancelled(job)
+            return False
+        job.status = GenerationJob.Status.RUNNING
+        job.phase = GenerationJob.Phase.RUNNING
+        job.started_at = started_at
+        job.updated_at = started_at
+        return True
 
     @staticmethod
     def _skip_cancelled(job: GenerationJob) -> None:
         """Close out a job that was cancelled before it started (it never ran)."""
-        if job.mode == GenerationJob.Mode.AGENT:
-            run_queue().drop(str(job.id))
-        job.status = GenerationJob.Status.CANCELLED
-        job.phase = GenerationJob.Phase.NONE
-        job.completed_at = timezone.now()
-        job.save(update_fields=["status", "phase", "completed_at", "updated_at"])
+        now = timezone.now()
+        GenerationJob.objects.filter(id=job.id, completed_at__isnull=True).update(completed_at=now, updated_at=now)
+        job.refresh_from_db(fields=["status", "phase", "completed_at", "updated_at"])
         result_writer.publish_status(job)
         result_writer.update_batch(job)
+
+    @staticmethod
+    def _fail(job, message: str, *, detail: str, status_code=None, remediation=None) -> None:
+        job.status = GenerationJob.Status.FAILED
+        job.error_message = (message or detail)[:2000]
+        existing = job.result_data if isinstance(job.result_data, dict) else {}
+        existing["error_detail"] = detail[:2000]
+        if status_code is not None:
+            existing["error_status_code"] = status_code
+        existing["error_remediation"] = remediation
+        job.result_data = existing
+
+    def _llm_infra_reason(self, job: GenerationJob, exc: OpenRouterError) -> tuple[str, str] | None:
+        """Whether an LLM error is an infrastructure failure to retry (spec §C.7), and as what.
+
+        Retryable access errors (endpoint offline/unavailable, timeouts, lease
+        expiry, model OOM) with no successful call in the attempt → ``infra``;
+        on a local endpoint after a successful call → ``infra_interrupted``
+        (scaffolding restarts from scratch with the same seed). Anything else
+        (model 4xx, OpenRouter errors after retries) is a failure of the job.
+        """
+        from backend.inference.access import LLMAccessError
+
+        if not isinstance(exc, LLMAccessError) or not exc.retryable:
+            return None
+        if self._ok_calls == 0:
+            return (transitions.REASON_INFRA, f"{exc.code}: {exc}"[:1000])
+        access = self._access
+        if access is not None and not access.is_openrouter:
+            return (transitions.REASON_INFRA_INTERRUPTED, f"{exc.code}: {exc}"[:1000])
+        return None
+
+    @staticmethod
+    def _evaluate_scaffolding(job: GenerationJob) -> bool:
+        """Scaffolding experiment jobs evaluate per job when ``post_run.evaluate`` (default on)."""
+        if job.experiment_id is None or job.app_requirement_id is None:
+            return False
+        from backend.generation.models import Experiment
+
+        post_run = Experiment.objects.filter(pk=job.experiment_id).values_list("post_run", flat=True).first()
+        if not isinstance(post_run, dict):
+            return True
+        return bool(post_run.get("evaluate", True))
 
     # ── Custom Mode ───────────────────────────────────────────────────
 
     def _run_custom(self, job: GenerationJob) -> None:
         """Custom mode: direct system + user prompts → LLM."""
-        model_id = job.model.model_id if job.model else "openai/gpt-4o-mini"
+        # No silent model fallback: a job without a model fails at its first call (_build_client_for).
+        model_id = job.model.model_id if job.model else ""
         messages = []
         if job.custom_system_prompt:
             messages.append({"role": "system", "content": job.custom_system_prompt})
@@ -198,7 +322,8 @@ class GenerationService:
 
     def _run_scaffolding(self, job: GenerationJob) -> None:
         """Scaffolding mode: two-stage generation (backend → scan → frontend)."""
-        model_id = job.model.model_id if job.model else "openai/gpt-4o-mini"
+        # No silent model fallback: a job without a model fails at its first call (_build_client_for).
+        model_id = job.model.model_id if job.model else ""
         app_req = job.app_requirement
         if not app_req:
             msg = "Scaffolding mode requires an app requirement template"
@@ -395,6 +520,12 @@ class GenerationService:
 
         try:
             client = self._build_client_for(job)
+            access = self._access
+            if access is not None and not access.is_openrouter:
+                request_payload["_upstream"] = {
+                    "endpoint": access.endpoint.slug,
+                    "path": "/api/chat" if access.api_flavor == "native" else "/v1/chat/completions",
+                }
             response = client.chat_completion(
                 model=model_id,
                 messages=messages,
@@ -412,6 +543,7 @@ class GenerationService:
             )
             raise
 
+        self._ok_calls += 1
         usage = OpenRouterClient.extract_usage(response)
         GenerationArtifact.objects.create(
             job=job,

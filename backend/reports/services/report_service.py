@@ -13,6 +13,7 @@ from backend.common.threading import dispatch_in_thread
 from backend.reports.models import Report
 
 from .generators import GENERATORS
+from .generators import USER_SCOPED
 
 logger = logging.getLogger(__name__)
 
@@ -28,15 +29,67 @@ def create_and_dispatch(
 ) -> Report:
     """Create a Report row, then run the generator in a daemon thread."""
 
+    report = _create(
+        report_type=report_type,
+        config=config,
+        title=title,
+        description=description,
+        user=user,
+        expires_in_days=expires_in_days,
+    )
+    _dispatch(report.id)
+    return report
+
+
+def create_and_run(
+    *,
+    report_type: str,
+    config: dict[str, Any],
+    title: str | None = None,
+    description: str = "",
+    user=None,
+    expires_in_days: int | None = 30,
+) -> Report:
+    """Create a Report row and generate it synchronously in the caller's thread (experiment post-runs).
+
+    A generator failure is recorded on the row (``failed``), never raised.
+    """
+    report = _create(
+        report_type=report_type,
+        config=config,
+        title=title,
+        description=description,
+        user=user,
+        expires_in_days=expires_in_days,
+    )
+    report.mark_generating()
+    try:
+        _generate(report)
+    except Exception as exc:
+        logger.exception("Report generation failed for %s", report.id)
+        report.mark_failed(str(exc))
+    report.refresh_from_db()
+    return report
+
+
+def _create(
+    *,
+    report_type: str,
+    config: dict[str, Any],
+    title: str | None,
+    description: str,
+    user,
+    expires_in_days: int | None,
+) -> Report:
     if report_type not in GENERATORS:
         msg = f"Unknown report_type: {report_type}"
         raise ValueError(msg)
-    _validate_config(report_type, config)
+    _validate_config(report_type, config, user)
 
     final_title = title or _default_title(report_type, config)
     expires_at = timezone.now() + timedelta(days=int(expires_in_days)) if expires_in_days else None
 
-    report = Report.objects.create(
+    return Report.objects.create(
         report_type=report_type,
         title=final_title,
         description=description,
@@ -44,8 +97,6 @@ def create_and_dispatch(
         created_by=user if (user and user.is_authenticated) else None,
         expires_at=expires_at,
     )
-    _dispatch(report.id)
-    return report
 
 
 def _dispatch(report_id) -> None:
@@ -77,27 +128,37 @@ def _run_generation(report_id) -> None:
 
 def _generate(report: Report) -> None:
     generator = GENERATORS[report.report_type]
-    data = generator(report.config or {})
+    if report.report_type in USER_SCOPED:
+        # Owner-scoped generators read only what the report's creator may see.
+        data = generator(report.config or {}, user=report.created_by)
+    else:
+        data = generator(report.config or {})
     report.report_data = data
     report.summary = _make_summary(report.report_type, data)
     report.save(update_fields=["report_data", "summary"])
     report.mark_completed()
 
 
-def _validate_config(report_type: str, config: dict[str, Any]) -> None:
-    """Synchronously check required config keys before background dispatch."""
+def _validate_config(report_type: str, config: dict[str, Any], user=None) -> None:
+    """Synchronously check required config keys (and ownership) before background dispatch."""
 
     required: dict[str, list[str]] = {
         "model_analysis": ["model_id"],
         "template_comparison": ["template_slug"],
+        "experiment_report": ["experiment_id"],
     }
     for key in required.get(report_type, []):
         if not (config or {}).get(key):
             msg = f"Missing required config key for {report_type}: {key}"
             raise ValueError(msg)
+    if report_type == "experiment_report":
+        from .generators import owned_experiment
+
+        # Raises ValueError("Experiment not found") for another user's experiment.
+        owned_experiment(config["experiment_id"], user)
 
 
-def _default_title(report_type: str, config: dict[str, Any]) -> str:
+def _default_title(report_type: str, config: dict[str, Any]) -> str:  # noqa: PLR0911 - one branch per type
     if report_type == "model_analysis":
         slug = config.get("model_id") or config.get("model_slug", "?")
         return f"Model analysis: {slug}"
@@ -109,10 +170,12 @@ def _default_title(report_type: str, config: dict[str, Any]) -> str:
         return f"Generation analytics ({config.get('days', 7)}d)"
     if report_type == "comprehensive":
         return f"Comprehensive report ({config.get('days', 30)}d)"
+    if report_type == "experiment_report":
+        return f"Experiment report: {config.get('experiment_id', '?')}"
     return "Report"
 
 
-def _make_summary(report_type: str, data: dict[str, Any]) -> dict[str, Any]:
+def _make_summary(report_type: str, data: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0911 - one branch per type
     """Compact denormalized summary for list rendering."""
 
     if report_type == "model_analysis":
@@ -143,6 +206,16 @@ def _make_summary(report_type: str, data: dict[str, Any]) -> dict[str, Any]:
     if report_type == "comprehensive":
         return {
             "platform": data.get("platform", {}),
+        }
+    if report_type == "experiment_report":
+        results = data.get("results") or {}
+        leader = (results.get("leaderboard") or [{}])[0]
+        return {
+            "experiment_id": (data.get("experiment") or {}).get("id"),
+            "condition_count": data.get("total_conditions", 0),
+            "leader": leader.get("label"),
+            "leader_pass_rate": leader.get("pass_rate_mean"),
+            "interim": results.get("interim"),
         }
     return {}
 

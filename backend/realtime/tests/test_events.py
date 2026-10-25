@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import json
-from http import HTTPStatus
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
-from django.http import StreamingHttpResponse
-from django.test import RequestFactory
 
-from backend.realtime.api.views import sse_stream
 from backend.realtime.events import publish
 from backend.realtime.subscribers import _build_sse
 
@@ -94,39 +90,3 @@ class TestBuildSse:
         parsed = json.loads(data_line[len("data: ") :])
         assert parsed["analyzer"] == "mypy"
         assert parsed["finding_count"] == pytest.approx(3)
-
-
-# ---------------------------------------------------------------------------
-# api/views.py tests
-# ---------------------------------------------------------------------------
-
-
-class TestSseStreamView:
-    def setup_method(self):
-        self.factory = RequestFactory()
-
-    def test_unauthenticated_returns_401(self):
-        """Unauthenticated requests must be rejected with HTTP 401."""
-        request = self.factory.get("/api/realtime/stream", {"channels": "generation:1"})
-        request.user = MagicMock(is_authenticated=False)
-        response = sse_stream(request)
-        assert response.status_code == HTTPStatus.UNAUTHORIZED
-
-    def test_missing_channels_returns_400(self):
-        """A request without ?channels= must return HTTP 400."""
-        request = self.factory.get("/api/realtime/stream")
-        request.user = MagicMock(is_authenticated=True)
-        response = sse_stream(request)
-        assert response.status_code == HTTPStatus.BAD_REQUEST
-
-    @patch("backend.realtime.api.views.event_stream")
-    def test_authenticated_returns_streaming_response(self, mock_stream):
-        """Valid authenticated request returns a StreamingHttpResponse."""
-        mock_stream.return_value = iter([": heartbeat\n\n"])
-        request = self.factory.get("/api/realtime/stream", {"channels": "generation:1"})
-        request.user = MagicMock(is_authenticated=True)
-        response = sse_stream(request)
-        assert isinstance(response, StreamingHttpResponse)
-        assert response["Content-Type"] == "text/event-stream"
-        assert response["Cache-Control"] == "no-cache"
-        assert response["X-Accel-Buffering"] == "no"

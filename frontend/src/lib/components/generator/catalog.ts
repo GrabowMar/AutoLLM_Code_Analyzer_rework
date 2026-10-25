@@ -45,6 +45,11 @@ class Catalog<T> {
     private readonly revalidateAfterMs: number,
   ) {}
 
+  /** Whether this list was ever requested (so a forced refresh is worth it). */
+  get loaded(): boolean {
+    return this.entry !== null;
+  }
+
   load(force = false): Promise<T> {
     if (!browser) return this.fetcher();
     const entry = this.entry;
@@ -98,11 +103,18 @@ class Catalog<T> {
   }
 }
 
-async function fetchAllModels(): Promise<LLMModelSummary[]> {
-  const first = await getModels({ per_page: MODEL_PAGE_SIZE, page: 1 });
+async function fetchAllModels(
+  includeUnavailable = false,
+): Promise<LLMModelSummary[]> {
+  const extra = includeUnavailable ? { include_unavailable: true } : {};
+  const first = await getModels({
+    per_page: MODEL_PAGE_SIZE,
+    page: 1,
+    ...extra,
+  });
   const rest = await Promise.all(
     Array.from({ length: Math.max(0, first.pages - 1) }, (_, i) =>
-      getModels({ per_page: MODEL_PAGE_SIZE, page: i + 2 }),
+      getModels({ per_page: MODEL_PAGE_SIZE, page: i + 2, ...extra }),
     ),
   );
   // A catalog sync between page requests can shift rows; keep the first copy.
@@ -117,21 +129,38 @@ async function fetchAllModels(): Promise<LLMModelSummary[]> {
 
 // Models change only on a catalog sync (and the list is several pages);
 // app specs change whenever the Library is used.
-const models = new Catalog<LLMModelSummary[]>(fetchAllModels, 2 * 60_000);
+const models = new Catalog<LLMModelSummary[]>(
+  () => fetchAllModels(),
+  2 * 60_000,
+);
+// Hidden and unavailable local models too (pickers with `showUnavailable`).
+// Endpoint inventories change while a relay is connected, so this list
+// revalidates sooner.
+const modelsWithUnavailable = new Catalog<LLMModelSummary[]>(
+  () => fetchAllModels(true),
+  30_000,
+);
 const appSpecs = new Catalog<AppRequirementTemplate[]>(getAppTemplates, 15_000);
 
 if (browser) {
   window.addEventListener("focus", () => {
     models.onFocus();
+    modelsWithUnavailable.onFocus();
     appSpecs.onFocus();
   });
 }
 
-/** Every model in the catalog (all pages), cached (see the module comment). */
+/**
+ * Every model in the catalog (all pages), cached (see the module comment).
+ * `includeUnavailable` also returns hidden and no-longer-served local models
+ * (a separate cached list).
+ */
 export function loadModelCatalog(
-  options: { force?: boolean } = {},
+  options: { force?: boolean; includeUnavailable?: boolean } = {},
 ): Promise<LLMModelSummary[]> {
-  return models.load(options.force);
+  return (options.includeUnavailable ? modelsWithUnavailable : models).load(
+    options.force,
+  );
 }
 
 /** Every visible app spec, cached (see the module comment). */
@@ -150,6 +179,7 @@ export function loadAppSpecCatalog(
 export function watchCatalog(
   name: "models",
   onList: (list: LLMModelSummary[]) => void,
+  options?: { includeUnavailable?: boolean },
 ): () => void;
 export function watchCatalog(
   name: "app-specs",
@@ -158,8 +188,15 @@ export function watchCatalog(
 export function watchCatalog(
   name: CatalogName,
   onList: (list: never) => void,
+  options: { includeUnavailable?: boolean } = {},
 ): () => void {
-  const catalog = (name === "models" ? models : appSpecs) as Catalog<unknown>;
+  const catalog = (
+    name === "models"
+      ? options.includeUnavailable
+        ? modelsWithUnavailable
+        : models
+      : appSpecs
+  ) as Catalog<unknown>;
   const unsubscribe = catalog.subscribe(onList as (value: unknown) => void);
   // Errors are left to the next load; the cached list stays on screen.
   catalog.revalidate()?.catch(() => {});
@@ -172,12 +209,16 @@ export function watchCatalog(
  * new list; later loads reuse it.
  */
 export function refreshCatalog(name?: CatalogName): Promise<void> {
-  const targets = name
-    ? [name === "models" ? models : appSpecs]
-    : [models, appSpecs];
-  return Promise.all(
-    targets.map((c) => (c as Catalog<unknown>).load(true)),
-  ).then(() => undefined);
+  const all: Catalog<unknown>[] = [];
+  if (!name || name === "models") {
+    all.push(models as Catalog<unknown>);
+    // The second model list is refetched only when something loaded it before.
+    if (modelsWithUnavailable.loaded) {
+      all.push(modelsWithUnavailable as Catalog<unknown>);
+    }
+  }
+  if (!name || name === "app-specs") all.push(appSpecs as Catalog<unknown>);
+  return Promise.all(all.map((c) => c.load(true))).then(() => undefined);
 }
 
 /** Match `?model=` links: canonical slug, OpenRouter id, or numeric pk. */
@@ -200,14 +241,141 @@ export interface ModelEligibilityRules {
   requireTools?: boolean;
 }
 
-/** Why a model cannot run under the given rules, or null when it can. */
+/** True for a model served by a local endpoint (Ollama / OpenAI-compatible), not OpenRouter. */
+export function isLocalModel(model: LLMModelSummary): boolean {
+  if (model.is_local != null) return model.is_local;
+  return model.endpoint != null && model.endpoint.kind !== "openrouter";
+}
+
+/**
+ * Why a model cannot run under the given rules, or null when it can. For
+ * local models, tool support is what the endpoint's discovery reported
+ * (Ollama `capabilities`, or the endpoint's "assume tools" setting).
+ * An offline endpoint does not make a model ineligible: its runs wait.
+ */
 export function modelIneligibility(
   model: LLMModelSummary | undefined,
   rules: ModelEligibilityRules,
 ): string | null {
   if (!model) return "No longer in the model catalog";
+  if (model.is_available === false) {
+    return model.endpoint
+      ? `No longer served by ${model.endpoint.name}`
+      : "No longer available";
+  }
   if (rules.requireTools && !model.supports_function_calling) {
-    return "No tool calling (a selected harness needs it)";
+    return isLocalModel(model)
+      ? "Endpoint reports no tool calling (a selected harness needs it)"
+      : "No tool calling (a selected harness needs it)";
   }
   return null;
+}
+
+// ── grouping (ModelPicker, selection summaries) ──────────────────────
+
+export type ModelGroupBy = "provider" | "endpoint";
+export type ModelEndpointScope = "all" | "local" | "openrouter";
+
+export interface ModelGroup {
+  /** Stable key: `endpoint:<id>` or `provider:<name>`. */
+  key: string;
+  /** Header text: the endpoint name, or the OpenRouter vendor. */
+  label: string;
+  /** `endpoint` groups hold one local endpoint's models; `provider` groups an OpenRouter vendor's. */
+  type: "endpoint" | "provider";
+  endpoint: LLMModelSummary["endpoint"] | null;
+  /** Vendor for `provider` groups (ProviderIcon), the endpoint slug otherwise. */
+  provider: string;
+  models: LLMModelSummary[];
+  selectedCount: number;
+}
+
+/** Keep only local or only OpenRouter models (`all` keeps every one). */
+export function filterByEndpointScope(
+  models: LLMModelSummary[],
+  scope: ModelEndpointScope,
+): LLMModelSummary[] {
+  if (scope === "all") return models;
+  const wantLocal = scope === "local";
+  return models.filter((m) => isLocalModel(m) === wantLocal);
+}
+
+/**
+ * Group models for display. `provider` groups by `model.provider` (today's
+ * picker). `endpoint` puts each local endpoint's models under one group,
+ * first and sorted by endpoint name, then the OpenRouter catalog grouped by
+ * vendor as before. Models inside a group are sorted by name. Inputs are not
+ * mutated.
+ */
+export function groupModels(
+  models: LLMModelSummary[],
+  groupBy: ModelGroupBy,
+  selected: ReadonlySet<number> = new Set(),
+): ModelGroup[] {
+  const map = new Map<string, ModelGroup>();
+  for (const m of models) {
+    const local = groupBy === "endpoint" && isLocalModel(m) && m.endpoint;
+    const key = local ? `endpoint:${m.endpoint!.id}` : `provider:${m.provider}`;
+    let group = map.get(key);
+    if (!group) {
+      group = local
+        ? {
+            key,
+            label: m.endpoint!.name || m.endpoint!.slug,
+            type: "endpoint",
+            endpoint: m.endpoint!,
+            provider: m.endpoint!.slug,
+            models: [],
+            selectedCount: 0,
+          }
+        : {
+            key,
+            label: m.provider,
+            type: "provider",
+            endpoint: null,
+            provider: m.provider,
+            models: [],
+            selectedCount: 0,
+          };
+      map.set(key, group);
+    }
+    group.models.push(m);
+    if (selected.has(m.id)) group.selectedCount += 1;
+  }
+  const groups = [...map.values()];
+  for (const g of groups) {
+    g.models.sort((a, b) => a.model_name.localeCompare(b.model_name));
+  }
+  return groups.sort((a, b) => {
+    if (a.type !== b.type) return a.type === "endpoint" ? -1 : 1;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+/** Selected model counts per endpoint (local) or "OpenRouter", in display order. */
+export function selectionByEndpoint(
+  models: LLMModelSummary[],
+  selectedIds: Iterable<number>,
+): { key: string; label: string; count: number }[] {
+  const byId = new Map(models.map((m) => [m.id, m]));
+  const counts = new Map<
+    string,
+    { key: string; label: string; count: number }
+  >();
+  for (const id of selectedIds) {
+    const m = byId.get(id);
+    if (!m) continue;
+    const local = isLocalModel(m) && m.endpoint;
+    const key = local ? `endpoint:${m.endpoint!.id}` : "openrouter";
+    const label = local ? m.endpoint!.name || m.endpoint!.slug : "OpenRouter";
+    const entry = counts.get(key) ?? { key, label, count: 0 };
+    entry.count += 1;
+    counts.set(key, entry);
+  }
+  return [...counts.values()].sort((a, b) => {
+    if (a.key === "openrouter" || b.key === "openrouter") {
+      return a.key === "openrouter" ? 1 : -1;
+    }
+    return a.label.localeCompare(b.label);
+  });
 }

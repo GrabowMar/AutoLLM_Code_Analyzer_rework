@@ -18,6 +18,15 @@ def api_client(client, user):
     return client
 
 
+@pytest.fixture
+def staff_api_client(client, user):
+    """Authenticated staff client (catalog sync, import and delete are staff-only)."""
+    user.is_staff = True
+    user.save(update_fields=["is_staff"])
+    client.force_login(user)
+    return client
+
+
 def _set_user_openrouter_key(user, raw: str) -> UserApiCredential:
     cred = UserApiCredential(user=user, provider=Provider.OPENROUTER)
     cred.set_secret(raw)
@@ -152,7 +161,7 @@ class TestProvidersAPI:
 @pytest.mark.django_db
 class TestSyncAPI:
     @patch("backend.llm_models.api.views.sync_models_from_openrouter")
-    def test_sync(self, mock_sync, api_client, user):
+    def test_sync(self, mock_sync, staff_api_client, user):
         _set_user_openrouter_key(user, "user-key")
         expected_fetched = 100
         expected_upserted = 95
@@ -160,7 +169,7 @@ class TestSyncAPI:
             "fetched": expected_fetched,
             "upserted": expected_upserted,
         }
-        resp = api_client.post("/api/models/sync/")
+        resp = staff_api_client.post("/api/models/sync/")
         assert resp.status_code == HTTPStatus.OK
         data = resp.json()
         assert data["fetched"] == expected_fetched
@@ -169,8 +178,8 @@ class TestSyncAPI:
 
     @override_settings(OPENROUTER_API_KEY="global-key", OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK=True)
     @patch("backend.llm_models.api.views.sync_models_from_openrouter")
-    def test_sync_requires_user_key_even_when_global_fallback_exists(self, mock_sync, api_client):
-        resp = api_client.post("/api/models/sync/")
+    def test_sync_requires_user_key_even_when_global_fallback_exists(self, mock_sync, staff_api_client):
+        resp = staff_api_client.post("/api/models/sync/")
 
         assert resp.status_code == HTTPStatus.FORBIDDEN
         data = resp.json()
@@ -181,7 +190,7 @@ class TestSyncAPI:
 
 @pytest.mark.django_db
 class TestImportAPI:
-    def test_import_openrouter_payload(self, api_client):
+    def test_import_openrouter_payload(self, staff_api_client):
         payload = {
             "data": [
                 {
@@ -200,7 +209,7 @@ class TestImportAPI:
             ],
         }
 
-        resp = api_client.post(
+        resp = staff_api_client.post(
             "/api/models/import/",
             data=json.dumps(payload),
             content_type="application/json",
@@ -210,7 +219,7 @@ class TestImportAPI:
         assert resp.json() == {"count": 1, "imported": 1}
         assert LLMModel.objects.filter(canonical_slug="openai_gpt-4o").exists()
 
-    def test_import_exported_payload(self, api_client):
+    def test_import_exported_payload(self, staff_api_client):
         payload = {
             "models": [
                 {
@@ -233,7 +242,7 @@ class TestImportAPI:
             ],
         }
 
-        resp = api_client.post(
+        resp = staff_api_client.post(
             "/api/models/import/",
             data=json.dumps(payload),
             content_type="application/json",
@@ -352,11 +361,22 @@ class TestRefreshAPI:
 
 @pytest.mark.django_db
 class TestDeleteAPI:
-    def test_delete(self, api_client):
+    def test_delete(self, staff_api_client):
         m = LLMModelFactory(
             model_id="del/test",
             canonical_slug="del_test",
         )
-        resp = api_client.delete(f"/api/models/detail/{m.canonical_slug}/")
+        resp = staff_api_client.delete(f"/api/models/detail/{m.canonical_slug}/")
         assert resp.status_code == HTTPStatus.OK
         assert not LLMModel.objects.filter(canonical_slug="del_test").exists()
+
+
+@pytest.mark.django_db
+class TestCatalogMutationsAreStaffOnly:
+    def test_sync_import_delete_forbidden_for_non_staff(self, api_client):
+        m = LLMModelFactory(model_id="keep/me", canonical_slug="keep_me")
+        assert api_client.post("/api/models/sync/").status_code == HTTPStatus.FORBIDDEN
+        resp = api_client.post("/api/models/import/", data="{}", content_type="application/json")
+        assert resp.status_code == HTTPStatus.FORBIDDEN
+        assert api_client.delete(f"/api/models/detail/{m.canonical_slug}/").status_code == HTTPStatus.FORBIDDEN
+        assert LLMModel.objects.filter(pk=m.pk).exists()
