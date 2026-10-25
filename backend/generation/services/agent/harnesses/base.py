@@ -137,6 +137,21 @@ def normalize_options(
     return normalized
 
 
+@dataclass(frozen=True)
+class LocalRender:
+    """Render inputs for a model on a local (non-OpenRouter) endpoint (spec §D.5).
+
+    Passed to ``snapshot_section`` only for local models, so OpenRouter
+    sections stay byte-identical. ``client_timeout_s`` is the harness HTTP
+    client timeout from ``inference.timeouts.chain`` (long enough never to
+    cut the gateway's 504 re-attach chain); ``capabilities`` are the
+    model's discovered capabilities (e.g. ``"thinking"``).
+    """
+
+    client_timeout_s: int
+    capabilities: tuple[str, ...] = ()
+
+
 GATEWAY_ALIAS = "llm-gateway"
 GATEWAY_PORT = 8080
 GATEWAY_BASE_URL = f"http://{GATEWAY_ALIAS}:{GATEWAY_PORT}/api/v1"
@@ -249,12 +264,14 @@ class Harness:
         agent_config: dict[str, Any],
         title: str,
         options: dict[str, Any] | None = None,
+        local: LocalRender | None = None,
     ) -> dict[str, Any]:
         """Everything frozen about this harness for one job (enters run_fingerprint).
 
         *options* are the run's harness options (sparse; validated here);
         with none, or only defaults, the section is the harness's frozen
-        default configuration.
+        default configuration. *local* is set only for models on a local
+        endpoint (see :class:`LocalRender`).
         """
         raise NotImplementedError
 

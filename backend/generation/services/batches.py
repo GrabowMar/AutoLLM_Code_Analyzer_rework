@@ -5,9 +5,11 @@ A batch's stored ``status`` / ``total_jobs`` / ``completed_jobs`` /
 reports is recomputed from the jobs, so retries, deletions, cancellations
 and experiment top-ups can never leave a batch stuck "pending":
 
-* counts: ``pending``, ``queued`` (RUNNING, waiting for a sandbox slot),
-  ``running`` (RUNNING otherwise, evaluation included), ``completed``,
-  ``failed``, ``cancelled``;
+* counts: ``pending`` (waiting for the executor, behind a lane included),
+  ``queued`` (RUNNING, generation done and waiting for an evaluation slot;
+  legacy thread-era rows waiting for a sandbox slot), ``running`` (RUNNING
+  otherwise: in the sandbox / LLM calls, or being evaluated),
+  ``completed``, ``failed``, ``cancelled``;
 * terminal = nothing pending, queued or running;
 * status: ``pending`` (nothing started) / ``running`` while active; once
   terminal ``completed`` (all completed, or no jobs), ``cancelled`` (all
@@ -52,10 +54,11 @@ COUNT_KEYS = ("pending", "queued", "running", "completed", "failed", "cancelled"
 ACTIVE_KEYS = ("pending", "queued", "running")
 ACTIVE_JOB_STATUSES = (GenerationJob.Status.PENDING, GenerationJob.Status.RUNNING)
 
+_QUEUED_PHASES = (GenerationJob.Phase.QUEUED, GenerationJob.Phase.EVAL_QUEUED)
 _COUNT_FILTERS = {
     "pending": Q(status=GenerationJob.Status.PENDING),
-    "queued": Q(status=GenerationJob.Status.RUNNING, phase=GenerationJob.Phase.QUEUED),
-    "running": Q(status=GenerationJob.Status.RUNNING) & ~Q(phase=GenerationJob.Phase.QUEUED),
+    "queued": Q(status=GenerationJob.Status.RUNNING, phase__in=_QUEUED_PHASES),
+    "running": Q(status=GenerationJob.Status.RUNNING) & ~Q(phase__in=_QUEUED_PHASES),
     "completed": Q(status=GenerationJob.Status.COMPLETED),
     "failed": Q(status=GenerationJob.Status.FAILED),
     "cancelled": Q(status=GenerationJob.Status.CANCELLED),
@@ -119,27 +122,27 @@ def refresh_batch(batch: GenerationBatch) -> dict[str, int]:
 
 
 def cancel_batch(batch: GenerationBatch) -> list[GenerationJob]:
-    """Cancel every pending / queued / running job of *batch*; returns the jobs cancelled.
+    """Cancel every pending and running job of *batch* (``execution.transitions.cancel_jobs``).
 
-    Runs notice the cancel themselves (queued agent runs within seconds,
-    sandboxed runs at the next heartbeat; template-mode LLM calls finish
-    first but keep the cancelled status).
+    Returns the jobs that became CANCELLED. Running workers notice the cancel
+    themselves (sandbox polls, LLM waits every 5 s) and release their slot when
+    they exit; jobs whose generation is done (waiting for or in evaluation)
+    finish their evaluation.
     """
-    now = timezone.now()
-    with transaction.atomic():
-        jobs = list(
-            batch.jobs.select_for_update()
-            .filter(status__in=ACTIVE_JOB_STATUSES)
-            .only("id", "status", "phase", "started_at", "completed_at"),
-        )
-        GenerationJob.objects.filter(id__in=[job.id for job in jobs]).update(
-            status=GenerationJob.Status.CANCELLED,
-            phase=GenerationJob.Phase.NONE,
-            updated_at=now,
-        )
-    for job in jobs:
-        job.status = GenerationJob.Status.CANCELLED
-        job.phase = GenerationJob.Phase.NONE
+    from backend.execution.transitions import cancel_jobs
+
+    active = list(batch.jobs.filter(status__in=ACTIVE_JOB_STATUSES).values_list("id", flat=True))
+    cancel_jobs(batch.jobs.all(), scope="all")
+    jobs = list(
+        GenerationJob.objects.filter(id__in=active, status=GenerationJob.Status.CANCELLED).only(
+            "id",
+            "status",
+            "phase",
+            "started_at",
+            "completed_at",
+            "experiment_id",
+        ),
+    )
     refresh_batch(batch)
     return jobs
 

@@ -20,6 +20,18 @@ from backend.users.tests.factories import UserFactory
 pytestmark = pytest.mark.django_db
 
 
+@pytest.fixture(autouse=True)
+def _openrouter_key():
+    """Launches check the owner's OpenRouter key (inference.access.launch_issues); tests that need none patch it."""
+    with mock.patch("backend.credentials.services.resolver.has_resolvable_key", return_value=True):
+        yield
+
+
+def _enqueued(enqueue) -> int:
+    """Jobs handed to the (patched) executor queue across every ``enqueue_jobs`` call."""
+    return sum(len(call.args[0]) for call in enqueue.call_args_list)
+
+
 def _real_flask_bundle() -> GenerationProfile:
     """The real auto-seeded default bundle — has valid, resolvable block_refs."""
     return GenerationProfile.objects.filter(slug="system-scaffolding-standard").order_by("-version").first()
@@ -87,16 +99,16 @@ class TestPreviewExperiment:
 
 class TestLaunchExperiment:
     def test_launch_creates_one_job_per_cell(self, experiment, condition, user):
-        with mock.patch("backend.generation.services.experiments.dispatch_job") as dispatch:
+        with mock.patch("backend.generation.services.experiments.enqueue_jobs") as dispatch:
             batch = experiments_svc.launch_experiment(experiment, user)
 
         assert batch.total_jobs == 4
         assert GenerationJob.objects.filter(experiment=experiment).count() == 4
-        assert dispatch.call_count == 4
+        assert _enqueued(dispatch) == 4
 
     def test_launch_sets_stack_slug_from_bundle(self, experiment, condition, user):
         """resolve_stack_slug() reads job.stack_slug — must not be blank."""
-        with mock.patch("backend.generation.services.experiments.dispatch_job"):
+        with mock.patch("backend.generation.services.experiments.enqueue_jobs"):
             experiments_svc.launch_experiment(experiment, user)
 
         jobs = GenerationJob.objects.filter(experiment=experiment)
@@ -104,13 +116,13 @@ class TestLaunchExperiment:
 
     def test_launch_marks_experiment_running(self, experiment, condition, user):
         assert experiment.status == Experiment.Status.DRAFT
-        with mock.patch("backend.generation.services.experiments.dispatch_job"):
+        with mock.patch("backend.generation.services.experiments.enqueue_jobs"):
             experiments_svc.launch_experiment(experiment, user)
         experiment.refresh_from_db()
         assert experiment.status == Experiment.Status.RUNNING
 
     def test_launch_is_idempotent_when_rerun_with_nothing_failed(self, experiment, condition, user):
-        with mock.patch("backend.generation.services.experiments.dispatch_job"):
+        with mock.patch("backend.generation.services.experiments.enqueue_jobs"):
             experiments_svc.launch_experiment(experiment, user)
             # jobs are "pending" (never executed) — still non-failed, so a
             # second launch must not create duplicates.
@@ -119,25 +131,25 @@ class TestLaunchExperiment:
         assert GenerationJob.objects.filter(experiment=experiment).count() == 4
 
     def test_launch_resumes_only_failed_cells(self, experiment, condition, user):
-        with mock.patch("backend.generation.services.experiments.dispatch_job"):
+        with mock.patch("backend.generation.services.experiments.enqueue_jobs"):
             experiments_svc.launch_experiment(experiment, user)
 
         jobs = list(GenerationJob.objects.filter(experiment=experiment))
         jobs[0].status = GenerationJob.Status.FAILED
         jobs[0].save(update_fields=["status"])
 
-        with mock.patch("backend.generation.services.experiments.dispatch_job") as dispatch:
+        with mock.patch("backend.generation.services.experiments.enqueue_jobs") as dispatch:
             experiments_svc.launch_experiment(experiment, user)
 
         # Only the failed cell gets a fresh job; the other 3 are left alone.
         assert GenerationJob.objects.filter(experiment=experiment).count() == 5
-        assert dispatch.call_count == 1
+        assert _enqueued(dispatch) == 1
 
     def test_launch_derives_deterministic_seeds_from_base_seed(self, experiment, condition, user):
         experiment.base_seed = 42
         experiment.save(update_fields=["base_seed"])
 
-        with mock.patch("backend.generation.services.experiments.dispatch_job"):
+        with mock.patch("backend.generation.services.experiments.enqueue_jobs"):
             experiments_svc.launch_experiment(experiment, user)
 
         jobs = list(GenerationJob.objects.filter(experiment=experiment))
@@ -152,7 +164,7 @@ class TestLaunchExperiment:
 
     def test_launch_without_base_seed_still_sets_a_seed(self, experiment, condition, user):
         assert experiment.base_seed is None
-        with mock.patch("backend.generation.services.experiments.dispatch_job"):
+        with mock.patch("backend.generation.services.experiments.enqueue_jobs"):
             experiments_svc.launch_experiment(experiment, user)
 
         seeds = GenerationJob.objects.filter(experiment=experiment).values_list("experiment_seed", flat=True)
@@ -167,7 +179,7 @@ class TestLaunchExperiment:
             model=model,
             param_overrides={"temperature": 0.9, "max_tokens": 4000},
         )
-        with mock.patch("backend.generation.services.experiments.dispatch_job"):
+        with mock.patch("backend.generation.services.experiments.enqueue_jobs"):
             experiments_svc.launch_experiment(experiment, user)
 
         jobs = GenerationJob.objects.filter(experiment=experiment, condition=cond)
@@ -177,20 +189,22 @@ class TestLaunchExperiment:
 
 class TestExperimentStatus:
     def test_status_reports_progress_grid(self, experiment, condition, user):
-        with mock.patch("backend.generation.services.experiments.dispatch_job"):
+        with mock.patch("backend.generation.services.experiments.enqueue_jobs"):
             experiments_svc.launch_experiment(experiment, user)
 
-        status = experiments_svc.experiment_status(experiment)
+        status = experiments_svc.experiment_status_v2(experiment, user)
+        cells = experiments_svc.cells_payload(experiment)
 
-        assert status["total_cells"] == 4
-        assert status["jobs_created"] == 4
-        assert status["by_status"] == {"pending": 4}
-        assert len(status["grid"]) == 2  # 1 condition x 2 apps
+        assert status["cells"]["total"] == 4
+        assert status["counts"]["pending"] == 4
+        assert status["attempts_total"] == 4
+        assert len(cells["cells"]) == 4  # 1 condition x 2 apps x 2 repeats
+        assert {c[3] for c in cells["cells"]} == {"p"}
 
 
 class TestExportExperiment:
     def test_export_includes_config_conditions_and_jobs(self, experiment, condition, user):
-        with mock.patch("backend.generation.services.experiments.dispatch_job"):
+        with mock.patch("backend.generation.services.experiments.enqueue_jobs"):
             experiments_svc.launch_experiment(experiment, user)
 
         payload = experiments_svc.export_experiment(experiment)

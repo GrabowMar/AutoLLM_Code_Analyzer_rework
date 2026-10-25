@@ -274,6 +274,12 @@ INFERENCE_BLOCKED_HOSTS = [
     "169.254.169.254",
     "metadata.google.internal",
 ]
+# The Docker host's public addresses and extra ranges a direct endpoint may never target
+# (the container's default gateway is always blocked).
+INFERENCE_HOST_PUBLIC_IPS = env.list("INFERENCE_HOST_PUBLIC_IPS", default=[])
+INFERENCE_EXTRA_BLOCKED_CIDRS = env.list("INFERENCE_EXTRA_BLOCKED_CIDRS", default=[])
+# Public base URL the relay install commands point at (empty: the request's scheme and host).
+LLMLAB_PUBLIC_URL = env.str("LLMLAB_PUBLIC_URL", default="")
 LLM_REQUEST_RETENTION_DAYS = 7
 
 # TEMPLATES

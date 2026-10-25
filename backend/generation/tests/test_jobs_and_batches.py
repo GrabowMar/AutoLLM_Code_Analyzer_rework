@@ -15,7 +15,6 @@ from backend.generation.models import GenerationJob
 from backend.generation.services import presets as preset_service
 from backend.generation.services import result_writer
 from backend.generation.services.agent.runner import AgentRunner
-from backend.generation.services.agent.runner import run_queue
 from backend.generation.services.agent.snapshot import apply_agent_snapshot_to_job
 from backend.generation.services.batches import derive_status
 from backend.generation.services.batches import empty_counts
@@ -103,14 +102,15 @@ class TestPhase:
         job = _job(user, batch, model=_model(), app_requirement=_app())
         seen = []
 
-        def fake_execute(runner):
-            for phase in ("queued", "running", "evaluating"):
+        def fake_run_stage(runner):
+            for phase in ("running", "evaluating"):
                 result_writer.publish_phase(runner.job, phase)
                 seen.append(GenerationJob.objects.get(id=runner.job.id).phase)
+            return "done"
 
-        monkeypatch.setattr(AgentRunner, "execute", fake_execute)
+        monkeypatch.setattr(AgentRunner, "run_stage", fake_run_stage)
         GenerationService().execute(job)
-        assert seen == ["queued", "running", "evaluating"]
+        assert seen == ["running", "evaluating"]
         job.refresh_from_db()
         assert (job.status, job.phase) == (S.COMPLETED, "")
         batch.refresh_from_db()
@@ -120,19 +120,19 @@ class TestPhase:
         user = UserFactory()
         job = _job(user, model=_model(), app_requirement=_app())
 
-        def fake_execute(runner):
+        def fake_run_stage(runner):
             result_writer.publish_phase(runner.job, "running")
             msg = "sandbox exploded"
             raise RuntimeError(msg)
 
-        monkeypatch.setattr(AgentRunner, "execute", fake_execute)
+        monkeypatch.setattr(AgentRunner, "run_stage", fake_run_stage)
         GenerationService().execute(job)
         job.refresh_from_db()
         assert (job.status, job.phase) == (S.FAILED, "")
 
     def test_phase_never_overwrites_a_cancel(self):
         job = _job(UserFactory(), status=S.CANCELLED)
-        result_writer.publish_phase(job, "queued")
+        result_writer.publish_phase(job, "running")
         job.refresh_from_db()
         assert job.phase == ""
 
@@ -140,24 +140,50 @@ class TestPhase:
         user = UserFactory()
         batch = _batch(user)
         job = _job(user, batch, model=_model(), app_requirement=_app())
-        run_queue().reserve(str(job.id))
         GenerationJob.objects.filter(id=job.id).update(status=S.CANCELLED)
-        monkeypatch.setattr(AgentRunner, "execute", mock.Mock(side_effect=AssertionError("must not run")))
+        monkeypatch.setattr(AgentRunner, "run_stage", mock.Mock(side_effect=AssertionError("must not run")))
         GenerationService().execute(job)  # the in-memory row still says pending
         job.refresh_from_db()
         assert job.status == S.CANCELLED
         assert job.started_at is None
         assert job.completed_at is not None
-        assert str(job.id) not in run_queue().waiting
         batch.refresh_from_db()
         assert batch.status == "cancelled"
 
-    def test_maintenance_clears_the_phase_of_stuck_jobs(self):
+    def test_maintenance_clears_the_phase_of_stuck_legacy_jobs(self):
         job = _job(UserFactory(), status=S.RUNNING, phase="queued")
         GenerationJob.objects.filter(id=job.id).update(updated_at="2000-01-01T00:00:00Z")
         assert clear_stuck_generation_jobs() == 1
         job.refresh_from_db()
         assert (job.status, job.phase) == (S.FAILED, "")
+
+    def test_maintenance_never_fails_a_healthy_executor_job(self):
+        from django.utils import timezone
+
+        user = UserFactory()
+        old = "2000-01-01T00:00:00Z"
+        queued = _job(user, queued_at=timezone.now())
+        live = _job(
+            user,
+            status=S.RUNNING,
+            phase="running",
+            queued_at=timezone.now(),
+            lease_owner="exec:1",
+            lease_expires_at=timezone.now() + timezone.timedelta(seconds=60),
+        )
+        lost = _job(
+            user,
+            status=S.RUNNING,
+            phase="running",
+            queued_at=timezone.now(),
+            lease_owner="exec:0",
+            lease_expires_at=old,
+        )
+        GenerationJob.objects.filter(id__in=[queued.id, live.id]).update(updated_at=old)
+        assert clear_stuck_generation_jobs() == 1
+        statuses = dict(GenerationJob.objects.values_list("id", "status"))
+        assert (statuses[queued.id], statuses[live.id], statuses[lost.id]) == (S.PENDING, S.RUNNING, S.FAILED)
+        assert GenerationJob.objects.get(id=lost.id).lease_owner == ""
 
     def test_job_cancel_endpoint_clears_phase_and_refreshes_the_batch(self, user_client):
         client, user = user_client
@@ -585,7 +611,7 @@ class TestBatches:
     def test_cancel(self, summary_batch, django_capture_on_commit_callbacks):
         client, _user, batch, _presets = summary_batch
         with (
-            mock.patch("backend.generation.api.views.jobs.result_writer.publish_status") as published,
+            mock.patch("backend.generation.services.result_writer.publish_status") as published,
             django_capture_on_commit_callbacks(execute=True),
         ):
             res = client.post(f"{API}/batches/{batch.id}/cancel/")
@@ -945,3 +971,116 @@ def test_stacks_expose_approval_and_server_kind(user_client):
     for item in items:
         assert isinstance(item["is_approved"], bool)
         assert item["server_kind"] in ("python", "uvicorn")
+
+
+# ── jobs list: experiment filters and execution fields (spec §F.2) ─────
+
+
+class TestJobListExecutionFilters:
+    def test_filters_current_attempts_and_execution_fields(self, user_client):
+        from django.utils import timezone
+
+        client, user = user_client
+        experiment = ExperimentFactory(created_by=user)
+        condition = ExperimentConditionFactory(experiment=experiment)
+        app = _app()
+        common = {"experiment": experiment, "condition": condition, "app_requirement": app, "repeat_index": 0}
+        old = _job(user, status=S.FAILED, sequence=3, **common)
+        retry = _job(user, status=S.RUNNING, phase="eval_queued", sequence=3, attempt=1, **common)
+        GenerationJob.objects.filter(id=retry.id).update(
+            queued_at=timezone.now(),
+            execution={"queue_seconds": 12.5},
+        )
+        other = _job(user, experiment=experiment, condition=condition, app_requirement=app, repeat_index=1, sequence=1)
+        _job(user)  # not in the experiment
+
+        def ids(**params):
+            res = client.get(f"{API}/jobs/", params)
+            assert res.status_code == 200, res.content
+            return [row["id"] for row in res.json()["items"]]
+
+        assert set(ids(experiment_id=experiment.id)) == {str(old.id), str(retry.id), str(other.id)}
+        assert set(ids(experiment_id=experiment.id, current="true")) == {str(retry.id), str(other.id)}
+        assert ids(experiment_id=experiment.id, phase="eval_queued,evaluating") == [str(retry.id)]
+        assert ids(experiment_id=experiment.id, attempt_gt=0) == [str(retry.id)]
+        assert ids(experiment_id=experiment.id, repeat_index=1) == [str(other.id)]
+        assert ids(experiment_id=experiment.id, sort_by="sequence")[0] == str(other.id)
+        row = client.get(f"{API}/jobs/", {"experiment_id": experiment.id, "attempt_gt": 0}).json()["items"][0]
+        assert (row["attempt"], row["sequence"], row["queue_seconds"], row["endpoint_slug"]) == (1, 3, 12.5, None)
+        assert client.get(f"{API}/jobs/", {"experiment_id": experiment.id, "per_page": 500}).status_code == 200
+        assert client.get(f"{API}/jobs/", {"per_page": 500}).status_code == 400
+        assert client.get(f"{API}/jobs/", {"experiment_id": "nope"}).status_code == 400
+
+    def test_cancel_endpoint_leaves_finished_generations_to_their_evaluation(self, user_client):
+        client, user = user_client
+        job = _job(user, status=S.RUNNING, phase="eval_queued")
+        GenerationJob.objects.filter(id=job.id).update(queued_at="2026-01-01T00:00:00Z")
+        res = client.post(f"{API}/jobs/{job.id}/cancel/").json()
+        assert res["success"] is False
+        assert GenerationJob.objects.get(id=job.id).status == S.RUNNING
+
+    def test_scaffolding_batch_is_enqueued_in_creation_order(self, user_client, flask_default_profile):
+        client, _ = user_client
+        res, dispatch = _post(
+            client,
+            "/jobs/scaffolding/",
+            {"stack_slug": "flask-react", "app_requirement_ids": [_app().id], "model_ids": [_model().id], "trials": 3},
+        )
+        assert res.status_code == 200, res.content
+        jobs = [c.args[0] for c in dispatch.call_args_list]
+        assert [j.sequence for j in jobs] == [0, 1, 2]
+        assert len({j.queued_at for j in jobs}) == 1
+
+    def test_invisible_models_are_unknown(self, user_client):
+        from backend.inference.models import LLMEndpoint
+
+        client, _ = user_client
+        foreign = LLMEndpoint.objects.create(slug="someone-else", name="x", kind="ollama", owner=UserFactory())
+        model = _model(endpoint=foreign, served_model_name="qwen")
+        res, dispatch = _post(client, "/jobs/custom/", {"model_id": model.id, "system_prompt": "", "user_prompt": "x"})
+        assert res.status_code == 404
+        dispatch.assert_not_called()
+
+    @pytest.mark.parametrize("finished", ["completed", "cancelled"])
+    def test_retrying_a_cell_reopens_its_finished_experiment(self, user_client, finished):
+        """The executor only claims jobs of running experiments: a retried cell must not wait forever."""
+        client, user = user_client
+        model = _model()
+        experiment = ExperimentFactory(created_by=user, mode="custom", status=finished)
+        condition = ExperimentConditionFactory(experiment=experiment, model=model)
+        failed = _job(
+            user,
+            mode=GenerationJob.Mode.CUSTOM,
+            status=S.FAILED,
+            model=model,
+            experiment=experiment,
+            condition=condition,
+            app_requirement=_app(),
+            repeat_index=0,
+        )
+        with mock.patch("backend.generation.api.views.jobs.dispatch_job") as dispatch:
+            res = client.post(f"{API}/jobs/{failed.id}/retry/")
+        assert res.status_code == 200, res.content
+        dispatch.assert_called_once()
+        experiment.refresh_from_db()
+        assert (experiment.status, experiment.completed_at, experiment.cancelled_at) == ("running", None, None)
+
+    def test_retrying_a_cell_leaves_a_paused_experiment_paused(self, user_client):
+        client, user = user_client
+        model = _model()
+        experiment = ExperimentFactory(created_by=user, mode="custom", status="paused")
+        condition = ExperimentConditionFactory(experiment=experiment, model=model)
+        failed = _job(
+            user,
+            mode=GenerationJob.Mode.CUSTOM,
+            status=S.FAILED,
+            model=model,
+            experiment=experiment,
+            condition=condition,
+            app_requirement=_app(),
+            repeat_index=0,
+        )
+        with mock.patch("backend.generation.api.views.jobs.dispatch_job"):
+            assert client.post(f"{API}/jobs/{failed.id}/retry/").status_code == 200
+        experiment.refresh_from_db()
+        assert experiment.status == "paused"

@@ -3,9 +3,9 @@ import { apiFetch } from "./core";
 /**
  * Generation API client (`/api/generation/...`).
  *
- * Names that `automation.ts` already exports through the `client.ts` barrel
- * (`BatchSummary`, `listBatches`, `getBatch`, `cancelBatch`, ...) get a
- * `Generation` prefix here, otherwise `export *` reports TS2308.
+ * Batch helpers carry a `Generation` prefix (`GenerationBatchSummary`,
+ * `listGenerationBatches`, …): historically they clashed with automation
+ * exports in the `client.ts` barrel, and the names are kept for stability.
  */
 
 // ── Shared vocabulary ─────────────────────────────────────────────────
@@ -14,7 +14,11 @@ export type GenerationMode = "agent" | "scaffolding" | "custom";
 export type SamplingPolicy = "provider_default" | "harness_native";
 export type NetworkPolicy = "packages" | "none";
 /** Persisted run phase ("" = not started / finished). */
-export type JobPhase = "" | "queued" | "running" | "evaluating";
+/**
+ * Sub-state of a RUNNING job. `eval_queued`: the run finished and waits for an
+ * evaluation slot; `queued` is legacy (thread-era rows only).
+ */
+export type JobPhase = "" | "queued" | "running" | "eval_queued" | "evaluating";
 
 /** Optional request knobs shared by every fetch helper that may be superseded. */
 export interface RequestOptions {
@@ -469,6 +473,14 @@ export interface GenerationJobList {
   phase?: JobPhase;
   experiment_seed?: number | null;
   config_fingerprint?: string | null;
+  /** Execution attempt (1 = first; infra retries reuse the row and bump it). */
+  attempt?: number;
+  /** Endpoint slug the run used ("openrouter" for the OpenRouter catalog). */
+  endpoint_slug?: string | null;
+  /** Frozen launch order within the experiment (null for ad-hoc runs). */
+  sequence?: number | null;
+  /** Seconds between queueing and the executor claiming it. */
+  queue_seconds?: number | null;
 }
 
 export interface PaginatedJobs {
@@ -490,10 +502,23 @@ export interface GenerationJobsQuery {
   container_status?: string;
   batch_id?: string;
   harness?: string;
+  // Experiment runs (spec §F.2). `per_page` may go up to 500 with `experiment_id`.
+  experiment_id?: string;
+  condition_id?: number;
+  endpoint_id?: number;
+  app_requirement_id?: number;
+  repeat_index?: number;
+  /** Comma-separated phases, e.g. "running,evaluating". */
+  phase?: string;
+  /** Latest attempt per (condition, app, repeat) cell only. */
+  current?: boolean;
+  /** Only rows whose attempt is above this (e.g. 1 = retried runs). */
+  attempt_gt?: number;
 }
 
 export async function getGenerationJobs(
   params?: GenerationJobsQuery,
+  options?: RequestOptions,
 ): Promise<PaginatedJobs> {
   const q = new URLSearchParams();
   if (params?.page) q.set("page", String(params.page));
@@ -507,8 +532,23 @@ export async function getGenerationJobs(
     q.set("container_status", params.container_status);
   if (params?.batch_id) q.set("batch_id", params.batch_id);
   if (params?.harness) q.set("harness", params.harness);
+  if (params?.experiment_id) q.set("experiment_id", params.experiment_id);
+  if (params?.condition_id != null)
+    q.set("condition_id", String(params.condition_id));
+  if (params?.endpoint_id != null)
+    q.set("endpoint_id", String(params.endpoint_id));
+  if (params?.app_requirement_id != null)
+    q.set("app_requirement_id", String(params.app_requirement_id));
+  if (params?.repeat_index != null)
+    q.set("repeat_index", String(params.repeat_index));
+  if (params?.phase) q.set("phase", params.phase);
+  if (params?.current != null) q.set("current", String(params.current));
+  if (params?.attempt_gt != null)
+    q.set("attempt_gt", String(params.attempt_gt));
   const qs = q.toString();
-  const res = await apiFetch(`/generation/jobs/${qs ? "?" + qs : ""}`);
+  const res = await apiFetch(`/generation/jobs/${qs ? "?" + qs : ""}`, {
+    signal: options?.signal,
+  });
   return res.json();
 }
 

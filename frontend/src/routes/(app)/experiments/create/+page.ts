@@ -1,8 +1,7 @@
 import { redirect } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 
+// Renamed route: keep old links (and their query) working.
 export const load: PageLoad = ({ url }) => {
-  const params = new URLSearchParams(url.searchParams);
-  params.set("type", "experiment");
-  redirect(307, `/automation/create?${params}${url.hash}`);
+  redirect(308, `/experiments/new${url.search}`);
 };

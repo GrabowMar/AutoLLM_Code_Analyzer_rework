@@ -52,6 +52,7 @@ from backend.generation.services.agent.harnesses.base import GATEWAY_BASE_URL
 from backend.generation.services.agent.harnesses.base import OUTPUT_DIR
 from backend.generation.services.agent.harnesses.base import Harness
 from backend.generation.services.agent.harnesses.base import HarnessSummary
+from backend.generation.services.agent.harnesses.base import LocalRender
 from backend.generation.services.agent.harnesses.base import OptionField
 
 AIDER = "/opt/harness/venv/bin/aider"
@@ -107,6 +108,7 @@ class AiderHarness(Harness):
         agent_config: dict[str, Any],
         title: str,
         options: dict[str, Any] | None = None,
+        local: LocalRender | None = None,
     ) -> dict[str, Any]:
         version = self.version()
         opts = self.effective_options(options)
@@ -139,6 +141,9 @@ class AiderHarness(Harness):
             "--model-metadata-file", f"{OUTPUT_DIR}/aider-model-metadata.json",
             "--message-file", BRIEF_PATH,
         ]  # fmt: skip
+        if local is not None:
+            # Local models only: litellm's request timeout must outlive the proxy's 504 re-attach chain.
+            args[-2:-2] = ["--timeout", str(int(local.client_timeout_s))]
         metadata = {
             model: {
                 "max_input_tokens": int(context_window),

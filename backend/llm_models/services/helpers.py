@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from django.db import IntegrityError
+from django.db.models import Q
 
 from backend.llm_models.models import LLMModel
 
@@ -53,16 +54,32 @@ def _update_or_create_model(
     canonical_slug: str,
     defaults: dict[str, Any],
 ) -> bool:
+    """Upsert one OpenRouter catalog row; returns False when it cannot be stored.
+
+    Only catalog rows (``endpoint`` NULL) are ever matched or overwritten:
+    models discovered on local endpoints are owned by their inventory, so a
+    catalog sync or import whose id or canonical slug collides with one is
+    refused (logged, skipped) instead of rewriting it.
+    """
+    local_clash = LLMModel.objects.filter(endpoint__isnull=False).filter(
+        Q(model_id=model_id) | Q(canonical_slug=canonical_slug),
+    )
+    if local_clash.exists():
+        logger.error("Refusing to upsert catalog model %s: it collides with a local endpoint model", model_id)
+        return False
     try:
         LLMModel.objects.update_or_create(
             model_id=model_id,
+            endpoint=None,
             defaults={**defaults, "canonical_slug": canonical_slug},
         )
         return True
     except IntegrityError:
         try:
+            # A renamed catalog id keeps its canonical slug: update that row.
             LLMModel.objects.update_or_create(
                 canonical_slug=canonical_slug,
+                endpoint=None,
                 defaults={**defaults, "model_id": model_id},
             )
             return True

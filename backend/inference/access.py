@@ -1,10 +1,13 @@
 """LLM access resolver (spec §D.1): which endpoint, credentials and served name a call uses.
 
-Frozen contract (Foundation). Implemented here: ``system_openrouter``,
-``visible_endpoints``, ``is_endpoint_owner``, ``can_use_endpoint``,
-``effective_num_ctx`` (re-exported from ``inference.snapshot``) and the
-OpenRouter branches of ``resolve_access`` / ``launch_issues``. The local
-branches are Track B's.
+- OpenRouter (``model.endpoint_id`` NULL or the system row): the user's
+  OpenRouter key; the credential resolver is unchanged.
+- Local (Ollama / OpenAI-compatible): the endpoint must be enabled and usable
+  by the user and the model available; the API key is decrypted for direct
+  endpoints only (relay endpoints never hold one).
+
+``launch_issues`` reports what blocks a launch and what only warns (an
+offline endpoint just makes jobs wait).
 """
 
 from __future__ import annotations
@@ -30,8 +33,10 @@ __all__ = [
     "LLM_ACCESS_ERROR_CODES",
     "Access",
     "LLMAccessError",
+    "access_from_snapshot",
     "can_use_endpoint",
     "effective_num_ctx",
+    "endpoint_access",
     "is_endpoint_owner",
     "launch_issues",
     "resolve_access",
@@ -79,6 +84,9 @@ class Access:
     base_url: str
     api_key: str | None
     request_timeout_s: int
+    # Ollama ``/api/show`` capabilities of the model (``think`` is only sent
+    # when they include "thinking"); empty for OpenRouter.
+    capabilities: tuple[str, ...] = ()
 
     @property
     def is_openrouter(self) -> bool:
@@ -153,6 +161,13 @@ def is_endpoint_owner(user, endpoint: LLMEndpoint) -> bool:
     return endpoint.owner_id is not None and endpoint.owner_id == user.pk
 
 
+def owner_label(user) -> str:
+    """How an endpoint owner is named in the UI (users have no username: name, else email)."""
+    if user is None:
+        return "another user"
+    return getattr(user, "name", "") or getattr(user, "email", "") or f"user {user.pk}"
+
+
 def can_use_endpoint(user, endpoint: LLMEndpoint) -> bool:
     """Whether ``user`` may run models on ``endpoint`` (ignores ``enabled``; see ``resolve_access``)."""
     if endpoint.is_system:
@@ -203,7 +218,7 @@ def resolve_access(user, model: LLMModel) -> Access:
     - Local: the endpoint must be enabled (``endpoint_disabled``), usable by
       the user (``endpoint_forbidden``) and the model available
       (``model_unavailable``); the API key is decrypted for direct endpoints
-      only. (Track B.)
+      only.
     """
     if model is None:
         raise LLMAccessError(code="model_unavailable", message="job has no model", retryable=False)
@@ -212,9 +227,106 @@ def resolve_access(user, model: LLMModel) -> Access:
     return _local_access(user, model)
 
 
+def model_capabilities(model: LLMModel) -> tuple[str, ...]:
+    """The model's discovered capabilities (``metadata.ollama.capabilities``)."""
+    caps = ((model.metadata or {}).get("ollama") or {}).get("capabilities") or []
+    return tuple(str(c) for c in caps if isinstance(c, str))
+
+
+def _decrypt_api_key(endpoint: LLMEndpoint) -> str | None:
+    if endpoint.connection != LLMEndpoint.Connection.DIRECT or not endpoint.encrypted_api_key:
+        return None
+    from backend.common.crypto import DecryptionError
+    from backend.common.crypto import decrypt
+
+    try:
+        return decrypt(endpoint.encrypted_api_key)
+    except DecryptionError as exc:
+        raise LLMAccessError(
+            code="unavailable",
+            message=f"The API key of endpoint {endpoint.slug} cannot be decrypted",
+            retryable=False,
+            remediation="Re-enter the endpoint's API key in its settings.",
+        ) from exc
+
+
 def _local_access(user, model: LLMModel) -> Access:
-    msg = "inference.access local branch: Track B"
-    raise NotImplementedError(msg)
+    endpoint = model.endpoint
+    if not endpoint.enabled:
+        raise LLMAccessError(
+            code="endpoint_disabled",
+            message=f"Endpoint {endpoint.slug} is disabled",
+            retryable=False,
+            remediation="Enable the endpoint on the Endpoints page.",
+        )
+    if not can_use_endpoint(user, endpoint):
+        raise LLMAccessError(
+            code="endpoint_forbidden",
+            message=f"You cannot use endpoint {endpoint.slug}",
+            retryable=False,
+            status_code=403,
+        )
+    if not model.is_available:
+        raise LLMAccessError(
+            code="model_unavailable",
+            message=f"{model.model_id} is no longer served by {endpoint.slug}",
+            retryable=False,
+            remediation="Pull the model again on the endpoint, or choose another model.",
+        )
+    return Access(
+        endpoint=endpoint,
+        kind=endpoint.kind,
+        connection=endpoint.connection,
+        api_flavor=endpoint.api_flavor,
+        served_model_name=model.served_model_name,
+        digest=model.digest,
+        num_ctx=effective_num_ctx(model),
+        keep_alive=endpoint.keep_alive,
+        base_url=endpoint.base_url,
+        api_key=_decrypt_api_key(endpoint),
+        request_timeout_s=endpoint.request_timeout_s,
+        capabilities=model_capabilities(model),
+    )
+
+
+def endpoint_access(endpoint: LLMEndpoint, *, served_model_name: str = "", digest: str = "") -> Access:
+    """An :class:`Access` for endpoint-level requests (probes, warm-ups, unloads); no user checks."""
+    return Access(
+        endpoint=endpoint,
+        kind=endpoint.kind,
+        connection=endpoint.connection,
+        api_flavor=endpoint.api_flavor,
+        served_model_name=served_model_name,
+        digest=digest,
+        num_ctx=None,
+        keep_alive=endpoint.keep_alive,
+        base_url=endpoint.base_url,
+        api_key=None,
+        request_timeout_s=endpoint.request_timeout_s,
+    )
+
+
+def access_from_snapshot(section: dict[str, Any], endpoint: LLMEndpoint, *, capabilities=()) -> Access:
+    """The :class:`Access` frozen in ``snapshot["endpoint"]`` (served name, digest, ``num_ctx``, keep-alive).
+
+    The internal LLM proxy builds upstream bodies from this, never from the
+    live model row, so a running job keeps the parameters it was created
+    with. Only the queue routing (``endpoint``) and timeouts are live.
+    """
+    return Access(
+        endpoint=endpoint,
+        kind=str(section.get("kind") or endpoint.kind),
+        connection=endpoint.connection,
+        api_flavor=str(section.get("api_flavor") or endpoint.api_flavor),
+        served_model_name=str(section.get("served_model_name") or ""),
+        digest=str(section.get("digest") or ""),
+        num_ctx=section.get("num_ctx"),
+        keep_alive=str(section.get("keep_alive") if section.get("keep_alive") is not None else endpoint.keep_alive),
+        base_url=endpoint.base_url,
+        api_key=None,
+        request_timeout_s=endpoint.request_timeout_s,
+        capabilities=tuple(capabilities or section.get("capabilities") or ()),
+    )
 
 
 def launch_issues(user, models, *, check_openrouter_key: bool = True) -> list[dict[str, Any]]:
@@ -225,13 +337,16 @@ def launch_issues(user, models, *, check_openrouter_key: bool = True) -> list[di
     ``model_unavailable``. Warnings: ``endpoint_offline``,
     ``model_not_served``, ``foreign_endpoint``.
 
-    Foundation implements the OpenRouter key check and the row-level local
-    checks (disabled / forbidden / unavailable / foreign); liveness warnings
-    (``endpoint_offline``, ``model_not_served``) are Track B's.
+    Liveness is checked once per endpoint: ``endpoint_offline`` when no
+    relay session (or direct pump inventory) is live, ``model_not_served``
+    when the live server does not list the model's ``(name, digest)``.
     """
     from backend.credentials.services.resolver import has_resolvable_key
+    from backend.inference.live import endpoint_status
+    from backend.inference.live import served_pairs
 
     issues: list[dict[str, Any]] = []
+    liveness: dict[int, tuple[str, set[tuple[str, str]]]] = {}
     models = [m for m in models if m is not None]
     openrouter = [m for m in models if not is_local(m)]
     if check_openrouter_key and openrouter and not has_resolvable_key(user):
@@ -261,6 +376,30 @@ def launch_issues(user, models, *, check_openrouter_key: bool = True) -> list[di
             add("endpoint_forbidden", f"You cannot use endpoint {slug}.", blocking=True)
         elif not model.is_available:
             add("model_unavailable", f"{model.model_id} is no longer available on {slug}.", blocking=True)
-        elif endpoint.owner_id is not None and endpoint.owner_id != getattr(user, "pk", None):
-            add("foreign_endpoint", f"Endpoint {slug} is run by another user.", blocking=False)
+        else:
+            if endpoint.owner_id is not None and endpoint.owner_id != getattr(user, "pk", None):
+                owner = owner_label(endpoint.owner)
+                add(
+                    "foreign_endpoint",
+                    f"Prompts and generated code pass through a machine run by {owner} ({slug}).",
+                    blocking=False,
+                )
+            if endpoint.pk not in liveness:
+                status = endpoint_status(endpoint)
+                liveness[endpoint.pk] = (status, served_pairs(endpoint) if status != "offline" else set())
+            status, served = liveness[endpoint.pk]
+            if status == "offline":
+                add(
+                    "endpoint_offline",
+                    f"Endpoint {slug} is offline; its jobs wait until it connects.",
+                    blocking=False,
+                )
+            elif (model.served_model_name, model.digest) not in served:
+                weights = f" ({model.digest[7:19]})" if model.digest else ""
+                add(
+                    "model_not_served",
+                    f"{slug} does not currently serve {model.served_model_name}{weights}; "
+                    "its jobs wait until it does.",
+                    blocking=False,
+                )
     return issues

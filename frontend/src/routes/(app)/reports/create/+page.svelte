@@ -23,7 +23,9 @@
 		type AppRequirementTemplate,
 		type ReportType
 	} from '$lib/api/client';
-	import { listExperiments, type Experiment } from '$lib/api/experiments';
+	import { page } from '$app/state';
+	import * as Select from '$lib/components/ui/select';
+	import { listExperiments, type ExperimentListItem } from '$lib/api/experiments';
 
 	const reportTypes: {
 		key: ReportType;
@@ -36,7 +38,7 @@
 		{ key: 'tool_analysis', label: 'Tool Analysis', description: 'Findings breakdown across analyzers / security tools.', icon: Wrench },
 		{ key: 'generation_analytics', label: 'Generation Analytics', description: 'Throughput and success rate over a time window.', icon: TrendingUp },
 		{ key: 'comprehensive', label: 'Comprehensive', description: 'Platform-wide rollup of generation, analysis, and tools.', icon: Layers },
-		{ key: 'experiment_report', label: 'Experiment Report', description: 'Per-condition stats and pairwise A/B deltas for one designed experiment.', icon: FlaskConical }
+		{ key: 'experiment_report', label: 'Experiment Report', description: 'Leaderboard and paired comparisons against the pre-registered baseline for one experiment.', icon: FlaskConical }
 	];
 
 	let step = $state<1 | 2>(1);
@@ -53,18 +55,28 @@
 
 	let models = $state<LLMModelSummary[]>([]);
 	let templates = $state<AppRequirementTemplate[]>([]);
-	let experiments = $state<Experiment[]>([]);
+	let experiments = $state<ExperimentListItem[]>([]);
+
+	// Deep link from an experiment's Results tab: ?type=experiment_report&experiment_id=…
+	{
+		const type = page.url.searchParams.get('type');
+		if (type && reportTypes.some((t) => t.key === type)) {
+			selectedType = type as ReportType;
+			step = 2;
+		}
+		experimentId = page.url.searchParams.get('experiment_id') ?? '';
+	}
 
 	onMount(async () => {
 		try {
 			const [m, t, ex] = await Promise.all([
 				getModels({ per_page: 100 }),
 				getAppTemplates(),
-				listExperiments()
+				listExperiments({ per_page: 100, ordering: '-updated_at' })
 			]);
 			models = m.items;
 			templates = t;
-			experiments = ex;
+			experiments = ex.items.filter((e) => e.status !== 'draft');
 		} catch {
 			// non-fatal
 		}
@@ -226,16 +238,12 @@
 				{:else if selectedType === 'experiment_report'}
 					<div class="space-y-2">
 						<label for="rep-experiment" class="text-sm font-medium">Experiment</label>
-						<select
+						<Select.Simple
 							id="rep-experiment"
 							bind:value={experimentId}
-							class="block w-full std-select py-2"
-						>
-							<option value="">— select an experiment —</option>
-							{#each experiments as ex (ex.id)}
-								<option value={ex.id}>{ex.name}</option>
-							{/each}
-						</select>
+							placeholder="Select an experiment"
+							items={experiments.map((ex) => ({ value: ex.id, label: ex.name, description: `${ex.status} · ${ex.condition_count} conditions` }))}
+						/>
 					</div>
 				{/if}
 

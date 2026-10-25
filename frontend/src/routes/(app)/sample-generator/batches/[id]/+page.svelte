@@ -296,8 +296,9 @@
 				<BatchProgress {counts} total={batch.total_jobs} legend />
 				{#if live && inFlight > 0}
 					<p class="text-[11px] text-muted-foreground">
-						{inFlight} {inFlight === 1 ? 'run is' : 'runs are'} still pending, queued or running. Queued runs wait for a free
-						sandbox slot; runs execute trial by trial in a seeded order.
+						{inFlight} {inFlight === 1 ? 'run is' : 'runs are'} still pending, running or awaiting evaluation. Pending runs wait
+						for the executor (a free sandbox slot or endpoint capacity); finished runs wait for an evaluation slot. Runs
+						execute trial by trial in a seeded order.
 					</p>
 				{/if}
 				<dl class="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
@@ -367,7 +368,7 @@
 	<ConfirmDialog
 		bind:open={cancelOpen}
 		title="Cancel this batch?"
-		description="Stops the {inFlight} {inFlight === 1 ? 'run' : 'runs'} that are pending, queued or running. Finished runs and their results are kept."
+		description="Stops the {inFlight} {inFlight === 1 ? 'run' : 'runs'} that are pending, running or awaiting evaluation. Finished runs and their results are kept."
 		confirmLabel="Cancel runs"
 		cancelLabel="Keep running"
 		destructive

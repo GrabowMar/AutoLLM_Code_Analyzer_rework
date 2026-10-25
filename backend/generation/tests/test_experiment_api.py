@@ -20,6 +20,18 @@ from backend.users.tests.factories import UserFactory
 pytestmark = pytest.mark.django_db
 
 
+@pytest.fixture(autouse=True)
+def _openrouter_key():
+    """Launches check the owner's OpenRouter key (inference.access.launch_issues); tests that need none patch it."""
+    with mock.patch("backend.credentials.services.resolver.has_resolvable_key", return_value=True):
+        yield
+
+
+def _enqueued(enqueue) -> int:
+    """Jobs handed to the (patched) executor queue across every ``enqueue_jobs`` call."""
+    return sum(len(call.args[0]) for call in enqueue.call_args_list)
+
+
 def _flask_bundle() -> GenerationProfile:
     return GenerationProfile.objects.filter(slug="system-scaffolding-standard").order_by("-version").first()
 
@@ -129,7 +141,8 @@ def test_list_experiments_is_scoped_to_owner(auth_client):
     res = client.get("/api/generation/experiments/")
 
     assert res.status_code == 200
-    assert len(res.json()) == 1
+    assert res.json()["total"] == 1
+    assert len(res.json()["items"]) == 1
 
 
 def test_get_experiment_404s_for_non_owner(auth_client):
@@ -157,15 +170,24 @@ def test_update_experiment_in_draft(auth_client):
 
 def test_update_experiment_rejects_non_draft(auth_client):
     client, user = auth_client
-    exp = ExperimentFactory(created_by=user, status=Experiment.Status.RUNNING)
+    exp = ExperimentFactory(created_by=user, status=Experiment.Status.RUNNING, repeats=3)
+
+    # Design fields are frozen after launch; repeats may only grow.
+    res = client.patch(
+        f"/api/generation/experiments/{exp.id}/",
+        data=json.dumps({"base_seed": 7}),
+        content_type="application/json",
+    )
+    assert res.status_code == 400
+    assert res.json()["code"] == "not_draft"
 
     res = client.patch(
         f"/api/generation/experiments/{exp.id}/",
-        data=json.dumps({"repeats": 10}),
+        data=json.dumps({"repeats": 2}),
         content_type="application/json",
     )
-
     assert res.status_code == 400
+    assert res.json()["code"] == "repeats_decrease"
 
 
 def test_delete_experiment_in_draft(auth_client):
@@ -251,7 +273,7 @@ def test_launch_requires_api_key(auth_client):
     exp.app_requirements.add(AppRequirementTemplateFactory())
     ExperimentConditionFactory(experiment=exp, profile=_flask_bundle(), model=LLMModelFactory())
 
-    with mock.patch("backend.generation.api.views.experiments.has_resolvable_key", return_value=False):
+    with mock.patch("backend.credentials.services.resolver.has_resolvable_key", return_value=False):
         res = client.post(f"/api/generation/experiments/{exp.id}/launch/")
 
     assert res.status_code == 400
@@ -263,7 +285,7 @@ def test_launch_requires_conditions(auth_client):
     exp = ExperimentFactory(created_by=user)
     exp.app_requirements.add(AppRequirementTemplateFactory())
 
-    with mock.patch("backend.generation.api.views.experiments.has_resolvable_key", return_value=True):
+    with mock.patch("backend.credentials.services.resolver.has_resolvable_key", return_value=True):
         res = client.post(f"/api/generation/experiments/{exp.id}/launch/")
 
     assert res.status_code == 400
@@ -275,7 +297,7 @@ def test_launch_requires_app_requirements(auth_client):
     exp = ExperimentFactory(created_by=user)
     ExperimentConditionFactory(experiment=exp, profile=_flask_bundle(), model=LLMModelFactory())
 
-    with mock.patch("backend.generation.api.views.experiments.has_resolvable_key", return_value=True):
+    with mock.patch("backend.credentials.services.resolver.has_resolvable_key", return_value=True):
         res = client.post(f"/api/generation/experiments/{exp.id}/launch/")
 
     assert res.status_code == 400
@@ -289,15 +311,18 @@ def test_launch_creates_jobs_and_dispatches(auth_client):
     ExperimentConditionFactory(experiment=exp, profile=_flask_bundle(), model=LLMModelFactory())
 
     with (
-        mock.patch("backend.generation.api.views.experiments.has_resolvable_key", return_value=True),
-        mock.patch("backend.generation.services.experiments.dispatch_job") as dispatch,
+        mock.patch("backend.credentials.services.resolver.has_resolvable_key", return_value=True),
+        mock.patch("backend.generation.services.experiments.enqueue_jobs") as dispatch,
     ):
         res = client.post(f"/api/generation/experiments/{exp.id}/launch/")
 
     assert res.status_code == 200
     body = res.json()
-    assert body["total_jobs"] == 1
-    assert dispatch.call_count == 1
+    assert body["batch"]["total_jobs"] == 1
+    assert body["batch"]["kind"] == "launch"
+    assert body["jobs_created"] == 1
+    assert body["experiment"]["status"] == "running"
+    assert _enqueued(dispatch) == 1
     assert GenerationJob.objects.filter(experiment=exp).count() == 1
 
 
@@ -308,15 +333,18 @@ def test_status_endpoint(auth_client):
     ExperimentConditionFactory(experiment=exp, profile=_flask_bundle(), model=LLMModelFactory())
 
     with (
-        mock.patch("backend.generation.api.views.experiments.has_resolvable_key", return_value=True),
-        mock.patch("backend.generation.services.experiments.dispatch_job"),
+        mock.patch("backend.credentials.services.resolver.has_resolvable_key", return_value=True),
+        mock.patch("backend.generation.services.experiments.enqueue_jobs"),
     ):
         client.post(f"/api/generation/experiments/{exp.id}/launch/")
 
     res = client.get(f"/api/generation/experiments/{exp.id}/status/")
 
     assert res.status_code == 200
-    assert res.json()["jobs_created"] == 1
+    body = res.json()
+    assert body["counts"]["pending"] == 1
+    assert body["cells"]["total"] == 1
+    assert body["conditions"][0]["counts"]["pending"] == 1
 
 
 def test_export_endpoint(auth_client):

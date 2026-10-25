@@ -1,0 +1,39 @@
+# systemd unit for the LLM Lab relay.
+#
+#   sudo useradd --system --home /var/lib/llmlab-relay --shell /usr/sbin/nologin llmlab-relay
+#   sudo install -d -m 700 -o llmlab-relay /var/lib/llmlab-relay /etc/llmlab
+#   sudo install -m 755 llmlab_relay.py /usr/local/lib/llmlab_relay.py      # after verifying its sha256
+#   sudo install -m 600 -o llmlab-relay /dev/stdin /etc/llmlab/relay-token   # paste the token, Ctrl-D
+#   sudo cp llmlab-relay.service /etc/systemd/system/ && sudo systemctl edit llmlab-relay   # set LLMLAB_SERVER
+#   sudo systemctl enable --now llmlab-relay
+#
+# After rotating the token, replace /etc/llmlab/relay-token and run
+# `sudo systemctl reload llmlab-relay` (SIGHUP re-reads the file).
+[Unit]
+Description=LLM Lab relay (connects the local model server to LLM Lab)
+After=network-online.target ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=llmlab-relay
+Environment=LLMLAB_SERVER=https://lab.example.org
+Environment=LLMLAB_TOKEN_FILE=/etc/llmlab/relay-token
+Environment=LLMLAB_STATE_DIR=/var/lib/llmlab-relay
+Environment=LLMLAB_UPSTREAM=http://127.0.0.1:11434
+Environment=LLMLAB_PARALLEL=1
+ExecStart=/usr/bin/python3 /usr/local/lib/llmlab_relay.py
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+# Exit code 3 = the token was rejected; restarting would not help.
+RestartPreventExitStatus=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/llmlab-relay
+ReadOnlyPaths=/etc/llmlab
+
+[Install]
+WantedBy=multi-user.target

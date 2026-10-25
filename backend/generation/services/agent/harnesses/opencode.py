@@ -39,6 +39,7 @@ from backend.generation.services.agent.harnesses.base import DUMMY_API_KEY
 from backend.generation.services.agent.harnesses.base import GATEWAY_BASE_URL
 from backend.generation.services.agent.harnesses.base import Harness
 from backend.generation.services.agent.harnesses.base import HarnessSummary
+from backend.generation.services.agent.harnesses.base import LocalRender
 
 PROMPTS_DIR = Path(__file__).resolve().parents[3] / "data" / "agent" / "harness_prompts"
 DISABLED_TOOLS = ("webfetch", "websearch", "skill")
@@ -86,6 +87,7 @@ class OpenCodeHarness(Harness):
         agent_config: dict[str, Any],
         title: str,
         options: dict[str, Any] | None = None,
+        local: LocalRender | None = None,
     ) -> dict[str, Any]:
         self.normalize_options(options)  # no options exist: rejects any
         version = self.version()
@@ -124,6 +126,12 @@ class OpenCodeHarness(Harness):
             },
             "tools": dict.fromkeys(DISABLED_TOOLS, False),
         }
+        if local is not None:
+            # Local models only: reasoning as the model reports it, and a client
+            # timeout long enough for the proxy's 504 re-attach chain.
+            provider = config["provider"]["openrouter"]
+            provider["models"][model_slug]["reasoning"] = "thinking" in local.capabilities
+            provider["options"]["timeout"] = int(local.client_timeout_s) * 1000
         return {
             "name": self.name,
             "version": version,

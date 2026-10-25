@@ -84,7 +84,28 @@ EXPORT_CSV_FIELDS = [
 ]
 
 
-def _resolve_model_queryset(identifier: str):
+def _base_queryset(request, *, include_unavailable: bool = True):
+    """The models ``request.auth`` may see (spec §F.3: every view goes through ``visible_to``)."""
+    qs = LLMModel.objects.visible_to(request.auth).select_related("endpoint")
+    if not include_unavailable:
+        qs = qs.filter(is_available=True, is_hidden=False)
+    return qs
+
+
+def _require_staff(request) -> None:
+    if not getattr(request.auth, "is_staff", False):
+        raise HttpError(403, "Only staff can change the model catalog.")
+
+
+def _apply_endpoint_filter(qs, endpoint: str):
+    if endpoint == "openrouter":
+        return qs.filter(Q(endpoint__isnull=True) | Q(endpoint__is_system=True))
+    if endpoint == "local":
+        return qs.filter(endpoint__isnull=False, endpoint__is_system=False)
+    return qs.filter(endpoint__slug=endpoint)
+
+
+def _resolve_model_queryset(identifier: str, base=None):
     raw = (identifier or "").strip()
     normalized = normalize_model_identifier(raw)
     query = Q(canonical_slug__iexact=raw) | Q(model_id__iexact=raw)
@@ -96,12 +117,12 @@ def _resolve_model_queryset(identifier: str):
         provider, model_name = raw.split("_", 1)
         query |= Q(model_id__iexact=f"{provider}/{model_name}")
 
-    return LLMModel.objects.filter(query)
+    return (base if base is not None else LLMModel.objects.all()).filter(query)
 
 
-def _get_model_by_identifier(identifier: str) -> LLMModel:
+def _get_model_by_identifier(request, identifier: str) -> LLMModel:
     return get_object_or_404(
-        _resolve_model_queryset(identifier).order_by("canonical_slug"),
+        _resolve_model_queryset(identifier, _base_queryset(request)).order_by("canonical_slug"),
     )
 
 
@@ -240,10 +261,18 @@ def list_models(
     price_range: str = Query(""),
     context_range: str = Query(""),
     used_in_apps: bool = Query(False),  # noqa: FBT003
+    endpoint: str = Query(""),
+    include_unavailable: bool = Query(False),  # noqa: FBT003
 ):
-    """List models with filtering, search, sorting, and pagination."""
-    qs = LLMModel.objects.all()
+    """List models with filtering, search, sorting, and pagination.
+
+    ``endpoint`` is a slug, ``local`` or ``openrouter``; hidden and
+    unavailable local models are left out unless ``include_unavailable``.
+    """
+    qs = _base_queryset(request, include_unavailable=include_unavailable)
     qs = _apply_search(qs, search)
+    if endpoint:
+        qs = _apply_endpoint_filter(qs, endpoint)
 
     if provider:
         qs = qs.filter(provider__iexact=provider)
@@ -262,7 +291,8 @@ def list_models(
 
     page_qs, total, page, pages = paginate_queryset(qs, page, per_page)
 
-    items = [LLMModelListSchema.from_model(m) for m in page_qs]
+    online: dict[int, bool] = {}
+    items = [LLMModelListSchema.from_model(m, online) for m in page_qs]
     return PaginatedModelsSchema(
         items=items,
         total=total,
@@ -275,7 +305,7 @@ def list_models(
 @router.get("/stats/", response=StatsSchema)
 def get_stats(request):
     """Get aggregate statistics about loaded models."""
-    qs = LLMModel.objects.all()
+    qs = _base_queryset(request)
     # Exclude models with negative sentinel prices (e.g. -1) from averages
     paid_qs = qs.filter(input_price_per_token__gte=0)
     agg = paid_qs.aggregate(
@@ -295,13 +325,14 @@ def get_stats(request):
 def list_providers(request):
     """Return distinct provider names."""
     return list(
-        LLMModel.objects.values_list("provider", flat=True).distinct().order_by("provider"),
+        _base_queryset(request).values_list("provider", flat=True).distinct().order_by("provider"),
     )
 
 
 @router.post("/sync/", response={200: SyncResultSchema, 403: dict})
 def sync_models(request):
-    """Fetch models from OpenRouter and upsert into DB."""
+    """Fetch models from OpenRouter and upsert into DB (staff only)."""
+    _require_staff(request)
     api_key = _resolve_openrouter_catalog_key(request)
     if not isinstance(api_key, str):
         return api_key
@@ -310,7 +341,8 @@ def sync_models(request):
 
 @router.post("/import/", response=ModelImportResultSchema)
 def import_models(request):
-    """Import models from exported JSON or OpenRouter payload JSON."""
+    """Import models from exported JSON or OpenRouter payload JSON (staff only)."""
+    _require_staff(request)
     try:
         payload = json.loads(request.body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -327,7 +359,7 @@ def import_models(request):
 def export_models(request, format: str = Query("csv")):
     """Export models as CSV or JSON."""
     export_format = format.lower()
-    models = list(LLMModel.objects.all())
+    models = list(_base_queryset(request))
 
     if export_format == "csv":
         return _build_csv_export(models)
@@ -350,7 +382,7 @@ def get_model_comparison(request, models: str = Query("")):
     seen_slugs: set[str] = set()
 
     for identifier in identifiers:
-        match = _resolve_model_queryset(identifier).first()
+        match = _resolve_model_queryset(identifier, _base_queryset(request)).first()
         if not match:
             missing.append(identifier)
             continue
@@ -369,13 +401,15 @@ def get_model_comparison(request, models: str = Query("")):
 @router.get("/detail/{slug}/", response=LLMModelSchema)
 def get_model(request, slug: str):
     """Get a single model by its canonical slug."""
-    return _get_model_by_identifier(slug)
+    return _get_model_by_identifier(request, slug)
 
 
 @router.post("/detail/{slug}/refresh/", response={200: LLMModelSchema, 403: dict})
 def refresh_model(request, slug: str):
     """Refresh a single model from the OpenRouter model catalog."""
-    model = _get_model_by_identifier(slug)
+    model = _get_model_by_identifier(request, slug)
+    if model.endpoint_id is not None and not model.endpoint.is_system:
+        raise HttpError(400, "Local models are refreshed from their endpoint (Endpoints page).")
     api_key = _resolve_openrouter_catalog_key(request)
     if not isinstance(api_key, str):
         return api_key
@@ -387,8 +421,9 @@ def refresh_model(request, slug: str):
 
 @router.delete("/detail/{slug}/")
 def delete_model(request, slug: str):
-    """Delete a model by slug."""
-    model = _get_model_by_identifier(slug)
+    """Delete a model by slug (staff only)."""
+    _require_staff(request)
+    model = _get_model_by_identifier(request, slug)
     model.delete()
     return {"success": True}
 
@@ -396,10 +431,12 @@ def delete_model(request, slug: str):
 @router.get("/detail/{slug}/related/", response=list[LLMModelListSchema])
 def get_related_models(request, slug: str, limit: int = Query(10, ge=1, le=20)):
     """Get models from the same provider, excluding the current model."""
-    model = _get_model_by_identifier(slug)
+    model = _get_model_by_identifier(request, slug)
     related = (
-        LLMModel.objects.filter(provider=model.provider)
+        _base_queryset(request, include_unavailable=False)
+        .filter(provider=model.provider)
         .exclude(pk=model.pk)
         .order_by("-cost_efficiency", "model_name")[:limit]
     )
-    return [LLMModelListSchema.from_model(m) for m in related]
+    online: dict[int, bool] = {}
+    return [LLMModelListSchema.from_model(m, online) for m in related]

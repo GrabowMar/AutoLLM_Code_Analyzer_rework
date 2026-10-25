@@ -408,9 +408,18 @@ def build_resolved_snapshot(
     stack_entry = stack_snapshot_entry(snapshot["scaffolding_slug"])
     if stack_entry:
         snapshot["stack"] = stack_entry
+    _attach_endpoint_section(snapshot, model)
     snapshot["prompt_hash"] = _snapshot_prompt_hash(snapshot)
     snapshot["run_fingerprint"] = run_fingerprint(snapshot)
     return snapshot
+
+
+def _attach_endpoint_section(snapshot: dict[str, Any], model: LLMModel | None) -> None:
+    """``snapshot["endpoint"]`` for a model on a local endpoint (absent for OpenRouter; spec §D.5)."""
+    from backend.inference.snapshot import endpoint_section
+
+    if (section := endpoint_section(model)) is not None:
+        snapshot["endpoint"] = section
 
 
 def _attach_model_provenance(llm_section: dict[str, Any], model: LLMModel | None) -> None:
@@ -430,6 +439,15 @@ def _attach_model_provenance(llm_section: dict[str, Any], model: LLMModel | None
     llm_section["input_price_per_token"] = model.input_price_per_token
     llm_section["output_price_per_token"] = model.output_price_per_token
     llm_section["pricing_snapshot_at"] = timezone.now().isoformat()
+    if model.endpoint_id is not None and not model.endpoint.is_system:
+        # Local models only (provenance; the llm section is not fingerprinted
+        # beyond model_slug and the sampling keys).
+        from backend.inference.snapshot import effective_num_ctx
+
+        llm_section["endpoint_slug"] = model.endpoint.slug
+        llm_section["served_model_name"] = model.served_model_name
+        llm_section["digest"] = model.digest
+        llm_section["num_ctx"] = effective_num_ctx(model)
 
 
 def build_custom_snapshot(
@@ -454,6 +472,7 @@ def build_custom_snapshot(
         "llm": llm_section,
         "llm_overrides": dict(llm_overrides or {}),
     }
+    _attach_endpoint_section(snapshot, model)
     _attach_preset_provenance(snapshot, sampling_preset)
     return snapshot
 
@@ -583,6 +602,11 @@ def run_fingerprint(snapshot: dict[str, Any]) -> str:
     stack = snapshot.get("stack") or {}
     if stack.get("content_hash"):
         payload["stack_content_hash"] = stack["content_hash"]
+    # Local models only: the served weights and server flavour (spec §D.5).
+    from backend.inference.snapshot import llm_source
+
+    if (src := llm_source(snapshot)) is not None:
+        payload["llm_source"] = src
     encoded = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(encoded.encode()).hexdigest()[:16]
 

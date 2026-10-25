@@ -532,6 +532,11 @@ class GenerationJobListSchema(Schema):
     # "valid" | "warn" | "exclude" (result_data.agent.validity); None before an agent run is assessed.
     validity: str | None = None
     config_fingerprint: str | None = None
+    # Execution (spec §F.2): attempt of this row, endpoint (None = OpenRouter), frozen lane order, queue time.
+    attempt: int = 0
+    endpoint_slug: str | None = None
+    sequence: int | None = None
+    queue_seconds: float | None = None
 
 
 class PaginatedJobsSchema(Schema):

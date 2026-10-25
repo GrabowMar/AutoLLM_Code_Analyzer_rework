@@ -30,7 +30,12 @@ export interface LLMModelSummary {
   quantization?: string;
   parameter_size?: string;
   is_local?: boolean;
+  /** False once the endpoint stopped listing the model (only with `include_unavailable`). */
+  is_available?: boolean;
 }
+
+/** `?endpoint=` filter of the models list: an endpoint slug, or every local / OpenRouter row. */
+export type ModelEndpointFilter = "local" | "openrouter" | (string & {});
 
 export interface LLMModelEndpointRef {
   id: number;
@@ -116,6 +121,9 @@ export async function getModels(
     price_range?: string;
     context_range?: string;
     used_in_apps?: boolean;
+    endpoint?: ModelEndpointFilter;
+    /** Also list hidden and unavailable local models. */
+    include_unavailable?: boolean;
   } = {},
 ): Promise<PaginatedModels> {
   const q = new URLSearchParams();
@@ -130,6 +138,8 @@ export async function getModels(
   if (params.price_range) q.set("price_range", params.price_range);
   if (params.context_range) q.set("context_range", params.context_range);
   if (params.used_in_apps) q.set("used_in_apps", "true");
+  if (params.endpoint) q.set("endpoint", params.endpoint);
+  if (params.include_unavailable) q.set("include_unavailable", "1");
   const qs = q.toString();
   const res = await apiFetch(`/models/${qs ? "?" + qs : ""}`);
   return res.json();

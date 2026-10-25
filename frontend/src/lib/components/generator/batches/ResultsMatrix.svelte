@@ -7,8 +7,12 @@
 	 *
 	 * Props:
 	 * - `jobs`: the batch's job list items (`/batches/{id}/jobs/`).
+	 * - `matrix`: a prebuilt matrix instead of `jobs` (experiment results:
+	 *   `fromResultsMatrix(results)`, so it applies the server's filters).
 	 * - `mode`: batch mode ('agent' | 'scaffolding' | …) — picks the column axis.
 	 * - `graded`: false for free-form tasks (cells show progress, not pass rates).
+	 * - `transpose` (default false): conditions as rows and tasks as columns
+	 *   (for many conditions); the per-condition aggregate becomes the last column.
 	 */
 	import { tick } from 'svelte';
 	import type { GenerationJobList } from '$lib/api/generation';
@@ -33,17 +37,42 @@
 		shortId,
 		type TrialOutcome,
 	} from './batch-utils';
-	import { buildResultsMatrix, cellKey, type CellStats, type MatrixCell } from './matrix';
+	import {
+		buildResultsMatrix,
+		cellKey,
+		type CellStats,
+		type MatrixCell,
+		type MatrixColumn,
+		type MatrixRow,
+		type ResultsMatrix as ResultsMatrixData,
+	} from './matrix';
 
 	interface Props {
-		jobs: GenerationJobList[];
+		jobs?: GenerationJobList[];
+		matrix?: ResultsMatrixData | null;
 		mode: string;
 		graded: boolean;
+		transpose?: boolean;
 	}
 
-	let { jobs, mode, graded }: Props = $props();
+	let { jobs = [], matrix: prebuilt = null, mode, graded, transpose = false }: Props = $props();
 
-	const matrix = $derived(buildResultsMatrix(jobs, mode, graded));
+	const matrix = $derived(prebuilt ?? buildResultsMatrix(jobs, mode, graded));
+
+	// Display axes: tasks × conditions, or conditions × tasks when transposed.
+	type Axis = { kind: 'task'; item: MatrixRow } | { kind: 'condition'; item: MatrixColumn };
+	const taskAxis = $derived(matrix.rows.map((item): Axis => ({ kind: 'task', item })));
+	const conditionAxis = $derived(matrix.columns.map((item): Axis => ({ kind: 'condition', item })));
+	const displayRows = $derived(transpose ? conditionAxis : taskAxis);
+	const displayCols = $derived(transpose ? taskAxis : conditionAxis);
+	const cornerLabel = $derived(transpose ? 'Condition' : 'Task');
+	const showAggregate = $derived(matrix.rows.length > 1);
+
+	function cellAt(row: Axis, col: Axis): MatrixCell | undefined {
+		const task = row.kind === 'task' ? row.item : (col.item as MatrixRow);
+		const condition = row.kind === 'condition' ? row.item : (col.item as MatrixColumn);
+		return matrix.cells.get(cellKey(task.key, condition.key));
+	}
 	const columnLabel = $derived(
 		mode === 'agent' ? 'Harness preset' : mode === 'scaffolding' ? 'Profile' : ''
 	);
@@ -135,39 +164,67 @@
 	{/if}
 {/snippet}
 
+{#snippet axisLabel(axis: Axis, header: boolean)}
+	{#if axis.kind === 'task'}
+		<span class={cn('block truncate', header ? 'text-xs font-semibold text-foreground' : '')} title={axis.item.slug ?? axis.item.label}>{axis.item.label}</span>
+		{#if axis.item.slug === null}
+			<span class="block text-[11px] font-normal text-muted-foreground">free-form</span>
+		{/if}
+	{:else}
+		{@const col = axis.item}
+		<span class="block truncate text-xs font-semibold text-foreground" title={col.modelId ?? col.model}>{col.model}</span>
+		{#if col.variant}
+			<span class="block truncate font-mono text-[11px] font-normal text-muted-foreground" title="{columnLabel}: {col.variant}">{col.variant}</span>
+		{/if}
+		{#if col.conditionId != null}
+			<span class="block text-[11px] font-normal text-muted-foreground">condition #{col.conditionId}</span>
+		{/if}
+	{/if}
+{/snippet}
+
+{#snippet aggregate(stats: CellStats | undefined, title: string)}
+	{#if stats}
+		{@const head = headline(stats)}
+		<span class="flex items-baseline justify-between gap-2">
+			<span class="font-mono text-sm font-semibold tabular-nums">
+				{head.value}<span class="ml-1 font-sans text-[11px] font-normal text-muted-foreground">{head.unit}</span>
+			</span>
+			{#if graded && stats.meanPassRate != null}
+				<span class="font-mono text-xs tabular-nums text-muted-foreground" {title}>{formatPassRate(stats.meanPassRate)}</span>
+			{/if}
+		</span>
+	{/if}
+{/snippet}
+
 <div class="space-y-3">
 	<div class="relative overflow-x-auto rounded-md border border-border" role="region" aria-label="Results matrix">
 		<table class="w-max min-w-full">
 			<thead>
 				<tr>
-					<th scope="col" class="left-0 z-20 w-28 min-w-28 max-w-28 sm:w-auto sm:min-w-36 sm:max-w-56 bg-surface-2 backdrop-blur-none">Task</th>
-					{#each matrix.columns as col (col.key)}
+					<th scope="col" class="left-0 z-20 w-28 min-w-28 max-w-28 sm:w-auto sm:min-w-36 sm:max-w-56 bg-surface-2 backdrop-blur-none">{cornerLabel}</th>
+					{#each displayCols as col (col.item.key)}
 						<th scope="col" class="min-w-36 max-w-56 bg-surface-2 align-bottom normal-case tracking-normal backdrop-blur-none">
-							<span class="block truncate text-xs font-semibold text-foreground" title={col.modelId ?? col.model}>{col.model}</span>
-							{#if col.variant}
-								<span class="block truncate font-mono text-[11px] font-normal" title="{columnLabel}: {col.variant}">{col.variant}</span>
-							{/if}
-							{#if col.conditionId != null}
-								<span class="block text-[11px] font-normal">condition #{col.conditionId}</span>
-							{/if}
+							{@render axisLabel(col, true)}
 						</th>
 					{/each}
+					{#if transpose && showAggregate}
+						<th scope="col" class="min-w-32 bg-surface-2 align-bottom normal-case tracking-normal backdrop-blur-none">
+							<span class="block text-xs font-semibold text-foreground">All tasks</span>
+						</th>
+					{/if}
 				</tr>
 			</thead>
 			<tbody>
-				{#each matrix.rows as row (row.key)}
+				{#each displayRows as row (row.item.key)}
 					<tr>
 						<th
 							scope="row"
 							class="top-auto left-0 z-10 w-28 min-w-28 max-w-28 sm:w-auto sm:min-w-36 sm:max-w-56 bg-card align-top text-sm font-medium normal-case tracking-normal text-foreground backdrop-blur-none"
 						>
-							<span class="block truncate" title={row.slug ?? row.label}>{row.label}</span>
-							{#if row.slug === null}
-								<span class="block text-[11px] font-normal text-muted-foreground">free-form</span>
-							{/if}
+							{@render axisLabel(row, false)}
 						</th>
-						{#each matrix.columns as col (col.key)}
-							{@const cell = matrix.cells.get(cellKey(row.key, col.key))}
+						{#each displayCols as col (col.item.key)}
+							{@const cell = cellAt(row, col)}
 							<td class="p-1 align-top">
 								{#if cell}
 									{@const head = headline(cell.stats)}
@@ -200,29 +257,23 @@
 								{/if}
 							</td>
 						{/each}
+						{#if transpose && showAggregate}
+							<td class="border-l border-border px-3.5 py-2 align-top">
+								{@render aggregate(matrix.columnStats.get(row.item.key), 'Mean pass rate over every graded trial')}
+							</td>
+						{/if}
 					</tr>
 				{/each}
 			</tbody>
-			{#if matrix.rows.length > 1}
+			{#if !transpose && showAggregate}
 				<tfoot>
 					<tr>
 						<th scope="row" class="top-auto left-0 z-10 w-28 min-w-28 max-w-28 sm:w-auto sm:min-w-36 sm:max-w-56 border-t border-border bg-card normal-case tracking-normal backdrop-blur-none">
 							All tasks
 						</th>
 						{#each matrix.columns as col (col.key)}
-							{@const stats = matrix.columnStats.get(col.key)}
 							<td class="border-t border-border px-3.5 py-2 align-top">
-								{#if stats}
-									{@const head = headline(stats)}
-									<span class="flex items-baseline justify-between gap-2">
-										<span class="font-mono text-sm font-semibold tabular-nums">
-											{head.value}<span class="ml-1 font-sans text-[11px] font-normal text-muted-foreground">{head.unit}</span>
-										</span>
-										{#if graded && stats.meanPassRate != null}
-											<span class="font-mono text-xs tabular-nums text-muted-foreground" title="Mean pass rate over every graded trial">{formatPassRate(stats.meanPassRate)}</span>
-										{/if}
-									</span>
-								{/if}
+								{@render aggregate(matrix.columnStats.get(col.key), 'Mean pass rate over every graded trial')}
 							</td>
 						{/each}
 					</tr>

@@ -19,6 +19,22 @@ from backend.users.tests.factories import UserFactory
 BASE = "/api/automation"
 
 
+def _automation_api_mounted() -> bool:
+    from django.urls import Resolver404
+    from django.urls import resolve
+
+    try:
+        resolve(f"{BASE}/pipelines/")
+    except Resolver404:
+        return False
+    return True
+
+
+# Spec §H: /api/automation/ is unmounted (automation is now Schedules and
+# Post-run on experiments); the app, its tables and engine stay.
+pytestmark = pytest.mark.skipif(not _automation_api_mounted(), reason="automation API unmounted")
+
+
 def _auth_client(user) -> Client:
     client = Client()
     client.force_login(user)

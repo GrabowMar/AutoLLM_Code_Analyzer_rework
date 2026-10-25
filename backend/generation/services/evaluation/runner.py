@@ -52,6 +52,8 @@ from backend.runtime.services.scaffolding import prepare_build_dir
 from backend.runtime.services.scaffolding import resolve_stack_slug
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from backend.generation.models import GenerationJob
 
 logger = logging.getLogger(__name__)
@@ -116,7 +118,8 @@ class Evaluation:
         self.network = None
         self.containers: list = []
         self.image_tag = f"llmlab-eval/{self.short}:latest"
-        self.labels = {LABEL: str(job.id)}
+        # llmlab.started: the executor's orphan reaper skips containers younger than 2 minutes.
+        self.labels = {LABEL: str(job.id), "llmlab.started": str(int(time.time()))}
 
     def run(self) -> dict[str, Any]:
         started = time.monotonic()
@@ -308,8 +311,17 @@ def _resolved_python_deps(container) -> list[str]:
     return [line for line in out.decode("utf-8", errors="replace").splitlines() if "==" in line][:500]
 
 
-def evaluate_job(job: GenerationJob) -> dict[str, Any]:
-    """Evaluate *job* and store the outcome on it (``result_data.evaluation`` + ``metrics.functional``)."""
+def evaluate_job(
+    job: GenerationJob,
+    *,
+    save: Callable[[GenerationJob, list[str]], None] | None = None,
+) -> dict[str, Any]:
+    """Evaluate *job* and store the outcome on it (``result_data.evaluation`` + ``metrics.functional``).
+
+    ``save(job, fields)`` persists the result; the executor passes
+    ``execution.transitions.guarded_save`` so a requeued or cancelled job is
+    never written to (it raises ``LeaseLost``). Default: a plain ``save``.
+    """
     outcome = Evaluation(job).run()
     # Only samples whose prompt stated this contract (agent brief v2+) were
     # asked for e.g. the accounts endpoints; template-mode scores against it
@@ -339,6 +351,14 @@ def evaluate_job(job: GenerationJob) -> dict[str, Any]:
     if isinstance(result.get("agent"), dict):
         from backend.generation.services.agent.runner import assess_validity
 
-        result["agent"]["validity"] = assess_validity(job.resolved_bundle or {}, result)
-    job.save(update_fields=["result_data", "metrics", "updated_at"])
+        result["agent"]["validity"] = assess_validity(
+            job.resolved_bundle or {},
+            result,
+            execution=job.execution if isinstance(job.execution, dict) else {},
+            attempt=job.attempt,
+        )
+    if save is None:
+        job.save(update_fields=["result_data", "metrics", "updated_at"])
+    else:
+        save(job, ["result_data", "metrics"])
     return outcome

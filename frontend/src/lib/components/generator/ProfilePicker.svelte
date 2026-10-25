@@ -1,3 +1,13 @@
+<script lang="ts" module>
+	/**
+	 * Toggle `id` in an ordered selection: removed when present, appended
+	 * otherwise. Returns a new array (selections are replaced, never mutated).
+	 */
+	export function toggleSelection(ids: readonly number[], id: number): number[] {
+		return ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
+	}
+</script>
+
 <script lang="ts">
 	/**
 	 * ProfilePicker — prompt profile for template scaffolding.
@@ -16,7 +26,13 @@
 	 *   (scaffolding rejects a profile whose stack differs from the chosen stack).
 	 * - `showPreview` (default true): collapsible rendered-prompt preview.
 	 * - `label` (default 'Prompt profile'; '' hides it), `idPrefix`, `disabled`.
-	 * - `onchange(profile | null)` after the user picks.
+	 * - `onchange(profile | null)` after the user picks (single mode).
+	 * - `multiple`: pick several profiles (one experiment condition each) from a
+	 *   checklist; `selectedIds` (bindable `number[]`, in pick order) holds them
+	 *   and `onselect(profiles)` fires after each change. The preview renders
+	 *   the first selected profile. Multiple mode never offers Auto.
+	 * - `allowAuto` (default true): offer "Auto" in single mode. With false the
+	 *   select starts empty ("Choose a profile") until one is picked.
 	 */
 	import { onMount } from 'svelte';
 	import {
@@ -36,6 +52,8 @@
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import { summarizeLLMParams } from './llm-params';
+	import { navigateList } from './list-keyboard';
+	import Check from '@lucide/svelte/icons/check';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -50,6 +68,10 @@
 		idPrefix?: string;
 		disabled?: boolean;
 		onchange?: (profile: GenerationProfile | null) => void;
+		multiple?: boolean;
+		selectedIds?: number[];
+		allowAuto?: boolean;
+		onselect?: (profiles: GenerationProfile[]) => void;
 	}
 
 	let {
@@ -62,6 +84,10 @@
 		idPrefix = 'profile-picker',
 		disabled = false,
 		onchange,
+		multiple = false,
+		selectedIds = $bindable([]),
+		allowAuto = true,
+		onselect,
 	}: Props = $props();
 
 	const AUTO = 'auto';
@@ -90,7 +116,16 @@
 		profiles.reduce((acc, p) => acc.set(p.slug, Math.max(acc.get(p.slug) ?? 0, p.version)), new Map<string, number>())
 	);
 	const isOlder = (p: GenerationProfile) => (newestVersion.get(p.slug) ?? 0) > p.version;
-	const selected = $derived(selectedId != null ? profiles.find((p) => p.id === selectedId) : undefined);
+	// In multiple mode the first pick drives the stack check and the preview.
+	const primaryId = $derived(multiple ? (selectedIds[0] ?? null) : selectedId);
+	const selected = $derived(primaryId != null ? profiles.find((p) => p.id === primaryId) : undefined);
+	const selectedSet = $derived(new Set(selectedIds));
+	const mismatchedPicks = $derived(
+		multiple && stackSlug
+			? profiles.filter((p) => selectedSet.has(p.id) && p.scaffolding_slug !== stackSlug)
+			: []
+	);
+	const autoOffered = $derived(allowAuto && !multiple);
 	const appKey = $derived([...appIds].sort((a, b) => a - b).join(','));
 	const suggestedIds = $derived(new Set(suggestions.map((s) => s.profile_id).filter((id) => id != null)));
 	const triggerId = $derived(`${idPrefix}-select`);
@@ -206,6 +241,13 @@
 		onchange?.(selectedId != null ? (profiles.find((p) => p.id === selectedId) ?? null) : null);
 	}
 
+	function togglePick(id: number) {
+		if (disabled) return;
+		selectedIds = toggleSelection(selectedIds, id);
+		const byId = new Map(profiles.map((p) => [p.id, p]));
+		onselect?.(selectedIds.map((x) => byId.get(x)).filter((p): p is GenerationProfile => !!p));
+	}
+
 	const previewStages = $derived(
 		preview?.rendered
 			? Object.entries(preview.rendered).map(([stage, messages]) => ({
@@ -252,61 +294,119 @@
 {/snippet}
 
 <div class="min-w-0 space-y-1.5" data-slot="profile-picker">
-	{#if label}<Label for={triggerId}>{label}</Label>{/if}
+	{#if label}
+		{#if multiple}<p class="text-sm font-medium leading-none">{label}</p>{:else}<Label for={triggerId}>{label}</Label>{/if}
+	{/if}
 	{#if error}
 		<ErrorAlert message={error} onretry={load} />
 	{:else}
-		<Select.Root
-			type="single"
-			value={selectedId != null ? String(selectedId) : AUTO}
-			onValueChange={pick}
-			disabled={disabled || loading}
-			items={[
-				{ value: AUTO, label: 'Auto' },
-				...profiles.map((p) => ({ value: String(p.id), label: isOlder(p) ? `${p.name} v${p.version}` : p.name })),
-			]}
-		>
-			<Select.Trigger id={triggerId} class="min-h-9 py-1.5 data-[size=default]:h-auto" aria-busy={loading}>
-				{#if loading}
-					<span class="flex items-center gap-2 text-muted-foreground">
-						<LoaderCircle class="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />Loading profiles…
-					</span>
-				{:else if selected}
-					{@render profileLine(selected)}
-				{:else}
-					<span class="flex min-w-0 flex-col">
-						<span class="font-medium">Auto</span>
-						<span class="truncate text-[11px] text-muted-foreground">
-							{#if suggesting}resolving…{:else}{autoSummary || 'per app: app pilot, else the stack default'}{/if}
+		{#if multiple}
+			{#if loading}
+				<LoadingState label="loading profiles" class="rounded-md border border-border py-6" />
+			{:else if profiles.length === 0}
+				<p class="rounded-md border border-border px-3 py-4 text-xs text-muted-foreground">No prompt profiles yet.</p>
+			{:else}
+				<div
+					class="max-h-72 divide-y divide-border/40 overflow-y-auto rounded-md border border-border"
+					role="group"
+					aria-label={label || 'Prompt profiles'}
+					data-nav-list
+				>
+					{#each profiles as profile (profile.id)}
+						{@const checked = selectedSet.has(profile.id)}
+						<button
+							type="button"
+							role="checkbox"
+							aria-checked={checked}
+							data-nav-item
+							{disabled}
+							class={cn(
+								'flex w-full cursor-pointer items-start gap-2.5 px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60',
+								checked && 'bg-primary/5'
+							)}
+							onclick={() => togglePick(profile.id)}
+							onkeydown={navigateList}
+						>
+							<span
+								class={cn(
+									'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors duration-150',
+									checked ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/60 bg-surface-1'
+								)}
+								aria-hidden="true"
+							>
+								{#if checked}<Check class="size-3" strokeWidth={3} />{/if}
+							</span>
+							{@render profileLine(profile)}
+						</button>
+					{/each}
+				</div>
+				<p class="text-[11px] tabular-nums text-muted-foreground" aria-live="polite">
+					{selectedIds.length} selected{selectedIds.length > 1 ? ' · each profile is one condition' : ''}
+				</p>
+			{/if}
+		{:else}
+			<Select.Root
+				type="single"
+				value={selectedId != null ? String(selectedId) : autoOffered ? AUTO : ''}
+				onValueChange={pick}
+				disabled={disabled || loading}
+				items={[
+					...(autoOffered ? [{ value: AUTO, label: 'Auto' }] : []),
+					...profiles.map((p) => ({ value: String(p.id), label: isOlder(p) ? `${p.name} v${p.version}` : p.name })),
+				]}
+			>
+				<Select.Trigger id={triggerId} class="min-h-9 py-1.5 data-[size=default]:h-auto" aria-busy={loading}>
+					{#if loading}
+						<span class="flex items-center gap-2 text-muted-foreground">
+							<LoaderCircle class="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />Loading profiles…
 						</span>
-					</span>
-				{/if}
-			</Select.Trigger>
-			<Select.Content class="max-w-[min(32rem,calc(100vw-2rem))]">
-				<Select.Item value={AUTO} label="Auto">
-					<span class="flex min-w-0 flex-col">
-						<span class="font-medium">Auto</span>
-						<span class="truncate text-[11px] text-muted-foreground">
-							{autoSummary || 'Resolved per app: app pilot, else the stack default'}
+					{:else if selected}
+						{@render profileLine(selected)}
+					{:else if !autoOffered}
+						<span class="text-muted-foreground">Choose a profile</span>
+					{:else}
+						<span class="flex min-w-0 flex-col">
+							<span class="font-medium">Auto</span>
+							<span class="truncate text-[11px] text-muted-foreground">
+								{#if suggesting}resolving…{:else}{autoSummary || 'per app: app pilot, else the stack default'}{/if}
+							</span>
 						</span>
-					</span>
-				</Select.Item>
-				{#if profiles.length > 0}<Select.Separator />{/if}
-				{#each profiles as profile (profile.id)}
-					<Select.Item value={String(profile.id)} label={profile.name}>
-						{@render profileLine(profile)}
-					</Select.Item>
-				{/each}
-			</Select.Content>
-		</Select.Root>
+					{/if}
+				</Select.Trigger>
+				<Select.Content class="max-w-[min(32rem,calc(100vw-2rem))]">
+					{#if autoOffered}
+						<Select.Item value={AUTO} label="Auto">
+							<span class="flex min-w-0 flex-col">
+								<span class="font-medium">Auto</span>
+								<span class="truncate text-[11px] text-muted-foreground">
+									{autoSummary || 'Resolved per app: app pilot, else the stack default'}
+								</span>
+							</span>
+						</Select.Item>
+						{#if profiles.length > 0}<Select.Separator />{/if}
+					{/if}
+					{#each profiles as profile (profile.id)}
+						<Select.Item value={String(profile.id)} label={profile.name}>
+							{@render profileLine(profile)}
+						</Select.Item>
+					{/each}
+				</Select.Content>
+			</Select.Root>
+		{/if}
 
-		{#if stackMismatch && selected}
+		{#if multiple && mismatchedPicks.length > 0}
+			<p class="flex items-start gap-1.5 text-[11px] text-warning-fg" role="status">
+				<TriangleAlert class="mt-px size-3.5 shrink-0" aria-hidden="true" />
+				{mismatchedPicks.map((p) => p.name).join(', ')}
+				{mismatchedPicks.length === 1 ? 'targets' : 'target'} another stack than {stackSlug}; mismatched runs are rejected.
+			</p>
+		{:else if !multiple && stackMismatch && selected}
 			<p class="flex items-start gap-1.5 text-[11px] text-warning-fg" role="status">
 				<TriangleAlert class="mt-px size-3.5 shrink-0" aria-hidden="true" />
 				This profile targets {selected.scaffolding_slug}, but the selected stack is {stackSlug}. Pick a matching
 				profile or stack — mismatched runs are rejected.
 			</p>
-		{:else if selected?.description}
+		{:else if !multiple && selected?.description}
 			<p class="text-[11px] text-muted-foreground">{selected.description}</p>
 		{/if}
 

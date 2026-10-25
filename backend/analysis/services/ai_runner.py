@@ -1,8 +1,9 @@
 """AI reviewer tool — runs an LLM review instead of a container CLI.
 
-This is the ``kind == "ai"`` execution path. It calls OpenRouter (reusing the
-generation client + credential resolver) and parses a structured JSON list of
-findings out of the model response.
+This is the ``kind == "ai"`` execution path. It resolves the model through
+``inference.access`` (OpenRouter with the user's key, or a local endpoint),
+calls it through ``inference.chat`` (``source="analysis"``) and parses a
+structured JSON list of findings out of the model response.
 """
 
 from __future__ import annotations
@@ -10,6 +11,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -24,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 # Default to the latest Claude model for the built-in reviewer.
 DEFAULT_MODEL = "anthropic/claude-opus-4-8"
+# Upper bound for a local-model call made inside a web request (tool "test").
+INLINE_LOCAL_TIMEOUT_S = 180
 
 _SYSTEM_PROMPT = (
     "You are a meticulous senior code reviewer. Analyze the provided code for "
@@ -45,39 +50,31 @@ def run(
     config: dict[str, Any] | None,
     user: User | None,
 ) -> AnalyzerOutput:
-    from backend.credentials.services.resolver import MissingApiKeyError
-    from backend.credentials.services.resolver import get_openrouter_key
-    from backend.generation.services.openrouter_client import OpenRouterClient
     from backend.generation.services.openrouter_client import OpenRouterError
 
     config = config or {}
     model = config.get("model") or tool.default_config.get("model") or DEFAULT_MODEL
 
-    try:
-        api_key = get_openrouter_key(user)
-    except MissingApiKeyError as exc:
-        return AnalyzerOutput(error=str(exc))
-
     code_blob = _format_code(code)
+    max_tokens = int(config.get("max_tokens") or tool.default_config.get("max_tokens") or 4000)
+    messages = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": code_blob},
+    ]
+    try:
+        access = _resolve(model, user)
+    except OpenRouterError as exc:
+        return AnalyzerOutput(error=str(exc))
     if not code_blob.strip():
         return AnalyzerOutput(summary={"message": "No code to review"})
 
-    max_tokens = int(config.get("max_tokens") or tool.default_config.get("max_tokens") or 4000)
-
-    client = OpenRouterClient(api_key=api_key)
     try:
-        response = client.chat_completion(
-            model=model,
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": code_blob},
-            ],
-            temperature=0.2,
-            max_tokens=max_tokens,
-        )
+        response = _chat(access, messages, max_tokens)
     except OpenRouterError as exc:
         logger.warning("AI review failed: %s", exc)
         return AnalyzerOutput(error=str(exc))
+
+    from backend.generation.services.openrouter_client import OpenRouterClient
 
     content = OpenRouterClient.extract_content(response)
     truncated = OpenRouterClient.is_truncated(response)
@@ -95,6 +92,94 @@ def run(
         raw_output={"model": model, "truncated": truncated, "response": content[:8000]},
         summary={"model": model, "finding_count": len(findings), "truncated": truncated},
     )
+
+
+def _resolve(model_id: str, user: User | None):
+    """The :class:`~backend.inference.access.Access` for ``model_id``.
+
+    A model visible to ``user`` resolves through ``inference.resolve_access``
+    (local endpoints included); an id that is not in the catalog is treated
+    as an OpenRouter id with the user's key, as before.
+    """
+    from backend.inference.access import LLMAccessError
+    from backend.inference.access import resolve_access
+    from backend.inference.access import system_openrouter
+    from backend.llm_models.models import LLMModel
+
+    row = LLMModel.objects.visible_to(user).select_related("endpoint").filter(model_id=model_id).first()
+    if row is not None:
+        return resolve_access(user, row)
+    from backend.credentials.services.resolver import MissingApiKeyError
+    from backend.credentials.services.resolver import get_openrouter_key
+    from backend.inference.access import Access
+
+    try:
+        api_key = get_openrouter_key(user)
+    except MissingApiKeyError as exc:
+        raise LLMAccessError(
+            code="missing_api_key",
+            message=str(exc),
+            retryable=False,
+            remediation=exc.remediation,
+        ) from exc
+    endpoint = system_openrouter()
+    return Access(
+        endpoint=endpoint,
+        kind=endpoint.kind,
+        connection=endpoint.connection,
+        api_flavor=endpoint.api_flavor,
+        served_model_name=model_id,
+        digest="",
+        num_ctx=None,
+        keep_alive="",
+        base_url=endpoint.base_url,
+        api_key=api_key,
+        request_timeout_s=endpoint.request_timeout_s,
+    )
+
+
+def _chat(access, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
+    """One review call; local models queue behind experiment calls (``analysis`` claims last).
+
+    A local call is a queued ``LLMRequest`` that a relay or pump can only
+    claim once it is committed. Inside a request transaction (the tool's
+    inline "test" action under ``ATOMIC_REQUESTS``) the call therefore runs on
+    its own autocommit connection in a helper thread, bounded by
+    :data:`INLINE_LOCAL_TIMEOUT_S` instead of the request's long deadline.
+    """
+    from django.db import connection
+
+    from backend.inference.chat import chat
+
+    params = {"temperature": 0.2, "max_tokens": max_tokens}
+    if access.is_openrouter or not connection.in_atomic_block:
+        return chat(access, messages=messages, params=params, seed=None, source="analysis").response
+
+    from backend.inference.access import LLMAccessError
+    from backend.inference.db import close_db
+
+    deadline = time.monotonic() + INLINE_LOCAL_TIMEOUT_S
+
+    def call() -> dict[str, Any]:
+        try:
+            return chat(
+                access,
+                messages=messages,
+                params=params,
+                seed=None,
+                source="analysis",
+                cancel_check=lambda: time.monotonic() > deadline,
+            ).response
+        except LLMAccessError as exc:
+            if exc.code == "cancelled" and time.monotonic() > deadline:
+                msg = f"{access.endpoint.slug} did not answer within {INLINE_LOCAL_TIMEOUT_S} s"
+                raise LLMAccessError(code="timeout", message=msg) from exc
+            raise
+        finally:
+            close_db()
+
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="ai-review") as pool:
+        return pool.submit(call).result()
 
 
 def _format_code(code: dict[str, str]) -> str:

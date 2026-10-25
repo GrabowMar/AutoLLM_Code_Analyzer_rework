@@ -31,6 +31,11 @@ def _bundle_key(snapshot: dict) -> str:
     return bundle_key_from_snapshot(snapshot)
 
 
+def _execution_policy(original: GenerationJob) -> dict:
+    policy = (original.execution or {}).get("policy") if isinstance(original.execution, dict) else None
+    return {"policy": policy} if policy else {}
+
+
 def cell_seed(original: GenerationJob) -> int | None:
     """The seed of *original*'s cell, for a retry that takes the cell over.
 
@@ -203,6 +208,11 @@ def clone_job(
             copilot_description=original.copilot_description,
             copilot_max_iterations=original.copilot_max_iterations,
             copilot_use_open_source=original.copilot_use_open_source,
+            # A cell takeover keeps the cell's frozen run position and priority, so
+            # the executor runs the replacement where the design put the cell.
+            sequence=original.sequence if keep_cell else None,
+            priority=original.priority if keep_cell else 0,
+            execution=_execution_policy(original) if keep_cell else {},
         )
 
         snapshot = original.resolved_bundle if isinstance(original.resolved_bundle, dict) else {}

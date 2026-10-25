@@ -6,7 +6,11 @@ from backend.realtime import events as realtime
 
 
 def publish_status(job: GenerationJob) -> None:
-    """Publish a status update event for a job."""
+    """Publish a status update event for a job.
+
+    ``generation:<id>`` gets the status event; a job of an experiment also
+    emits the ``job`` event on ``experiment:<id>`` (spec §F.6).
+    """
     timestamp = job.completed_at or job.started_at
     realtime.publish(
         f"generation:{job.id}",
@@ -16,6 +20,15 @@ def publish_status(job: GenerationJob) -> None:
             "updated_at": timestamp.isoformat() if timestamp else None,
         },
     )
+    _publish_experiment_job(job)
+
+
+def _publish_experiment_job(job: GenerationJob) -> None:
+    if not getattr(job, "experiment_id", None):
+        return
+    from backend.execution.transitions import job_event
+
+    realtime.publish_experiment_event(job.experiment_id, job_event(job))
 
 
 def publish_progress(
@@ -38,18 +51,26 @@ def publish_progress(
 
 
 def publish_phase(job: GenerationJob, phase: str) -> None:
-    """Persist and publish an agent-run phase change (``queued`` → ``running`` → ``evaluating``).
+    """Persist and publish a phase change of a running job (``running`` → ``evaluating``).
 
-    Persisted so lists and batch counts can tell queued from running after
-    a reload; only while the job is still RUNNING, so a cancel is never
-    overwritten. The orchestrator clears the phase when the run ends.
+    The write is guarded (``execution.transitions.guarded_save``): it only
+    lands while this worker still owns the job's current attempt, so a
+    cancel or a requeue is never overwritten. A lost lease is ignored here;
+    the worker notices it at its next guarded write or when it finishes.
     """
+    from backend.execution.transitions import LeaseLost
+    from backend.execution.transitions import guarded_save
+
     job.phase = phase
-    GenerationJob.objects.filter(id=job.id, status=GenerationJob.Status.RUNNING).update(phase=phase)
+    try:
+        guarded_save(job, ["phase"])
+    except LeaseLost:
+        return
     realtime.publish(
         f"generation:{job.id}",
         {"type": "progress", "status": job.status, "phase": phase},
     )
+    _publish_experiment_job(job)
 
 
 def update_batch(job: GenerationJob) -> None:

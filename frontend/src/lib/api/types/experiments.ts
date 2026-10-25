@@ -1,7 +1,8 @@
 /**
  * Experiments API v2 wire types (spec §F.1). Mirrors
- * backend/generation/api/schemas_experiments.py. The v1 types in
- * `../experiments.ts` stay until the experiments frontend is rewritten.
+ * backend/generation/api/schemas_experiments.py. The shared preview /
+ * comparability shapes live in `../experiments.ts`, which also re-exports
+ * everything here.
  */
 
 import type { ExperimentCondition, ExperimentPreview } from "../experiments";
@@ -481,6 +482,11 @@ export interface ExperimentStatusV2Payload {
   };
   executor: { online: boolean; draining: boolean; code_stale: boolean };
   latest_post_run: PostRunOut | null;
+  /**
+   * Thread-era rows (`queued_at IS NULL`) still PENDING / RUNNING; the page
+   * offers "Requeue" (`POST /jobs/requeue-legacy/`). Optional: 0 when absent.
+   */
+  legacy_pending?: number;
 }
 
 /**

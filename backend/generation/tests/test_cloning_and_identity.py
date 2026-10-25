@@ -40,10 +40,18 @@ from backend.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
 
+
+@pytest.fixture(autouse=True)
+def _openrouter_key():
+    """Launches check the owner's OpenRouter key (inference.access.launch_issues); tests that need none patch it."""
+    with mock.patch("backend.credentials.services.resolver.has_resolvable_key", return_value=True):
+        yield
+
+
 API = "/api/generation"
 SUPPORTED = ["temperature", "top_p", "seed", "tools", "tool_choice", "max_tokens", "reasoning"]
 S = GenerationJob.Status
-LAUNCH_DISPATCH = "backend.generation.services.experiments.dispatch_job"
+LAUNCH_DISPATCH = "backend.generation.services.experiments.enqueue_jobs"
 JOBS_DISPATCH = "backend.generation.api.views.jobs.dispatch_job"
 
 
@@ -359,9 +367,10 @@ class TestCloneCells:
         with mock.patch("backend.generation.services.experiments.apply_snapshot_to_job", side_effect=flaky_snapshot):
             _launch(experiment, user)
         broken = experiment.jobs.get(condition=c2)
-        assert (broken.status, broken.experiment_seed) == (S.FAILED, None)
         # Scaffolding keeps its historical per-condition derivation: existing experiments keep their seeds.
         seed_x = derive_experiment_seed(4321, c2.id, app.id, 0)
+        # The failed cell keeps the seed launch derived for it (jobs are bulk-created with it).
+        assert (broken.status, broken.experiment_seed) == (S.FAILED, seed_x)
         assert cell_seed(broken) == seed_x
         assert experiment.jobs.get(condition=c1).experiment_seed == derive_experiment_seed(4321, c1.id, app.id, 0)
 

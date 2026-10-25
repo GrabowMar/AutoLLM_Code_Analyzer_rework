@@ -525,86 +525,45 @@ def generate_generation_analytics(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-_DELTA_METRICS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("weighted_per_kloc", ("stats", "weighted_per_kloc", "mean")),
-    ("findings_total", ("stats", "findings_total", "mean")),
-    ("critical_high", ("stats", "critical_high", "mean")),
-    ("functional_pass_rate", ("stats", "functional", "pass_rate", "mean")),
-    ("cost", ("stats", "cost", "mean")),
-    ("duration", ("stats", "duration", "mean")),
-)
+def owned_experiment(experiment_id: Any, user):
+    """The experiment *experiment_id* if *user* may report on it (owner; staff: any); else ``ValueError``.
 
-
-def _dig(row: dict[str, Any], path: tuple[str, ...]) -> float | None:
-    node: Any = row
-    for key in path:
-        if not isinstance(node, dict) or key not in node:
-            return None
-        node = node[key]
-    return node if isinstance(node, (int, float)) else None
-
-
-def _pairwise_condition_deltas(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Every unordered condition pair, diffed on the headline trial metrics.
-
-    A raw side-by-side of per-condition stats leaves the reader to compute
-    "how much did switching from A to B change things" by hand; this does it
-    once for every metric ``_experiment_stats`` tracks so a model swap or a
-    bundle edit's effect is visible directly instead of read off two columns.
+    An unknown id, a malformed id and another user's experiment all read
+    "Experiment not found", so a report request cannot probe for ids.
     """
-
-    comparisons = []
-    for i in range(len(rows)):
-        for j in range(i + 1, len(rows)):
-            a, b = rows[i], rows[j]
-            deltas: dict[str, Any] = {}
-            for metric_name, path in _DELTA_METRICS:
-                va, vb = _dig(a, path), _dig(b, path)
-                if va is None or vb is None:
-                    deltas[metric_name] = None
-                    continue
-                diff = round(vb - va, 4)
-                deltas[metric_name] = {
-                    "a": va,
-                    "b": vb,
-                    "delta": diff,
-                    "pct_change": round((diff / va) * 100, 2) if va else None,
-                }
-            comparisons.append(
-                {
-                    "condition_a": {"id": a["condition_id"], "label": a["label"]},
-                    "condition_b": {"id": b["condition_id"], "label": b["label"]},
-                    "deltas": deltas,
-                },
-            )
-    return comparisons
-
-
-def generate_experiment_report(config: dict[str, Any]) -> dict[str, Any]:
-    """Per-condition stats and pairwise A/B deltas for one designed experiment.
-
-    Each :class:`ExperimentCondition` is one arm of the model x bundle matrix;
-    this reuses ``_experiment_stats`` per condition's jobs (same trial-level
-    statistics as ``template_comparison`` and ``/rankings``), then diffs every
-    condition pair so an A/B swap surfaces without hand-computing it from the
-    per-condition numbers.
-    """
-
     from django.core.exceptions import ValidationError
 
     from backend.generation.models import Experiment
 
-    experiment_id = config.get("experiment_id")
     if not experiment_id:
         msg = "experiment_id required for experiment_report report"
         raise ValueError(msg)
-
+    qs = Experiment.objects.all()
+    if user is None or not getattr(user, "is_authenticated", False):
+        qs = qs.none()
+    elif not getattr(user, "is_staff", False):
+        qs = qs.filter(created_by=user)
     try:
-        experiment = Experiment.objects.get(id=experiment_id)
+        return qs.get(id=experiment_id)
     except (Experiment.DoesNotExist, ValidationError) as e:
         msg = f"Experiment not found: {experiment_id}"
         raise ValueError(msg) from e
 
+
+def generate_experiment_report(config: dict[str, Any], *, user=None) -> dict[str, Any]:
+    """Results and per-condition code findings for one designed experiment.
+
+    The statistics are ``experiment_results.compute`` -- the same leaderboard
+    and app-blocked paired comparison vs the pre-registered baseline the
+    Results tab shows (no all-pairs deltas). Each condition also gets the
+    trial-level code statistics (findings, LOC, cost) from
+    ``_experiment_stats``. Only *user*'s experiments (staff: any) are
+    reported on.
+    """
+    from backend.generation.services.experiment_results import ResultFilters
+    from backend.generation.services.experiment_results import compute
+
+    experiment = owned_experiment(config.get("experiment_id"), user)
     exclude_truncated = bool(config.get("exclude_truncated", True))
     ai_slugs = AnalyzerTool.ai_slugs()
 
@@ -633,6 +592,7 @@ def generate_experiment_report(config: dict[str, Any]) -> dict[str, Any]:
             },
         )
 
+    results = compute(experiment, None, ResultFilters(exclude_truncated=exclude_truncated), user)
     return {
         "experiment": {
             "id": str(experiment.id),
@@ -641,10 +601,20 @@ def generate_experiment_report(config: dict[str, Any]) -> dict[str, Any]:
             "hypothesis": experiment.hypothesis,
             "status": experiment.status,
             "repeats": experiment.repeats,
+            "baseline_condition_id": experiment.baseline_condition_id,
         },
         "conditions": rows,
         "total_conditions": len(rows),
-        "comparisons": _pairwise_condition_deltas(rows),
+        "results": {
+            "baseline_condition_id": results["baseline_condition_id"],
+            "baseline_source": results["baseline_source"],
+            "interim": results["interim"],
+            "balanced": results["balanced"],
+            "leaderboard": results["leaderboard"],
+            "paired": results["paired"],
+            "notes": results["notes"],
+            "generated_at": results["generated_at"].isoformat(),
+        },
     }
 
 
@@ -677,3 +647,6 @@ GENERATORS = {
     "comprehensive": generate_comprehensive,
     "experiment_report": generate_experiment_report,
 }
+
+# Generators that take ``user=`` and report only on what that user owns.
+USER_SCOPED = frozenset({"experiment_report"})

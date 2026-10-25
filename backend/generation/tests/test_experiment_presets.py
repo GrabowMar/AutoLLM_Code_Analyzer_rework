@@ -35,9 +35,22 @@ from backend.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
 
+
+@pytest.fixture(autouse=True)
+def _openrouter_key():
+    """Launches check the owner's OpenRouter key (inference.access.launch_issues); tests that need none patch it."""
+    with mock.patch("backend.credentials.services.resolver.has_resolvable_key", return_value=True):
+        yield
+
+
+def _enqueued(enqueue) -> int:
+    """Jobs handed to the (patched) executor queue across every ``enqueue_jobs`` call."""
+    return sum(len(call.args[0]) for call in enqueue.call_args_list)
+
+
 API = "/api/generation"
 SUPPORTED = ["temperature", "top_p", "top_k", "min_p", "seed", "tools", "tool_choice", "max_tokens", "reasoning"]
-DISPATCH = "backend.generation.services.experiments.dispatch_job"
+DISPATCH = "backend.generation.services.experiments.enqueue_jobs"
 
 
 @pytest.fixture(autouse=True)
@@ -113,7 +126,7 @@ def _send(client, method, path, payload=None):
 
 def _launch_api(client, experiment_id):
     with (
-        mock.patch("backend.generation.api.views.experiments.has_resolvable_key", return_value=True),
+        mock.patch("backend.credentials.services.resolver.has_resolvable_key", return_value=True),
         mock.patch(DISPATCH),
     ):
         return client.post(f"{API}/experiments/{experiment_id}/launch/")
@@ -255,10 +268,13 @@ class TestConditions:
         whole = _whole(user)
         assert status({"model_id": model.id, "harness": "opencode", "harness_preset_id": whole.id}) == 400
         assert status({"model_id": model.id, "harness": "cursor"}) == 400
-        # Tool calling is checked for the preset's harness and for the experiment default.
-        assert status({"model_id": toolless.id, "harness_preset_id": _default("harness", "opencode").id}) == 400
-        assert status({"model_id": toolless.id}) == 400
+        # Tool calling is not refused per condition: it is the blocking preview issue
+        # models_without_tools, checked for the preset's harness and for the experiment default.
+        opencode = _default("harness", "opencode")
+        assert status({"model_id": toolless.id, "harness_preset_id": opencode.id}) == 200
         assert status({"model_id": toolless.id, "harness_preset_id": whole.id}) == 200
+        codes = {e["code"] for e in preview_experiment(exp)["launch_errors"]}
+        assert "models_without_tools" in codes
         # Profiles must be visible (system or own).
         private = GenerationProfileFactory(is_system=False, created_by=UserFactory())
         assert status({"model_id": model.id, "profile_id": private.id}) == 404
@@ -290,7 +306,9 @@ class TestConditions:
         )
         assert res.status_code == 200
         condition = ExperimentCondition.objects.get(id=res.json()["id"])
-        assert str(condition).endswith("/ aider-default v1")
+        assert condition.method_label() == "aider-default v1"
+        # Auto-label: "{model} · {harness}@{preset}".
+        assert res.json()["label"].endswith(" · aider@aider-default")
 
         listed = client.get(f"{API}/experiments/{exp.id}/conditions/").json()
         assert (listed[0]["profile"], listed[0]["bundle_slug"], listed[0]["bundle_version"]) == (None, None, None)
@@ -304,14 +322,14 @@ class TestConditions:
         assert _launch_api(client, exp.id).status_code == 200
         job = GenerationJob.objects.get(experiment=exp)
         assert (job.profile_id, job.stack_slug, job.status) == (None, "flask-react", GenerationJob.Status.PENDING)
-        assert client.get(f"{API}/experiments/{exp.id}/status/").json()["jobs_created"] == 1
+        assert client.get(f"{API}/experiments/{exp.id}/status/").json()["counts"]["pending"] == 1
         exported = client.get(f"{API}/experiments/{exp.id}/export/").json()
         assert exported["conditions"][0]["profile"] is None
         assert exported["conditions"][0]["bundle_slug"] is None
 
-        report = generators.generate_experiment_report({"experiment_id": str(exp.id)})
+        report = generators.generate_experiment_report({"experiment_id": str(exp.id)}, user=user)
         assert report["conditions"][0]["bundle_key"] == "aider-default@1"
-        assert report["conditions"][0]["label"].endswith("/ aider-default v1")
+        assert report["conditions"][0]["label"].endswith(" · aider@aider-default")
 
 
 # ── experiment settings: stack rule, presets ──────────────────────────
@@ -708,7 +726,7 @@ class TestLaunch:
         _condition(exp, model, preset=whole)
 
         batch, dispatch = _launch(exp, user)
-        assert (batch.total_jobs, batch.status, dispatch.call_count) == (4, "pending", 4)
+        assert (batch.total_jobs, batch.status, _enqueued(dispatch)) == (4, "pending", 4)
         request = GenerationBatch.objects.get(id=batch.id).request
         assert request["experiment_id"] == str(exp.id)
         assert (request["base_seed"], request["order_seed"], request["trials"], request["stack_slug"]) == (
@@ -728,14 +746,14 @@ class TestLaunch:
         GenerationJob.objects.filter(id=jobs[0].id).update(status=GenerationJob.Status.FAILED)
         GenerationJob.objects.filter(id=jobs[1].id).update(status=GenerationJob.Status.CANCELLED)
         top_up, dispatch = _launch(exp, user)
-        assert (top_up.total_jobs, dispatch.call_count, top_up.request["pending_cell_count"]) == (2, 2, 2)
+        assert (top_up.total_jobs, _enqueued(dispatch), top_up.request["pending_cell_count"]) == (2, 2, 2)
         assert GenerationJob.objects.filter(experiment=exp).count() == 6
         # The top-up reproduces the cells' seeds (common random numbers survive).
         new = {(j.condition_id, j.app_requirement_id, j.repeat_index): j.experiment_seed for j in top_up.jobs.all()}
         assert new == {(j.condition_id, j.app_requirement_id, j.repeat_index): j.experiment_seed for j in jobs[:2]}
 
         empty, dispatch = _launch(exp, user)
-        assert (empty.total_jobs, empty.status, dispatch.call_count) == (0, "completed", 0)
+        assert (empty.total_jobs, empty.status, _enqueued(dispatch)) == (0, "completed", 0)
         summary = batch_summary(GenerationBatch.objects.get(id=empty.id))
         assert summary["experiment"]["id"] == exp.id
         assert (summary["trials"], summary["base_seed"], summary["stack_slug"]) == (2, 5, "flask-react")
@@ -748,7 +766,7 @@ class TestLaunch:
             side_effect=RuntimeError("boom"),
         ):
             batch, dispatch = _launch(exp, user)
-        assert (batch.status, batch.total_jobs, batch.failed_jobs, dispatch.call_count) == ("failed", 2, 2, 0)
+        assert (batch.status, batch.total_jobs, batch.failed_jobs, _enqueued(dispatch)) == ("failed", 2, 2, 0)
         assert GenerationBatch.objects.get(id=batch.id).status == "failed"
 
 

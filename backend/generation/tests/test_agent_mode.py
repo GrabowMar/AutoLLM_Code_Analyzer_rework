@@ -9,7 +9,6 @@ import gzip
 import importlib.util
 import json
 import sys
-import threading
 from pathlib import Path
 from unittest import mock
 
@@ -25,10 +24,8 @@ from backend.generation.services.agent.harnesses.base import proxy_env
 from backend.generation.services.agent.harnesses.base import run_script
 from backend.generation.services.agent.harnesses.opencode import DISABLED_TOOLS
 from backend.generation.services.agent.harnesses.opencode import parse_events
-from backend.generation.services.agent.runner import AgentRunCancelled
 from backend.generation.services.agent.runner import AgentRunError
 from backend.generation.services.agent.runner import AgentRunner
-from backend.generation.services.agent.runner import RunQueue
 from backend.generation.services.agent.runner import assess_validity
 from backend.generation.services.agent.runner import validate_python_sources
 from backend.generation.services.agent.sandbox import SandboxResult
@@ -613,38 +610,6 @@ class TestGateway:
         assert out["usage"]["cost"] == 0.001
 
 
-# ── run queue ──────────────────────────────────────────────────────────
-
-
-class TestRunQueue:
-    def test_fifo_by_reservation_order_not_thread_start_order(self, monkeypatch):
-        monkeypatch.setattr("backend.generation.services.agent.runner._is_live", lambda key: True)
-        queue = RunQueue(1)
-        for key in ("a", "b", "c"):
-            queue.reserve(key)
-        order: list[str] = []
-
-        def run(key):
-            queue.enter(key, lambda: False)
-            order.append(key)
-            queue.leave(key)
-
-        threads = [threading.Thread(target=run, args=(k,)) for k in ("c", "b", "a")]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=30)
-        assert order == ["a", "b", "c"]
-
-    def test_cancelled_waiter_leaves_the_queue(self):
-        queue = RunQueue(1)
-        queue.reserve("head")
-        queue.enter("head", lambda: False)
-        with pytest.raises(AgentRunCancelled):
-            queue.enter("waiter", lambda: True)
-        assert "waiter" not in queue.waiting
-
-
 # ── runner: evidence → result_data / metrics / status ──────────────────
 
 
@@ -789,7 +754,7 @@ class TestValidity:
 
 class TestRunnerExecute:
     def _fake_sandbox(self, monkeypatch, result):
-        monkeypatch.setattr("backend.generation.services.agent.runner.get_openrouter_key", lambda user: "sk-test")
+        monkeypatch.setattr("backend.credentials.services.resolver.get_openrouter_key", lambda user: "sk-test")
         monkeypatch.setattr(
             "backend.generation.services.agent.runner.seed_files",
             lambda job: {"app.py": b"pass\n", "Dockerfile": b"FROM x"},
@@ -808,10 +773,12 @@ class TestRunnerExecute:
         assert agent_job.status == GenerationJob.Status.COMPLETED
         agent = agent_job.result_data["agent"]
         assert agent["termination"] == "completed"
-        assert agent["schedule"]["run_order"] >= 1
+        assert agent["schedule"]["attempt"] == 0
         assert agent["validity"]["valid"] is True
         assert {n["code"] for n in agent["validity"]["notes"]} == {"not_evaluated"}
-        assert fake.call_args.kwargs["api_key"] == "sk-test"
+        wiring = fake.call_args.kwargs["wiring"]
+        assert (wiring.api_key, wiring.network, wiring.image_local) == ("sk-test", "bridge", False)
+        assert fake.call_args.args == (str(agent_job.id), 0)
 
     def test_auto_evaluation_runs_inside_the_slot(self, agent_job, no_frontend_validator, monkeypatch, settings):
         from backend.generation.services.orchestrator import GenerationService
@@ -820,7 +787,7 @@ class TestRunnerExecute:
         self._fake_sandbox(monkeypatch, _result([_call(1)]))
         calls = []
 
-        def fake_evaluate(job):
+        def fake_evaluate(job, **_kwargs):
             calls.append(job.id)
             job.result_data = {**job.result_data, "evaluation": {"status": "passed"}}
 
@@ -838,17 +805,58 @@ class TestRunnerExecute:
         agent_job.refresh_from_db()
         assert agent_job.status == GenerationJob.Status.CANCELLED
 
-    def test_missing_key_fails_with_remediation_and_frees_the_queue(self, agent_job, settings):
-        from backend.generation.services.agent.runner import run_queue
+    def test_missing_key_fails_with_remediation(self, agent_job, settings):
         from backend.generation.services.orchestrator import GenerationService
 
         settings.OPENROUTER_API_KEY = ""
-        run_queue().reserve(str(agent_job.id))
         GenerationService().execute(agent_job)
         agent_job.refresh_from_db()
         assert agent_job.status == GenerationJob.Status.FAILED
         assert agent_job.result_data["error_remediation"]
-        assert str(agent_job.id) not in run_queue().waiting
+        assert agent_job.attempt == 0  # a configuration error is not retried
+
+    def test_local_run_after_a_proxy_infra_error_is_interrupted(self, agent_job, no_frontend_validator, monkeypatch):
+        from backend.inference.gateway_wiring import GatewayWiring
+
+        self._fake_sandbox(monkeypatch, _result([_call(1)]))
+        wiring = GatewayWiring(
+            image_local=True,
+            upstream="http://proxy/v1",
+            api_key="",
+            network="llmlab-gw-egress",
+            extra_env={"LLMLAB_UPSTREAM_TOKEN": "t"},
+            upstream_timeout_s=1200,
+        )
+        monkeypatch.setattr("backend.inference.gateway_wiring.for_job", lambda job, snapshot: wiring)
+        agent_job.resolved_bundle = {
+            **agent_job.resolved_bundle,
+            "endpoint": {"slug": "gpu", "served_model_name": "q"},
+        }
+        agent_job.status = GenerationJob.Status.RUNNING
+        agent_job.execution = {"infra_errors": [{"code": "endpoint_unavailable", "status": 503}]}
+        agent_job.save()
+        assert AgentRunner(agent_job).run_stage() == "infra_interrupted"
+        agent_job.refresh_from_db()
+        assert agent_job.result_data["agent"]["termination"] == "completed"  # the sample was recorded first
+
+    def test_transport_failures_without_a_successful_call_are_infra(self, agent_job):
+        calls = [_call(1, status=503, error={"code": "endpoint_unavailable", "message": "relay gone"})]
+        with pytest.raises(AgentRunError) as exc:
+            AgentRunner(agent_job)._record(agent_job.resolved_bundle, {}, _result(calls))
+        assert exc.value.infra is True
+        calls = [_call(1, status=400, error={"message": "context too long"})]
+        with pytest.raises(AgentRunError) as exc:
+            AgentRunner(agent_job)._record(agent_job.resolved_bundle, {}, _result(calls))
+        assert exc.value.infra is False
+
+    def test_contended_and_retried_runs_are_flagged(self):
+        snap = {"gateway": {"dropped_params": {}}, "llm": {"model_slug": "m"}}
+        result = {"agent": {"wall_seconds": 100}, "evaluation": {"status": "passed"}}
+        notes = {
+            n["code"]: n["severity"]
+            for n in assess_validity(snap, result, execution={"llm_queue_wait_s": 30}, attempt=1)["notes"]
+        }
+        assert (notes["contended"], notes["infra_retried"]) == ("warn", "warn")
 
     def test_old_snapshot_schema_is_not_replayed(self, agent_job):
         from backend.generation.services.orchestrator import GenerationService
@@ -1013,7 +1021,10 @@ class TestAgentExperiments:
         model = _model()
         ExperimentConditionFactory(experiment=experiment, model=model, profile=profile, harness="opencode")
         ExperimentConditionFactory(experiment=experiment, model=model, profile=profile, harness="mini-swe-agent")
-        with mock.patch("backend.generation.services.experiments.dispatch_job") as dispatch:
+        with (
+            mock.patch("backend.execution.api.wake"),
+            mock.patch("backend.credentials.services.resolver.has_resolvable_key", return_value=True),
+        ):
             launch_experiment(experiment, user)
         jobs = list(experiment.jobs.all())
         assert len(jobs) == 8
@@ -1023,7 +1034,9 @@ class TestAgentExperiments:
             for repeat in (0, 1):
                 cell = [j for j in jobs if j.app_requirement_id == app_id and j.repeat_index == repeat]
                 assert len({j.experiment_seed for j in cell}) == 1
-        order = [c.args[0].repeat_index for c in dispatch.call_args_list]
+        # Executor-owned, in repeat blocks: every repeat-0 cell runs before any repeat-1 cell.
+        assert all(j.queued_at is not None for j in jobs)
+        order = [j.repeat_index for j in sorted(jobs, key=lambda j: (j.sequence or 0, j.queued_at))]
         assert order == sorted(order)
 
     def test_preview_reports_comparability(self):
