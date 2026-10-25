@@ -21,6 +21,23 @@ export interface LLMModelSummary {
   supports_json_mode: boolean;
   /** OpenRouter lists `reasoning`/`include_reasoning` among the model's supported params. */
   supports_reasoning?: boolean;
+  // Endpoint fields (spec §F.3). Optional until the models API serializes
+  // them; `endpoint: null` / `is_local: false` mean the OpenRouter catalog.
+  endpoint?: LLMModelEndpointRef | null;
+  /** Exact name on the endpoint (Ollama tag, colon kept); "" for OpenRouter. */
+  served_model_name?: string;
+  digest?: string;
+  quantization?: string;
+  parameter_size?: string;
+  is_local?: boolean;
+}
+
+export interface LLMModelEndpointRef {
+  id: number;
+  slug: string;
+  name: string;
+  kind: "openrouter" | "ollama" | "openai_compatible";
+  online: boolean;
 }
 
 export interface LLMModelDetail extends LLMModelSummary {

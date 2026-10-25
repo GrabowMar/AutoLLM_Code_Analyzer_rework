@@ -96,6 +96,8 @@ LOCAL_APPS = [
     "backend.docs",
     "backend.system",
     "backend.automation",
+    "backend.inference",
+    "backend.execution",
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -210,10 +212,11 @@ AGENT_SAMPLING_POLICY = env.str("AGENT_SAMPLING_POLICY", default="provider_defau
 # right after its run (generation/services/evaluation/).
 AGENT_AUTO_EVALUATE = env.bool("AGENT_AUTO_EVALUATE", default=True)
 AGENT_NETWORK_POLICY = env.str("AGENT_NETWORK_POLICY", default="packages")
-# Sandboxes running at once in one process. Each may use AGENT_SANDBOX_MEM_LIMIT
-# of the apps daemon's own cap (4 GB in docker-compose.local.yml, shared with
-# the sample apps), so raise both together. The limits are frozen into every
-# job snapshot: runs are only comparable under the same caps.
+# Initial ExecutorSettings.sandbox_slots (sandboxes running at once; editable at
+# runtime by staff). Each may use AGENT_SANDBOX_MEM_LIMIT of the apps daemon's
+# own cap (APPS_DIND_MEM_LIMIT, shared with the sample apps), so raise both
+# together. Only sandbox_mem_limit / nano_cpus are frozen into job snapshots
+# (runs are only comparable under the same caps); the concurrency is not.
 AGENT_MAX_CONCURRENT_RUNS = env.int("AGENT_MAX_CONCURRENT_RUNS", default=1)
 AGENT_SANDBOX_MEM_LIMIT = env.str("AGENT_SANDBOX_MEM_LIMIT", default="3g")
 AGENT_SANDBOX_NANO_CPUS = env.int("AGENT_SANDBOX_NANO_CPUS", default=2_000_000_000)
@@ -223,6 +226,55 @@ AGENT_DEFAULT_PROVIDER_ROUTING = {
     "quantizations": ["fp8", "fp16", "bf16", "fp32", "unknown"],
     "allow_fallbacks": True,
 }
+
+# ── Execution (backend/execution) ──
+EXECUTOR_TICK_SECONDS = env.float("EXECUTOR_TICK_SECONDS", default=2.0)
+EXECUTOR_LEASE_SECONDS = env.int("EXECUTOR_LEASE_SECONDS", default=90)
+EXECUTOR_HEARTBEAT_SECONDS = env.int("EXECUTOR_HEARTBEAT_SECONDS", default=20)
+EXECUTOR_LEADER_LOCK_KEY = 0x6C6C6D6C6162  # "llmlab"
+EXECUTOR_MAX_DB_THREADS = 48
+EXECUTOR_LOST_RETRIES = 10  # executor_lost requeues; separate from infra_retries
+EXECUTOR_STARVATION_S = 600  # residency starvation guard (spec §C.4 rule 4)
+EVAL_MAX_REQUEUES = 2
+# AUTHORITATIVE for the memory rule (docker info MemTotal inside apps-dind reports host RAM).
+APPS_DIND_MEM_LIMIT = env.str("APPS_DIND_MEM_LIMIT", default="4g")
+APPS_DIND_APP_RESERVE = env.str("APPS_DIND_APP_RESERVE", default="1g")
+EVAL_SLOT_MEM = "1536m"  # app 1g + tester 256m + slack (evaluation/runner.py)
+ANALYSIS_WORKSPACE_MEM = "1g"  # runtime/services/docker_manager.py
+SCHEDULE_MIN_INTERVAL_S = 900
+# ── Inference ──
+LLM_PROXY_BIND = env.str("LLM_PROXY_BIND", default="172.30.99.2:8090")
+LLM_PROXY_UPSTREAM = env.str("LLM_PROXY_UPSTREAM", default="http://172.30.99.2:8090/v1")
+LLM_GATEWAY_EGRESS_NETWORK = "llmlab-gw-egress"
+LLM_GATEWAY_EGRESS_BRIDGE = "llmlab-gwegr"  # com.docker.network.bridge.name (firewall -i match)
+LLM_GATEWAY_EGRESS_SUBNET = env.str("LLM_GATEWAY_EGRESS_SUBNET", default="10.213.0.0/24")
+LLM_PROXY_MAX_BODY_BYTES = 16 * 1024 * 1024
+RELAY_POLL_TIMEOUT_S = 25
+RELAY_ACK_LEASE_S = 60  # 2 x poll timeout; extended on ack
+RELAY_SESSION_TTL_S = 60
+RELAY_MAX_BODY_BYTES = 8 * 1024 * 1024  # request bodies (gzip ok); decompressed cap 32 MB
+RELAY_RATE_LIMIT_PER_S = 20
+RELAY_MIN_VERSION = "1.0.0"
+RELAY_INVENTORY_MAX_MODELS = 500
+# frontend + Caddy addresses; client IP = right-most untrusted X-Forwarded-For hop
+TRUSTED_PROXY_CIDRS = env.list("TRUSTED_PROXY_CIDRS", default=[])
+# "cidr:port", e.g. "100.64.0.0/10:11434"
+INFERENCE_DIRECT_ALLOWED_TARGETS = env.list("INFERENCE_DIRECT_ALLOWED_TARGETS", default=[])
+INFERENCE_BLOCKED_HOSTS = [
+    "postgres",
+    "redis",
+    "django",
+    "apps-dind",
+    "mailpit",
+    "flower",
+    "executor",
+    "frontend",
+    "celeryworker",
+    "celerybeat",
+    "169.254.169.254",
+    "metadata.google.internal",
+]
+LLM_REQUEST_RETENTION_DAYS = 7
 
 # TEMPLATES
 # ------------------------------------------------------------------------------

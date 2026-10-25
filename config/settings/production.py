@@ -22,7 +22,9 @@ ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[DJANGO_DOMAIN])  # noq
 
 # DATABASES
 # ------------------------------------------------------------------------------
-DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=60)
+# 0: ASGI runs sync views in per-request threads and the executor uses thread
+# pools; a persistent connection per thread would leak (spec §B.5).
+DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=0)
 
 # CACHES
 # ------------------------------------------------------------------------------

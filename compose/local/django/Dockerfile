@@ -64,6 +64,10 @@ COPY ./compose/local/django/start /start
 RUN sed -i 's/\r$//g' /start
 RUN chmod +x /start
 
+COPY ./compose/local/django/start-executor /start-executor
+RUN sed -i 's/\r$//g' /start-executor
+RUN chmod +x /start-executor
+
 
 COPY ./compose/local/django/celery/worker/start /start-celeryworker
 RUN sed -i 's/\r$//g' /start-celeryworker

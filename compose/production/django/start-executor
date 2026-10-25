@@ -1,0 +1,10 @@
+#!/bin/bash
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+
+# The executor never runs migrations: it waits until django's `migrate` is done,
+# then runs every generation job (backend/execution). No autoreload.
+python manage.py wait_for_migrations && exec python manage.py run_executor

@@ -1,16 +1,41 @@
-"""LLM Model — stores AI model capabilities, pricing, and metadata from OpenRouter."""
+"""LLM Model — capabilities, pricing and metadata of OpenRouter catalog rows and local endpoint models."""
+
+from __future__ import annotations
 
 import math
 
 from django.db import models
+from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
 
+class LLMModelQuerySet(models.QuerySet):
+    def visible_to(self, user) -> LLMModelQuerySet:
+        """Models ``user`` may see and use: the OpenRouter catalog plus models of visible endpoints.
+
+        Staff see every row. This is the only way views, the ModelPicker
+        catalog, condition creation and job creation resolve a model pk
+        (spec §B.2); an invisible pk is a 404.
+        """
+        if user is not None and getattr(user, "is_staff", False):
+            return self.all()
+        from backend.inference.access import visible_endpoints
+
+        return self.filter(Q(endpoint__isnull=True) | Q(endpoint__in=visible_endpoints(user)))
+
+
+LLMModelManager = models.Manager.from_queryset(LLMModelQuerySet)
+
+
 class LLMModel(models.Model):
-    """AI model fetched from OpenRouter with capabilities, pricing, and metadata."""
+    """An AI model: an OpenRouter catalog row (``endpoint`` NULL) or a model discovered on a local endpoint.
+
+    ``model_id`` stays globally unique; local rows use
+    ``local-<endpoint_slug>/<sanitized served name>``.
+    """
 
     model_id = models.CharField(
-        _("OpenRouter model ID"),
+        _("Model ID"),
         max_length=300,
         unique=True,
         db_index=True,
@@ -52,13 +77,41 @@ class LLMModel(models.Model):
     )
     metadata = models.JSONField(_("structured metadata"), default=dict, blank=True)
 
+    # Where the model runs. NULL = the OpenRouter catalog (every pre-existing row).
+    endpoint = models.ForeignKey(
+        "inference.LLMEndpoint",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="models",
+    )
+    # Exact name on the endpoint (Ollama tag, colon kept), e.g. "qwen2.5-coder:32b".
+    served_model_name = models.CharField(max_length=300, blank=True, default="")
+    digest = models.CharField(max_length=80, blank=True, default="")
+    quantization = models.CharField(max_length=32, blank=True, default="")
+    parameter_size = models.CharField(max_length=32, blank=True, default="")
+    family = models.CharField(max_length=64, blank=True, default="")
+    num_ctx_override = models.PositiveIntegerField(null=True, blank=True)
+    is_available = models.BooleanField(default=True)
+    is_hidden = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = LLMModelManager()
 
     class Meta:
         verbose_name = _("LLM Model")
         verbose_name_plural = _("LLM Models")
         ordering = ["provider", "model_name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["endpoint", "served_model_name"],
+                condition=Q(endpoint__isnull=False),
+                name="llmmodel_endpoint_served_unique",
+            ),
+        ]
+        indexes = [models.Index(fields=["endpoint", "is_available"], name="llmmodel_endpoint_avail")]
 
     def __str__(self) -> str:
         return f"{self.provider}/{self.model_name}"
@@ -83,6 +136,11 @@ class LLMModel(models.Model):
         raw = context_norm / avg_price if avg_price > 0 else 0
         scaled = math.log(raw + 1) / math.log(101)
         return max(0.0, min(1.0, scaled))
+
+    @property
+    def is_local(self) -> bool:
+        """True for models on a non-system (Ollama / OpenAI-compatible) endpoint."""
+        return self.endpoint_id is not None and not self.endpoint.is_system
 
     def get_capabilities_list(self) -> list[str]:
         """Return human-readable list of supported capabilities."""

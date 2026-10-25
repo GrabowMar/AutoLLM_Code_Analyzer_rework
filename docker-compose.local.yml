@@ -11,6 +11,17 @@ volumes:
   apps_dind_data: {}
   apps_dind_certs: {}
 
+networks:
+  default: {}
+  # Internal-only network between the executor's LLM proxy (172.30.99.2:8090)
+  # and apps-dind (172.30.99.3), so gateways of local-model agent runs can
+  # reach the proxy (spec §B.6). No default route, no other members.
+  llmproxy:
+    internal: true
+    ipam:
+      config:
+        - subnet: "${LLMPROXY_SUBNET:-172.30.99.0/29}"
+
 services:
   django: &django
     build:
@@ -36,7 +47,7 @@ services:
     env_file:
       - ./.envs/.local/.django
       - ./.envs/.local/.postgres
-    environment:
+    environment: &django-env
       # Sample apps are built and run inside apps-dind (nested containers), and
       # the reverse-proxy reaches an app's published port at apps-dind:<app_port>.
       APPS_DOCKER_HOST: tcp://apps-dind:2376
@@ -45,6 +56,12 @@ services:
       # App ports are published inside apps-dind only, so browsers reach apps via
       # Django's /apps/<name>/ path proxy (or APPS_SUBDOMAIN_PROXY, which wins).
       APPS_PROXY_PATH: "True"
+      # Authoritative apps-dind memory for the executor's memory rule; keep it
+      # equal to apps-dind's mem_limit below.
+      APPS_DIND_MEM_LIMIT: "${APPS_DIND_MEM_LIMIT:-4g}"
+      # Frontend + Caddy addresses: the relay's client IP is the right-most
+      # X-Forwarded-For hop outside these CIDRs.
+      TRUSTED_PROXY_CIDRS: "${TRUSTED_PROXY_CIDRS:-}"
     ports:
       - '8001:8000'
     command: /start
@@ -52,6 +69,35 @@ services:
     mem_limit: 4g
     cpus: 4
     pids_limit: 2048
+    oom_score_adj: 500
+
+  # Runs every generation job (scheduling, sandboxes, LLM calls, evaluation,
+  # the internal LLM proxy, schedules and post-runs); the web process only
+  # writes rows. One instance, no autoreload: restart it to pick up backend
+  # code (drain first, see docs/EXECUTION.md).
+  executor:
+    <<: *django
+    depends_on:
+      - postgres
+      - redis
+      - apps-dind
+    ports: []
+    command: /start-executor
+    networks:
+      default: {}
+      llmproxy:
+        ipv4_address: "${LLM_PROXY_ADDR:-172.30.99.2}"
+    environment:
+      <<: *django-env
+      CONN_MAX_AGE: "0"
+      APPS_DIND_MEM_LIMIT: "${APPS_DIND_MEM_LIMIT:-4g}"
+    # No extra_hosts: direct endpoints (tailnet/VPN) are reached through host
+    # routing + masquerade; host.docker.internal would expose every host-bound
+    # service and is rejected by the SSRF validator anyway.
+    stop_grace_period: 30s
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 1024
     oom_score_adj: 500
 
   postgres:
@@ -82,11 +128,22 @@ services:
     environment:
       DOCKER_TLS_CERTDIR: /certs
       DOCKER_TLS_SAN: DNS:apps-dind
+      # Firewall exception for local-model gateways -> executor LLM proxy
+      # (compose/local/apps-dind/entrypoint.sh).
+      LLM_PROXY_ADDR: "${LLM_PROXY_ADDR:-172.30.99.2}"
+      LLM_PROXY_PORT: "8090"
+      LLM_GATEWAY_EGRESS_SUBNET: "${LLM_GATEWAY_EGRESS_SUBNET:-10.213.0.0/24}"
+      LLMPROXY_SUBNET: "${LLMPROXY_SUBNET:-172.30.99.0/29}"
     volumes:
       - apps_dind_data:/var/lib/docker
       - apps_dind_certs:/certs
-    mem_limit: 4g
-    cpus: 4
+    networks:
+      default: {}
+      llmproxy:
+        ipv4_address: "172.30.99.3"
+    # Keep APPS_DIND_MEM_LIMIT equal to this cap (django/executor read it).
+    mem_limit: ${APPS_DIND_MEM_LIMIT:-4g}
+    cpus: ${APPS_DIND_CPUS:-4}
     pids_limit: 4096
     oom_score_adj: 500
 
@@ -117,7 +174,8 @@ services:
       - apps-dind
     ports: []
     command: /start-celeryworker
-    mem_limit: 2g
+    # Was 2g; job execution and automation moved to the executor.
+    mem_limit: 1g
     cpus: 2
 
   celerybeat:
