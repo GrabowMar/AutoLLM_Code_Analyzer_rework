@@ -33,6 +33,8 @@ if settings.DEBUG:
 
 # API URLS
 urlpatterns += [
+    # Relay protocol v1 (plain async Django views, spec §E.1); before "api/".
+    path("api/relay/v1/", include("backend.inference.relay.urls")),
     # API base url
     path("api/", api.urls),
     # Realtime SSE stream (plain Django view — Ninja doesn't support streaming)

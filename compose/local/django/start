@@ -6,4 +6,5 @@ set -o nounset
 
 
 python manage.py migrate
-exec uvicorn config.asgi:application --host 0.0.0.0 --reload --reload-include '*.html'
+# --timeout-graceful-shutdown: a reload must not hang on open SSE streams.
+exec uvicorn config.asgi:application --host 0.0.0.0 --reload --reload-include '*.html' --timeout-graceful-shutdown 5

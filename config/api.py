@@ -40,4 +40,9 @@ api.add_router("/runtime/", "backend.runtime.api.views.router")
 api.add_router("/export/", "backend.export.api.views.router")
 api.add_router("/docs/", "backend.docs.api.views.router")
 api.add_router("/system/", "backend.system.api.views.router")
+api.add_router("/inference/", "backend.inference.api.views.router")
+api.add_router("/execution/", "backend.execution.api_views.router")
+# Spec §F.4 replaces the automation router with the two above. It stays mounted
+# until the experiments frontend (Track D) and the automation test skips
+# (Track C) land, so nothing that uses it today breaks; remove this line then.
 api.add_router("/automation/", "backend.automation.api.views.router")

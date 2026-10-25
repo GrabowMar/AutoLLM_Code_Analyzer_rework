@@ -4,6 +4,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
 
@@ -266,8 +267,22 @@ class Experiment(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft", _("Draft")
         RUNNING = "running", _("Running")
+        PAUSED = "paused", _("Paused")
         COMPLETED = "completed", _("Completed")
+        CANCELLED = "cancelled", _("Cancelled")
         ARCHIVED = "archived", _("Archived")
+
+    class SchedulingPolicy(models.TextChoices):
+        AUTO = "auto", _("Auto")
+        INTERLEAVED = "interleaved", _("Interleaved")
+        BLOCKED = "blocked", _("Blocked")
+        GROUPED = "grouped", _("Grouped")
+
+    class PauseReason(models.TextChoices):
+        NONE = "", _("None")
+        USER = "user", _("User")
+        DIGEST_CHANGED = "digest_changed", _("Digest changed")
+        ENDPOINT_REMOVED = "endpoint_removed", _("Endpoint removed")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(_("name"), max_length=200)
@@ -353,6 +368,58 @@ class Experiment(models.Model):
         related_name="experiments",
     )
 
+    # Execution (spec §B.3 / §C). The order is frozen per job (GenerationJob.sequence) at launch.
+    scheduling_policy = models.CharField(
+        _("scheduling policy"),
+        max_length=12,
+        choices=SchedulingPolicy.choices,
+        default=SchedulingPolicy.AUTO,
+    )
+    # -10..10; non-staff are clamped to -5..0. Orders lanes within a user's fair share.
+    priority = models.SmallIntegerField(_("priority"), default=0)
+    # Pre-registered baseline: defaults to the first condition at launch, frozen after launch.
+    baseline_condition = models.ForeignKey(
+        "ExperimentCondition",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    # Set on clones made by a clone_and_run schedule.
+    created_by_schedule = models.ForeignKey(
+        "ExperimentSchedule",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="clones",
+    )
+    # Cap on this experiment's RUNNING jobs in all phases (NULL = no cap).
+    max_concurrency = models.PositiveSmallIntegerField(_("max concurrency"), null=True, blank=True)
+    infra_retries = models.PositiveSmallIntegerField(_("infra retries"), default=2)  # 0..5
+    # {"warmup": bool (default true; kind=ollama only), "max_resident_models": int|null (only tightens K)}
+    execution_options = models.JSONField(_("execution options"), default=dict, blank=True)
+    # Keys: evaluate (bool), analysis (enabled, tool_slugs, only_passing),
+    # report (enabled, exclude_truncated). Spec §B.3.
+    post_run = models.JSONField(_("post-run steps"), default=dict, blank=True)
+    pause_reason = models.CharField(
+        _("pause reason"),
+        max_length=32,
+        choices=PauseReason.choices,
+        blank=True,
+        default="",
+    )
+    cloned_from = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="clones",
+    )
+    launched_at = models.DateTimeField(_("launched at"), null=True, blank=True)
+    paused_at = models.DateTimeField(_("paused at"), null=True, blank=True)
+    completed_at = models.DateTimeField(_("completed at"), null=True, blank=True)
+    cancelled_at = models.DateTimeField(_("cancelled at"), null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -360,6 +427,9 @@ class Experiment(models.Model):
         verbose_name = _("Experiment")
         verbose_name_plural = _("Experiments")
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["created_by", "status", "-updated_at"], name="gen_exp_owner_status"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["created_by", "slug"],
@@ -416,6 +486,9 @@ class ExperimentCondition(models.Model):
         blank=True,
         related_name="experiment_conditions",
     )
+    # Set at first launch for local models; top_up/add_replicates raise
+    # ``digest_drift`` when the live LLMModel.digest differs.
+    pinned_digest = models.CharField(_("pinned digest"), max_length=80, blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -459,8 +532,107 @@ class ExperimentCondition(models.Model):
         return "/".join(parts)
 
 
+class ExperimentSchedule(models.Model):
+    """A cron trigger on an experiment: top up, add replicates, or clone and run (spec §F.5)."""
+
+    class Action(models.TextChoices):
+        TOP_UP = "top_up", _("Top up")
+        ADD_REPLICATES = "add_replicates", _("Add replicates")
+        CLONE_AND_RUN = "clone_and_run", _("Clone and run")
+
+    experiment = models.ForeignKey(Experiment, on_delete=models.CASCADE, related_name="schedules")
+    action = models.CharField(_("action"), max_length=16, choices=Action.choices)
+    # croniter-valid, min interval SCHEDULE_MIN_INTERVAL_S
+    cron = models.CharField(_("cron"), max_length=120)
+    timezone = models.CharField(_("timezone"), max_length=64, default="UTC")
+    # add_replicates {"replicates": 1..5}; clone_and_run {"name_template": "{name} {date}"}
+    params = models.JSONField(_("params"), default=dict)
+    skip_if_active = models.BooleanField(_("skip if active"), default=True)
+    enabled = models.BooleanField(_("enabled"), default=True)
+    next_run_at = models.DateTimeField(_("next run at"), null=True, blank=True)
+    last_run_at = models.DateTimeField(_("last run at"), null=True, blank=True)
+    # {outcome: fired|skipped|error, batch_id?, experiment_id?, jobs_created?, detail}
+    last_result = models.JSONField(_("last result"), default=dict)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="experiment_schedules",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("Experiment Schedule")
+        verbose_name_plural = _("Experiment Schedules")
+        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["next_run_at"], condition=Q(enabled=True), name="expsched_due"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.action} {self.cron} ({self.experiment_id})"
+
+
+class ExperimentPostRun(models.Model):
+    """One post-run (analysis, then report) of an experiment; leased by the executor (spec §F.5)."""
+
+    class Trigger(models.TextChoices):
+        COMPLETED = "completed", _("Completed")
+        MANUAL = "manual", _("Manual")
+        SCHEDULE = "schedule", _("Schedule")
+
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        RUNNING = "running", _("Running")
+        COMPLETED = "completed", _("Completed")
+        FAILED = "failed", _("Failed")
+        CANCELLED = "cancelled", _("Cancelled")
+
+    experiment = models.ForeignKey(Experiment, on_delete=models.CASCADE, related_name="post_runs")
+    trigger = models.CharField(_("trigger"), max_length=12, choices=Trigger.choices)
+    status = models.CharField(_("status"), max_length=12, choices=Status.choices, default=Status.PENDING)
+    config = models.JSONField(_("config"))  # frozen copy of experiment.post_run
+    analysis_run_ids = models.JSONField(_("analysis run ids"), default=list)
+    report = models.ForeignKey(
+        "reports.Report",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    # Keys: analysis_done, analysis_total, analysis_failed.
+    progress = models.JSONField(_("progress"), default=dict)
+    lease_owner = models.CharField(_("lease owner"), max_length=80, blank=True, default="")
+    lease_expires_at = models.DateTimeField(_("lease expires at"), null=True, blank=True)
+    error = models.TextField(_("error"), blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(_("started at"), null=True, blank=True)
+    completed_at = models.DateTimeField(_("completed at"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("Experiment Post-run")
+        verbose_name_plural = _("Experiment Post-runs")
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["status"],
+                condition=Q(status__in=["pending", "running"]),
+                name="postrun_active",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"post-run {self.id} ({self.status})"
+
+
 class GenerationBatch(models.Model):
     """Groups multiple generation jobs together."""
+
+    class Kind(models.TextChoices):
+        ADHOC = "adhoc", _("Ad hoc")
+        LAUNCH = "launch", _("Launch")
+        TOP_UP = "top_up", _("Top up")
+        RETRY = "retry", _("Retry")
+        SCHEDULE = "schedule", _("Schedule")
 
     class Status(models.TextChoices):
         PENDING = "pending", _("Pending")
@@ -493,6 +665,14 @@ class GenerationBatch(models.Model):
         on_delete=models.CASCADE,
         related_name="generation_batches",
     )
+    experiment = models.ForeignKey(
+        Experiment,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="batches",
+    )
+    kind = models.CharField(_("kind"), max_length=16, choices=Kind.choices, default=Kind.ADHOC)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -501,6 +681,7 @@ class GenerationBatch(models.Model):
         verbose_name = _("Generation Batch")
         verbose_name_plural = _("Generation Batches")
         ordering = ["-created_at"]
+        indexes = [models.Index(fields=["experiment", "-created_at"], name="genbatch_experiment")]
 
     def __str__(self) -> str:
         return self.name or f"Batch {str(self.id)[:8]}"
@@ -525,10 +706,17 @@ class GenerationJob(models.Model):
         CANCELLED = "cancelled", _("Cancelled")
 
     class Phase(models.TextChoices):
+        # PENDING: "". RUNNING: running | eval_queued | evaluating.
         NONE = "", _("None")
+        # Legacy (thread dispatch) rows only.
         QUEUED = "queued", _("Queued")
         RUNNING = "running", _("Running")
+        EVAL_QUEUED = "eval_queued", _("Waiting for evaluation")
         EVALUATING = "evaluating", _("Evaluating")
+
+    class Lane(models.TextChoices):
+        SANDBOX = "sandbox", _("Sandbox")
+        LLM = "llm", _("LLM")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     mode = models.CharField(
@@ -747,6 +935,31 @@ class GenerationJob(models.Model):
         help_text="Token usage, cost, timing",
     )
 
+    # Execution queue (spec §B.3 / §C). Owned by backend.execution.
+    # Denormalized from model.endpoint at creation; NULL = OpenRouter.
+    endpoint = models.ForeignKey(
+        "inference.LLMEndpoint",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="jobs",
+    )
+    lane = models.CharField(_("lane"), max_length=8, choices=Lane.choices, default=Lane.LLM)
+    # Non-NULL means the executor owns the row; legacy (thread-dispatch) rows stay NULL.
+    queued_at = models.DateTimeField(_("queued at"), null=True, blank=True)
+    run_after = models.DateTimeField(_("run after"), null=True, blank=True)
+    priority = models.SmallIntegerField(_("priority"), default=0)
+    sequence = models.PositiveIntegerField(_("sequence"), null=True, blank=True)
+    attempt = models.PositiveSmallIntegerField(_("attempt"), default=0)
+    lease_owner = models.CharField(_("lease owner"), max_length=80, blank=True, default="")
+    lease_expires_at = models.DateTimeField(_("lease expires at"), null=True, blank=True)
+    heartbeat_at = models.DateTimeField(_("heartbeat at"), null=True, blank=True)
+    # When the job entered its current phase (eval FIFO, UI).
+    stage_entered_at = models.DateTimeField(_("stage entered at"), null=True, blank=True)
+    # Runtime record (policy, started_seq, queue timings, attempts, infra_errors, ...).
+    # Not part of the snapshot and not fingerprinted.
+    execution = models.JSONField(_("execution"), default=dict, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -754,6 +967,31 @@ class GenerationJob(models.Model):
         verbose_name = _("Generation Job")
         verbose_name_plural = _("Generation Jobs")
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["-priority", "queued_at"],
+                condition=Q(status="pending") & Q(queued_at__isnull=False),
+                name="genjob_ready",
+            ),
+            models.Index(
+                fields=["experiment", "endpoint", "sequence", "queued_at"],
+                condition=Q(status="pending") & Q(queued_at__isnull=False),
+                name="genjob_lane_head",
+            ),
+            models.Index(fields=["lease_owner"], condition=~Q(lease_owner=""), name="genjob_owned"),
+            models.Index(
+                fields=["endpoint", "lane", "phase"],
+                condition=Q(status="running"),
+                name="genjob_running",
+            ),
+            models.Index(fields=["lease_expires_at"], condition=Q(status="running"), name="genjob_lease"),
+            models.Index(
+                fields=["experiment", "condition", "app_requirement", "repeat_index"],
+                name="genjob_cell",
+            ),
+            models.Index(fields=["experiment", "status", "phase"], name="genjob_exp_state"),
+            models.Index(fields=["batch", "status"], name="genjob_batch_status"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.mode} job {str(self.id)[:8]} ({self.status})"

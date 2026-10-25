@@ -12,6 +12,13 @@ networks:
   llm_apps:
     name: llm_apps
     driver: bridge
+  # Internal-only network for the executor's LLM proxy (spec §B.6). Gateways of
+  # local-model agent runs reach it at ${LLM_PROXY_ADDR:-172.30.99.2}:8090.
+  llmproxy:
+    internal: true
+    ipam:
+      config:
+        - subnet: "${LLMPROXY_SUBNET:-172.30.99.0/29}"
 
 services:
   django: &django
@@ -36,6 +43,23 @@ services:
       - default
       - llm_apps
     command: /start
+
+  # Runs every generation job; the web process only writes rows (see
+  # docker-compose.local.yml). One instance, no autoreload.
+  executor:
+    <<: *django
+    image: backend_production_executor
+    command: /start-executor
+    environment:
+      - TRAEFIK_DYNAMIC_DIR=/traefik-dynamic
+      - DOCKER_APPS_NETWORK=llm_apps
+      - CONN_MAX_AGE=0
+    networks:
+      default: {}
+      llm_apps: {}
+      llmproxy:
+        ipv4_address: "${LLM_PROXY_ADDR:-172.30.99.2}"
+    stop_grace_period: 30s
 
   postgres:
     build:
