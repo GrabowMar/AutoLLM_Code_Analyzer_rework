@@ -45,7 +45,7 @@
 			accumulated += '/' + part;
 			const label = routeLabels[accumulated];
 			if (label) {
-				segments.push({ label, href: accumulated });
+				segments.push({ label, href: accumulated === '/experiments' ? '/automation?type=experiment' : accumulated });
 			} else if (accumulated.startsWith('/users/') && accumulated !== '/users/settings') {
 				// /users/<pk> — render as "Profile"
 				segments.push({ label: 'Profile', href: accumulated });

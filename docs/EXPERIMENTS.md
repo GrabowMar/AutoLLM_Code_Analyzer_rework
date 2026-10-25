@@ -64,4 +64,4 @@ The `experiment_report` report type (`config: {"experiment_id": ...}`) is purpos
 
 ## Frontend
 
-`/experiments` (list), `/experiments/create` (name, hypothesis, mode, stack, sampling and budget presets, repeats, base seed, app selection), `/experiments/[id]` (add conditions — model + harness preset in agent mode, model + profile in scaffolding mode, optional param overrides — then preview with the comparability table, launch, live progress grid). `lib/api/experiments.ts` is the client.
+Experiments and workflows share the `/automation` hub. Filter to experiments at `/automation?type=experiment`, and create one at `/automation/create?type=experiment` (name, hypothesis, mode, stack, sampling and budget presets, repeats, base seed, app selection). `/experiments/[id]` adds conditions — model + harness preset in agent mode, model + profile in scaffolding mode, optional param overrides — then preview with the comparability table, launch, and follow the live progress grid. Existing experiment links remain supported. `lib/api/experiments.ts` is the client.

@@ -704,7 +704,7 @@
 	<PageHeader
 		title={experiment?.name ?? 'Experiment'}
 		description={experiment?.description || undefined}
-		back={{ href: '/experiments', label: 'Experiments' }}
+		back={{ href: '/automation?type=experiment', label: 'Automation' }}
 	>
 		{#snippet meta()}
 			{#if experiment}

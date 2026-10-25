@@ -5,7 +5,6 @@ import Boxes from "@lucide/svelte/icons/boxes";
 import Library from "@lucide/svelte/icons/library";
 import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
 import Zap from "@lucide/svelte/icons/zap";
-import GitCompareArrows from "@lucide/svelte/icons/git-compare-arrows";
 import AppWindow from "@lucide/svelte/icons/app-window";
 import ScanSearch from "@lucide/svelte/icons/scan-search";
 import Microscope from "@lucide/svelte/icons/microscope";
@@ -45,7 +44,6 @@ export const navSections: NavSection[] = [
         icon: WandSparkles,
       },
       { label: "Automation", href: "/automation", icon: Zap },
-      { label: "Experiments", href: "/experiments", icon: GitCompareArrows },
     ],
   },
   {
@@ -85,8 +83,9 @@ const extraLabels: Record<string, string> = {
   "/models/compare": "Compare",
   "/models/import": "Import",
   "/analysis/create": "New analysis",
-  "/automation/create": "New pipeline",
+  "/automation/create": "New automation",
   "/automation/runs": "Runs",
+  "/experiments": "Automation",
   "/experiments/create": "New experiment",
   "/sample-generator/batches": "Batches",
   "/reports/create": "New report",
@@ -101,5 +100,11 @@ export const routeLabels: Record<string, string> = {
 
 export function isNavActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
+  if (
+    href === "/automation" &&
+    (pathname === "/experiments" || pathname.startsWith("/experiments/"))
+  ) {
+    return true;
+  }
   return pathname === href || pathname.startsWith(href + "/");
 }

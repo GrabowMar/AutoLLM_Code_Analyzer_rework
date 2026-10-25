@@ -162,7 +162,7 @@
 	<PageHeader
 		title="Workflow run"
 		documentTitle="Run {id.slice(0, 8)}"
-		back={run ? { href: `/automation/${run.pipeline_id}`, label: pipeline?.name ?? 'Workflow' } : { href: '/automation', label: 'Workflows' }}
+		back={run ? { href: `/automation/${run.pipeline_id}`, label: pipeline?.name ?? 'Workflow' } : { href: '/automation', label: 'Automation' }}
 	>
 		{#snippet meta()}
 			{#if run}<StatusBadge status={run.status} />{/if}
