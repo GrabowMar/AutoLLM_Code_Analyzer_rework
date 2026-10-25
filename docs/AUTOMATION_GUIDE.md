@@ -31,7 +31,7 @@ Two substitution scopes are available in step configs (`engine/params.py`): `{{p
 
 ## Building pipelines in the UI
 
-The `/automation` section has a node-based editor: steps are nodes, `depends_on` edges are drawn between them, and the run view overlays live statuses on the same graph.
+The `/automation` hub combines workflows and [experiments](/docs/EXPERIMENTS), with search and type/status filters. Start at `/automation/create` and choose a workflow or an experiment. Workflows use a node-based editor: steps are nodes, `depends_on` edges are drawn between them, and the run view overlays live statuses on the same graph.
 
 ## Execution and scheduling
 

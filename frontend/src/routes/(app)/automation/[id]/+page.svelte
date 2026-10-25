@@ -126,7 +126,7 @@
 	<PageHeader
 		title={pipeline?.name ?? 'Workflow'}
 		description={pipeline?.description || undefined}
-		back={{ href: '/automation', label: 'Workflows' }}
+		back={{ href: '/automation?type=workflow', label: 'Automation' }}
 	>
 		{#snippet meta()}
 			{#if pipeline}<StatusBadge status={pipeline.status} />{/if}
