@@ -503,7 +503,8 @@ def test_api_scoped_between_users(alice, bob):
     assert cb.patch(base, {"name": "pwned"}, content_type="application/json").status_code == 404
     assert cb.get(f"{base}deliveries/").status_code == 404
     assert cb.post(f"{base}test/").status_code == 404
-    assert cb.delete(base).status_code == 404
+    resp = cb.delete(base)
+    assert resp.status_code == 404
     assert WebhookSubscription.objects.filter(pk=sub.pk, name="generic hook").exists()
     assert len(ca.get(f"{base}deliveries/").json()) == 1
 
@@ -532,7 +533,8 @@ def test_api_patch_delete_and_test(alice):
     deliveries = c.get(f"{base}deliveries/").json()
     assert len(deliveries) == 1
 
-    assert c.delete(base).status_code == 204
+    resp = c.delete(base)
+    assert resp.status_code == 204
     assert not WebhookSubscription.objects.filter(pk=sub.pk).exists()
 
 

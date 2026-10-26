@@ -265,10 +265,12 @@ class TestInstallAndDelete:
 
     def test_delete_in_use_is_409(self, owner, endpoint, local_model):
         GenerationJobFactory(model=local_model, created_by=owner)
-        assert _client(owner).delete(f"{API}{endpoint.pk}/").status_code == 409
+        resp = _client(owner).delete(f"{API}{endpoint.pk}/")
+        assert resp.status_code == 409
 
     def test_delete_unused(self, owner, endpoint, local_model):
-        assert _client(owner).delete(f"{API}{endpoint.pk}/").json() == {"success": True}
+        resp = _client(owner).delete(f"{API}{endpoint.pk}/")
+        assert resp.json() == {"success": True}
         assert not LLMEndpoint.objects.filter(pk=endpoint.pk).exists()
         assert not LLMModel.objects.filter(pk=local_model.pk).exists()
 
