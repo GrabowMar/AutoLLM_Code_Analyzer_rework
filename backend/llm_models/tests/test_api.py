@@ -378,5 +378,6 @@ class TestCatalogMutationsAreStaffOnly:
         assert api_client.post("/api/models/sync/").status_code == HTTPStatus.FORBIDDEN
         resp = api_client.post("/api/models/import/", data="{}", content_type="application/json")
         assert resp.status_code == HTTPStatus.FORBIDDEN
-        assert api_client.delete(f"/api/models/detail/{m.canonical_slug}/").status_code == HTTPStatus.FORBIDDEN
+        resp = api_client.delete(f"/api/models/detail/{m.canonical_slug}/")
+        assert resp.status_code == HTTPStatus.FORBIDDEN
         assert LLMModel.objects.filter(pk=m.pk).exists()

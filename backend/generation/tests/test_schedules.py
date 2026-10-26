@@ -358,11 +358,13 @@ def test_schedule_crud_and_run_now(client, user):
         2,
     )
     assert client.get(base).json()[0]["last_result"]["outcome"] == "fired"
-    assert client.delete(f"{base}{schedule['id']}/").json() == {"success": True}
+    resp = client.delete(f"{base}{schedule['id']}/")
+    assert resp.json() == {"success": True}
     other = ExperimentSchedule.objects.create(
         experiment=_finished(UserFactory())[0],
         action="top_up",
         cron="0 3 * * *",
         created_by=user,
     )
-    assert client.delete(f"{base}{other.id}/").status_code == 404
+    resp = client.delete(f"{base}{other.id}/")
+    assert resp.status_code == 404
