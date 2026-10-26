@@ -28,9 +28,11 @@ signupUrl: string;
 signupLabel: string;
 placeholder: string;
 inputId: string;
+/** Called after the stored key was saved, removed or re-tested. */
+onchange?: () => void;
 }
 
-let { provider, title, description, signupUrl, signupLabel, placeholder, inputId }: Props =
+let { provider, title, description, signupUrl, signupLabel, placeholder, inputId, onchange }: Props =
 $props();
 
 let status = $state<CredentialStatus | null>(null);
@@ -67,6 +69,7 @@ status = await setCredentialKey(provider, value);
 toast.success('API key saved and validated.');
 newKey = '';
 showForm = false;
+onchange?.();
 } catch (err) {
 const detail =
 (err as { detail?: string })?.detail ?? 'Could not save key (it may be invalid).';
@@ -82,6 +85,7 @@ saving = true;
 try {
 status = await deleteCredentialKey(provider);
 toast.success('API key removed.');
+onchange?.();
 } catch (err) {
 console.error(err);
 toast.error('Failed to remove key.');
@@ -97,6 +101,7 @@ const result = await testCredentialKey(provider);
 if (result.is_valid) toast.success(result.message);
 else toast.error(result.message);
 await refresh();
+onchange?.();
 } catch (err) {
 console.error(err);
 toast.error('Could not test key.');

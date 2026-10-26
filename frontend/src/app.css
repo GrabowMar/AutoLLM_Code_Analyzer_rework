@@ -8,15 +8,17 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ============================================================================
-   LLM Eval Lab — "Data-Dense Dashboard" design system
-   Generated via ui-ux-pro-max-skill (see frontend/DESIGN_SYSTEM.md)
-   Palette: slate-900 surfaces + green-500 CTA. Typography: Fira Sans / Fira Code.
+   LLM Eval Lab — "Research Lab" design system
+   Generated via ui-ux-pro-max-skill (Swiss Modernism 2.0 × Data-Dense
+   Dashboard, "Research Lab" palette) — see frontend/DESIGN_SYSTEM.md.
+   Ink & paper surfaces, research-indigo action, ochre/teal supporting accents.
+   Typography: Source Serif 4 (display) / IBM Plex Sans (UI) / IBM Plex Mono (data).
    ============================================================================ */
 
-/* ─── Light Theme (slate on near-white, green action) ─────────── */
+/* ─── Light Theme ("paper": warm off-white, ink text, indigo action) ─ */
 :root {
   color-scheme: light;
-  --radius: 0.375rem;
+  --radius: 0.3rem;
 
   /* LayerChart/layerstack semantic vars, mapped to our tokens (these
      resolve against the mode-aware vars below, so both themes work) */
@@ -25,179 +27,155 @@
   --color-surface-300: var(--surface-3);
   --color-surface-content: var(--foreground);
 
-  --font-sans: "Fira Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    sans-serif;
-  --font-mono: "Fira Code", ui-monospace, SFMono-Regular, "JetBrains Mono",
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "JetBrains Mono",
     "Cascadia Code", monospace;
-  --font-display: "Fira Code", var(--font-mono);
+  --font-display: "Source Serif 4", "Source Serif Pro", Georgia,
+    "Times New Roman", serif;
 
   /* Surfaces */
-  --background: #f8fafc; /* slate-50 */
-  --foreground: #0f172a; /* slate-900 */
+  --background: #f5f5f1; /* paper */
+  --foreground: #141a26; /* ink */
 
   --card: #ffffff;
-  --card-foreground: #0f172a;
+  --card-foreground: #141a26;
 
   --popover: #ffffff;
-  --popover-foreground: #0f172a;
+  --popover-foreground: #141a26;
 
   --surface-1: #ffffff;
-  --surface-2: #f1f5f9; /* slate-100 */
-  --surface-3: #e2e8f0; /* slate-200 */
+  --surface-2: #f0f0eb;
+  --surface-3: #e4e4dd;
 
-  /* Action (CTA = run/execute) */
-  --primary: #16a34a; /* green-600 — better contrast on light */
-  --primary-foreground: #f8fafc;
-  --primary-hover: #15803d; /* green-700 */
+  /* Action (research indigo) */
+  --primary: #2c44bd;
+  --primary-foreground: #ffffff;
+  --primary-hover: #23379c;
 
-  --secondary: #1e293b; /* slate-800 — heavy info color */
-  --secondary-foreground: #f8fafc;
+  --secondary: #1b2436;
+  --secondary-foreground: #f5f5f1;
 
-  --muted: #f1f5f9;
-  --muted-foreground: #475569; /* slate-600 */
+  --muted: #efefea;
+  --muted-foreground: #545b68;
 
-  --accent: #ecfdf5; /* green-50 — soft accent */
-  --accent-foreground: #14532d; /* green-900 */
+  --accent: #eceffb; /* indigo-50 — soft hover/selected */
+  --accent-foreground: #1f2f86;
 
-  /* Duotone accents (green stays the action color; cyan/violet are supporting) */
-  --accent-2: #0e7490; /* cyan-700 — text-safe on light */
-  --accent-3: #6d28d9; /* violet-700 — text-safe on light */
+  /* Supporting accents (indigo stays the only action color) */
+  --accent-2: #8a5a00; /* ochre — text-safe on light */
+  --accent-3: #0f6b62; /* teal — text-safe on light */
 
-  --destructive: #dc2626; /* red-600 */
+  --destructive: #dc2626;
   --destructive-foreground: #ffffff;
 
-  --success: #16a34a; /* green-600 */
-  --warning: #d97706; /* amber-600 */
-  --info: #2563eb; /* blue-600 */
+  --success: #16a34a;
+  --warning: #d97706;
+  --info: #0284c7; /* sky — kept apart from the indigo action color */
   /* Text-safe tone shades for badges/inline status (4.5:1 on card and on 10% tints) */
-  --success-fg: #15803d; /* green-700 */
-  --warning-fg: #b45309; /* amber-700 */
-  --danger-fg: #b91c1c; /* red-700 */
-  --info-fg: #1d4ed8; /* blue-700 */
+  --success-fg: #15803d;
+  --warning-fg: #b45309;
+  --danger-fg: #b91c1c;
+  --info-fg: #0369a1;
 
-  --border: #e2e8f0; /* slate-200 */
-  --input: #e2e8f0;
-  --ring: #22c55e; /* green-500 focus ring */
+  --border: #dcdcd3;
+  --input: #d4d4cb;
+  --ring: #3b5bdb;
 
   /* Charts — categorical slots, validated (dataviz six checks) on #ffffff */
-  --chart-1: #16a34a; /* green-600 */
-  --chart-2: #0891b2; /* cyan-600 */
-  --chart-3: #7c3aed; /* violet-600 */
-  --chart-4: #d97706; /* amber-600 */
-  --chart-5: #e11d48; /* rose-600 */
+  --chart-1: #3b5bdb; /* indigo */
+  --chart-2: #0d9488; /* teal */
+  --chart-3: #c2850c; /* ochre */
+  --chart-4: #c2255c; /* rose */
+  --chart-5: #7048e8; /* violet */
 
-  /* Glow, glass, gradients */
-  --glow-primary: 0 0 0 1px color-mix(in oklab, var(--primary) 25%, transparent),
-    0 4px 20px -6px color-mix(in oklab, var(--primary) 30%, transparent);
-  --glow-accent: 0 0 0 1px color-mix(in oklab, var(--accent-2) 25%, transparent),
-    0 4px 20px -6px color-mix(in oklab, var(--accent-2) 30%, transparent);
-  --glass-bg: color-mix(in oklab, var(--card) 78%, transparent);
-  --glass-border: color-mix(in oklab, var(--border) 80%, transparent);
-  --gradient-brand: linear-gradient(135deg, var(--primary), var(--accent-2));
-  --gradient-panel: radial-gradient(
-      42rem 18rem at 105% -20%,
-      color-mix(in oklab, var(--primary) 6%, transparent),
-      transparent 60%
-    ),
-    radial-gradient(
-      36rem 16rem at -10% 120%,
-      color-mix(in oklab, var(--accent-2) 5%, transparent),
-      transparent 60%
-    );
+  /* Graph-paper canvas (lab-notebook grid behind content) */
+  --grid-line: color-mix(in oklab, var(--foreground) 3%, transparent);
+  --grid-line-major: color-mix(in oklab, var(--foreground) 6%, transparent);
 
-  /* Sidebar (always darker than canvas, even in light mode — IDE feel) */
-  --sidebar: #0f172a;
-  --sidebar-foreground: #cbd5e1;
-  --sidebar-primary: #22c55e;
-  --sidebar-primary-foreground: #0f172a;
-  --sidebar-accent: #1e293b;
-  --sidebar-accent-foreground: #f8fafc;
-  --sidebar-border: #1e293b;
-  --sidebar-ring: #22c55e;
+  --shadow-card: 0 1px 0 0
+    color-mix(in oklab, var(--foreground) 4%, transparent);
+  --shadow-pop: 0 12px 32px -12px color-mix(in oklab, var(--foreground) 22%, transparent);
+
+  /* Sidebar (paper, a shade darker than the canvas) */
+  --sidebar: #efefe9;
+  --sidebar-foreground: #2a3140;
+  --sidebar-primary: #2c44bd;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e3e3dc;
+  --sidebar-accent-foreground: #141a26;
+  --sidebar-border: #dcdcd3;
+  --sidebar-ring: #3b5bdb;
 }
 
-/* ─── Dark Theme (default for the app) ────────────────────────── */
+/* ─── Dark Theme ("observatory": deep ink, default for the app) ─ */
 .dark {
   color-scheme: dark;
-  --background: #162233; /* lifted navy — easier on the eyes */
-  --foreground: #f1f5f9; /* slate-100 — slightly softer than pure white */
+  --background: #0b111d;
+  --foreground: #e4e8f0;
 
-  --card: #1a2d44; /* distinct from background — visible surface lift */
-  --card-foreground: #f1f5f9;
+  --card: #111a2b;
+  --card-foreground: #e4e8f0;
 
-  --popover: #1a2d44;
-  --popover-foreground: #f1f5f9;
+  --popover: #131d30;
+  --popover-foreground: #e4e8f0;
 
-  --surface-1: #1a2d44;
-  --surface-2: #213550; /* clear second layer */
-  --surface-3: #2d4160; /* third layer for hover/selected states */
+  --surface-1: #111a2b;
+  --surface-2: #172338;
+  --surface-3: #20304a;
 
-  --primary: #22c55e; /* green-500 — pops on dark */
-  --primary-foreground: #052e16; /* green-950 for legible text on green */
-  --primary-hover: #16a34a;
+  --primary: #7b91ff;
+  --primary-foreground: #0a1030;
+  --primary-hover: #96a8ff;
 
-  --secondary: #213550;
-  --secondary-foreground: #f1f5f9;
+  --secondary: #1a2740;
+  --secondary-foreground: #e4e8f0;
 
-  --muted: #1e2f47;
-  --muted-foreground: #a0b4c8; /* brighter than slate-400 for readability */
+  --muted: #152034;
+  --muted-foreground: #9aa6ba;
 
-  --accent: #14532d; /* green-900 */
-  --accent-foreground: #bbf7d0; /* green-200 */
+  --accent: #1b2747;
+  --accent-foreground: #c9d3ff;
 
-  /* Duotone accents — brighter steps for dark text/glow use */
-  --accent-2: #22d3ee; /* cyan-400 */
-  --accent-3: #a78bfa; /* violet-400 */
+  --accent-2: #e0b252; /* ochre */
+  --accent-3: #4fd1c5; /* teal */
 
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
 
   --success: #22c55e;
   --warning: #f59e0b;
-  --info: #3b82f6;
-  --success-fg: #4ade80; /* green-400 */
-  --warning-fg: #fbbf24; /* amber-400 */
-  --danger-fg: #f87171; /* red-400 */
-  --info-fg: #60a5fa; /* blue-400 */
+  --info: #38bdf8;
+  --success-fg: #4ade80;
+  --warning-fg: #fbbf24;
+  --danger-fg: #f87171;
+  --info-fg: #7dd3fc;
 
-  --border: #253c56; /* visible lines without harsh contrast */
-  --input: #253c56;
-  --ring: #22c55e;
+  --border: #22304a;
+  --input: #263552;
+  --ring: #7b91ff;
 
-  /* Charts — validated on card surface #1a2d44 (400-grade hues fail the
-     dark lightness band; keep those for text/glow only, never chart marks) */
-  --chart-1: #16a34a;
-  --chart-2: #0891b2;
-  --chart-3: #8b5cf6; /* violet-500 */
-  --chart-4: #d97706;
-  --chart-5: #f43f5e; /* rose-500 */
+  /* Charts — validated on card surface (#111a2b / #121b2d) */
+  --chart-1: #4c6ef5;
+  --chart-2: #0d9488;
+  --chart-3: #c2850c;
+  --chart-4: #d6336c;
+  --chart-5: #7950f2;
 
-  --glow-primary: 0 0 0 1px color-mix(in oklab, var(--primary) 40%, transparent),
-    0 4px 24px -6px color-mix(in oklab, var(--primary) 45%, transparent);
-  --glow-accent: 0 0 0 1px color-mix(in oklab, var(--accent-2) 35%, transparent),
-    0 4px 24px -6px color-mix(in oklab, var(--accent-2) 40%, transparent);
-  --glass-bg: color-mix(in oklab, var(--card) 65%, transparent);
-  --glass-border: color-mix(in oklab, var(--accent-2) 12%, var(--border));
-  --gradient-brand: linear-gradient(135deg, var(--primary), var(--accent-2));
-  --gradient-panel: radial-gradient(
-      42rem 18rem at 105% -20%,
-      color-mix(in oklab, var(--primary) 10%, transparent),
-      transparent 60%
-    ),
-    radial-gradient(
-      36rem 16rem at -10% 120%,
-      color-mix(in oklab, var(--accent-2) 8%, transparent),
-      transparent 60%
-    );
+  --grid-line: color-mix(in oklab, var(--foreground) 2.2%, transparent);
+  --grid-line-major: color-mix(in oklab, var(--foreground) 4.5%, transparent);
 
-  --sidebar: #0d1a2d; /* dark but not pitch-black */
-  --sidebar-foreground: #cbd5e1;
-  --sidebar-primary: #22c55e;
-  --sidebar-primary-foreground: #052e16;
-  --sidebar-accent: #1a2c43;
-  --sidebar-accent-foreground: #f1f5f9;
-  --sidebar-border: #172538;
-  --sidebar-ring: #22c55e;
+  --shadow-card: 0 1px 0 0 color-mix(in oklab, #000 30%, transparent);
+  --shadow-pop: 0 16px 40px -12px color-mix(in oklab, #000 70%, transparent);
+
+  --sidebar: #080d17;
+  --sidebar-foreground: #b8c2d3;
+  --sidebar-primary: #8197ff;
+  --sidebar-primary-foreground: #0a1030;
+  --sidebar-accent: #141e31;
+  --sidebar-accent-foreground: #eef1f7;
+  --sidebar-border: #1a2539;
+  --sidebar-ring: #7b91ff;
 }
 
 @theme inline {
@@ -270,24 +248,26 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-sans);
-    font-feature-settings: "ss01", "ss02", "cv11", "tnum";
     font-variant-numeric: tabular-nums;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* ── Typography Scale (display in Fira Code for "code IDE" feel) ─ */
+  /* ── Typography Scale (serif display for titles, Plex Sans for UI) ─ */
   h1,
-  h2,
+  h2 {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
+    font-optical-sizing: auto;
+  }
   h3,
   h4,
   h5,
   h6 {
-    font-family: var(--font-display);
-    letter-spacing: -0.01em;
+    letter-spacing: -0.005em;
   }
   h1 {
-    @apply text-xl font-semibold tracking-tight sm:text-2xl;
+    @apply text-2xl font-semibold tracking-tight sm:text-[1.75rem];
   }
   h2 {
     @apply text-lg font-semibold tracking-tight sm:text-xl;
@@ -308,7 +288,7 @@
 
   /* ── Selection ──────────────────────────────────────────────── */
   ::selection {
-    background: color-mix(in oklab, var(--primary) 30%, transparent);
+    background: color-mix(in oklab, var(--primary) 28%, transparent);
     color: var(--foreground);
   }
 
@@ -446,15 +426,30 @@
 /* ─── Component Layer ─────────────────────────────────────────── */
 @layer components {
   /* ── Page header (compact, dense) ───────────────────────────── */
+  /* Journal-style masthead: mono eyebrow, serif title, double rule. */
   .page-header {
-    @apply flex flex-col gap-2 border-b border-border pb-4;
+    @apply relative flex flex-col gap-2 pb-4;
+    border-bottom: 1px solid var(--border);
+  }
+  .page-header::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -1px;
+    width: 3rem;
+    height: 2px;
+    background: var(--primary);
   }
   .page-header h1 {
-    @apply text-xl font-semibold tracking-tight sm:text-2xl;
+    @apply text-2xl font-semibold tracking-tight sm:text-[1.875rem] sm:leading-tight;
     font-family: var(--font-display);
   }
   .page-header p {
-    @apply text-sm text-muted-foreground;
+    @apply text-sm leading-relaxed text-muted-foreground;
+  }
+  .page-eyebrow {
+    @apply inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground;
+    font-family: var(--font-mono);
   }
   .back-link {
     @apply inline-flex w-fit items-center gap-1 rounded text-xs font-medium text-muted-foreground transition-colors hover:text-foreground;
@@ -462,7 +457,8 @@
 
   /* Small uppercase label above a group of fields/values */
   .section-label {
-    @apply text-[11px] font-medium uppercase tracking-wider text-muted-foreground;
+    @apply text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground;
+    font-family: var(--font-mono);
   }
 
   /* ── Empty state ────────────────────────────────────────────── */
@@ -476,37 +472,34 @@
   /* ── KPI card (the workhorse for dashboards) ────────────────── */
   .kpi-card {
     @apply relative flex flex-col gap-1 overflow-hidden rounded-md border border-border bg-card px-4 py-3;
+    box-shadow: var(--shadow-card);
     transition:
-      transform 0.2s ease,
       border-color 0.2s ease,
-      box-shadow 0.2s ease;
+      background-color 0.2s ease;
   }
+  /* Instrument-style accent tick on the left edge */
   .kpi-card::before {
     content: "";
     position: absolute;
-    inset: 0 0 auto 0;
-    height: 2px;
-    background: var(--gradient-brand);
-    opacity: 0.55;
-    transition: opacity 0.2s ease;
+    left: 0;
+    top: 0.75rem;
+    width: 2px;
+    height: 1.25rem;
+    background: var(--kpi-accent, var(--primary));
   }
   /* Hover affordance only when the tile is a link */
   a:hover > .kpi-card,
   a.kpi-card:hover {
-    border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
-    transform: translateY(-2px);
-    box-shadow: var(--glow-primary);
-  }
-  a:hover > .kpi-card::before,
-  a.kpi-card:hover::before {
-    opacity: 1;
+    border-color: color-mix(in oklab, var(--primary) 45%, var(--border));
+    background-color: color-mix(in oklab, var(--primary) 3%, var(--card));
   }
   .kpi-label {
-    @apply text-[11px] font-medium uppercase tracking-wider text-muted-foreground;
+    @apply text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground;
+    font-family: var(--font-mono);
   }
   .kpi-value {
-    @apply text-3xl font-semibold tabular-nums;
-    font-family: var(--font-display);
+    @apply text-3xl font-medium tabular-nums tracking-tight;
+    font-family: var(--font-mono);
   }
 
   /* ── Tables (data-dense — minimal padding, row hover, zebra) ── */
@@ -516,8 +509,13 @@
     border-spacing: 0;
   }
   table th {
-    @apply sticky top-0 z-10 bg-muted/60 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground backdrop-blur;
+    @apply sticky top-0 z-10 bg-muted/80 px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground backdrop-blur;
+    font-family: var(--font-mono);
     border-bottom: 1px solid var(--border);
+  }
+  /* Sort buttons inside headers keep the header's case (UA resets it) */
+  table th button {
+    text-transform: inherit;
   }
   table td {
     @apply px-3 py-2 align-middle;
@@ -527,7 +525,144 @@
     transition: background-color 0.12s ease;
   }
   table tbody tr:hover {
+    background-color: color-mix(in oklab, var(--primary) 5%, transparent);
+  }
+
+  /* ── Data tables: frame, density, row states (components/table) ── */
+  /* A table that fits its card scrolls with the page (`data-fits`, set by the
+     `tableFrame` attachment) and its header sticks under the 3rem app bar — no
+     scroll box inside a scrolling page. A wider table gets one bounded scroll box
+     for both axes, which keeps the horizontal scrollbar on screen and the header
+     sticky (an overflow-x wrapper on its own traps `position: sticky`).
+     `position: relative` keeps absolutely positioned descendants (`.sr-only`
+     labels) inside the frame; otherwise they stretch the page past its content.
+     The hosting card uses `overflow-clip`: `overflow-hidden` would trap the header. */
+  .table-frame {
+    position: relative;
+    overflow: auto;
+    max-height: calc(100dvh - 7rem);
+  }
+  .table-frame[data-fits] {
+    overflow: visible;
+    max-height: none;
+  }
+  .table-frame[data-fits] table thead th {
+    top: 3rem;
+  }
+  .table-frame table thead th {
+    background-color: color-mix(in oklab, var(--muted) 92%, var(--card));
+  }
+  /* Compact density (Settings → Workspace, or the toolbar toggle). */
+  [data-density="compact"] table td {
+    padding-top: 0.3125rem;
+    padding-bottom: 0.3125rem;
+  }
+  [data-density="compact"] table th {
+    padding-top: 0.375rem;
+    padding-bottom: 0.375rem;
+  }
+  [data-density="compact"] table .cell-sub {
+    display: none;
+  }
+  table td.num,
+  table th.num {
+    text-align: right;
+    white-space: nowrap;
+  }
+  table td.num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  /* The card/box border closes the table; a last-row rule would double it. */
+  table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  table tbody tr.row-link {
+    cursor: pointer;
+  }
+  table tbody tr[data-selected="true"] {
+    background-color: color-mix(in oklab, var(--primary) 9%, transparent);
+    box-shadow: inset 2px 0 0 var(--primary);
+  }
+  /* Secondary row actions appear on hover / keyboard focus; touch keeps them visible. */
+  @media (hover: hover) {
+    table tbody tr .row-actions-more,
+    .data-list-row .row-actions-more {
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+    table tbody tr:hover .row-actions-more,
+    table tbody tr:focus-within .row-actions-more,
+    .data-list-row:hover .row-actions-more,
+    .data-list-row:focus-within .row-actions-more {
+      opacity: 1;
+    }
+  }
+  /* List counterpart of a table: one bordered surface, hairline-divided rows. */
+  .data-list {
+    @apply overflow-hidden rounded-md border border-border bg-card shadow-[var(--shadow-card)];
+  }
+  .data-list-row {
+    @apply relative border-b border-border/60 px-4 py-3 transition-colors duration-150 last:border-b-0;
+  }
+  /* Rows wrapped in <li> are each a last child; keep the dividers between items. */
+  .data-list > li:not(:last-child) > .data-list-row {
+    border-bottom-width: 1px;
+  }
+  .data-list-row:hover {
+    background-color: color-mix(in oklab, var(--primary) 4%, transparent);
+  }
+  .data-list-row[data-active="true"] {
     background-color: color-mix(in oklab, var(--primary) 8%, transparent);
+    box-shadow: inset 2px 0 0 var(--primary);
+  }
+  [data-density="compact"] .data-list-row {
+    @apply py-1.5;
+  }
+  [data-density="compact"] .data-list-row .cell-sub {
+    display: none;
+  }
+  .data-list-head {
+    @apply flex items-center gap-4 border-b border-border px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground;
+    font-family: var(--font-mono);
+    background-color: color-mix(in oklab, var(--muted) 92%, var(--card));
+  }
+  /* Row headers (<th scope="row"> in tbody) read as body cells, not column headers. */
+  table tbody th {
+    position: static;
+    background-color: transparent;
+    font-family: var(--font-sans);
+    font-size: inherit;
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--foreground);
+    border-bottom-color: color-mix(in oklab, var(--border) 60%, transparent);
+  }
+  /* Pinned first column for wide tables. */
+  table .col-sticky {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background-color: var(--card);
+  }
+  table tbody th.col-sticky {
+    position: sticky;
+    top: auto;
+    background-color: var(--card);
+  }
+  table thead th.col-sticky {
+    z-index: 11;
+    background-color: color-mix(in oklab, var(--muted) 92%, var(--card));
+  }
+  table tbody tr:hover .col-sticky {
+    background-color: color-mix(in oklab, var(--primary) 5%, var(--card));
+  }
+  table tbody tr[data-selected="true"] .col-sticky {
+    background-color: color-mix(in oklab, var(--primary) 9%, var(--card));
+  }
+  /* Toolbar strip between a card's edge and its table. */
+  .table-toolbar {
+    @apply flex min-h-11 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-border px-3 py-1.5 text-xs text-muted-foreground;
   }
 
   /* ── Focus ring (universal) ─────────────────────────────────── */
@@ -544,7 +679,8 @@
   /* ── Filter Bar design tokens ───────────────────────────────── */
   /* Shell container — matches card styling exactly */
   .fb-shell {
-    @apply rounded-md border border-border bg-card shadow-sm overflow-hidden;
+    @apply rounded-md border border-border bg-card overflow-hidden;
+    box-shadow: var(--shadow-card);
   }
   /* Filter chip — base (inactive) */
   .fb-chip {
@@ -596,7 +732,7 @@
 
   /* ── Subtle "terminal" surface (for code blocks / logs) ─────── */
   .terminal {
-    @apply rounded-md border border-border bg-[color:var(--sidebar)] p-3 text-xs text-[color:var(--sidebar-foreground)] overflow-x-auto;
+    @apply rounded-md border border-border bg-[#0b111d] p-3 text-xs text-[#cdd5e3] overflow-x-auto;
     font-family: var(--font-mono);
   }
 
@@ -703,54 +839,33 @@
     border-radius: var(--radius);
   }
 
-  /* ── Blinking cursor (terminal feel) ────────────────────────── */
-  @keyframes cursor-blink {
-    0%,
-    49% {
-      opacity: 1;
+  /* ── Loader label (indeterminate scan bar + mono label) ─────── */
+  @keyframes loader-scan {
+    0% {
+      background-position:
+        -70% 0,
+        0 0;
     }
-    50%,
     100% {
-      opacity: 0;
-    }
-  }
-  .cursor-blink::after {
-    content: "▌";
-    color: var(--primary);
-    margin-left: 2px;
-    animation: cursor-blink 1s step-end infinite;
-    font-weight: 400;
-  }
-
-  /* ── Mono loader (replaces plain "Loading…" labels) ─────────── */
-  @keyframes loader-dots {
-    0%,
-    20% {
-      content: ".";
-    }
-    40% {
-      content: "..";
-    }
-    60%,
-    100% {
-      content: "...";
+      background-position:
+        170% 0,
+        0 0;
     }
   }
   .loading-mono {
-    @apply inline-flex items-center gap-2 text-xs text-muted-foreground;
+    @apply inline-flex flex-col items-center gap-2 text-xs text-muted-foreground;
     font-family: var(--font-mono);
   }
   .loading-mono::before {
-    content: "$";
-    color: var(--primary);
-    font-weight: 600;
-  }
-  .loading-mono::after {
-    content: "...";
-    color: var(--primary);
-    animation: loader-dots 1.2s steps(3, end) infinite;
-    min-width: 1.25rem;
-    display: inline-block;
+    content: "";
+    display: block;
+    width: 6rem;
+    height: 2px;
+    border-radius: 9999px;
+    background:
+      linear-gradient(var(--primary), var(--primary)) no-repeat -70% 0 / 40% 100%,
+      linear-gradient(var(--border), var(--border));
+    animation: loader-scan 1.1s ease-in-out infinite;
   }
 
   /* ── Card lift for clickable cards ──────────────────────────── */
@@ -762,31 +877,39 @@
   }
   .card-lift:hover {
     transform: translateY(-1px);
-    border-color: color-mix(in oklab, var(--primary) 35%, var(--border));
-    box-shadow: 0 4px 14px -6px color-mix(in oklab, var(--primary) 30%, transparent);
+    border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
+    box-shadow: var(--shadow-pop);
   }
 
-  /* ── Gradient accents ───────────────────────────────────────── */
-  .gradient-text {
-    background: var(--gradient-brand);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+  /* ── Lab canvas: graph-paper page background (8px minor, 40px major) ── */
+  .lab-canvas {
+    background-color: var(--background);
+    background-image: linear-gradient(
+        var(--grid-line-major) 1px,
+        transparent 1px
+      ),
+      linear-gradient(90deg, var(--grid-line-major) 1px, transparent 1px),
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size:
+      40px 40px,
+      40px 40px,
+      8px 8px,
+      8px 8px;
+    background-position: -1px -1px;
   }
-  /* ── Hero panel (dashboard greeting) ────────────────────────── */
+
+  /* ── Hero panel (dashboard masthead) ───────────────────────── */
   .hero-panel {
-    @apply relative overflow-hidden;
-    background-color: var(--glass-bg);
-    background-image: var(--gradient-panel);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--glass-border);
-    border-radius: calc(var(--radius) + 2px);
+    @apply relative overflow-hidden rounded-md border border-border bg-card;
+    box-shadow: var(--shadow-card);
   }
-  @supports not (backdrop-filter: blur(1px)) {
-    .hero-panel {
-      background-color: var(--card);
-    }
+  /* Faint plotted-curve figure on the right edge of the hero */
+  .hero-figure {
+    @apply pointer-events-none absolute inset-y-0 right-0 hidden w-1/2 md:block;
+    color: var(--primary);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 45%);
+    mask-image: linear-gradient(90deg, transparent, #000 45%);
   }
 
   /* ── Staggered entrance (set --stagger-i per section) ───────── */
@@ -832,7 +955,7 @@
 
   /* ── Display heading (hero scale) ───────────────────────────── */
   .display-xl {
-    @apply text-3xl font-bold tracking-tight sm:text-4xl;
+    @apply text-3xl font-semibold tracking-tight sm:text-[2.5rem] sm:leading-[1.1];
     font-family: var(--font-display);
   }
 }

@@ -217,8 +217,8 @@ Failed Iterations
 
 <!-- Request Artifacts -->
 {#if artifacts.length > 0}
-<Card.Root>
-<Card.Header class="pb-3">
+<Card.Root class="gap-0 overflow-clip py-0">
+<Card.Header class="border-b border-border py-3">
 <Card.Title class="text-sm font-medium flex items-center gap-2">
 <Database class="h-4 w-4" />
 Request Artifacts
@@ -227,22 +227,22 @@ Request Artifacts
 </Card.Header>
 <Card.Content class="p-0">
 <div class="overflow-x-auto">
-<table class="w-full text-sm">
+<table>
 <thead>
 <tr>
 <th>Stage</th>
 <th>Model</th>
-<th>Prompt</th>
-<th>Completion</th>
+<th class="num">Prompt</th>
+<th class="num">Completion</th>
 </tr>
 </thead>
 <tbody>
 {#each artifacts as art}
 <tr>
-<td><Badge variant="outline" class="text-xs">{art.stage}</Badge></td>
-<td class="font-mono text-xs">{art.request_payload?.model ?? '—'}</td>
-<td>{fmt(art.prompt_tokens)}</td>
-<td>{fmt(art.completion_tokens)}</td>
+<td class="whitespace-nowrap"><Badge variant="outline" class="text-xs">{art.stage}</Badge></td>
+<td class="font-mono text-xs">{#if art.request_payload?.model}{art.request_payload.model}{:else}<span class="text-muted-foreground">—</span>{/if}</td>
+<td class="num">{#if art.prompt_tokens == null}<span class="text-muted-foreground">—</span>{:else}{fmt(art.prompt_tokens)}{/if}</td>
+<td class="num">{#if art.completion_tokens == null}<span class="text-muted-foreground">—</span>{:else}{fmt(art.completion_tokens)}{/if}</td>
 </tr>
 {/each}
 </tbody>

@@ -9,11 +9,23 @@
 		page?: number;
 		pages?: number;
 		onGoToPage?: (p: number) => void;
-		/** Extra classes on the wrapper — e.g. "rounded-md border border-border" for standalone use */
+		/** Extra classes on the wrapper — e.g. "border-t border-border" as a table card's footer */
 		class?: string;
+		/** Below a list: after a page change, bring the top of the enclosing card back into view. */
+		scrollToCard?: boolean;
 	}
 
-	let { resultsText = '', page, pages, onGoToPage, class: cls = '' }: Props = $props();
+	let { resultsText = '', page, pages, onGoToPage, class: cls = '', scrollToCard = false }: Props = $props();
+
+	let bar = $state<HTMLElement>();
+
+	function go(p: number) {
+		onGoToPage?.(p);
+		if (!scrollToCard || !bar) return;
+		const card = bar.closest('[data-slot="card"]') ?? bar;
+		const top = card.getBoundingClientRect().top + window.scrollY - 64; // clear the 3rem app bar
+		if (top < window.scrollY) window.scrollTo({ top });
+	}
 
 	const hasPagination = $derived(!!page && !!pages && !!onGoToPage && pages > 1);
 
@@ -27,25 +39,25 @@
 </script>
 
 {#if resultsText || hasPagination}
-	<div class="flex items-center justify-between gap-3 bg-muted/20 px-3 py-1.5 {cls}">
+	<div bind:this={bar} class="flex items-center justify-between gap-3 bg-muted/20 px-3 py-1.5 {cls}">
 		<span class="text-[11px] text-muted-foreground tabular-nums shrink-0">
 			{resultsText}
 		</span>
 
 		{#if hasPagination && page && pages && onGoToPage}
-			<div class="flex items-center gap-0.5">
+			<nav class="flex items-center gap-0.5" aria-label="Pagination">
 				<button
-					class="inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+					class="inline-flex size-8 items-center sm:size-7 justify-center rounded border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
 					disabled={page <= 1}
-					onclick={() => onGoToPage!(1)}
+					onclick={() => go(1)}
 					aria-label="First page"
-				><ChevronsLeft class="h-3 w-3" /></button>
+				><ChevronsLeft class="size-3.5" /></button>
 				<button
-					class="inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+					class="inline-flex size-8 items-center sm:size-7 justify-center rounded border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
 					disabled={page <= 1}
-					onclick={() => onGoToPage!(page - 1)}
+					onclick={() => go(page - 1)}
 					aria-label="Previous page"
-				><ChevronLeft class="h-3 w-3" /></button>
+				><ChevronLeft class="size-3.5" /></button>
 
 				{#if visiblePages[0] > 1}
 					<span class="px-0.5 text-[11px] text-muted-foreground">…</span>
@@ -53,11 +65,11 @@
 
 				{#each visiblePages as p}
 					<button
-						class="inline-flex h-6 min-w-6 items-center justify-center rounded border px-1 text-[11px] font-medium tabular-nums transition-colors
+						class="inline-flex h-8 min-w-8 items-center sm:h-7 sm:min-w-7 justify-center rounded border px-1 text-[11px] font-medium tabular-nums transition-colors
 							{p === page
 								? 'border-primary/50 bg-primary/10 text-primary'
 								: 'border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground'}"
-						onclick={() => onGoToPage!(p)}
+						onclick={() => go(p)}
 						aria-current={p === page ? 'page' : undefined}
 					>{p}</button>
 				{/each}
@@ -67,18 +79,18 @@
 				{/if}
 
 				<button
-					class="inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+					class="inline-flex size-8 items-center sm:size-7 justify-center rounded border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
 					disabled={page >= pages}
-					onclick={() => onGoToPage!(page + 1)}
+					onclick={() => go(page + 1)}
 					aria-label="Next page"
-				><ChevronRight class="h-3 w-3" /></button>
+				><ChevronRight class="size-3.5" /></button>
 				<button
-					class="inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+					class="inline-flex size-8 items-center sm:size-7 justify-center rounded border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
 					disabled={page >= pages}
-					onclick={() => onGoToPage!(pages)}
+					onclick={() => go(pages)}
 					aria-label="Last page"
-				><ChevronsRight class="h-3 w-3" /></button>
-			</div>
+				><ChevronsRight class="size-3.5" /></button>
+			</nav>
 		{/if}
 	</div>
 {/if}

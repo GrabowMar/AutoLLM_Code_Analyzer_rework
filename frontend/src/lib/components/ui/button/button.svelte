@@ -23,9 +23,9 @@
 		// Disabled reads as plainly unavailable (muted fill), not as a faded primary
 		// that still looks clickable; a busy one (aria-busy) keeps the primary look.
 		default:
-			'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-md hover:-translate-y-px active:translate-y-0 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 disabled:shadow-none aria-busy:disabled:bg-primary aria-busy:disabled:text-primary-foreground',
+			'bg-primary text-primary-foreground shadow-[var(--shadow-card)] hover:bg-[color:var(--primary-hover)] active:translate-y-px disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 disabled:shadow-none aria-busy:disabled:bg-primary aria-busy:disabled:text-primary-foreground',
 		destructive: 'bg-destructive text-white shadow-sm hover:bg-destructive/90 hover:shadow-md',
-		outline: 'border border-border bg-transparent hover:bg-accent hover:text-accent-foreground hover:border-primary/50',
+		outline: 'border border-input bg-transparent hover:bg-accent hover:text-accent-foreground hover:border-primary/50',
 		secondary: 'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80',
 		ghost: 'hover:bg-accent hover:text-accent-foreground',
 		link: 'text-primary underline-offset-4 hover:underline decoration-primary/60',
@@ -38,7 +38,7 @@
 		icon: 'h-9 w-9',
 	};
 
-	const baseClasses = 'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium tracking-tight transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4 cursor-pointer touch-manipulation motion-reduce:transition-none motion-reduce:hover:transform-none';
+	const baseClasses = 'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4 cursor-pointer touch-manipulation motion-reduce:transition-none motion-reduce:hover:transform-none';
 </script>
 
 {#if href}

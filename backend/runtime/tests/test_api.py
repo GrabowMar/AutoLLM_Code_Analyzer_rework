@@ -162,7 +162,13 @@ def test_docker_info_daemon_available(auth_client):
     """docker/info/ returns 200 when daemon is reachable."""
     client, _ = auth_client
     mock_c = MagicMock()
-    mock_c.info.return_value = {"OSType": "linux", "Architecture": "x86_64"}
+    mock_c.info.return_value = {
+        "OSType": "linux",
+        "Architecture": "x86_64",
+        "ContainersRunning": 2,
+        "ContainersStopped": 1,
+        "Images": 7,
+    }
     mock_c.version.return_value = {"Version": "24.0.0"}
     with (
         patch("backend.runtime.services.docker_manager.ping", return_value=True),
@@ -175,3 +181,6 @@ def test_docker_info_daemon_available(auth_client):
     assert resp.status_code == HTTPStatus.OK
     data = resp.json()
     assert data["daemon_available"] is True
+    assert data["containers_running"] == 2
+    assert data["containers_stopped"] == 1
+    assert data["images"] == 7

@@ -117,13 +117,13 @@
 				<EmptyState compact icon={History} title="No post-runs yet" />
 			{:else}
 				<div class="overflow-x-auto rounded-md border border-border">
-					<table class="table-card-mobile w-full text-xs">
+					<table class="table-card-mobile">
 						<thead>
 							<tr>
 								<th scope="col">Started</th>
 								<th scope="col">Trigger</th>
 								<th scope="col">Status</th>
-								<th scope="col">Analyses</th>
+								<th scope="col" class="num">Analyses</th>
 								<th scope="col">Report</th>
 							</tr>
 						</thead>
@@ -131,16 +131,16 @@
 							{#each data.runs as run (run.id)}
 								{@const p = run.progress ?? {}}
 								<tr>
-									<td data-label="Started" class="tabular-nums">{formatDateTime(run.created_at)}</td>
+									<td data-label="Started" class="whitespace-nowrap font-mono text-xs tabular-nums">{formatDateTime(run.created_at)}</td>
 									<td data-label="Trigger">{TRIGGERS[run.trigger] ?? run.trigger}</td>
 									<td data-label="Status">
 										<StatusBadge status={run.status} />
-										{#if run.error}<span class="block max-w-60 truncate text-[11px] text-danger-fg" title={run.error}>{run.error}</span>{/if}
+										{#if run.error}<span class="cell-sub mt-0.5 block max-w-60 truncate text-[11px] text-danger-fg" title={run.error}>{run.error}</span>{/if}
 									</td>
-									<td data-label="Analyses" class="font-mono tabular-nums">
+									<td data-label="Analyses" class="num text-xs max-md:text-left">
 										{#if p.analysis_total}
 											{p.analysis_done ?? 0}/{p.analysis_total}{#if p.analysis_failed}<span class="text-danger-fg"> · {p.analysis_failed} failed</span>{/if}
-										{:else}—{/if}
+										{:else}<span class="text-muted-foreground">—</span>{/if}
 									</td>
 									<td data-label="Report">
 										{#if run.report_id}

@@ -8,6 +8,7 @@ import StatusBadge from '$lib/components/StatusBadge.svelte';
 import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 import LoadingState from '$lib/components/LoadingState.svelte';
 import EmptyState from '$lib/components/EmptyState.svelte';
+import { tableFrame } from '$lib/components/table';
 import { containerTones, type Tone } from '$lib/constants/colors';
 import {
 getMe,
@@ -251,31 +252,31 @@ fn: () => clearCaches() as Promise<Record<string, unknown>>,
 </Card.Root>
 
 <!-- CONTAINERS -->
-<Card.Root>
-<Card.Header class="pb-2"><Card.Title>Containers</Card.Title></Card.Header>
-<Card.Content class="space-y-3">
+<Card.Root class="gap-0 overflow-clip py-0">
+<Card.Header class="border-b border-border py-3"><Card.Title>Containers</Card.Title></Card.Header>
+<Card.Content class="p-0">
 {#if containers().length === 0}
-<EmptyState compact title="No containers found" />
+<div class="p-4"><EmptyState compact title="No containers found" /></div>
 {:else}
-<div class="overflow-x-auto">
-<table class="w-full text-sm">
+<div class="table-frame" {@attach tableFrame}>
+<table>
 <thead>
-<tr class="border-b bg-muted/40 sticky top-0 z-10">
-<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Name</th>
-<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Image</th>
-<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Status</th>
-<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Health</th>
+<tr>
+<th>Name</th>
+<th>Image</th>
+<th>Status</th>
+<th>Health</th>
 </tr>
 </thead>
 <tbody>
-{#each containers() as c, i}
-<tr class="border-b transition-colors hover:bg-muted/50 {i % 2 === 0 ? '' : 'bg-muted/15'}">
-<td class="px-3 py-2 align-top font-mono text-xs">{c.name}</td>
-<td class="px-3 py-2 align-top text-xs text-muted-foreground">{c.image}</td>
-<td class="px-3 py-2 align-top">
+{#each containers() as c}
+<tr>
+<td class="font-mono text-xs">{c.name}</td>
+<td class="max-w-[28rem] truncate font-mono text-xs text-muted-foreground" title={c.image as string}>{c.image}</td>
+<td class="whitespace-nowrap">
 <StatusBadge status={c.status as string} tones={dockerTones} />
 </td>
-<td class="px-3 py-2 align-top text-xs text-muted-foreground">{c.health}</td>
+<td class="text-xs text-muted-foreground">{c.health || '—'}</td>
 </tr>
 {/each}
 </tbody>

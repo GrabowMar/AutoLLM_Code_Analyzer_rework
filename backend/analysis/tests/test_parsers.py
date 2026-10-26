@@ -369,3 +369,34 @@ def test_parser_tolerates_empty_and_non_json_output():
             parsed = parsers.parse(key, raw)
             assert parsed.findings == []
             assert parsed.metrics == {}
+
+
+def test_bandit_and_semgrep_record_cwe():
+    import json
+
+    from backend.analysis.services.parsers import parse
+
+    bandit = parse(
+        "bandit",
+        json.dumps(
+            {"results": [{"issue_severity": "HIGH", "test_id": "B608", "issue_cwe": {"id": 89}, "line_number": 3}]},
+        ),
+    )
+    assert bandit.findings[0].tool_specific_data["cwe"] == "CWE-89"
+    semgrep = parse(
+        "semgrep",
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "check_id": "x.sql",
+                        "start": {"line": 3},
+                        "extra": {"metadata": {"cwe": ["CWE-89: Improper Neutralization"]}},
+                    },
+                ],
+            },
+        ),
+    )
+    assert semgrep.findings[0].tool_specific_data["cwe"] == "CWE-89"
+    no_cwe = parse("bandit", json.dumps({"results": [{"test_id": "B101"}]}))
+    assert "cwe" not in no_cwe.findings[0].tool_specific_data

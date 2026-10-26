@@ -271,3 +271,57 @@ class TestEvaluatorBookkeeping:
 
         assert _INFRA_PATTERNS.search("npm ERR! code ECONNRESET")
         assert not _INFRA_PATTERNS.search("SyntaxError: invalid syntax")
+
+
+@pytest.mark.django_db
+class TestHealingAblation:
+    def test_ablation_stores_each_mode_beside_the_evaluation(self):
+        from backend.generation.models import GenerationJob
+        from backend.generation.services.evaluation import runner
+        from backend.users.tests.factories import UserFactory
+
+        job = GenerationJob.objects.create(
+            mode="scaffolding",
+            created_by=UserFactory(),
+            result_data={"evaluation": {"status": "passed"}, "files": {"app.py": "x"}},
+        )
+        seen = []
+
+        def fake_run(self):
+            seen.append(self.healing)
+            status = "build_failed" if self.healing == "none" else "passed"
+            return {"status": status, "build": {"healing": {"mode": str(self.healing), "changed": False}}}
+
+        with mock.patch.object(runner.Evaluation, "run", fake_run):
+            out = runner.evaluate_healing_ablation(job, ("none", "no_deps"))
+        job.refresh_from_db()
+        assert seen == ["none", "no_deps"]
+        assert out["none"]["deployed"] is False
+        assert job.result_data["healing_ablation"]["no_deps"]["deployed"] is True
+        assert job.result_data["evaluation"] == {"status": "passed"}
+
+    def test_evaluation_names_differ_per_mode(self):
+        from backend.generation.models import GenerationJob
+        from backend.generation.services.evaluation import runner
+        from backend.users.tests.factories import UserFactory
+
+        job = GenerationJob.objects.create(mode="scaffolding", created_by=UserFactory())
+        assert runner.Evaluation(job).image_tag != runner.Evaluation(job, healing="none").image_tag
+
+    def test_evaluate_job_records_deployed_and_healing(self):
+        from backend.generation.models import GenerationJob
+        from backend.generation.services.evaluation import runner
+        from backend.users.tests.factories import UserFactory
+
+        job = GenerationJob.objects.create(mode="scaffolding", created_by=UserFactory())
+        outcome = {"status": "start_failed", "build": {"healing": {"mode": "full", "changed": True}}, "checks": []}
+        with mock.patch.object(runner.Evaluation, "run", return_value=outcome):
+            runner.evaluate_job(job)
+        job.refresh_from_db()
+        functional = job.metrics["functional"]
+        assert (functional["deployed"], functional["healing_mode"], functional["healing_changed"]) == (
+            False,
+            "full",
+            True,
+        )
+        assert runner.is_deployed("infra_error") is None

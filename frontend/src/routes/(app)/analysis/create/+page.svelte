@@ -15,6 +15,7 @@ import Store from '@lucide/svelte/icons/store';
 import { toast } from 'svelte-sonner';
 import { createRun } from '$lib/api/runs';
 import { getToolCatalog, type AnalyzerTool } from '$lib/api/analyzers';
+import ToolIcon from '$lib/components/analyzers/ToolIcon.svelte';
 import { getGenerationJobs, type GenerationJobList } from '$lib/api/client';
 import AnalysisTargetForm from '$lib/components/analysis/AnalysisTargetForm.svelte';
 import PageHeader from '$lib/components/PageHeader.svelte';
@@ -63,12 +64,14 @@ const categoryLabels: Record<string, string> = {
 	lint: 'Lint & Quality',
 	secrets: 'Secrets',
 	performance: 'Performance',
+	dependencies: 'Dependencies',
 	ai: 'AI Review',
 };
-const categoryOrder = ['security', 'lint', 'secrets', 'performance', 'ai'];
+const categoryOrder = ['security', 'dependencies', 'lint', 'secrets', 'performance', 'ai'];
 
+// Known categories first, then any the catalog adds later (never hide a tool).
 const groupedTools = $derived(
-	categoryOrder
+	[...categoryOrder, ...new Set(tools.map((t) => t.category).filter((c) => !categoryOrder.includes(c)))]
 		.map((cat) => ({ category: cat, items: tools.filter((t) => t.category === cat) }))
 		.filter((g) => g.items.length > 0),
 );
@@ -248,6 +251,7 @@ const canAdvance = $derived.by(() => {
 														disabled={!tool.installed}
 														onchange={() => toggleTool(tool.slug)}
 													/>
+													<ToolIcon {tool} size="sm" />
 													<div class="min-w-0 flex-1">
 														<div class="flex items-center gap-2">
 															<span class="text-sm font-medium">{tool.name}</span>

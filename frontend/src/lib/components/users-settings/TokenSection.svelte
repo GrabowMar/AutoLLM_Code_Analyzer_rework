@@ -292,35 +292,35 @@
 
 		<div class="space-y-2">
 			<Label>Available Endpoints</Label>
-			<div class="overflow-x-auto rounded-lg border border-border">
-				<table class="w-full text-sm">
+			<div class="overflow-x-auto rounded-md border border-border">
+				<table class="[&_tbody_tr:last-child_td]:border-b-0">
 					<thead>
-						<tr class="border-b border-border bg-muted/50">
-							<th class="px-3 py-2 text-left font-medium">Method</th>
-							<th class="px-3 py-2 text-left font-medium">Endpoint</th>
-							<th class="px-3 py-2 text-left font-medium">Description</th>
+						<tr>
+							<th>Method</th>
+							<th>Endpoint</th>
+							<th>Description</th>
 						</tr>
 					</thead>
 					<tbody>
-						<tr class="border-b border-border">
-							<td class="px-3 py-2"><code class="rounded bg-muted px-1 text-xs">GET</code></td>
-							<td class="px-3 py-2 font-mono text-xs">/api/models/</td>
-							<td class="px-3 py-2 text-muted-foreground">List all AI models</td>
-						</tr>
-						<tr class="border-b border-border">
-							<td class="px-3 py-2"><code class="rounded bg-muted px-1 text-xs">GET</code></td>
-							<td class="px-3 py-2 font-mono text-xs">/api/models/stats/</td>
-							<td class="px-3 py-2 text-muted-foreground">Model statistics</td>
-						</tr>
-						<tr class="border-b border-border">
-							<td class="px-3 py-2"><code class="rounded bg-muted px-1 text-xs">POST</code></td>
-							<td class="px-3 py-2 font-mono text-xs">/api/models/sync/</td>
-							<td class="px-3 py-2 text-muted-foreground">Sync from OpenRouter</td>
+						<tr>
+							<td class="w-px"><code class="rounded bg-muted px-1 text-xs">GET</code></td>
+							<td class="font-mono text-xs">/api/models/</td>
+							<td class="text-muted-foreground">List all AI models</td>
 						</tr>
 						<tr>
-							<td class="px-3 py-2"><code class="rounded bg-muted px-1 text-xs">GET</code></td>
-							<td class="px-3 py-2 font-mono text-xs">/api/users/me/</td>
-							<td class="px-3 py-2 text-muted-foreground">Current user profile</td>
+							<td class="w-px"><code class="rounded bg-muted px-1 text-xs">GET</code></td>
+							<td class="font-mono text-xs">/api/models/stats/</td>
+							<td class="text-muted-foreground">Model statistics</td>
+						</tr>
+						<tr>
+							<td class="w-px"><code class="rounded bg-muted px-1 text-xs">POST</code></td>
+							<td class="font-mono text-xs">/api/models/sync/</td>
+							<td class="text-muted-foreground">Sync from OpenRouter</td>
+						</tr>
+						<tr>
+							<td class="w-px"><code class="rounded bg-muted px-1 text-xs">GET</code></td>
+							<td class="font-mono text-xs">/api/users/me/</td>
+							<td class="text-muted-foreground">Current user profile</td>
 						</tr>
 					</tbody>
 				</table>

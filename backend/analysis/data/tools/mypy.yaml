@@ -9,8 +9,9 @@ target_language: python
 icon: check-check
 version: "1"
 docs_url: https://mypy.readthedocs.io/
-install_cmd: "pip install --user mypy"
+install_cmd: "pip install --user --upgrade mypy"
 verify_cmd: "mypy --version"
+uninstall_cmd: "pip uninstall -y mypy"
 run_cmd: "mypy {target} --no-error-summary --no-color-output --show-error-codes --ignore-missing-imports --no-pretty"
 parser_key: mypy
 run_timeout: 180

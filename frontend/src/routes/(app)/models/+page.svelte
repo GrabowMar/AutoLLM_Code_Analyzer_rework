@@ -296,9 +296,6 @@ onMount(() => {
 		resultsText={data && !loading
 			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} models`
 			: ''}
-		page={data?.page}
-		pages={data?.pages}
-		onGoToPage={goToPage}
 		onSearchInput={debouncedLoad}
 		onProviderChange={applyFilterAndReload}
 		onApplyQuickFilter={applyQuickFilter}
@@ -313,12 +310,6 @@ onMount(() => {
 
 	{#if error}
 		<ErrorAlert message={error} onretry={load} />
-	{/if}
-
-	{#if data && !loading && selectedModelSlugs.size > 0}
-		<div class="flex items-center justify-between">
-			<Button variant="ghost" size="sm" class="h-7 px-2 text-xs" onclick={clearSelection}>Clear selection</Button>
-		</div>
 	{/if}
 
 	<ModelsTable
@@ -336,15 +327,20 @@ onMount(() => {
 		onChangeMobileSort={changeMobileSort}
 		onToggleSortDir={toggleSortDir}
 		onClearAllFilters={clearAllFilters}
-	/>
-
-	<PaginationBar
-		resultsText={data && !loading
-			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} models`
-			: ''}
-		page={data?.page}
-		pages={data?.pages}
-		onGoToPage={goToPage}
-		class="rounded-md border border-border"
-	/>
+		onClearSelection={clearSelection}
+		onCompare={openComparison}
+	>
+		{#snippet footer()}
+			<PaginationBar
+				resultsText={data && !loading
+					? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} models`
+					: ''}
+				page={data?.page}
+				pages={data?.pages}
+				onGoToPage={goToPage}
+				class="border-t border-border"
+				scrollToCard
+			/>
+		{/snippet}
+	</ModelsTable>
 </div>

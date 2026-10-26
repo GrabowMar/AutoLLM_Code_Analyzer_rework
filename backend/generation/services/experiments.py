@@ -87,6 +87,9 @@ from backend.generation.services.agent.snapshot import agent_llm_layers
 from backend.generation.services.agent.snapshot import apply_agent_snapshot_to_job
 from backend.generation.services.agent.snapshot import resolve_agent_run
 from backend.generation.services.agent.snapshot import resolve_llm
+from backend.generation.services.analysis_plan import PlanError
+from backend.generation.services.analysis_plan import normalize_analysis_plan
+from backend.generation.services.analysis_plan import plan_hash
 from backend.generation.services.batches import refresh_batch
 from backend.generation.services.llm_params import merge_llm_params
 from backend.generation.services.llm_params import validate_llm_params
@@ -1472,6 +1475,7 @@ def _new_job(
         top_p=layers.llm_params.get("top_p"),
         agent_config=dict(layers.agent_config),
         harness_options=dict(layers.harness_options),
+        build_healing=experiment.build_healing,
         harness_preset=layers.harness_preset,
         sampling_preset=layers.sampling_preset,
         budget_preset=layers.budget_preset,
@@ -1601,6 +1605,11 @@ def launch_experiment(
             experiment.status = Experiment.Status.RUNNING
             experiment.launched_at = now
             update_fields += ["status", "launched_at"]
+            if experiment.analysis_plan and not experiment.analysis_plan_frozen_at:
+                # Pre-registration: the plan is fixed before any result exists.
+                experiment.analysis_plan_hash = plan_hash(experiment.analysis_plan)
+                experiment.analysis_plan_frozen_at = now
+                update_fields += ["analysis_plan_hash", "analysis_plan_frozen_at"]
             if experiment.baseline_condition_id is None:
                 experiment.baseline_condition = plans[0].condition
                 update_fields.append("baseline_condition")
@@ -1695,6 +1704,7 @@ _DESIGN_FIELDS = (
     "mode",
     "continuation_limit",
     "enable_repair",
+    "build_healing",
 )
 # PATCH fields an explicit null clears; for the others it is ignored.
 _NULLABLE_FIELDS = {"base_seed", "stack_slug", "sampling_preset", "budget_preset", "max_concurrency"}
@@ -1714,6 +1724,13 @@ _LAUNCHED_FIELDS = {
 _PRIORITY_RANGE = (-10, 10)
 _USER_PRIORITY_RANGE = (-5, 0)
 _MAX_RESIDENT_MODELS = 64
+
+
+def _validated_plan(plan: dict | None) -> dict[str, Any]:
+    try:
+        return normalize_analysis_plan(plan)
+    except PlanError as exc:
+        raise ExperimentError(400, f"Invalid analysis plan: {exc}", "invalid_analysis_plan") from exc
 
 
 def _validated_params(params: dict | None) -> dict[str, Any]:
@@ -2208,6 +2225,7 @@ def _design_experiment(user: AbstractUser, data: dict[str, Any]) -> tuple[Experi
     experiment.llm_defaults = _validated_params(data.get("llm_defaults"))
     _apply_execution(experiment, data.get("execution"), user)
     experiment.post_run = normalize_post_run(data.get("post_run"), experiment.mode)
+    experiment.analysis_plan = _validated_plan(data.get("analysis_plan"))
     apps = visible_apps(user, data.get("app_requirement_ids") or [])
     check_design(experiment)
     return experiment, apps
@@ -2299,6 +2317,8 @@ def update_experiment(experiment: Experiment, user: AbstractUser, data: dict[str
         )
     if "post_run" in data:
         data["post_run"] = normalize_post_run(data["post_run"], data.get("mode") or experiment.mode)
+    if "analysis_plan" in data:
+        data["analysis_plan"] = _validated_plan(data["analysis_plan"])
     baseline_set = "baseline_condition_id" in data
     baseline_id = data.pop("baseline_condition_id", None)
     if baseline_set and baseline_id is not None and not experiment.conditions.filter(id=baseline_id).exists():
@@ -2633,6 +2653,7 @@ def design_payload(experiment: Experiment) -> dict[str, Any]:
         "agent_config": dict(experiment.agent_config or {}),
         "continuation_limit": experiment.continuation_limit,
         "enable_repair": experiment.enable_repair,
+        "build_healing": experiment.build_healing,
         "llm_defaults": dict(experiment.llm_defaults or {}),
         "conditions": {
             "cross": {"model_ids": []},
@@ -2649,6 +2670,7 @@ def design_payload(experiment: Experiment) -> dict[str, Any]:
             "options": dict(experiment.execution_options or {}),
         },
         "post_run": effective_post_run(experiment),
+        "analysis_plan": dict(experiment.analysis_plan or {}),
         "schedules": [
             {
                 "action": s.action,
@@ -3508,6 +3530,12 @@ def export_experiment(experiment: Experiment) -> dict[str, Any]:
             "presets": {"sampling": provenance(base.sampling_preset), "budget": provenance(base.budget_preset)},
             "continuation_limit": experiment.continuation_limit,
             "enable_repair": experiment.enable_repair,
+            "build_healing": experiment.build_healing,
+            "analysis_plan": experiment.analysis_plan,
+            "analysis_plan_hash": experiment.analysis_plan_hash,
+            "analysis_plan_frozen_at": (
+                experiment.analysis_plan_frozen_at.isoformat() if experiment.analysis_plan_frozen_at else None
+            ),
             "scheduling_policy": experiment.scheduling_policy,
             "baseline_condition_id": experiment.baseline_condition_id,
             "execution_options": experiment.execution_options,

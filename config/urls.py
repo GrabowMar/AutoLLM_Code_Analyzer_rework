@@ -6,6 +6,8 @@ from django.urls import include
 from django.urls import path
 from django.views import defaults as default_views
 
+from backend.integrations.mcp.views import mcp_endpoint
+from backend.integrations.mcp.views import mcp_endpoint_url_token
 from backend.realtime.api.views import sse_stream
 from backend.runtime.proxy import app_proxy
 
@@ -35,6 +37,10 @@ if settings.DEBUG:
 urlpatterns += [
     # Relay protocol v1 (plain async Django views, spec §E.1); before "api/".
     path("api/relay/v1/", include("backend.inference.relay.urls")),
+    # MCP server (Streamable HTTP, plain Django view); before "api/".
+    path("api/mcp", mcp_endpoint),
+    path("api/mcp/", mcp_endpoint),
+    path("api/mcp/t/<str:token>", mcp_endpoint_url_token),
     # API base url
     path("api/", api.urls),
     # Realtime SSE stream (plain Django view — Ninja doesn't support streaming)

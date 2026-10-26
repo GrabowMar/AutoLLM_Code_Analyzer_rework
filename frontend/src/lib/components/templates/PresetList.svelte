@@ -18,7 +18,6 @@
 	} from '$lib/api/generation';
 	import { formatApiError } from '$lib/api/core';
 	import { formatDate } from '$lib/utils/formatters';
-	import { cn } from '$lib/utils';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import EmptyState from '$lib/components/EmptyState.svelte';
@@ -106,37 +105,33 @@
 {#snippet presetRow(preset: RunPreset)}
 	{@const key = `${preset.kind}/${preset.slug}`}
 	{@const own = !preset.is_system}
-	<div class={cn('rounded-md border border-border bg-card', activeSlug === preset.slug && 'ring-2 ring-primary')}>
-		<div class="flex flex-col gap-3 p-4 sm:flex-row sm:items-start">
-			<div class="min-w-0 flex-1 space-y-1">
+	<div class="data-list-row" data-active={activeSlug === preset.slug}>
+		<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+			<div class="min-w-0 flex-1 space-y-0.5">
 				<div class="flex flex-wrap items-center gap-2">
-					<span class="text-sm font-semibold">{preset.name}</span>
+					<span class="text-sm font-medium">{preset.name}</span>
 					<span class="font-mono text-[11px] text-muted-foreground">{preset.slug}@v{preset.version}</span>
 					{#if preset.is_default}
 						<!-- Outline, not the tinted default variant: green-on-tint is under 4.5:1 in light mode. -->
-						<Badge variant="outline" class="text-success-fg">Default</Badge>
+						<Badge variant="outline" class="h-5 px-1.5 text-[11px] text-success-fg">Default</Badge>
 					{:else if preset.is_system}
-						<Badge variant="secondary">System</Badge>
+						<Badge variant="secondary" class="h-5 px-1.5 text-[11px]">System</Badge>
 					{:else}
-						<Badge variant="outline">Yours</Badge>
+						<Badge variant="outline" class="h-5 px-1.5 text-[11px]">Yours</Badge>
 					{/if}
-					{#if preset.is_archived}<Badge variant="secondary">Archived</Badge>{/if}
+					{#if preset.is_archived}<Badge variant="secondary" class="h-5 px-1.5 text-[11px]">Archived</Badge>{/if}
 				</div>
 				<p class="break-words font-mono text-xs text-foreground/90">{summarizePreset(preset, schemaFor(preset))}</p>
 				{#if preset.description}
-					<p class="line-clamp-2 text-xs leading-relaxed text-muted-foreground">{preset.description}</p>
+					<p class="cell-sub line-clamp-1 text-xs text-muted-foreground" title={preset.description}>{preset.description}</p>
 				{/if}
 			</div>
-			<div class="flex shrink-0 flex-wrap gap-1.5 sm:self-center">
-				{#if own && !preset.is_archived}
-					<Button variant="outline" size="sm" title="A config change saves a new version" onclick={() => onEdit(preset)}>
-						<Pencil /> Edit
-					</Button>
-				{/if}
+			<div class="flex shrink-0 flex-wrap items-center justify-end gap-0.5">
 				{#if canDuplicate(preset)}
 					<Button
-						variant="outline"
+						variant="ghost"
 						size="sm"
+						class="h-8 text-muted-foreground hover:text-foreground {own ? 'w-8 p-0' : 'px-2'}"
 						title="Duplicate as a new preset"
 						aria-label="Duplicate {preset.name}"
 						onclick={() => onDuplicate(preset)}
@@ -145,8 +140,9 @@
 					</Button>
 				{/if}
 				<Button
-					variant="outline"
+					variant="ghost"
 					size="sm"
+					class="size-8 p-0 text-muted-foreground hover:text-foreground"
 					title="Version history"
 					aria-label="Version history of {preset.name}"
 					aria-expanded={historyKey === key}
@@ -156,9 +152,9 @@
 				</Button>
 				{#if own && !preset.is_archived}
 					<Button
-						variant="outline"
+						variant="ghost"
 						size="sm"
-						class="hover:bg-destructive/10 hover:text-danger-fg"
+						class="size-8 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-danger-fg"
 						title="Archive every version (jobs keep their references)"
 						aria-label="Archive {preset.name}"
 						onclick={() => onArchive(preset)}
@@ -166,11 +162,16 @@
 						<Archive />
 					</Button>
 				{/if}
+				{#if own && !preset.is_archived}
+					<Button variant="ghost" size="sm" class="h-8 px-2" title="A config change saves a new version" onclick={() => onEdit(preset)}>
+						<Pencil /> Edit
+					</Button>
+				{/if}
 			</div>
 		</div>
 
 		{#if historyKey === key}
-			<div class="border-t bg-muted/20 px-4 py-3">
+			<div class="mt-3 rounded-md border border-border bg-muted/20 px-3 py-2">
 				{#if historyLoading}
 					<LoadingState label="loading versions" class="py-2" />
 				{:else if historyError}
@@ -240,7 +241,7 @@
 				{#if group.presets.length === 0}
 					<p class="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">No presets for this harness.</p>
 				{:else}
-					<div class="space-y-2">
+					<div class="data-list">
 						{#each group.presets as preset (preset.id)}
 							{@render presetRow(preset)}
 						{/each}

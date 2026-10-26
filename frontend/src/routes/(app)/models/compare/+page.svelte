@@ -16,6 +16,7 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import Settings from '@lucide/svelte/icons/settings';
 	import X from '@lucide/svelte/icons/x';
+	import { tableFrame, shortModelName, modelNamePrefix } from '$lib/components/table';
 
 	type BaselineMode = 'first' | 'average' | 'median';
 
@@ -76,6 +77,34 @@
 		if (score >= 0.3) return 'C+';
 		if (score >= 0.2) return 'C';
 		return 'D';
+	}
+
+	/**
+	 * Index set of the models holding the best value of a row, or empty when
+	 * there is no clear leader (all tied, or more than two share the best).
+	 * A 0 counts as missing for 'max' rows (unknown size) but as free for 'min' (prices).
+	 */
+	function leaders(values: (number | null | undefined)[], better: 'max' | 'min', fmt: (v: number) => string = String): Set<number> {
+		const nums = values.map((v) => (typeof v === 'number' && Number.isFinite(v) && (better === 'min' ? v >= 0 : v > 0) ? v : null));
+		const present = nums.filter((v): v is number => v != null);
+		if (present.length < 2) return new Set();
+		const best = better === 'max' ? Math.max(...present) : Math.min(...present);
+		// Values that read the same once formatted (1M vs 1.05M → "1M") are a tie.
+		const idx = nums.flatMap((v, i) => (v != null && fmt(v) === fmt(best) ? [i] : []));
+		return idx.length <= 2 && idx.length < values.length ? new Set(idx) : new Set();
+	}
+
+	const best = $derived({
+		context: leaders(comparedModels.map((m) => m.context_window), 'max', formatTokens),
+		maxOut: leaders(comparedModels.map((m) => m.max_output_tokens), 'max', formatTokens),
+		input: leaders(comparedModels.map((m) => m.input_price_per_million), 'min', formatPrice),
+		output: leaders(comparedModels.map((m) => m.output_price_per_million), 'min', formatPrice),
+		efficiency: leaders(comparedModels.map((m) => m.cost_efficiency), 'max', (v) => v.toFixed(3)),
+	});
+
+	/** Faint tint on the column picked under "Highlight". */
+	function colTint(model: LLMModelDetail): string {
+		return highlightSlug === model.canonical_slug ? 'bg-primary/[0.04]' : '';
 	}
 
 	function supportsCapability(model: LLMModelDetail, capability: string): boolean {
@@ -204,71 +233,65 @@
 				</Card.Content>
 			</Card.Root>
 
-			<Card.Root>
-				<Card.Header>
+			<Card.Root class="gap-0 overflow-clip py-0">
+				<Card.Header class="border-b border-border py-3">
 					<Card.Title>Core Metrics</Card.Title>
+					<Card.Description>The best value in a row is marked when one or two models clearly lead it.</Card.Description>
 				</Card.Header>
 				<Card.Content class="p-0">
-					<div class="overflow-x-auto">
-						<table class="w-full min-w-[720px]">
+					<div class="table-frame" {@attach tableFrame}>
+						<table class="min-w-[720px]">
 							<thead>
-								<tr class="border-b bg-muted/30">
-									<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Metric</th>
-									{#each comparedModels as model (model.canonical_slug)}
-										<th class="px-4 py-3 text-left text-xs font-medium {highlightSlug === model.canonical_slug ? 'text-primary' : 'text-muted-foreground'}">{model.model_name}</th>
-									{/each}
-								</tr>
+								{@render modelHead('Metric')}
 							</thead>
-							<tbody class="divide-y">
-								<tr class="hover:bg-muted/30">
-									<td class="px-4 py-2.5 text-sm font-medium">Provider</td>
-									{#each comparedModels as model}
-										<td class="px-4 py-2.5 text-sm">{model.provider}</td>
+							<tbody>
+								<tr>
+									<td class="col-sticky font-medium">Provider</td>
+									{#each comparedModels as model (model.canonical_slug)}
+										<td class={colTint(model)}>{model.provider}</td>
 									{/each}
 								</tr>
-								<tr class="hover:bg-muted/30">
-									<td class="px-4 py-2.5 text-sm font-medium">Context Window</td>
-									{#each comparedModels as model}
-										<td class="px-4 py-2.5 text-sm font-mono">{model.context_window_display}</td>
+								<tr>
+									<td class="col-sticky font-medium">Context window</td>
+									{#each comparedModels as model, i (model.canonical_slug)}
+										<td class="num {colTint(model)}">{@render bestVal(model.context_window_display || '—', best.context.has(i), !model.context_window)}</td>
 									{/each}
 								</tr>
-								<tr class="hover:bg-muted/30">
-									<td class="px-4 py-2.5 text-sm font-medium">Max Output</td>
-									{#each comparedModels as model}
-										<td class="px-4 py-2.5 text-sm font-mono">{model.max_output_tokens ? formatTokens(model.max_output_tokens) : '—'}</td>
+								<tr>
+									<td class="col-sticky font-medium">Max output</td>
+									{#each comparedModels as model, i (model.canonical_slug)}
+										<td class="num {colTint(model)}">{@render bestVal(model.max_output_tokens ? formatTokens(model.max_output_tokens) : '—', best.maxOut.has(i), !model.max_output_tokens)}</td>
 									{/each}
 								</tr>
-								<tr class="hover:bg-muted/30">
-									<td class="px-4 py-2.5 text-sm font-medium">Input $/1M Tokens</td>
-									{#each comparedModels as model}
-										<td class="px-4 py-2.5 text-sm font-mono">{formatPrice(model.input_price_per_million)}</td>
+								<tr>
+									<td class="col-sticky font-medium">Input $/1M tokens</td>
+									{#each comparedModels as model, i (model.canonical_slug)}
+										<td class="num {colTint(model)}">{@render bestVal(formatPrice(model.input_price_per_million), best.input.has(i))}</td>
 									{/each}
 								</tr>
-								<tr class="hover:bg-muted/30">
-									<td class="px-4 py-2.5 text-sm font-medium">Output $/1M Tokens</td>
-									{#each comparedModels as model}
-										<td class="px-4 py-2.5 text-sm font-mono">{formatPrice(model.output_price_per_million)}</td>
+								<tr>
+									<td class="col-sticky font-medium">Output $/1M tokens</td>
+									{#each comparedModels as model, i (model.canonical_slug)}
+										<td class="num {colTint(model)}">{@render bestVal(formatPrice(model.output_price_per_million), best.output.has(i))}</td>
 									{/each}
 								</tr>
-								<tr class="hover:bg-muted/30">
-									<td class="px-4 py-2.5 text-sm font-medium">Cost Efficiency</td>
-									{#each comparedModels as model}
-										<td class="px-4 py-2.5 text-sm">
-											<div class="flex items-center gap-2">
-												<span class="font-semibold">{efficiencyGrade(model.cost_efficiency)}</span>
-												<span class="font-mono text-xs text-muted-foreground">{model.cost_efficiency.toFixed(3)}</span>
-											</div>
+								<tr>
+									<td class="col-sticky font-medium">Cost efficiency</td>
+									{#each comparedModels as model, i (model.canonical_slug)}
+										<td class="num {colTint(model)}">
+											<span class={best.efficiency.has(i) ? 'font-semibold text-primary' : 'font-semibold'}>{efficiencyGrade(model.cost_efficiency)}</span>
+											<span class="ml-1.5 text-xs text-muted-foreground">{model.cost_efficiency.toFixed(3)}</span>
 										</td>
 									{/each}
 								</tr>
-								<tr class="hover:bg-muted/30">
-									<td class="px-4 py-2.5 text-sm font-medium">Free Tier</td>
-									{#each comparedModels as model}
-										<td class="px-4 py-2.5 text-sm">
+								<tr>
+									<td class="col-sticky font-medium">Free tier</td>
+									{#each comparedModels as model (model.canonical_slug)}
+										<td class="num {colTint(model)}">
 											{#if model.is_free}
-												<Check class="h-4 w-4 text-success-fg" aria-label="Yes" />
+												<Check class="ml-auto h-4 w-4 text-foreground" aria-label="Yes" />
 											{:else}
-												<X class="h-4 w-4 text-muted-foreground" aria-label="No" />
+												<X class="ml-auto h-4 w-4 text-muted-foreground/60" aria-label="No" />
 											{/if}
 										</td>
 									{/each}
@@ -279,39 +302,30 @@
 				</Card.Content>
 			</Card.Root>
 
-			<Card.Root>
-				<Card.Header>
+			<Card.Root class="gap-0 overflow-clip py-0">
+				<Card.Header class="border-b border-border py-3">
 					<Card.Title>Pricing Deltas</Card.Title>
-					<Card.Description>Difference compared to {baselineLabel}.</Card.Description>
+					<Card.Description>Difference in $/1M tokens compared to {baselineLabel}; negative is cheaper.</Card.Description>
 				</Card.Header>
 				<Card.Content class="p-0">
-					<div class="overflow-x-auto">
-						<table class="w-full min-w-[720px]">
+					<div class="table-frame" {@attach tableFrame}>
+						<table class="min-w-[720px]">
 							<thead>
-								<tr class="border-b bg-muted/30">
-									<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Type</th>
-									{#each comparedModels as model (model.canonical_slug)}
-										<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">{model.model_name}</th>
-									{/each}
-								</tr>
+								{@render modelHead('Type')}
 							</thead>
-							<tbody class="divide-y">
-								<tr class="hover:bg-muted/30">
-									<td class="px-4 py-2.5 text-sm font-medium">Input Delta</td>
-									{#each comparedModels as model}
+							<tbody>
+								<tr>
+									<td class="col-sticky font-medium">Input delta</td>
+									{#each comparedModels as model (model.canonical_slug)}
 										{@const delta = model.input_price_per_million - baselineInputPrice}
-										<td class="px-4 py-2.5 text-sm font-mono {delta > 0 ? 'text-danger-fg' : delta < 0 ? 'text-success-fg' : 'text-muted-foreground'}">
-											{formatDelta(delta)}
-										</td>
+										<td class="num {colTint(model)} {delta === 0 ? 'text-muted-foreground' : ''}">{formatDelta(delta)}</td>
 									{/each}
 								</tr>
-								<tr class="hover:bg-muted/30">
-									<td class="px-4 py-2.5 text-sm font-medium">Output Delta</td>
-									{#each comparedModels as model}
+								<tr>
+									<td class="col-sticky font-medium">Output delta</td>
+									{#each comparedModels as model (model.canonical_slug)}
 										{@const delta = model.output_price_per_million - baselineOutputPrice}
-										<td class="px-4 py-2.5 text-sm font-mono {delta > 0 ? 'text-danger-fg' : delta < 0 ? 'text-success-fg' : 'text-muted-foreground'}">
-											{formatDelta(delta)}
-										</td>
+										<td class="num {colTint(model)} {delta === 0 ? 'text-muted-foreground' : ''}">{formatDelta(delta)}</td>
 									{/each}
 								</tr>
 							</tbody>
@@ -320,31 +334,26 @@
 				</Card.Content>
 			</Card.Root>
 
-			<Card.Root>
-				<Card.Header>
+			<Card.Root class="gap-0 overflow-clip py-0">
+				<Card.Header class="border-b border-border py-3">
 					<Card.Title>Capabilities Comparison</Card.Title>
 				</Card.Header>
 				<Card.Content class="p-0">
-					<div class="overflow-x-auto">
-						<table class="w-full min-w-[720px]">
+					<div class="table-frame" {@attach tableFrame}>
+						<table class="min-w-[720px]">
 							<thead>
-								<tr class="border-b bg-muted/30">
-									<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Capability</th>
-									{#each comparedModels as model (model.canonical_slug)}
-										<th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground">{model.model_name}</th>
-									{/each}
-								</tr>
+								{@render modelHead('Capability', true)}
 							</thead>
-							<tbody class="divide-y">
+							<tbody>
 								{#each capabilityUnion as capability (capability)}
-									<tr class="hover:bg-muted/30">
-										<td class="px-4 py-2.5 text-sm font-medium">{capability}</td>
-										{#each comparedModels as model}
-											<td class="px-4 py-2.5 text-center">
+									<tr>
+										<td class="col-sticky font-medium">{capability}</td>
+										{#each comparedModels as model (model.canonical_slug)}
+											<td class="text-center {colTint(model)}">
 												{#if supportsCapability(model, capability)}
-													<Check class="inline h-4 w-4 text-success-fg" aria-label="Yes" />
+													<Check class="inline h-4 w-4 text-foreground" aria-label="Yes" />
 												{:else}
-													<X class="inline h-4 w-4 text-muted-foreground" aria-label="No" />
+													<X class="inline h-4 w-4 text-muted-foreground/60" aria-label="No" />
 												{/if}
 											</td>
 										{/each}
@@ -358,3 +367,26 @@
 		{/if}
 	{/if}
 </div>
+
+{#snippet modelHead(label: string, center = false)}
+	<tr>
+		<th class="col-sticky min-w-40">{label}</th>
+		{#each comparedModels as model (model.canonical_slug)}
+			{@const prefix = modelNamePrefix(model.model_name)}
+			<th class="{center ? 'text-center' : 'num'} normal-case tracking-normal {highlightSlug === model.canonical_slug ? 'text-primary' : ''}" title={model.model_name}>
+				<a href="/models/{model.canonical_slug}" class="font-sans text-xs font-semibold hover:text-primary">{shortModelName(model.model_name)}</a>
+				{#if prefix}<span class="block font-sans text-[11px] font-normal text-muted-foreground">{prefix}</span>{/if}
+			</th>
+		{/each}
+	</tr>
+{/snippet}
+
+{#snippet bestVal(text: string, isBest: boolean, missing = false)}
+	{#if missing}
+		<span class="text-muted-foreground">—</span>
+	{:else if isBest}
+		<span class="font-semibold text-primary" title="Best in this row">{text}</span>
+	{:else}
+		{text}
+	{/if}
+{/snippet}

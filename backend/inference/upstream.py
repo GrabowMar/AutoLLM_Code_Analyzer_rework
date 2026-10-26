@@ -75,7 +75,26 @@ def _join(base_path: str, path: str) -> str:
     # base_url is the server root; tolerate a configured ".../v1" for OpenAI-style paths.
     if base_path.endswith("/v1") and path.startswith("/v1/"):
         base_path = base_path[: -len("/v1")]
+    # Gemini's OpenAI layer (".../v1beta/openai") serves "/chat/completions" and "/models" without "/v1".
+    elif base_path.endswith("/openai") and path.startswith("/v1/"):
+        path = path[len("/v1") :]
     return f"{base_path}{path}"
+
+
+# Claude API (OpenAI-compatible layer): /v1/models needs a version header, and
+# current Claude models reject the sampling knobs with a 400 instead of ignoring them.
+ANTHROPIC_HOST = "api.anthropic.com"
+ANTHROPIC_VERSION = "2023-06-01"
+ANTHROPIC_UNSUPPORTED_PARAMS = ("temperature", "top_p", "top_k")
+
+
+def _provider_quirks(host: str, body: Any, headers: dict[str, str]) -> Any:
+    if host != ANTHROPIC_HOST:
+        return body
+    headers["anthropic-version"] = ANTHROPIC_VERSION
+    if isinstance(body, dict) and any(k in body for k in ANTHROPIC_UNSUPPORTED_PARAMS):
+        body = {k: v for k, v in body.items() if k not in ANTHROPIC_UNSUPPORTED_PARAMS}
+    return body
 
 
 def _connect(target: Target, timeout: float) -> http.client.HTTPConnection:
@@ -133,8 +152,9 @@ def call(
     if on_socket is not None:
         on_socket(conn.sock)
     try:
-        data = json.dumps(body).encode() if body is not None else None
         headers = {"Host": target.host_header, "Accept": "application/json", "User-Agent": "llmlab-executor"}
+        body = _provider_quirks(target.host, body, headers)
+        data = json.dumps(body).encode() if body is not None else None
         if data is not None:
             headers["Content-Type"] = "application/json"
         if api_key:

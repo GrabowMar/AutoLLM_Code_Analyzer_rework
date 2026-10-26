@@ -97,3 +97,29 @@ def delete_report(request, report_id: str):
     report = get_object_or_404(Report, report_id=report_id, created_by=request.auth)
     report.delete()
     return {"success": True, "message": "deleted"}
+
+
+@router.get("/{report_id}/export/")
+def export_report(request, report_id: str, format: str = "md"):
+    """The report as Markdown (``md``), LaTeX tables (``tex``) or raw JSON (``json``)."""
+    import json
+
+    from django.http import HttpResponse
+
+    from backend.reports.services.renderers import render_latex
+    from backend.reports.services.renderers import render_markdown
+
+    report = get_object_or_404(Report, report_id=report_id, created_by=request.auth)
+    if report.status != Report.Status.COMPLETED:
+        return HttpResponse(f"Report not ready (status: {report.status})", status=400)
+    if format == "md":
+        body, content_type, ext = render_markdown(report), "text/markdown; charset=utf-8", "md"
+    elif format == "tex":
+        body, content_type, ext = render_latex(report), "application/x-tex; charset=utf-8", "tex"
+    elif format == "json":
+        body, content_type, ext = json.dumps(report.report_data, indent=2, default=str), "application/json", "json"
+    else:
+        return HttpResponse("format must be md, tex or json", status=400)
+    resp = HttpResponse(body, content_type=content_type)
+    resp["Content-Disposition"] = f'attachment; filename="{report.report_id}.{ext}"'
+    return resp

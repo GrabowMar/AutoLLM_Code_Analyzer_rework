@@ -8,7 +8,18 @@ export type ReportType =
   | "tool_analysis"
   | "generation_analytics"
   | "comprehensive"
-  | "experiment_report";
+  | "experiment_report"
+  | "study_report";
+
+export type ReportExportFormat = "md" | "tex" | "json";
+
+/** Download URL of a completed report as Markdown, LaTeX tables or JSON. */
+export function reportExportUrl(
+  reportId: string,
+  format: ReportExportFormat,
+): string {
+  return `/api/reports/${encodeURIComponent(reportId)}/export/?format=${format}`;
+}
 
 export interface GenerateReportPayload {
   report_type: ReportType;

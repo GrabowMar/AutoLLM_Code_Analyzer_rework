@@ -1,6 +1,7 @@
 """Django Ninja schemas for generation."""
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from django.conf import settings
@@ -89,10 +90,13 @@ class AppRequirementTemplateSchema(ModelSchema):
 
 
 class AppRequirementCreateSchema(Schema):
+    """POST/PUT body for an app spec. PUT replaces every field except the slug."""
+
     name: str
     slug: str
     category: str = ""
     description: str = ""
+    difficulty: Literal["", "basic", "standard", "advanced"] = ""
     backend_requirements: list = []
     frontend_requirements: list = []
     admin_requirements: list = []
@@ -585,6 +589,8 @@ class ScaffoldingJobCreateSchema(Schema):
     # Independent repetitions per (template × model) cell. Sampling variance
     # between trials is the point — comparisons need n > 1.
     trials: int = Field(1, ge=1, le=10)
+    # Build-time repair of the output: full | no_deps | none (HealingMode).
+    build_healing: str = Field("full", pattern="^(full|no_deps|none)$")
 
 
 class LLMPreviewSchema(Schema):
@@ -842,6 +848,7 @@ class ExperimentSchema(ModelSchema):
             "agent_config",
             "continuation_limit",
             "enable_repair",
+            "build_healing",
             "llm_defaults",
             "created_at",
             "updated_at",
@@ -888,6 +895,7 @@ class ExperimentCreateSchema(Schema):
     agent_config: AgentConfigSchema | None = None
     continuation_limit: int = Field(1, ge=0, le=5)
     enable_repair: bool = True
+    build_healing: str = Field("full", pattern="^(full|no_deps|none)$")
     llm_defaults: LLMParamsSchema | None = None
 
 
@@ -907,4 +915,5 @@ class ExperimentUpdateSchema(Schema):
     agent_config: AgentConfigSchema | None = None
     continuation_limit: int | None = Field(None, ge=0, le=5)
     enable_repair: bool | None = None
+    build_healing: str | None = Field(None, pattern="^(full|no_deps|none)$")
     llm_defaults: LLMParamsSchema | None = None

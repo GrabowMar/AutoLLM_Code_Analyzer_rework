@@ -8,6 +8,7 @@ import LoadingState from '$lib/components/LoadingState.svelte';
 import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 import EmptyState from '$lib/components/EmptyState.svelte';
 import type { GenerationJobList } from '$lib/api/client';
+import { tableFrame, shortModelName, modelNamePrefix } from '$lib/components/table';
 
 type SourceMode = 'job' | 'paste';
 
@@ -106,34 +107,48 @@ let {
 					{/snippet}
 				</EmptyState>
 			{:else}
-				<div class="overflow-x-auto table-scroll-wrapper">
-					<table class="w-full text-sm">
+				<div class="table-frame rounded-md border border-border" {@attach tableFrame}>
+					<table>
 						<thead>
-							<tr class="border-b bg-muted/30">
-								<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Job ID</th>
-								<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Model</th>
-								<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Template</th>
-								<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Completed</th>
-								<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground"></th>
+							<tr>
+								<th>Job ID</th>
+								<th>Model</th>
+								<th>Template</th>
+								<th>Completed</th>
+								<th><span class="sr-only">Select</span></th>
 							</tr>
 						</thead>
-						<tbody class="divide-y">
+						<tbody>
 							{#each filteredJobs as job}
-								<tr class="transition-colors hover:bg-muted/30 {selectedJobId === job.id ? 'bg-primary/5' : ''}">
-									<td class="px-4 py-2.5 font-mono text-xs">{job.id.slice(0, 8)}…</td>
-									<td class="px-4 py-2.5">{job.model_name ?? '—'}</td>
-									<td class="px-4 py-2.5">{job.template_name ?? '—'}</td>
-									<td class="px-4 py-2.5 text-xs text-muted-foreground">
+								{@const selected = selectedJobId === job.id}
+								{@const provider = modelNamePrefix(job.model_name) || job.model_id_str?.split('/')[0] || ''}
+								<tr data-selected={selected}>
+									<td class="whitespace-nowrap font-mono text-xs">{job.id.slice(0, 8)}…</td>
+									<td class="max-w-0 w-[35%]">
+										{#if job.model_name}
+											<div class="min-w-0" title={job.model_name}>
+												<span class="block truncate">{shortModelName(job.model_name)}</span>
+												{#if provider}<span class="cell-sub block truncate text-[11px] text-muted-foreground">{provider}</span>{/if}
+											</div>
+										{:else}
+											<span class="text-muted-foreground">—</span>
+										{/if}
+									</td>
+									<td>
+										{#if job.template_name}{job.template_name}{:else}<span class="text-muted-foreground">—</span>{/if}
+									</td>
+									<td class="whitespace-nowrap text-xs text-muted-foreground">
 										{job.completed_at ? new Date(job.completed_at).toLocaleDateString() : '—'}
 									</td>
-									<td class="px-4 py-2.5">
+									<td class="w-px whitespace-nowrap text-right">
 										<Button
-											variant={selectedJobId === job.id ? 'default' : 'outline'}
+											variant={selected ? 'default' : 'ghost'}
 											size="sm"
-											class="h-7 text-xs"
+											class="h-7 px-2 text-xs"
+											aria-pressed={selected}
 											onclick={() => onSelectJob(job.id)}
 										>
-											{selectedJobId === job.id ? 'Selected' : 'Select'}
+											{selected ? 'Selected' : 'Select'}
 										</Button>
 									</td>
 								</tr>

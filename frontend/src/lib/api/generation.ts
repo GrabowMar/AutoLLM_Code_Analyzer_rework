@@ -1213,17 +1213,24 @@ export async function getAppTemplates(): Promise<AppRequirementTemplate[]> {
   return res.json();
 }
 
-export async function createAppTemplate(data: {
+/** Body of POST/PUT /app-specs/: PUT replaces the whole spec, so send every field. */
+export interface AppSpecWritePayload {
   name: string;
   slug: string;
+  category?: string;
+  difficulty?: AppSpecDifficulty;
   description?: string;
   backend_requirements?: string[];
   frontend_requirements?: string[];
   admin_requirements?: string[];
-  api_endpoints?: Record<string, unknown>;
-  admin_api_endpoints?: any[];
+  api_endpoints?: unknown[];
+  admin_api_endpoints?: unknown[];
   data_model?: Record<string, unknown>;
-}): Promise<AppRequirementTemplate> {
+}
+
+export async function createAppTemplate(
+  data: AppSpecWritePayload,
+): Promise<AppRequirementTemplate> {
   const res = await apiFetch("/generation/app-specs/", {
     method: "POST",
     body: JSON.stringify(data),
@@ -1233,16 +1240,7 @@ export async function createAppTemplate(data: {
 
 export async function updateAppTemplate(
   slug: string,
-  data: Partial<{
-    name: string;
-    description: string;
-    backend_requirements: string[];
-    frontend_requirements: string[];
-    admin_requirements: string[];
-    api_endpoints: Record<string, unknown>;
-    admin_api_endpoints: any[];
-    data_model: Record<string, unknown>;
-  }>,
+  data: AppSpecWritePayload,
 ): Promise<AppRequirementTemplate> {
   const res = await apiFetch(`/generation/app-specs/${slug}/`, {
     method: "PUT",

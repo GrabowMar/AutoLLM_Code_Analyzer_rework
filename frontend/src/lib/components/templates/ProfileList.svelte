@@ -64,79 +64,94 @@
 {:else if profiles.length === 0}
 	<EmptyState icon={SlidersHorizontal} title="No profiles yet" description="Create one, or import a starter package." />
 {:else}
-	<div class="space-y-2">
+	<div class="data-list @container">
+		<div class="data-list-head" aria-hidden="true">
+			<span class="flex-1">Profile</span>
+			<span class="hidden w-16 text-right @xl:block">Blocks</span>
+			<span class="hidden w-40 @xl:block">Stack</span>
+			<span class="w-[8.5rem]"></span>
+		</div>
 		{#each profiles as p (p.id)}
 			{@const isActive = activeSlug === p.slug}
-			<div class="rounded-md border border-border bg-card {isActive ? 'ring-2 ring-primary' : ''}">
-				<div class="flex items-start gap-4 p-4">
-					<div class="flex-1 min-w-0">
-						<div class="flex items-center flex-wrap gap-2">
-							<span class="font-semibold text-sm">{p.name}</span>
-							<span class="text-[11px] font-mono text-muted-foreground">{p.slug}@{p.version}</span>
-							{#if p.is_default}<Badge variant="secondary">Default</Badge>{/if}
-							{#if p.is_system}<Badge variant="secondary">System</Badge>{/if}
+			{@const llmDefaults = Object.keys(p.llm_config ?? {}).length}
+			<div class="data-list-row" data-active={isActive}>
+				<div class="flex items-center gap-4">
+					<div class="min-w-0 flex-1">
+						<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+							<span class="text-sm font-medium">{p.name}</span>
+							<span class="font-mono text-[11px] text-muted-foreground">{p.slug}@{p.version}</span>
+							{#if p.is_default}<Badge variant="outline" class="h-5 px-1.5 text-[11px] text-primary">Default</Badge>{/if}
+							{#if p.is_system}<Badge variant="secondary" class="h-5 px-1.5 text-[11px]">System</Badge>{/if}
 						</div>
 						{#if p.description}
-							<p class="text-xs text-muted-foreground mt-1 line-clamp-1 leading-relaxed">{p.description}</p>
+							<p class="cell-sub mt-0.5 line-clamp-1 text-xs text-muted-foreground" title={p.description}>{p.description}</p>
 						{/if}
-						<div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[11px] text-muted-foreground font-medium">
-							<span class="flex items-center gap-1">
-								<Badge variant="outline" class="font-mono">{p.block_refs?.length ?? 0}</Badge> blocks
-							</span>
-							<span>stack <span class="font-mono text-foreground">{p.scaffolding_slug}</span></span>
-							{#if Object.keys(p.llm_config ?? {}).length > 0}
-								<span class="font-mono text-success-fg">{Object.keys(p.llm_config).length} llm default{Object.keys(p.llm_config).length > 1 ? 's' : ''}</span>
+						<p class="cell-sub mt-0.5 font-mono text-[11px] text-muted-foreground @xl:hidden">
+							{p.block_refs?.length ?? 0} blocks · {p.scaffolding_slug}
+						</p>
+					</div>
+					<span class="hidden w-16 text-right font-mono text-sm tabular-nums @xl:block" title="Prompt blocks">{p.block_refs?.length ?? 0}</span>
+					<div class="hidden w-40 min-w-0 @xl:block">
+						<span class="block truncate font-mono text-xs">{p.scaffolding_slug}</span>
+						{#if llmDefaults > 0}
+							<span class="cell-sub block text-[11px] text-muted-foreground">{llmDefaults} LLM default{llmDefaults > 1 ? 's' : ''}</span>
+						{/if}
+					</div>
+					<div class="flex w-[8.5rem] shrink-0 items-center justify-end gap-0.5">
+						<div class="row-actions-more flex items-center gap-0.5">
+							<Button
+								variant="ghost"
+								size="sm"
+								class="size-8 p-0 text-muted-foreground hover:text-foreground"
+								title="Version history"
+								aria-label="Version history of {p.name}"
+								aria-expanded={historySlug === p.slug}
+								onclick={() => toggleHistory(p)}
+							>
+								<History />
+							</Button>
+							<Button variant="ghost" size="sm" class="size-8 p-0 text-muted-foreground hover:text-foreground" title="Duplicate as a new profile" aria-label="Duplicate {p.name}" onclick={() => onDuplicate(p)}>
+								<Copy />
+							</Button>
+							{#if !p.is_system}
+								<Button
+									variant="ghost"
+									size="sm"
+									class="size-8 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-danger-fg"
+									title="Archive all versions (jobs keep their snapshots)"
+									aria-label="Archive {p.name}"
+									onclick={() => onArchive(p)}
+								>
+									<Archive />
+								</Button>
 							{/if}
 						</div>
-					</div>
-					<div class="flex gap-1.5 ml-2 shrink-0 self-center">
 						{#if !p.is_system || canEditSystem}
-							<Button variant="outline" size="sm" title="Edit as a new version — versions are immutable" onclick={() => onEdit(p)}>
+							<Button variant="ghost" size="sm" class="h-8 px-2" title="Edit as a new version — versions are immutable" onclick={() => onEdit(p)}>
 								<Pencil /> Edit
 							</Button>
-						{/if}
-						<Button
-							variant="outline"
-							size="sm"
-							title="Version history"
-							aria-label="Version history of {p.name}"
-							aria-expanded={historySlug === p.slug}
-							onclick={() => toggleHistory(p)}
-						>
-							<History />
-						</Button>
-						<Button variant="outline" size="sm" title="Duplicate as a new profile" aria-label="Duplicate {p.name}" onclick={() => onDuplicate(p)}>
-							<Copy />
-						</Button>
-						{#if !p.is_system}
-							<Button
-								variant="outline"
-								size="sm"
-								class="hover:bg-destructive/10 hover:text-danger-fg"
-								title="Archive all versions (jobs keep their snapshots)"
-								aria-label="Archive {p.name}"
-								onclick={() => onArchive(p)}
-							>
-								<Archive />
+						{:else}
+							<Button variant="ghost" size="sm" class="h-8 px-2" title="System profiles are read-only — duplicate to change" onclick={() => onDuplicate(p)}>
+								<Copy /> Copy
 							</Button>
 						{/if}
 					</div>
 				</div>
 
 				{#if historySlug === p.slug}
-					<div class="border-t bg-muted/20 px-4 py-3">
+					<div class="mt-3 rounded-md border border-border bg-muted/20 px-3 py-2">
 						{#if historyLoading}
 							<LoadingState label="loading versions" class="py-2" />
 						{:else}
-							<div class="space-y-1">
+							<ol class="space-y-1">
 								{#each historyVersions as v, i (v.id)}
-									<div class="flex items-baseline gap-3 text-xs">
-										<span class="font-mono text-foreground shrink-0">v{v.version}</span>
+									<li class="flex items-baseline gap-3 text-xs">
+										<span class="shrink-0 font-mono text-foreground">v{v.version}</span>
 										<span class="text-muted-foreground">{refsDelta(v, historyVersions[i + 1])}</span>
-										<span class="ml-auto text-[11px] text-muted-foreground shrink-0">{new Date(v.created_at).toLocaleDateString()}</span>
-									</div>
+										<time class="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground" datetime={v.created_at}>{new Date(v.created_at).toLocaleDateString()}</time>
+									</li>
 								{/each}
-							</div>
+							</ol>
 						{/if}
 					</div>
 				{/if}

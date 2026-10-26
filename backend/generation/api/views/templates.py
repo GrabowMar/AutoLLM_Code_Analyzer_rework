@@ -269,9 +269,12 @@ def list_app_templates(request):
     return visible_app_templates_for(request.auth)
 
 
-@router.post("/app-specs/", response=AppRequirementTemplateSchema)
+@router.post("/app-specs/", response={200: AppRequirementTemplateSchema, 400: dict})
 def create_app_template(request, payload: AppRequirementCreateSchema):
-    return AppRequirementTemplate.objects.create(
+    # Slugs are unique across every owner; don't say whose it is.
+    if AppRequirementTemplate.objects.filter(slug=payload.slug).exists():
+        return 400, {"detail": f"App spec slug {payload.slug!r} is already in use."}
+    return 200, AppRequirementTemplate.objects.create(
         **payload.dict(),
         created_by=request.auth,
     )
@@ -285,7 +288,7 @@ def get_app_template(request, slug: str):
 @router.put("/app-specs/{slug}/", response=AppRequirementTemplateSchema)
 def update_app_template(request, slug: str, payload: AppRequirementCreateSchema):
     template = _mutable_template_or_403(request.auth, slug=slug)
-    for attr, value in payload.dict().items():
+    for attr, value in payload.dict(exclude={"slug"}).items():
         setattr(template, attr, value)
     template.save()
     return template

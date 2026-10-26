@@ -90,27 +90,27 @@ onDestroy(() => { if (poll) clearInterval(poll); });
 				<div>
 					<h3 class="section-label mb-2">Ports</h3>
 					<div class="overflow-x-auto">
-						<table class="w-full text-sm">
+						<table>
 							<thead>
 								<tr>
 									<th>Service</th>
-									<th>Host Port</th>
-									<th>Container Port</th>
-									<th>Actions</th>
+									<th class="num">Host port</th>
+									<th class="num">Container port</th>
+									<th><span class="sr-only">Actions</span></th>
 								</tr>
 							</thead>
 							<tbody>
 								{#if container.app_port}
 									<tr>
 										<td>App</td>
-										<td class="font-mono text-xs">{container.app_port}</td>
-										<td class="font-mono text-xs">8000</td>
-										<td>
-											<a href={container.app_url ?? '#'} target="_blank" rel="noopener noreferrer" class="text-success-fg hover:underline inline-flex items-center gap-1 text-xs">Open <ExternalLink class="h-3 w-3" /></a>
+										<td class="num">{container.app_port}</td>
+										<td class="num">8000</td>
+										<td class="w-px whitespace-nowrap text-right">
+											<a href={container.app_url ?? '#'} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs text-primary hover:underline">Open <ExternalLink class="h-3 w-3" /></a>
 										</td>
 									</tr>
 								{:else}
-									<tr><td colspan="4" class="px-3 py-3 text-xs text-muted-foreground text-center">No ports mapped</td></tr>
+									<tr><td colspan="4" class="text-center text-xs text-muted-foreground">No ports mapped</td></tr>
 								{/if}
 							</tbody>
 						</table>

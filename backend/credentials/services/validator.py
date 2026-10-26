@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
 HUGGINGFACE_WHOAMI_URL = "https://huggingface.co/api/whoami-v2"
+GITHUB_USER_URL = "https://api.github.com/user"
 HTTP_OK = 200
 HTTP_UNAUTHORIZED = 401
 HTTP_FORBIDDEN = 403
@@ -126,9 +127,73 @@ def validate_huggingface_key(  # noqa: PLR0911
     )
 
 
+def validate_github_token(  # noqa: PLR0911
+    api_key: str,
+    *,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> ValidationResult:
+    """Probe GitHub to check whether ``api_key`` (a PAT) is accepted.
+
+    Hits ``GET /user``, which returns the authenticated account and does not
+    count against anything but the regular API rate limit.
+    """
+    if not api_key or not api_key.strip():
+        return ValidationResult(ValidationStatus.INVALID, "API key is empty.")
+
+    try:
+        response = requests.get(
+            GITHUB_USER_URL,
+            headers={
+                "Authorization": f"Bearer {api_key.strip()}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            timeout=timeout,
+        )
+    except requests.exceptions.Timeout:
+        return ValidationResult(
+            ValidationStatus.NETWORK_ERROR,
+            f"GitHub did not respond within {timeout}s.",
+        )
+    except requests.exceptions.RequestException as exc:
+        return ValidationResult(
+            ValidationStatus.NETWORK_ERROR,
+            f"Could not reach GitHub: {exc}",
+        )
+
+    if response.status_code == HTTP_OK:
+        try:
+            login = (response.json() or {}).get("login") or ""
+        except ValueError:
+            login = ""
+        suffix = f" as {login}" if login else ""
+        return ValidationResult(ValidationStatus.VALID, f"Token accepted by GitHub{suffix}.")
+    if response.status_code == HTTP_UNAUTHORIZED:
+        return ValidationResult(
+            ValidationStatus.INVALID,
+            "GitHub rejected this token (401). It is invalid, revoked, or expired.",
+        )
+    if response.status_code in (HTTP_FORBIDDEN, HTTP_RATE_LIMITED):
+        # GitHub signals primary rate limits with 403 + X-RateLimit-Remaining: 0.
+        if response.status_code == HTTP_RATE_LIMITED or response.headers.get("X-RateLimit-Remaining") == "0":
+            return ValidationResult(
+                ValidationStatus.RATE_LIMITED,
+                "GitHub rate-limited the validation request. Try again shortly.",
+            )
+        return ValidationResult(
+            ValidationStatus.INVALID,
+            "GitHub refused this token (403). It may lack permissions or be blocked by an organization policy.",
+        )
+    return ValidationResult(
+        ValidationStatus.NETWORK_ERROR,
+        f"Unexpected response from GitHub ({response.status_code}).",
+    )
+
+
 PROVIDER_VALIDATORS = {
     "openrouter": validate_openrouter_key,
     "huggingface": validate_huggingface_key,
+    "github": validate_github_token,
 }
 
 

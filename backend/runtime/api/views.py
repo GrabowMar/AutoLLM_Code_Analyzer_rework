@@ -52,6 +52,9 @@ def get_docker_info(request: HttpRequest):
         version=version.get("Version"),
         os=info.get("OSType"),
         arch=info.get("Architecture"),
+        containers_running=info.get("ContainersRunning"),
+        containers_stopped=info.get("ContainersStopped"),
+        images=info.get("Images"),
     )
 
 

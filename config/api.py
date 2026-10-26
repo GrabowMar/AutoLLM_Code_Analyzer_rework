@@ -42,5 +42,6 @@ api.add_router("/docs/", "backend.docs.api.views.router")
 api.add_router("/system/", "backend.system.api.views.router")
 api.add_router("/inference/", "backend.inference.api.views.router")
 api.add_router("/execution/", "backend.execution.api_views.router")
+api.add_router("/integrations/", "backend.integrations.api.views.router")
 # The /automation/ router is unmounted (spec §F.4/§H): schedules and post-runs
 # live on experiments now. backend.automation keeps its app, tables and code.

@@ -75,6 +75,9 @@ export const liveStatuses = new Set([
   "evaluating",
   "warming",
   "warming_model",
+  "provisioning",
+  "installing",
+  "updating",
 ]);
 
 /** Containers: "running" is the healthy steady state, not work in progress. */

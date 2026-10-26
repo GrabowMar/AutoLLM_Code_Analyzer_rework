@@ -1,42 +1,50 @@
 # Design System: LLM Eval Lab
 
-Pattern: **Data-Dense Dashboard** — KPI cards, real charts, dense tables, minimal
-padding, 12-col bento grid, maximum data visibility. Identity: **code dark + run
-green**, extended with a cyan/violet duotone. Founded with ui-ux-pro-max-skill;
-chart color and interaction rules follow the dataviz skill (palettes are
-validator-checked, not eyeballed).
+Pattern: **Research Lab** — Swiss Modernism 2.0 × Data-Dense Dashboard: an
+editorial "journal" layer (serif titles, mono eyebrows, hairline rules) over
+dense data surfaces (KPI tiles, real charts, sortable tables, 12-col bento).
+Identity: **ink & paper + research indigo**, with ochre/teal supporting accents
+and a faint graph-paper canvas. Generated with ui-ux-pro-max-skill (vendored at
+`.claude/skills/ui-ux-pro-max`, query: `"AI research lab developer tool analytics"
+--design-system --density 8 --variance 4 --motion 3`); chart color and
+interaction rules follow the dataviz skill (palettes are validator-checked, not
+eyeballed).
 
 ## Colors
 
-Tokens live in `src/app.css` (`:root` light / `.dark`); Tailwind v4 reads them via
-`@theme inline`.
+Tokens live in `src/app.css` (`:root` light "paper" / `.dark` "observatory");
+Tailwind v4 reads them via `@theme inline`. Dark stays the default mode.
 
-| Role              | Light     | Dark      |
-| ----------------- | --------- | --------- |
-| Primary / CTA     | `#16a34a` | `#22c55e` |
-| Accent 2 (cyan)   | `#0e7490` | `#22d3ee` |
-| Accent 3 (violet) | `#6d28d9` | `#a78bfa` |
-| Background        | `#f8fafc` | `#162233` |
-| Card              | `#ffffff` | `#1a2d44` |
-| Text              | `#0f172a` | `#f1f5f9` |
+| Role             | Light     | Dark      |
+| ---------------- | --------- | --------- |
+| Primary / CTA    | `#2c44bd` | `#7b91ff` |
+| Accent 2 (ochre) | `#8a5a00` | `#e0b252` |
+| Accent 3 (teal)  | `#0f6b62` | `#4fd1c5` |
+| Info (sky)       | `#0284c7` | `#38bdf8` |
+| Background       | `#f5f5f1` | `#0b111d` |
+| Card             | `#ffffff` | `#111a2b` |
+| Sidebar          | `#efefe9` | `#080d17` |
+| Text             | `#141a26` | `#e4e8f0` |
 
-- Green stays the only action color. Cyan/violet are supporting accents (icon
-  tints, gradients, KPI chips) — never buttons.
-- `--gradient-brand` (green→cyan) is reserved for the brand chip, hero name,
-  panel hairlines (`.gradient-border-top`), and the header underline.
+- Indigo is the only action color. Ochre/teal are supporting accents (KPI ticks,
+  figure strokes, brand dot) — never buttons. `info` is sky so "running" never
+  reads as the action color.
+- No gradients, glass or glow anywhere. The only decorative surfaces are the
+  `.lab-canvas` graph paper (app/auth layouts) and the dashboard `.hero-figure`.
+- All text tokens were checked ≥ 4.5:1 on their surfaces (most ≥ 6:1).
 
 ### Chart palette (validated)
 
-`--chart-1..5` are categorical slots, validated with the dataviz six-checks
-script against each mode's surface:
+`--chart-1..5` are categorical slots (indigo, teal, ochre, rose, violet),
+validated with the dataviz six-checks script against each mode's surface:
 
-- Light (on `#ffffff`): `#16a34a #0891b2 #7c3aed #d97706 #e11d48`
-- Dark (on `#1a2d44`): `#16a34a #0891b2 #8b5cf6 #d97706 #f43f5e`
+- Light (on `#ffffff`): `#3b5bdb #0d9488 #c2850c #c2255c #7048e8`
+- Dark (on `#121b2d`): `#4c6ef5 #0d9488 #c2850c #d6336c #7950f2`
 
 Re-validate whenever surfaces or slots change:
 
 ```
-node <dataviz-skill>/scripts/validate_palette.js "<hex,hex,…>" --mode dark --surface "#1a2d44"
+node <dataviz-skill>/scripts/validate_palette.js "<hex,hex,…>" --mode dark --surface "#121b2d"
 ```
 
 Rules (see `src/lib/components/charts/theme.ts`):
@@ -51,9 +59,15 @@ Rules (see `src/lib/components/charts/theme.ts`):
 
 ## Typography
 
-- **Display/headings:** Fira Code (`--font-display`); **body:** Fira Sans.
-- Hero scale: `.display-xl` (3xl/4xl). Page titles: `.page-header h1` (2xl/3xl).
-- KPI values: `.kpi-value` (3xl, tabular).
+- **Display (serif):** Source Serif 4 (`--font-display`, `font-display`) — `h1`,
+  `h2`, page titles, card titles, hero. Italic + primary for one emphasised phrase.
+- **UI/body:** IBM Plex Sans (`--font-sans`). `h3`–`h6` stay sans.
+- **Data (mono):** IBM Plex Mono (`--font-mono`, `font-mono`) — KPI values, big
+  stat numbers, eyebrows, `.section-label`, `.kpi-label`, table headers, IDs.
+- Hero scale: `.display-xl`. Page titles: `.page-header h1` (2xl/30px).
+- KPI values: `.kpi-value` (3xl mono, tabular). Big numbers elsewhere use
+  `font-mono font-medium tabular-nums`, never the serif.
+- Eyebrow: `.page-eyebrow` (mono, uppercase, 0.14em tracking).
 
 ## Page anatomy (every page under `(app)/`)
 
@@ -72,6 +86,8 @@ Rules (see `src/lib/components/charts/theme.ts`):
 </div>
 ```
 
+- `PageHeader` renders the section eyebrow (`02 · Generate`, from `navSectionFor` in `nav.ts`) or the
+  `back` link, the serif `<h1>`, and the masthead rule (hairline + short primary bar).
 - `PageHeader` owns the `<h1>` and the browser `<title>` (`"{title} · LLM Lab"`) — no
   separate `<svelte:head><title>` and no hand-rolled `.page-header` markup.
 - Vertical rhythm: `space-y-6` between page sections, `gap-4` inside grids, `gap-3` in KPI rows.
@@ -90,6 +106,7 @@ Rules (see `src/lib/components/charts/theme.ts`):
 | Tabs                         | `ui/tabs` (`Tabs.Root bind:value` / `List` / `Trigger` / `Content`)          | button rows with `activeTab` classes                   |
 | Section container            | `Card.Root` + `Card.Header`/`Card.Title`/`Card.Description` + `Card.Content` | bespoke bordered divs                                  |
 | Clickable card               | add `.card-lift`                                                             | hover effects on static cards                          |
+| Logo / wordmark              | `BrandMark` (`compact`, `tagline`, `size="lg"`)                              | icon + hand-built "LLM Lab" spans                      |
 | KPI                          | `dashboard/KpiCard` or `.kpi-card` / `.kpi-label` / `.kpi-value`             | one-off stat boxes                                     |
 | Small group label            | `.section-label`                                                             | `text-[10px] uppercase …` variants                     |
 | Pick one of a list           | `ui/select` (`Select.Simple` for plain lists, parts for rich rows)           | raw `<select>` with copied class strings               |
@@ -114,6 +131,35 @@ Navigation lives in `src/lib/nav.ts` (sidebar, mobile menu, breadcrumbs). Add ro
   a radiogroup (arrow keys move and select), `fullWidth` stretches items, narrow screens scroll sideways.
 - Number inputs bind numbers (`null` when empty): hand `<Input type="number">` the number itself, never
   `String(n)`, or Svelte rewrites partial input such as `-0` while the user types.
+
+## Tables and lists (`src/lib/components/table/`)
+
+Import from `$lib/components/table`. Base `table`/`th`/`td` styles are global (`app.css`); don't restate
+`px-3 py-2` or header classes on cells — explicit padding utilities defeat compact density.
+
+| Need                               | Use                                                                                                                                                                                               |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Table inside a card                | `Card.Root class="gap-0 overflow-clip py-0"` → `TableToolbar` → `div.table-frame {@attach tableFrame}` → `table` (fits: page scrolls, header sticks under the app bar; wider: bounded scroll box) |
+| Card title above a flush table     | `Card.Header class="border-b border-border py-3"` + `Card.Content class="p-0"`                                                                                                                    |
+| Table inside a padded area         | `table-frame` + `rounded-md border border-border` (no card)                                                                                                                                       |
+| Short, fixed tables (≤ ~8 rows)    | plain `overflow-x-auto`; a `max-h-*` box can't use `table-frame` (it un-bounds when the table fits)                                                                                               |
+| Sortable header                    | `SortableTh label field sortBy sortDir onSort align? help? ascOnly?` (renders `<th aria-sort>`)                                                                                                   |
+| Summary / bulk actions / density   | `TableToolbar` (`summary`, `bulk`, `controls` snippets; `selectedCount`, `onClearSelection`)                                                                                                      |
+| Whole row opens a page             | `<tr class="row-link" onclick={rowLink(href)}>` + a real `<a>` in the name cell                                                                                                                   |
+| Selection                          | `ui/checkbox` per row + `indeterminate` header box; `<tr data-selected={…}>`                                                                                                                      |
+| Numbers                            | `td.num` / `th.num` (right, mono, tabular); missing value `—` in `text-muted-foreground`                                                                                                          |
+| 0–1 scores                         | `ScoreCell` (number + neutral meter; `best` only for a leader held by ≤ 2 rows)                                                                                                                   |
+| Secondary row actions              | wrap in `.row-actions-more` (revealed on hover/focus, always visible on touch)                                                                                                                    |
+| Second line under a cell           | `.cell-sub` (hidden in compact density)                                                                                                                                                           |
+| Wide table                         | `.col-sticky` on the identity column                                                                                                                                                              |
+| Model names next to a provider     | `shortModelName()` / `modelNamePrefix()` ("Amazon: Nova 2 Lite" → "Nova 2 Lite" · Amazon)                                                                                                         |
+| List of records (not tabular data) | `.data-list` (+ `@container`) with `.data-list-head` and `.data-list-row[data-active]`                                                                                                            |
+| Mobile rendering of a table        | `.data-list` rows: identity line, status + numbers line, one next step + icon actions (≥ 36px)                                                                                                    |
+
+- Density: the "Compact tables" preference sets `data-density` on the app shell; the toolbar toggle writes it.
+- Scores are never colored red/amber/green by value; color marks status, not "low number".
+- One primary next step per row (Open, Provision, Edit) as a ghost button; no outline buttons repeated per row.
+- Hide columns that are empty on the whole page, and say so in the toolbar.
 
 ## Generation building blocks (`src/lib/components/generator/`)
 
@@ -178,8 +224,12 @@ Import from `$lib/components/experiments`. Endpoint pieces (`SlotMeter`, `Endpoi
 
 ## Decoration (usage rules)
 
-- Swiss-minimal data surfaces: no glass, glow or gradients on cards, tables or lists.
-- `.hero-panel` and `--gradient-brand` stay on the dashboard hero only.
+- Swiss-minimal data surfaces: crisp 1px borders, `--shadow-card` hairline, no
+  glass, glow or gradients on cards, tables or lists. Radius 0.3rem.
+- `.lab-canvas` (graph paper) only on layout wrappers; `.hero-panel` +
+  `.hero-figure` only on the dashboard.
+- KPI tiles: left accent tick via `--kpi-accent`; hover = border + faint tint,
+  no lift.
 
 ## Motion
 
@@ -205,11 +255,13 @@ Import from `$lib/components/experiments`. Endpoint pieces (`SlotMeter`, `Endpoi
 ## Key effects
 
 Hover tooltips, row highlighting, smooth filter animations, staggered section
-entrances, live status dots (`.status-dot-live`), KPI count-ups.
+entrances, live status dots (`.status-dot-live`), KPI count-ups, indeterminate
+scan-bar loader (`LoadingState` / `.loading-mono`).
 
 ## Avoid (anti-patterns)
 
-- Ornate decoration; glass/glow on data-dense surfaces; hover lift on non-clickable cards
+- Ornate decoration; glass/glow/gradients; hover lift on non-clickable cards
+- Terminal gimmicks (`$` prompts, blinking cursors, `// comments`) in UI copy
 - Light mode as default; slow animations (>300ms UI transitions)
 - Dual-axis charts; cycled/generated categorical hues; color-only identity
 

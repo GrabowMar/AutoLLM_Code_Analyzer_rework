@@ -1,0 +1,27 @@
+slug: htmlhint
+name: HTMLHint
+description: >-
+  Static analysis for HTML. Flags a missing doctype or title, duplicate ids,
+  unclosed or mismatched tags, and images without alt text.
+category: lint
+kind: container
+target_language: html
+icon: file-code
+version: "1"
+docs_url: https://htmlhint.com/
+install_cmd: "npm install -g htmlhint@1"
+verify_cmd: "htmlhint --version"
+uninstall_cmd: "npm uninstall -g htmlhint"
+run_cmd: "htmlhint '{target}/**/*.html' --ignore '**/node_modules/**' --format json 2>/dev/null"
+parser_key: htmlhint
+run_timeout: 60
+install_timeout: 120
+display_order: 100
+sample_filename: index.html
+sample_code: |
+  <html>
+  <body>
+    <img src="logo.png">
+    <div id="main"></div><div id="main"></div>
+  </body>
+  </html>

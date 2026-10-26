@@ -24,6 +24,7 @@ import EmptyState from '$lib/components/EmptyState.svelte';
 import LoadingState from '$lib/components/LoadingState.svelte';
 import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 import PaginationBar from '$lib/components/PaginationBar.svelte';
+import { tableFrame } from '$lib/components/table';
 import { formatDate, statusLabel } from '$lib/utils/formatters';
 
 // Severities ordered critical→info for the summary bar / sidebar.
@@ -339,43 +340,43 @@ onMount(() => {
 					<EmptyState title="No findings" />
 				{/if}
 			{:else}
-				<Card.Root>
+				<Card.Root class="gap-0 overflow-clip py-0">
 					<Card.Content class="p-0">
-						<div class="overflow-x-auto">
-							<table class="w-full text-sm">
+						<div class="table-frame" {@attach tableFrame}>
+							<table>
 								<thead>
-									<tr class="border-b bg-muted/40">
-										<th scope="col" class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Severity</th>
-										<th scope="col" class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Title</th>
-										<th scope="col" class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Location</th>
-										<th scope="col" class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Rule</th>
-										<th scope="col" class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Tool</th>
+									<tr>
+										<th scope="col">Severity</th>
+										<th scope="col">Title</th>
+										<th scope="col">Location</th>
+										<th scope="col">Rule</th>
+										<th scope="col">Tool</th>
 									</tr>
 								</thead>
 								<tbody>
 									{#each findings as f (f.id)}
-										<tr class="border-b align-top hover:bg-muted/30">
-											<td class="px-3 py-2">
+										<tr class="align-top">
+											<td class="whitespace-nowrap">
 												<Badge variant="outline" class="text-[11px] capitalize {severityColors[f.severity] ?? ''}">{f.severity}</Badge>
 											</td>
-											<td class="px-3 py-2">
+											<td>
 												<div class="font-medium">{f.title}</div>
 												{#if f.description && f.description !== f.title}
-													<div class="mt-0.5 text-xs text-muted-foreground line-clamp-2">{f.description}</div>
+													<div class="cell-sub mt-0.5 line-clamp-2 text-xs text-muted-foreground">{f.description}</div>
 												{/if}
 												{#if f.code_snippet}
-													<code class="mt-1 block max-w-md truncate rounded bg-muted px-1.5 py-0.5 text-[11px]">{f.code_snippet}</code>
+													<code class="cell-sub mt-1 block max-w-md truncate rounded bg-muted px-1.5 py-0.5 text-[11px]">{f.code_snippet}</code>
 												{/if}
 											</td>
-											<td class="px-3 py-2 text-xs text-muted-foreground">
+											<td class="text-xs text-muted-foreground">
 												{#if f.file_path}
 													<span class="font-mono">{f.file_path}{f.line_number != null ? `:${f.line_number}` : ''}</span>
 												{:else}
 													—
 												{/if}
 											</td>
-											<td class="px-3 py-2 text-xs"><span class="font-mono text-muted-foreground">{f.rule_id || '—'}</span></td>
-											<td class="px-3 py-2"><Badge variant="secondary" class="text-[11px]">{f.tool_slug}</Badge></td>
+											<td class="text-xs"><span class="font-mono text-muted-foreground">{f.rule_id || '—'}</span></td>
+											<td class="whitespace-nowrap"><Badge variant="secondary" class="text-[11px]">{f.tool_slug}</Badge></td>
 										</tr>
 									{/each}
 								</tbody>

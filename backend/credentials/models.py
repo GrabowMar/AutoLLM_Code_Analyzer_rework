@@ -18,6 +18,7 @@ from backend.common import crypto
 class Provider(models.TextChoices):
     OPENROUTER = "openrouter", "OpenRouter"
     HUGGINGFACE = "huggingface", "Hugging Face"
+    GITHUB = "github", "GitHub"
 
 
 class ValidationStatus(models.TextChoices):

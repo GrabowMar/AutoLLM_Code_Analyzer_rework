@@ -1055,3 +1055,25 @@ class TestReviewFixes:
         with pytest.raises(AssertionError, match="recomputed"):
             results_svc._bootstrap(cluster_bootstrap_ci, data, 42)
         assert results_svc._bootstrap(results_svc.cluster_bootstrap_ci, {}, 42) is None
+
+
+class TestBuildHealing:
+    def test_create_and_launch_copies_build_healing_to_jobs(self, api, user):
+        body = _create_body(_models(1), _apps(), build_healing="none")
+        with mock.patch(ENQUEUE):
+            res = api.post(f"{API}/experiments/?launch=true", data=json.dumps(body), content_type="application/json")
+        assert res.status_code == 201, res.content
+        experiment = Experiment.objects.get(id=res.json()["experiment"]["id"])
+        assert experiment.build_healing == "none"
+        assert set(experiment.jobs.values_list("build_healing", flat=True)) == {"none"}
+        assert svc.design_payload(experiment)["build_healing"] == "none"
+
+    def test_scaffolding_launch_defaults_to_full(self, user):
+        experiment, _ = _scaffolding_experiment(user)
+        _launch(experiment, user)
+        assert set(experiment.jobs.values_list("build_healing", flat=True)) == {"full"}
+
+    def test_rejects_unknown_mode(self, api, user):
+        body = _create_body(_models(1), _apps(), build_healing="sometimes")
+        res = api.post(f"{API}/experiments/", data=json.dumps(body), content_type="application/json")
+        assert res.status_code == 422

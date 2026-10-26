@@ -31,12 +31,16 @@ class ToolCategory(models.TextChoices):
     LINT = "lint", _("Lint / quality")
     PERFORMANCE = "performance", _("Performance")
     SECRETS = "secrets", _("Secrets")
+    DEPENDENCIES = "dependencies", _("Dependencies")
     AI = "ai", _("AI review")
 
 
 class TargetLanguage(models.TextChoices):
     PYTHON = "python", _("Python")
     JAVASCRIPT = "javascript", _("JavaScript / TypeScript")
+    HTML = "html", _("HTML")
+    CSS = "css", _("CSS")
+    SHELL = "shell", _("Shell")
     ANY = "any", _("Any")
 
 
@@ -78,6 +82,12 @@ class AnalyzerTool(models.Model):
     # Container execution (kind == container)
     install_cmd = models.TextField(_("install command"), blank=True, default="")
     verify_cmd = models.TextField(_("verify command"), blank=True, default="")
+    uninstall_cmd = models.TextField(
+        _("uninstall command"),
+        blank=True,
+        default="",
+        help_text=_("Best-effort removal of the package from a running workspace."),
+    )
     run_cmd = models.TextField(
         _("run command"),
         blank=True,
@@ -185,6 +195,7 @@ class InstalledTool(models.Model):
 
     class Status(models.TextChoices):
         INSTALLING = "installing", _("Installing")
+        UPDATING = "updating", _("Updating")
         INSTALLED = "installed", _("Installed")
         FAILED = "failed", _("Failed")
 
@@ -211,6 +222,13 @@ class InstalledTool(models.Model):
         blank=True,
         default="",
     )
+    catalog_version = models.CharField(
+        _("catalog version"),
+        max_length=50,
+        blank=True,
+        default="",
+        help_text=_("The catalog tool version this install was made from."),
+    )
     config = models.JSONField(_("config"), default=dict, blank=True)
     install_log = models.TextField(_("install log"), blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -224,6 +242,11 @@ class InstalledTool(models.Model):
 
     def __str__(self) -> str:
         return f"{self.tool.slug}@{self.workspace_id}"
+
+    @property
+    def update_available(self) -> bool:
+        """True when the catalog pins a different version than was installed."""
+        return self.status == self.Status.INSTALLED and self.catalog_version != (self.tool.version or "")
 
 
 class AnalysisRun(models.Model):

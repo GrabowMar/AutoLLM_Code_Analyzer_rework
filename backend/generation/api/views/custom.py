@@ -256,6 +256,7 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
             "temperature": payload.temperature,
             "max_tokens": payload.max_tokens,
             "llm_params": llm_overrides,
+            "build_healing": payload.build_healing,
         },
     )
 
@@ -276,6 +277,7 @@ def create_scaffolding_jobs(request, payload: ScaffoldingJobCreateSchema):
                     llm_params=dict(job_llm_params),
                     sampling_preset=preset,
                     repeat_index=trial,
+                    build_healing=payload.build_healing,
                 )
                 try:
                     apply_snapshot_to_job(job)

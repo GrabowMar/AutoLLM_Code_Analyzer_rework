@@ -9,8 +9,9 @@ target_language: python
 icon: shield-alert
 version: "1.7"
 docs_url: https://bandit.readthedocs.io/
-install_cmd: "pip install --user 'bandit==1.7.*'"
+install_cmd: "pip install --user --upgrade 'bandit==1.7.*'"
 verify_cmd: "bandit --version"
+uninstall_cmd: "pip uninstall -y bandit"
 run_cmd: "bandit -r {target} -f json -q"
 parser_key: bandit
 run_timeout: 120

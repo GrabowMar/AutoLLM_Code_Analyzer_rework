@@ -81,3 +81,58 @@ def get_code_generation(request):
 @router.get("/analyzer-health/", response=AnalyzerHealthSchema)
 def get_analyzer_health(request):
     return services.get_analyzer_health()
+
+
+# ── study tables (paper revision: dedup, healing, tool accounting) ──────────
+
+
+def _study_scope(request, experiment_id: str | None, batch_id: str | None):
+    from backend.statistics.services.study import study_jobs
+
+    return study_jobs(request.auth, experiment_id=experiment_id, batch_id=batch_id)
+
+
+@router.get("/study/breakdowns/")
+def get_study_breakdowns(
+    request,
+    experiment_id: str | None = None,
+    batch_id: str | None = None,
+    include_ai: bool = False,
+    line_tolerance: int = Query(2, ge=0, le=20),
+    include_issues: bool = False,
+):
+    """Raw vs cross-tool-deduplicated issues per app, model, template and tool, plus tool overlap."""
+    from backend.statistics.services.study import issue_breakdowns
+
+    data = issue_breakdowns(
+        _study_scope(request, experiment_id, batch_id),
+        include_ai=include_ai,
+        line_tolerance=line_tolerance,
+    )
+    if not include_issues:
+        data.pop("issues")
+    return data
+
+
+@router.get("/study/healing/")
+def get_study_healing(request, experiment_id: str | None = None, batch_id: str | None = None):
+    """Deploy rate with and without build healing, paired on the same model output."""
+    from backend.statistics.services.study import healing_impact
+
+    return healing_impact(_study_scope(request, experiment_id, batch_id))
+
+
+@router.get("/study/tools/")
+def get_study_tools(request):
+    """The tool inventory: catalog analyzers plus the platform's runtime evaluators."""
+    from backend.statistics.services.accounting import tool_inventory
+
+    return tool_inventory()
+
+
+@router.get("/study/accounting/")
+def get_study_accounting(request, experiment_id: str | None = None, batch_id: str | None = None):
+    """Apps, runs and per-tool executions actually recorded (never tools x apps)."""
+    from backend.statistics.services.accounting import run_accounting
+
+    return run_accounting(_study_scope(request, experiment_id, batch_id))

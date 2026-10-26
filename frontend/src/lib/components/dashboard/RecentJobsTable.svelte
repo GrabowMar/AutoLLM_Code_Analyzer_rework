@@ -6,6 +6,7 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import type { RecentApp } from '$lib/utils/dashboard';
+	import { rowLink, shortModelName, modelNamePrefix } from '$lib/components/table';
 
 	interface Props {
 		jobs: RecentApp[];
@@ -14,8 +15,8 @@
 	let { jobs }: Props = $props();
 </script>
 
-<Card.Root>
-	<Card.Header>
+<Card.Root class="gap-0 overflow-clip py-0">
+	<Card.Header class="border-b border-border py-3">
 		<div class="flex items-center justify-between">
 			<div class="flex items-center gap-2">
 				<AppWindow class="h-4 w-4 text-muted-foreground" />
@@ -32,30 +33,35 @@
 	</Card.Header>
 	<Card.Content class="p-0">
 		<div class="overflow-x-auto">
-			<table class="table-card-mobile w-full">
+			<table class="table-card-mobile">
 				<thead>
-					<tr class="border-b bg-muted/30">
-						<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Job</th>
-						<th class="hide-mobile px-4 py-2.5 text-left text-xs font-medium text-muted-foreground"
-							>Model</th
-						>
-						<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Status</th>
-						<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Created</th>
+					<tr>
+						<th>Job</th>
+						<th class="hide-mobile">Model</th>
+						<th>Status</th>
+						<th>Created</th>
 					</tr>
 				</thead>
-				<tbody class="divide-y">
+				<tbody>
 					{#each jobs as app (app.id)}
-						<tr class="transition-colors hover:bg-muted/30">
-							<td class="px-4 py-2.5" data-label="Job">
-								<a href="/applications/{app.id}" class="text-sm font-medium transition-colors hover:text-primary">{app.name}</a>
+						{@const href = `/applications/${app.id}`}
+						<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
+						<tr class="row-link" onclick={rowLink(href)}>
+							<td data-label="Job">
+								<a {href} class="block max-w-[26rem] truncate font-medium transition-colors hover:text-primary" title={app.name}>{app.name}</a>
 							</td>
-							<td class="hide-mobile px-4 py-2.5" data-label="Model">
-								<span class="text-sm text-muted-foreground">{app.model}</span>
+							<td class="hide-mobile" data-label="Model">
+								{#if app.model}
+									{@const provider = modelNamePrefix(app.model)}
+									<span class="block max-w-[18rem] truncate" title={app.model}>{shortModelName(app.model)}{#if provider}<span class="text-muted-foreground">{` · ${provider}`}</span>{/if}</span>
+								{:else}
+									<span class="text-muted-foreground">—</span>
+								{/if}
 							</td>
-							<td class="px-4 py-2.5" data-label="Status">
+							<td class="whitespace-nowrap" data-label="Status">
 								<StatusBadge status={app.status} />
 							</td>
-							<td class="px-4 py-2.5" data-label="Created">
+							<td class="whitespace-nowrap" data-label="Created">
 								<span class="text-xs text-muted-foreground">{app.time}</span>
 							</td>
 						</tr>

@@ -64,6 +64,11 @@ def _container_running(workspace: AnalyzerWorkspace) -> bool:
     return bool(state.get("Running"))
 
 
+def is_running(workspace: AnalyzerWorkspace) -> bool:
+    """Whether the workspace's container exists and is running (no provisioning)."""
+    return _container_running(workspace)
+
+
 def provision(user: User) -> AnalyzerWorkspace:
     """Ensure the user has a ready, running workspace container.
 

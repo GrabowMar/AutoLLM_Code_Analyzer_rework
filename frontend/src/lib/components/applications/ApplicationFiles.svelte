@@ -150,16 +150,16 @@ const extensionBreakdown = $derived.by(() => {
 
 		<!-- By Extension Breakdown -->
 		{#if extensionBreakdown.length > 0}
-			<Card.Root>
-				<Card.Header class="pb-2"><Card.Title class="text-sm font-medium">By Extension</Card.Title><Card.Description>Share of generated files per extension.</Card.Description></Card.Header>
+			<Card.Root class="gap-0 overflow-clip py-0">
+				<Card.Header class="border-b border-border py-3"><Card.Title class="text-sm font-medium">By Extension</Card.Title><Card.Description>Share of generated files per extension.</Card.Description></Card.Header>
 				<Card.Content class="p-0">
 					<div class="overflow-x-auto">
-					<table class="w-full text-sm">
+					<table>
 						<thead>
 							<tr>
 								<th>Extension</th>
-								<th>Files</th>
-								<th>Size</th>
+								<th class="num">Files</th>
+								<th class="num">Size</th>
 								<th class="w-1/3">%</th>
 							</tr>
 						</thead>
@@ -167,14 +167,14 @@ const extensionBreakdown = $derived.by(() => {
 							{#each extensionBreakdown as ext}
 								<tr>
 									<td class="font-mono text-xs font-medium">{ext.ext}</td>
-									<td>{ext.count}</td>
-									<td class="text-muted-foreground">{(ext.size / 1024).toFixed(1)} KB</td>
+									<td class="num">{ext.count}</td>
+									<td class="num text-muted-foreground">{(ext.size / 1024).toFixed(1)} KB</td>
 									<td>
 										<div class="flex items-center gap-2">
 											<div class="flex-1 h-2 rounded-full bg-muted overflow-hidden">
 												<div class="h-full rounded-full {ext.pct > 30 ? 'bg-primary' : ext.pct > 10 ? 'bg-primary/60' : 'bg-muted-foreground/50'}" style="width: {ext.pct}%"></div>
 											</div>
-											<span class="text-xs text-muted-foreground w-10 text-right">{ext.pct.toFixed(0)}%</span>
+											<span class="w-10 text-right font-mono text-xs tabular-nums text-muted-foreground">{ext.pct.toFixed(0)}%</span>
 										</div>
 									</td>
 								</tr>

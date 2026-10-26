@@ -1,0 +1,32 @@
+slug: deptry
+name: deptry
+description: >-
+  Finds Python dependency problems: modules imported but missing from
+  requirements (the app crashes at import time), declared but unused
+  packages, and transitive or misplaced dependencies.
+category: dependencies
+kind: container
+target_language: python
+icon: boxes
+version: "0.23"
+docs_url: https://deptry.com/
+install_cmd: "pip install --user --upgrade 'deptry==0.23.*'"
+verify_cmd: "deptry --version"
+uninstall_cmd: "pip uninstall -y deptry"
+# Dependencies aren't installed in the workspace, so deptry can't read their
+# metadata: map distributions whose import name differs from the package name.
+run_cmd: |
+  cd {target} && find . -name 'requirements*.txt' -not -path '*/node_modules/*' -not -path '*/.venv/*' -exec dirname {} \; | sort -u | while IFS= read -r d; do
+    echo "### ${d#./}"
+    rm -f /tmp/deptry.json
+    (cd "$d" && deptry . --json-output /tmp/deptry.json --package-module-name-map 'PyJWT=jwt,python-dotenv=dotenv,Pillow=PIL,beautifulsoup4=bs4,PyYAML=yaml,scikit-learn=sklearn,python-jose=jose,psycopg2-binary=psycopg2,opencv-python=cv2,python-dateutil=dateutil,python-multipart=multipart,pymongo=pymongo|bson,dnspython=dns,protobuf=google.protobuf' >/dev/null 2>&1; cat /tmp/deptry.json 2>/dev/null)
+    echo
+  done
+parser_key: deptry
+run_timeout: 120
+install_timeout: 180
+display_order: 30
+sample_filename: requirements.txt
+sample_code: |
+  flask==3.0.0
+  requests==2.31.0

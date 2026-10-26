@@ -25,6 +25,8 @@
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import Hammer from '@lucide/svelte/icons/hammer';
 	import Layers from '@lucide/svelte/icons/layers';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import { shortModelName } from '$lib/components/table';
 
 	interface Props {
 		jobs: GenerationJobList[];
@@ -54,220 +56,97 @@
 	}: Props = $props();
 </script>
 
-<div class="space-y-2.5">
+<div class="data-list">
 	{#each jobs as job (job.id)}
 		{@const container = containersByJobId[job.id]}
 		{@const isBusy = containerBusy[job.id]}
-		<div class="block rounded-lg border bg-card p-3.5 space-y-3">
-			<!-- Card Header: Mode & Time -->
-			<div class="flex items-center justify-between gap-2">
-				<div class="flex items-center gap-2.5 min-w-0 flex-1">
-					<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-						{#if job.mode === 'custom'}
-							<Pencil class="h-4 w-4 text-muted-foreground" />
-						{:else if job.mode === 'scaffolding'}
-							<Layers class="h-4 w-4 text-muted-foreground" />
-						{:else if job.mode === 'agent' || job.mode === 'copilot'}
-							<Bot class="h-4 w-4 text-muted-foreground" />
-						{/if}
+		{@const ModeIcon = job.mode === 'custom' ? Pencil : job.mode === 'scaffolding' ? Layers : Bot}
+		<article class="data-list-row space-y-2.5">
+			<!-- Identity -->
+			<div class="flex items-start gap-3">
+				<span class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/50 text-muted-foreground" title={job.mode}>
+					<ModeIcon class="size-4" aria-hidden="true" />
+				</span>
+				<div class="min-w-0 flex-1">
+					<div class="flex items-baseline justify-between gap-2">
+						<a href="/applications/{job.id}" class="truncate text-sm font-medium hover:text-primary">{jobDescription(job)}</a>
+						<time class="shrink-0 font-mono text-[11px] text-muted-foreground" datetime={job.created_at}>{timeAgo(job.created_at)}</time>
 					</div>
-					<div class="min-w-0">
-						<a href="/applications/{job.id}" class="text-sm font-semibold hover:text-primary transition-colors block truncate">{jobDescription(job)}</a>
-						<span class="text-[11px] text-muted-foreground block truncate">
-							<span class="capitalize font-medium text-foreground/80">{job.mode}</span>{#if job.harness}
-								&middot; <span class="font-mono" title="Harness">{job.harness}</span>{/if}
-							&middot; {job.model_name ?? '—'}
-						</span>
-					</div>
-				</div>
-				<div class="flex items-center gap-1.5 shrink-0 text-[11px] text-muted-foreground font-medium">
-					{timeAgo(job.created_at)}
+					<p class="truncate text-xs text-muted-foreground" title={job.model_name ?? undefined}>
+						{shortModelName(job.model_name) || '—'}
+						<span class="opacity-50">·</span> <span class="capitalize">{job.mode}</span>{#if job.harness}<span class="opacity-50"> ·</span> <span class="font-mono">{job.harness}</span>{/if}
+					</p>
 				</div>
 			</div>
 
-			<!-- Status Badges & Container States -->
-			<div class="grid grid-cols-2 gap-2.5 py-2.5 border-y">
-				<!-- Job Status -->
-				<div class="flex flex-col gap-1">
-					<span class="section-label">Job Status</span>
-					<StatusBadge status={jobDisplayStatus(job)} tones={jobPhaseTones} class="w-fit" />
-				</div>
-
-				<!-- Container / App -->
-				<div class="flex flex-col gap-1">
-					<span class="section-label">Container</span>
-					{#if container}
-						<StatusBadge status={container.status} tones={containerTones} class="w-fit" />
-					{:else}
-						<span class="text-xs text-muted-foreground/60 italic">Not created</span>
-					{/if}
-				</div>
+			<!-- State: job + app, with numbers -->
+			<div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-11 text-xs">
+				<StatusBadge status={jobDisplayStatus(job)} tones={jobPhaseTones} />
+				{#if container}<StatusBadge status={container.status} tones={containerTones} />{/if}
+				<span class="font-mono tabular-nums text-muted-foreground">{formatDuration(job.duration_seconds)}</span>
+				{#if job.cost_usd != null && job.cost_usd > 0}<span class="font-mono tabular-nums text-muted-foreground">${job.cost_usd.toFixed(job.cost_usd < 0.1 ? 3 : 2)}</span>{/if}
+				{#if job.pass_rate != null}<span class="font-mono tabular-nums text-muted-foreground" title="Smoke-test pass rate">smoke {(job.pass_rate * 100).toFixed(0)}%</span>{/if}
 			</div>
-
-			<!-- Container Actions Box -->
-			{#if container || job.status === 'completed'}
-				<div class="bg-muted/30 border rounded-lg p-2.5 space-y-2">
-					{#if container}
-						{#if container.status === 'running'}
-							{@const accessUrl = container.app_url ?? null}
-							<div class="flex items-center justify-between gap-2 flex-wrap">
-								<span class="text-[11px] text-muted-foreground font-mono">Port: {container.app_port}</span>
-								{#if accessUrl}
-									<Button
-										id="mobile-access-app-btn-{job.id}"
-										variant="outline"
-										size="sm"
-										href={accessUrl}
-										target="_blank"
-										rel="noopener noreferrer"
-										class="h-8 text-success-fg"
-									>
-										<ExternalLink class="h-3 w-3 mr-1.5" />
-										Access App
-									</Button>
-								{/if}
-							</div>
-						{:else if container.status === 'stopped'}
-							<div class="flex items-center justify-between gap-2">
-								<span class="text-xs text-muted-foreground">App is stopped.</span>
-								<Button
-									id="mobile-start-btn-{job.id}"
-									variant="outline"
-									size="sm"
-									class="h-8 gap-1 text-xs"
-									disabled={isBusy != null}
-									onclick={() => onStart(job.id, container.id)}
-								>
-									{#if isBusy === 'start'}
-										<LoaderCircle class="h-3 w-3 animate-spin" />
-										Starting...
-									{:else}
-										<Play class="h-3 w-3 fill-current" />
-										Start App
-									{/if}
-								</Button>
-							</div>
-						{:else if container.status === 'failed'}
-							<div class="flex flex-col gap-1.5">
-								<span class="text-[11px] text-destructive font-mono line-clamp-1">{container.last_error || 'Container failed'}</span>
-								<Button
-									id="mobile-restart-btn-{job.id}"
-									variant="outline"
-									size="sm"
-									class="h-8 gap-1 text-xs"
-									disabled={isBusy != null}
-									onclick={() => onStart(job.id, container.id)}
-								>
-									{#if isBusy === 'start'}
-										<LoaderCircle class="h-3 w-3 animate-spin" />
-										Starting...
-									{:else}
-										<Play class="h-3 w-3" />
-										Restart App
-									{/if}
-								</Button>
-							</div>
-						{:else if container.status === 'building'}
-							<span class="text-xs text-warning-fg font-medium flex items-center gap-1.5 justify-center py-1">
-								<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-								Provisioning environment...
-							</span>
-						{/if}
-					{:else if job.status === 'completed'}
-						<div class="flex items-center justify-between gap-2">
-							<span class="text-xs text-muted-foreground">No environment built.</span>
-							<Button
-								id="mobile-provision-btn-{job.id}"
-								variant="outline"
-								size="sm"
-								class="h-8 text-xs font-semibold gap-1.5 border-primary/30 text-success-fg hover:bg-primary/10 hover:border-primary/50"
-								disabled={isBusy != null}
-								onclick={() => onBuild(job.id)}
-							>
-								{#if isBusy === 'build'}
-									<LoaderCircle class="h-3 w-3 animate-spin mr-1.5" />
-									Building...
-								{:else}
-									<Hammer class="h-3 w-3 mr-1.5" />
-									Provision
-								{/if}
-							</Button>
-						</div>
-					{/if}
-				</div>
+			{#if job.error_message}
+				<p class="flex items-center gap-1 pl-11 text-[11px] text-danger-fg" title={job.error_message}>
+					<AlertTriangle class="size-3 shrink-0" aria-hidden="true" /><span class="truncate">{job.error_message}</span>
+				</p>
+			{:else if container?.status === 'failed'}
+				<p class="truncate pl-11 font-mono text-[11px] text-danger-fg" title={container.last_error}>{container.last_error || 'Container failed'}</p>
 			{/if}
 
-			<!-- Footer Info & Actions -->
-			<div class="flex items-center justify-between pt-3 border-t">
-				<span class="text-[11px] font-mono text-muted-foreground">{formatDuration(job.duration_seconds)}</span>
-
-				<!-- Mobile Actions Group -->
-				<div class="flex items-center gap-1">
-					{#if container}
-						{#if container.status === 'running'}
-							<Button
-								id="mobile-action-stop-{job.id}"
-								variant="ghost"
-								size="sm"
-								class="h-8 w-8 p-0 text-warning-fg hover:bg-warning/10"
-								title="Stop Container" aria-label="Stop Container"
-								disabled={isBusy != null}
-								onclick={() => onStop(job.id, container.id)}
-							>
-								{#if isBusy === 'stop'}
-									<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-								{:else}
-									<Square class="h-3.5 w-3.5 fill-current" />
-								{/if}
-							</Button>
-						{/if}
-						{#if container.status !== 'building' && container.status !== 'pending'}
-							<Button
-								id="mobile-action-remove-container-{job.id}"
-								variant="ghost"
-								size="sm"
-								class="h-8 w-8 p-0 text-destructive hover:bg-destructive/10"
-								title="Remove Container" aria-label="Remove Container"
-								disabled={isBusy != null}
-								onclick={() => onRemoveContainer(job.id, container.id)}
-							>
-								{#if isBusy === 'remove'}
-									<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-								{:else}
-									<Server class="h-3.5 w-3.5" />
-								{/if}
-							</Button>
-						{/if}
-					{/if}
-
-					<Button variant="ghost" size="sm" class="h-8 w-8 p-0" href="/applications/{job.id}" title="View details" aria-label="View details">
-						<Eye class="h-4 w-4" />
-					</Button>
-					{#if job.status === 'failed' || job.status === 'cancelled'}
-						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-info-fg hover:bg-info/10" title="Retry" aria-label="Retry" onclick={() => onRetry(job.id)}>
-							<RotateCcw class="h-4 w-4" />
+			<!-- Actions: one next step on the left, the rest as icons -->
+			<div class="flex items-center justify-between gap-2 pl-11">
+				<div>
+					{#if container?.status === 'running' && container.app_url}
+						<Button id="mobile-access-app-btn-{job.id}" variant="outline" size="sm" href={container.app_url} target="_blank" rel="noopener noreferrer" class="h-9 text-primary">
+							<ExternalLink class="size-3.5" />Open app
+						</Button>
+					{:else if container && (container.status === 'stopped' || container.status === 'failed')}
+						<Button id="mobile-start-btn-{job.id}" variant="outline" size="sm" class="h-9" disabled={isBusy != null} onclick={() => onStart(job.id, container.id)}>
+							{#if isBusy === 'start'}<LoaderCircle class="size-3.5 animate-spin" />Starting…{:else}<Play class="size-3.5" />{container.status === 'failed' ? 'Restart' : 'Start'}{/if}
+						</Button>
+					{:else if container?.status === 'building'}
+						<span class="flex items-center gap-1.5 text-xs text-warning-fg"><LoaderCircle class="size-3.5 animate-spin" />Provisioning…</span>
+					{:else if !container && job.status === 'completed'}
+						<Button id="mobile-provision-btn-{job.id}" variant="outline" size="sm" class="h-9" disabled={isBusy != null} onclick={() => onBuild(job.id)}>
+							{#if isBusy === 'build'}<LoaderCircle class="size-3.5 animate-spin" />Building…{:else}<Hammer class="size-3.5" />Provision{/if}
 						</Button>
 					{/if}
+				</div>
+				<div class="flex items-center">
+					{#if container?.status === 'running'}
+						{@render iconAction(`mobile-action-stop-${job.id}`, 'Stop container', Square, () => onStop(job.id, container.id), isBusy === 'stop', isBusy != null)}
+					{/if}
+					{#if container && container.status !== 'building' && container.status !== 'pending'}
+						{@render iconAction(`mobile-action-remove-container-${job.id}`, 'Remove container (keeps the code)', Server, () => onRemoveContainer(job.id, container.id), isBusy === 'remove', isBusy != null, true)}
+					{/if}
+					{#if job.status === 'failed' || job.status === 'cancelled'}
+						{@render iconAction(`mobile-action-retry-${job.id}`, 'Retry job', RotateCcw, () => onRetry(job.id))}
+					{/if}
 					{#if job.status === 'failed'}
-						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-destructive hover:bg-destructive/10" href="/applications/{job.id}/failure" title="Failure details" aria-label="Failure details">
-							<AlertTriangle class="h-4 w-4" />
+						<Button variant="ghost" size="sm" class="size-9 p-0 text-danger-fg" href="/applications/{job.id}/failure" title="Failure details" aria-label="Failure details">
+							<AlertTriangle class="size-4" />
 						</Button>
 					{/if}
 					{#if job.status === 'pending' || job.status === 'running'}
-						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-warning-fg hover:bg-warning/10" title="Cancel" aria-label="Cancel" onclick={() => onCancel(job.id)}>
-							<Ban class="h-4 w-4" />
-						</Button>
+						{@render iconAction(`mobile-action-cancel-${job.id}`, 'Cancel job', Ban, () => onCancel(job.id))}
 					{/if}
-					<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-muted-foreground" title="Copy ID" aria-label="Copy ID" onclick={() => onCopyId(job.id)}>
-						<Copy class="h-3.5 w-3.5" />
-					</Button>
+					{@render iconAction(`mobile-action-copy-${job.id}`, 'Copy job ID', Copy, () => onCopyId(job.id))}
 					{#if job.status !== 'running'}
-						<Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-destructive hover:bg-destructive/10" title="Delete" aria-label="Delete" onclick={() => onDelete(job.id)}>
-							<Trash2 class="h-3.5 w-3.5" />
-						</Button>
+						{@render iconAction(`mobile-action-delete-${job.id}`, 'Delete job', Trash2, () => onDelete(job.id), false, false, true)}
 					{/if}
+					<Button variant="ghost" size="sm" class="size-9 p-0 text-muted-foreground" href="/applications/{job.id}" title="View details" aria-label="View details">
+						<ChevronRight class="size-4" />
+					</Button>
 				</div>
 			</div>
-		</div>
+		</article>
 	{/each}
 </div>
+
+{#snippet iconAction(id: string, label: string, Icon: typeof Eye, onclick: () => void, busy = false, disabled = false, danger = false)}
+	<Button {id} variant="ghost" size="sm" class="size-9 p-0 text-muted-foreground {danger ? 'hover:bg-destructive/10 hover:text-danger-fg' : ''}" title={label} aria-label={label} {disabled} {onclick}>
+		{#if busy}<LoaderCircle class="size-4 animate-spin" />{:else}<Icon class="size-4" />{/if}
+	</Button>
+{/snippet}

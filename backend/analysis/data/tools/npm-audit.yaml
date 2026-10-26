@@ -1,0 +1,36 @@
+slug: npm-audit
+name: npm audit
+description: >-
+  Checks JavaScript dependencies against the GitHub advisory database. Resolves
+  a lockfile from each package.json (no packages are installed) and reports
+  vulnerable direct and transitive packages. Needs network access.
+category: dependencies
+kind: container
+target_language: javascript
+icon: package-x
+version: "10"
+docs_url: https://docs.npmjs.com/cli/commands/npm-audit
+# npm ships with the base image's Node.js; nothing to install.
+install_cmd: ""
+verify_cmd: "npm --version"
+run_cmd: |
+  cd {target} && find . -name package.json -not -path '*/node_modules/*' | sort | while IFS= read -r f; do
+    rm -rf /tmp/npm-audit && mkdir -p /tmp/npm-audit
+    cp "$f" /tmp/npm-audit/
+    lock="$(dirname "$f")/package-lock.json"
+    [ -f "$lock" ] && cp "$lock" /tmp/npm-audit/
+    echo "### ${f#./}"
+    (cd /tmp/npm-audit && { [ -f package-lock.json ] || npm install --package-lock-only --ignore-scripts --no-audit --no-fund >/dev/null 2>&1; } && npm audit --json 2>/dev/null)
+    echo
+  done
+parser_key: npm_audit
+run_timeout: 300
+install_timeout: 60
+display_order: 20
+sample_filename: package.json
+sample_code: |
+  {
+    "name": "sample",
+    "version": "1.0.0",
+    "dependencies": { "lodash": "4.17.15", "axios": "0.21.0" }
+  }

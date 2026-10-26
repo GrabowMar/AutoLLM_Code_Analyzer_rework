@@ -27,6 +27,7 @@ from backend.llm_models.models import LLMModel
 from backend.rankings.services.constants import SEVERITY_WEIGHTS
 
 from .loc import loc_for_jobs
+from .study_report import generate_study_report
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -192,6 +193,23 @@ def _experiment_stats(jobs_qs, *, exclude_truncated: bool = True) -> dict[str, A
             "pass_rate": _stat(functional_rates),
         },
     }
+
+
+def _dedup_totals(jobs_qs) -> dict[str, Any]:
+    """Cross-tool deduplicated issue totals (statistics.services.study) next to the raw counts."""
+    from backend.statistics.services.study import issue_breakdowns
+
+    totals = issue_breakdowns(jobs_qs.select_related("model", "app_requirement"))["totals"]
+    keys = (
+        "apps",
+        "raw_findings",
+        "unique_issues",
+        "duplicate_findings",
+        "mean_unique_per_app",
+        "unique_per_kloc",
+        "security_unique",
+    )
+    return {k: totals.get(k) for k in keys}
 
 
 def _findings_for_jobs(jobs_qs):
@@ -370,6 +388,7 @@ def generate_template_comparison(config: dict[str, Any]) -> dict[str, Any]:
                 "total_findings": findings.count(),
                 "ai_findings": _severity_counts(ai_findings),
                 "ai_total": ai_findings.count(),
+                "issues_dedup": _dedup_totals(sub_jobs),
                 "stats": _experiment_stats(sub_jobs, exclude_truncated=exclude_truncated),
             },
         )
@@ -588,6 +607,7 @@ def generate_experiment_report(config: dict[str, Any], *, user=None) -> dict[str
                 "total_findings": findings.count(),
                 "ai_findings": _severity_counts(ai_findings),
                 "ai_total": ai_findings.count(),
+                "issues_dedup": _dedup_totals(jobs),
                 "stats": _experiment_stats(jobs, exclude_truncated=exclude_truncated),
             },
         )
@@ -646,7 +666,8 @@ GENERATORS = {
     "generation_analytics": generate_generation_analytics,
     "comprehensive": generate_comprehensive,
     "experiment_report": generate_experiment_report,
+    "study_report": generate_study_report,
 }
 
 # Generators that take ``user=`` and report only on what that user owns.
-USER_SCOPED = frozenset({"experiment_report"})
+USER_SCOPED = frozenset({"experiment_report", "study_report"})

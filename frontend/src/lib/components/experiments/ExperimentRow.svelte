@@ -13,7 +13,6 @@
 	 * - `busy`: an action on this row is in flight.
 	 * - `onaction(action)`: Pause / Resume / Cancel / Archive (the page confirms Cancel).
 	 */
-	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import BatchProgress from '$lib/components/generator/batches/BatchProgress.svelte';
@@ -55,17 +54,17 @@
 	);
 </script>
 
-<Card.Root class="card-lift gap-0 py-3">
-	<Card.Content class="grid gap-3 px-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)_19rem] lg:items-center">
+<!-- One `.data-list-row`; the page wraps the rows in a `.data-list`. -->
+	<div class="data-list-row grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)_19rem] lg:items-center">
 		<div class="min-w-0 space-y-1">
 			<div class="flex min-w-0 flex-wrap items-center gap-2">
-				<a href="/experiments/{exp.id}" class="min-w-0 truncate text-sm font-semibold hover:text-primary hover:underline">{exp.name}</a>
+				<a href="/experiments/{exp.id}" class="min-w-0 truncate text-sm font-semibold hover:text-primary">{exp.name}</a>
 				<StatusBadge status={exp.status} tones={experimentTones} />
 				{#if exp.status === 'paused' && exp.pause_reason}
 					<span class="text-[11px] text-warning-fg">{pauseReasonLabel(exp.pause_reason)}</span>
 				{/if}
 			</div>
-			<p class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+			<p class="cell-sub flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
 				<span>{MODE_LABELS[exp.mode] ?? exp.mode}</span>
 				<span aria-hidden="true">·</span>
 				<span class="rounded-full border border-border px-1.5" title="Scheduling policy">{policyLabel(exp.scheduling_policy)}</span>
@@ -80,7 +79,7 @@
 				<p class="flex flex-wrap gap-x-3 text-[11px] text-muted-foreground tabular-nums">
 					<span><span class="font-mono text-foreground">{done}/{exp.total_cells}</span> done</span>
 					{#if !terminal && exp.eta_seconds != null}<span>ETA {formatEta(exp.eta_seconds)}</span>{/if}
-					{#if exp.cost_usd > 0}<span>{formatUsd(exp.cost_usd)}</span>{/if}
+					{#if exp.cost_usd > 0}<span class="font-mono">{formatUsd(exp.cost_usd)}</span>{/if}
 				</p>
 			{:else}
 				<p class="text-[11px] text-muted-foreground">Draft · {exp.total_cells} cells planned</p>
@@ -103,20 +102,48 @@
 			{/if}
 		</div>
 
-		<div class="flex flex-wrap items-center gap-1.5 lg:justify-end">
-			{#if busy}<LoaderCircle class="size-4 animate-spin text-muted-foreground motion-reduce:animate-none" aria-label="Working" />{/if}
+		<!-- One visible next step (Pause / Resume, else Clone); the rest on hover / focus. -->
+		<div class="flex flex-wrap items-center gap-0.5 lg:justify-end">
+			{#if busy}<LoaderCircle class="mr-1 size-4 animate-spin text-muted-foreground motion-reduce:animate-none" aria-label="Working" />{/if}
+			<div class="row-actions-more flex items-center gap-0.5">
+				{#if exp.status === 'running' || exp.status === 'paused'}
+					{@render iconAction('Cancel experiment', Square, () => onaction('cancel'), true)}
+				{/if}
+				{#if exp.status === 'completed' || exp.status === 'cancelled'}
+					{@render iconAction('Archive', Archive, () => onaction('archive'))}
+				{/if}
+				{#if exp.status === 'running' || exp.status === 'paused'}
+					<Button
+						variant="ghost"
+						size="sm"
+						class="size-8 p-0 text-muted-foreground hover:text-foreground"
+						href="/experiments/new?from={exp.id}"
+						title="Clone: new draft with this design"
+						aria-label="Clone: new draft with this design"><Copy class="size-4" /></Button
+					>
+				{/if}
+			</div>
 			{#if exp.status === 'running'}
-				<Button variant="outline" size="sm" disabled={busy} onclick={() => onaction('pause')}><Pause />Pause</Button>
+				<Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs" disabled={busy} onclick={() => onaction('pause')}><Pause class="size-3" />Pause</Button>
 			{:else if exp.status === 'paused'}
-				<Button variant="outline" size="sm" disabled={busy} onclick={() => onaction('resume')}><Play />Resume</Button>
-			{/if}
-			{#if exp.status === 'running' || exp.status === 'paused'}
-				<Button variant="outline" size="sm" disabled={busy} onclick={() => onaction('cancel')}><Square />Cancel</Button>
-			{/if}
-			<Button variant="outline" size="sm" href="/experiments/new?from={exp.id}" title="New draft with this design"><Copy />Clone</Button>
-			{#if exp.status === 'completed' || exp.status === 'cancelled'}
-				<Button variant="outline" size="sm" disabled={busy} onclick={() => onaction('archive')}><Archive />Archive</Button>
+				<Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs" disabled={busy} onclick={() => onaction('resume')}><Play class="size-3" />Resume</Button>
+			{:else}
+				<Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs" href="/experiments/new?from={exp.id}" title="New draft with this design"><Copy class="size-3" />Clone</Button>
 			{/if}
 		</div>
-	</Card.Content>
-</Card.Root>
+	</div>
+
+
+{#snippet iconAction(label: string, Icon: typeof Copy, onclick: () => void, danger = false)}
+	<Button
+		variant="ghost"
+		size="sm"
+		class="size-8 p-0 text-muted-foreground {danger ? 'hover:bg-destructive/10 hover:text-danger-fg' : 'hover:text-foreground'}"
+		title={label}
+		aria-label={label}
+		disabled={busy}
+		{onclick}
+	>
+		<Icon class="size-4" />
+	</Button>
+{/snippet}

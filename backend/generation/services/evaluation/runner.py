@@ -47,6 +47,8 @@ from backend.generation.services.agent.workspace import make_tar
 from backend.generation.services.evaluation import contract as contract_mod
 from backend.generation.services.profile_resolver import app_requirement_to_dict
 from backend.runtime.services import docker_manager
+from backend.runtime.services.scaffolding import HealingMode
+from backend.runtime.services.scaffolding import HealingReport
 from backend.runtime.services.scaffolding import get_stack_config
 from backend.runtime.services.scaffolding import prepare_build_dir
 from backend.runtime.services.scaffolding import resolve_stack_slug
@@ -111,9 +113,14 @@ def build_plan(job: GenerationJob, *, admin_password: str, has_frontend: bool) -
 
 
 class Evaluation:
-    def __init__(self, job: GenerationJob) -> None:
+    def __init__(self, job: GenerationJob, *, healing: str | None = None) -> None:
         self.job = job
+        # None: the job's own build_healing; set by the healing ablation.
+        self.healing = healing
         self.short = str(job.id).replace("-", "")[:12]
+        if healing is not None:
+            # Distinct names so an ablation never collides with the job's own evaluation.
+            self.short = f"{self.short}-{healing.replace('_', '')}"
         self.client = None
         self.network = None
         self.containers: list = []
@@ -225,9 +232,11 @@ class Evaluation:
 
     def _build(self) -> dict[str, Any]:
         attempts: list[dict[str, Any]] = []
+        report = HealingReport()
         for _attempt in range(2):
+            report = HealingReport()
             with tempfile.TemporaryDirectory(prefix="llmlab-eval-") as tmp:
-                prepare_build_dir(self.job, Path(tmp))
+                prepare_build_dir(self.job, Path(tmp), healing=self.healing, report=report)
                 started = time.monotonic()
                 ok, log = self._docker_build(tmp)
             infra = not ok and bool(_INFRA_PATTERNS.search(log))
@@ -243,6 +252,7 @@ class Evaluation:
             "infra_suspected": attempts[-1]["infra_suspected"],
             "log_tail": log[-6000:],
             "image_bytes": image_bytes,
+            "healing": report.to_dict(),
         }
 
     def _docker_build(self, path: str) -> tuple[bool, str]:
@@ -334,6 +344,7 @@ def evaluate_job(
     summary = outcome.get("summary") or {}
     checks = outcome.get("checks") or []
     endpoint_checks = [c for c in checks if c["category"] in ("api", "admin")]
+    healing = (outcome.get("build") or {}).get("healing") or {}
     metrics = dict(job.metrics or {})
     metrics["functional"] = {
         "source": "conformance",
@@ -346,6 +357,9 @@ def evaluate_job(
         "evaluator_version": outcome.get("evaluator_version"),
         "tester_sha256": outcome.get("tester_sha256"),
         "contract_stated_in_prompt": outcome["contract_stated_in_prompt"],
+        "deployed": is_deployed(outcome["status"]),
+        "healing_mode": healing.get("mode"),
+        "healing_changed": healing.get("changed"),
     }
     job.metrics = metrics
     if isinstance(result.get("agent"), dict):
@@ -362,3 +376,54 @@ def evaluate_job(
     else:
         save(job, ["result_data", "metrics"])
     return outcome
+
+
+# Outcomes where the app built and answered its health check.
+_DEPLOYED_STATUSES = frozenset({"passed", "failed"})
+# Outcomes that say nothing about the sample (re-evaluate instead of counting).
+NON_SAMPLE_STATUSES = frozenset({"infra_error", "not_applicable"})
+
+
+def is_deployed(status: str | None) -> bool | None:
+    """True/False for a sample outcome, None when the evaluation says nothing about the sample."""
+    if status is None or status in NON_SAMPLE_STATUSES:
+        return None
+    return status in _DEPLOYED_STATUSES
+
+
+def evaluate_healing_ablation(
+    job: GenerationJob,
+    modes: tuple[str, ...] = (HealingMode.NONE,),
+    *,
+    save: Callable[[GenerationJob, list[str]], None] | None = None,
+) -> dict[str, Any]:
+    """Re-evaluate *job*'s unchanged output under each healing *mode* (paired ablation).
+
+    The job's own evaluation stays untouched; every mode lands in
+    ``result_data.healing_ablation[mode]`` so the deploy rate of the same
+    model output can be compared with and without build repair.
+    """
+    ablation: dict[str, Any] = {}
+    for mode in modes:
+        outcome = Evaluation(job, healing=HealingMode(mode)).run()
+        build = outcome.get("build") or {}
+        summary = outcome.get("summary") or {}
+        ablation[str(mode)] = {
+            "status": outcome.get("status"),
+            "deployed": is_deployed(outcome.get("status")),
+            "pass_rate": summary.get("pass_rate") if outcome.get("status") not in NON_SAMPLE_STATUSES else None,
+            "healing": build.get("healing") or {},
+            "build_log_tail": (build.get("log_tail") or "")[-2000:],
+            "error": outcome.get("error"),
+            "evaluator_version": outcome.get("evaluator_version"),
+            "tester_sha256": outcome.get("tester_sha256"),
+            "seconds": outcome.get("seconds"),
+        }
+    result = dict(job.result_data or {})
+    result["healing_ablation"] = {**(result.get("healing_ablation") or {}), **ablation}
+    job.result_data = result
+    if save is None:
+        job.save(update_fields=["result_data", "updated_at"])
+    else:
+        save(job, ["result_data"])
+    return ablation

@@ -33,6 +33,7 @@ _FIELDS = (
     "docs_url",
     "install_cmd",
     "verify_cmd",
+    "uninstall_cmd",
     "run_cmd",
     "parser_key",
     "output_kind",

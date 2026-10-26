@@ -15,6 +15,7 @@ install_cmd: >-
   https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64 &&
   chmod +x /home/analyzer/.local/bin/hadolint
 verify_cmd: "hadolint --version"
+uninstall_cmd: "rm -f /home/analyzer/.local/bin/hadolint"
 # hadolint takes explicit file arguments, so find Dockerfiles first; --no-fail
 # keeps the exit code at 0 and -r makes xargs a no-op when none exist.
 run_cmd: "find {target} -type f \\( -name Dockerfile -o -name 'Dockerfile.*' -o -name '*.dockerfile' \\) -print0 | xargs -0 -r hadolint -f json --no-fail"

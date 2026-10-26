@@ -57,6 +57,65 @@ def test_non_owner_cannot_update_default_app_template(client):
     assert response.status_code == 403
 
 
+SPEC_BODY = {
+    "name": "Book Library",
+    "slug": "test_book_library",
+    "category": "CRUD",
+    "difficulty": "standard",
+    "description": "Track books",
+    "backend_requirements": ["Book model"],
+    "frontend_requirements": ["Book list"],
+    "admin_requirements": [],
+    "api_endpoints": [
+        {"method": "GET", "path": "/api/books", "description": "List", "request": None, "response": {"items": []}},
+    ],
+    "admin_api_endpoints": [],
+    "data_model": {"name": "Book", "fields": {"id": "integer"}},
+}
+
+
+@pytest.mark.django_db
+def test_app_spec_create_and_update_keep_the_whole_contract(client):
+    user = UserFactory()
+    client.force_login(user)
+
+    created = client.post("/api/generation/app-specs/", data=json.dumps(SPEC_BODY), content_type="application/json")
+    assert created.status_code == 200
+    assert created.json()["difficulty"] == "standard"
+
+    # PUT replaces every field but the slug, which never changes.
+    body = {**SPEC_BODY, "slug": "renamed", "difficulty": "advanced", "description": "Edited"}
+    updated = client.put(
+        f"/api/generation/app-specs/{SPEC_BODY['slug']}/",
+        data=json.dumps(body),
+        content_type="application/json",
+    )
+    assert updated.status_code == 200
+    spec = AppRequirementTemplate.objects.get(slug=SPEC_BODY["slug"])
+    assert spec.difficulty == "advanced"
+    assert spec.description == "Edited"
+    assert spec.api_endpoints == SPEC_BODY["api_endpoints"]
+    assert spec.data_model == SPEC_BODY["data_model"]
+
+
+@pytest.mark.django_db
+def test_app_spec_create_refuses_taken_slug_and_bad_difficulty(client):
+    client.force_login(UserFactory())
+    # Another user's private spec still holds the slug.
+    AppRequirementTemplateFactory(slug=SPEC_BODY["slug"], is_default=False, created_by=UserFactory())
+
+    taken = client.post("/api/generation/app-specs/", data=json.dumps(SPEC_BODY), content_type="application/json")
+    assert taken.status_code == 400
+    assert "already in use" in taken.json()["detail"]
+
+    bad = client.post(
+        "/api/generation/app-specs/",
+        data=json.dumps({**SPEC_BODY, "slug": "other_slug", "difficulty": "hard"}),
+        content_type="application/json",
+    )
+    assert bad.status_code == 422
+
+
 @pytest.mark.django_db
 def test_bundle_export_yaml_and_import_round_trip(client):
     owner = UserFactory()

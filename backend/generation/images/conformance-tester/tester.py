@@ -29,6 +29,7 @@ Stdlib only; baked into its own image. Bump VERSION with any change.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import sys
@@ -38,11 +39,17 @@ import urllib.request
 from datetime import UTC
 from datetime import datetime
 
-VERSION = 2
+VERSION = 3
 REQUEST_TIMEOUT_S = 15
 PASSWORD = "Eval-Pass-2026!"
 PARAM_RE = re.compile(r":([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\}")
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+# "<type>", "<type> (optional)", "<type> (<detail>)" in a sample body.
+TYPE_DESCRIPTOR_RE = re.compile(
+    r"(string|str|text|integer|int|number|float|decimal|boolean|bool|array|list|object|dict)"
+    r"(?:\s*\(([^)]*)\))?$",
+    re.IGNORECASE,
+)
 
 
 class Client:
@@ -120,15 +127,42 @@ class Synth:
             return text.split("|", 1)[0]
         if k == "password":
             return PASSWORD
+        # Type descriptors ("integer (optional)", "string (todo|done)",
+        # "string (base64)"): v2 sent them verbatim, so a correct app
+        # rejected the body and every check needing the created id failed.
+        described = TYPE_DESCRIPTOR_RE.match(text.strip())
+        if described:
+            base, detail = described.group(1).lower(), (described.group(2) or "").strip()
+            if "|" in detail:
+                return detail.split("|", 1)[0].strip()
+            if base in {"integer", "int"}:
+                return datetime.now(UTC).year if k == "year" else 1
+            if base in {"number", "float", "decimal"}:
+                return 1.5
+            if base in {"boolean", "bool"}:
+                return True
+            if base in {"array", "list"}:
+                return []
+            if base in {"object", "dict"}:
+                return {}
+            if detail.lower() == "base64":
+                return base64.b64encode(f"eval {self.tag}".encode()).decode()
+            text = base
+        now = datetime.now(UTC).replace(microsecond=0)
+        if text.upper() == "YYYY-MM-DD":
+            return now.date().isoformat()
+        if text.upper() in {"HH:MM", "HH:MM:SS"}:
+            return now.strftime("%H:%M" if len(text) == 5 else "%H:%M:%S")
         self.n += 1
         if "email" in k:
             return f"eval{self.tag}{self.n}@example.com"
         if text.upper().startswith("ISO8601") or k.endswith(("_at", "date", "time")):
-            return datetime.now(UTC).replace(microsecond=0).isoformat()
+            return now.isoformat()
         if "url" in k:
             return f"https://example.com/eval/{self.tag}/{self.n}"
         if text.lower() in {"string", "text", "str"} or text == "":
-            return f"eval {k or 'value'} {self.tag}-{self.n}"
+            # Short (v2's "eval isbn <tag>-10" broke a 20-char limit only from the 10th value on).
+            return f"{(k or 'value')[:10]} {self.tag[:4]}{self.n}"
         return text
 
 
@@ -289,9 +323,14 @@ def run(plan: dict) -> dict:
             param = m.group(1) or m.group(2)
             base = collection_of(path)
             if fresh:
-                for key in (base, base.replace("/api/admin/", "/api/")):
+                keys = [key for key in (base, base.replace("/api/admin/", "/api/")) if key in creators]
+                for key in keys:
                     if (value := create(key)) is not None:
                         return str(value)
+                if keys:
+                    # Falling back to the shared id would hand this check an item an
+                    # earlier destructive check already consumed (v2: DELETE 404).
+                    raise LookupError(f"could not create a fresh resource for {path}")
             for key in (base, base.replace("/api/admin/", "/api/")):
                 if key in created:
                     return str(created[key])

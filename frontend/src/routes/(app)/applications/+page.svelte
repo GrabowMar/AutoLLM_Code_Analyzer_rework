@@ -421,9 +421,6 @@
 		resultsText={data && !loading
 			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} applications`
 			: ''}
-		page={data?.page}
-		pages={data?.pages}
-		onGoToPage={goToPage}
 		onClearAll={clearFilters}
 	>
 		{#snippet filters()}
@@ -572,7 +569,9 @@
 				onDelete={handleDelete}
 				onRetry={handleRetry}
 				onCopyId={copyId}
-			/>
+			>
+				{#snippet footer()}{@render pager('border-t border-border')}{/snippet}
+			</JobsTable>
 		</div>
 
 		<!-- Cards (mobile) -->
@@ -593,6 +592,12 @@
 		</div>
 	{/if}
 
+	{#if !loading && filteredItems.length > 0}
+		<div class="md:hidden">{@render pager('rounded-md border border-border')}</div>
+	{/if}
+</div>
+
+{#snippet pager(cls: string)}
 	<PaginationBar
 		resultsText={data && !loading
 			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} applications`
@@ -600,9 +605,10 @@
 		page={data?.page}
 		pages={data?.pages}
 		onGoToPage={goToPage}
-		class="rounded-md border border-border"
+		class={cls}
+		scrollToCard
 	/>
-</div>
+{/snippet}
 
 <ConfirmDialog
 	bind:open={confirmOpen}

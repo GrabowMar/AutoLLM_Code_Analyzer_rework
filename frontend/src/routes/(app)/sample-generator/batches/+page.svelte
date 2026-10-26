@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { rowLink, tableFrame } from '$lib/components/table';
 	// Every generation batch (ad-hoc and experiment launches), newest first.
 	// Filters and page live in the URL; the list refreshes itself every 10 s
 	// while any visible batch still has runs in flight.
@@ -234,24 +235,25 @@
 	{:else if data}
 		<div class="space-y-3 transition-opacity duration-200 {busy ? 'opacity-60' : ''}" aria-busy={busy}>
 			<!-- Table (md and up) -->
-			<Card.Root class="hidden md:block">
+			<Card.Root class="hidden gap-0 overflow-clip py-0 md:block">
 				<Card.Content class="p-0">
-					<div class="overflow-x-auto">
-						<table class="w-full">
+					<div class="table-frame" {@attach tableFrame}>
+						<table>
 							<thead>
 								<tr>
 									<th scope="col">Batch</th>
 									<th scope="col">Status</th>
 									<th scope="col">Progress</th>
 									<th scope="col">Design</th>
-									<th scope="col" class="text-right">Pass rate</th>
-									<th scope="col" class="text-right">Cost</th>
-									<th scope="col" class="text-right">Created</th>
+									<th scope="col" class="num">Pass rate</th>
+									<th scope="col" class="num">Cost</th>
+									<th scope="col" class="num">Created</th>
 								</tr>
 							</thead>
 							<tbody>
 								{#each items as batch (batch.id)}
-									<tr>
+									<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the title link is the keyboard path) -->
+									<tr class="row-link" onclick={rowLink(batchHref(batch.id))}>
 										<td class="max-w-72">{@render batchTitle(batch)}</td>
 										<td><StatusBadge status={batch.status} /></td>
 										<td>{@render progress(batch)}</td>

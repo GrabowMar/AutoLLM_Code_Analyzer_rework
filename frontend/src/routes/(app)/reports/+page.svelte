@@ -16,6 +16,7 @@
 	import TrendingUp from '@lucide/svelte/icons/trending-up';
 	import Layers from '@lucide/svelte/icons/layers';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
+	import Microscope from '@lucide/svelte/icons/microscope';
 	import { toast } from 'svelte-sonner';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
@@ -55,7 +56,8 @@
 		tool_analysis: { label: 'Tool Analysis', icon: Wrench },
 		generation_analytics: { label: 'Generation Analytics', icon: TrendingUp },
 		comprehensive: { label: 'Comprehensive', icon: Layers },
-		experiment_report: { label: 'Experiment Report', icon: FlaskConical }
+		experiment_report: { label: 'Experiment Report', icon: FlaskConical },
+		study_report: { label: 'Study Report', icon: Microscope }
 	};
 
 	async function load() {

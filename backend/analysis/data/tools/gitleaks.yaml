@@ -15,6 +15,7 @@ install_cmd: >-
   https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz
   | tar -xz -C /home/analyzer/.local/bin gitleaks
 verify_cmd: "gitleaks version"
+uninstall_cmd: "rm -f /home/analyzer/.local/bin/gitleaks"
 # Write the JSON report to a file and cat only that, sending gitleaks' banner
 # and logs to /dev/null — otherwise the ASCII banner/ANSI logs pollute stdout.
 run_cmd: "gitleaks detect --no-git --source {target} --report-format json --report-path /tmp/gitleaks-report.json --exit-code 0 --redact --no-banner --log-level error >/dev/null 2>&1; cat /tmp/gitleaks-report.json"

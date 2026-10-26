@@ -1,0 +1,30 @@
+slug: stylelint
+name: Stylelint
+description: >-
+  CSS linter using the stylelint-config-recommended rule set: unknown
+  properties and units, invalid colors, duplicate selectors and other likely
+  bugs (Tailwind at-rules allowed).
+category: lint
+kind: container
+target_language: css
+icon: palette
+version: "16"
+docs_url: https://stylelint.io/
+install_cmd: "npm install -g stylelint@16 stylelint-config-recommended@14"
+verify_cmd: "stylelint --version"
+uninstall_cmd: "npm uninstall -g stylelint stylelint-config-recommended"
+# stylelint 16 writes the report to stderr when it finds problems; use a file.
+run_cmd: |
+  rm -f /tmp/stylelint.json
+  printf '%s' '{"extends":"stylelint-config-recommended","rules":{"at-rule-no-unknown":[true,{"ignoreAtRules":["tailwind","apply","layer","config","screen","variants","responsive"]}]}}' > /tmp/stylelintrc.json
+  stylelint '{target}/**/*.{css,scss}' --ignore-pattern '**/node_modules/**' --config /tmp/stylelintrc.json --config-basedir "$(npm root -g)" --allow-empty-input -f json --output-file /tmp/stylelint.json >/dev/null 2>&1
+  cat /tmp/stylelint.json 2>/dev/null
+parser_key: stylelint
+run_timeout: 60
+install_timeout: 180
+display_order: 110
+sample_filename: styles.css
+sample_code: |
+  .card { colr: red; }
+  .card { color: #ff00; }
+  @tailwind base;

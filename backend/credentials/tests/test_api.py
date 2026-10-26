@@ -112,7 +112,7 @@ def test_list_credentials_returns_all_providers(auth_client):
     assert resp.status_code == 200
     payload = resp.json()
     providers = {row["provider"] for row in payload}
-    assert providers == {"openrouter", "huggingface"}
+    assert providers == {"openrouter", "huggingface", "github"}
 
 
 def test_huggingface_put_and_get(auth_client, user):

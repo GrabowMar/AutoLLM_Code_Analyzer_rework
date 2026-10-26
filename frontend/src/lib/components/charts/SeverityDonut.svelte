@@ -51,7 +51,7 @@
 			class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"
 			aria-hidden="true"
 		>
-			<span class="text-2xl font-bold font-display">
+			<span class="text-2xl font-medium font-mono">
 				{severity.total}
 			</span>
 			<span class="text-[11px] text-muted-foreground">findings</span>

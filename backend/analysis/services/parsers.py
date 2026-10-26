@@ -71,6 +71,26 @@ def _loads(raw: str) -> Any:
         return None
 
 
+_CWE_RE = re.compile(r"CWE-?(\d+)", re.IGNORECASE)
+
+
+def _cwe_field(value: Any) -> dict[str, str]:
+    """``{"cwe": "CWE-<n>"}`` from an int, a "CWE-89: ..." string or a list of them; {} if none.
+
+    The first CWE wins — tools list the most specific one first. Cross-tool
+    deduplication (statistics.services.dedup) matches findings on it.
+    """
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if isinstance(value, int) and value > 0:
+        return {"cwe": f"CWE-{value}"}
+    if isinstance(value, str):
+        m = _CWE_RE.search(value)
+        if m:
+            return {"cwe": f"CWE-{int(m.group(1))}"}
+    return {}
+
+
 @register("bandit")
 def parse_bandit(raw: str) -> list[FindingData]:
     data = _loads(raw) or {}
@@ -89,7 +109,10 @@ def parse_bandit(raw: str) -> list[FindingData]:
                 code_snippet=(item.get("code") or "")[:500],
                 rule_id=item.get("test_id", ""),
                 confidence=conf_map.get(item.get("issue_confidence", "MEDIUM"), "medium"),
-                tool_specific_data={"test_name": item.get("test_name", "")},
+                tool_specific_data={
+                    "test_name": item.get("test_name", ""),
+                    **_cwe_field((item.get("issue_cwe") or {}).get("id")),
+                },
             ),
         )
     return findings
@@ -163,7 +186,10 @@ def parse_semgrep(raw: str) -> list[FindingData]:
                 code_snippet=(extra.get("lines") or "")[:500],
                 rule_id=item.get("check_id", ""),
                 confidence=str((extra.get("metadata") or {}).get("confidence", "medium")).lower() or "medium",
-                tool_specific_data={"end_line": end.get("line")},
+                tool_specific_data={
+                    "end_line": end.get("line"),
+                    **_cwe_field((extra.get("metadata") or {}).get("cwe")),
+                },
             ),
         )
     return findings

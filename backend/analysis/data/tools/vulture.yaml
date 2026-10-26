@@ -9,8 +9,9 @@ target_language: python
 icon: skull
 version: "2"
 docs_url: https://github.com/jendrikseipp/vulture
-install_cmd: "pip install --user 'vulture==2.*'"
+install_cmd: "pip install --user --upgrade 'vulture==2.*'"
 verify_cmd: "vulture --version"
+uninstall_cmd: "pip uninstall -y vulture"
 run_cmd: "vulture {target} --min-confidence 60"
 parser_key: vulture
 run_timeout: 90
