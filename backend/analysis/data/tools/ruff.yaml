@@ -6,14 +6,18 @@ description: >-
 category: lint
 kind: container
 target_language: python
+analysis_mode: static
+technologies: [python]
 icon: sparkles
 version: "0.6"
 docs_url: https://docs.astral.sh/ruff/
 install_cmd: "pip install --user --upgrade 'ruff==0.6.*'"
 verify_cmd: "ruff --version"
 uninstall_cmd: "pip uninstall -y ruff"
-run_cmd: "ruff check {target} --output-format json"
+# --no-cache: a .ruff_cache in /work would be scanned by detect-secrets/jscpd.
+run_cmd: "sel={config:select}; ruff check {target} --no-cache --output-format json ${sel:+--select \"$sel\"}"
 parser_key: ruff
+file_patterns: ["*.py"]
 run_timeout: 90
 install_timeout: 180
 display_order: 20
@@ -24,7 +28,8 @@ config_schema:
     description: Comma-separated rule codes to enable (leave blank for defaults).
     default: ""
     placeholder: "E,F,W"
-default_config: {}
+default_config:
+  select: ""
 sample_code: |
   import os
   import sys

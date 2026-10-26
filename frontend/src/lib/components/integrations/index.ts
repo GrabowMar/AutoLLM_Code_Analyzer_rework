@@ -1,4 +1,4 @@
-// Integrations page sections and the GitHub export dialog (application detail page).
+// Settings → Connections sections and the GitHub export dialog (application detail page).
 export { default as McpSection } from "./McpSection.svelte";
 export { default as ProvidersSection } from "./ProvidersSection.svelte";
 export { default as ProviderConnectDialog } from "./ProviderConnectDialog.svelte";

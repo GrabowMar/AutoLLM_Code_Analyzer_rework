@@ -70,7 +70,7 @@ def _handle(request: HttpRequest, raw_token: str, *, url_token: bool) -> HttpRes
         return _unauthorized("invalid, expired or revoked token")
     scopes = set(token.scopes or [])
     if url_token and URL_TOKEN_SCOPE not in scopes:
-        return _unauthorized("tokens in the URL need the 'mcp' scope; create one under Settings → Integrations")
+        return _unauthorized("tokens in the URL need the 'mcp' scope; create one under Settings → MCP server")
     token.mark_used(request.META.get("REMOTE_ADDR", ""))
 
     if len(request.body) > MAX_REQUEST_BYTES:

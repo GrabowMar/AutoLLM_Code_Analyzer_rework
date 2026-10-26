@@ -37,14 +37,22 @@ def host_metrics() -> dict[str, Any]:
     if cached is not None:
         return cached
 
-    cpu_percent = psutil.cpu_percent(interval=None)
+    # interval=None compares against the previous call in this process, so the
+    # first call per worker (and every call after a long idle) reads 0.0.
+    cpu_percent = psutil.cpu_percent(interval=0.2)
     mem = psutil.virtual_memory()
     load = psutil.getloadavg()
     boot_time = psutil.boot_time()
     uptime_seconds = time.time() - boot_time
 
     disks = []
-    for part in psutil.disk_partitions(all=False):
+    seen_devices: set[str] = set()
+    # Shortest mountpoint first; bind mounts of one device (a container sees its
+    # volumes and /etc/hosts as such) then collapse onto it.
+    for part in sorted(psutil.disk_partitions(all=False), key=lambda p: len(p.mountpoint)):
+        if part.device in seen_devices:
+            continue
+        seen_devices.add(part.device)
         try:
             usage = psutil.disk_usage(part.mountpoint)
             disks.append(

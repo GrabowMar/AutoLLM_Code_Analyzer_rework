@@ -59,7 +59,14 @@
 		setAnalysis({ tool_slugs: [...set] });
 	}
 
-	const usable = (t: AnalyzerTool) => t.kind === 'ai' || t.installed;
+	// Dynamic scanners need the app running, and evaluation tears apps down.
+	const isDynamic = (t: AnalyzerTool) => t.analysis_mode === 'dynamic';
+	const usable = (t: AnalyzerTool) => !isDynamic(t) && (t.kind === 'ai' || t.installed);
+
+	function unusableReason(t: AnalyzerTool): string {
+		if (isDynamic(t)) return "Dynamic scanner: needs the app running, which post-run analysis doesn't do yet";
+		return 'Not installed in your analyzer workspace';
+	}
 </script>
 
 <div class="space-y-4">
@@ -74,7 +81,7 @@
 			/>
 			<div class="min-w-0 space-y-0.5">
 				<label for="{idPrefix}-evaluate" class="text-sm font-medium">Evaluate every run</label>
-				<p id="{idPrefix}-evaluate-note" class="text-[11px] text-muted-foreground">
+				<p id="{idPrefix}-evaluate-note" class="text-xs text-muted-foreground">
 					Builds the app and runs its hidden conformance suite, so Results can rank conditions. Without it runs are
 					ungraded.
 				</p>
@@ -93,7 +100,7 @@
 			/>
 			<div class="min-w-0 space-y-0.5">
 				<label for="{idPrefix}-analysis" class="text-sm font-medium">Static analysis when the experiment completes</label>
-				<p id="{idPrefix}-analysis-note" class="text-[11px] text-muted-foreground">
+				<p id="{idPrefix}-analysis-note" class="text-xs text-muted-foreground">
 					Runs the chosen analyzers over the finished runs, one at a time, after every cell is done.
 				</p>
 			</div>
@@ -105,23 +112,25 @@
 				{:else if !tools}
 					<p class="loading-mono">loading analyzers</p>
 				{:else if tools.length === 0}
-					<p class="text-[11px] text-muted-foreground">No analyzers are enabled. <a href="/analyzers" class="underline">Set them up</a>.</p>
+					<p class="text-xs text-muted-foreground">No analyzers are enabled. <a href="/analyzers" class="underline">Set them up</a>.</p>
 				{:else}
 					<fieldset class="grid gap-1.5 sm:grid-cols-2" aria-label="Analyzers">
 						{#each tools as tool (tool.slug)}
-							<label class="flex items-center gap-2 text-xs" title={usable(tool) ? tool.description : 'Not installed in your analyzer workspace'}>
+							<label class="flex items-center gap-2 text-xs" title={usable(tool) ? tool.description : unusableReason(tool)}>
 								<Checkbox
 									checked={value.analysis.tool_slugs.includes(tool.slug)}
 									disabled={disabled || !usable(tool)}
 									onCheckedChange={(v) => toggleTool(tool.slug, v === true)}
 								/>
 								<span class="truncate">{tool.name}</span>
-								<span class="text-[11px] text-muted-foreground">{tool.category}{usable(tool) ? '' : ' · not installed'}</span>
+								<span class="text-xs text-muted-foreground"
+									>{tool.category}{isDynamic(tool) ? ' · needs running app' : usable(tool) ? '' : ' · not installed'}</span
+								>
 							</label>
 						{/each}
 					</fieldset>
 					{#if value.analysis.tool_slugs.length === 0}
-						<p class="text-[11px] text-warning-fg">Pick at least one analyzer.</p>
+						<p class="text-xs text-warning-fg">Pick at least one analyzer.</p>
 					{/if}
 				{/if}
 				<label class="flex items-center gap-2 text-xs">
@@ -147,7 +156,7 @@
 			/>
 			<div class="min-w-0 space-y-0.5">
 				<label for="{idPrefix}-report" class="text-sm font-medium">Experiment report</label>
-				<p id="{idPrefix}-report-note" class="text-[11px] text-muted-foreground">
+				<p id="{idPrefix}-report-note" class="text-xs text-muted-foreground">
 					Generated after analysis: leaderboard and paired comparisons against the baseline.
 				</p>
 			</div>
@@ -164,6 +173,6 @@
 		{/if}
 	</div>
 	{#if mode === 'agent'}
-		<p class="text-[11px] text-muted-foreground">Agent runs are evaluated as they finish; no separate step is needed.</p>
+		<p class="text-xs text-muted-foreground">Agent runs are evaluated as they finish; no separate step is needed.</p>
 	{/if}
 </div>

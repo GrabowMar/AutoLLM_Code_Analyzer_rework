@@ -19,6 +19,7 @@
 	import { Segmented } from '$lib/components/ui/segmented';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import SectionHeading from '$lib/components/SectionHeading.svelte';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Save from '@lucide/svelte/icons/save';
 	import Copy from '@lucide/svelte/icons/copy';
@@ -178,7 +179,7 @@
 		{:else}
 			<!-- Basics -->
 			<section class="space-y-3" aria-labelledby="spec-basics">
-				<h3 id="spec-basics" class="section-label">Basics</h3>
+				<SectionHeading id="spec-basics" size="sm" level={3} title="Basics" />
 				<div class="grid gap-3 sm:grid-cols-2">
 					<div class="space-y-1.5">
 						<Label for="spec-name" class="text-xs">Name</Label>
@@ -237,10 +238,7 @@
 
 			<!-- Requirements -->
 			<section class="space-y-3" aria-labelledby="spec-reqs">
-				<div>
-					<h3 id="spec-reqs" class="section-label">Requirements</h3>
-					<p class="mt-1 text-[11px] text-muted-foreground">One per line. Stated to the agent; not checked directly.</p>
-				</div>
+				<SectionHeading id="spec-reqs" size="sm" level={3} title="Requirements" lead="One per line. Stated to the agent; not checked directly." />
 				<div class="grid gap-3 sm:grid-cols-2">
 					<div class="space-y-1.5">
 						<Label for="spec-backend" class="text-xs">Backend</Label>
@@ -259,7 +257,7 @@
 
 			<!-- Data model -->
 			<section class="space-y-3" aria-labelledby="spec-model">
-				<h3 id="spec-model" class="section-label">Data model</h3>
+				<SectionHeading id="spec-model" size="sm" level={3} title="Data model" />
 				<div class="space-y-1.5 sm:w-1/2">
 					<Label for="spec-model-name" class="text-xs">Model name</Label>
 					<Input id="spec-model-name" bind:value={draft.modelName} readonly={readonly} aria-invalid={!!problem('spec-model-name')} placeholder="e.g. Book" class="h-9 text-xs" />
@@ -318,15 +316,19 @@
 
 			<!-- Endpoints -->
 			<section class="space-y-3" aria-labelledby="spec-endpoints">
-				<div>
-					<h3 id="spec-endpoints" class="section-label">API endpoints <span class="font-sans normal-case tracking-normal">({draft.endpoints.length})</span></h3>
-					<p class="mt-1 text-[11px] text-muted-foreground">Each one is called by the hidden suite and must answer 2xx with the documented response fields.</p>
-				</div>
+				<SectionHeading
+					id="spec-endpoints"
+					size="sm"
+					level={3}
+					title="API endpoints"
+					count={draft.endpoints.length}
+					lead="Each one is called by the hidden suite and must answer 2xx with the documented response fields."
+				/>
 				<EndpointListEditor bind:endpoints={draft.endpoints} prefix="ep" label="Endpoint" {readonly} {problem} />
 			</section>
 
 			<section class="space-y-3" aria-labelledby="spec-admin-endpoints">
-				<h3 id="spec-admin-endpoints" class="section-label">Admin endpoints <span class="font-sans normal-case tracking-normal">({draft.adminEndpoints.length})</span></h3>
+				<SectionHeading id="spec-admin-endpoints" size="sm" level={3} title="Admin endpoints" count={draft.adminEndpoints.length} />
 				<EndpointListEditor bind:endpoints={draft.adminEndpoints} prefix="aep" label="Admin endpoint" {readonly} {problem} />
 			</section>
 		{/if}

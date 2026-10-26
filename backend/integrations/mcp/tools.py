@@ -187,7 +187,7 @@ GENERIC_TOOLS: tuple[dict[str, Any], ...] = (
     {
         "name": "find_api_operations",
         "description": (
-            "Search every LLM Lab REST operation (225+) by keyword and/or tag. Use when no dedicated "
+            "Search all LLM Lab REST operations by keyword and/or tag. Use when no dedicated "
             "tool fits; then describe_api_operation and call_api."
         ),
         "inputSchema": {

@@ -7,6 +7,8 @@ description: >-
 category: lint
 kind: container
 target_language: css
+analysis_mode: static
+technologies: [css]
 icon: palette
 version: "16"
 docs_url: https://stylelint.io/
@@ -20,6 +22,7 @@ run_cmd: |
   stylelint '{target}/**/*.{css,scss}' --ignore-pattern '**/node_modules/**' --config /tmp/stylelintrc.json --config-basedir "$(npm root -g)" --allow-empty-input -f json --output-file /tmp/stylelint.json >/dev/null 2>&1
   cat /tmp/stylelint.json 2>/dev/null
 parser_key: stylelint
+file_patterns: ["*.css", "*.scss"]
 run_timeout: 60
 install_timeout: 180
 display_order: 110

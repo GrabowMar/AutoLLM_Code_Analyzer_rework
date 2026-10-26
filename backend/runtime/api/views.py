@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from ninja import Query
 from ninja import Router
@@ -29,6 +30,39 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
 router = Router(tags=["runtime"])
+
+
+# Ownership: containers are scoped by container_service.visible_containers
+# (builder or job owner; staff see all). Rows that belong to someone else
+# answer 404 (not 403) so their ids don't leak — the same convention as the
+# generation jobs/experiments routers. Internal callers (analysis runner,
+# executor, evaluation) use the models directly and are not affected.
+def _is_staff(user) -> bool:
+    return bool(getattr(user, "is_staff", False))
+
+
+def _container_qs(user):
+    return container_service.visible_containers(user)
+
+
+def _action_qs(user):
+    qs = ContainerAction.objects.all()
+    if _is_staff(user):
+        return qs
+    return qs.filter(
+        Q(container__created_by=user) | Q(container__generation_job__created_by=user) | Q(triggered_by=user),
+    )
+
+
+def _job_qs(user):
+    qs = GenerationJob.objects.all()
+    if _is_staff(user):
+        return qs
+    return qs.filter(created_by=user)
+
+
+def _owned_container(request: HttpRequest, container_id: str) -> ContainerInstance:
+    return get_object_or_404(_container_qs(request.auth), id=container_id)
 
 
 @router.get(
@@ -66,15 +100,18 @@ def list_containers(
     request: HttpRequest,
     status: str | None = None,
     job_id: str | None = None,
+    model_id: str | None = None,
     page: int = Query(1),
     per_page: int = Query(20),
 ):
-    """List ContainerInstance rows with optional filters."""
-    qs = ContainerInstance.objects.select_related("created_by", "generation_job")
+    """List ContainerInstance rows with optional filters (``model_id`` is the OpenRouter id)."""
+    qs = _container_qs(request.auth).select_related("created_by", "generation_job")
     if status:
         qs = qs.filter(status=status)
     if job_id:
         qs = qs.filter(generation_job_id=job_id)
+    if model_id:
+        qs = qs.filter(generation_job__model__model_id=model_id)
     items, total, page_num, total_pages = paginate_queryset(qs, page, per_page)
     return 200, ContainerListResponse(
         containers=list(items),
@@ -93,7 +130,7 @@ def list_containers(
 )
 def get_container(request: HttpRequest, container_id: str):
     """Return detail for a single ContainerInstance."""
-    instance = get_object_or_404(ContainerInstance, id=container_id)
+    instance = _owned_container(request, container_id)
     return 200, instance
 
 
@@ -105,7 +142,7 @@ def build_container_for_job(request: HttpRequest, job_id: str):
     """Kick off a container build for the given generation job."""
     if not docker_manager.ping():
         return 503, GenericResponse(success=False, message="Docker daemon unavailable")
-    job = get_object_or_404(GenerationJob, id=job_id)
+    job = get_object_or_404(_job_qs(request.auth), id=job_id)
     instance = container_service.build_for_job(job, request.auth)
     return 200, instance
 
@@ -118,7 +155,7 @@ def smoke_test_job(request: HttpRequest, job_id: str):
     """Re-probe a job's running container (health + declared GET endpoints)."""
     from backend.runtime.services import smoke
 
-    job = get_object_or_404(GenerationJob, id=job_id)
+    job = get_object_or_404(_job_qs(request.auth), id=job_id)
     container = job.container_instances.filter(status=ContainerInstance.Status.RUNNING).order_by("-created_at").first()
     if container is None:
         return 409, GenericResponse(
@@ -136,7 +173,7 @@ def start_container(request: HttpRequest, container_id: str):
     """Start a stopped container."""
     if not docker_manager.ping():
         return 503, GenericResponse(success=False, message="Docker daemon unavailable")
-    instance = get_object_or_404(ContainerInstance, id=container_id)
+    instance = _owned_container(request, container_id)
     if instance.status == ContainerInstance.Status.FAILED:
         last_err = (
             instance.actions.filter(status="failed")
@@ -171,7 +208,7 @@ def stop_container(request: HttpRequest, container_id: str):
     """Stop a running container."""
     if not docker_manager.ping():
         return 503, GenericResponse(success=False, message="Docker daemon unavailable")
-    instance = get_object_or_404(ContainerInstance, id=container_id)
+    instance = _owned_container(request, container_id)
     action = container_service.stop_instance(instance, request.auth)
     return 200, action
 
@@ -184,7 +221,7 @@ def restart_container(request: HttpRequest, container_id: str):
     """Restart a container."""
     if not docker_manager.ping():
         return 503, GenericResponse(success=False, message="Docker daemon unavailable")
-    instance = get_object_or_404(ContainerInstance, id=container_id)
+    instance = _owned_container(request, container_id)
     if instance.status == ContainerInstance.Status.FAILED:
         return 409, GenericResponse(
             success=False,
@@ -202,7 +239,7 @@ def remove_container(request: HttpRequest, container_id: str):
     """Remove a container (force=True)."""
     if not docker_manager.ping():
         return 503, GenericResponse(success=False, message="Docker daemon unavailable")
-    instance = get_object_or_404(ContainerInstance, id=container_id)
+    instance = _owned_container(request, container_id)
     action = container_service.remove_instance(instance, request.auth)
     return 200, action
 
@@ -219,7 +256,7 @@ def get_container_logs(
     """Return last *tail* lines of container logs as plain text."""
     if not docker_manager.ping():
         return 503, GenericResponse(success=False, message="Docker daemon unavailable")
-    instance = get_object_or_404(ContainerInstance, id=container_id)
+    instance = _owned_container(request, container_id)
     output = docker_manager.logs(instance.name, tail=tail)
     return 200, output
 
@@ -232,7 +269,7 @@ def get_container_health(request: HttpRequest, container_id: str):
     """Return current health state of a container."""
     if not docker_manager.ping():
         return 503, GenericResponse(success=False, message="Docker daemon unavailable")
-    instance = get_object_or_404(ContainerInstance, id=container_id)
+    instance = _owned_container(request, container_id)
     data = docker_manager.health(instance.name)
     if "error" in data:
         return 503, GenericResponse(success=False, message=data["error"])
@@ -255,7 +292,7 @@ def list_actions(
     per_page: int = Query(20),
 ):
     """List ContainerAction rows with optional filters."""
-    qs = ContainerAction.objects.select_related("container", "triggered_by")
+    qs = _action_qs(request.auth).select_related("container", "triggered_by")
     if container_id:
         qs = qs.filter(container_id=container_id)
     if status:
@@ -278,7 +315,7 @@ def list_actions(
 )
 def get_action(request: HttpRequest, action_id: str):
     """Return detail for a single ContainerAction."""
-    action = get_object_or_404(ContainerAction, action_id=action_id)
+    action = get_object_or_404(_action_qs(request.auth), action_id=action_id)
     return 200, action
 
 
@@ -335,7 +372,7 @@ def inspect_container(request: HttpRequest, container_id: str):
     """Return image, command, masked env, mounts, ports for a container."""
     if not docker_manager.ping():
         return 503, GenericResponse(success=False, message="Docker daemon unavailable")
-    instance = get_object_or_404(ContainerInstance, id=container_id)
+    instance = _owned_container(request, container_id)
     data = docker_manager.inspect(instance.name)
     if "error" in data:
         return 200, ContainerInspectResponse(error=str(data["error"]))
@@ -372,7 +409,7 @@ def exec_container_command(
             success=False,
             message=f"Unknown action; allowed: {sorted(_EXEC_WHITELIST)}",
         )
-    instance = get_object_or_404(ContainerInstance, id=container_id)
+    instance = _owned_container(request, container_id)
     result = docker_manager.exec_in(instance.name, cmd, timeout_s=10)
     return 200, ContainerExecResponse(
         action=payload.action,

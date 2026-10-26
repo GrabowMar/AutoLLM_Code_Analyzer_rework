@@ -311,7 +311,20 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
                     ("significant", f"< {planned.get('alpha')}"),
                 ],
                 family["comparisons"],
-                "Interim: do not interpret p-values yet." if planned.get("interim") else "",
+                " ".join(
+                    note
+                    for note in (
+                        "Interim: do not interpret p-values yet." if planned.get("interim") else "",
+                        (
+                            f"Not tested (fewer than {planned.get('min_apps_per_condition')} apps): "
+                            + ", ".join(c["condition"] for c in family["comparisons"] if c.get("skipped"))
+                            + "."
+                        )
+                        if any(c.get("skipped") for c in family["comparisons"])
+                        else "",
+                    )
+                    if note
+                ),
             ),
         )
 

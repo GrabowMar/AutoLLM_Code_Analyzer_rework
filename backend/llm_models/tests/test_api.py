@@ -320,7 +320,18 @@ class TestComparisonAPI:
 @pytest.mark.django_db
 class TestRefreshAPI:
     @patch("backend.llm_models.api.views.refresh_model_from_openrouter")
-    def test_refresh_model(self, mock_refresh, api_client, user):
+    def test_refresh_is_staff_only(self, mock_refresh, api_client, user):
+        """Catalog rows are shared, so a regular user can't rewrite one."""
+        _set_user_openrouter_key(user, "user-key")
+        model = LLMModelFactory(model_id="openai/gpt-4o", canonical_slug="openai_gpt-4o")
+
+        resp = api_client.post(f"/api/models/detail/{model.canonical_slug}/refresh/")
+
+        assert resp.status_code == HTTPStatus.FORBIDDEN
+        mock_refresh.assert_not_called()
+
+    @patch("backend.llm_models.api.views.refresh_model_from_openrouter")
+    def test_refresh_model(self, mock_refresh, staff_api_client, user):
         _set_user_openrouter_key(user, "user-key")
         model = LLMModelFactory(
             model_id="openai/gpt-4o",
@@ -336,7 +347,7 @@ class TestRefreshAPI:
 
         mock_refresh.side_effect = refresh_side_effect
 
-        resp = api_client.post(f"/api/models/detail/{model.canonical_slug}/refresh/")
+        resp = staff_api_client.post(f"/api/models/detail/{model.canonical_slug}/refresh/")
 
         assert resp.status_code == HTTPStatus.OK, resp.content
         assert resp.json()["model_name"] == "New Name"
@@ -344,13 +355,13 @@ class TestRefreshAPI:
 
     @override_settings(OPENROUTER_API_KEY="global-key", OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK=True)
     @patch("backend.llm_models.api.views.refresh_model_from_openrouter")
-    def test_refresh_requires_user_key_even_when_global_fallback_exists(self, mock_refresh, api_client):
+    def test_refresh_requires_user_key_even_when_global_fallback_exists(self, mock_refresh, staff_api_client):
         model = LLMModelFactory(
             model_id="openai/gpt-4o",
             canonical_slug="openai_gpt-4o",
         )
 
-        resp = api_client.post(f"/api/models/detail/{model.canonical_slug}/refresh/")
+        resp = staff_api_client.post(f"/api/models/detail/{model.canonical_slug}/refresh/")
 
         assert resp.status_code == HTTPStatus.FORBIDDEN
         data = resp.json()

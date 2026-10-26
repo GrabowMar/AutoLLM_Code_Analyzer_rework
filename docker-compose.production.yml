@@ -38,6 +38,11 @@ services:
       - ./.envs/.production/.django
       - ./.envs/.production/.postgres
     environment:
+      # config/asgi.py, manage.py and celery_app.py default to local settings
+      # (debug_toolbar, not in the --no-dev image), so every Django-image
+      # service must name production explicitly. Services that override
+      # `environment` (executor) repeat it.
+      - DJANGO_SETTINGS_MODULE=config.settings.production
       - TRAEFIK_DYNAMIC_DIR=/traefik-dynamic
       - DOCKER_APPS_NETWORK=llm_apps
     networks:
@@ -55,6 +60,7 @@ services:
     # after 10 min (production /start does not migrate); Docker brings it back.
     restart: unless-stopped
     environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.production
       - TRAEFIK_DYNAMIC_DIR=/traefik-dynamic
       - DOCKER_APPS_NETWORK=llm_apps
       - CONN_MAX_AGE=0

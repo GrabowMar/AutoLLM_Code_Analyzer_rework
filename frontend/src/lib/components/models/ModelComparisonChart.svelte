@@ -1,92 +1,62 @@
 <script lang="ts">
+	/** Other models from the same provider and source (catalog or local), as a compact table. */
 	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
-	import Cpu from '@lucide/svelte/icons/cpu';
-	import Users from '@lucide/svelte/icons/users';
-	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
-	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import EmptyState from '$lib/components/EmptyState.svelte';
+	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
+	import { rowLink, shortModelName } from '$lib/components/table';
 	import type { LLMModelSummary } from '$lib/api/client';
+	import { formatPrice } from './helpers';
 
 	interface Props {
 		provider: string;
+		slug: string;
 		relatedModels: LLMModelSummary[];
 	}
 
-	let { provider, relatedModels }: Props = $props();
+	let { provider, slug, relatedModels }: Props = $props();
 
-	let relatedScrollEl = $state<HTMLDivElement | null>(null);
-
-	function scrollRelated(dir: 'left' | 'right') {
-		if (!relatedScrollEl) return;
-		const amount = 300;
-		relatedScrollEl.scrollBy({ left: dir === 'left' ? -amount : amount, behavior: 'smooth' });
-	}
+	const compareHref = $derived(`/models/compare?models=${[slug, ...relatedModels.slice(0, 3).map((m) => m.canonical_slug)].join(',')}`);
 </script>
 
-<section id="related" class="space-y-4">
-	<h2 class="text-lg font-semibold flex items-center gap-2"><Users class="h-5 w-5" /> Related Models</h2>
-
-	<Card.Root>
-		<Card.Header class="pb-2">
-			<div class="flex items-center justify-between">
-				<Card.Title class="text-sm font-medium flex items-center gap-2">
-					Models from {provider}
-					<Badge variant="outline" class="text-xs">{relatedModels.length}</Badge>
-				</Card.Title>
-				{#if relatedModels.length > 4}
-					<div class="flex items-center gap-1">
-						<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => scrollRelated('left')} aria-label="Scroll related models left">
-							<ChevronLeft class="h-4 w-4" />
-						</Button>
-						<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => scrollRelated('right')} aria-label="Scroll related models right">
-							<ChevronRight class="h-4 w-4" />
-						</Button>
-					</div>
-				{/if}
+{#if relatedModels.length}
+	<Card.Root class="gap-0 overflow-clip py-0">
+		<Card.Header class="flex flex-row items-center justify-between gap-2 border-b border-border py-3">
+			<div>
+				<Card.Title class="text-sm font-medium">More from {provider}</Card.Title>
+				<Card.Description class="text-xs">Best value first</Card.Description>
 			</div>
+			<Button variant="ghost" size="sm" href={compareHref}><GitCompareArrows class="size-3.5" />Compare top 3</Button>
 		</Card.Header>
-		<Card.Content>
-			{#if relatedModels.length === 0}
-				<EmptyState compact icon={Users} title="No related models" description="No other models from {provider} found." />
-			{:else}
-				<div bind:this={relatedScrollEl} class="flex gap-3 overflow-x-auto pb-2 scrollbar-thin">
-					{#each relatedModels as related}
-						<a
-							href="/models/{related.canonical_slug}"
-							class="group card-lift flex-shrink-0 w-56 rounded-md border bg-card p-3 hover:border-primary/30"
-						>
-							<div class="flex items-start gap-2 mb-2">
-								<div class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-primary/10">
-									<Cpu class="h-3.5 w-3.5 text-primary" />
-								</div>
-								<div class="min-w-0 flex-1">
-									<div class="text-sm font-medium truncate group-hover:text-primary transition-colors">{related.model_name}</div>
-									<div class="text-xs text-muted-foreground">{related.provider}</div>
-								</div>
-							</div>
-							<div class="grid grid-cols-2 gap-1.5 text-xs">
-								<div>
-									<span class="text-muted-foreground">Context:</span>
-									<span class="font-medium ml-0.5">{related.context_window >= 1000 ? `${Math.round(related.context_window / 1000)}K` : related.context_window}</span>
-								</div>
-								<div>
-									<span class="text-muted-foreground">Input:</span>
-									<span class="font-medium ml-0.5">{related.input_price_per_million === 0 ? 'Free' : `$${related.input_price_per_million.toFixed(2)}`}</span>
-								</div>
-							</div>
-							{#if related.capabilities && related.capabilities.length > 0}
-								<div class="flex flex-wrap gap-1 mt-1.5">
-									{#each related.capabilities.slice(0, 3) as cap}
-										<Badge variant="outline" class="text-[11px] px-1 py-0">{cap}</Badge>
-									{/each}
-								</div>
-							{/if}
-						</a>
-					{/each}
-				</div>
-			{/if}
+		<Card.Content class="p-0">
+			<div class="overflow-x-auto">
+				<table>
+					<thead>
+						<tr>
+							<th>Model</th>
+							<th class="num">Context</th>
+							<th class="num">$ in / out per 1M</th>
+							<th>Features</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each relatedModels as m (m.id)}
+							{@const href = `/models/${m.canonical_slug}`}
+							<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
+							<tr class="row-link" onclick={rowLink(href)}>
+								<td class="max-w-[18rem]">
+									<a {href} class="block truncate font-medium hover:text-primary" title={m.model_name}>{shortModelName(m.model_name)}</a>
+									<span class="cell-sub block truncate font-mono text-[11px] text-muted-foreground">{m.model_id}</span>
+								</td>
+								<td class="num">{m.context_window_display}</td>
+								<td class="num whitespace-nowrap">{m.is_free ? 'Free' : `${formatPrice(m.input_price_per_million)} / ${formatPrice(m.output_price_per_million)}`}</td>
+								<td class="text-xs text-muted-foreground">
+									{[m.supports_function_calling && 'tools', m.supports_vision && 'vision', m.supports_reasoning && 'reasoning', m.supports_json_mode && 'JSON'].filter(Boolean).join(' · ') || '—'}
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
 		</Card.Content>
 	</Card.Root>
-</section>
+{/if}

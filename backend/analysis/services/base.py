@@ -31,6 +31,11 @@ class FindingData:
     rule_id: str = ""
     confidence: str = "medium"  # high, medium, low
     tool_specific_data: dict[str, Any] = field(default_factory=dict)
+    # The severity/level exactly as the tool printed it ("HIGH", "error",
+    # "convention"); empty when the tool rates nothing. ``severity`` above is
+    # a normalization (a heuristic for unrated tools) that only aggregate
+    # statistics use: the UI shows this field, never an invented level.
+    tool_severity: str = ""
 
 
 @dataclass
@@ -44,6 +49,12 @@ class ParsedOutput:
 
     findings: list[FindingData] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
+    # Coverage gaps (e.g. one of several manifests could not be audited): the
+    # result stands but is incomplete.
+    warnings: list[str] = field(default_factory=list)
+    # The output shows the tool did not measure anything: the result must be
+    # recorded as failed, not as a clean (zero-finding) one.
+    error: str | None = None
 
 
 @dataclass
@@ -54,6 +65,7 @@ class AnalyzerOutput:
     metrics: dict[str, Any] = field(default_factory=dict)
     summary: dict[str, Any] = field(default_factory=dict)
     raw_output: dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
     error: str | None = None
 
     @property

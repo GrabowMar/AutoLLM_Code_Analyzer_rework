@@ -1,290 +1,354 @@
 <script lang="ts">
-	import { getMe } from '$lib/api/users';
-	import type { ApiUser } from '$lib/api/users';
-	import { onMount, untrack } from 'svelte';
+	/**
+	 * Settings — laid out like the Generation Library: a bookmark rail card on the
+	 * left, and every section as one card (heading strip, then its rows flush
+	 * below) in a single scrolling list. The rail (desktop) / sticky chips
+	 * (mobile) follow the scroll position, every section has a shareable `#id`
+	 * link, and sections report an at-a-glance status (key valid, N active
+	 * tokens…) to the rail.
+	 */
+	import { onMount, type Component } from 'svelte';
+	import { replaceState } from '$app/navigation';
+	import { toast } from 'svelte-sonner';
+	import { Popover } from 'bits-ui';
 	import { cn } from '$lib/utils';
-	import * as Card from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
 	import PageHeader from '$lib/components/PageHeader.svelte';
-	import LoadingState from '$lib/components/LoadingState.svelte';
+	import SectionHeading from '$lib/components/SectionHeading.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import type { Tone } from '$lib/constants/colors';
+	import { getAuth } from '$lib/stores/auth.svelte';
+	import { SETTINGS_SECTIONS, SETTINGS_GROUPS, resolveSettingsSection } from '$lib/settings-sections';
+	import { provideSectionStatus } from '$lib/components/users-settings/section-status.svelte';
 
 	import ProfileSection from '$lib/components/users-settings/ProfileSection.svelte';
 	import SecuritySection from '$lib/components/users-settings/SecuritySection.svelte';
 	import AppearanceSection from '$lib/components/users-settings/AppearanceSection.svelte';
 	import WorkspaceSection from '$lib/components/users-settings/WorkspaceSection.svelte';
-	import CookieSettingsSection from '$lib/components/users-settings/CookieSettingsSection.svelte';
+	import PrivacyDataSection from '$lib/components/users-settings/PrivacyDataSection.svelte';
 	import ApiKeysSection from '$lib/components/users-settings/ApiKeysSection.svelte';
 	import TokenSection from '$lib/components/users-settings/TokenSection.svelte';
-	import DataManagementSection from '$lib/components/users-settings/DataManagementSection.svelte';
-
-	import User from '@lucide/svelte/icons/user';
-	import Lock from '@lucide/svelte/icons/lock';
-	import Palette from '@lucide/svelte/icons/palette';
-	import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard';
-	import Cookie from '@lucide/svelte/icons/cookie';
-	import Key from '@lucide/svelte/icons/key';
-	import Terminal from '@lucide/svelte/icons/terminal';
-	import Database from '@lucide/svelte/icons/database';
+	import { McpSection, ProvidersSection, GitHubSection, WebhooksSection } from '$lib/components/integrations';
+	import Link from '@lucide/svelte/icons/link';
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
-	import type { Component } from 'svelte';
+	import CircleHelp from '@lucide/svelte/icons/circle-help';
 
-	interface Section {
-		id: string;
-		label: string;
-		group: 'account' | 'application' | 'privacy' | 'integrations' | 'data';
-		icon: Component;
-	}
+	const auth = getAuth();
+	const statuses = provideSectionStatus();
 
-	const SECTIONS: Section[] = [
-		{ id: 'account', label: 'Account', group: 'account', icon: User },
-		{ id: 'security', label: 'Security', group: 'account', icon: Lock },
-		{ id: 'appearance', label: 'Appearance', group: 'application', icon: Palette },
-		{ id: 'workspace', label: 'Workspace', group: 'application', icon: LayoutDashboard },
-		{ id: 'privacy', label: 'Privacy & Cookies', group: 'privacy', icon: Cookie },
-		{ id: 'credentials', label: 'API Credentials', group: 'integrations', icon: Key },
-		{ id: 'tokens', label: 'Personal Tokens', group: 'integrations', icon: Terminal },
-		{ id: 'data', label: 'Data Management', group: 'data', icon: Database },
-	];
-
-	const GROUP_LABELS: Record<Section['group'], string> = {
-		account: 'Account',
-		application: 'Application',
-		privacy: 'Privacy',
-		integrations: 'Integrations',
-		data: 'Data',
+	const BODIES: Record<string, Component> = {
+		account: ProfileSection,
+		security: SecuritySection,
+		appearance: AppearanceSection,
+		workspace: WorkspaceSection,
+		privacy: PrivacyDataSection,
+		credentials: ApiKeysSection,
+		providers: ProvidersSection,
+		github: GitHubSection,
+		mcp: McpSection,
+		notifications: WebhooksSection,
+		tokens: TokenSection,
 	};
 
-	const groupedSections = $derived(
-		(Object.keys(GROUP_LABELS) as Section['group'][]).map((g) => ({
-			group: g,
-			label: GROUP_LABELS[g],
-			items: SECTIONS.filter((s) => s.group === g),
-		})),
-	);
+	const DOT: Record<Tone, string> = {
+		success: 'text-success',
+		warning: 'text-warning',
+		danger: 'text-destructive',
+		info: 'text-info',
+		neutral: 'text-muted-foreground',
+	};
 
-	let profile = $state<ApiUser | null>(null);
-	let loading = $state(true);
-	let activeId = $state<string>('account');
-	let showBackToTop = $state(false);
+	const ORDER = SETTINGS_SECTIONS.map((s) => s.id);
+	const groups = SETTINGS_GROUPS.map((g) => ({
+		...g,
+		sections: SETTINGS_SECTIONS.filter((s) => s.group === g.id),
+	}));
 
-	function scrollToSection(id: string) {
-		if (typeof window === 'undefined') return;
-		const el = document.getElementById(`section-${id}`);
-		if (!el) return;
-		const headerOffset = 64; // app header (~3rem) + breathing room
-		const top = el.getBoundingClientRect().top + window.scrollY - headerOffset;
-		window.scrollTo({ top, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+	/** A section counts as current once its top passes this line (app bar + chip bar + air). */
+	const SPY_LINE = 132;
+
+	let activeId = $state(ORDER[0]);
+	let chipBar = $state<HTMLElement | null>(null);
+	/** Set by a bookmark click: keeps that section current while the page settles at the bottom. */
+	let pinned: string | null = null;
+	let programmaticUntil = 0;
+	/** Target of the last bookmark scroll, re-checked when scrolling ends (layout may have shifted meanwhile). */
+	let pendingTarget: string | null = null;
+
+	function sectionTop(id: string): number | null {
+		const el = document.getElementById(id);
+		return el ? el.getBoundingClientRect().top : null;
+	}
+
+	function setActive(id: string) {
+		if (id === activeId) return;
 		activeId = id;
-		history.replaceState(history.state, '', `${window.location.pathname}#${id}`);
+		// Keep the address bar bookmarkable without adding history entries.
+		replaceState(`#${id}`, {});
 	}
 
-	function prefersReducedMotion(): boolean {
-		if (typeof window === 'undefined') return false;
-		return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	function spy() {
+		if (performance.now() < programmaticUntil) return;
+		const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+		if (atBottom && pinned) {
+			const top = sectionTop(pinned);
+			if (top != null && top < window.innerHeight) return setActive(pinned);
+		}
+		if (!atBottom) pinned = null;
+		let current = ORDER[0];
+		for (const id of ORDER) {
+			const top = sectionTop(id);
+			if (top != null && top - SPY_LINE <= 0) current = id;
+		}
+		if (atBottom && !pinned) current = ORDER[ORDER.length - 1];
+		setActive(current);
 	}
 
-	function scrollToTop() {
-		window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+	function targetOffset(el: HTMLElement): number {
+		return el.getBoundingClientRect().top - (parseFloat(getComputedStyle(el).scrollMarginTop) || 0);
 	}
+
+	function scrollToSection(id: string, behavior: ScrollBehavior = 'smooth') {
+		const el = document.getElementById(id);
+		if (!el) return;
+		const top = targetOffset(el) + window.scrollY;
+		pinned = id;
+		pendingTarget = behavior === 'smooth' ? id : null;
+		programmaticUntil = performance.now() + (behavior === 'smooth' ? 900 : 50);
+		window.scrollTo({ top, behavior });
+		setActive(id);
+	}
+
+	function jump(e: MouseEvent, id: string) {
+		if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+		e.preventDefault();
+		scrollToSection(id);
+		document.getElementById(`${id}-title`)?.focus({ preventScroll: true });
+	}
+
+	async function copyLink(id: string, label: string) {
+		const url = `${location.origin}${location.pathname}#${id}`;
+		try {
+			await navigator.clipboard.writeText(url);
+			toast.success(`Link to ${label} copied.`);
+		} catch {
+			toast.error('Could not copy the link.');
+		}
+	}
+
+	// Keep the active chip visible in the mobile bar.
+	$effect(() => {
+		const chip = chipBar?.querySelector<HTMLElement>(`[data-chip="${activeId}"]`);
+		if (!chipBar || !chip) return;
+		const left = chip.offsetLeft - (chipBar.clientWidth - chip.offsetWidth) / 2;
+		chipBar.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+	});
 
 	onMount(() => {
-		// Load profile
-		getMe()
-			.then((u) => (profile = u))
-			.catch(() => {})
-			.finally(() => (loading = false));
-
-		// Honor initial hash
-		const initialHash = window.location.hash.replace('#', '');
-		if (initialHash && SECTIONS.some((s) => s.id === initialHash)) {
-			// Defer to next frame so layout is settled
-			requestAnimationFrame(() => scrollToSection(initialHash));
-		}
-
-		// IntersectionObserver for active section tracking
-		const observer = new IntersectionObserver(
-			(entries) => {
-				const visible = entries
-					.filter((e) => e.isIntersecting)
-					.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-				if (visible[0]) {
-					const id = visible[0].target.id.replace('section-', '');
-					untrack(() => {
-						activeId = id;
-					});
-				}
-			},
-			{ rootMargin: '-80px 0px -65% 0px', threshold: [0, 0.1] },
-		);
-		for (const s of SECTIONS) {
-			const el = document.getElementById(`section-${s.id}`);
-			if (el) observer.observe(el);
-		}
-
+		let frame = 0;
 		const onScroll = () => {
-			showBackToTop = window.scrollY > 400;
+			cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(spy);
 		};
 		window.addEventListener('scroll', onScroll, { passive: true });
+		const onScrollEnd = () => {
+			const el = pendingTarget ? document.getElementById(pendingTarget) : null;
+			pendingTarget = null;
+			const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+			if (el && !atBottom && Math.abs(targetOffset(el)) > 8) {
+				window.scrollTo({ top: targetOffset(el) + window.scrollY, behavior: 'instant' });
+			}
+			programmaticUntil = 0;
+			spy();
+		};
+		window.addEventListener('scrollend', onScrollEnd);
+		// In-page links such as <a href="#appearance"> inside a section body.
+		const onHashChange = () => {
+			const id = resolveSettingsSection(location.hash.slice(1));
+			if (id !== activeId || Math.abs(sectionTop(id) ?? 0) > SPY_LINE) scrollToSection(id);
+		};
+		window.addEventListener('hashchange', onHashChange);
+
+		// Deep link: sections load their data after mount and grow, so re-align to the
+		// target until the layout settles or the user takes over.
+		const hash = location.hash.slice(1);
+		let settle: ResizeObserver | null = null;
+		const stopSettling = () => {
+			settle?.disconnect();
+			settle = null;
+		};
+		if (hash) {
+			const target = resolveSettingsSection(hash);
+			requestAnimationFrame(() => scrollToSection(target, 'instant'));
+			const body = document.getElementById('settings-body');
+			if (body) {
+				settle = new ResizeObserver(() => scrollToSection(target, 'instant'));
+				settle.observe(body);
+			}
+			setTimeout(stopSettling, 2500);
+			for (const ev of ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const) {
+				window.addEventListener(ev, stopSettling, { once: true, passive: true });
+			}
+		} else {
+			spy();
+		}
 
 		return () => {
-			observer.disconnect();
+			cancelAnimationFrame(frame);
+			stopSettling();
 			window.removeEventListener('scroll', onScroll);
+			window.removeEventListener('scrollend', onScrollEnd);
+			window.removeEventListener('hashchange', onHashChange);
 		};
 	});
 </script>
 
-{#snippet sectionHeading(id: string, label: string)}
-	<h2 id="section-{id}-label" class="section-label">{label}</h2>
-{/snippet}
-
-<div class="space-y-6">
+<div class="space-y-4">
 	<PageHeader
 		title="Settings"
-		description="Configure account, appearance, workspace, privacy, and integrations."
+		description="Your account, how the app looks, and the keys, tokens and services LLM Lab connects to."
 	>
-		{#if profile?.email}
-			<p class="font-mono text-xs text-muted-foreground">{profile.email}</p>
-		{/if}
+		{#snippet meta()}
+			{#if auth.user?.email}<span class="truncate text-xs text-muted-foreground">{auth.user.email}</span>{/if}
+		{/snippet}
 	</PageHeader>
 
-	<div class="grid gap-6 lg:grid-cols-[14rem_minmax(0,1fr)]">
-		<!-- Sticky TOC sidebar (lg+) / horizontal chips (<lg) -->
-		<aside class="lg:sticky lg:top-16 lg:self-start">
-			<!-- Desktop nav -->
-			<nav class="hidden lg:block" aria-label="Settings sections">
-				<div class="space-y-4 rounded-md border border-border bg-card p-3">
-					{#each groupedSections as group (group.group)}
-						<div class="space-y-1">
-							<p
-								class="section-label px-2"
-							>
-								{group.label}
-							</p>
-							<ul class="space-y-0.5">
-								{#each group.items as s (s.id)}
-									{@const active = activeId === s.id}
-									<li>
-										<button
-											type="button"
-											onclick={() => scrollToSection(s.id)}
-											class={cn(
-												'group relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
-												active
-													? 'bg-primary/10 text-foreground'
-													: 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-											)}
-											aria-current={active ? 'true' : undefined}
-										>
-											<span
-												class={cn(
-													'absolute left-0 top-1 bottom-1 w-[2px] rounded-r-sm transition-opacity duration-150 motion-reduce:transition-none',
-													active ? 'bg-primary opacity-100' : 'opacity-0',
-												)}
-												aria-hidden="true"
-											></span>
-											<s.icon class="h-3.5 w-3.5 shrink-0" />
-											<span class="truncate">{s.label}</span>
-										</button>
-									</li>
-								{/each}
-							</ul>
-						</div>
-					{/each}
-				</div>
-			</nav>
+	<!-- Narrow screens: sticky bookmark chips under the app bar. -->
+	<nav
+		class="sticky top-12 z-20 -mx-3 border-b border-border bg-background/95 backdrop-blur-md sm:-mx-4 md:-mx-5 lg:hidden"
+		aria-label="Settings sections"
+	>
+		<ul bind:this={chipBar} class="flex gap-1.5 overflow-x-auto px-3 py-2 [scrollbar-width:none] sm:px-4 md:px-5">
+			{#each SETTINGS_SECTIONS as s (s.id)}
+				{@const isActive = activeId === s.id}
+				<li class="shrink-0">
+					<a
+						href="#{s.id}"
+						data-chip={s.id}
+						onclick={(e) => jump(e, s.id)}
+						aria-current={isActive ? 'location' : undefined}
+						class={cn(
+							'inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-md border px-2.5 text-sm whitespace-nowrap transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
+							isActive
+								? 'border-primary/40 bg-primary/10 font-medium text-primary'
+								: 'border-border bg-card text-muted-foreground hover:text-foreground',
+						)}
+					>
+						<s.icon class="size-4" aria-hidden="true" />
+						{s.label}
+						{#if statuses[s.id]}
+							<span class={cn('status-dot size-1.5', DOT[statuses[s.id].tone])} aria-hidden="true"></span>
+						{/if}
+					</a>
+				</li>
+			{/each}
+		</ul>
+	</nav>
 
-			<!-- Mobile / tablet jump-to bar -->
-			<div class="lg:hidden -mx-3 sm:mx-0">
-				<div
-					class="flex gap-1.5 overflow-x-auto px-3 sm:px-0 py-1 border-y border-border bg-background"
+	<div class="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
+		<!-- Desktop: bookmark rail (same shape as the Library nav). -->
+		<div class="hidden min-w-0 lg:sticky lg:top-20 lg:block lg:self-start">
+			<nav
+				class="space-y-4 rounded-md border border-border bg-card p-2 pt-3 shadow-[var(--shadow-card)]"
+				aria-label="Settings sections"
+			>
+				{#each groups as group (group.id)}
+					<div class="space-y-1 border-t border-border/60 pt-3 first:border-t-0 first:pt-0">
+						<p class="section-label px-2">{group.label}</p>
+						<ul class="space-y-0.5">
+							{#each group.sections as s (s.id)}
+								{@const isActive = activeId === s.id}
+								{@const status = statuses[s.id]}
+								<li class="relative">
+									{#if isActive}<span class="absolute inset-y-1 left-0 w-0.5 rounded-full bg-primary" aria-hidden="true"></span>{/if}
+									<a
+										href="#{s.id}"
+										onclick={(e) => jump(e, s.id)}
+										aria-current={isActive ? 'location' : undefined}
+										class={cn(
+											'flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
+											isActive
+												? 'bg-primary/10 font-medium text-primary'
+												: 'text-muted-foreground hover:bg-muted hover:text-foreground',
+										)}
+									>
+										<s.icon class="size-4 shrink-0" aria-hidden="true" />
+										<span class="flex-1 truncate">{s.label}</span>
+										{#if status}
+											<span class={cn('status-dot size-1.5 shrink-0', DOT[status.tone])} title={status.label} aria-hidden="true"></span>
+											<span class="sr-only">status: {status.label}</span>
+										{/if}
+									</a>
+								</li>
+							{/each}
+						</ul>
+					</div>
+				{/each}
+				<button
+					type="button"
+					class="flex w-full cursor-pointer items-center gap-1.5 border-t border-border/60 px-2 pt-3 pb-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+					onclick={() => scrollToSection(ORDER[0])}
 				>
-					{#each SECTIONS as s (s.id)}
-						{@const active = activeId === s.id}
-						<button
-							type="button"
-							onclick={() => scrollToSection(s.id)}
-							class={cn(
-								'inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border px-2.5 py-1 text-xs cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
-								active
-									? 'border-primary/40 bg-primary/10 text-foreground'
-									: 'border-border text-muted-foreground hover:border-primary/30 hover:text-foreground',
-							)}
+					<ArrowUp class="size-3.5" aria-hidden="true" />Back to top
+				</button>
+			</nav>
+		</div>
+
+		<!-- Every section as one card, in one list. -->
+		<div id="settings-body" class="min-w-0 space-y-6">
+			{#each groups as group (group.id)}
+				<div class="space-y-4" role="group" aria-labelledby="group-{group.id}">
+					<SectionHeading id="group-{group.id}" size="sm" title={group.label} />
+					{#each group.sections as s (s.id)}
+						{@const Body = BODIES[s.id]}
+						{@const status = statuses[s.id]}
+						<section
+							id={s.id}
+							aria-labelledby="{s.id}-title"
+							class="settings-pane group/section min-w-0 scroll-mt-28 overflow-clip rounded-md border border-border bg-card shadow-[var(--shadow-card)] lg:scroll-mt-20"
 						>
-							<s.icon class="h-3 w-3" />
-							{s.label}
-						</button>
+							<div class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2.5">
+								<div class="mr-auto flex min-w-0 items-center gap-1.5">
+									<h3 id="{s.id}-title" tabindex="-1" class="font-display text-base font-semibold outline-none">{s.label}</h3>
+									<Popover.Root>
+										<Popover.Trigger class="page-header-help-trigger" aria-label="About {s.label.toLowerCase()}">
+											<CircleHelp class="size-4" aria-hidden="true" />
+										</Popover.Trigger>
+										<Popover.Portal>
+											<Popover.Content side="bottom" align="start" sideOffset={6} collisionPadding={12} class="page-header-help">
+												<p>{s.description}</p>
+											</Popover.Content>
+										</Popover.Portal>
+									</Popover.Root>
+									{#if status}<StatusBadge status={status.label} tone={status.tone} class="ml-1" />{/if}
+								</div>
+								<button
+									type="button"
+									class="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-lg:opacity-60"
+									onclick={() => copyLink(s.id, s.label)}
+									aria-label="Copy link to {s.label}"
+									title="Copy link to this section"
+								>
+									<Link class="size-3.5" />
+								</button>
+							</div>
+							<div class="settings-pane-body divide-y divide-border">
+								<Body />
+							</div>
+						</section>
 					{/each}
 				</div>
-			</div>
-		</aside>
-
-		<!-- Sections -->
-		<div class="min-w-0 space-y-8">
-			<!-- Account -->
-			<section id="section-account" aria-labelledby="section-account-label" class="space-y-3 scroll-mt-20">
-				{@render sectionHeading('account', 'Account')}
-				{#if loading}
-					<Card.Root>
-						<LoadingState label="loading profile" />
-					</Card.Root>
-				{:else}
-					<ProfileSection {profile} onUpdated={(u) => (profile = u)} />
-				{/if}
-			</section>
-
-			<!-- Security -->
-			<section id="section-security" aria-labelledby="section-security-label" class="space-y-3 scroll-mt-20">
-				{@render sectionHeading('security', 'Security')}
-				<SecuritySection />
-			</section>
-
-			<!-- Appearance -->
-			<section id="section-appearance" aria-labelledby="section-appearance-label" class="space-y-3 scroll-mt-20">
-				{@render sectionHeading('appearance', 'Appearance')}
-				<AppearanceSection />
-			</section>
-
-			<!-- Workspace -->
-			<section id="section-workspace" aria-labelledby="section-workspace-label" class="space-y-3 scroll-mt-20">
-				{@render sectionHeading('workspace', 'Workspace')}
-				<WorkspaceSection />
-			</section>
-
-			<!-- Privacy -->
-			<section id="section-privacy" aria-labelledby="section-privacy-label" class="space-y-3 scroll-mt-20">
-				{@render sectionHeading('privacy', 'Privacy & Cookies')}
-				<CookieSettingsSection />
-			</section>
-
-			<!-- Credentials -->
-			<section id="section-credentials" aria-labelledby="section-credentials-label" class="space-y-3 scroll-mt-20">
-				{@render sectionHeading('credentials', 'API Credentials')}
-				<ApiKeysSection />
-			</section>
-
-			<!-- Personal tokens -->
-			<section id="section-tokens" aria-labelledby="section-tokens-label" class="space-y-3 scroll-mt-20">
-				{@render sectionHeading('tokens', 'Personal Tokens')}
-				<TokenSection />
-			</section>
-
-			<!-- Data Management -->
-			<section id="section-data" aria-labelledby="section-data-label" class="space-y-3 scroll-mt-20">
-				{@render sectionHeading('data', 'Data Management')}
-				<DataManagementSection />
-			</section>
+			{/each}
 		</div>
 	</div>
 </div>
 
-{#if showBackToTop}
-	<Button
-		onclick={scrollToTop}
-		size="icon"
-		variant="outline"
-		class="fixed bottom-6 right-6 z-30 h-10 w-10 rounded-full shadow-lg motion-reduce:transition-none"
-		aria-label="Back to top"
-	>
-		<ArrowUp class="h-4 w-4" />
-	</Button>
-{/if}
+<style>
+	/* Banners and states render flush inside the section card instead of as their own surfaces. */
+	.settings-pane-body > :global([role='alert']) {
+		margin: 1rem;
+		width: auto;
+	}
+	.settings-pane-body > :global(form) {
+		display: block;
+	}
+</style>

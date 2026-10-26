@@ -254,6 +254,11 @@ function createAuth() {
     }
   }
 
+  /** Reflect a profile edit (PATCH /users/me/) without re-checking the session. */
+  function setDisplayName(name: string) {
+    if (user) user = { ...user, name, display: name || user.email };
+  }
+
   return {
     get isAuthenticated() {
       return isAuthenticated;
@@ -270,6 +275,7 @@ function createAuth() {
     login,
     signup,
     logout,
+    setDisplayName,
   };
 }
 

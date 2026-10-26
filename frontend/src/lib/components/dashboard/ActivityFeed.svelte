@@ -1,8 +1,6 @@
 <script lang="ts">
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import { fly } from 'svelte/transition';
-	import { prefersReducedMotion } from 'svelte/motion';
 	import Activity from '@lucide/svelte/icons/activity';
 	import AppWindow from '@lucide/svelte/icons/app-window';
 	import Clock from '@lucide/svelte/icons/clock';
@@ -24,6 +22,11 @@
 		if (status === 'failed') return 'text-destructive';
 		if (status === 'running') return 'text-info';
 		return 'text-muted-foreground';
+	}
+
+	// Titles already start with the kind ("Generation agent job — …"); the status is the dot.
+	function label(event: RecentActivityItem): string {
+		return event.title.replace(/^(Generation|Analysis)\s+/i, '');
 	}
 </script>
 
@@ -48,41 +51,21 @@
 	</Card.Header>
 	<Card.Content>
 		{#if items.length > 0}
-			<!-- Timeline rail -->
-			<div class="relative ml-1.5 space-y-4 border-l border-border pl-4">
-				{#each items as event, i (event.kind + event.id)}
+			<ul class="-mx-1 text-xs">
+				{#each items as event (event.kind + event.id)}
 					{@const EvtIcon = event.kind === 'analysis' ? Activity : AppWindow}
-					<div
-						class="relative"
-						in:fly={{
-							y: 8,
-							duration: prefersReducedMotion.current ? 0 : 250,
-							delay: prefersReducedMotion.current ? 0 : Math.min(i, 8) * 35,
-						}}
-					>
+					<li class="flex items-center gap-2 rounded px-1 py-1" title="{event.title} ({event.status})">
 						<span
-							class="absolute -left-[1.4rem] top-1 flex h-3 w-3 items-center justify-center rounded-full bg-card"
-							aria-hidden="true"
-						>
-							<span
-								class="status-dot h-2 w-2 {dotColor(event.status)} {event.status === 'running'
-									? 'status-dot-live'
-									: ''}"
-							></span>
-						</span>
-						<div class="flex items-start gap-2">
-							<EvtIcon class="mt-0.5 h-3.5 w-3.5 shrink-0 {dotColor(event.status)}" />
-							<div class="min-w-0 flex-1">
-								<p class="break-words text-xs leading-relaxed">
-									<span class="capitalize">{event.kind}</span>: {event.title}
-									<span class="text-muted-foreground">({event.status})</span>
-								</p>
-								<p class="mt-0.5 text-[11px] text-muted-foreground">{timeAgo(event.created_at)}</p>
-							</div>
-						</div>
-					</div>
+							class="status-dot h-1.5 w-1.5 {dotColor(event.status)} {event.status === 'running' ? 'status-dot-live' : ''}"
+							role="img"
+							aria-label={event.status}
+						></span>
+						<EvtIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label={event.kind} />
+						<span class="min-w-0 flex-1 truncate">{label(event)}</span>
+						<span class="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{timeAgo(event.created_at)}</span>
+					</li>
 				{/each}
-			</div>
+			</ul>
 		{:else}
 			<EmptyState compact icon={Activity} title="No recent activity yet" />
 		{/if}

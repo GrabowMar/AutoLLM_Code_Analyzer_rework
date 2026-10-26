@@ -6,6 +6,8 @@ description: >-
 category: lint
 kind: container
 target_language: html
+analysis_mode: static
+technologies: [html]
 icon: file-code
 version: "1"
 docs_url: https://htmlhint.com/
@@ -14,6 +16,7 @@ verify_cmd: "htmlhint --version"
 uninstall_cmd: "npm uninstall -g htmlhint"
 run_cmd: "htmlhint '{target}/**/*.html' --ignore '**/node_modules/**' --format json 2>/dev/null"
 parser_key: htmlhint
+file_patterns: ["*.html"]
 run_timeout: 60
 install_timeout: 120
 display_order: 100

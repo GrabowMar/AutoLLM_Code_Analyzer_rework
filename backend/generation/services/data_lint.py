@@ -67,6 +67,23 @@ def _spec_errors(validator: jsonschema.Draft202012Validator, data: Any, label: s
     ]
 
 
+def app_spec_errors(spec: dict[str, Any], *, label: str = "app spec", check_slug: bool = True) -> list[str]:
+    """Errors of one app spec against ``schema.json`` (used by the API and package import).
+
+    Empty optional values (``difficulty: ""``) count as absent. With
+    ``check_slug=False`` the slug's snake_case pattern is not enforced: specs
+    created before the schema, and slugs the importer renames (``slug-2``),
+    keep working.
+    """
+    data = {k: v for k, v in spec.items() if not (k == "difficulty" and not v)}
+    errors = []
+    for err in sorted(_spec_validator().iter_errors(data), key=lambda e: list(e.path)):
+        if not check_slug and list(err.path) == ["slug"] and err.validator == "pattern":
+            continue
+        errors.append(f"{label}: {'.'.join(str(p) for p in err.path) or '<root>'}: {err.message}")
+    return errors
+
+
 def lint_requirement_specs() -> list[str]:
     """Validate every ``data/requirements/*.json`` against ``schema.json``."""
     errors: list[str] = []

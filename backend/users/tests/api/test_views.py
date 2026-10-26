@@ -164,3 +164,41 @@ def test_update_user(client: Client):
         "url": f"/api/users/{user.pk}/",
         "is_staff": user.is_staff,
     }
+
+
+def test_current_user_activity(client: Client, user: User):
+    from backend.analysis.tests.factories import AnalysisRunFactory
+    from backend.generation.tests.factories import ExperimentFactory
+    from backend.generation.tests.factories import GenerationJobFactory
+    from backend.reports.models import Report
+
+    GenerationJobFactory.create(created_by=user, status="completed")
+    GenerationJobFactory.create(created_by=user)
+    AnalysisRunFactory.create(created_by=user, name="Security sweep")
+    ExperimentFactory.create(created_by=user, name="Temperature study")
+    Report.objects.create(report_type="comprehensive", title="Q3 summary", created_by=user)
+    # Another user's work is excluded.
+    GenerationJobFactory.create()
+    client.force_login(user)
+
+    response = client.get(reverse("api:current_user_activity"))
+
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["counts"] == {
+        "applications": 2,
+        "applications_completed": 1,
+        "analyses": 1,
+        "experiments": 1,
+        "reports": 1,
+    }
+    assert len(body["recent"]) == 5
+    assert body["recent"][0]["title"] == "Q3 summary"
+    assert body["recent"][0]["href"].startswith("/reports/")
+    assert {item["kind"] for item in body["recent"]} == {"application", "analysis", "experiment", "report"}
+
+
+def test_current_user_activity_requires_auth(client: Client):
+    response = client.get(reverse("api:current_user_activity"))
+
+    assert response.status_code == HTTPStatus.UNAUTHORIZED

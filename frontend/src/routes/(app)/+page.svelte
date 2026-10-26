@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import { getAuth } from '$lib/stores/auth.svelte';
 	import {
 		getStatisticsOverview,
 		getStatisticsRecentActivity,
@@ -29,20 +28,12 @@
 		type RecentApp,
 	} from '$lib/utils/dashboard';
 	import HeroPanel from '$lib/components/dashboard/HeroPanel.svelte';
-	import KpiCard from '$lib/components/dashboard/KpiCard.svelte';
 	import TrendPanel from '$lib/components/dashboard/TrendPanel.svelte';
 	import SeverityPanel from '$lib/components/dashboard/SeverityPanel.svelte';
 	import AnalyzerHealthGrid from '$lib/components/dashboard/AnalyzerHealthGrid.svelte';
 	import RecentRunsTable from '$lib/components/dashboard/RecentRunsTable.svelte';
 	import RecentJobsTable from '$lib/components/dashboard/RecentJobsTable.svelte';
 	import ActivityFeed from '$lib/components/dashboard/ActivityFeed.svelte';
-	import QuickActions from '$lib/components/dashboard/QuickActions.svelte';
-	import Boxes from '@lucide/svelte/icons/boxes';
-	import AppWindow from '@lucide/svelte/icons/app-window';
-	import BarChart3 from '@lucide/svelte/icons/bar-chart-3';
-	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
-
-	const auth = getAuth();
 
 	const AUTO_REFRESH_MS = 60_000;
 
@@ -184,67 +175,41 @@
 		}
 	}
 
-	// allauth's `display` falls back to the email; greet by the local part instead.
-	const userName = $derived.by(() => {
-		if (!auth.isAuthenticated || !auth.user) return null;
-		const name = auth.user.name || auth.user.display || auth.user.email;
-		return name.includes('@') ? name.split('@')[0] : name;
-	});
-
 	const analysesSubtitle = $derived(
 		completedAnalyses !== null ? `${completedAnalyses} completed` : ''
 	);
 	const analysesChange = $derived(runningAnalyses !== null ? `${runningAnalyses} running` : '');
 </script>
 
-<svelte:head>
-	<title>Dashboard · LLM Lab</title>
-</svelte:head>
-
-<div class="bento gap-4 sm:gap-5">
-	<div class="b-12 rise-in" style="--stagger-i: 0">
-		<HeroPanel {userName} {isRefreshing} {lastRefreshed} onRefresh={handleRefresh} />
+<!-- Headline counts: the header's footer strip; each links to its page. -->
+{#snippet headerStats()}
+	<div class="header-stats">
+		<a href="/models" class="header-stat hover:text-foreground" title={overview ? `${overview.total_apps} total apps` : undefined}>
+			<b>{overview ? overview.models_in_use.toLocaleString() : '—'}</b> models in use
+		</a>
+		<a href="/applications" class="header-stat hover:text-foreground" title={overview ? `${overview.apps_success_rate}% success` : undefined}>
+			<b>{overview ? overview.total_apps.toLocaleString() : '—'}</b> apps{#if overview}<span>· {overview.apps_completed} completed</span>{/if}
+		</a>
+		<a href="/analysis" class="header-stat hover:text-foreground">
+			<b>{totalAnalyses ?? '—'}</b> analyses{#if analysesSubtitle}<span>· {analysesSubtitle}</span>{/if}{#if analysesChange}<span>· {analysesChange}</span>{/if}
+		</a>
+		<a href="/statistics" class="header-stat hover:text-foreground" title={overview ? `${overview.analyses_completed} analyses` : undefined}>
+			<b>{overview ? overview.total_findings.toLocaleString() : '—'}</b> findings{#if overview}<span>· {overview.total_apps ? (overview.total_findings / overview.total_apps).toFixed(1) : 0}/app avg</span>{/if}
+		</a>
 	</div>
+{/snippet}
 
-	<!-- KPI row -->
-	<div class="b-12 rise-in grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4" style="--stagger-i: 1">
-		<KpiCard
-			title="Models"
-			value={overview ? overview.models_in_use : null}
-			subtitle="Models in use"
-			change={overview ? `${overview.total_apps} total apps` : ''}
-			icon={Boxes}
-			href="/models"
-			accent="cyan"
-		/>
-		<KpiCard
-			title="Applications"
-			value={overview ? overview.total_apps : null}
-			subtitle={overview ? `${overview.apps_completed} completed` : 'Loading…'}
-			change={overview ? `${overview.apps_success_rate}% success` : ''}
-			icon={AppWindow}
-			href="/applications"
-			accent="green"
-		/>
-		<KpiCard
-			title="Analyses"
-			value={totalAnalyses}
-			subtitle={analysesSubtitle || 'Loading…'}
-			change={analysesChange}
-			icon={BarChart3}
-			href="/analysis"
-			accent="amber"
-		/>
-		<KpiCard
-			title="Findings"
-			value={overview ? overview.total_findings : null}
-			subtitle={overview
-				? `${overview.total_apps ? (overview.total_findings / overview.total_apps).toFixed(1) : 0}/app avg`
-				: 'Loading…'}
-			change={overview ? `${overview.analyses_completed} analyses` : ''}
-			icon={ShieldAlert}
-			href="/statistics"
-			accent="violet"
+<div class="bento gap-4">
+	<div class="b-12 rise-in" style="--stagger-i: 0">
+		<HeroPanel
+			{isRefreshing}
+			{lastRefreshed}
+			{pendingAction}
+			onRefresh={handleRefresh}
+			onSyncModels={handleSyncModels}
+			onClearCaches={handleClearCaches}
+			onClearStuck={handleClearStuck}
+			stats={headerStats}
 		/>
 	</div>
 
@@ -262,19 +227,11 @@
 	</div>
 
 	<!-- Tables + side column -->
-	<div class="b-8 rise-in space-y-4 sm:space-y-5" style="--stagger-i: 5">
+	<div class="b-8 rise-in space-y-4" style="--stagger-i: 5">
 		<RecentRunsTable analyses={recentAnalyses} />
 		<RecentJobsTable jobs={recentApps} />
 	</div>
-	<div class="b-4 rise-in space-y-4 sm:space-y-5" style="--stagger-i: 6">
-		<QuickActions
-			{isRefreshing}
-			{pendingAction}
-			onRefresh={handleRefresh}
-			onSyncModels={handleSyncModels}
-			onClearCaches={handleClearCaches}
-			onClearStuck={handleClearStuck}
-		/>
+	<div class="b-4 rise-in space-y-4" style="--stagger-i: 6">
 		<ActivityFeed items={liveActivity} {isRefreshing} onRefresh={handleRefresh} />
 	</div>
 </div>

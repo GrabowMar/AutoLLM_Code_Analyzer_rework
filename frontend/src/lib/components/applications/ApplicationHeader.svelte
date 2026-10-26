@@ -1,7 +1,7 @@
 <script lang="ts">
+import type { Snippet } from 'svelte';
 import { Badge } from '$lib/components/ui/badge';
 import { Button } from '$lib/components/ui/button';
-import { Alert, AlertDescription } from '$lib/components/ui/alert';
 import PageHeader from '$lib/components/PageHeader.svelte';
 import StatusBadge from '$lib/components/StatusBadge.svelte';
 import Copy from '@lucide/svelte/icons/copy';
@@ -35,6 +35,8 @@ interface Props {
 	onDelete: () => void;
 	/** Opens the GitHub export dialog; the button is hidden without it. */
 	onExportGithub?: () => void;
+	/** Section tabs, rendered in the header's bottom strip (the page owns `Tabs.Root`). */
+	nav?: Snippet;
 }
 
 let {
@@ -49,6 +51,7 @@ let {
 	onDownloadCode,
 	onDelete,
 	onExportGithub,
+	nav,
 }: Props = $props();
 
 // Agent runs sample at the provider default unless a temperature was set explicitly.
@@ -57,12 +60,12 @@ const temperature = $derived(
 );
 
 const kpis = $derived([
-	{ label: 'Duration', value: fmtDur(job.duration_seconds), sub: job.started_at ? 'wall clock' : 'not started' },
-	{ label: 'Tokens', value: fmt(totalTokens, 0), sub: 'prompt + completion' },
-	{ label: 'Cost', value: fmtCost(totalCost), sub: 'USD' },
-	{ label: 'Lines of code', value: fmt(codeFootprint?.totalLines ?? 0, 0), sub: codeFootprint ? `${codeFootprint.fileCount} file${codeFootprint.fileCount === 1 ? '' : 's'}` : 'no code' },
-	{ label: 'Temperature', value: temperature, sub: 'sampling' },
-	{ label: 'Max tokens', value: fmt(job.max_tokens, 0), sub: 'per response' },
+	{ label: 'duration', value: fmtDur(job.duration_seconds), title: job.started_at ? 'Wall clock' : 'Not started' },
+	{ label: 'tokens', value: fmt(totalTokens, 0), title: 'Prompt + completion' },
+	{ label: 'cost', value: fmtCost(totalCost), title: 'USD' },
+	{ label: 'LOC', value: fmt(codeFootprint?.totalLines ?? 0, 0), title: codeFootprint ? `Lines of code in ${codeFootprint.fileCount} file${codeFootprint.fileCount === 1 ? '' : 's'}` : 'No code' },
+	{ label: 'temp', value: temperature, title: 'Sampling temperature' },
+	{ label: 'max tokens', value: fmt(job.max_tokens, 0), title: 'Max tokens per response' },
 ]);
 </script>
 
@@ -70,6 +73,7 @@ const kpis = $derived([
 	title={jobDescription(job)}
 	documentTitle="{jobDescription(job)} · {job.model_name ?? 'Unknown model'}"
 	back={{ href: '/applications', label: 'Applications' }}
+	{nav}
 >
 	{#snippet meta()}
 		<StatusBadge status={jobDisplayStatus(job)} tones={jobPhaseTones} />
@@ -139,28 +143,19 @@ const kpis = $derived([
 			{job.id.substring(0, 8)}<Copy class="size-3 opacity-60 group-hover/id:opacity-100" aria-hidden="true" />
 			<span class="sr-only">Copy job ID</span>
 		</button>
+		<span aria-hidden="true" class="opacity-50">·</span>
+		<span class="header-stats">
+			{#each kpis as kpi (kpi.label)}
+				<span class="header-stat" title={kpi.title}><b>{kpi.value}</b>{kpi.label}</span>
+			{/each}
+		</span>
 	</div>
+	{#if job.status === 'failed'}
+		<p class="mt-1 flex min-w-0 items-center gap-1.5 text-danger-fg" role="alert">
+			<AlertTriangle class="size-3.5 shrink-0" aria-hidden="true" />
+			<span class="font-medium">Generation failed:</span>
+			<span class="min-w-0 truncate" title={job.error_message || undefined}>{job.error_message || 'Unknown error'}</span>
+			<a href="/applications/{job.id}/failure" class="shrink-0 underline hover:text-foreground">View details</a>
+		</p>
+	{/if}
 </PageHeader>
-
-{#if job.status === 'failed'}
-	<Alert variant="destructive">
-		<AlertTriangle />
-		<div class="flex flex-wrap items-center justify-between gap-2">
-			<div class="min-w-0">
-				<p class="font-medium">Generation failed</p>
-				<AlertDescription class="truncate">{job.error_message || 'Unknown error'}</AlertDescription>
-			</div>
-			<Button variant="outline" size="sm" href="/applications/{job.id}/failure">View Details</Button>
-		</div>
-	</Alert>
-{/if}
-
-<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-	{#each kpis as kpi (kpi.label)}
-		<div class="kpi-card">
-			<span class="kpi-label">{kpi.label}</span>
-			<span class="kpi-value text-xl">{kpi.value}</span>
-			<span class="text-[11px] text-muted-foreground">{kpi.sub}</span>
-		</div>
-	{/each}
-</div>

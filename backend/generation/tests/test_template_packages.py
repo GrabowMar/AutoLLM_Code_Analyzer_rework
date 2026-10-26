@@ -292,7 +292,7 @@ def test_reimporting_own_package_reuses_identical_stack_and_profile():
 def test_import_rejects_invalid_profile_llm_config_atomically():
     client = _client(UserFactory())
     package = _package(
-        app_specs=[{"name": "Atomic", "slug": "atomic_app"}],
+        app_specs=[_spec("atomic_app")],
         profiles=[
             {
                 "name": "Hot",
@@ -391,7 +391,7 @@ def test_v2_package_imports_with_no_presets():
     package = {
         "kind": "llm-lab-template-package",
         "template_package_schema_version": 2,
-        "assets": {"app_specs": [{"name": "Old", "slug": "old_v2_app"}], "blocks": [], "profiles": [], "stacks": []},
+        "assets": {"app_specs": [_spec("old_v2_app")], "blocks": [], "profiles": [], "stacks": []},
     }
 
     response = _import(client, package)
@@ -616,3 +616,87 @@ def test_uploaded_packages_never_read_content_files():
 
     assert response.status_code == 400
     assert "requires name and slug" in response.json()["detail"]
+
+
+def _spec(slug: str, **extra) -> dict:
+    """A minimal app spec that meets data/requirements/schema.json."""
+    return {
+        "name": slug.replace("_", " ").title(),
+        "slug": slug,
+        "category": "CRUD",
+        "description": "Track things",
+        "backend_requirements": ["Thing model"],
+        "frontend_requirements": ["Thing list"],
+        "api_endpoints": [{"method": "GET", "path": "/api/things", "description": "List"}],
+        "data_model": {"name": "Thing", "fields": {"id": "integer"}},
+        **extra,
+    }
+
+
+def test_import_validates_app_specs_against_the_schema():
+    client = _client(UserFactory())
+    response = _import(client, _package(app_specs=[{"name": "Thin", "slug": "thin_app"}]))
+    assert response.status_code == 400
+    assert "App template thin_app" in response.json()["detail"]
+    assert "backend_requirements" in response.json()["detail"]
+
+    ok = _import(client, _package(app_specs=[_spec("valid_app")]))
+    assert ok.status_code == 200, ok.content
+    assert ok.json()["app_specs"] == ["valid_app"]
+
+
+def test_import_rejects_unknown_block_type():
+    client = _client(UserFactory())
+    block = {"slug": "weird-block", "name": "Weird", "content": "x", "block_type": "nonsense"}
+    response = _import(client, _package(blocks=[block]))
+    assert response.status_code == 400
+    assert "unknown block_type 'nonsense'" in response.json()["detail"]
+    assert not ContentBlock.objects.filter(slug="weird-block").exists()
+
+
+def test_import_rejects_profile_on_unknown_stack():
+    client = _client(UserFactory())
+    profile = {
+        "name": "Lost",
+        "slug": "lost-profile",
+        "scaffolding_slug": "no-such-stack",
+        "block_refs": [{"type": "prompt_tone", "slug": "tone-standard"}],
+    }
+    response = _import(client, _package(profiles=[profile]))
+    assert response.status_code == 400
+    assert "unknown stack 'no-such-stack'" in response.json()["detail"]
+    assert not GenerationProfile.objects.filter(slug="lost-profile").exists()
+
+
+def test_app_spec_api_validates_against_the_schema():
+    client = _client(UserFactory())
+    bad = client.post(
+        "/api/generation/app-specs/",
+        data=json.dumps({"name": "Thin", "slug": "thin_spec"}),
+        content_type="application/json",
+    )
+    assert bad.status_code == 400
+    assert bad.json()["errors"]
+    assert "backend_requirements" in bad.json()["detail"]
+
+    hyphen = client.post(
+        "/api/generation/app-specs/",
+        data=json.dumps({**_spec("x"), "slug": "Not-Snake"}),
+        content_type="application/json",
+    )
+    assert hyphen.status_code == 400
+    assert "slug" in hyphen.json()["detail"]
+
+    created = client.post(
+        "/api/generation/app-specs/",
+        data=json.dumps(_spec("ok_spec")),
+        content_type="application/json",
+    )
+    assert created.status_code == 200, created.content
+    emptied = client.put(
+        "/api/generation/app-specs/ok_spec/",
+        data=json.dumps({**_spec("ok_spec"), "api_endpoints": []}),
+        content_type="application/json",
+    )
+    assert emptied.status_code == 400
+    assert "api_endpoints" in emptied.json()["detail"]

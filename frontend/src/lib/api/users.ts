@@ -115,3 +115,33 @@ export async function verifyEmail(key: string): Promise<void> {
   if (isAllauthMutationSuccess(res, body)) return;
   throw body;
 }
+
+export type ActivityKind = "application" | "analysis" | "experiment" | "report";
+
+export interface UserActivityItem {
+  kind: ActivityKind;
+  id: string;
+  title: string;
+  status: string;
+  created_at: string;
+  href: string;
+}
+
+export interface UserActivity {
+  date_joined: string;
+  last_login: string | null;
+  counts: {
+    applications: number;
+    applications_completed: number;
+    analyses: number;
+    experiments: number;
+    reports: number;
+  };
+  recent: UserActivityItem[];
+}
+
+/** Counts and most recent work of the signed-in user (profile page). */
+export async function getMyActivity(): Promise<UserActivity> {
+  const res = await apiFetch("/users/me/activity/");
+  return res.json();
+}

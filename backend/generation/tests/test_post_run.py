@@ -120,6 +120,18 @@ class TestCreation:
         with pytest.raises(ExperimentError, match="at least one analyzer"):
             normalize_post_run({"analysis": {"enabled": True, "tool_slugs": []}}, "agent")
 
+    def test_dynamic_analyzer_is_refused(self, tool):
+        AnalyzerTool.objects.update_or_create(
+            slug="zap-test",
+            defaults={"name": "ZAP (test)", "analysis_mode": "dynamic"},
+        )
+        with pytest.raises(ExperimentError, match="running app") as err:
+            normalize_post_run({"analysis": {"enabled": True, "tool_slugs": ["bandit", "zap-test"]}}, "agent")
+        assert err.value.code == "dynamic_analyzer"
+        assert "bandit" not in str(err.value)
+        out = normalize_post_run({"analysis": {"enabled": True, "tool_slugs": ["bandit"]}}, "agent")
+        assert out["analysis"]["tool_slugs"] == ["bandit"]
+
 
 class TestAdvance:
     def test_analyses_run_sequentially_for_jobs_without_one_then_the_report(self, user, tool):

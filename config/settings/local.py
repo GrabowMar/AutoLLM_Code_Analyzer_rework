@@ -17,6 +17,10 @@ ALLOWED_HOSTS = env.list(
     "DJANGO_ALLOWED_HOSTS",
     default=["localhost", "0.0.0.0", "127.0.0.1", "django"],  # noqa: S104
 )
+# App subdomains (<name>.<APPS_DOMAIN>) are served by AppSubdomainProxyMiddleware,
+# which calls request.get_host(); without this every app request is a 400.
+if APPS_SUBDOMAIN_PROXY and APPS_DOMAIN:  # noqa: F405
+    ALLOWED_HOSTS = [*ALLOWED_HOSTS, f".{APPS_DOMAIN}"]  # noqa: F405
 
 # CACHES
 # ------------------------------------------------------------------------------

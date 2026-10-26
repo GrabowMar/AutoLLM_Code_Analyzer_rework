@@ -56,13 +56,13 @@
 		<ol class="max-h-80 divide-y divide-border/60 overflow-y-auto rounded-md border border-border" aria-live="polite">
 			{#each visible as item (item.key)}
 				<li class="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-xs">
-					<span class="w-16 shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{time(item.ts)}</span>
+					<span class="w-16 shrink-0 font-mono text-xs tabular-nums text-muted-foreground">{time(item.ts)}</span>
 					<span class={cn('size-2.5 shrink-0 rounded-[2px]', CELL_STATES[item.code].square, 'animate-none')} aria-hidden="true"></span>
 					<a href="/applications/{item.jobId}" class="min-w-0 flex-1 truncate hover:underline">
 						<span class="font-medium">{conditionLabel(item.conditionId)}</span>
 						<span class="text-muted-foreground"> · {appName(item.appId)}{item.repeat != null ? ` · #${item.repeat + 1}` : ''}</span>
 					</a>
-					<span class="shrink-0 text-[11px] text-muted-foreground">
+					<span class="shrink-0 text-xs text-muted-foreground">
 						{CELL_STATES[item.code].label}{item.attempt > 0 ? ` · attempt ${item.attempt + 1}` : ''}
 					</span>
 				</li>

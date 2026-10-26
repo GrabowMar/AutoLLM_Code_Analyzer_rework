@@ -94,7 +94,7 @@
 	}
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4">
 	<PageHeader
 		title="Generation Library"
 		description="Everything a sample run is assembled from: what to build, the stack it runs on, how the agent runs, and the prompts template mode uses."

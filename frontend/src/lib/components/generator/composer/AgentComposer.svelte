@@ -2,7 +2,9 @@
 	/**
 	 * AgentComposer — the primary mode: tasks × models × harness presets ×
 	 * trials, each run by an agent harness in a sandbox. Sections on the left
-	 * and the sticky Run summary (server preview) on the right once the composer
+	 * (the three choices first; the optional settings folded to a one-line
+	 * summary until opened or invalid) and the sticky rail on the right — the
+	 * section index and the Run summary (server preview) — once the composer
 	 * is ≥ 56rem wide (a container query: the sidebar state matters, not just the
 	 * viewport); narrower, the summary follows the form and a StartBar sticks
 	 * to the bottom.
@@ -37,6 +39,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import ComposerSectionNav, { type ComposerNavSection } from '$lib/components/experiments/ComposerSectionNav.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import AppSpecPicker from '../AppSpecPicker.svelte';
 	import ModelPicker from '../ModelPicker.svelte';
@@ -65,7 +68,9 @@
 		type PresetPins,
 		type TaskKind,
 	} from './draft';
-	import { presetLookupIssue, previewIssues, type ChecklistItem, type IssueAction, type SummaryIssue } from './issues';
+	import { presetLookupIssue, previewIssues, type IssueAction, type SummaryIssue } from './issues';
+	import type { RunFactor } from './RunFormula.svelte';
+	import { llmOverrideCount, overridesLabel, presetLabel } from './section-summary';
 	import { trackPresets } from './preset-lookup.svelte';
 	import Dices from '@lucide/svelte/icons/dices';
 	import Save from '@lucide/svelte/icons/save';
@@ -101,6 +106,11 @@
 	let trialsInvalid = $state(false);
 	let seedInvalid = $state(false);
 	let saveBudgetOpen = $state(false);
+	// Optional steps start folded unless the draft already overrides something.
+	let samplingOpen = $state(
+		Object.keys(cleanLLMParams(init.llmParams)).length > 0 || init.agentConfig.sampling_policy != null
+	);
+	let budgetOpen = $state(Object.keys(budgetOnly(init.agentConfig)).length > 0);
 
 	function budgetOnly(config: AgentConfigOverrides): AgentConfigOverrides {
 		const out: Record<string, unknown> = {};
@@ -394,22 +404,54 @@
 		if (currentPreview?.warnings.some((w) => w.code === 'missing_api_key')) previewNonce += 1;
 	}
 
-	// ── checklist ───────────────────────────────────────────────────────
-	const checklist = $derived<ChecklistItem[]>([
-		{
-			label: taskKind === 'freeform' ? 'Describe the free-form task' : 'Pick at least one app spec',
-			done: taskReady,
-			detail: taskKind === 'freeform' ? 'free-form (not graded)' : `${appIds.size} selected`,
-			href: '#composer-task',
-		},
-		{ label: 'Pick at least one model', done: modelIds.size > 0, detail: `${modelIds.size} selected`, href: '#composer-models' },
-		{
-			label: 'Choose harness presets',
-			done: harnessPresetIds.length > 0,
-			detail: `${harnessPresetIds.length} selected`,
-			href: '#composer-harnesses',
-		},
+	// ── run formula + section index ─────────────────────────────────
+	const fresh = $derived(ready && currentPreview ? currentPreview : null);
+	const factors = $derived<RunFactor[]>([
+		taskKind === 'freeform'
+			? { label: 'tasks', singular: 'task', count: descriptionText ? 1 : 0, href: '#composer-task' }
+			: { label: 'app specs', singular: 'app spec', count: fresh?.task_count ?? appIds.size, href: '#composer-task' },
+		{ label: 'models', singular: 'model', count: fresh?.model_count ?? modelIds.size, href: '#composer-models' },
+		{ label: 'harnesses', singular: 'harness', count: fresh?.harness_count ?? harnessPresetIds.length, href: '#composer-harnesses' },
+		{ label: 'trials', singular: 'trial', count: trialsInvalid ? null : trials },
 	]);
+	const formulaTotal = $derived(
+		fresh?.run_count ??
+			(factors.some((f) => f.count == null) ? null : factors.reduce((n, f) => n * (f.count ?? 0), 1))
+	);
+
+	const samplingInvalid = $derived(llmInvalid || Object.keys(llmErrors).length > 0);
+	const budgetSectionInvalid = $derived(
+		budgetInvalid ||
+			trialsInvalid ||
+			seedInvalid ||
+			trials == null ||
+			Object.keys(budgetErrors).length > 0 ||
+			!!fieldErrors.trials ||
+			!!fieldErrors.base_seed
+	);
+	const navSections = $derived<ComposerNavSection[]>([
+		{ id: 'composer-task', step: 1, label: 'Task', done: taskReady },
+		{ id: 'composer-models', step: 2, label: 'Models', done: modelIds.size > 0 },
+		{ id: 'composer-harnesses', step: 3, label: 'Harnesses', done: harnessPresetIds.length > 0 },
+		{ id: 'composer-sampling', step: 4, label: 'Model settings', invalid: samplingInvalid },
+		{ id: 'composer-budget', step: 5, label: 'Budget & repeats', invalid: budgetSectionInvalid },
+	]);
+
+	const samplingSummary = $derived(
+		[
+			presetLabel(samplingPreset, 'No preset'),
+			overridesLabel(llmOverrideCount(llmParams) + (samplingPolicy ? 1 : 0)),
+			`policy: ${(samplingPolicy ?? inheritedPolicy?.value) === 'harness_native' ? 'harness-native' : 'provider defaults'}`,
+		].join(' · ')
+	);
+	const budgetSummary = $derived(
+		[
+			presetLabel(budgetPreset, 'Platform defaults'),
+			overridesLabel(Object.keys(budgetOnly(budgetOverrides)).length),
+			trials != null ? `${trials} trial${trials === 1 ? '' : 's'} per cell` : 'trials not set',
+			baseSeed != null ? `base seed ${baseSeed}` : 'random seeds',
+		].join(' · ')
+	);
 
 	// ── draft persistence ───────────────────────────────────────────────
 	$effect(() => {
@@ -444,6 +486,8 @@
 				step={1}
 				id="composer-task"
 				title="Task"
+				done={taskReady}
+				meta={taskKind === 'specs' && appIds.size > 0 ? `${appIds.size} selected` : undefined}
 				description="What every run builds. App specs carry a hidden conformance suite, so their runs are graded."
 			>
 				<Segmented
@@ -494,6 +538,8 @@
 				step={2}
 				id="composer-models"
 				title="Models"
+				done={modelIds.size > 0}
+				meta={modelIds.size > 0 ? `${modelIds.size} selected` : undefined}
 				description={requireTools
 					? 'A selected harness needs native tool calling, so models without it are hidden.'
 					: 'Every selected model runs every task with every harness preset.'}
@@ -505,6 +551,8 @@
 				step={3}
 				id="composer-harnesses"
 				title="Harnesses"
+				done={harnessPresetIds.length > 0}
+				meta={harnessPresetIds.length > 0 ? `${harnessPresetIds.length} selected` : undefined}
 				description="The comparison axis: each selected harness preset runs every model on every task."
 			>
 				{#if config}
@@ -520,6 +568,10 @@
 				step={4}
 				id="composer-sampling"
 				title="Model settings"
+				collapsible
+				bind:open={samplingOpen}
+				summary={samplingSummary}
+				invalid={samplingInvalid}
 				description="Sampling settings apply identically to every model; per-model support is shown in the Run summary."
 			>
 				<SamplingSettings
@@ -540,6 +592,10 @@
 				step={5}
 				id="composer-budget"
 				title="Budget & repeats"
+				collapsible
+				bind:open={budgetOpen}
+				summary={budgetSummary}
+				invalid={budgetSectionInvalid}
 				description="Limits for each run, how often every cell repeats, and the seed shared across conditions."
 			>
 				<PresetPicker kind="budget" bind:selectedId={budgetPresetId} pinned={pins.budget} idPrefix="agent-budget-preset" />
@@ -612,8 +668,12 @@
 			class="min-w-0 @4xl/composer:sticky @4xl/composer:top-[4.5rem] @4xl/composer:max-h-[calc(100dvh-5.5rem)] @4xl/composer:overflow-y-auto @4xl/composer:overscroll-contain"
 			aria-label="Run summary"
 		>
+			<div class="hidden @4xl/composer:mb-3 @4xl/composer:block">
+				<ComposerSectionNav sections={navSections} />
+			</div>
 			<AgentPreviewPanel
-				{checklist}
+				{factors}
+				total={formulaTotal}
 				{ready}
 				preview={shownPreview}
 				{stale}

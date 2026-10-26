@@ -11,6 +11,7 @@
 	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { SortableTh, TableToolbar, ScoreCell, rowLink, tableFrame, shortModelName, modelNamePrefix } from '$lib/components/table';
+	import { modelPathSegment } from '$lib/api/models';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -193,7 +194,7 @@
 	}
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4">
 	<PageHeader title="Model Rankings" description="Empirical quality measured on this platform, alongside the metadata-based MSS decision aid.">
 		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={load} disabled={loading}>
@@ -205,98 +206,79 @@
 				Export CSV
 			</Button>
 		{/snippet}
+		{#if data}
+			<div class="header-stats">
+				<span class="header-stat"><b>{data.statistics.total}</b> models</span>
+				<span class="header-stat"><b>{data.statistics.with_benchmarks}</b> with benchmarks</span>
+				<span class="header-stat"><b>{data.statistics.free_models}</b> free</span>
+				<span class="header-stat" title="Model Scoring System: a metadata-based decision aid, not a measurement"><b>{(data.statistics.avg_mss * 100).toFixed(1)}</b> avg MSS</span>
+			</div>
+		{/if}
 	</PageHeader>
-
-	<!-- Stats summary -->
-	{#if data}
-		<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-			<div class="kpi-card">
-				<div class="kpi-label">Total Models</div>
-				<div class="kpi-value">{data.statistics.total}</div>
-			</div>
-			<div class="kpi-card">
-				<div class="kpi-label">With Benchmarks</div>
-				<div class="kpi-value">{data.statistics.with_benchmarks}</div>
-			</div>
-			<div class="kpi-card">
-				<div class="kpi-label">Free Models</div>
-				<div class="kpi-value">{data.statistics.free_models}</div>
-			</div>
-			<div class="kpi-card">
-				<div class="kpi-label">Avg MSS (decision aid)</div>
-				<div class="kpi-value">{(data.statistics.avg_mss * 100).toFixed(1)}</div>
-			</div>
-		</div>
-	{/if}
-
-	<!-- Filters -->
-	<FilterBar
-		searchPlaceholder="Search models..."
-		bind:searchValue={searchQuery}
-		activeTags={activeFilters}
-		resultsText={data
-			? `${data.statistics.total} models · ${data.statistics.free_models} free · ${data.statistics.with_benchmarks} with benchmarks`
-			: ''}
-		onClearAll={clearAllFilters}
-	>
-		{#snippet filters()}
-			<!-- Row 1: Provider -->
-			<div class="fb-group">
-				<span class="fb-group-label">Provider</span>
-				<select
-					class="fb-select"
-					aria-label="Filter by provider"
-					bind:value={providerFilter}
-					onchange={() => { page = 1; }}
-				>
-					<option value="all">All Providers</option>
-					{#each providers() as p}
-						<option value={p}>{p}</option>
-					{/each}
-				</select>
-			</div>
-
-			<!-- Row 2: Options -->
-			<div class="fb-group">
-				<span class="fb-group-label">Options</span>
-				<button
-					class="fb-chip {includeFree ? '' : 'fb-chip-on'}"
-					onclick={() => { includeFree = !includeFree; page = 1; }}
-					aria-pressed={!includeFree}
-				>Paid only</button>
-				<button
-					class="fb-chip {hasBenchmarksOnly ? 'fb-chip-on' : ''}"
-					onclick={() => { hasBenchmarksOnly = !hasBenchmarksOnly; page = 1; }}
-					aria-pressed={hasBenchmarksOnly}
-				>Has Benchmarks</button>
-			</div>
-
-			<!-- Row 3: Sort -->
-			<div class="fb-group">
-				<span class="fb-group-label">Sort</span>
-				<button class="fb-chip {sortBy === 'mss' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'mss'} onclick={() => toggleSort('mss')}>MSS</button>
-				<button class="fb-chip {sortBy === 'empirical' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'empirical'} onclick={() => toggleSort('empirical')}>Empirical</button>
-				<button class="fb-chip {sortBy === 'composite' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'composite'} onclick={() => toggleSort('composite')}>Composite</button>
-				<button class="fb-chip {sortBy === 'benchmark' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'benchmark'} onclick={() => toggleSort('benchmark')}>Benchmark</button>
-				<button class="fb-chip {sortBy === 'cost_efficiency' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'cost_efficiency'} onclick={() => toggleSort('cost_efficiency')}>Cost</button>
-				<button class="fb-chip {sortBy === 'accessibility' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'accessibility'} onclick={() => toggleSort('accessibility')}>Accessibility</button>
-				<button class="fb-chip {sortBy === 'adoption' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'adoption'} onclick={() => toggleSort('adoption')}>Adoption</button>
-			</div>
-
-			<!-- Row 4: Per page -->
-			<div class="fb-group">
-				<span class="fb-group-label">Per page</span>
-				<button class="fb-chip {perPage === 25 ? 'fb-chip-on' : ''}" aria-pressed={perPage === 25} onclick={() => { perPage = 25; page = 1; }}>25</button>
-				<button class="fb-chip {perPage === 50 ? 'fb-chip-on' : ''}" aria-pressed={perPage === 50} onclick={() => { perPage = 50; page = 1; }}>50</button>
-				<button class="fb-chip {perPage === 100 ? 'fb-chip-on' : ''}" aria-pressed={perPage === 100} onclick={() => { perPage = 100; page = 1; }}>100</button>
-			</div>
-		{/snippet}
-
-	</FilterBar>
 
 	<!-- Leaderboard -->
 	<Card.Root class="gap-0 overflow-clip py-0">
 		<Card.Content class="p-0">
+			<FilterBar
+				embedded
+				searchPlaceholder="Search models..."
+				bind:searchValue={searchQuery}
+				activeTags={activeFilters}
+				onClearAll={clearAllFilters}
+			>
+				{#snippet filters()}
+					<!-- Row 1: Provider -->
+					<div class="fb-group">
+						<span class="fb-group-label">Provider</span>
+						<select
+							class="fb-select"
+							aria-label="Filter by provider"
+							bind:value={providerFilter}
+							onchange={() => { page = 1; }}
+						>
+							<option value="all">All Providers</option>
+							{#each providers() as p}
+								<option value={p}>{p}</option>
+							{/each}
+						</select>
+					</div>
+
+					<!-- Row 2: Options -->
+					<div class="fb-group">
+						<span class="fb-group-label">Options</span>
+						<button
+							class="fb-chip {includeFree ? '' : 'fb-chip-on'}"
+							onclick={() => { includeFree = !includeFree; page = 1; }}
+							aria-pressed={!includeFree}
+						>Paid only</button>
+						<button
+							class="fb-chip {hasBenchmarksOnly ? 'fb-chip-on' : ''}"
+							onclick={() => { hasBenchmarksOnly = !hasBenchmarksOnly; page = 1; }}
+							aria-pressed={hasBenchmarksOnly}
+						>Has Benchmarks</button>
+					</div>
+
+					<!-- Row 3: Sort -->
+					<div class="fb-group">
+						<span class="fb-group-label">Sort</span>
+						<button class="fb-chip {sortBy === 'mss' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'mss'} onclick={() => toggleSort('mss')}>MSS</button>
+						<button class="fb-chip {sortBy === 'empirical' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'empirical'} onclick={() => toggleSort('empirical')}>Empirical</button>
+						<button class="fb-chip {sortBy === 'composite' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'composite'} onclick={() => toggleSort('composite')}>Composite</button>
+						<button class="fb-chip {sortBy === 'benchmark' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'benchmark'} onclick={() => toggleSort('benchmark')}>Benchmark</button>
+						<button class="fb-chip {sortBy === 'cost_efficiency' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'cost_efficiency'} onclick={() => toggleSort('cost_efficiency')}>Cost</button>
+						<button class="fb-chip {sortBy === 'accessibility' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'accessibility'} onclick={() => toggleSort('accessibility')}>Accessibility</button>
+						<button class="fb-chip {sortBy === 'adoption' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'adoption'} onclick={() => toggleSort('adoption')}>Adoption</button>
+					</div>
+
+					<!-- Row 4: Per page -->
+					<div class="fb-group">
+						<span class="fb-group-label">Per page</span>
+						<button class="fb-chip {perPage === 25 ? 'fb-chip-on' : ''}" aria-pressed={perPage === 25} onclick={() => { perPage = 25; page = 1; }}>25</button>
+						<button class="fb-chip {perPage === 50 ? 'fb-chip-on' : ''}" aria-pressed={perPage === 50} onclick={() => { perPage = 50; page = 1; }}>50</button>
+						<button class="fb-chip {perPage === 100 ? 'fb-chip-on' : ''}" aria-pressed={perPage === 100} onclick={() => { perPage = 100; page = 1; }}>100</button>
+					</div>
+				{/snippet}
+			</FilterBar>
 			{#if error}
 				<div class="p-4"><ErrorAlert message={error} onretry={load} /></div>
 			{:else if loading && !data}
@@ -367,7 +349,7 @@
 							{#each data.rankings as model, i (model.model_id)}
 								{@const rank = indexOnPage(i)}
 								{@const selected = selectedModels.has(model.model_id)}
-								{@const href = `/models/${encodeURIComponent(model.model_id)}`}
+								{@const href = `/models/${modelPathSegment(model.model_id)}`}
 								<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
 								<tr class="row-link" data-selected={selected} onclick={rowLink(href)}>
 									<td class="col-sticky">
@@ -430,7 +412,7 @@
 								<div class="min-w-0 flex-1">
 									<div class="flex items-start justify-between gap-2">
 										<div class="min-w-0">
-											<a href="/models/{encodeURIComponent(model.model_id)}" class="block truncate text-sm font-medium hover:text-primary" title={model.model_name}>{shortModelName(model.model_name)}</a>
+											<a href="/models/{modelPathSegment(model.model_id)}" class="block truncate text-sm font-medium hover:text-primary" title={model.model_name}>{shortModelName(model.model_name)}</a>
 											<p class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
 												<span class="truncate">{modelNamePrefix(model.model_name) || model.provider}</span>
 												{#if model.is_free}<span class="rounded-sm bg-success/12 px-1 font-medium text-success-fg">Free</span>{/if}

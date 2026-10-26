@@ -6,14 +6,22 @@ description: >-
 category: lint
 kind: container
 target_language: python
+analysis_mode: static
+technologies: [python]
 icon: check-check
-version: "1"
+version: "2.4"
 docs_url: https://mypy.readthedocs.io/
-install_cmd: "pip install --user --upgrade mypy"
+# Pinned like the other pip tools: an unpinned install drifts to new major
+# versions (new checks change the counts) between workspaces.
+install_cmd: "pip install --user --upgrade 'mypy==2.4.*'"
 verify_cmd: "mypy --version"
 uninstall_cmd: "pip uninstall -y mypy"
-run_cmd: "mypy {target} --no-error-summary --no-color-output --show-error-codes --ignore-missing-imports --no-pretty"
+# --cache-dir: keep the cache out of /work, where detect-secrets/jscpd would scan it.
+# --explicit-package-bases from the app root: multi-module apps (routers/admin.py)
+# otherwise abort with "source file found twice under different module names".
+run_cmd: "cd {target} && mypy . --explicit-package-bases --cache-dir /tmp/mypy-cache --no-error-summary --no-color-output --show-error-codes --ignore-missing-imports --no-pretty"
 parser_key: mypy
+file_patterns: ["*.py"]
 run_timeout: 180
 install_timeout: 300
 display_order: 50

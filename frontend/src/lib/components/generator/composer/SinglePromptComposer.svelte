@@ -18,13 +18,16 @@
 	import ModelPicker from '../ModelPicker.svelte';
 	import type { OpenRouterKeyState } from '../OpenRouterKeyBanner.svelte';
 	import { cleanLLMParams } from '../llm-params';
+	import ComposerSectionNav, { type ComposerNavSection } from '$lib/components/experiments/ComposerSectionNav.svelte';
 	import ComposerSection from './ComposerSection.svelte';
 	import NumberField from './NumberField.svelte';
 	import SamplingSettings from './SamplingSettings.svelte';
 	import SimpleSummaryPanel from './SimpleSummaryPanel.svelte';
 	import StartBar from './StartBar.svelte';
 	import { DEFAULT_SYSTEM_PROMPT, MAX_SEED, randomSeed, saveDraft, type CustomDraft, type PresetPins } from './draft';
-	import { presetLookupIssue, type ChecklistItem, type IssueAction, type SummaryIssue } from './issues';
+	import { presetLookupIssue, type IssueAction, type SummaryIssue } from './issues';
+	import type { RunFactor } from './RunFormula.svelte';
+	import { llmOverrideCount, overridesLabel, presetLabel } from './section-summary';
 	import { trackLLMPreview } from './llm-preview.svelte';
 	import { trackPresets } from './preset-lookup.svelte';
 	import Dices from '@lucide/svelte/icons/dices';
@@ -47,6 +50,8 @@
 	let seed = $state<number | null>(init.seed);
 	let llmInvalid = $state(false);
 	let seedInvalid = $state(false);
+	// Optional step: folded unless the draft already overrides something.
+	let samplingOpen = $state(llmOverrideCount(init.llmParams) > 0 || init.seed != null);
 
 	const samplingPresets = trackPresets('sampling', () => [samplingPresetId]);
 	const samplingPreset = $derived(samplingPresets.find(samplingPresetId) ?? null);
@@ -144,10 +149,24 @@
 		)
 	);
 
-	const checklist = $derived<ChecklistItem[]>([
-		{ label: 'Write the user prompt', done: userPrompt.trim().length > 0, href: '#custom-prompt' },
-		{ label: 'Pick a model', done: modelId != null, href: '#custom-model' },
+	const promptReady = $derived(userPrompt.trim().length > 0);
+	const factors = $derived<RunFactor[]>([
+		{ label: 'user prompts', singular: 'user prompt', count: promptReady ? 1 : 0, href: '#custom-prompt' },
+		{ label: 'models', singular: 'model', count: modelId != null ? 1 : 0, href: '#custom-model' },
 	]);
+	const samplingInvalid = $derived(llmInvalid || seedInvalid || Object.keys(llmErrors).length > 0 || !!serverFieldErrors.seed);
+	const navSections = $derived<ComposerNavSection[]>([
+		{ id: 'custom-prompt', step: 1, label: 'Prompt', done: promptReady },
+		{ id: 'custom-model', step: 2, label: 'Model', done: modelId != null },
+		{ id: 'custom-sampling', step: 3, label: 'Model settings', invalid: samplingInvalid },
+	]);
+	const samplingSummary = $derived(
+		[
+			presetLabel(samplingPreset, 'Mode default (temperature 0.3)'),
+			overridesLabel(llmOverrideCount(llmParams)),
+			seed != null ? `seed ${seed}` : 'no seed',
+		].join(' · ')
+	);
 
 	$effect(() => {
 		saveDraft('custom', {
@@ -164,7 +183,13 @@
 <div class="@container/composer">
 	<div class="grid items-start gap-4 @4xl/composer:grid-cols-[minmax(0,1fr)_22rem] @6xl/composer:grid-cols-[minmax(0,1fr)_26rem]">
 		<div class="min-w-0 space-y-4">
-			<ComposerSection step={1} id="custom-prompt" title="Prompt" description="Sent verbatim: no template, stack or brief is added.">
+			<ComposerSection
+				step={1}
+				id="custom-prompt"
+				title="Prompt"
+				description="Sent verbatim: no template, stack or brief is added."
+				done={promptReady}
+			>
 				<div class="space-y-1.5">
 					<div class="flex flex-wrap items-center justify-between gap-2">
 						<Label for="custom-system">System prompt</Label>
@@ -187,7 +212,7 @@
 				</div>
 			</ComposerSection>
 
-			<ComposerSection step={2} id="custom-model" title="Model">
+			<ComposerSection step={2} id="custom-model" title="Model" done={modelId != null}>
 				<ModelPicker mode="single" bind:selectedId={modelId} idPrefix="custom-model-picker" label="" aria-label="Model" maxHeight="max-h-96" />
 			</ComposerSection>
 
@@ -195,6 +220,10 @@
 				step={3}
 				id="custom-sampling"
 				title="Model settings"
+				collapsible
+				bind:open={samplingOpen}
+				summary={samplingSummary}
+				invalid={samplingInvalid}
 				description="Sampling preset, overrides on top, and an optional seed."
 			>
 				<SamplingSettings
@@ -239,8 +268,12 @@
 			class="min-w-0 @4xl/composer:sticky @4xl/composer:top-[4.5rem] @4xl/composer:max-h-[calc(100dvh-5.5rem)] @4xl/composer:overflow-y-auto @4xl/composer:overscroll-contain"
 			aria-label="Run summary"
 		>
+			<div class="hidden @4xl/composer:mb-3 @4xl/composer:block">
+				<ComposerSectionNav sections={navSections} />
+			</div>
 			<SimpleSummaryPanel
-				{checklist}
+				{factors}
+				total={promptReady && modelId != null ? 1 : 0}
 				{ready}
 				{llm}
 				llmNote="Base layer: the mode default (temperature 0.3, output cap 32,000), then the sampling preset and your overrides."
@@ -253,11 +286,7 @@
 				startLabel="Start generation"
 				onstart={start}
 			>
-				<div class="rounded-md border border-border bg-surface-2 p-3 text-xs">
-					<p class="flex items-baseline gap-2">
-						<span class="font-mono text-2xl font-medium tabular-nums">1</span>
-						<span class="text-sm text-muted-foreground">run</span>
-					</p>
+				<div class="rounded-md border border-border bg-surface-2 px-3 py-2 text-xs">
 					<p class="text-muted-foreground">
 						{seed != null ? `Seed ${seed}` : 'No seed'} · opens the job page when it starts
 					</p>

@@ -224,10 +224,13 @@ blocks:
 def test_template_package_export_and_import(client):
     owner = UserFactory()
     client.force_login(owner)
+    # Import checks specs against data/requirements/schema.json.
+    spec_fields = {k: v for k, v in SPEC_BODY.items() if k not in ("name", "slug")}
     app_template = AppRequirementTemplateFactory(
         is_default=False,
         created_by=owner,
         slug="shared-app",
+        **spec_fields,
     )
     block = ContentBlockFactory(
         is_system=False,
@@ -239,7 +242,7 @@ def test_template_package_export_and_import(client):
         is_default=False,
         created_by=owner,
         slug="shared-bundle-export",
-        scaffolding_slug="shared-stack",
+        scaffolding_slug="flask-react",
         block_refs=[{"type": block.block_type, "slug": block.slug, "version": block.version}],
     )
 
@@ -302,10 +305,10 @@ def test_import_skips_legacy_prompt_templates_section(client):
                     "category": "Productivity",
                     "description": "From an old export",
                     "backend_requirements": ["Store items"],
-                    "frontend_requirements": [],
+                    "frontend_requirements": ["Item list"],
                     "admin_requirements": [],
-                    "api_endpoints": [],
-                    "data_model": {},
+                    "api_endpoints": [{"method": "GET", "path": "/api/items", "description": "List"}],
+                    "data_model": {"name": "Item", "fields": {"id": "integer"}},
                     "admin_api_endpoints": [],
                 },
             ],

@@ -20,7 +20,7 @@
 			{/if}
 			<span class={item.done ? 'text-foreground' : 'text-muted-foreground'}>
 				{#if !item.done && item.href}
-					<a href={item.href} class="rounded underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40">{item.label}</a>
+					<a href={item.href} class="rounded underline decoration-dotted underline-offset-2 hover:text-foreground hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40">{item.label}</a>
 				{:else}
 					{item.label}
 				{/if}

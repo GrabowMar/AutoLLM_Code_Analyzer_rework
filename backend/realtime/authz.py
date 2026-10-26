@@ -12,8 +12,8 @@ is refused. Non-owners of an endpoint are mapped to its redacted
 | ``endpoint:<int>``         | ``can_use_endpoint``; non-owners get ``:public``  |
 | ``endpoint:<int>:public``  | ``can_use_endpoint``                              |
 | ``analysis:<uuid|int>``    | the analysis run's creator or staff               |
-| ``runtime:<uuid|int>``     | the container's creator or staff                  |
-| ``capacity``, ``dashboard``| any authenticated user (aggregate payloads only)  |
+| ``runtime:<uuid|int>``     | the container's creator, its job's owner, or staff|
+| ``capacity``               | any authenticated user (aggregate payloads only)  |
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
     "analysis": re.compile(rf"^analysis:({_UUID}|[1-9][0-9]{{0,18}})$"),
     "runtime": re.compile(rf"^runtime:({_UUID}|[1-9][0-9]{{0,18}})$"),
 }
-AGGREGATE_CHANNELS = frozenset({"capacity", "dashboard"})
+AGGREGATE_CHANNELS = frozenset({"capacity"})
 
 
 def _owned(model, object_id: str, user, owner_field: str = "created_by") -> bool:
@@ -59,6 +59,16 @@ def _owner_model(prefix: str):
     from backend.runtime.models import ContainerInstance
 
     return ContainerInstance
+
+
+def _may_see(prefix: str, object_id: str, user) -> bool:
+    """Whether *user* may watch the ``<prefix>:<object_id>`` object."""
+    if prefix == "runtime":
+        # Same visibility as the runtime API: creator, generation-job owner, or staff.
+        from backend.runtime.services.container_service import visible_containers
+
+        return visible_containers(user).filter(pk=object_id).exists()
+    return _owned(_owner_model(prefix), object_id, user)
 
 
 def _endpoint_channel(user, endpoint_id: str, *, public: bool) -> str | None:
@@ -94,7 +104,7 @@ def resolve_channel(user, channel: str) -> str | None:
     # Owner-checked objects; their primary keys are UUIDs, so integer ids never match.
     if not _UUID_RE.match(object_id):
         return None
-    return channel if _owned(_owner_model(prefix), object_id, user) else None
+    return channel if _may_see(prefix, object_id, user) else None
 
 
 def authorize_channels(user, channels: list[str]) -> list[str] | None:

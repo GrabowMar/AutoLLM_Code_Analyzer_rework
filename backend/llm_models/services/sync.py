@@ -7,6 +7,9 @@ import requests
 from django.conf import settings
 
 from backend.llm_models.models import LLMModel
+from backend.llm_models.services.enrichment import enrich_model
+from backend.llm_models.services.enrichment import fetch_models_dev
+from backend.llm_models.services.enrichment import preserved_enrichment
 from backend.llm_models.services.helpers import _build_canonical_slug
 from backend.llm_models.services.helpers import _update_or_create_model
 from backend.llm_models.services.helpers import normalize_model_identifier
@@ -55,6 +58,9 @@ def upsert_openrouter_models(models_payload: list[dict]) -> int:
     Returns count upserted.
     """
     upserted = 0
+    # Third-party enrichment (models.dev, Hugging Face) is not in the payload;
+    # carry it over so a re-sync doesn't wipe it.
+    preserved = preserved_enrichment([str(m.get("id")) for m in models_payload if m.get("id")])
     for model_data in models_payload:
         model_id = model_data.get("id")
         if not model_id:
@@ -168,6 +174,7 @@ def upsert_openrouter_models(models_payload: list[dict]) -> int:
             meta["architecture_instruct_type"] = arch.get("instruct_type")
             meta["architecture_input_modalities"] = arch.get("input_modalities")
             meta["architecture_output_modalities"] = arch.get("output_modalities")
+        meta.update(preserved.get(model_id, {}))
 
         defaults = {
             "provider": provider,
@@ -218,7 +225,11 @@ def refresh_model_from_openrouter(model: LLMModel, api_key: str) -> bool:
             str(model_data.get("canonical_slug") or ""),
         )
         if model_id.lower() in candidates or canonical_slug in candidates:
-            return upsert_openrouter_models([model_data]) == 1
+            if upsert_openrouter_models([model_data]) != 1:
+                return False
+            model.refresh_from_db()
+            enrich_model(model, force_hf=True)
+            return True
 
     return False
 
@@ -229,4 +240,14 @@ def sync_models_from_openrouter(api_key: str) -> dict:
     if not models_payload:
         return {"fetched": 0, "upserted": 0}
     upserted = upsert_openrouter_models(models_payload)
+    _enrich_from_models_dev()
     return {"fetched": len(models_payload), "upserted": upserted}
+
+
+def _enrich_from_models_dev() -> None:
+    """One models.dev download covers the whole catalog; Hugging Face runs separately (``enrich_models``)."""
+    catalog = fetch_models_dev(use_cache=False)
+    if not catalog:
+        return
+    for model in LLMModel.objects.filter(endpoint__isnull=True).iterator():
+        enrich_model(model, catalog=catalog, include_hf=False)

@@ -94,7 +94,7 @@
 {#snippet stackLine(stack: Stack)}
 	<span class="flex min-w-0 flex-wrap items-center gap-1.5">
 		<span class="truncate font-medium">{stack.name || stack.slug}</span>
-		<span class="font-mono text-[11px] text-muted-foreground">{stack.slug}</span>
+		{#if stack.name && stack.name !== stack.slug}<span class="font-mono text-[11px] text-muted-foreground">{stack.slug}</span>{/if}
 		{#if !stack.has_frontend}
 			<span class={cn(chip, 'border-border bg-muted text-muted-foreground')}>backend only</span>
 		{/if}

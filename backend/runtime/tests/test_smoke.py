@@ -111,3 +111,16 @@ def test_smoke_no_routing_configured(user):
     result = smoke.run_smoke(job, container)
     assert result["passed"] is False
     assert "error" in result
+
+
+def test_smoke_keeps_conformance_verdict(user):
+    conformance = {"source": "conformance", "status": "failed", "passed": False, "pass_rate": 0.4375}
+    job = _job_with_endpoints(user, metrics={"functional": conformance})
+    container = ContainerInstanceFactory(generation_job=job, created_by=user)
+
+    with mock.patch.object(smoke.requests, "get", side_effect=_status_map({})):
+        smoke.run_smoke(job, container)
+
+    job.refresh_from_db()
+    assert job.metrics["functional"] == conformance
+    assert job.metrics["smoke"]["pass_rate"] == 1.0

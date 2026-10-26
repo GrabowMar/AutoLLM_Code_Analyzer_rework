@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { formatDateTime as formatDate } from '$lib/utils/formatters';
 	import { containerTones } from '$lib/constants/colors';
-	import { onMount } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
@@ -13,12 +12,12 @@
 	import { formatApiError } from '$lib/api/core';
 	import { toast } from 'svelte-sonner';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import Eye from '@lucide/svelte/icons/eye';
 	import Play from '@lucide/svelte/icons/play';
 	import Square from '@lucide/svelte/icons/square';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Layers from '@lucide/svelte/icons/layers';
+	import { rowLink, tableFrame } from '$lib/components/table';
 	import {
 		getContainers,
 		startContainer,
@@ -74,15 +73,14 @@
 	let removeId = $state<string | null>(null);
 	let removeOpen = $state(false);
 
+	// Runs on mount and again whenever the filter changes.
 	$effect(() => {
 		void statusFilter;
 		load();
 	});
-
-	onMount(load);
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4">
 	<PageHeader title="Runtime" description="Docker containers created by generation jobs.">
 		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={load}>
@@ -91,27 +89,8 @@
 		{/snippet}
 	</PageHeader>
 
-	{#if dockerInfo}
-		<Card.Root class="py-0">
-			<Card.Content class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 text-sm">
-				{#if dockerInfo.daemon_available}
-					<StatusBadge status="healthy" label="Docker daemon online" />
-					{#if dockerInfo.version}
-						<span class="text-muted-foreground">v{dockerInfo.version}</span>
-					{/if}
-					{#if dockerInfo.containers_running != null}
-						<span class="font-mono text-xs text-muted-foreground tabular-nums sm:ml-auto">
-							{dockerInfo.containers_running} running · {dockerInfo.containers_stopped ?? 0} stopped · {dockerInfo.images ?? 0} images
-						</span>
-					{/if}
-				{:else}
-					<StatusBadge status="unhealthy" label="Docker daemon unavailable" />
-				{/if}
-			</Card.Content>
-		</Card.Root>
-	{/if}
-
-	<div class="flex flex-wrap items-center gap-3">
+	<!-- Daemon status and the filter share one toolbar line. -->
+	<div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
 		<label for="runtime-status-filter" class="sr-only">Filter by status</label>
 		<select id="runtime-status-filter" bind:value={statusFilter} class="std-select">
 			<option value="all">All statuses</option>
@@ -122,8 +101,21 @@
 			<option value="failed">Failed</option>
 			<option value="removed">Removed</option>
 		</select>
-		<span class="ml-auto text-xs text-muted-foreground">
+		{#if dockerInfo}
+			{#if dockerInfo.daemon_available}
+				<StatusBadge status="healthy" label="Docker daemon online" />
+				{#if dockerInfo.version}
+					<span class="font-mono text-xs text-muted-foreground">v{dockerInfo.version}</span>
+				{/if}
+			{:else}
+				<StatusBadge status="unhealthy" label="Docker daemon unavailable" />
+			{/if}
+		{/if}
+		<span class="ml-auto font-mono text-xs text-muted-foreground tabular-nums">
 			{total} container{total === 1 ? '' : 's'}
+			{#if dockerInfo?.containers_running != null}
+				· daemon: {dockerInfo.containers_running} running · {dockerInfo.containers_stopped ?? 0} stopped · {dockerInfo.images ?? 0} images
+			{/if}
 		</span>
 	</div>
 
@@ -138,58 +130,68 @@
 			description="Containers are created automatically when generation jobs run."
 		/>
 	{:else}
-		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-			{#each containers as c (c.id)}
-				<Card.Root class="flex flex-col">
-					<Card.Header class="pb-3">
-						<div class="flex items-start justify-between gap-2">
-							<StatusBadge status={c.status} tones={containerTones} />
-							{#if c.app_url}
-								<a
-									href={c.app_url}
-									target="_blank"
-									rel="noopener noreferrer"
-									class="text-xs text-primary hover:underline"
-								>:{c.app_port}</a>
-							{/if}
-						</div>
-						<Card.Title class="mt-2 font-mono text-sm truncate">{c.name}</Card.Title>
-						{#if c.image}
-							<Card.Description class="font-mono text-xs truncate">{c.image}</Card.Description>
-						{/if}
-					</Card.Header>
-					<Card.Content class="flex-1 text-xs text-muted-foreground space-y-1">
-						<div>Created: {formatDate(c.created_at)}</div>
-						{#if c.last_error}
-							<div class="text-danger-fg line-clamp-2">{c.last_error}</div>
-						{/if}
-					</Card.Content>
-					<Card.Footer class="gap-1 pt-3 flex-wrap">
-						<Button size="sm" variant="ghost" href={`/runtime/${c.id}`}>
-							<Eye />Details
-						</Button>
-						{#if c.status === 'stopped' || c.status === 'failed'}
-							<Button size="icon" variant="ghost" class="size-8" aria-label="Start container" title="Start container" onclick={() => act(c.id, 'start')} disabled={actionLoading[c.id]}>
-								<Play />
-							</Button>
-						{/if}
-						{#if c.status === 'running'}
-							<Button size="icon" variant="ghost" class="size-8" aria-label="Stop container" title="Stop container" onclick={() => act(c.id, 'stop')} disabled={actionLoading[c.id]}>
-								<Square />
-							</Button>
-							<Button size="icon" variant="ghost" class="size-8" aria-label="Restart container" title="Restart container" onclick={() => act(c.id, 'restart')} disabled={actionLoading[c.id]}>
-								<RotateCcw />
-							</Button>
-						{/if}
-						{#if c.status !== 'removed'}
-							<Button size="icon" variant="ghost" class="ml-auto size-8 hover:bg-destructive/10 hover:text-danger-fg" aria-label="Remove container" title="Remove container" onclick={() => { removeId = c.id; removeOpen = true; }} disabled={actionLoading[c.id]}>
-								<Trash2 />
-							</Button>
-						{/if}
-					</Card.Footer>
-				</Card.Root>
-			{/each}
-		</div>
+		<Card.Root class="gap-0 overflow-clip py-0">
+			<div class="table-frame" {@attach tableFrame}>
+				<table>
+					<thead>
+						<tr>
+							<th>Container</th>
+							<th>Status</th>
+							<th>Image</th>
+							<th class="num">Port</th>
+							<th>Created</th>
+							<th class="text-right">Actions</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each containers as c (c.id)}
+							{@const href = `/runtime/${c.id}`}
+							<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
+							<tr class="row-link" onclick={rowLink(href)}>
+								<td>
+									<a {href} class="font-mono text-xs font-medium hover:text-primary">{c.name}</a>
+									{#if c.last_error}
+										<p class="cell-sub line-clamp-1 max-w-md text-[11px] text-danger-fg" title={c.last_error}>{c.last_error}</p>
+									{/if}
+								</td>
+								<td class="whitespace-nowrap"><StatusBadge status={c.status} tones={containerTones} /></td>
+								<td class="max-w-[22rem] truncate font-mono text-xs text-muted-foreground" title={c.image}>{c.image || '—'}</td>
+								<td class="num text-xs">
+									{#if c.app_url}
+										<a href={c.app_url} target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">:{c.app_port}</a>
+									{:else}
+										<span class="text-muted-foreground">—</span>
+									{/if}
+								</td>
+								<td class="whitespace-nowrap text-xs text-muted-foreground">{formatDate(c.created_at)}</td>
+								<td>
+									<div class="flex justify-end gap-0.5">
+										{#if c.status === 'stopped' || c.status === 'failed'}
+											<Button size="icon" variant="ghost" class="size-7" aria-label="Start container" title="Start container" onclick={() => act(c.id, 'start')} disabled={actionLoading[c.id]}>
+												<Play />
+											</Button>
+										{/if}
+										{#if c.status === 'running'}
+											<Button size="icon" variant="ghost" class="size-7" aria-label="Stop container" title="Stop container" onclick={() => act(c.id, 'stop')} disabled={actionLoading[c.id]}>
+												<Square />
+											</Button>
+											<Button size="icon" variant="ghost" class="size-7" aria-label="Restart container" title="Restart container" onclick={() => act(c.id, 'restart')} disabled={actionLoading[c.id]}>
+												<RotateCcw />
+											</Button>
+										{/if}
+										{#if c.status !== 'removed'}
+											<Button size="icon" variant="ghost" class="size-7 hover:bg-destructive/10 hover:text-danger-fg" aria-label="Remove container" title="Remove container" onclick={() => { removeId = c.id; removeOpen = true; }} disabled={actionLoading[c.id]}>
+												<Trash2 />
+											</Button>
+										{/if}
+									</div>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		</Card.Root>
 	{/if}
 </div>
 

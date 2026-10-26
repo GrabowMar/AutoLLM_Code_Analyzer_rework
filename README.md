@@ -1,11 +1,11 @@
 <div align="center">
 
-# LLM Eval Lab
+# LLM Lab
 
 **Which model writes the best code for a given task?**
 
-Generate one application per LLM, run each in a Docker sandbox,
-and score the code with 14 analysis tools.
+Have each LLM build the same application, run every app in a Docker sandbox,
+grade it with a hidden test suite, and score the code with 33 analysis tools.
 
 [![CI](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml)
@@ -25,51 +25,68 @@ and score the code with 14 analysis tools.
 ## 💡 The idea
 
 Benchmarks tell you how a model scores on puzzles; they say little about
-the quality of a full application it writes. Here the experiment is
-end-to-end: you pick a requirement template and a set of models from
-[OpenRouter][openrouter], and for each model the platform
+the quality of a full application it builds. Here the experiment is
+end-to-end: you pick an app spec and a set of models (from
+[OpenRouter][openrouter], or your own Ollama / OpenAI-compatible server),
+and for each model the platform
 
-1. **generates** a complete application from the template
-   ([how generation works](docs/GENERATION_PROCESS.md)),
-2. **runs it** in an isolated container with its own subdomain, so you can
-   click through the live app,
-3. **analyzes** the code with the tools you select — ruff, bandit, semgrep,
-   eslint, mypy, pylint, gitleaks, detect-secrets, hadolint, codespell,
-   vulture, radon, jscpd, and an LLM code reviewer,
-4. **aggregates** the findings and metrics into reports and per-model
-   rankings.
+1. **generates** the app. In the primary *agent* mode a coding-agent
+   harness (OpenCode, mini-swe-agent or Aider) works on a stack skeleton in
+   an isolated sandbox, with the model behind a budget-enforcing gateway;
+   template and single-prompt modes cover one-shot comparisons
+   ([generation](docs/GENERATION_PROCESS.md)),
+2. **grades** it: the built app is deployed with no network and checked by
+   a hidden conformance suite the model never saw,
+3. **runs it** in its own container so you can click through the live app,
+4. **analyzes** it with the tools you install from the analyzer shop: 29
+   static tools (ruff, bandit, semgrep, eslint, trivy, osv-scanner,
+   gitleaks, hadolint, …), an LLM code reviewer, and three DAST scanners
+   (OWASP ZAP, Nuclei, Wapiti) that attack the running app
+   ([analyzer guide](docs/ANALYZER_GUIDE.md)),
+5. **compares** the results in statistics, rankings and study reports.
 
-The comparison rests on measured findings, not gut feeling. Everything runs
-from the web UI, or unattended as [automation pipelines](docs/AUTOMATION_GUIDE.md)
-composed in a node-based editor — schedule them or fan them out over a
-parameter matrix. Multi-user support (email login, optional MFA, per-user
-OpenRouter keys, API tokens) makes a shared instance practical.
+Comparisons are run as **experiments**: apps × conditions (model, harness,
+sampling preset, profile) × repeats, with a pre-registered baseline, a
+reproducibility seed, a live monitor, cron schedules and post-run analysis
+([experiments](docs/EXPERIMENTS.md)). A dedicated executor process runs every
+job under leases and fair capacity lanes, so runs survive web restarts
+([execution](docs/EXECUTION.md)). Study tooling covers deduplicated findings,
+build-healing ablation, a manual-review sample and Markdown/LaTeX study
+reports ([study tables](docs/STUDY_TABLES.md)).
 
-The stack: Django 6 + django-ninja + Celery + PostgreSQL + Redis on the
-backend, SvelteKit (Svelte 5) on the frontend, everything in Docker.
+Outward, the platform exposes a REST API with personal tokens, an MCP server
+for Claude, ChatGPT and other MCP clients, GitHub export and webhooks
+([integrations](docs/INTEGRATIONS.md)). Multi-user support (email login,
+optional MFA, per-user encrypted API keys) makes a shared instance practical.
 
-This began as a master's-thesis project and is maintained by one person —
-expect sharp edges, and feel free to file issues.
+The stack: Django 6 + django-ninja + PostgreSQL + Redis (+ Celery for a few
+background tasks) on the backend, SvelteKit (Svelte 5) on the frontend,
+everything in Docker, with untrusted code confined to a Docker-in-Docker
+sandbox.
+
+This began as a master's-thesis project and is maintained by one person.
+Expect sharp edges, and feel free to file issues.
 
 ## 🚀 Quick start
 
-You need Docker (with the Compose plugin),
-[`just`](https://github.com/casey/just), and an
-[OpenRouter API key](https://openrouter.ai/keys) — the key is only needed
-for generation, browsing works without it.
+You need Docker (with the Compose plugin and permission to run one
+privileged container), [`just`](https://github.com/casey/just), Python 3 for
+the bootstrap script, and an
+[OpenRouter API key](https://openrouter.ai/keys) (or a local model server).
+The key is only needed for generation; browsing works without it.
 
 ```bash
 git clone https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework.git
 cd AutoLLM_Code_Analyzer_rework
-just bootstrap                          # .env files with generated secrets
-just build && just up                   # build and start the stack
-just manage seed_generation_templates   # scaffolding templates & prompts
-just manage createsuperuser
+just bootstrap          # .env files with generated secrets
+just build && just up   # build and start the stack
 ```
 
-Migrations run automatically when the django container starts. Open
-<http://localhost:8000>, log in, and add your OpenRouter key in the UI (or
-set `OPENROUTER_API_KEY` in `.envs/.local/.django` as a global fallback).
+Migrations and seed data (analyzer tools, generation library, stacks, run
+presets) are applied automatically when the django container starts. Open
+<http://localhost:8000>: on an empty database the sign-up page creates the
+initial admin account. Then add your OpenRouter key under
+**Settings → API keys** and sync the model catalog from **Models**.
 
 | URL                              | Service                   |
 | -------------------------------- | ------------------------- |
@@ -79,7 +96,8 @@ set `OPENROUTER_API_KEY` in `.envs/.local/.django` as a global fallback).
 | <http://localhost:8025>          | Mailpit (captured emails) |
 | <http://localhost:5555>          | Flower (Celery tasks)     |
 
-The full walkthrough is in [docs/QUICKSTART.md](docs/QUICKSTART.md).
+The full walkthrough is in [docs/QUICKSTART.md](docs/QUICKSTART.md); the
+[user guide](docs/USER_GUIDE.md) tours the UI page by page.
 
 ## 🌍 Deploy to a server
 
@@ -87,9 +105,10 @@ The full walkthrough is in [docs/QUICKSTART.md](docs/QUICKSTART.md).
 bash <(curl -fsSL https://raw.githubusercontent.com/GrabowMar/AutoLLM_Code_Analyzer_rework/main/scripts/deploy.sh)
 ```
 
-The script handles first-time installs and in-place updates behind an
-existing Caddy proxy; options are documented in the script header. For the
-full production stack (Traefik with wildcard TLS, per-app subdomains), see
+The script handles first-time installs and in-place updates of the local
+stack behind an existing Caddy (or nginx) proxy; options are documented in
+the script header. For the production compose stack (Traefik with wildcard
+TLS, per-app subdomains) and its caveats, see
 [docs/deployment-guide.md](docs/deployment-guide.md).
 
 ## 🛠️ Development
@@ -98,37 +117,38 @@ The `justfile` is the entry point for everything:
 
 ```bash
 just up / just down     # start / stop the stack
-just logs               # tail container logs
-just test               # backend tests — pytest in Docker, same as CI
+just logs [service]     # tail container logs
+just test [args]        # backend tests: pytest in Docker, same as CI
 just manage <cmd>       # any manage.py command
 just build              # rebuild images
 just prune              # remove containers and volumes
 ```
 
-Linting and type checks:
+Linting, type checks and frontend tests:
 
 ```bash
 uv run pre-commit run --all-files   # ruff, djlint, prettier, and friends
 uv run mypy backend
-cd frontend && npm run check        # svelte-check
+cd frontend && npm run check && npm test   # svelte-check, vitest
 ```
 
 How the code is laid out:
 
 ```
-backend/    Django apps, one per domain: generation, analysis, automation,
-            reports, rankings, runtime, users, ...
+backend/    Django apps, one per domain: generation, execution, inference,
+            analysis, statistics, reports, rankings, runtime, integrations, ...
 config/     settings, root URLconf, Celery app, API root
-frontend/   SvelteKit app — routes, components, API client
+frontend/   SvelteKit app: routes, components, API client
+relay/      the relay script that connects a GPU box's model server
 compose/    Dockerfiles for the local and production targets
 scripts/    bootstrap.py (env files), deploy.sh (server install)
-docs/       deeper documentation — start at docs/README.md
+docs/       deeper documentation, start at docs/README.md
 ```
 
 Secrets live in `.envs/`; only `*.example` templates are committed, and
 `just bootstrap` derives the real files from them.
 
-Docs under `docs/` are served live by the in-app viewer at `/docs` — the
+Docs under `docs/` are served live by the in-app viewer at `/docs`. The
 [development guide](docs/development-guide.md) covers the workflow and the
 conventions for writing them.
 
@@ -141,8 +161,8 @@ Bug reports, ideas, and PRs are welcome. The short version:
   prefixes: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.
 - Install the git hooks once — they run the same checks as CI:
   `uv sync && uv run pre-commit install`.
-- Before pushing, run the three commands from
-  [Development](#-development) above (lint, `just test`, svelte-check);
+- Before pushing, run the commands from
+  [Development](#-development) above (lint, `just test`, svelte-check and vitest);
   CI gates merging on them.
 - One logical change per PR; screenshots for UI changes.
 

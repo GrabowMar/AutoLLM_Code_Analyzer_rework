@@ -20,7 +20,7 @@ CELERY_FLOWER_PASSWORD=changeme
 # OpenRouter — get a key at https://openrouter.ai/keys
 # ------------------------------------------------------------------------------
 # Optional global fallback key. Each user can also configure their own key via
-# Settings → API Access in the web UI (stored encrypted in the DB, recommended).
+# Settings → API keys in the web UI (stored encrypted in the DB, recommended).
 # When a job runs, the user's personal key is used if set; otherwise we fall
 # back to this global key when OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK is True.
 OPENROUTER_API_KEY=
@@ -36,10 +36,12 @@ FRONTEND_PUBLIC_ORIGIN=http://localhost:8000
 # Sample-app subdomain routing (see /docs/deployment-guide).
 # Serve each generated app at https://llm-<hex>.<APPS_DOMAIN>/ through a
 # wildcard edge route (*.<APPS_DOMAIN> → Django) instead of raw host ports.
-# Needs wildcard DNS + a wildcard TLS cert at the edge, and .<APPS_DOMAIN>
-# added to DJANGO_ALLOWED_HOSTS below.
+# Needs wildcard DNS (*.<APPS_DOMAIN>) and edge TLS for it: a wildcard cert, or
+# Caddy on_demand_tls with ask → /api/runtime/app-tls-check/. Django adds
+# .<APPS_DOMAIN> to ALLOWED_HOSTS itself; the vite dev server needs the same
+# APPS_DOMAIN in its environment to pass app hosts through to Django.
 # ------------------------------------------------------------------------------
-# APPS_DOMAIN=example.com
+# APPS_DOMAIN=apps.example.com
 # APPS_SUBDOMAIN_PROXY=True
 
 # Without it, apps are served at <APPS_PUBLIC_ORIGIN>/apps/<name>/ by Django's path

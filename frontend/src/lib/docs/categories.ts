@@ -48,7 +48,7 @@ export const CATEGORY_META: Record<string, CategoryMeta> = {
   Other: {
     label: "Other",
     icon: FolderOpen,
-    tagline: "Everything else \u2014 internal notes, todos, and archives.",
+    tagline: "Subsystem guides that do not fit a category above.",
     accent: "text-muted-foreground",
   },
 };

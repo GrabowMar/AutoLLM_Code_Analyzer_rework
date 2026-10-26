@@ -39,6 +39,11 @@
 		actions?: Snippet;
 		/** Additional classes on the outer wrapper */
 		class?: string;
+		/**
+		 * Render as the top strip of the table card it filters (no own border/shadow).
+		 * The results/pagination row is dropped: the table toolbar and footer carry it.
+		 */
+		embedded?: boolean;
 	}
 
 	let {
@@ -54,6 +59,7 @@
 		filters,
 		actions,
 		class: cls = '',
+		embedded = false,
 	}: Props = $props();
 
 	let filtersExpanded = $state(false);
@@ -87,7 +93,7 @@
 	}}
 />
 
-<div class="fb-shell {cls}" role="search" aria-label="Filter and search">
+<div class="fb-shell {embedded ? 'fb-embedded' : ''} {cls}" role="search" aria-label="Filter and search">
 	<!-- ── Row 1: Search + filter toggle + actions ─────────────── -->
 	<div class="flex items-center gap-2 p-2">
 		<!-- Search -->
@@ -194,11 +200,13 @@
 	{/if}
 
 	<!-- ── Row 4: Results + pagination bar ───────────────────────── -->
-	<PaginationBar
-		{resultsText}
-		{page}
-		{pages}
-		{onGoToPage}
-		class="border-t border-border"
-	/>
+	{#if !embedded}
+		<PaginationBar
+			{resultsText}
+			{page}
+			{pages}
+			{onGoToPage}
+			class="border-t border-border"
+		/>
+	{/if}
 </div>

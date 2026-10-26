@@ -45,15 +45,16 @@
 
 <nav aria-label="Library sections">
 	<!-- Rail (lg and up) -->
-	<div class="hidden space-y-5 lg:block">
+	<div class="hidden space-y-4 rounded-md border border-border bg-card p-2 pt-3 shadow-[var(--shadow-card)] lg:block">
 		{#each groups as g (g.title)}
-			<div class="space-y-1">
+			<div class="space-y-1 border-t border-border/60 pt-3 first:border-t-0 first:pt-0">
 				<p class="section-label px-2">{g.title}</p>
 				{#if g.note}<p class="px-2 text-[11px] text-muted-foreground">{g.note}</p>{/if}
 				<ul class="space-y-0.5">
 					{#each g.items as item (item.label)}
 						{@const active = isActive(item)}
-						<li>
+						<li class="relative">
+							{#if active}<span class="absolute inset-y-1 left-0 w-0.5 rounded-full bg-primary" aria-hidden="true"></span>{/if}
 							<a
 								href={libraryHref(item.tab, item.kind)}
 								data-sveltekit-replacestate

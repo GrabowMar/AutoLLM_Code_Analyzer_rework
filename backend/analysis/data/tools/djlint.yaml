@@ -1,0 +1,47 @@
+slug: djlint
+name: djLint
+description: >-
+  Linter for HTML templates — Jinja (Flask) and Django templates as well as
+  plain HTML. Flags accessibility gaps, missing attributes, unsafe inline
+  markup and malformed template tags.
+category: lint
+kind: container
+target_language: html
+analysis_mode: static
+technologies: [html, jinja]
+icon: file-code
+version: "1.36"
+docs_url: https://www.djlint.com/docs/linter/
+install_cmd: >-
+  set -e;
+  python3 -m venv /home/analyzer/.local/opt/djlint;
+  /home/analyzer/.local/opt/djlint/bin/pip install --upgrade 'djlint==1.36.*';
+  mkdir -p /home/analyzer/.local/bin;
+  ln -sf /home/analyzer/.local/opt/djlint/bin/djlint /home/analyzer/.local/bin/djlint
+verify_cmd: "djlint --version"
+uninstall_cmd: "rm -rf /home/analyzer/.local/opt/djlint /home/analyzer/.local/bin/djlint"
+# A machine-readable line format; the progress bar lines are ignored by the parser.
+run_cmd: "djlint {target} --lint --profile={config:profile} --linter-output-format '{filename}:{line}:{code}:{message}' 2>/dev/null"
+parser_key: djlint
+file_patterns: ["*.html", "*.jinja", "*.jinja2", "*.j2"]
+run_timeout: 120
+install_timeout: 300
+display_order: 75
+config_schema:
+  - name: profile
+    type: select
+    label: Template profile
+    description: Template language the rules assume.
+    default: jinja
+    options:
+      - { value: jinja, label: Jinja (Flask) }
+      - { value: django, label: Django }
+      - { value: html, label: Plain HTML }
+default_config:
+  profile: jinja
+sample_filename: index.html
+sample_code: |
+  <html><body>
+  <img src="logo.png">
+  {{ name|safe }}
+  </body></html>

@@ -128,7 +128,6 @@
 		return tags;
 	});
 
-	const resultsText = $derived(reports.length > 0 || !loading ? `${reports.length} of ${total} reports` : '');
 
 	$effect(() => {
 		void typeFilter;
@@ -140,7 +139,7 @@
 	onMount(load);
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4">
 	<PageHeader title="Reports" description="Generated insights across models, templates and analysis tools.">
 		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={load}>
@@ -162,57 +161,69 @@
 				<Plus class="mr-2 h-4 w-4" />New report
 			</Button>
 		{/snippet}
+		{#if !loading && !error}
+			<div class="header-stats">
+				<span class="header-stat"><b>{reports.length}</b> of {total} reports</span>
+			</div>
+		{/if}
 	</PageHeader>
 
-	<FilterBar
-		searchPlaceholder="Search reports by title…"
-		bind:searchValue={searchQuery}
-		onSearchInput={onSearchInput}
-		activeTags={activeFilters}
-		resultsText={resultsText}
-		onClearAll={() => { typeFilter = 'all'; statusFilter = 'all'; searchQuery = ''; sortBy = 'newest'; }}
-	>
-		{#snippet filters()}
-			<div class="fb-group">
-				<span class="fb-group-label">Type</span>
-				<button class="fb-chip {typeFilter === 'all' ? 'fb-chip-on' : ''}" aria-pressed={typeFilter === 'all'} onclick={() => { typeFilter = 'all'; }}>All</button>
-				{#each Object.entries(typeConfig) as [k, v] (k)}
-					<button class="fb-chip {typeFilter === k ? 'fb-chip-on' : ''}" aria-pressed={typeFilter === k} onclick={() => { typeFilter = k as ReportType; }}>{v.label}</button>
-				{/each}
-			</div>
-			<div class="fb-group">
-				<span class="fb-group-label">Status</span>
-				<button class="fb-chip {statusFilter === 'all' ? 'fb-chip-on' : ''}" aria-pressed={statusFilter === 'all'} onclick={() => { statusFilter = 'all'; }}>All</button>
-				{#each ['pending', 'generating', 'completed', 'failed'] as const as st (st)}
-					<button class="fb-chip capitalize {statusFilter === st ? 'fb-chip-on' : ''}" aria-pressed={statusFilter === st} onclick={() => { statusFilter = st; }}>{st}</button>
-				{/each}
-			</div>
-			<div class="fb-group">
-				<span class="fb-group-label">Sort</span>
-				<button class="fb-chip {sortBy === 'newest' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'newest'} onclick={() => { sortBy = 'newest'; }}>Newest</button>
-				<button class="fb-chip {sortBy === 'oldest' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'oldest'} onclick={() => { sortBy = 'oldest'; }}>Oldest</button>
-				<button class="fb-chip {sortBy === 'title' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'title'} onclick={() => { sortBy = 'title'; }}>A–Z</button>
-			</div>
-		{/snippet}
-	</FilterBar>
-
-	{#if loading}
-		<LoadingState label="loading reports" />
-	{:else if error}
-		<ErrorAlert message={error} onretry={load} />
-	{:else if reports.length === 0}
-		<EmptyState
-			icon={GitCompareArrows}
-			title="No reports yet"
-			description="Generate your first report to get insights across models, templates and tools."
+	<!-- Filters; loading, error and empty states render inside the same card. -->
+	<Card.Root class="gap-0 overflow-clip py-0">
+		<FilterBar
+			embedded
+			searchPlaceholder="Search reports by title…"
+			bind:searchValue={searchQuery}
+			onSearchInput={onSearchInput}
+			activeTags={activeFilters}
+			onClearAll={() => { typeFilter = 'all'; statusFilter = 'all'; searchQuery = ''; sortBy = 'newest'; }}
+			class={!loading && !error && reports.length > 0 ? 'border-b-0' : ''}
 		>
-			{#snippet action()}
-				<Button size="sm" onclick={() => goto('/reports/create')}>
-					<Plus class="mr-2 h-4 w-4" />Generate your first report
-				</Button>
+			{#snippet filters()}
+				<div class="fb-group">
+					<span class="fb-group-label">Type</span>
+					<button class="fb-chip {typeFilter === 'all' ? 'fb-chip-on' : ''}" aria-pressed={typeFilter === 'all'} onclick={() => { typeFilter = 'all'; }}>All</button>
+					{#each Object.entries(typeConfig) as [k, v] (k)}
+						<button class="fb-chip {typeFilter === k ? 'fb-chip-on' : ''}" aria-pressed={typeFilter === k} onclick={() => { typeFilter = k as ReportType; }}>{v.label}</button>
+					{/each}
+				</div>
+				<div class="fb-group">
+					<span class="fb-group-label">Status</span>
+					<button class="fb-chip {statusFilter === 'all' ? 'fb-chip-on' : ''}" aria-pressed={statusFilter === 'all'} onclick={() => { statusFilter = 'all'; }}>All</button>
+					{#each ['pending', 'generating', 'completed', 'failed'] as const as st (st)}
+						<button class="fb-chip capitalize {statusFilter === st ? 'fb-chip-on' : ''}" aria-pressed={statusFilter === st} onclick={() => { statusFilter = st; }}>{st}</button>
+					{/each}
+				</div>
+				<div class="fb-group">
+					<span class="fb-group-label">Sort</span>
+					<button class="fb-chip {sortBy === 'newest' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'newest'} onclick={() => { sortBy = 'newest'; }}>Newest</button>
+					<button class="fb-chip {sortBy === 'oldest' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'oldest'} onclick={() => { sortBy = 'oldest'; }}>Oldest</button>
+					<button class="fb-chip {sortBy === 'title' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'title'} onclick={() => { sortBy = 'title'; }}>A–Z</button>
+				</div>
 			{/snippet}
-		</EmptyState>
-	{:else}
+		</FilterBar>
+
+		{#if loading}
+			<LoadingState label="loading reports" />
+		{:else if error}
+			<div class="p-3"><ErrorAlert message={error} onretry={load} /></div>
+		{:else if reports.length === 0}
+			<EmptyState
+				compact
+				icon={GitCompareArrows}
+				title="No reports yet"
+				description="Generate your first report to get insights across models, templates and tools."
+			>
+				{#snippet action()}
+					<Button size="sm" onclick={() => goto('/reports/create')}>
+						<Plus class="mr-2 h-4 w-4" />Generate your first report
+					</Button>
+				{/snippet}
+			</EmptyState>
+		{/if}
+	</Card.Root>
+
+	{#if !loading && !error && reports.length > 0}
 		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 			{#each reports as r (r.report_id)}
 				{@const cfg = typeConfig[r.report_type]}

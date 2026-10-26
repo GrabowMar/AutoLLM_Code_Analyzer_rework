@@ -1,25 +1,47 @@
 <script lang="ts">
-import CredentialCard from './CredentialCard.svelte';
+	import type { CredentialStatus } from '$lib/api/credentials';
+	import SettingsBlock from './SettingsBlock.svelte';
+	import CredentialRow from './CredentialRow.svelte';
+	import { useSectionStatus } from './section-status.svelte';
+
+	const report = useSectionStatus('credentials');
+
+	let openrouter = $state<CredentialStatus | null | undefined>(undefined);
+
+	// The rail shows the key generation depends on: OpenRouter.
+	$effect(() => {
+		if (openrouter === undefined) return;
+		if (!openrouter?.configured) report({ tone: 'warning', label: 'no key' });
+		else if (openrouter.last_validation_status === 'valid') report({ tone: 'success', label: 'valid' });
+		else if (openrouter.last_validation_status === 'invalid') report({ tone: 'danger', label: 'invalid' });
+		else report({ tone: 'neutral', label: 'unchecked' });
+	});
 </script>
 
-<div class="space-y-6">
-<CredentialCard
-provider="openrouter"
-title="OpenRouter API Key"
-description="Your personal OpenRouter API key is used for generation jobs you submit. Never shared with other users."
-signupUrl="https://openrouter.ai/keys"
-signupLabel="openrouter.ai/keys"
-placeholder="sk-or-v1-..."
-inputId="openrouter-key"
-/>
+<SettingsBlock>
+	<CredentialRow
+		provider="openrouter"
+		title="OpenRouter"
+		description="Runs the generation jobs and experiments you submit; never shared with other users. Get one at"
+		signupUrl="https://openrouter.ai/keys"
+		signupLabel="openrouter.ai/keys"
+		placeholder="sk-or-v1-…"
+		inputId="openrouter-key"
+		onstatus={(s) => (openrouter = s)}
+	/>
+	<CredentialRow
+		provider="huggingface"
+		title="Hugging Face"
+		description="Model metadata, downloads and rankings sync. Get one at"
+		signupUrl="https://huggingface.co/settings/tokens"
+		signupLabel="huggingface.co/settings/tokens"
+		placeholder="hf_…"
+		inputId="huggingface-key"
+	/>
+</SettingsBlock>
 
-<CredentialCard
-provider="huggingface"
-title="Hugging Face Token"
-description="Personal Hugging Face access token used for model metadata, downloads, and rankings sync."
-signupUrl="https://huggingface.co/settings/tokens"
-signupLabel="huggingface.co/settings/tokens"
-placeholder="hf_..."
-inputId="huggingface-key"
-/>
-</div>
+<p class="settings-row text-[13px] leading-5 text-muted-foreground">
+	Other cloud providers (Anthropic, OpenAI, Groq…) connect as endpoints under
+	<a href="#providers" class="settings-link">LLM providers</a>. The GitHub token lives under
+	<a href="#github" class="settings-link">GitHub</a>.
+</p>

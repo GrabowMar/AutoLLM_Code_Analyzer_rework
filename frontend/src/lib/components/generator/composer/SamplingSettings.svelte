@@ -68,6 +68,8 @@
 		disabled?: boolean;
 		hideProviderRouting?: boolean;
 		localModels?: boolean;
+		/** Replaces the mode's inheritance note (e.g. when the section already says it). */
+		hint?: string;
 		onchange?: () => void;
 	}
 
@@ -85,6 +87,7 @@
 		disabled = false,
 		hideProviderRouting = false,
 		localModels = false,
+		hint: hintProp,
 		onchange,
 	}: Props = $props();
 
@@ -149,7 +152,7 @@
 		custom:
 			'Blank fields inherit the value shown in grey: the mode default (temperature 0.3, output cap 32,000), then the sampling preset.',
 	};
-	const hint = $derived(HINTS[mode]);
+	const hint = $derived(hintProp ?? HINTS[mode]);
 
 	function onSaved(saved: RunPreset) {
 		presetId = saved.id;

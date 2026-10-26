@@ -34,7 +34,8 @@ uv run python manage.py <command>
 ```sh
 cd frontend
 npm install       # install deps
-npm run dev       # dev server (port 8080)
+npm run dev       # dev server (in compose: container port 8080, published as http://localhost:8000)
+npm test          # vitest
 npm run check     # svelte-check (type-check)
 npm run build     # production build
 ```
@@ -56,7 +57,7 @@ just frontend-dev         # start frontend dev server in container
 
 - `config/` — Django project config: settings (`base.py`, `local.py`, `production.py`, `test.py`), root URLconf, ASGI/WSGI, Celery app
 - `config/api.py` — Django Ninja API root. Registers routers from Django apps.
-- `backend/` — Django apps directory (`APPS_DIR`). Apps: `users`, `llm_models`, `credentials`, `generation`, `runtime`, `analysis`, `reports`, `rankings`, `statistics`, `automation`, `realtime`, `tokens`, `export`, `docs`, `system`, `common`, `contrib`
+- `backend/` — Django apps directory (`APPS_DIR`). Apps: `users`, `tokens`, `credentials`, `llm_models`, `generation`, `execution`, `inference`, `runtime`, `analysis`, `statistics`, `rankings`, `reports`, `export`, `integrations`, `realtime`, `docs`, `system`, `automation` (retired, router unmounted), plus `common` and `contrib`. See `docs/development-guide.md`
 - `tests/` — Project-level tests
 
 Settings are environment-specific (`config/settings/{base,local,production,test}.py`) and use `django-environ` for env var loading.
@@ -66,7 +67,7 @@ Settings are environment-specific (`config/settings/{base,local,production,test}
 - `frontend/src/routes/` — SvelteKit file-based routing
   - `/(auth)/` — Login, signup, password reset, email verification, 2FA
   - `/(app)/` — Authenticated app pages (dashboard, models, analysis, etc.)
-- Vite proxies `/api`, `/_allauth`, `/admin`, `/media` to the Django backend
+- Vite (dev) and `src/hooks.server.ts` (dev and prod) proxy `/api`, `/_allauth`, `/admin`, `/media`, `/apps` to the Django backend
 
 ### API conventions (Django Ninja)
 
@@ -84,7 +85,7 @@ def list_items(request):
 
 Schemas use `ninja.ModelSchema` (Pydantic-based). Custom computed fields use `@staticmethod resolve_<field>()`. Routers are registered in `config/api.py`.
 
-Authentication is `SessionAuth` globally. API docs are restricted to staff.
+Authentication is Bearer API tokens or the session cookie on every router (a few exceptions are listed in `docs/api-reference.md`). API docs are restricted to staff.
 
 ### Testing conventions
 
@@ -98,17 +99,16 @@ Authentication is `SessionAuth` globally. API docs are restricted to staff.
 
 The `realtime` app exposes `GET /api/realtime/stream?channels=<comma-separated>` as a Server-Sent Events endpoint. Backend services publish events via `backend.realtime.events.publish(channel, event_dict)` which writes to Redis pub/sub.
 
-Channel naming convention:
-- `generation:<job_id>`
-- `analysis:<task_id>`
-- `runtime:<container_id>`
-- `dashboard` (broadcast)
+Channels (authorized per user in `backend/realtime/authz.py`; full table in `docs/api-reference.md`):
+- `generation:<job_id>`, `experiment:<id>`, `endpoint:<id>`
+- `analysis:<run_id>`, `runtime:<container_id>`
+- `capacity` (aggregate executor capacity)
 
 Frontend subscription via `$lib/api/sse.ts`:
 
 ```ts
 import { subscribe } from '$lib/api/sse';
-const cleanup = subscribe(['generation:42', 'dashboard'], (e) => {
+const cleanup = subscribe(['generation:42', 'capacity'], (e) => {
   console.log(e.type, e.data);
 });
 // on component destroy:
@@ -134,8 +134,7 @@ Custom `User` model with email as the login field (no username). Single `name` f
 
 ### Design system
 
-- Colors: background `#0F172A`, primary `#1E293B`, CTA `#22C55E`, text `#F8FAFC`
-- Fonts: headings Fira Code, body Fira Sans
+- Colors, fonts and chart rules are tokens in `src/app.css` (light "paper" / dark "observatory"); never hard-code colors
 - Icons: **SVG only** (Heroicons/Lucide) — no emoji as icons
 - All clickable elements must have `cursor-pointer` and visible hover/focus states (150–300ms transition)
 - Breakpoints: 375 px, 768 px, 1024 px, 1440 px; respect `prefers-reduced-motion`

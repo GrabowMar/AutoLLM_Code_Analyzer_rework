@@ -230,6 +230,13 @@ export function formatHours(hours: number | null | undefined): string {
   return `≈ ${Math.round(hours)} h`;
 }
 
+/**
+ * Fewest apps for which a cluster-bootstrap interval over apps is shown: with
+ * one or two apps the resampled means barely vary, so the "interval" would
+ * look far more certain than the data is.
+ */
+export const MIN_APPS_FOR_CI = 3;
+
 /** 0..1 → "87%"; null → "—". */
 export function formatPercent(
   value: number | null | undefined,

@@ -20,6 +20,9 @@ from django.conf import settings
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
+# Top-level ``result_data`` fields of non-file-map jobs that hold code.
+_JOB_CODE_KEYS = frozenset({"backend", "backend_code", "frontend", "frontend_code", "content"})
+
 
 class ToolKind(models.TextChoices):
     CONTAINER = "container", _("Container CLI")
@@ -42,6 +45,11 @@ class TargetLanguage(models.TextChoices):
     CSS = "css", _("CSS")
     SHELL = "shell", _("Shell")
     ANY = "any", _("Any")
+
+
+class AnalysisMode(models.TextChoices):
+    STATIC = "static", _("Static (source code)")
+    DYNAMIC = "dynamic", _("Dynamic (running app)")
 
 
 class ToolOutputKind(models.TextChoices):
@@ -75,6 +83,20 @@ class AnalyzerTool(models.Model):
         choices=TargetLanguage,
         default=TargetLanguage.ANY,
     )
+    analysis_mode = models.CharField(
+        _("analysis mode"),
+        max_length=20,
+        choices=AnalysisMode,
+        default=AnalysisMode.STATIC,
+        db_index=True,
+        help_text=_("Static tools read the source; dynamic tools probe the app's running container."),
+    )
+    technologies = models.JSONField(
+        _("technologies"),
+        default=list,
+        blank=True,
+        help_text=_("Technology slugs the tool scans (vocabulary in data/tools/catalog.yaml)."),
+    )
     icon = models.CharField(_("icon"), max_length=100, blank=True, default="")
     version = models.CharField(_("version"), max_length=50, blank=True, default="")
     docs_url = models.URLField(_("documentation URL"), blank=True, default="")
@@ -92,9 +114,22 @@ class AnalyzerTool(models.Model):
         _("run command"),
         blank=True,
         default="",
-        help_text=_("Template; '{target}' is replaced with the code path."),
+        help_text=_(
+            "Template: '{target}' is replaced with the code path, '{url}' with the running "
+            "app's base URL (dynamic tools) and '{config:<name>}' with a shell-quoted option.",
+        ),
     )
     parser_key = models.CharField(_("parser key"), max_length=50, blank=True, default="")
+    file_patterns = models.JSONField(
+        _("file patterns"),
+        default=list,
+        blank=True,
+        help_text=_(
+            "Globs (on the file name, or the relative path when they contain '/') of the files the "
+            "tool reads. A run whose code has none of them skips the tool as not applicable instead "
+            "of recording a clean result. Empty: always applicable.",
+        ),
+    )
     output_kind = models.CharField(
         _("output kind"),
         max_length=20,
@@ -283,6 +318,8 @@ class AnalysisRun(models.Model):
     )
     source_code = models.JSONField(_("source code"), null=True, blank=True)
     tool_slugs = models.JSONField(_("tool slugs"), default=list, blank=True)
+    # Runs launched together (one per app) share a batch id.
+    batch_id = models.UUIDField(_("batch"), null=True, blank=True, db_index=True)
     status = models.CharField(
         _("status"),
         max_length=20,
@@ -295,6 +332,10 @@ class AnalysisRun(models.Model):
     duration_seconds = models.FloatField(_("duration (s)"), null=True, blank=True)
     started_at = models.DateTimeField(_("started at"), null=True, blank=True)
     completed_at = models.DateTimeField(_("completed at"), null=True, blank=True)
+    # Refreshed by the executing thread while the run is ``running``; a stale
+    # heartbeat means that thread is gone (backend reload) and the run can be
+    # reaped (runner.reap_stale_runs).
+    heartbeat_at = models.DateTimeField(_("heartbeat at"), null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -343,8 +384,9 @@ class AnalysisRun(models.Model):
                     if file_map:
                         return file_map
                 # Scaffolding/custom jobs: top-level string blobs
-                # (backend_code/frontend_code/content).
-                return {k: v for k, v in data.items() if isinstance(v, str)}
+                # (backend_code/frontend_code/content). Other string fields are
+                # metadata (finish_reason, error_detail, …), not code to scan.
+                return {k: v for k, v in data.items() if isinstance(v, str) and k in _JOB_CODE_KEYS}
         return {}
 
 
@@ -372,6 +414,8 @@ class ToolResult(models.Model):
         choices=Status.choices,
         default=Status.PENDING,
     )
+    started_at = models.DateTimeField(_("started at"), null=True, blank=True)
+    duration_seconds = models.FloatField(_("duration (s)"), null=True, blank=True)
     raw_output = models.JSONField(_("raw output"), default=dict, blank=True)
     summary = models.JSONField(_("summary"), default=dict, blank=True)
     metrics = models.JSONField(_("metrics"), default=dict, blank=True)
@@ -386,6 +430,37 @@ class ToolResult(models.Model):
 
     def __str__(self) -> str:
         return f"{self.tool_slug} ({self.status})"
+
+    @classmethod
+    def latest_ids_per_job(cls, job_ids=None) -> list:
+        """Per generation job and tool, the latest result of a finished run.
+
+        A job's code never changes, so each tool's measurement of it stands
+        on its own: re-running one tool (or only the AI reviewer) must not
+        discard the other tools' results, as picking the latest *run* would.
+        A result that measured something (completed, or skipped as not
+        applicable) wins over a later one that did not (failed, app not
+        running); a tool that never measured the job keeps its latest result
+        so coverage can say why.
+        """
+        measured = models.Case(
+            models.When(status=cls.Status.COMPLETED, then=1),
+            models.When(status=cls.Status.SKIPPED, summary__skip_reason="not_applicable", then=1),
+            default=0,
+            output_field=models.IntegerField(),
+        )
+        qs = cls.objects.filter(
+            run__generation_job__isnull=False,
+            run__status__in=[AnalysisRun.Status.COMPLETED, AnalysisRun.Status.PARTIAL, AnalysisRun.Status.FAILED],
+        ).exclude(status__in=[cls.Status.PENDING, cls.Status.RUNNING])
+        if job_ids is not None:
+            qs = qs.filter(run__generation_job_id__in=list(job_ids))
+        return list(
+            qs.annotate(measured=measured)
+            .order_by("run__generation_job_id", "tool_slug", "-measured", "-created_at")
+            .distinct("run__generation_job_id", "tool_slug")
+            .values_list("id", flat=True),
+        )
 
 
 class Finding(models.Model):
@@ -410,6 +485,16 @@ class Finding(models.Model):
         choices=Severity.choices,
         default=Severity.INFO,
         db_index=True,
+        help_text=_(
+            "Normalized level for aggregate statistics; a heuristic for tools that rate nothing (see tool_severity).",
+        ),
+    )
+    tool_severity = models.CharField(
+        _("tool severity"),
+        max_length=40,
+        blank=True,
+        default="",
+        help_text=_("The severity/level exactly as the tool printed it; empty when the tool rates nothing."),
     )
     category = models.CharField(_("category"), max_length=50, blank=True, default="")
     confidence = models.CharField(_("confidence"), max_length=20, blank=True, default="medium")

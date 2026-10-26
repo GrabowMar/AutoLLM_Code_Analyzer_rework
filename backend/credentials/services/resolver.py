@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from backend.users.models import User
 
 
-SETTINGS_LINK_REMEDIATION = "Add or update your OpenRouter API key in Settings → API Access."
+SETTINGS_LINK_REMEDIATION = "Add or update your OpenRouter API key in Settings → API keys."
 
 
 class MissingApiKeyError(Exception):

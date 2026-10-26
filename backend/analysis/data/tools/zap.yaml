@@ -1,0 +1,65 @@
+slug: zap
+name: OWASP ZAP
+description: >-
+  Dynamic application security testing (DAST) against the running app: spiders
+  its pages, then passively and actively scans them for missing security
+  headers, XSS, SQL injection, information leaks and misconfigurations.
+  Requires the app's container to be running.
+category: security
+kind: container
+target_language: any
+analysis_mode: dynamic
+technologies: [http, rest-api]
+icon: globe
+version: "2.17"
+docs_url: https://www.zaproxy.org/docs/
+# Self-contained: ZAP plus its own Temurin JRE under ~/.local/opt (the base
+# image has no Java and no root). Both downloads are checksum-pinned.
+install_cmd: >-
+  set -e;
+  mkdir -p /home/analyzer/.local/opt /home/analyzer/.local/bin && cd /tmp;
+  curl -sSfL -o zap-jre.tgz https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12%2B8/OpenJDK21U-jre_x64_linux_hotspot_21.0.12_8.tar.gz;
+  echo "8a379a67c91a3ae61ffb33d46e0a40c7ba35e70713c4db31cfca30492f792eff  zap-jre.tgz" | sha256sum -c -;
+  curl -sSfL -o zap.tgz https://github.com/zaproxy/zaproxy/releases/download/v2.17.0/ZAP_2.17.0_Linux.tar.gz;
+  echo "efe799aaa3627db683b43f00c9c210aea0b75c00cc8f0a0f0434d12bb3ddde5a  zap.tgz" | sha256sum -c -;
+  rm -rf /home/analyzer/.local/opt/zap /home/analyzer/.local/opt/zap-jre;
+  mkdir -p /home/analyzer/.local/opt/zap /home/analyzer/.local/opt/zap-jre;
+  tar -xzf zap-jre.tgz -C /home/analyzer/.local/opt/zap-jre --strip-components=1;
+  tar -xzf zap.tgz -C /home/analyzer/.local/opt/zap --strip-components=1;
+  rm -f zap.tgz zap-jre.tgz;
+  printf '#!/bin/sh\nexport JAVA_HOME=/home/analyzer/.local/opt/zap-jre\nexport PATH="$JAVA_HOME/bin:$PATH"\nexec /home/analyzer/.local/opt/zap/zap.sh -Xmx512m "$@"\n' > /home/analyzer/.local/bin/zap;
+  chmod +x /home/analyzer/.local/bin/zap
+verify_cmd: 'v=$(zap -cmd -silent -dir /tmp/zap-verify -version 2>/dev/null | tail -1) && [ -n "$v" ] && echo "ZAP $v"'
+uninstall_cmd: "rm -rf /home/analyzer/.local/opt/zap /home/analyzer/.local/opt/zap-jre /home/analyzer/.local/bin/zap"
+# Quick scan = spider + active scan. A fresh -dir per run keeps no state
+# between apps; the JSON report is the only thing printed.
+run_cmd: >-
+  rm -rf /tmp/zap && mkdir -p /tmp/zap &&
+  zap -cmd -silent -dir /tmp/zap/home
+  -config spider.maxDuration={config:spider_minutes}
+  -config scanner.maxScanDurationInMins={config:scan_minutes}
+  -config scanner.threadPerHost=4
+  -quickurl {url}/ -quickout /tmp/zap/report.json >/tmp/zap/zap.log 2>&1;
+  cat /tmp/zap/report.json
+parser_key: zap
+run_timeout: 1200
+install_timeout: 900
+display_order: 5
+config_schema:
+  - name: spider_minutes
+    type: number
+    label: Spider time (minutes)
+    description: Upper bound for crawling the app before scanning.
+    default: 2
+    min: 1
+    max: 10
+  - name: scan_minutes
+    type: number
+    label: Active scan time (minutes)
+    description: Upper bound for the active (attack) phase.
+    default: 5
+    min: 1
+    max: 15
+default_config:
+  spider_minutes: 2
+  scan_minutes: 5

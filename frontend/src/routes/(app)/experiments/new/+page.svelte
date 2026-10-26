@@ -101,20 +101,23 @@
 	}
 </script>
 
-<div class="space-y-6">
+<!-- Where the design came from; the footer strip only renders when there is one. -->
+{#snippet sourceLine()}
+	<p class="text-muted-foreground">{source}</p>
+{/snippet}
+
+<div class="space-y-4">
 	<PageHeader
 		title={editing ? 'Edit experiment' : 'New experiment'}
 		description="Models × harness presets (or prompt profiles) × apps × repeats, with shared seeds and a pre-registered baseline."
 		back={{ href: editing && data.editId ? `/experiments/${data.editId}` : '/experiments', label: editing ? 'Experiment' : 'Experiments' }}
+		children={source ? sourceLine : undefined}
 	>
 		{#snippet actions()}
 			{#if !editing && initial && source === 'Continuing your unsaved draft.'}
 				<Button variant="outline" size="sm" onclick={startOver}><RotateCcw />Start over</Button>
 			{/if}
 		{/snippet}
-		{#if source}
-			<p class="text-xs text-muted-foreground">{source}</p>
-		{/if}
 	</PageHeader>
 
 	{#if error}

@@ -1,26 +1,13 @@
 import type { PageLoad } from "./$types";
+import { resolveExperimentTab } from "$lib/components/experiments/study/tabs";
 
 export const ssr = false;
 
-export type ExperimentTab =
-  | "overview"
-  | "results"
-  | "runs"
-  | "design"
-  | "automation";
-const TABS: ExperimentTab[] = [
-  "overview",
-  "results",
-  "runs",
-  "design",
-  "automation",
-];
-
-/** `?tab=overview|results|runs|design|automation` (unknown values: the default for the status). */
-export const load: PageLoad = ({ params, url }) => {
-  const raw = url.searchParams.get("tab");
-  return {
-    id: params.id,
-    tab: TABS.includes(raw as ExperimentTab) ? (raw as ExperimentTab) : null,
-  };
-};
+/**
+ * `?tab=summary|method|results|data|operations` (older names — overview,
+ * design, runs, automation — still resolve; unknown values: the default).
+ */
+export const load: PageLoad = ({ params, url }) => ({
+  id: params.id,
+  tab: resolveExperimentTab(url.searchParams.get("tab")),
+});

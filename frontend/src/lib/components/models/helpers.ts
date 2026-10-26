@@ -1,24 +1,5 @@
 import type { LLMModelDetail } from "$lib/api/client";
 import { toast } from "svelte-sonner";
-import MessageSquare from "@lucide/svelte/icons/message-square";
-import Eye from "@lucide/svelte/icons/eye";
-import Wrench from "@lucide/svelte/icons/wrench";
-import Radio from "@lucide/svelte/icons/radio";
-import Braces from "@lucide/svelte/icons/braces";
-import Mic from "@lucide/svelte/icons/mic";
-import Box from "@lucide/svelte/icons/box";
-import Zap from "@lucide/svelte/icons/zap";
-
-export interface SkillBadge {
-  name: string;
-  icon: typeof Zap;
-  active: boolean;
-}
-
-export interface PricingTier {
-  label: string;
-  perMillionTokens: number;
-}
 
 export { formatPrice, formatTokens } from "$lib/utils/formatters";
 
@@ -54,12 +35,6 @@ export function getArchitecture(m: LLMModelDetail): Record<string, unknown> {
   return (caps.architecture || {}) as Record<string, unknown>;
 }
 
-export function getHuggingFaceId(m: LLMModelDetail): string | null {
-  const caps = getCaps(m);
-  const hfId = caps.hugging_face_id as string | undefined;
-  return hfId || null;
-}
-
 export function getSupportedParameters(m: LLMModelDetail): string[] {
   const caps = getCaps(m);
   const meta = getMeta(m);
@@ -80,94 +55,6 @@ export function getDefaultParameters(
 ): Record<string, unknown> {
   const caps = getCaps(m);
   return (caps.default_parameters || {}) as Record<string, unknown>;
-}
-
-export function getCoreSkills(m: LLMModelDetail): SkillBadge[] {
-  const caps = getCaps(m);
-  const arch = getArchitecture(m);
-  const inputMods = (arch.input_modalities || []) as string[];
-  const outputMods = (arch.output_modalities || []) as string[];
-  return [
-    { name: "Text/Chat", icon: MessageSquare, active: true },
-    {
-      name: "Vision",
-      icon: Eye,
-      active: m.supports_vision || inputMods.includes("image"),
-    },
-    { name: "Functions", icon: Wrench, active: m.supports_function_calling },
-    { name: "Streaming", icon: Radio, active: m.supports_streaming },
-    { name: "JSON Mode", icon: Braces, active: m.supports_json_mode },
-    {
-      name: "Audio",
-      icon: Mic,
-      active: inputMods.includes("audio") || outputMods.includes("audio"),
-    },
-    {
-      name: "Multimodal",
-      icon: Box,
-      active: inputMods.length > 1 || (caps.multimodal as boolean) || false,
-    },
-  ];
-}
-
-export function getCapabilityMatrix(
-  m: LLMModelDetail,
-): Record<string, boolean> {
-  const caps = getCaps(m);
-  const result: Record<string, boolean> = {};
-  for (const [key, value] of Object.entries(caps)) {
-    if (typeof value === "boolean") {
-      result[key] = value;
-    }
-  }
-  result["function_calling"] = m.supports_function_calling;
-  result["vision"] = m.supports_vision;
-  result["streaming"] = m.supports_streaming;
-  result["json_mode"] = m.supports_json_mode;
-  return result;
-}
-
-export function getAllPricingTiers(m: LLMModelDetail): PricingTier[] {
-  const meta = getMeta(m);
-  const caps = getCaps(m);
-  const pricing = (meta.openrouter_pricing ||
-    (caps.pricing as Record<string, string>) ||
-    {}) as Record<string, string>;
-  const tiers: PricingTier[] = [];
-  const tierMap: Record<string, string> = {
-    input_cache_read: "Cache Read",
-    input_cache_write: "Cache Write",
-    web_search: "Web Search",
-    internal_reasoning: "Internal Reasoning",
-    request: "Per Request",
-    image: "Per Image",
-  };
-  for (const [key, label] of Object.entries(tierMap)) {
-    const raw = pricing[key];
-    if (raw) {
-      const val = parseFloat(raw);
-      if (val > 0) tiers.push({ label, perMillionTokens: val * 1_000_000 });
-    }
-  }
-  return tiers;
-}
-
-export function formatMetaValue(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "object") {
-    if (Array.isArray(value)) {
-      if (value.length === 0) return "—";
-      if (value.length > 3)
-        return `${value.slice(0, 3).join(", ")} (+${value.length - 3})`;
-      return value.join(", ");
-    }
-    return `${Object.keys(value).length} keys`;
-  }
-  if (typeof value === "number") {
-    return value > 1000 ? formatNumber(value) : String(value);
-  }
-  const sv = String(value);
-  return sv.length > 80 ? sv.slice(0, 77) + "..." : sv;
 }
 
 export async function copyToClipboard(text: string): Promise<void> {
@@ -198,4 +85,163 @@ export function stripMarkdown(text: string): string {
     .replace(/[*_]{1,2}([^*_]+)[*_]{1,2}/g, "$1")
     .replace(/#{1,6}\s/g, "")
     .replace(/`([^`]+)`/g, "$1");
+}
+
+// ── Enrichment payloads (see backend/llm_models/services/enrichment.py) ──
+
+export interface ModelsDevCost {
+  input?: number;
+  output?: number;
+  cache_read?: number;
+  cache_write?: number;
+}
+
+/** models.dev record stored in `metadata.models_dev` (all fields optional). */
+export interface ModelsDevInfo {
+  id?: string;
+  family?: string;
+  knowledge?: string;
+  release_date?: string;
+  last_updated?: string;
+  open_weights?: boolean;
+  reasoning?: boolean;
+  reasoning_options?: {
+    type: string;
+    values?: string[];
+    min?: number;
+    max?: number;
+  }[];
+  tool_call?: boolean;
+  structured_output?: boolean;
+  temperature?: boolean;
+  attachment?: boolean;
+  modalities?: { input?: string[]; output?: string[] };
+  limit?: { context?: number; output?: number; input?: number };
+  cost?: ModelsDevCost & {
+    tiers?: (ModelsDevCost & { tier?: { type?: string; size?: number } })[];
+  };
+  status?: string;
+  fetched_at?: string;
+}
+
+/** Hugging Face Hub record stored in `metadata.huggingface`. */
+export interface HuggingFaceInfo {
+  id: string;
+  author: string;
+  license: string;
+  license_name: string;
+  pipeline_tag: string;
+  library_name: string;
+  downloads: number;
+  downloads_all_time: number | null;
+  likes: number;
+  parameters: number | null;
+  parameters_by_dtype: Record<string, number>;
+  architectures: string[];
+  model_type: string;
+  base_models: string[];
+  languages: string[];
+  arxiv: string[];
+  gated: boolean;
+  created_at: string | null;
+  last_modified: string | null;
+  spaces_count: number;
+  fetched_at: string;
+}
+
+/** OpenRouter `reasoning` block of the catalog payload. */
+export interface ReasoningInfo {
+  mandatory?: boolean;
+  default_effort?: string;
+  supported_efforts?: string[];
+}
+
+export interface DesignArenaEntry {
+  arena: string;
+  category: string;
+  elo: number;
+  rank: number;
+  win_rate: number;
+}
+
+export interface ArtificialAnalysisIndices {
+  intelligence_index?: number;
+  coding_index?: number;
+  agentic_index?: number;
+}
+
+export function getModelsDev(m: LLMModelDetail): ModelsDevInfo | null {
+  return (getMeta(m).models_dev as ModelsDevInfo | undefined) ?? null;
+}
+
+export function getHuggingFace(m: LLMModelDetail): HuggingFaceInfo | null {
+  return (getMeta(m).huggingface as HuggingFaceInfo | undefined) ?? null;
+}
+
+export function getReasoning(m: LLMModelDetail): ReasoningInfo | null {
+  return (getCaps(m).reasoning as ReasoningInfo | undefined) ?? null;
+}
+
+export function getDesignArena(m: LLMModelDetail): DesignArenaEntry[] {
+  const b = (getCaps(m).benchmarks || {}) as Record<string, unknown>;
+  return Array.isArray(b.design_arena)
+    ? (b.design_arena as DesignArenaEntry[])
+    : [];
+}
+
+export function getArtificialAnalysis(
+  m: LLMModelDetail,
+): ArtificialAnalysisIndices | null {
+  const b = (getCaps(m).benchmarks || {}) as Record<string, unknown>;
+  return (
+    (b.artificial_analysis as ArtificialAnalysisIndices | undefined) ?? null
+  );
+}
+
+/** Unix seconds (OpenRouter `created`) or ISO date → "2026-02-17". */
+export function isoDay(value: unknown): string | null {
+  if (typeof value === "number" && value > 0)
+    return new Date(value * 1000).toISOString().slice(0, 10);
+  if (typeof value === "string" && value) return value.slice(0, 10);
+  return null;
+}
+
+/** 0–1 rate → "83%" ("—" when null). */
+export function fmtRate(rate: number | null | undefined, digits = 0): string {
+  return rate == null ? "—" : `${(rate * 100).toFixed(digits)}%`;
+}
+
+/** Wilson interval → "55–95%" ("" when unknown). */
+export function fmtCI(
+  low: number | null | undefined,
+  high: number | null | undefined,
+): string {
+  if (low == null || high == null) return "";
+  return `${Math.round(low * 100)}–${Math.round(high * 100)}%`;
+}
+
+/** Compact count → "1.4M" / "4.5K" / "12". */
+export function compactNumber(n: number | null | undefined): string {
+  if (n == null) return "—";
+  return new Intl.NumberFormat(undefined, {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(n);
+}
+
+/** USD amount with precision that scales down for small sums. */
+export function fmtUsd(n: number | null | undefined): string {
+  if (n == null) return "—";
+  if (n === 0) return "$0";
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  if (n < 100) return `$${n.toFixed(2)}`;
+  return `$${Math.round(n).toLocaleString()}`;
+}
+
+/** Parameter count → "685B" / "7.2B" / "350M". */
+export function fmtParams(n: number | null | undefined): string {
+  if (!n) return "—";
+  if (n >= 1e12) return `${(n / 1e12).toFixed(1)}T`;
+  if (n >= 1e9) return `${(n / 1e9).toFixed(n >= 1e11 ? 0 : 1)}B`;
+  return `${Math.round(n / 1e6)}M`;
 }

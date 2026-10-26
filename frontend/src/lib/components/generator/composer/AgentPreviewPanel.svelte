@@ -1,12 +1,12 @@
 <script lang="ts">
 	/**
-	 * AgentPreviewPanel — the agent composer's Run summary. Before a task and a
-	 * model are chosen it is a neutral checklist; afterwards it renders the
-	 * server preview (`POST /jobs/agent/preview/`): tally, cost bound, resolved
+	 * AgentPreviewPanel — the agent composer's Run summary: the run formula
+	 * (tasks × models × harness presets × trials, empty factors link to their
+	 * step) always on top; once the form is complete, the server preview (`POST /jobs/agent/preview/`): tally, cost bound, resolved
 	 * settings, per-model effects and issues, plus the Start button (two-column layout only;
 	 * the StartBar carries it otherwise).
 	 *
-	 * Props: `checklist`, `ready`, `preview` (latest successful one, possibly
+	 * Props: `factors` + `total` (RunFormula), `ready`, `preview` (latest successful one, possibly
 	 * `stale` for the current form), `loading`, `error` + `onretry`, `localInvalid`,
 	 * `baseSeed`, `harnessSchemas` (harness → option schema, for chips),
 	 * `issues` + `actions`, Start state (`canStart`, `blockedReason`, `submitting`,
@@ -22,9 +22,9 @@
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import { harnessOptionChips, summarizeBudget } from '../presets.svelte';
 	import EffectiveParams from './EffectiveParams.svelte';
-	import SummaryChecklist from './SummaryChecklist.svelte';
+	import RunFormula, { type RunFactor } from './RunFormula.svelte';
 	import SummaryIssues from './SummaryIssues.svelte';
-	import { type ChecklistItem, type IssueAction, type SummaryIssue } from './issues';
+	import { type IssueAction, type SummaryIssue } from './issues';
 	import Check from '@lucide/svelte/icons/check';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
@@ -33,7 +33,8 @@
 	import X from '@lucide/svelte/icons/x';
 
 	interface Props {
-		checklist: ChecklistItem[];
+		factors: RunFactor[];
+		total: number | null;
 		ready: boolean;
 		preview: AgentPreview | null;
 		stale: boolean;
@@ -54,7 +55,8 @@
 	}
 
 	let {
-		checklist,
+		factors,
+		total,
 		ready,
 		preview,
 		stale,
@@ -103,10 +105,6 @@
 		return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 	}
 
-	function plural(n: number, word: string): string {
-		return `${n} ${word}${n === 1 ? '' : 's'}`;
-	}
-
 	const chip = 'inline-flex items-center rounded-full border px-1.5 text-[11px] font-medium leading-4';
 </script>
 
@@ -124,12 +122,11 @@
 		{/if}
 	</Card.Header>
 	<Card.Content class="space-y-4">
+		<RunFormula {factors} {total} />
 		{#if !ready}
 			<p class="text-xs text-muted-foreground">
-				Choose what to run. Every run is resolved here — models, harnesses, settings and costs — before anything
-				starts.
+				Every run is resolved here — models, harnesses, settings and costs — before anything starts.
 			</p>
-			<SummaryChecklist items={checklist} />
 		{:else}
 			{#if localInvalid}
 				<p class="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning-fg" role="status">
@@ -143,20 +140,11 @@
 				{#if !error && !localInvalid}<LoadingState label="resolving runs" class="py-10" />{/if}
 			{:else}
 				<div class={cn('space-y-4 transition-opacity duration-200', stale && 'opacity-60')} aria-busy={stale}>
-					<div class="rounded-md border border-border bg-surface-2 p-3">
-						<p class="flex items-baseline gap-2" aria-live="polite">
-							<span class="font-mono text-2xl font-medium tabular-nums">{preview.run_count}</span>
-							<span class="text-sm text-muted-foreground">run{preview.run_count === 1 ? '' : 's'}</span>
-						</p>
-						<p class="text-xs text-muted-foreground tabular-nums">
-							{plural(preview.task_count, 'task')} × {plural(preview.model_count, 'model')} × {plural(
-								preview.harness_count,
-								'harness preset'
-							)} × {plural(preview.trials, 'trial')}
-						</p>
-						<p class="mt-2 text-xs">
-							Max cost <span class="font-medium tabular-nums">≤ {usd(preview.max_cost_usd_total)}</span>
-							<span class="text-muted-foreground">({usd(preview.agent_config.max_cost_usd)} cap per run)</span>
+					<div class="rounded-md border border-border bg-surface-2 px-3 py-2">
+						<p class="flex flex-wrap items-baseline gap-x-2 text-xs">
+							<span class="text-muted-foreground">Max cost</span>
+							<span class="font-mono text-base font-medium tabular-nums">≤ {usd(preview.max_cost_usd_total)}</span>
+							<span class="text-muted-foreground">{usd(preview.agent_config.max_cost_usd)} cap per run</span>
 						</p>
 						<p class="mt-0.5 text-xs text-muted-foreground">
 							{preview.graded

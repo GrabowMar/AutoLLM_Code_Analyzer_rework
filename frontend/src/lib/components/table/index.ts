@@ -1,4 +1,5 @@
 import { goto } from "$app/navigation";
+import { scrollHint } from "$lib/utils/scroll-hint";
 
 export { default as SortableTh } from "./SortableTh.svelte";
 export { default as TableToolbar } from "./TableToolbar.svelte";
@@ -8,9 +9,11 @@ export { default as ScoreCell } from "./ScoreCell.svelte";
  * Attachment for `div.table-frame` (`{@attach tableFrame}`). While the table fits
  * the frame it sets `data-fits`: the page does the scrolling and the header sticks
  * under the app bar. A wider table keeps the frame as its own bounded scroll box so
- * the horizontal scrollbar stays on screen.
+ * the horizontal scrollbar stays on screen. It also gets `scrollHint()`: an edge
+ * fade on phones and a tab stop while it scrolls sideways.
  */
 export function tableFrame(node: HTMLElement) {
+  const detachHint = scrollHint()(node);
   const update = () => {
     const table = node.querySelector("table");
     node.toggleAttribute(
@@ -23,7 +26,10 @@ export function tableFrame(node: HTMLElement) {
   const table = node.querySelector("table");
   if (table) observer.observe(table);
   update();
-  return () => observer.disconnect();
+  return () => {
+    observer.disconnect();
+    detachHint();
+  };
 }
 
 const INTERACTIVE =

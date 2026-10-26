@@ -1,21 +1,29 @@
 slug: eslint
 name: ESLint
 description: >-
-  The pluggable linter for JavaScript and TypeScript. Reports problematic
-  patterns and style violations in JS/TS code.
+  The pluggable linter for JavaScript. Reports undefined names and unused
+  variables in .js, .jsx, .cjs and .mjs files (TypeScript is not linted:
+  no TypeScript parser is installed).
 category: lint
 kind: container
 target_language: javascript
+analysis_mode: static
+technologies: [javascript]
 icon: braces
 version: "8"
 docs_url: https://eslint.org/docs/latest/
-install_cmd: "npm install -g eslint@8"
+install_cmd: "npm install -g eslint@8 eslint-plugin-react@7"
 verify_cmd: "eslint --version"
 uninstall_cmd: "npm uninstall -g eslint"
 # es2022 is needed alongside browser/node: without it Promise, Set, etc. are
-# "not defined" and no-undef floods the results with false positives.
-run_cmd: "eslint {target} --ext .js,.jsx,.cjs,.mjs -f json --no-eslintrc --env browser,node,es2022 --parser-options=ecmaVersion:latest,sourceType:module,ecmaFeatures:{jsx:true} --rule '{\"no-undef\":\"error\",\"no-unused-vars\":\"warn\"}'"
+# "not defined" and no-undef floods the results with false positives. The react
+# plugin's jsx-uses-vars rules only mark JSX-referenced components as used (they
+# never report): without them every imported component is "unused".
+run_cmd: |
+  printf '%s' '{"root":true,"env":{"browser":true,"node":true,"es2022":true},"parserOptions":{"ecmaVersion":"latest","sourceType":"module","ecmaFeatures":{"jsx":true}},"settings":{"react":{"version":"18.2"}},"plugins":["react"],"rules":{"no-undef":"error","no-unused-vars":"warn","react/jsx-uses-vars":"error","react/jsx-uses-react":"error"}}' > /tmp/eslint-base.json
+  eslint {target} --ext .js,.jsx,.cjs,.mjs -f json --no-eslintrc -c /tmp/eslint-base.json --resolve-plugins-relative-to "$(npm root -g)" --ignore-pattern node_modules 2>/dev/null
 parser_key: eslint
+file_patterns: ["*.js", "*.jsx", "*.cjs", "*.mjs"]
 run_timeout: 120
 install_timeout: 300
 display_order: 30

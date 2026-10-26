@@ -6,6 +6,8 @@ description: >-
 category: lint
 kind: container
 target_language: shell
+analysis_mode: static
+technologies: [shell]
 icon: terminal
 version: "0.10"
 docs_url: https://www.shellcheck.net/
@@ -14,6 +16,7 @@ verify_cmd: "shellcheck --version"
 uninstall_cmd: "pip uninstall -y shellcheck-py"
 run_cmd: "find {target} -type f \\( -name '*.sh' -o -name '*.bash' \\) -not -path '*/node_modules/*' -print0 | xargs -0 -r shellcheck -f json 2>/dev/null"
 parser_key: shellcheck
+file_patterns: ["*.sh", "*.bash"]
 run_timeout: 60
 install_timeout: 120
 display_order: 95

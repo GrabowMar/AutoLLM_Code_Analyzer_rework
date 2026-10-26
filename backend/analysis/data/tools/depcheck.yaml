@@ -6,6 +6,8 @@ description: >-
 category: dependencies
 kind: container
 target_language: javascript
+analysis_mode: static
+technologies: [javascript, npm]
 icon: package-check
 version: "1.4"
 docs_url: https://github.com/depcheck/depcheck
@@ -20,6 +22,7 @@ run_cmd: |
     echo
   done
 parser_key: depcheck
+file_patterns: ["package.json"]
 run_timeout: 120
 install_timeout: 180
 display_order: 40

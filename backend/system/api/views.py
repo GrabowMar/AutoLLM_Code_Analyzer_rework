@@ -13,7 +13,11 @@ router = Router(tags=["system"])
 
 
 def _assert_staff(request) -> None:
-    if not (request.user and request.user.is_authenticated and request.user.is_staff):
+    # ``request.auth`` is the user resolved by whichever API auth scheme
+    # matched (TokenAuth or SessionAuth); ``request.user`` is only set by the
+    # session middleware, so Bearer callers would always be refused.
+    user = getattr(request, "auth", None)
+    if not (user is not None and getattr(user, "is_authenticated", False) and getattr(user, "is_staff", False)):
         raise HttpError(403, "Forbidden: staff only")
 
 

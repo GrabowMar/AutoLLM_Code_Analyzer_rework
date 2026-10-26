@@ -5,9 +5,8 @@
 	 */
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import * as Card from '$lib/components/ui/card';
+	import SettingsBlock from '$lib/components/users-settings/SettingsBlock.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Switch } from '$lib/components/ui/switch';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
@@ -28,6 +27,7 @@
 	import WebhookFormDialog from './WebhookFormDialog.svelte';
 	import WebhookDeliveries from './WebhookDeliveries.svelte';
 	import { webhookKind } from './webhook-kinds';
+	import { useSectionStatus } from '$lib/components/users-settings/section-status.svelte';
 	import Bell from '@lucide/svelte/icons/bell';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Send from '@lucide/svelte/icons/send';
@@ -37,6 +37,13 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 
 	const MAX_WEBHOOKS = 25;
+
+	const report = useSectionStatus('notifications');
+	$effect(() => {
+		if (loading || error) return;
+		const on = subs.filter((s) => s.enabled).length;
+		report(on ? { tone: 'success', label: `${on} on` } : null);
+	});
 
 	let subs = $state<WebhookSubscription[]>([]);
 	let eventTypes = $state<WebhookEventType[]>([]);
@@ -134,117 +141,115 @@
 	onMount(load);
 </script>
 
-<div class="space-y-4">
-	<div class="flex flex-wrap items-center justify-between gap-3">
-		<p class="max-w-2xl text-sm text-muted-foreground">
-			Get a message in Slack, Discord, Teams, ntfy or Telegram, or a signed JSON POST to your own service, when your
-			generations, analyses, experiments or reports finish. Targets and secrets are stored encrypted and never shown
-			again.
-		</p>
+<SettingsBlock title="Channels" description="Targets and secrets are stored encrypted and never shown again.">
+	{#snippet actions()}
 		<Button size="sm" onclick={openCreate} disabled={loading || subs.length >= MAX_WEBHOOKS}>
-			<Plus />Add notification
+			<Plus />Add channel
 		</Button>
-	</div>
+	{/snippet}
 
 	{#if error}
-		<ErrorAlert message={error} onretry={load} />
+		<div class="settings-row"><ErrorAlert message={error} onretry={load} /></div>
 	{:else if loading}
 		<LoadingState label="loading notifications" />
 	{:else if subs.length === 0}
-		<EmptyState icon={Bell} title="No notifications yet" description="Add a channel to hear about finished runs.">
-			{#snippet action()}<Button size="sm" onclick={openCreate}><Plus />Add notification</Button>{/snippet}
-		</EmptyState>
+		<EmptyState
+			compact
+			icon={Bell}
+			title="No channels yet"
+			description="Add Slack, Discord, Teams, Telegram, ntfy or a webhook to hear about finished runs."
+		/>
 	{:else}
-		<div class="space-y-3">
-			{#each subs as sub (sub.id)}
-				{@const kindInfo = webhookKind(sub.kind)}
-				<Card.Root class="gap-0 py-0">
-					<div class="flex flex-wrap items-start gap-3 p-4">
-						<Switch
-							checked={sub.enabled}
-							label="{sub.enabled ? 'Disable' : 'Enable'} {sub.name}"
-							onCheckedChange={(v) => setEnabled(sub, v)}
-							class="mt-0.5"
-						/>
-						<div class="min-w-0 flex-1 space-y-1">
-							<p class="flex flex-wrap items-center gap-2">
-								<span class="font-medium">{sub.name}</span>
-								<Badge variant="outline">{kindInfo?.label ?? sub.kind}</Badge>
-								{#if !sub.enabled}
-									<StatusBadge status="disabled" tone="neutral" />
-								{:else if sub.last_error && (!sub.last_success_at || (sub.last_error_at ?? '') > sub.last_success_at)}
-									<StatusBadge status="failing" tone="danger" />
-								{:else if sub.last_success_at}
-									<StatusBadge status="ok" tone="success" label="delivering" />
-								{/if}
-							</p>
-							<p class="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-								{#if sub.kind === 'telegram'}
-									<span>chat <span class="font-mono">{sub.telegram_chat_id}</span></span>
-								{:else if sub.url_hint}
-									<span class="font-mono">{sub.url_hint}</span>
-								{/if}
-								{#if sub.has_secret}<span>secret <span class="font-mono">{sub.secret_hint}</span></span>{/if}
-								<span>last success {formatAgo(sub.last_success_at)}</span>
-							</p>
-							{#if sub.last_error}
-								<p class="truncate text-xs text-danger-fg" title={sub.last_error}>
-									{formatAgo(sub.last_error_at)}: {sub.last_error}
-								</p>
+		{#each subs as sub (sub.id)}
+			{@const kindInfo = webhookKind(sub.kind)}
+			<div>
+				<div class="settings-row flex items-start gap-3.5">
+					<Switch
+						checked={sub.enabled}
+						label="{sub.enabled ? 'Disable' : 'Enable'} {sub.name}"
+						onCheckedChange={(v) => setEnabled(sub, v)}
+						class="mt-0.5"
+					/>
+					<div class="min-w-0 flex-1 space-y-1">
+						<p class="flex flex-wrap items-center gap-2 text-sm">
+							<span class="font-medium">{sub.name}</span>
+							<span class="text-xs text-muted-foreground">{kindInfo?.label ?? sub.kind}</span>
+							{#if !sub.enabled}
+								<StatusBadge status="disabled" tone="neutral" />
+							{:else if sub.last_error && (!sub.last_success_at || (sub.last_error_at ?? '') > sub.last_success_at)}
+								<StatusBadge status="failing" tone="danger" />
+							{:else if sub.last_success_at}
+								<StatusBadge status="ok" tone="success" label="delivering" />
 							{/if}
-							<p class="flex flex-wrap gap-1 pt-0.5">
-								{#if sub.events.length === 0}
-									<span class="text-xs text-warning-fg">No events selected: only tests are sent.</span>
-								{:else}
-									{#each sub.events as ev (ev)}<code class="mono-tag">{ev}</code>{/each}
-								{/if}
-								{#if sub.include_experiment_jobs}<code class="mono-tag">+ experiment jobs</code>{/if}
+						</p>
+						<p class="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+							{#if sub.kind === 'telegram'}
+								<span>chat <span class="font-mono">{sub.telegram_chat_id}</span></span>
+								<span aria-hidden="true">·</span>
+							{:else if sub.url_hint}
+								<span class="font-mono">{sub.url_hint}</span>
+								<span aria-hidden="true">·</span>
+							{/if}
+							{#if sub.has_secret}<span>secret <span class="font-mono">{sub.secret_hint}</span></span><span aria-hidden="true">·</span>{/if}
+							<span>last success {formatAgo(sub.last_success_at)}</span>
+						</p>
+						{#if sub.last_error}
+							<p class="truncate text-xs text-danger-fg" title={sub.last_error}>
+								{formatAgo(sub.last_error_at)}: {sub.last_error}
 							</p>
-						</div>
-						<div class="flex items-center gap-0.5">
-							<Button variant="ghost" size="sm" onclick={() => sendTest(sub)} disabled={testingId === sub.id}>
-								{#if testingId === sub.id}<LoaderCircle class="animate-spin" />{:else}<Send />{/if}Test
-							</Button>
-							<Button
-								variant="ghost"
-								size="sm"
-								class="size-8 p-0"
-								aria-expanded={expandedId === sub.id}
-								aria-label="Recent deliveries of {sub.name}"
-								title="Recent deliveries"
-								onclick={() => (expandedId = expandedId === sub.id ? null : sub.id)}
-							>
-								<History />
-							</Button>
-							<Button variant="ghost" size="sm" class="size-8 p-0" aria-label="Edit {sub.name}" title="Edit" onclick={() => openEdit(sub)}>
-								<Pencil />
-							</Button>
-							<Button
-								variant="ghost"
-								size="sm"
-								class="size-8 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-danger-fg"
-								aria-label="Delete {sub.name}"
-								title="Delete"
-								onclick={() => askDelete(sub)}
-							>
-								<Trash2 />
-							</Button>
-						</div>
+						{/if}
+						<p class="flex flex-wrap gap-1 pt-0.5">
+							{#if sub.events.length === 0}
+								<span class="text-xs text-warning-fg">No events selected: only tests are sent.</span>
+							{:else}
+								{#each sub.events as ev (ev)}<code class="mono-tag">{ev}</code>{/each}
+							{/if}
+							{#if sub.include_experiment_jobs}<code class="mono-tag">+ experiment jobs</code>{/if}
+						</p>
 					</div>
-					{#if expandedId === sub.id}
-						<div class="border-t border-border p-4">
-							<p class="section-label mb-2">Recent deliveries</p>
-							<WebhookDeliveries subscriptionId={sub.id} refreshKey={deliveriesKey} />
-						</div>
-					{/if}
-				</Card.Root>
-			{/each}
-		</div>
-		{#if subs.length >= MAX_WEBHOOKS}
-			<p class="text-xs text-muted-foreground">At most {MAX_WEBHOOKS} notifications per account.</p>
-		{/if}
+					<div class="flex shrink-0 items-center gap-0.5">
+						<Button variant="ghost" size="sm" onclick={() => sendTest(sub)} disabled={testingId === sub.id}>
+							{#if testingId === sub.id}<LoaderCircle class="animate-spin" />{:else}<Send />{/if}Test
+						</Button>
+						<Button
+							variant="ghost"
+							size="sm"
+							class="size-8 p-0"
+							aria-expanded={expandedId === sub.id}
+							aria-label="Recent deliveries of {sub.name}"
+							title="Recent deliveries"
+							onclick={() => (expandedId = expandedId === sub.id ? null : sub.id)}
+						>
+							<History />
+						</Button>
+						<Button variant="ghost" size="sm" class="size-8 p-0" aria-label="Edit {sub.name}" title="Edit" onclick={() => openEdit(sub)}>
+							<Pencil />
+						</Button>
+						<Button
+							variant="ghost"
+							size="sm"
+							class="size-8 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-danger-fg"
+							aria-label="Delete {sub.name}"
+							title="Delete"
+							onclick={() => askDelete(sub)}
+						>
+							<Trash2 />
+						</Button>
+					</div>
+				</div>
+				{#if expandedId === sub.id}
+					<div class="border-t border-border bg-muted/20 px-4 py-3">
+						<p class="mb-2 text-xs font-medium text-muted-foreground">Recent deliveries</p>
+						<WebhookDeliveries subscriptionId={sub.id} refreshKey={deliveriesKey} />
+					</div>
+				{/if}
+			</div>
+		{/each}
 	{/if}
-</div>
+</SettingsBlock>
+{#if subs.length >= MAX_WEBHOOKS}
+	<p class="settings-row text-xs text-muted-foreground">At most {MAX_WEBHOOKS} channels per account.</p>
+{/if}
 
 <WebhookFormDialog bind:open={formOpen} subscription={editing} {eventTypes} onsaved={saved} />
 

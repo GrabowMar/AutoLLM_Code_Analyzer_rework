@@ -93,6 +93,7 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import AutomationSettings from './AutomationSettings.svelte';
+	import ComposerSectionNav, { type ComposerNavSection } from './ComposerSectionNav.svelte';
 	import ExecutionSettings from './ExecutionSettings.svelte';
 	import PlanRail from './PlanRail.svelte';
 	import SelectionSummary from './SelectionSummary.svelte';
@@ -558,6 +559,37 @@
 	let fieldErrors = $state<Record<string, string>>({});
 	let confirmOpen = $state(false);
 
+	// ── section index (rail) ────────────────────────────────────────────
+	const navSections = $derived<ComposerNavSection[]>([
+		{ id: 'composer-basics', step: 1, label: 'Basics', done: checklist[0].done, invalid: !!(fieldErrors.name || fieldErrors.slug) },
+		{ id: 'composer-method', step: 2, label: 'Method' },
+		{ id: 'composer-models', step: 3, label: 'Models', done: checklist[1].done },
+		{ id: 'composer-conditions', step: 4, label: isAgent ? 'Harness presets' : 'Prompt profiles', done: checklist[2].done },
+		{ id: 'composer-apps', step: 5, label: 'Apps', done: checklist[3].done },
+		{
+			id: 'composer-replication',
+			step: 6,
+			label: 'Replication',
+			invalid: repeatsInvalid || seedInvalid || repeats == null || !!(fieldErrors.repeats || fieldErrors.base_seed),
+		},
+		{ id: 'composer-sampling', step: 7, label: 'Sampling & budget', invalid: llmInvalid || (isAgent && budgetInvalid) },
+		{ id: 'composer-ablations', step: 8, label: 'Ablations' },
+		{ id: 'composer-execution', step: 9, label: 'Execution', invalid: executionInvalid },
+		{ id: 'composer-automation', step: 10, label: 'Automation', invalid: scheduleInvalid },
+	]);
+
+	/** The section that clears `blockedReason`, for its link in the Plan. */
+	const blockedHref = $derived.by(() => {
+		if (!name.trim() || !slug) return '#composer-basics';
+		if (modelIds.size === 0) return '#composer-models';
+		if (axisIds.length === 0) return '#composer-conditions';
+		if (appIds.size === 0) return '#composer-apps';
+		if (!stackSlug) return '#composer-method';
+		if (localInvalid) return `#${navSections.find((x) => x.invalid)?.id ?? 'composer-basics'}`;
+		if (needsConsent) return '#composer-models';
+		return '';
+	});
+
 	function finalBody(): ExperimentCreateV2 {
 		return JSON.parse(JSON.stringify(body)) as ExperimentCreateV2;
 	}
@@ -925,6 +957,7 @@
 					bind:invalid={llmInvalid}
 					hideProviderRouting={selectedModels.length > 0 && !anyOpenRouter}
 					localModels={selectedModels.some((m) => isLocal(m))}
+					hint="Blank fields inherit the value shown in grey. What each model actually receives is in the Plan's comparability check."
 				/>
 				{#if isAgent}
 					<div class="space-y-3 border-t border-border/60 pt-4">
@@ -1020,6 +1053,9 @@
 			class="min-w-0 @4xl/composer:sticky @4xl/composer:top-[4.5rem] @4xl/composer:max-h-[calc(100dvh-5.5rem)] @4xl/composer:overflow-y-auto @4xl/composer:overscroll-contain"
 			aria-label="Experiment plan"
 		>
+			<div class="mb-3 hidden @4xl/composer:block">
+				<ComposerSectionNav sections={navSections} />
+			</div>
 			<PlanRail
 				{checklist}
 				ready={designReady}
@@ -1037,6 +1073,7 @@
 				{canLaunch}
 				{canSave}
 				{blockedReason}
+				{blockedHref}
 				{submitting}
 				{submitError}
 				saveLabel={composerMode === 'edit' ? 'Save changes' : 'Save draft'}

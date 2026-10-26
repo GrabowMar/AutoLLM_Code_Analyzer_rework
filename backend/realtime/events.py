@@ -26,7 +26,7 @@ def publish(channel: str, event: dict) -> None:
       - ``generation:<job_id>``
       - ``analysis:<task_id>``
       - ``runtime:<container_id>``
-      - ``dashboard`` (broadcast)
+      - ``capacity`` (broadcast)
     """
     try:
         payload = json.dumps(

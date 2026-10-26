@@ -160,9 +160,9 @@ def test_get_model_comparison_uses_shared_rankings_scoring():
     assert 0 <= row["mss"] <= 1
     assert row["findings"]["critical"] == 2
     assert row["ai_findings"] == {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-    # no lines_of_code in metrics → no empirical measurement, composite == mss
-    assert row["empirical_quality"] is None
-    assert row["composite"] == row["mss"]
+    # LOC comes from the stored code (not metrics.lines_of_code): the analyzed
+    # job has some, so its findings yield an empirical measurement.
+    assert row["empirical_quality"] is not None
     # the same model on /rankings must show the same numbers
     ranking = next(r for r in aggregate_rankings(user=user) if r["model_id"] == model.model_id)
     assert row["mss"] == ranking["mss_score"]
@@ -259,6 +259,21 @@ def test_get_tool_effectiveness_per_analyzer():
     assert by_name["bandit"]["avg_per_scan"] == 5.0
     assert by_name["bandit"]["top_rule"] in {"B105", "B301"}
     assert by_name["eslint"]["findings"] == 4
+
+
+def test_get_tool_effectiveness_top_rule_ignores_other_users():
+    """The top rule per tool is computed from the caller's findings only."""
+    user = UserFactory()
+    other = UserFactory()
+    for owner, rule, count in ((user, "MINE", 1), (other, "THEIRS", 5)):
+        run = AnalysisRunFactory(created_by=owner, status=AnalysisRun.Status.COMPLETED)
+        result = ToolResultFactory(run=run, tool_slug="ruff", category="quality")
+        FindingFactory.create_batch(count, result=result, rule_id=rule)
+
+    tools = {t["name"]: t for t in services.get_tool_effectiveness(user)}
+
+    assert tools["ruff"]["findings"] == 1
+    assert tools["ruff"]["top_rule"] == "MINE"
 
 
 def test_get_top_findings_grouped_by_title():

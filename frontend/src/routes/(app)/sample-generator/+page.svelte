@@ -162,39 +162,31 @@
 	}
 </script>
 
-<div class="space-y-6">
-	<PageHeader
-		title="Sample Generator"
-		description="Compose generation runs, check exactly what will run and what it may cost, then start them."
-	>
+<div class="space-y-4">
+	<PageHeader title="Sample Generator" description={MODES[mode].description}>
 		{#snippet actions()}
 			<Button href="/sample-generator/batches" variant="outline" size="sm"><Layers />Batches</Button>
 			<Button href="/templates" variant="outline" size="sm"><Library />Library</Button>
 		{/snippet}
-		<p class="max-w-3xl text-xs text-muted-foreground">
-			<span class="font-medium text-foreground">App spec</span>: the task, graded by hidden tests ·
-			<span class="font-medium text-foreground">Harness</span>: the agent program that drives the model ·
-			<span class="font-medium text-foreground">Preset</span>: saved, versioned harness, sampling or budget settings ·
-			<span class="font-medium text-foreground">Stack</span>: the app skeleton
-		</p>
-	</PageHeader>
-
-	<div class="space-y-3">
-		<div class="flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
+		{#snippet help()}
+			<p class="mb-2 font-medium">Terms used on this page</p>
+			<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted-foreground">
+				<dt class="font-medium text-foreground">App spec</dt><dd>the task, graded by hidden tests</dd>
+				<dt class="font-medium text-foreground">Harness</dt><dd>the agent program that drives the model</dd>
+				<dt class="font-medium text-foreground">Preset</dt><dd>saved, versioned harness, sampling or budget settings</dd>
+				<dt class="font-medium text-foreground">Stack</dt><dd>the app skeleton</dd>
+			</dl>
+		{/snippet}
+		{#snippet nav()}
 			<Segmented
 				aria-label="Generation mode"
 				value={mode}
 				items={modeItems}
-				class="self-start"
 				onValueChange={(v) => switchMode(v as ComposerMode)}
 			/>
-			<p class="min-w-0 text-xs text-muted-foreground">
-				{#if mode === 'agent' && !wide.current}<span class="font-medium text-success-fg">Recommended.</span>{/if}
-				{MODES[mode].description}
-			</p>
-		</div>
-		<OpenRouterKeyBanner bind:keyState />
-	</div>
+			<OpenRouterKeyBanner bind:keyState class="ml-auto py-1.5" />
+		{/snippet}
+	</PageHeader>
 
 	{#if showMessages && prepared}
 		<div class="space-y-2">

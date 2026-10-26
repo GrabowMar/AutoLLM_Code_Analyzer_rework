@@ -13,7 +13,6 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import * as Card from '$lib/components/ui/card';
 	import {
 		cancelGenerationBatch,
@@ -145,15 +144,15 @@
 	const kpis = $derived.by(() => {
 		if (!batch) return [];
 		return [
-			{ label: 'Runs', value: String(batch.total_jobs) },
-			{ label: 'Finished', value: `${finishedCount(counts)}/${batch.total_jobs}` },
+			{ label: 'finished', value: `${finishedCount(counts)}/${batch.total_jobs}`, title: `${batch.total_jobs} runs in this batch` },
 			{
-				label: 'Mean pass rate',
-				value: batch.graded ? formatPassRate(batch.mean_pass_rate) : 'Not graded',
+				label: 'mean pass',
+				value: batch.graded ? formatPassRate(batch.mean_pass_rate) : '—',
+				title: batch.graded ? 'Mean pass rate (hidden conformance suite per app spec)' : 'Not graded (free-form task)',
 			},
-			{ label: 'Cost', value: formatUsd(batch.cost_usd) },
-			{ label: 'Trials', value: batch.trials != null ? String(batch.trials) : '—' },
-			{ label: 'Base seed', value: batch.base_seed != null ? String(batch.base_seed) : '—', mono: true },
+			{ label: 'cost', value: formatUsd(batch.cost_usd) },
+			{ label: 'trials', value: batch.trials != null ? String(batch.trials) : '—' },
+			{ label: 'seed', value: batch.base_seed != null ? String(batch.base_seed) : '—', title: 'Base seed' },
 		];
 	});
 
@@ -174,12 +173,12 @@
 </script>
 
 {#if loading}
-	<div class="space-y-6">
+	<div class="space-y-4">
 		<PageHeader title="Batch" back={{ href: '/sample-generator/batches', label: 'Batches' }} />
 		<LoadingState label="loading batch" />
 	</div>
 {:else if notFound}
-	<div class="space-y-6">
+	<div class="space-y-4">
 		<PageHeader title="Batch not found" back={{ href: '/sample-generator/batches', label: 'Batches' }} />
 		<EmptyState icon={SearchX} title="Batch not found" description="It may have been deleted, or the link is wrong.">
 			{#snippet action()}
@@ -188,12 +187,12 @@
 		</EmptyState>
 	</div>
 {:else if !batch}
-	<div class="space-y-6">
+	<div class="space-y-4">
 		<PageHeader title="Batch" back={{ href: '/sample-generator/batches', label: 'Batches' }} />
 		<ErrorAlert message={error || 'Could not load this batch.'} onretry={() => load(batchId)} />
 	</div>
 {:else}
-	<div class="space-y-6">
+	<div class="space-y-4">
 		<PageHeader
 			title={batch.name || `Batch ${shortId(batch.id)}`}
 			documentTitle="Batch {shortId(batch.id)}"
@@ -239,50 +238,51 @@
 					</Button>
 				{/if}
 			{/snippet}
-			<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-				<button
-					type="button"
-					class="inline-flex cursor-pointer items-center gap-1 font-mono hover:text-foreground transition-colors"
-					onclick={() => copyText(batch!.id, 'Copied batch ID')}
-					title="Copy batch ID"
-				>
-					{shortId(batch.id)}<Copy class="h-3 w-3" />
-				</button>
-				<span title={formatDateTime(batch.created_at)}>Created {formatDateTime(batch.created_at)}</span>
-				{#if batchDesign(batch)}<span>{batchDesign(batch)}</span>{/if}
-			</div>
-		</PageHeader>
-
-		{#if error}
-			<ErrorAlert message={error} onretry={() => load(batchId)} />
-		{/if}
-
-		{#if batch.experiment}
-			<Alert>
-				<GitCompareArrows />
-				<AlertDescription>
-					Part of experiment
-					<a href="/experiments/{batch.experiment.id}" class="font-medium text-success-fg hover:underline">{batch.experiment.name}</a>.
-					Columns are the experiment's conditions; launch further runs from the experiment page.
-				</AlertDescription>
-			</Alert>
-		{/if}
-
-		<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-			{#each kpis as kpi (kpi.label)}
-				<div class="kpi-card min-w-0">
-					<span class="kpi-label">{kpi.label}</span>
-					<span class="kpi-value truncate {kpi.mono ? 'font-mono text-lg' : 'text-xl'}" title={kpi.value}>{kpi.value}</span>
+			<div class="space-y-1.5">
+				<div class="header-stats gap-x-3">
+					<button
+						type="button"
+						class="inline-flex cursor-pointer items-center gap-1 font-mono hover:text-foreground transition-colors"
+						onclick={() => copyText(batch!.id, 'Copied batch ID')}
+						title="Copy batch ID"
+					>
+						{shortId(batch.id)}<Copy class="h-3 w-3" />
+					</button>
+					<span title={formatDateTime(batch.created_at)}>Created {formatDateTime(batch.created_at)}</span>
+					{#if batchDesign(batch)}<span>{batchDesign(batch)}</span>{/if}
+					<span class="header-stat min-w-0" title="Stack">stack <b class="min-w-0 truncate text-xs">{batch.stack_slug ?? '—'}</b></span>
+					{#if batch.mode === 'agent'}
+						<span class="inline-flex flex-wrap items-center gap-1">
+							{batch.harness_presets?.length ? 'presets' : 'harnesses'}
+							{#each batch.harness_presets ?? [] as preset (preset.id)}
+								<Badge variant="outline" class="font-mono">{presetRefLabel(preset)}</Badge>
+							{:else}
+								{#each batch.harnesses ?? [] as harness (harness)}
+									<Badge variant="outline" class="font-mono">{harness}</Badge>
+								{:else}
+									<span>—</span>
+								{/each}
+							{/each}
+						</span>
+					{/if}
+					{#if batch.experiment}
+						<span title="Columns are the experiment's conditions; launch further runs from the experiment page.">
+							part of <a href="/experiments/{batch.experiment.id}" class="font-medium text-success-fg hover:underline">{batch.experiment.name}</a>
+						</span>
+					{/if}
 				</div>
-			{/each}
-		</div>
-
-		<Card.Root>
-			<Card.Header class="pb-2">
-				<div class="flex flex-wrap items-center justify-between gap-2">
-					<Card.Title class="text-sm">Progress</Card.Title>
+				<div class="header-stats">
+					{#each kpis as kpi (kpi.label)}
+						<span class="header-stat" title={kpi.title}><b>{kpi.value}</b>{kpi.label}</span>
+					{/each}
+					{#if live && inFlight > 0}
+						<span
+							class="header-stat"
+							title="Pending runs wait for the executor (a free sandbox slot or endpoint capacity); finished runs wait for an evaluation slot. Runs execute trial by trial in a seeded order."
+						><b>{inFlight}</b>in flight</span>
+					{/if}
 					{#if updatedAt}
-						<span class="text-[11px] text-muted-foreground" aria-live="polite">
+						<span class="ml-auto text-[11px]" aria-live="polite">
 							{#if refreshError}
 								<span class="text-warning-fg">Couldn't refresh: {refreshError}</span>
 							{:else}
@@ -291,46 +291,13 @@
 						</span>
 					{/if}
 				</div>
-			</Card.Header>
-			<Card.Content class="space-y-4">
 				<BatchProgress {counts} total={batch.total_jobs} legend />
-				{#if live && inFlight > 0}
-					<p class="text-[11px] text-muted-foreground">
-						{inFlight} {inFlight === 1 ? 'run is' : 'runs are'} still pending, running or awaiting evaluation. Pending runs wait
-						for the executor (a free sandbox slot or endpoint capacity); finished runs wait for an evaluation slot. Runs
-						execute trial by trial in a seeded order.
-					</p>
-				{/if}
-				<dl class="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-					<div class="min-w-0">
-						<dt class="section-label">Stack</dt>
-						<dd class="truncate font-mono text-xs">{batch.stack_slug ?? '—'}</dd>
-					</div>
-					{#if batch.mode === 'agent'}
-						<div class="min-w-0 sm:col-span-2">
-							<dt class="section-label">{batch.harness_presets?.length ? 'Harness presets' : 'Harnesses'}</dt>
-							<dd class="flex flex-wrap gap-1 pt-0.5">
-								{#each batch.harness_presets ?? [] as preset (preset.id)}
-									<Badge variant="outline" class="font-mono">{presetRefLabel(preset)}</Badge>
-								{:else}
-									{#each batch.harnesses ?? [] as harness (harness)}
-										<Badge variant="outline" class="font-mono">{harness}</Badge>
-									{:else}
-										<span class="text-muted-foreground">—</span>
-									{/each}
-								{/each}
-							</dd>
-						</div>
-					{/if}
-					<div class="min-w-0">
-						<dt class="section-label">Grading</dt>
-						<dd class="text-xs">
-							{batch.graded ? 'Hidden conformance suite per app spec' : 'Not graded (free-form task)'}
-						</dd>
-					</div>
-				</dl>
-			</Card.Content>
-		</Card.Root>
+			</div>
+		</PageHeader>
+
+		{#if error}
+			<ErrorAlert message={error} onretry={() => load(batchId)} />
+		{/if}
 
 		<Card.Root>
 			<Card.Header class="pb-2">

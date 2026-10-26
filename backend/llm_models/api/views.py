@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 from io import StringIO
 
+from django.db import transaction
 from django.db.models import Avg
 from django.db.models import Q
 from django.http import HttpResponse
@@ -30,6 +32,10 @@ from backend.llm_models.services import import_models_from_payload
 from backend.llm_models.services import normalize_model_identifier
 from backend.llm_models.services import refresh_model_from_openrouter
 from backend.llm_models.services import sync_models_from_openrouter
+from backend.llm_models.services.enrichment import fetch_provider_endpoints
+from backend.llm_models.services.insights import model_insights
+
+logger = logging.getLogger(__name__)
 
 router = Router(tags=["models"])
 
@@ -336,7 +342,19 @@ def sync_models(request):
     api_key = _resolve_openrouter_catalog_key(request)
     if not isinstance(api_key, str):
         return api_key
-    return Status(200, sync_models_from_openrouter(api_key))
+    result = sync_models_from_openrouter(api_key)
+    transaction.on_commit(_queue_hf_enrichment)
+    return Status(200, result)
+
+
+def _queue_hf_enrichment() -> None:
+    """Hugging Face lookups take minutes for the whole catalog: run them on a worker."""
+    from backend.llm_models.tasks import enrich_catalog_task
+
+    try:
+        enrich_catalog_task.delay()
+    except Exception:  # noqa: BLE001 — any broker/kombu error; the sync already succeeded
+        logger.warning("Could not queue catalog enrichment", exc_info=True)
 
 
 @router.post("/import/", response=ModelImportResultSchema)
@@ -406,7 +424,12 @@ def get_model(request, slug: str):
 
 @router.post("/detail/{slug}/refresh/", response={200: LLMModelSchema, 403: dict})
 def refresh_model(request, slug: str):
-    """Refresh a single model from the OpenRouter model catalog."""
+    """Refresh a single model from the OpenRouter model catalog (staff only).
+
+    Catalog rows are shared by every user, so rewriting one is gated like
+    sync/import/delete.
+    """
+    _require_staff(request)
     model = _get_model_by_identifier(request, slug)
     if model.endpoint_id is not None and not model.endpoint.is_system:
         raise HttpError(400, "Local models are refreshed from their endpoint (Endpoints page).")
@@ -430,13 +453,26 @@ def delete_model(request, slug: str):
 
 @router.get("/detail/{slug}/related/", response=list[LLMModelListSchema])
 def get_related_models(request, slug: str, limit: int = Query(10, ge=1, le=20)):
-    """Get models from the same provider, excluding the current model."""
+    """Get models from the same provider and source (catalog or local), excluding the current model."""
     model = _get_model_by_identifier(request, slug)
-    related = (
-        _base_queryset(request, include_unavailable=False)
-        .filter(provider=model.provider)
-        .exclude(pk=model.pk)
-        .order_by("-cost_efficiency", "model_name")[:limit]
-    )
+    qs = _base_queryset(request, include_unavailable=False).filter(provider=model.provider).exclude(pk=model.pk)
+    qs = _apply_endpoint_filter(qs, "local" if model.is_local else "openrouter")
+    related = qs.order_by("-cost_efficiency", "model_name")[:limit]
     online: dict[int, bool] = {}
     return [LLMModelListSchema.from_model(m, online) for m in related]
+
+
+@router.get("/detail/{slug}/insights/", response=dict)
+def get_model_insights(request, slug: str):
+    """What this platform measured for the model (caller's jobs) and its place in the catalog."""
+    model = _get_model_by_identifier(request, slug)
+    return model_insights(model, request.auth)
+
+
+@router.get("/detail/{slug}/endpoints/", response=dict)
+def get_model_endpoints(request, slug: str, refresh: bool = Query(False)):  # noqa: FBT003
+    """Providers serving the model on OpenRouter (live price, uptime, latency; cached 10 min)."""
+    model = _get_model_by_identifier(request, slug)
+    if model.endpoint_id is not None and not model.endpoint.is_system:
+        return {"available": False, "fetched_at": None, "endpoints": []}
+    return fetch_provider_endpoints(model, use_cache=not refresh)

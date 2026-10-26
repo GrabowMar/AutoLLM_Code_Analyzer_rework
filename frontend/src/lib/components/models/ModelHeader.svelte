@@ -10,8 +10,9 @@
 	import Download from '@lucide/svelte/icons/download';
 	import ProviderIcon from '$lib/components/ProviderIcon.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import type { Snippet } from 'svelte';
 	import type { LLMModelDetail } from '$lib/api/client';
-	import { formatPrice, formatTokens, copyToClipboard } from './helpers';
+	import { formatPrice, formatTokens, copyToClipboard, getCaps, getHuggingFace, getModelsDev, isoDay, fmtParams } from './helpers';
 	import { shortModelName, modelNamePrefix } from '$lib/components/table';
 
 	interface Props {
@@ -20,10 +21,13 @@
 		efficiency: { grade: string; color: string };
 		refreshing: boolean;
 		applicationCount?: number;
-		onRefresh: () => void;
+		/** Staff-only metadata refresh; the button is hidden when omitted. */
+		onRefresh?: () => void;
+		/** Section tabs for the header's nav strip. */
+		nav?: Snippet;
 	}
 
-	let { model, slug, efficiency, refreshing, applicationCount, onRefresh }: Props = $props();
+	let { model, slug, efficiency, refreshing, applicationCount, onRefresh, nav: navSnippet }: Props = $props();
 
 	function exportJson() {
 		const blob = new Blob([JSON.stringify(model, null, 2)], { type: 'application/json' });
@@ -40,27 +44,37 @@
 	const lastUpdated = $derived(model.updated_at ? new Date(model.updated_at).toISOString().slice(0, 10) : null);
 	const providerLabel = $derived(modelNamePrefix(model.model_name) || model.provider);
 
-	const kpis = $derived<{ label: string; value: string | number; sub?: string; title?: string; class?: string }[]>([
-		{ label: 'Applications', value: applicationCount ?? '—', sub: 'generated here' },
-		{ label: 'Context', value: model.context_window_display, sub: 'tokens in' },
-		{ label: 'Max output', value: model.max_output_tokens ? formatTokens(model.max_output_tokens) : '—', sub: 'tokens out' },
-		{
-			label: 'Price $/1M',
-			value: model.is_free ? 'Free' : `${formatPrice(model.input_price_per_million)} / ${formatPrice(model.output_price_per_million)}`,
-			sub: model.is_free ? 'no token cost' : 'input / output',
-			class: model.is_free ? 'text-success-fg' : '',
-		},
-		{
-			label: 'Value',
-			value: efficiency.grade,
-			sub: `cost efficiency ${(model.cost_efficiency * 100).toFixed(0)}/100`,
-			title: 'Capability per dollar, A+ best',
-			class: efficiency.color,
-		},
-	]);
+	const md = $derived(getModelsDev(model));
+	const hf = $derived(getHuggingFace(model));
+	const released = $derived(md?.release_date || isoDay(getCaps(model).created));
+	const knowledge = $derived(md?.knowledge || isoDay(getCaps(model).knowledge_cutoff));
+
+	interface HeaderStat {
+		label: string;
+		value: string | number;
+		title?: string;
+	}
+
+	const stats = $derived(
+		(
+		[
+			{ label: 'context', value: model.context_window_display },
+			model.max_output_tokens ? { label: 'max out', value: formatTokens(model.max_output_tokens) } : null,
+			{
+				label: model.is_free ? 'no token cost' : '$/1M in · out',
+				value: model.is_free ? 'Free' : `${formatPrice(model.input_price_per_million)} · ${formatPrice(model.output_price_per_million)}`,
+			},
+			hf?.parameters ? { label: 'params', value: fmtParams(hf.parameters) } : null,
+			released ? { label: 'released', value: released } : null,
+			knowledge ? { label: 'knowledge', value: knowledge } : null,
+			{ label: 'value', value: efficiency.grade, title: `Cost efficiency ${(model.cost_efficiency * 100).toFixed(0)}/100 — context per dollar, A+ best` },
+			{ label: applicationCount === 1 ? 'app here' : 'apps here', value: applicationCount ?? '—' },
+		] as (HeaderStat | null)[]
+		).filter((s): s is HeaderStat => s !== null)
+	);
 </script>
 
-<PageHeader title={shortModelName(model.model_name)} documentTitle={model.model_name} back={{ href: '/models', label: 'Models' }}>
+<PageHeader title={shortModelName(model.model_name)} documentTitle={model.model_name} back={{ href: '/models', label: 'Models' }} nav={navSnippet}>
 	{#snippet meta()}
 		{#if model.is_free}
 			<Badge variant="outline" class="border-success/30 bg-success/10 text-xs text-success-fg">
@@ -89,6 +103,11 @@
 			<span>metadata from <time class="font-mono" datetime={model.updated_at}>{lastUpdated}</time></span>
 		{/if}
 	</div>
+	<p class="header-stats mt-1.5">
+		{#each stats as s (s.label)}
+			<span class="header-stat" title={s.title}><b>{s.value}</b> {s.label}</span>
+		{/each}
+	</p>
 	{#snippet actions()}
 		<div class="flex items-center gap-0.5">
 			<Button variant="ghost" size="sm" class="size-8 p-0" href="https://openrouter.ai/models/{model.model_id}" target="_blank" rel="noopener noreferrer" title="View on OpenRouter" aria-label="View on OpenRouter">
@@ -97,9 +116,11 @@
 			<Button variant="ghost" size="sm" class="size-8 p-0" onclick={exportJson} title="Export model as JSON" aria-label="Export model as JSON">
 				<Download />
 			</Button>
-			<Button variant="ghost" size="sm" class="size-8 p-0" onclick={onRefresh} title="Refresh metadata from OpenRouter" aria-label="Refresh metadata from OpenRouter" disabled={refreshing}>
-				<RefreshCw class={refreshing ? 'animate-spin' : ''} />
-			</Button>
+			{#if onRefresh}
+				<Button variant="ghost" size="sm" class="size-8 p-0" onclick={onRefresh} title="Refresh metadata from OpenRouter" aria-label="Refresh metadata from OpenRouter" disabled={refreshing}>
+					<RefreshCw class={refreshing ? 'animate-spin' : ''} />
+				</Button>
+			{/if}
 		</div>
 		<Button variant="outline" size="sm" href="/models/compare?models={slug}" title="Compare with other models">
 			<GitCompareArrows class="h-3.5 w-3.5" />Compare
@@ -109,14 +130,3 @@
 		</Button>
 	{/snippet}
 </PageHeader>
-
-<!-- KPI Row -->
-<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-	{#each kpis as kpi (kpi.label)}
-		<div class="kpi-card" title={kpi.title}>
-			<span class="kpi-label">{kpi.label}</span>
-			<span class="font-mono text-xl font-medium tabular-nums {kpi.class ?? ''}">{kpi.value}</span>
-			{#if kpi.sub}<span class="text-[11px] text-muted-foreground">{kpi.sub}</span>{/if}
-		</div>
-	{/each}
-</div>

@@ -1,0 +1,44 @@
+slug: nuclei
+name: Nuclei
+description: >-
+  Template-based web scanner from ProjectDiscovery. Probes the running app with
+  community templates for misconfigurations, exposed files and panels, missing
+  security headers, CORS issues and common injection bugs. Requires the app's
+  container to be running.
+category: security
+kind: container
+target_language: any
+analysis_mode: dynamic
+technologies: [http, rest-api]
+icon: scan-search
+version: "3.11"
+docs_url: https://docs.projectdiscovery.io/tools/nuclei/overview
+# Templates are fetched at install time; reinstall/update refreshes them.
+install_cmd: >-
+  set -e;
+  mkdir -p /home/analyzer/.local/bin && cd /tmp;
+  curl -sSfL -o nuclei.zip https://github.com/projectdiscovery/nuclei/releases/download/v3.11.1/nuclei_3.11.1_linux_amd64.zip;
+  echo "ea63d4ae232808cd7c6bc00d0142428e231fab59dae01042246097d195835ab6  nuclei.zip" | sha256sum -c -;
+  python3 -c "import zipfile; zipfile.ZipFile('nuclei.zip').extract('nuclei', '/home/analyzer/.local/bin')";
+  chmod +x /home/analyzer/.local/bin/nuclei && rm -f nuclei.zip;
+  nuclei -update-templates -no-color 2>&1 | tail -3;
+  test -d /home/analyzer/nuclei-templates
+verify_cmd: "nuclei -version 2>&1 | grep -o 'Engine Version: v[0-9.]*'"
+uninstall_cmd: "rm -rf /home/analyzer/.local/bin/nuclei /home/analyzer/nuclei-templates /home/analyzer/.config/nuclei /home/analyzer/.cache/nuclei"
+# Intrusive / DoS / fuzzing templates are always excluded.
+run_cmd: >-
+  nuclei -u {url} -tags {config:tags} -etags dos,fuzz,intrusive
+  -jsonl -omit-raw -silent -duc -no-color -rate-limit 50 -timeout 5 2>/dev/null
+parser_key: nuclei
+run_timeout: 900
+install_timeout: 600
+display_order: 6
+config_schema:
+  - name: tags
+    type: string
+    label: Template tags
+    description: Comma-separated template tags to run (fewer tags = faster scan).
+    default: "misconfig,exposure,tech,headers,xss,sqli,lfi,redirect,cors"
+    placeholder: "misconfig,exposure,xss"
+default_config:
+  tags: "misconfig,exposure,tech,headers,xss,sqli,lfi,redirect,cors"
