@@ -46,15 +46,32 @@ class Command(BaseCommand):
         parser.add_argument("--out", required=True, help="Output directory (created if missing)")
         parser.add_argument("--experiment", default=None, help="Experiment id to scope to")
         parser.add_argument("--batch", default=None, help="Generation batch id to scope to")
-        parser.add_argument("--include-ai", action="store_true", help="Count AI-reviewer findings too")
-        parser.add_argument("--line-tolerance", type=int, default=2, help="Line distance for cross-tool merges")
+        parser.add_argument(
+            "--include-ai",
+            action="store_true",
+            help="Also write AI consensus issues (ai_issue_clusters.csv); never counted as static issues",
+        )
+        parser.add_argument(
+            "--line-tolerance",
+            type=int,
+            default=2,
+            help="Kept for compatibility: issues are the analysis engine's stored grouping",
+        )
+        parser.add_argument("--plan-hash", default=None, help="Analysis plan to read (default: auto-selected)")
 
     def handle(self, *args, **opts):
         out = Path(opts["out"])
         out.mkdir(parents=True, exist_ok=True)
         jobs = study_jobs(experiment_id=opts["experiment"], batch_id=opts["batch"])
 
-        issues = issue_breakdowns(jobs, include_ai=opts["include_ai"], line_tolerance=opts["line_tolerance"])
+        issues = issue_breakdowns(
+            jobs,
+            include_ai=opts["include_ai"],
+            line_tolerance=opts["line_tolerance"],
+            plan_hash=opts["plan_hash"],
+        )
+        if opts["include_ai"]:
+            _write_csv(out / "ai_issue_clusters.csv", issues["ai_issues"])
         for key, name in (
             ("per_app", "issues_per_app"),
             ("by_model", "issues_by_model"),
@@ -78,12 +95,18 @@ class Command(BaseCommand):
             [{**t, "source": "catalog"} for t in inventory["analyzers"]]
             + [{**e, "source": "platform", "is_enabled": True} for e in inventory["evaluators"]],
         )
-        accounting = run_accounting(jobs)
+        # The runs the issue tables read (canonical, one plan), not each job's latest run.
+        accounting = run_accounting(jobs, run_ids=[a["run_id"] for a in issues["per_app"]])
         _write_csv(out / "tool_executions.csv", accounting["tools"]["latest"])
 
         summary = {
             "scope": {"experiment": opts["experiment"], "batch": opts["batch"]},
-            "issues": {"params": issues["params"], "totals": issues["totals"]},
+            "issues": {
+                "params": issues["params"],
+                "plan_hash": issues["plan_hash"],
+                "coverage": issues["coverage"],
+                "totals": issues["totals"],
+            },
             "healing": {
                 k: healing[k]
                 for k in ("baseline", "modes", "not_applicable", "totals", "added_requirements", "patches")
@@ -96,7 +119,8 @@ class Command(BaseCommand):
         t = issues["totals"]
         self.stdout.write(
             self.style.SUCCESS(
-                f"{t['apps']} analyzed apps: {t['raw_findings']} raw findings -> {t['unique_issues']} unique issues "
+                f"{t['apps']} measured apps ({t['static_measured_apps']} with static data): "
+                f"{t['raw_findings']} counted findings -> {t['unique_issues']} unique issues "
                 f"({issues['totals']['multi_tool_issues']} reported by >1 tool). "
                 f"Tools: {inventory['counts']['total_enabled']} enabled; "
                 f"executions recorded: {accounting['executions']['total']}. Wrote {out}/",

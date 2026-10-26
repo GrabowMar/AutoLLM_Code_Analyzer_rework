@@ -224,27 +224,53 @@ def test_clear_caches_staff_ok(staff_client):
 
 
 @pytest.mark.django_db
-def test_clear_stuck_analysis_updates_db(staff_client, db):
+def test_clear_stuck_analysis_delegates_to_the_reconciler(staff_client, db):
     client, _ = staff_client
     user = UserFactory()
     old_time = timezone.now() - timedelta(minutes=90)
-
-    task = AnalysisRun.objects.create(
-        name="stuck-task",
-        status=AnalysisRun.Status.RUNNING,
-        created_by=user,
-    )
+    # A long but healthy run must not be failed just for being old.
+    task = AnalysisRun.objects.create(name="long-run", status=AnalysisRun.Status.RUNNING, created_by=user)
     AnalysisRun.objects.filter(pk=task.pk).update(updated_at=old_time)
+    calls = []
 
-    resp = client.post(
-        "/api/system/maintenance/clear-stuck-analysis?older_than_minutes=60",
-    )
+    def reconcile(now=None):
+        calls.append(now)
+        return {
+            "requeued": ["r1"],
+            "failed": ["r2"],
+            "cancelled": [],
+            "redispatched": [],
+            "reaped": {"containers": 2, "volumes": 0, "errors": 5},
+            "reap_error": "",
+        }
+
+    with patch("backend.analysis.engine.executor.reconcile", side_effect=reconcile):
+        resp = client.post("/api/system/maintenance/clear-stuck-analysis?older_than_minutes=60")
+
     assert resp.status_code == HTTPStatus.OK
     data = resp.json()
-    assert data["updated"] >= 1
-
+    assert calls == [None]
+    assert data["updated"] == 4
+    # error counters are not actions taken
+    assert data["details"]["reaped"] == {"containers": 2, "volumes": 0, "errors": 5}
     task.refresh_from_db()
-    assert task.status == AnalysisRun.Status.FAILED
+    assert task.status == AnalysisRun.Status.RUNNING
+
+
+@pytest.mark.django_db
+def test_clear_stuck_reports_endpoint(staff_client):
+    from backend.reports.models import Report
+
+    client, _ = staff_client
+    report = Report.objects.create(report_type="comprehensive", title="x", status=Report.Status.GENERATING)
+    Report.objects.filter(pk=report.pk).update(created_at=timezone.now() - timedelta(hours=3))
+
+    resp = client.post("/api/system/maintenance/clear-stuck-reports?older_than_minutes=60")
+
+    assert resp.status_code == HTTPStatus.OK
+    assert resp.json()["updated"] == 1
+    report.refresh_from_db()
+    assert report.status == Report.Status.FAILED
 
 
 @pytest.mark.django_db
@@ -267,11 +293,159 @@ def test_clear_stuck_generation_updates_db(staff_client, db):
 
 
 @pytest.mark.django_db
-def test_purge_orphan_containers_with_docker_error(staff_client):
-    """When docker is unavailable, purge gracefully handles the error."""
+def test_clear_stuck_generation_spares_executor_jobs_with_a_live_lease():
+    """Executor-owned jobs wait for hours without writing their row: the lease, not age, says they are live."""
+    from backend.system.services.maintenance import clear_stuck_generation_jobs
+
+    now = timezone.now()
+    old = now - timedelta(minutes=90)
+    leased = GenerationJobFactory(status=GenerationJob.Status.RUNNING, mode="agent")
+    waiting = GenerationJobFactory(status=GenerationJob.Status.PENDING, mode="agent")
+    expired = GenerationJobFactory(status=GenerationJob.Status.RUNNING, mode="agent")  # executor died long ago
+    GenerationJob.objects.filter(pk=leased.pk).update(
+        queued_at=old,
+        updated_at=old,
+        lease_owner="exec-1",
+        lease_expires_at=now + timedelta(seconds=60),
+    )
+    GenerationJob.objects.filter(pk=waiting.pk).update(queued_at=old, updated_at=old)
+    GenerationJob.objects.filter(pk=expired.pk).update(
+        queued_at=old,
+        updated_at=old,
+        lease_owner="exec-0",
+        lease_expires_at=old,
+    )
+
+    assert clear_stuck_generation_jobs(60) == 1
+
+    for job in (leased, waiting, expired):
+        job.refresh_from_db()
+    assert leased.status == GenerationJob.Status.RUNNING
+    assert waiting.status == GenerationJob.Status.PENDING
+    assert expired.status == GenerationJob.Status.FAILED
+    assert (expired.lease_owner, expired.lease_expires_at) == ("", None)
+
+
+def _container(cid: str):
+    container = MagicMock()
+    container.id = cid
+    container.short_id = cid[:10]
+    return container
+
+
+@pytest.mark.django_db
+def test_purge_orphan_containers_with_docker_error_changes_nothing(staff_client):
+    """An unreachable daemon says nothing about what exists: abort, do not mark everything removed."""
+    from backend.runtime.models import ContainerInstance
+    from backend.runtime.tests.factories import ContainerInstanceFactory
+
     client, _ = staff_client
-    with patch("docker.from_env", side_effect=Exception("docker unavailable")):
+    instance = ContainerInstanceFactory(status=ContainerInstance.Status.RUNNING, container_id="deadbeef0001")
+    with (
+        patch(
+            "backend.runtime.services.docker_manager.new_client",
+            side_effect=Exception("docker unavailable"),
+        ),
+        patch("backend.analysis.engine.sandbox.reap") as reap,
+        patch("backend.generation.services.agent.sandbox.reap_orphans") as reap_agents,
+    ):
         resp = client.post("/api/system/maintenance/purge-orphan-containers")
+
     assert resp.status_code == HTTPStatus.OK
     data = resp.json()
     assert data["purged"] == 0
+    assert data["details"]["listing_ok"] is False
+    assert "docker listing failed" in data["details"]["errors"][0]
+    reap.assert_not_called()
+    reap_agents.assert_not_called()
+    instance.refresh_from_db()
+    assert instance.status == ContainerInstance.Status.RUNNING
+
+
+@pytest.mark.django_db
+def test_purge_orphan_containers_reaps_analysis_agent_and_legacy_leftovers(staff_client):
+    from backend.analysis.tests.factories import AnalysisRunFactory
+    from backend.runtime.models import ContainerInstance
+    from backend.runtime.tests.factories import ContainerInstanceFactory
+
+    client, _ = staff_client
+    present = ContainerInstanceFactory(status=ContainerInstance.Status.RUNNING, container_id="aaaaaaaaaaaa")
+    gone = ContainerInstanceFactory(status=ContainerInstance.Status.RUNNING, container_id="bbbbbbbbbbbb")
+    workspace_row = ContainerInstanceFactory(
+        status=ContainerInstance.Status.STOPPED,
+        name="analyzer-0123456789",
+        metadata={"kind": "analyzer-workspace"},
+    )
+    live = AnalysisRunFactory(status=AnalysisRun.Status.RUNNING)
+    AnalysisRunFactory(status=AnalysisRun.Status.COMPLETED)
+
+    docker = MagicMock()
+    legacy = _container("cccccccccccc")
+    docker.containers.list.side_effect = lambda all=True, filters=None: (  # noqa: A006
+        [legacy] if filters else [_container("aaaaaaaaaaaa"), legacy]
+    )
+    with (
+        patch("backend.runtime.services.docker_manager.new_client", return_value=docker),
+        patch(
+            "backend.analysis.engine.sandbox.reap",
+            return_value={"containers": 2, "volumes": 1},
+        ) as reap,
+        patch("backend.generation.services.agent.sandbox.reap_orphans", return_value=1) as reap_agents,
+    ):
+        resp = client.post("/api/system/maintenance/purge-orphan-containers")
+
+    data = resp.json()
+    details = data["details"]
+    assert details["listing_ok"] is True
+    assert details["marked_removed"] == 1
+    assert details["agent_reaped"] == 1
+    assert details["analysis_reaped"] == {"containers": 2, "volumes": 1}
+    assert details["legacy_workspaces_removed"] == 1
+    assert data["purged"] == 1 + 1 + 3 + 1
+    # only queued/running runs are live; everything else may be reaped
+    assert reap.call_args.kwargs["live_run_ids"] == {str(live.id)}
+    assert reap.call_args.kwargs["older_than_s"] > 0
+    assert reap_agents.call_args.args == (docker,)
+    legacy.remove.assert_called_once_with(force=True)
+    present.refresh_from_db()
+    gone.refresh_from_db()
+    workspace_row.refresh_from_db()
+    assert present.status == ContainerInstance.Status.RUNNING
+    assert gone.status == ContainerInstance.Status.REMOVED
+    assert workspace_row.status == ContainerInstance.Status.REMOVED
+
+
+@pytest.mark.django_db
+def test_one_failing_reaper_does_not_stop_the_others(staff_client):
+    client, _ = staff_client
+    docker = MagicMock()
+    docker.containers.list.return_value = []
+    with (
+        patch("backend.runtime.services.docker_manager.new_client", return_value=docker),
+        patch("backend.analysis.engine.sandbox.reap", side_effect=NotImplementedError),
+        patch("backend.generation.services.agent.sandbox.reap_orphans", return_value=2),
+    ):
+        data = client.post("/api/system/maintenance/purge-orphan-containers").json()
+
+    assert data["purged"] == 2
+    assert any("analysis reap failed" in e for e in data["details"]["errors"])
+
+
+@pytest.mark.django_db
+def test_app_stats_split_analysis_by_purpose(staff_client):
+    from django.core.cache import cache
+
+    from backend.analysis.tests.factories import AnalysisRunFactory
+
+    cache.clear()
+    client, _ = staff_client
+    AnalysisRunFactory(purpose=AnalysisRun.Purpose.CANARY)
+    AnalysisRunFactory(purpose=AnalysisRun.Purpose.ADHOC)
+    stale = AnalysisRunFactory(status=AnalysisRun.Status.RUNNING)
+    AnalysisRun.objects.filter(pk=stale.pk).update(heartbeat_at=timezone.now() - timedelta(hours=1))
+
+    data = client.get("/api/system/app-stats").json()
+
+    assert data["analysis_tasks"]["by_purpose"] == {"canary": 1, "adhoc": 2}
+    assert data["analysis_tasks"]["stale_heartbeats"] == 1
+    assert "analysis_studies" in data

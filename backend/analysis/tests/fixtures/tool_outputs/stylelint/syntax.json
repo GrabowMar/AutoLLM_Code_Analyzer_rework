@@ -1,0 +1,69 @@
+{
+ "captured_at": "2026-10-26T08:42:52+00:00",
+ "case": "syntax",
+ "config": {},
+ "files": [
+  {
+   "content": ".a {\n  color: red;\n",
+   "kind": "source",
+   "language": "css",
+   "path": "web/broken.css",
+   "sha256": "ebf6e543c0af203c82a444824d12c9fd7cf3fdb4ab3c70aa3566a32def832e3c"
+  },
+  {
+   "content": ".a {\n  color: red;\n}\n",
+   "kind": "source",
+   "language": "css",
+   "path": "web/ok.css",
+   "sha256": "8c9f88a97011307c7f50daa5b3220c7e8e9770583adff6d8f011b4f977f0fe1d"
+  },
+  {
+   "content": "$c: red;\n// a comment\n.a { color: $c; }\n",
+   "kind": "source",
+   "language": "css",
+   "path": "web/theme.scss",
+   "sha256": "d84c9a4001ba6749eb1ccfb2c4861dfe61ef3b89f05fb4640998a90882705dbc"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/stylelint",
+   "--config",
+   "/opt/analyzer/config/stylelint.json",
+   "--config-basedir",
+   "/opt/analyzer",
+   "--ignore-disables",
+   "--formatter",
+   "json",
+   "--output-file",
+   "/out/stylelint.json",
+   "--no-color",
+   "--",
+   "/src/web/broken.css",
+   "/src/web/ok.css"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "stylelint.json"
+  ],
+  "timeout_s": 120
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 2,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "stylelint.json": "[{\"source\":\"/src/web/broken.css\",\"deprecations\":[],\"invalidOptionWarnings\":[],\"parseErrors\":[],\"errored\":true,\"warnings\":[{\"line\":1,\"column\":1,\"rule\":\"CssSyntaxError\",\"severity\":\"error\",\"text\":\"Unclosed block (CssSyntaxError)\"}]},{\"source\":\"/src/web/ok.css\",\"deprecations\":[],\"invalidOptionWarnings\":[],\"parseErrors\":[],\"errored\":false,\"warnings\":[]}]"
+  },
+  "stderr": "[{\"source\":\"/src/web/broken.css\",\"deprecations\":[],\"invalidOptionWarnings\":[],\"parseErrors\":[],\"errored\":true,\"warnings\":[{\"line\":1,\"column\":1,\"rule\":\"CssSyntaxError\",\"severity\":\"error\",\"text\":\"Unclosed block (CssSyntaxError)\"}]},{\"source\":\"/src/web/ok.css\",\"deprecations\":[],\"invalidOptionWarnings\":[],\"parseErrors\":[],\"errored\":false,\"warnings\":[]}]",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.828
+ },
+ "schema": 1,
+ "tool": "stylelint",
+ "tool_version": "17.16.0"
+}

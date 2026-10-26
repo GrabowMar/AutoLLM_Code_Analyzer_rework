@@ -1,0 +1,61 @@
+{
+ "captured_at": "2026-10-26T08:42:07+00:00",
+ "case": "clean",
+ "config": {
+  "check_untyped_defs": true,
+  "python_version": "3.12"
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "a7c575e15cf284770b4b33371be54d864c4fb47b4f784dbf9a27db7beb28de46"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/venvs/mypy/bin/python",
+   "/opt/analyzer/scripts/mypy_prefilter.py",
+   "/out/mypy-files.json",
+   "3.12",
+   "--config-file=/opt/analyzer/config/mypy.ini",
+   "--output=json",
+   "--check-untyped-defs",
+   "--",
+   "/src/clean/backend/app.py",
+   "/src/clean/backend/bookmarks.py"
+  ],
+  "env": {
+   "MYPYPATH": "/src"
+  },
+  "mem_limit": "768m",
+  "report_files": [
+   "mypy-files.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "mypy-files.json": "{\n \"python\": \"3.12.15\",\n \"target\": \"3.12\",\n \"checked\": [\n  \"/src/clean/backend/app.py\",\n  \"/src/clean/backend/bookmarks.py\"\n ],\n \"unparseable\": [],\n \"skipped_imports\": [],\n \"inline_config_neutralized\": [],\n \"runs\": 1\n}\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 1.579
+ },
+ "schema": 1,
+ "tool": "mypy",
+ "tool_version": "2.4.0"
+}

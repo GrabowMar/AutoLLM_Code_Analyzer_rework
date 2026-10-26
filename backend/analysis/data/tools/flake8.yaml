@@ -1,25 +1,59 @@
+# flake8: pyflakes + pycodestyle + mccabe (ported from the v1 tool shop).
 slug: flake8
 name: Flake8
-description: >-
-  The classic Python linter (pyflakes + pycodestyle + mccabe). Catches
-  undefined names, unused imports, syntax errors and style violations.
+kind: static
 category: lint
-kind: container
-target_language: python
-icon: snowflake
-version: "7"
+version: "7.4.1"
+adapter_version: 1
+languages: [python]
+file_kinds: [source, config]
+output_kind: findings
+description: >-
+  The classic Python linter: pyflakes (undefined names, unused imports and
+  variables, invalid comparisons) plus pycodestyle (PEP 8 style) and,
+  when a threshold is set, mccabe complexity. Its pyflakes rules overlap
+  with Ruff's F rules; the dedup stage merges the same defect reported by
+  both into one issue.
 docs_url: https://flake8.pycqa.org/
-install_cmd: "pip install --user --upgrade 'flake8==7.*'"
-verify_cmd: "flake8 --version"
-uninstall_cmd: "pip uninstall -y flake8"
-run_cmd: "flake8 {target} --exit-zero --max-line-length 120 --exclude node_modules,.venv,venv 2>/dev/null"
-parser_key: flake8
-run_timeout: 120
-install_timeout: 180
-display_order: 25
-sample_code: |
-  import os
-
-
-  def greet(name):
-      print("hello " + nme)
+icon: snowflake
+display_order: 45
+default_enabled: false
+default_required: false
+mem_limit: 512m
+timeout_s: 180
+notes: >-
+  Run with --isolated (no setup.cfg / tox.ini / .flake8 of the app) and
+  --disable-noqa (an app's "# noqa" cannot hide a diagnostic). E999 syntax
+  errors and E902 unreadable files are coverage gaps, not findings.
+  pycodestyle's E/W codes are style (not counted by default).
+config_schema:
+  - name: select
+    type: string
+    label: Rule selection
+    description: Comma-separated codes or prefixes to report (--select).
+    default: "E,F,W,C90"
+    pattern: '^[A-Z]+[0-9]*(,[A-Z]+[0-9]*)*$'
+    placeholder: E,F,W,C90
+  - name: extend_ignore
+    type: string
+    label: Ignored rules
+    description: Comma-separated codes or prefixes to ignore on top of flake8's defaults (--extend-ignore).
+    default: ""
+    pattern: '^([A-Z]+[0-9]*(,[A-Z]+[0-9]*)*)?$'
+    placeholder: E501
+  - name: max_line_length
+    type: integer
+    label: Maximum line length
+    description: Lines longer than this are reported as E501 (--max-line-length).
+    default: 120
+    min: 60
+    max: 400
+  - name: max_complexity
+    type: integer
+    label: Complexity threshold
+    description: >-
+      Report functions above this McCabe complexity as C901 (--max-complexity);
+      -1 turns the check off (Lizard and Radon measure complexity).
+    default: -1
+    min: -1
+    max: 200

@@ -78,6 +78,9 @@ line-length = 119
 extend-exclude = [
   "*/migrations/*.py",
   "staticfiles/*",
+  # Deliberately vulnerable self-test fixtures; reformatting them would shift
+  # the line numbers their expectations and golden outputs pin.
+  "backend/analysis/data/canary/*",
 ]
 lint.select = [
   "A",
@@ -202,6 +205,9 @@ ini_options.python_files = [
   "tests.py",
 ]
 ini_options.addopts = "--ds=config.settings.test --reuse-db --import-mode=importlib"
+ini_options.markers = [
+  "docker: needs the apps Docker daemon (skips when it is unreachable)",
+]
 
 [tool.coverage]
 # ==== Coverage ====

@@ -1,24 +1,43 @@
+# ShellCheck: static analysis of shell scripts (ported from the v1 tool shop).
 slug: shellcheck
 name: ShellCheck
-description: >-
-  Static analysis for shell scripts: unquoted variables, word-splitting and
-  globbing bugs, dangerous rm -rf expansions and portability problems.
+kind: static
 category: lint
-kind: container
-target_language: shell
-icon: terminal
-version: "0.10"
+version: "0.11.0"
+adapter_version: 1
+languages: [shell]
+file_kinds: [source, config]
+output_kind: findings
+description: >-
+  Static analysis of sh/bash scripts: unquoted expansions, word-splitting
+  and globbing bugs, unchecked cd, dangerous rm -rf expansions and
+  portability problems.
 docs_url: https://www.shellcheck.net/
-install_cmd: "pip install --user --upgrade 'shellcheck-py==0.10.*'"
-verify_cmd: "shellcheck --version"
-uninstall_cmd: "pip uninstall -y shellcheck-py"
-run_cmd: "find {target} -type f \\( -name '*.sh' -o -name '*.bash' \\) -not -path '*/node_modules/*' -print0 | xargs -0 -r shellcheck -f json 2>/dev/null"
-parser_key: shellcheck
-run_timeout: 60
-install_timeout: 120
-display_order: 95
-sample_filename: start.sh
-sample_code: |
-  #!/bin/sh
-  cp $SRC/* $DEST
-  cd $1
+icon: terminal
+display_order: 190
+default_enabled: false
+default_required: false
+mem_limit: 256m
+timeout_s: 120
+notes: >-
+  --norc (no .shellcheckrc of the app); "# shellcheck disable=" directives
+  are neutralized in staged copies. Scripts that do not parse are coverage
+  gaps. zsh scripts are skipped (not supported by ShellCheck).
+config_schema:
+  - name: severity
+    type: select
+    label: Minimum severity
+    description: Lowest ShellCheck level reported (--severity).
+    default: style
+    options:
+      - {value: error, label: error}
+      - {value: warning, label: warning}
+      - {value: info, label: info}
+      - {value: style, label: style}
+  - name: exclude
+    type: string
+    label: Excluded checks
+    description: Comma-separated SC codes to exclude (--exclude).
+    default: ""
+    pattern: '^(SC[0-9]{4}(,SC[0-9]{4})*)?$'
+    placeholder: SC2086

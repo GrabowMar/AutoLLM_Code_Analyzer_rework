@@ -43,10 +43,12 @@ echo "apps-dind: nested containers blocked from private ranges via $uplink"
 
 # Hourly: drop images no container uses that are over a week old (removed
 # apps; base images are rebuilt on demand). Build cache is capped by
-# daemon.json's builder GC.
+# daemon.json's builder GC. Analyzer images (label llmlab.analysis-image) are
+# kept: a frozen analysis plan pins its image tag, and a pruned old tag could
+# only be rebuilt while its definition is unchanged, so its runs would fail.
 (
 	while sleep 3600; do
-		docker image prune --all --force --filter until=168h >/dev/null
+		docker image prune --all --force --filter until=168h --filter 'label!=llmlab.analysis-image' >/dev/null
 	done
 ) &
 

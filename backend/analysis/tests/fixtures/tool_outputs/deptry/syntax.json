@@ -1,0 +1,68 @@
+{
+ "captured_at": "2026-10-26T08:42:38+00:00",
+ "case": "syntax",
+ "config": {
+  "ignore": ""
+ },
+ "files": [
+  {
+   "content": "def handler(request:\n    return request\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/broken.py",
+   "sha256": "a213cda8977aafa87b15bec45ead948580c06c66386ac6bd1e94e459981963e4"
+  },
+  {
+   "content": "import flask\n\napp = flask.Flask(__name__)\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/ok.py",
+   "sha256": "c8e6d44c98331ab487c29f9e2ec13e6cc6c698a2e8814744e9b0a7ee340f47a0"
+  },
+  {
+   "content": "flask==3.0.3\n",
+   "kind": "manifest",
+   "language": "text",
+   "path": "svc/requirements.txt",
+   "sha256": "9c07c4225d35a82b6fb42f873d02ac383b4ac4e0aac95b536a56deac8610dfad"
+  },
+  {
+   "content": "import yaml\n",
+   "kind": "source",
+   "language": "python",
+   "path": "tools/orphan.py",
+   "sha256": "d22d7204efefc07781701766eb556bda918c85f7e033c3fb0f71e64e266fd8cb"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "sh",
+   "-c",
+   "set -eu; mkdir /tmp/llmlab-src; mkdir /tmp/llmlab-src/p0; cd /src/svc; cp --parents -- broken.py ok.py requirements.txt /tmp/llmlab-src/p0/; cd /tmp/llmlab-src/p0; rc=0; /opt/analyzer/bin/deptry . --config /opt/analyzer/config/deptry.toml --exclude '^$' --requirements-files requirements.txt --requirements-files-dev requirements-dev.txt,dev-requirements.txt --json-output /out/deptry-0.json --no-ansi > /out/deptry-0.out 2> /out/deptry-0.err || rc=$?; echo $rc > /out/deptry-0.rc"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "deptry-0.err": "Assuming the corresponding module name of package 'flask' is 'flask'. Install the package or configure a package_module_name_map entry to override this behaviour.\nScanning 2 files...\nWarning: Skipping processing of broken.py because of the following error: \"SyntaxError: Expected an expression at byte range 25..31\".\n\nSuccess! No dependency issues found.\n",
+   "deptry-0.json": "[]",
+   "deptry-0.out": "",
+   "deptry-0.rc": "0\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.256
+ },
+ "schema": 1,
+ "tool": "deptry",
+ "tool_version": "0.25.1"
+}

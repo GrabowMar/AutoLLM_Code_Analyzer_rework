@@ -1,0 +1,77 @@
+{
+ "captured_at": "2026-10-26T08:41:48+00:00",
+ "case": "suppressed",
+ "config": {
+  "ignore": "",
+  "select": "E9,F,B,S,PLE",
+  "target_version": "py312"
+ },
+ "files": [
+  {
+   "content": "import json  # noqa: F401  # pylint: disable=unused-import\n\n\ndef calculate(expression):\n    return eval(expression)  # nosec B307  # noqa: S307  # nosemgrep  # pylint: disable=eval-used\n\n\nAPI_PASSWORD = \"Wr4ngle-Canary-Pass-91\"  # nosec  # noqa: S105  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/app.py",
+   "sha256": "0fc0e4ae4c4c42060a507f0aef522d3d3f3fc527f022f6991ab3d5afa7f9bfd5"
+  },
+  {
+   "content": "def order_lines(orders: list[dict]) -> list[str]:\n    lines = []\n    for order in orders:  # pylint: disable=use-list-copy\n        lines.append(str(order))\n    return lines\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/perf.py",
+   "sha256": "aedd0aa2c555da747142b912eadc51bcbdebbf4d51c41273e2ac8b3335606d33"
+  },
+  {
+   "content": "AWS_ACCESS_KEY_ID = \"AKIAZ7QX3LKD5PMW2N4J\"  # gitleaks:allow  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/settings.py",
+   "sha256": "6221abca0f58a4cde431ff6fdc4757345c028d1a3654ef3f7173805410f917ef"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/ruff",
+   "check",
+   "--isolated",
+   "--no-cache",
+   "--ignore-noqa",
+   "--no-fix",
+   "--output-format",
+   "json",
+   "--output-file",
+   "/out/ruff.json",
+   "--target-version",
+   "py312",
+   "--select",
+   "E9,F,B,S,PLE",
+   "--",
+   "/src/suppressed/app.py",
+   "/src/suppressed/perf.py",
+   "/src/suppressed/settings.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "ruff.json"
+  ],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "ruff.json": "[\n  {\n    \"cell\": null,\n    \"code\": \"F401\",\n    \"end_location\": {\n      \"column\": 12,\n      \"row\": 1\n    },\n    \"filename\": \"/src/suppressed/app.py\",\n    \"fix\": {\n      \"applicability\": \"safe\",\n      \"edits\": [\n        {\n          \"content\": \"\",\n          \"end_location\": {\n            \"column\": 1,\n            \"row\": 2\n          },\n          \"location\": {\n            \"column\": 1,\n            \"row\": 1\n          }\n        }\n      ],\n      \"message\": \"Remove unused import: `json`\"\n    },\n    \"location\": {\n      \"column\": 8,\n      \"row\": 1\n    },\n    \"message\": \"`json` imported but unused\",\n    \"name\": \"unused-import\",\n    \"noqa_row\": 1,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/unused-import\"\n  },\n  {\n    \"cell\": null,\n    \"code\": \"S307\",\n    \"end_location\": {\n      \"column\": 28,\n      \"row\": 5\n    },\n    \"filename\": \"/src/suppressed/app.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 12,\n      \"row\": 5\n    },\n    \"message\": \"Use of possibly insecure function; consider using `ast.literal_eval`\",\n    \"name\": \"suspicious-eval-usage\",\n    \"noqa_row\": 5,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/suspicious-eval-usage\"\n  },\n  {\n    \"cell\": null,\n    \"code\": \"S105\",\n    \"end_location\": {\n      \"column\": 40,\n      \"row\": 8\n    },\n    \"filename\": \"/src/suppressed/app.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 16,\n      \"row\": 8\n    },\n    \"message\": \"Possible hardcoded password assigned to: \\\"API_PASSWORD\\\"\",\n    \"name\": \"hardcoded-password-string\",\n    \"noqa_row\": 8,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/hardcoded-password-string\"\n  }\n]"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.109
+ },
+ "schema": 1,
+ "tool": "ruff",
+ "tool_version": "0.16.10"
+}

@@ -1,9 +1,8 @@
 """Generation-time validation for scaffolding/custom output.
 
 Python is checked in-process (``compile()``/AST — cheap, no container).
-Frontend files get a real syntax parse via esbuild in a throwaway container,
-mirroring the analyzer workspace pattern in ``backend.analysis.services.
-workspace_service``. Validation never raises: an unavailable Docker daemon or
+Frontend files get a real syntax parse via esbuild in a throwaway,
+network-less container. Validation never raises: an unavailable Docker daemon or
 missing image degrades to a skipped check with a warning, it does not fail
 the generation job.
 """

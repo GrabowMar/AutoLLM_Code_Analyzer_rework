@@ -533,7 +533,7 @@ def put_post_run(request, experiment_id: str, payload: PostRunSpec):
     if experiment.status == Experiment.Status.ARCHIVED:
         return Status(400, {"detail": "Archived experiments cannot be edited.", "code": "archived"})
     try:
-        experiment.post_run = svc.normalize_post_run(payload.dict(), experiment.mode)
+        experiment.post_run = svc.normalize_post_run(payload.dict(), experiment.mode, request.auth)
     except ExperimentError as exc:
         return _fail(exc)
     experiment.save(update_fields=["post_run", "updated_at"])

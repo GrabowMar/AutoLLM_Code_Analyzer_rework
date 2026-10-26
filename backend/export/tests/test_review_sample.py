@@ -8,19 +8,47 @@ import zipfile
 
 import pytest
 
-from backend.analysis.models import AnalysisRun
-from backend.analysis.tests.factories import AnalysisRunFactory
-from backend.analysis.tests.factories import AnalyzerToolFactory
+from backend.analysis.models import ToolResult
 from backend.analysis.tests.factories import FindingFactory
-from backend.analysis.tests.factories import ToolResultFactory
 from backend.export.services import review_sample as svc
 from backend.generation.models import GenerationJob
 from backend.generation.tests.factories import AppRequirementTemplateFactory
 from backend.generation.tests.factories import GenerationJobFactory
 from backend.llm_models.tests.factories import LLMModelFactory
+from backend.rankings.tests.measured import PLAN_B
+from backend.rankings.tests.measured import make_run
 from backend.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
+
+_TOOLS = {"bandit": ToolResult.Status.SUCCEEDED, "ai_review": ToolResult.Status.SUCCEEDED}
+
+
+def _measured(job, **kw):
+    """A complete v2 run of *job* with bandit + the AI reviewer."""
+    kw.setdefault("ai", {"high": 1})
+    return make_run(job, tools=_TOOLS, measured_sloc=2, **kw)
+
+
+def _result(run, slug):
+    return run.results.get(tool_slug=slug)
+
+
+def _ai_cluster(run, key, *, n=3, title="AI says SQLi", severity="high", counted=True):
+    """One AI consensus cluster: *n* replicate findings sharing *key*."""
+    for _ in range(n):
+        FindingFactory(
+            result=_result(run, "ai_review"),
+            is_ai=True,
+            is_consensus=counted,
+            counted=counted,
+            issue_key=key,
+            title=title,
+            severity=severity,
+            file_path="app.py",
+            line_number=1,
+            grounding="exact",
+        )
 
 
 @pytest.fixture
@@ -80,19 +108,22 @@ def test_allocation_never_exceeds_a_stratum():
 
 def test_zip_is_blind_and_complete(population):
     _user, jobs = population
-    AnalyzerToolFactory(slug="llm_review", kind="ai", category="ai")
-    run = AnalysisRunFactory(
-        created_by=jobs[0].created_by,
-        generation_job=jobs[0],
-        status=AnalysisRun.Status.COMPLETED,
-    )
-    FindingFactory(result=ToolResultFactory(run=run, tool_slug="llm_review"), title="AI says SQLi", file_path="app.py")
+    run = _measured(jobs[0])
+    # Three replicates of one consensus opinion are one row; a non-consensus opinion is none.
+    _ai_cluster(run, "ai-1")
+    _ai_cluster(run, "ai-2", n=1, title="Only one replicate", counted=False)
+    # Bandit + ruff on one line under one engine issue key are one static issue; an
+    # uncounted (style) finding is not a verdict the measurement counts.
+    FindingFactory(result=_result(run, "bandit"), rule_id="B105", file_path="app.py", line_number=1, issue_key="s1")
     FindingFactory(
-        result=ToolResultFactory(run=run, tool_slug="bandit"),
-        rule_id="B105",
+        result=_result(run, "bandit"),
+        tool_slug="ruff",
+        rule_id="S105",
         file_path="app.py",
         line_number=1,
+        issue_key="s1",
     )
+    FindingFactory(result=_result(run, "bandit"), rule_id="E501", category="style", counted=False, line_number=2)
 
     data, manifest = svc.build_review_sample([jobs[0], *jobs[1:3]], size=3, stratify=(), seed=0)
     zf = zipfile.ZipFile(io.BytesIO(data))
@@ -106,9 +137,38 @@ def test_zip_is_blind_and_complete(population):
     key = list(csv.DictReader(io.StringIO(zf.read("key.csv").decode())))
     assert {k["model"] for k in key} <= {"vendor/m0"}
     ai = list(csv.DictReader(io.StringIO(zf.read("labels/ai_findings.csv").decode())))
-    assert [r["title"] for r in ai] == ["AI says SQLi"]
+    assert [(r["title"], r["replicates"], r["grounding"]) for r in ai] == [("AI says SQLi", "3", "exact")]
+    static = list(csv.DictReader(io.StringIO(zf.read("labels/static_issues.csv").decode())))
+    assert [(r["tools"], r["rule_ids"]) for r in static] == [("bandit;ruff", "bandit:B105;ruff:S105")]
     assert manifest["counts"]["static_issues"] == 1
     assert manifest["counts"]["requirements"] == 9
+    assert manifest["format_version"] == 2
+    analysed = {k["job_id"]: k for k in key}[str(jobs[0].id)]
+    assert analysed["analysis_run_id"] == str(run.id)
+    assert analysed["analysis_status"] == "measured"
+    assert manifest["analysis_coverage"]["measured"] == 1
+    assert manifest["analysis_coverage"]["not_analysed"] == 2
+
+
+def test_verdicts_come_from_one_plan_and_missing_rates_stay_empty(population):
+    _user, jobs = population
+    run = _measured(jobs[0])
+    _ai_cluster(run, "ai-1")
+    other = _measured(jobs[1], plan_hash=PLAN_B)
+    _ai_cluster(other, "ai-x", title="Other plan")
+    jobs[2].result_data = {**jobs[2].result_data, "evaluation": {"status": "infra_error", "summary": {}}}
+    jobs[2].save(update_fields=["result_data"])
+
+    data, manifest = svc.build_review_sample(jobs[:3], size=3, stratify=(), seed=0, plan_hash=run.plan_hash)
+    zf = zipfile.ZipFile(io.BytesIO(data))
+    key = {k["job_id"]: k for k in csv.DictReader(io.StringIO(zf.read("key.csv").decode()))}
+    ai = list(csv.DictReader(io.StringIO(zf.read("labels/ai_findings.csv").decode())))
+    assert [r["title"] for r in ai] == ["AI says SQLi"]
+    assert key[str(jobs[1].id)]["analysis_status"] == "other_plan"
+    assert key[str(jobs[1].id)]["analysis_run_id"] == ""
+    # No recorded pass rate is an empty cell, never 0.
+    assert key[str(jobs[2].id)]["conformance_pass_rate"] == ""
+    assert manifest["plan_hash"] == run.plan_hash
 
 
 def _rewrite(data: bytes, edits: dict[str, callable]) -> bytes:
@@ -132,10 +192,8 @@ def _rewrite(data: bytes, edits: dict[str, callable]) -> bytes:
 
 def test_scoring_filled_labels(population):
     _user, jobs = population
-    AnalyzerToolFactory(slug="llm_review", kind="ai", category="ai")
-    for job in jobs[:4]:
-        run = AnalysisRunFactory(created_by=job.created_by, generation_job=job, status=AnalysisRun.Status.COMPLETED)
-        FindingFactory(result=ToolResultFactory(run=run, tool_slug="llm_review"), severity="high", file_path="app.py")
+    for n, job in enumerate(jobs[:4]):
+        _ai_cluster(_measured(job), f"ai-{n}")
     data, _ = svc.build_review_sample(jobs[:4], size=4, stratify=(), seed=0)
     key = {
         r["sample_id"]: r

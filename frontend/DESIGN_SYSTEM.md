@@ -213,6 +213,29 @@ Import from `$lib/components/experiments`. Endpoint pieces (`SlotMeter`, `Endpoi
   for a model load) and always have an `aria-label`/`title`.
 - Statistics: never show a pooled pass rate across conditions; p-values only when results are not interim.
 
+## Analysis building blocks (`src/lib/components/analysis/`, `src/lib/components/insights/`)
+
+Runs, studies, profiles, tools and the insights pages (rankings, statistics, reports) share these.
+The API client is `$lib/api/analysis` (domain modules `runs`, `studies`, `profiles`, `catalog`,
+`targets`, `plans`).
+
+| Component / module                   | Use for                                                                             |
+| ------------------------------------ | ----------------------------------------------------------------------------------- |
+| `analysis/format.ts`                 | the one set of number / time / hash formatters; missing → `NA` ("—"), never "0"     |
+| `insights/format.ts`                 | the same formatters returning `null` for `MaybeValue`, outcome labels, report links |
+| `NaValue`                            | a missing value: "—" plus the reason in an accessible tooltip                       |
+| `Hint`                               | inline content with an accessible tooltip (lower bounds "≥ n", unverified versions) |
+| `insights/MaybeValue`                | a formatted value, or `NaValue` when the formatter returned null                    |
+| `insights/PlanHash`                  | a plan hash: short form, copy, link to the runs measured under it                   |
+| `insights/CoverageFunnel`            | coverage of a job set under one plan (plan rule, measured / excluded / other plan)  |
+| `ToolIcon`                           | a tool's brand mark (`toolLogos`) or catalog icon (falls back to the category icon) |
+| `RunDataBadge`, `run-utils.ts` cells | the runs list "data" badge and `staticFindingsCell` / `aiConsensusCell`             |
+
+- Research validity: missing data is NA with a reason, never 0; a count from a run whose tools did not
+  all succeed is a lower bound ("≥ n"); AI consensus is always shown apart from static counts; an
+  unknown AI spend is "—", a partial one "≥ $x".
+- Runs are comparable only under one plan: show the plan hash next to every aggregated number.
+
 ## Color & type rules
 
 - Components use tokens only: `primary`, `muted-foreground`, `success|warning|destructive|info`

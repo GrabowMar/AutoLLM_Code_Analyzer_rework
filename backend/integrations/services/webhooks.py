@@ -165,8 +165,13 @@ def _generation_payload(job) -> dict[str, Any]:
         data["cost_usd"] = round(float(metrics["cost"]), 4)
     if isinstance(metrics.get("total_tokens"), int):
         data["total_tokens"] = metrics["total_tokens"]
-    if isinstance(functional.get("pass_rate"), (int, float)):
-        data["pass_rate"] = functional["pass_rate"]
+    # Only the conformance evaluator's rate; not_applicable / infra_error carry
+    # none (missing data, never 0%), and other instruments are not this one.
+    from backend.rankings.services.measured import functional_rate
+
+    rate = functional_rate(functional)
+    if rate is not None:
+        data["pass_rate"] = rate
     if job.error_message:
         data["error"] = job.error_message[:500]
     fields = [
@@ -194,12 +199,24 @@ def _analysis_payload(run) -> dict[str, Any]:
     counts = summary.get("severity_counts") if isinstance(summary.get("severity_counts"), dict) else {}
     severity_text = " · ".join(f"{counts[s]} {s}" for s in _SEVERITIES if counts.get(s))
     title = run.name or (f"Analysis of job {str(run.generation_job_id)[:8]}" if run.generation_job_id else "Analysis")
+    # summary schema 2: static counts are None when no static tool succeeded
+    # (nothing was scanned, which is not "0 findings"); AI consensus is apart.
+    static_measured = summary.get("static_measured")
+    if static_measured is None:
+        static_measured = summary.get("total_findings") is not None
     data: dict[str, Any] = {
         "total_findings": summary.get("total_findings"),
         "severity_counts": counts,
+        "static_measured": bool(static_measured),
+        "issues": summary.get("issues"),
+        "ai_findings": summary.get("ai_findings"),
         "tools_run": summary.get("tools_run"),
         "tools_completed": summary.get("tools_completed"),
         "tools_failed": summary.get("tools_failed"),
+        "is_complete": run.is_complete,
+        "plan_hash": run.plan_hash or None,
+        "cost_usd": summary.get("cost_usd"),
+        "cost_complete": summary.get("cost_complete"),
         "duration_seconds": run.duration_seconds,
         "generation_job_id": str(run.generation_job_id) if run.generation_job_id else None,
     }
@@ -211,8 +228,12 @@ def _analysis_payload(run) -> dict[str, Any]:
         else None
     )
     fields = [
-        _field("Findings", summary.get("total_findings")),
+        _field(
+            "Findings",
+            summary.get("total_findings") if static_measured else "not measured (no static tool succeeded)",
+        ),
         _field("Severity", severity_text),
+        _field("AI consensus", summary.get("ai_findings") or None),
         _field("Tools", tools),
         _field("Duration", _duration(run.duration_seconds)),
         _field("Error", (run.error_message or "")[:300]),

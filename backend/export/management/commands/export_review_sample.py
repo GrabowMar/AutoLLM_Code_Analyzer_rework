@@ -28,6 +28,7 @@ class Command(BaseCommand):
         parser.add_argument("--stratify", default="model", help="'', model, template or model,template")
         parser.add_argument("--seed", type=int, default=0)
         parser.add_argument("--no-blind", action="store_true", help="Name folders by job id, not S001…")
+        parser.add_argument("--plan-hash", default=None, help="Analysis plan giving the automated verdicts")
 
     def handle(self, *args, **opts):
         jobs = study_jobs(experiment_id=opts["experiment"], batch_id=opts["batch"])
@@ -39,6 +40,7 @@ class Command(BaseCommand):
                 stratify=tuple(k for k in opts["stratify"].split(",") if k),
                 seed=opts["seed"],
                 blind=not opts["no_blind"],
+                plan_hash=opts["plan_hash"],
             )
         except ValueError as exc:
             raise CommandError(str(exc)) from exc

@@ -1,0 +1,61 @@
+{
+ "captured_at": "2026-10-26T08:42:55+00:00",
+ "case": "syntax",
+ "config": {
+  "exclude": "",
+  "severity": "style"
+ },
+ "files": [
+  {
+   "content": "#!/bin/bash\nif [ x ; then\n",
+   "kind": "source",
+   "language": "shell",
+   "path": "bin/broken.sh",
+   "sha256": "308b8f9604b06d483bf7137d433ba0a48ddebb169d0ccaf568d5cc90e1d63859"
+  },
+  {
+   "content": "#!/bin/sh\necho \"$1\"\n",
+   "kind": "source",
+   "language": "shell",
+   "path": "bin/ok.sh",
+   "sha256": "98b54de746499858ec4f06db2ee31e1b6b8a1157e5697cdec917cca328e313cb"
+  },
+  {
+   "content": "#!/bin/zsh\necho $1\n",
+   "kind": "source",
+   "language": "shell",
+   "path": "bin/prompt.zsh",
+   "sha256": "8f441c7501e0bed5d5ea7db73984ff7dd5468e047c368d064f9b248a1105e3cc"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/shellcheck",
+   "--norc",
+   "--format=json1",
+   "--severity=style",
+   "--",
+   "/src/bin/broken.sh",
+   "/src/bin/ok.sh"
+  ],
+  "env": {},
+  "mem_limit": "256m",
+  "report_files": [],
+  "timeout_s": 120
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "{\"comments\":[{\"file\":\"/src/bin/broken.sh\",\"line\":2,\"endLine\":2,\"column\":1,\"endColumn\":1,\"level\":\"info\",\"code\":1009,\"message\":\"The mentioned syntax error was in this if expression.\",\"fix\":null},{\"file\":\"/src/bin/broken.sh\",\"line\":2,\"endLine\":2,\"column\":4,\"endColumn\":4,\"level\":\"error\",\"code\":1073,\"message\":\"Couldn't parse this test expression. Fix to allow more checks.\",\"fix\":null},{\"file\":\"/src/bin/broken.sh\",\"line\":2,\"endLine\":2,\"column\":8,\"endColumn\":8,\"level\":\"error\",\"code\":1072,\"message\":\"Expected test to end here (don't wrap commands in []/[[]]). Fix any mentioned problems and try again.\",\"fix\":null}]}\n",
+  "timed_out": false,
+  "wall_seconds": 0.109
+ },
+ "schema": 1,
+ "tool": "shellcheck",
+ "tool_version": "0.11.0"
+}

@@ -15,6 +15,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import PlanHash from '$lib/components/insights/PlanHash.svelte';
 	import { putPostRun, runPostRun, type PostRunConfig, type PostRunSpec } from '$lib/api/experiments';
 	import { formatApiError } from '$lib/api/core';
 	import { formatDateTime } from '$lib/utils/formatters';
@@ -140,6 +141,9 @@
 									<td data-label="Analyses" class="num text-xs max-md:text-left">
 										{#if p.analysis_total}
 											{p.analysis_done ?? 0}/{p.analysis_total}{#if p.analysis_failed}<span class="text-danger-fg"> · {p.analysis_failed} failed</span>{/if}
+											{#if p.analysis_plan_hash}<span class="cell-sub mt-0.5 block"
+													><PlanHash hash={p.analysis_plan_hash} copy={false} /></span
+												>{/if}
 										{:else}<span class="text-muted-foreground">—</span>{/if}
 									</td>
 									<td data-label="Report">

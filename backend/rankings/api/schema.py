@@ -36,10 +36,19 @@ class RankingRow(Schema):
     apps_completed: int = 0
     avg_duration: float = 0.0
     findings: FindingsRollup
+    issues: FindingsRollup | None = None
     ai_findings: FindingsRollup | None = None
+    # Analysed complete jobs (canonical runs of one plan), not completed jobs.
     n_trials: int = 0
+    n_static: int = 0
+    n_ai: int = 0
+    measured_sloc: int | None = None
     functional_pass_rate: float | None = None
+    functional_n: int = 0
     variance: VarianceStats | None = None
+    analysis: dict[str, Any] | None = None
+    plan_hash: str | None = None
+    scoring_version: str = ""
     benchmark_score: float
     cost_efficiency_score: float
     accessibility_score: float
@@ -68,6 +77,7 @@ class RankingStats(Schema):
     unique_providers: int
     free_models: int = 0
     avg_mss: float = 0.0
+    measured_models: int = 0
 
 
 class RankingsResponse(Schema):
@@ -75,6 +85,14 @@ class RankingsResponse(Schema):
     rankings: list[dict[str, Any]]
     pagination: Pagination
     statistics: RankingStats
+    filters_applied: dict[str, Any] = {}
+    # Which analysis plan the empirical columns come from and which jobs were
+    # left out (not analysed / incomplete / other plan / excluded). Always
+    # carries ``plan_hash``, ``plan_explicit``, ``plan_rule`` (``explicit`` |
+    # ``most_static_measured_jobs``), ``plans`` ({hash: jobs}, reference
+    # first) and ``plan_details`` ({hash: {jobs, static_jobs, static_tools,
+    # last_used}}: what the auto-selection weighed).
+    comparability: dict[str, Any] | None = None
 
 
 class StatusResponse(Schema):
@@ -87,6 +105,8 @@ class StatusResponse(Schema):
 class TopModelsResponse(Schema):
     count: int
     models: list[dict[str, Any]]
+    # Same block as the list's ``comparability`` (the rows' analysis plan).
+    comparability: dict[str, Any] | None = None
 
 
 class SensitivityRankEntry(Schema):
@@ -99,10 +119,15 @@ class SensitivitySchemeRow(Schema):
     weights: dict[str, int]
     ranking: list[SensitivityRankEntry]
     kendall_tau: float
+    # False below two measured models: the tau is then a placeholder.
+    defined: bool = True
     adjacent_swaps: list[list[str]]
 
 
 class SensitivityResponse(Schema):
     models_evaluated: int
+    defined: bool = True
+    scoring_version: str = ""
     baseline_ranking: list[SensitivityRankEntry]
     schemes: list[SensitivitySchemeRow]
+    comparability: dict[str, Any] | None = None

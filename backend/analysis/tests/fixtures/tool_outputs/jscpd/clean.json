@@ -1,0 +1,126 @@
+{
+ "captured_at": "2026-10-26T08:42:31+00:00",
+ "case": "clean",
+ "config": {
+  "min_lines": 5,
+  "min_tokens": 50,
+  "mode": "mild"
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "a7c575e15cf284770b4b33371be54d864c4fb47b4f784dbf9a27db7beb28de46"
+  },
+  {
+   "kind": "source",
+   "language": "html",
+   "path": "clean/frontend/index.html",
+   "sha256": "a1dcb89b3bd3bc2f88231758fb9379ee6b74942abd6067a78e87ea4e6c6e143c"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/App.jsx",
+   "sha256": "50b34bd78e3cd0936b45a21d06065bf3a2816bdc18afdb09f9876378beeb279c"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "clean/frontend/src/TagBadge.vue",
+   "sha256": "47812dbf621a248a8411ee2aa9b0f7cdaaf1fee1d4d2b4e37569ad17d79351f5"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "clean/frontend/src/bookmarks.ts",
+   "sha256": "3872ba6ae0c99822ddbea2b5f454f11d68733ee860e6c078cd659fa4553c0e04"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/components/BookmarkList.jsx",
+   "sha256": "efd7854d492966cc76c2341a178b636bbf4567e6073ee63f1c4b44d1c29f1635"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "clean/frontend/src/components/Panel.tsx",
+   "sha256": "63a402046cdf7b1158644a4a595bf0b5bcd49eb4fb974ff2973f91d97e67f23b"
+  },
+  {
+   "kind": "source",
+   "language": "css",
+   "path": "clean/frontend/src/styles.css",
+   "sha256": "4d065f2c05073beba1e53f367ab341c797e2e718946053af4bb6ce8ab0302c28"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/jscpd",
+   "--config",
+   "/opt/analyzer/config/jscpd.json",
+   "--min-tokens",
+   "50",
+   "--min-lines",
+   "5",
+   "--max-lines",
+   "1000000",
+   "--max-size",
+   "8mb",
+   "--mode",
+   "mild",
+   "--format",
+   "python,javascript,jsx,typescript,tsx,vue,css,markup",
+   "--formats-exts",
+   "python:py,pyw,pyi;javascript:js,mjs,cjs;jsx:jsx;typescript:ts,mts,cts;tsx:tsx;vue:vue;css:css,scss,sass,less;markup:html,htm",
+   "--reporters",
+   "json",
+   "--output",
+   "/out/jscpd",
+   "--absolute",
+   "--no-gitignore",
+   "--silent",
+   "--",
+   "/src/clean/backend/app.py",
+   "/src/clean/backend/bookmarks.py",
+   "/src/clean/frontend/index.html",
+   "/src/clean/frontend/src/App.jsx",
+   "/src/clean/frontend/src/TagBadge.vue",
+   "/src/clean/frontend/src/bookmarks.ts",
+   "/src/clean/frontend/src/components/BookmarkList.jsx",
+   "/src/clean/frontend/src/components/Panel.tsx",
+   "/src/clean/frontend/src/styles.css"
+  ],
+  "env": {},
+  "mem_limit": "768m",
+  "report_files": [
+   "jscpd/jscpd-report.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "jscpd/jscpd-report.json": "{\n  \"statistics\": {\n    \"detectionDate\": \"2026-10-26T08:42:31.605Z\",\n    \"formats\": {\n      \"javascript\": {\n        \"sources\": {\n          \"/src/clean/frontend/src/components/Panel.tsx\": {\n            \"lines\": 1,\n            \"tokens\": 3,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/src/components/BookmarkList.jsx\": {\n            \"lines\": 2,\n            \"tokens\": 18,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/src/TagBadge.vue\": {\n            \"lines\": 8,\n            \"tokens\": 96,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/src/App.jsx\": {\n            \"lines\": 1,\n            \"tokens\": 3,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/index.html\": {\n            \"lines\": 1,\n            \"tokens\": 0,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 13,\n          \"tokens\": 120,\n          \"sources\": 5,\n          \"clones\": 0,\n          \"duplicatedLines\": 0,\n          \"duplicatedTokens\": 0,\n          \"percentage\": 0,\n          \"percentageTokens\": 0,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      },\n      \"tsx\": {\n        \"sources\": {\n          \"/src/clean/frontend/src/components/Panel.tsx\": {\n            \"lines\": 20,\n            \"tokens\": 152,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 20,\n          \"tokens\": 152,\n          \"sources\": 1,\n          \"clones\": 0,\n          \"duplicatedLines\": 0,\n          \"duplicatedTokens\": 0,\n          \"percentage\": 0,\n          \"percentageTokens\": 0,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      },\n      \"jsx\": {\n        \"sources\": {\n          \"/src/clean/frontend/src/components/BookmarkList.jsx\": {\n            \"lines\": 16,\n            \"tokens\": 145,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/src/App.jsx\": {\n            \"lines\": 22,\n            \"tokens\": 203,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 38,\n          \"tokens\": 348,\n          \"sources\": 2,\n          \"clones\": 0,\n          \"duplicatedLines\": 0,\n          \"duplicatedTokens\": 0,\n          \"percentage\": 0,\n          \"percentageTokens\": 0,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      },\n      \"css\": {\n        \"sources\": {\n          \"/src/clean/frontend/src/styles.css\": {\n            \"lines\": 8,\n            \"tokens\": 33,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 8,\n          \"tokens\": 33,\n          \"sources\": 1,\n          \"clones\": 0,\n          \"duplicatedLines\": 0,\n          \"duplicatedTokens\": 0,\n          \"percentage\": 0,\n          \"percentageTokens\": 0,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      },\n      \"typescript\": {\n        \"sources\": {\n          \"/src/clean/frontend/src/bookmarks.ts\": {\n            \"lines\": 14,\n            \"tokens\": 121,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 14,\n          \"tokens\": 121,\n          \"sources\": 1,\n          \"clones\": 0,\n          \"duplicatedLines\": 0,\n          \"duplicatedTokens\": 0,\n          \"percentage\": 0,\n          \"percentageTokens\": 0,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      },\n      \"markup\": {\n        \"sources\": {\n          \"/src/clean/frontend/src/TagBadge.vue\": {\n            \"lines\": 1,\n            \"tokens\": 16,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/index.html\": {\n            \"lines\": 12,\n            \"tokens\": 106,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 13,\n          \"tokens\": 122,\n          \"sources\": 2,\n          \"clones\": 0,\n          \"duplicatedLines\": 0,\n          \"duplicatedTokens\": 0,\n          \"percentage\": 0,\n          \"percentageTokens\": 0,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      },\n      \"python\": {\n        \"sources\": {\n          \"/src/clean/backend/bookmarks.py\": {\n            \"lines\": 17,\n            \"tokens\": 106,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/backend/app.py\": {\n            \"lines\": 50,\n            \"tokens\": 418,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 67,\n          \"tokens\": 524,\n          \"sources\": 2,\n          \"clones\": 0,\n          \"duplicatedLines\": 0,\n          \"duplicatedTokens\": 0,\n          \"percentage\": 0,\n          \"percentageTokens\": 0,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      }\n    },\n    \"total\": {\n      \"lines\": 173,\n      \"tokens\": 1420,\n      \"sources\": 14,\n      \"clones\": 0,\n      \"duplicatedLines\": 0,\n      \"duplicatedTokens\": 0,\n      \"percentage\": 0,\n      \"percentageTokens\": 0,\n      \"newDuplicatedLines\": 0,\n      \"newClones\": 0\n    }\n  },\n  \"duplicates\": []\n}"
+  },
+  "stderr": "",
+  "stdout": "JSON report saved to /out/jscpd/jscpd-report.json\nDuplications detection: Found 0 exact clones with 0(0%) duplicated lines in 14 (7 formats) files.\n",
+  "timed_out": false,
+  "wall_seconds": 0.735
+ },
+ "schema": 1,
+ "tool": "jscpd",
+ "tool_version": "4.3.0"
+}

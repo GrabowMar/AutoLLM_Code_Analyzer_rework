@@ -1,0 +1,94 @@
+{
+ "captured_at": "2026-10-26T08:42:43+00:00",
+ "case": "hostile",
+ "config": {
+  "skip_missing": false
+ },
+ "files": [
+  {
+   "content": "export default [{ ignores: ['**/*'] }, { rules: { 'no-eval': 'off' } }];\n",
+   "kind": "config",
+   "language": "javascript",
+   "path": "eslint.config.js",
+   "sha256": "7c1672280d5107e62bcd7caf8118e73bea33d51dd6f5f565c17aaeea2b7b5c68"
+  },
+  {
+   "kind": "manifest",
+   "language": "json",
+   "path": "vulnerable/frontend/package.json",
+   "sha256": "f8e68f2178a1127af90594b6541289ab1339e12a6db33838fe833a21463a47cc"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/App.jsx",
+   "sha256": "47a0a1ef7463a2fbdda619183d5a06fc98df96b885fc9ac423f2eb804450cbde"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "vulnerable/frontend/src/Banner.tsx",
+   "sha256": "fde9db28f3a89cc5d70d85571aeef23ae06527ed313e492889de7af3628dd5f2"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "vulnerable/frontend/src/Card.vue",
+   "sha256": "e3f1ac7af90e4290877fa1d335a8ee2ca2e6f6e07d5b18134bc8194d8cb4f5d1"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "vulnerable/frontend/src/api.ts",
+   "sha256": "10db8abdf7e86d4d1fcad8b1032fe585d8de4a9ed01057dc2cca191e1a4dad73"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Footer.jsx",
+   "sha256": "4d21c89dae359815df375738352440af702a72157da2815d9ec744590f4a94b9"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Header.jsx",
+   "sha256": "48f798d3de206f47a4d7edb0baf12379cfc62304952aa884b5117e3c967a9bdc"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/main.jsx",
+   "sha256": "d71c4e2d9fb272535669d50fc740276e318ed4ac0c7a6fe8d6db1fb8d259d487"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "sh",
+   "-c",
+   "set -eu; mkdir /tmp/llmlab-src; mkdir /tmp/llmlab-src/p0; cd /src/vulnerable/frontend; cp --parents -- package.json src/App.jsx src/Banner.tsx src/Card.vue src/api.ts src/components/Footer.jsx src/components/Header.jsx src/main.jsx /tmp/llmlab-src/p0/; cd /tmp/llmlab-src/p0; rc=0; /opt/analyzer/bin/depcheck . --json --config=/opt/analyzer/config/depcheck.json > /out/depcheck-0.out 2> /out/depcheck-0.err || rc=$?; echo $rc > /out/depcheck-0.rc"
+  ],
+  "env": {},
+  "mem_limit": "768m",
+  "report_files": [],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "depcheck-0.err": "",
+   "depcheck-0.out": "{\"dependencies\":[\"lodash\"],\"devDependencies\":[],\"missing\":{\"axios\":[\"/tmp/llmlab-src/p0/src/main.jsx\"]},\"using\":{\"react\":[\"/tmp/llmlab-src/p0/package.json\",\"/tmp/llmlab-src/p0/src/App.jsx\"],\"react-dom\":[\"/tmp/llmlab-src/p0/src/main.jsx\"],\"axios\":[\"/tmp/llmlab-src/p0/src/main.jsx\"]},\"invalidFiles\":{},\"invalidDirs\":{}}\n",
+   "depcheck-0.rc": "255\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.961
+ },
+ "schema": 1,
+ "tool": "depcheck",
+ "tool_version": "1.4.7"
+}

@@ -6,10 +6,8 @@ from unittest import mock
 
 import pytest
 
-from backend.analysis.models import AnalysisRun
-from backend.analysis.tests.factories import AnalysisRunFactory
+from backend.analysis.models import ToolResult
 from backend.analysis.tests.factories import FindingFactory
-from backend.analysis.tests.factories import ToolResultFactory
 from backend.generation.models import GenerationJob
 from backend.generation.services.analysis_plan import normalize_analysis_plan
 from backend.generation.tests.factories import AppRequirementTemplateFactory
@@ -17,6 +15,8 @@ from backend.generation.tests.factories import ExperimentConditionFactory
 from backend.generation.tests.factories import ExperimentFactory
 from backend.generation.tests.factories import GenerationJobFactory
 from backend.llm_models.tests.factories import LLMModelFactory
+from backend.rankings.tests.measured import PLAN_B
+from backend.rankings.tests.measured import make_run
 from backend.reports.models import Report
 from backend.reports.services import renderers
 from backend.reports.services import study_report
@@ -76,37 +76,38 @@ def study():
                 },
                 metrics={"cost": 0.01 * (n % 3 + 1), "functional": {"deployed": status in ("passed", "failed")}},
             )
-            run = AnalysisRunFactory(
-                created_by=user,
-                generation_job=job,
-                status=AnalysisRun.Status.COMPLETED,
-                source_code=None,
+            # The engine grouped bandit B105 + ruff S105 on one line into one issue
+            # (one issue_key); each F401 is its own issue.
+            unused = n % 3
+            run = make_run(
+                job,
+                tools={"bandit": ToolResult.Status.SUCCEEDED, "ruff": ToolResult.Status.SUCCEEDED},
+                findings={"low": 2, "medium": unused},
+                issues={"low": 1, "medium": unused},
+                measured_sloc=50 + n * 10 + 30,
+                complexity_max=2.0 + n % 4,
+                security_issues=1,
             )
-            bandit = ToolResultFactory(run=run, tool_slug="bandit")
-            ruff = ToolResultFactory(run=run, tool_slug="ruff", category="quality")
-            ToolResultFactory(
-                run=run,
-                tool_slug="radon",
-                category="quality",
-                metrics={"average_complexity": 2.0 + n % 4, "max_complexity": 9},
-            )
-            FindingFactory(result=bandit, rule_id="B105", line_number=3, severity="low", file_path="app.py")
+            bandit = run.results.get(tool_slug="bandit")
+            ruff = run.results.get(tool_slug="ruff")
+            key = f"secret-{n}"
+            FindingFactory(result=bandit, rule_id="B105", line_number=3, severity="low", issue_key=key)
             FindingFactory(
                 result=ruff,
                 rule_id="S105",
                 line_number=3,
                 severity="low",
-                file_path="app.py",
-                category="quality",
+                category="maintainability",
+                issue_key=key,
             )
-            for k in range(n % 3):
+            for k in range(unused):
                 FindingFactory(
                     result=ruff,
                     rule_id="F401",
                     line_number=10 + k,
                     severity="medium",
-                    file_path="app.py",
-                    category="quality",
+                    category="maintainability",
+                    issue_key=f"unused-{n}-{k}",
                 )
     return user, experiment
 
@@ -136,6 +137,13 @@ def test_study_report_sections(study):
     # Bandit B105 + Ruff S105 on the same line are one issue.
     totals = data["issues"]["totals"]
     assert totals["duplicate_findings"] == 12
+    assert totals["static_measured_apps"] == 12
+    assert data["issues"]["coverage"]["measured"] == 12
+    assert data["protocol"]["analysis_plan"]["plan_hash"] == data["issues"]["plan_hash"]
+    assert {t["slug"] for t in data["protocol"]["tools"]} == {"bandit", "ruff"}
+    row = data["per_app"][0]
+    assert row["measured_loc"] is not None
+    assert row["analysis_status"] == "measured"
 
     sev = {r["severity"]: r for r in data["security_bounds"]["overall"]}
     assert sev["critical"]["issues"] == 0
@@ -165,6 +173,44 @@ def test_study_report_sections(study):
 
     assert data["code_metrics"]["by_model"][0]["avg_complexity"]["n"] == 3
     assert len(data["protocol"]["data_fingerprint"]) == 64
+    assert data["protocol"]["report_version"] == 2
+
+
+def test_unmeasured_apps_are_missing_not_clean(study):
+    user, experiment = study
+    job = GenerationJob.objects.filter(experiment=experiment).order_by("created_at").first()
+    run = job.analysis_runs.get()
+    run.measurement = {**run.measurement, "static": {**run.measurement["static"], "available": False}}
+    run.save(update_fields=["measurement"])
+    other = GenerationJob.objects.filter(experiment=experiment).order_by("created_at")[1]
+    other.analysis_runs.update(plan_hash=PLAN_B)
+    unanalysed = GenerationJob.objects.filter(experiment=experiment).order_by("created_at")[2]
+    unanalysed.analysis_runs.all().delete()
+
+    data = study_report.generate_study_report({"experiment_id": str(experiment.id), "seed": 1}, user=user)
+    rows = {r["job_id"]: r for r in data["per_app"]}
+    assert rows[str(job.id)]["analyzed"] is True
+    assert rows[str(job.id)]["static_measured"] is False
+    assert rows[str(job.id)]["unique_issues"] is None
+    assert rows[str(other.id)]["analysis_status"] == "other_plan"
+    assert rows[str(unanalysed.id)]["analysis_status"] == "not_analysed"
+    assert data["security_bounds"]["apps_analyzed"] == 9
+    assert data["issues"]["totals"]["static_measured_apps"] == 9
+    codes = {v["code"] for v in data["validity"]}
+    assert {"not_measured", "static_unavailable", "mixed_analysis_plans"} <= codes
+    assert data["funnel"]["overall"]["analyzed"] == 10
+    assert data["funnel"]["overall"]["static_measured"] == 9
+
+
+def test_pass_rate_is_never_a_guessed_zero(study):
+    user, experiment = study
+    job = GenerationJob.objects.filter(experiment=experiment).order_by("created_at").first()
+    job.result_data = {**job.result_data, "evaluation": {"status": "failed", "summary": {}}}
+    job.save(update_fields=["result_data"])
+    data = study_report.generate_study_report({"experiment_id": str(experiment.id)}, user=user)
+    row = next(r for r in data["per_app"] if r["job_id"] == str(job.id))
+    assert row["deployed"] is True
+    assert row["pass_rate"] is None
 
 
 def test_report_is_reproducible(study):
@@ -250,3 +296,18 @@ def test_bad_ranking_criteria_rejected_up_front(client, study):
         content_type="application/json",
     )
     assert res.status_code == 400
+
+
+def test_study_report_command_pins_the_analysis_plan(study, tmp_path):
+    import json
+
+    from django.core.management import call_command
+
+    _user, experiment = study
+    out = tmp_path / "study.json"
+    call_command("study_report", "--out", str(out), "--experiment", str(experiment.id), "--plan-hash", PLAN_B)
+    data = json.loads(out.read_text())
+    # Nothing was analysed under PLAN_B: issue tables are empty, never zero-filled.
+    assert data["issues"]["plan_hash"] == PLAN_B
+    assert data["issues"]["totals"]["unique_issues"] is None
+    assert data["issues"]["coverage"]["other_plan"] == 12

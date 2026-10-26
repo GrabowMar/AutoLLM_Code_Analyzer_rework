@@ -1,61 +1,96 @@
 <script lang="ts">
-	import { formatDateTime as formatDate } from '$lib/utils/formatters';
-	import { page } from '$app/state';
+	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { onMount, onDestroy } from 'svelte';
-	import * as Card from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
+	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
+	import * as Card from '$lib/components/ui/card';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import PlanHash from '$lib/components/insights/PlanHash.svelte';
+	import ReportBody from '$lib/components/insights/reports/ReportBody.svelte';
+	import { reportTypeInfo } from '$lib/components/insights/reports/report-types';
+	import { formatTimestamp, humanize } from '$lib/components/insights/format';
+	import { formatApiError, isAbortError } from '$lib/api/core';
+	import { saveJson } from '$lib/utils/download';
+	import {
+		deleteReport,
+		generateReport,
+		getReport,
+		isReportInFlight,
+		reportExportUrl,
+		type ReportDetail,
+		type ReportExportFormat
+	} from '$lib/api/reports';
+	import FileDown from '@lucide/svelte/icons/file-down';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import FileDown from '@lucide/svelte/icons/file-down';
-	import { getReport, deleteReport, type ReportDetail } from '$lib/api/client';
-	import { reportExportUrl, type ReportExportFormat } from '$lib/api/reports';
+	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
+	import FileJson from '@lucide/svelte/icons/file-json';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 
+	const POLL_MS = 2_500;
+
+	/** Server-rendered exports (Markdown, LaTeX tables); JSON is saved locally below. */
 	const exportFormats: { format: ReportExportFormat; label: string }[] = [
 		{ format: 'md', label: 'Markdown' },
-		{ format: 'tex', label: 'LaTeX' },
-		{ format: 'json', label: 'JSON' }
+		{ format: 'tex', label: 'LaTeX' }
 	];
-	import { tableFrame } from '$lib/components/table';
+
+	const reportId = $derived(page.params.id ?? '');
 
 	let report = $state<ReportDetail | null>(null);
 	let loading = $state(true);
-	let error = $state('');
-	let timer: ReturnType<typeof setInterval> | null = null;
-
-	async function load() {
-		try {
-			report = await getReport(page.params.id ?? '');
-			error = '';
-		} catch (e) {
-			error = (e as Error)?.message || 'Failed to load report';
-		} finally {
-			loading = false;
-		}
-	}
-
-	onMount(() => {
-		load().then(() => {
-			timer = setInterval(() => {
-				if (report && (report.status === 'pending' || report.status === 'generating')) {
-					load();
-				}
-			}, 2000);
-		});
-	});
-
-	onDestroy(() => {
-		if (timer) clearInterval(timer);
-	});
+	let error = $state<string | null>(null);
+	let regenerating = $state(false);
 
 	let confirmOpen = $state(false);
 	let confirmBusy = $state(false);
+
+	let controller: AbortController | null = null;
+
+	async function load() {
+		controller?.abort();
+		const c = new AbortController();
+		controller = c;
+		try {
+			const res = await getReport(reportId, { signal: c.signal });
+			if (c.signal.aborted) return;
+			report = res;
+			error = null;
+		} catch (e) {
+			if (c.signal.aborted || isAbortError(e)) return;
+			error = formatApiError(e, 'Could not load the report.');
+		} finally {
+			if (controller === c) loading = false;
+		}
+	}
+
+	// Load on mount and whenever the route id changes.
+	$effect(() => {
+		void reportId;
+		untrack(() => {
+			report = null;
+			loading = true;
+			load();
+		});
+	});
+
+	// Poll silently while the report is being generated.
+	const inFlight = $derived(!!report && isReportInFlight(report.status));
+	$effect(() => {
+		if (!inFlight) return;
+		const timer = setInterval(() => {
+			if (document.visibilityState === 'visible') load();
+		}, POLL_MS);
+		return () => clearInterval(timer);
+	});
+
+	onMount(() => () => controller?.abort());
 
 	async function remove() {
 		if (!report) return;
@@ -63,294 +98,222 @@
 		try {
 			await deleteReport(report.report_id);
 			confirmOpen = false;
+			toast.success('Report deleted');
 			goto('/reports');
 		} catch (e) {
-			toast.error((e as Error)?.message || 'Failed to delete report');
+			toast.error(formatApiError(e, 'Could not delete the report.'));
 		} finally {
 			confirmBusy = false;
 		}
 	}
 
-	function isObject(v: unknown): v is Record<string, unknown> {
-		return typeof v === 'object' && v !== null && !Array.isArray(v);
-	}
-
-	function isArray(v: unknown): v is unknown[] {
-		return Array.isArray(v);
-	}
-
-	function entries(v: unknown): [string, unknown][] {
-		return isObject(v) ? Object.entries(v) : [];
-	}
-
-	function fmtValue(v: unknown): string {
-		if (v === null || v === undefined) return '—';
-		if (typeof v === 'number') {
-			return Number.isInteger(v) ? v.toString() : v.toFixed(2);
+	/** Generate a fresh report with the same type and config (the old one stays). */
+	async function regenerate() {
+		if (!report) return;
+		regenerating = true;
+		try {
+			const next = await generateReport({
+				report_type: report.report_type,
+				config: report.config ?? {},
+				title: report.title,
+				description: report.description || undefined
+			});
+			toast.success('Generating a new version of the report');
+			goto(`/reports/${next.report_id}`);
+		} catch (e) {
+			toast.error(formatApiError(e, 'Could not regenerate the report.'));
+		} finally {
+			regenerating = false;
 		}
-		if (typeof v === 'boolean') return v ? 'yes' : 'no';
-		return String(v);
 	}
 
-	/** One-line rendering for flat objects/arrays ("low: 2, high: 1"), so table
-	 *  cells and grid values never fall back to "[object Object]". */
-	function fmtCompact(v: unknown): string {
-		if (isArray(v)) {
-			return v.length ? v.map(fmtCompact).join(', ') : '—';
-		}
-		if (isObject(v)) {
-			const es = Object.entries(v);
-			if (!es.length) return '—';
-			return es
-				.map(([k, val]) =>
-					`${k.replace(/_/g, ' ')}: ${isObject(val) || isArray(val) ? JSON.stringify(val) : fmtValue(val)}`
-				)
-				.join(', ');
-		}
-		return fmtValue(v);
+	function downloadJson() {
+		if (!report) return;
+		const payload = {
+			report_id: report.report_id,
+			report_type: report.report_type,
+			title: report.title,
+			config: report.config,
+			created_at: report.created_at,
+			completed_at: report.completed_at,
+			report_data: report.report_data
+		};
+		saveJson(payload, `${report.report_id}.json`);
 	}
 
-	function isObjectRows(v: unknown): v is Record<string, unknown>[] {
-		return isArray(v) && v.length > 0 && isObject(v[0]);
-	}
-
-	/** Entries too structured for the key/value grid: rendered full-width below it. */
-	function isWide(k: string, v: unknown): boolean {
-		if (k === 'metrics_by_tool') return isObject(v) && Object.keys(v).length > 0;
-		if (isObjectRows(v)) return true;
-		// An object earns full-width treatment only when it holds a table-shaped
-		// list; anything flatter reads fine as a compact "k: v, …" line.
-		return isObject(v) && Object.values(v).some((x) => isObjectRows(x));
-	}
+	const info = $derived(report ? reportTypeInfo(report.report_type) : null);
+	const typed = $derived(!!report && report.report_data?.schema_version === 2);
+	const configEntries = $derived(
+		Object.entries(report?.config ?? {}).filter(([, v]) => v !== undefined && v !== '')
+	);
 </script>
 
-{#snippet objectTable(rows: Record<string, unknown>[])}
-	{@const cols = Object.keys(rows[0])}
-	{@const numCols = new Set(cols.filter((c) => rows.some((r) => typeof r[c] === 'number') && rows.every((r) => r[c] == null || typeof r[c] === 'number')))}
-	<div class="table-frame rounded-md border border-border" {@attach tableFrame}>
-		<table>
-			<thead>
-				<tr>
-					{#each cols as c (c)}
-						<th class="whitespace-nowrap" class:num={numCols.has(c)}>{c.replace(/_/g, ' ')}</th>
-					{/each}
-				</tr>
-			</thead>
-			<tbody>
-				{#each rows as row, i (i)}
-					<tr class="align-top">
-						{#each cols as c (c)}
-							<td class:num={numCols.has(c)}>
-								{#if row[c] == null}<span class="text-muted-foreground">—</span>{:else}{fmtCompact(row[c])}{/if}
-							</td>
-						{/each}
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
-{/snippet}
-
-{#snippet statValue(v: unknown)}
-	{#if v == null}<span class="text-muted-foreground">—</span>{:else}{fmtValue(v)}{/if}
-{/snippet}
-
-{#snippet metricsByTool(metrics: Record<string, unknown>)}
-	<div class="space-y-5">
-		{#each entries(metrics) as [tool, m] (tool)}
-			{@const numeric = entries(isObject(m) ? m['numeric'] : undefined)}
-			{@const dists = entries(isObject(m) ? m['distributions'] : undefined)}
-			{@const nResults = isObject(m) ? m['results_with_metrics'] : undefined}
-			<div>
-				<div class="mb-1.5 flex items-baseline gap-2">
-					<span class="font-medium">{tool}</span>
-					{#if nResults !== undefined}
-						<span class="text-xs text-muted-foreground">{fmtValue(nResults)} result{nResults === 1 ? '' : 's'} with metrics</span>
-					{/if}
-				</div>
-				{#if numeric.length > 0}
-					<div class="overflow-x-auto rounded-md border border-border">
-						<table>
-							<thead>
-								<tr>
-									<th>Metric</th>
-									<th class="num">Avg</th>
-									<th class="num">Min</th>
-									<th class="num">Max</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each numeric as [k, stat] (k)}
-									{@const s = isObject(stat) ? stat : {}}
-									<tr>
-										<td class="capitalize">{k.replace(/_/g, ' ')}</td>
-										<td class="num">{@render statValue(s['avg'])}</td>
-										<td class="num text-muted-foreground">{@render statValue(s['min'])}</td>
-										<td class="num text-muted-foreground">{@render statValue(s['max'])}</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-				{/if}
-				{#each dists as [k, buckets] (k)}
-					<div class="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
-						<span class="text-muted-foreground capitalize">{k.replace(/_/g, ' ')}:</span>
-						{#each entries(buckets) as [bucket, count] (bucket)}
-							<span class="rounded border bg-muted/40 px-1.5 py-0.5 font-mono">{bucket}: {fmtValue(count)}</span>
-						{/each}
-					</div>
-				{/each}
-			</div>
-		{/each}
-	</div>
-{/snippet}
-
-<div class="max-w-5xl space-y-6">
+<div class="space-y-6">
 	<PageHeader
 		title={report?.title ?? 'Report'}
-		description={report?.description || undefined}
+		description={report?.description || (typed ? info?.description : undefined) || undefined}
 		back={{ href: '/reports', label: 'Reports' }}
 	>
 		{#snippet meta()}
-			{#if report}<StatusBadge status={report.status} />{/if}
+			{#if report}
+				<StatusBadge status={report.status} />
+				{#if info}
+					{@const TypeIcon = info.icon}
+					<Badge variant="outline" class="gap-1 text-[11px]">
+						<TypeIcon class="h-3 w-3" aria-hidden="true" />{info.label}
+					</Badge>
+				{/if}
+			{/if}
 		{/snippet}
 		{#snippet actions()}
+			<Button
+				variant="outline"
+				size="sm"
+				onclick={load}
+				disabled={!report}
+				aria-label="Refresh"
+				title="Refresh"
+			>
+				<RefreshCw class="h-3.5 w-3.5" /><span class="hidden lg:inline">Refresh</span>
+			</Button>
 			{#if report?.status === 'completed'}
 				{#each exportFormats as f (f.format)}
-					<Button variant="outline" size="sm" href={reportExportUrl(report.report_id, f.format)} download>
-						<FileDown class="mr-1 h-4 w-4" />{f.label}
+					<Button
+						variant="outline"
+						size="sm"
+						href={reportExportUrl(report.report_id, f.format)}
+						download
+						aria-label="Download the report as {f.label}"
+						title="Download {f.label}"
+					>
+						<FileDown class="h-3.5 w-3.5" /><span class="hidden lg:inline">{f.label}</span>
 					</Button>
 				{/each}
 			{/if}
-			<Button variant="outline" size="sm" onclick={load}>
-				<RefreshCw class="mr-1 h-4 w-4" />Refresh
+			<Button
+				variant="outline"
+				size="sm"
+				onclick={downloadJson}
+				disabled={report?.status !== 'completed'}
+				aria-label="Download the report data as JSON"
+				title="Download JSON"
+			>
+				<FileJson class="h-3.5 w-3.5" /><span class="hidden lg:inline">JSON</span>
 			</Button>
-			<Button variant="outline" size="sm" disabled={!report} onclick={() => (confirmOpen = true)}>
-				<Trash2 class="mr-1 h-4 w-4" />Delete
+			<Button
+				variant="outline"
+				size="sm"
+				onclick={() => (confirmOpen = true)}
+				disabled={!report}
+				aria-label="Delete report"
+				title="Delete"
+			>
+				<Trash2 class="h-3.5 w-3.5" /><span class="hidden lg:inline">Delete</span>
+			</Button>
+			<Button size="sm" onclick={regenerate} disabled={!report || regenerating || inFlight}>
+				{#if regenerating}
+					<LoaderCircle class="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
+				{:else}
+					<RotateCcw class="h-3.5 w-3.5" />
+				{/if}
+				Regenerate
 			</Button>
 		{/snippet}
 	</PageHeader>
 
-	{#if loading}
-		<LoadingState label="loading report" />
-	{:else if error}
+	{#if error}
 		<ErrorAlert message={error} onretry={load} />
+	{/if}
+
+	{#if loading && !report}
+		<LoadingState label="loading report" />
 	{:else if report}
 		<Card.Root>
-			<Card.Content class="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
-				<div>
-					<div class="section-label">Type</div>
-					<div class="font-medium">{report.report_type.replace(/_/g, ' ')}</div>
-				</div>
-				<div>
-					<div class="section-label">Created</div>
-					<div class="font-medium">{formatDate(report.created_at)}</div>
-				</div>
-				<div>
-					<div class="section-label">Completed</div>
-					<div class="font-medium">{formatDate(report.completed_at)}</div>
-				</div>
-				<div>
-					<div class="section-label">Expires</div>
-					<div class="font-medium">{formatDate(report.expires_at)}</div>
-				</div>
+			<Card.Content class="space-y-3 text-xs">
+				<dl class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+					<div class="min-w-0">
+						<dt class="section-label">Report id</dt>
+						<dd class="mt-0.5 font-mono break-all">{report.report_id}</dd>
+					</div>
+					<div>
+						<dt class="section-label">Created</dt>
+						<dd class="mt-0.5">{formatTimestamp(report.created_at)}</dd>
+					</div>
+					<div>
+						<dt class="section-label">Completed</dt>
+						<dd class="mt-0.5">{formatTimestamp(report.completed_at)}</dd>
+					</div>
+					<div>
+						<dt class="section-label">Expires</dt>
+						<dd class="mt-0.5">
+							{report.expires_at ? formatTimestamp(report.expires_at) : 'never'}
+						</dd>
+					</div>
+				</dl>
+				{#if configEntries.length > 0}
+					<div class="flex flex-wrap items-center gap-1.5 border-t pt-3">
+						<span class="section-label mr-1">Config</span>
+						{#each configEntries as [key, value] (key)}
+							{#if key === 'plan_hash' && typeof value === 'string'}
+								<span class="inline-flex items-center gap-1"
+									><span class="text-muted-foreground">plan</span><PlanHash hash={value} /></span
+								>
+							{:else}
+								<span class="mono-tag">
+									{humanize(key)}: {Array.isArray(value)
+										? value.join(', ')
+										: typeof value === 'object'
+											? JSON.stringify(value)
+											: String(value)}
+								</span>
+							{/if}
+						{/each}
+					</div>
+				{/if}
 			</Card.Content>
 		</Card.Root>
 
-		{#if report.status === 'generating' || report.status === 'pending'}
-			<LoadingState label="generating report… {report.progress_percent}%" />
+		{#if isReportInFlight(report.status)}
+			<Card.Root>
+				<Card.Content class="space-y-2 py-2" aria-live="polite">
+					<div class="flex items-center justify-between text-sm">
+						<span class="inline-flex items-center gap-2">
+							<LoaderCircle
+								class="h-4 w-4 animate-spin text-primary motion-reduce:animate-none"
+								aria-hidden="true"
+							/>
+							{report.status === 'pending' ? 'Queued' : 'Generating'}…
+						</span>
+						<span class="font-mono text-xs tabular-nums text-muted-foreground"
+							>{report.progress_percent}%</span
+						>
+					</div>
+					<div
+						class="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+						role="progressbar"
+						aria-valuemin={0}
+						aria-valuemax={100}
+						aria-valuenow={report.progress_percent}
+						aria-label="Report generation progress"
+					>
+						<div
+							class="h-full rounded-full bg-primary transition-[width] duration-300"
+							style="width: {report.progress_percent}%"
+						></div>
+					</div>
+					<p class="text-xs text-muted-foreground">
+						This page updates by itself when the report is ready.
+					</p>
+				</Card.Content>
+			</Card.Root>
 		{:else if report.status === 'failed'}
-			<ErrorAlert title="Generation failed" message={report.error_message || 'Generation failed.'} />
-		{:else if report.status === 'completed'}
-			{#if report.summary && Object.keys(report.summary).length > 0}
-				<Card.Root>
-					<Card.Header><Card.Title class="text-base">Summary</Card.Title></Card.Header>
-					<Card.Content class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-						{#each entries(report.summary) as [k, v] (k)}
-							<div>
-								<div class="text-xs text-muted-foreground capitalize">{k.replace(/_/g, ' ')}</div>
-								{#if isObject(v) || isArray(v)}
-									<div class="mt-0.5 text-xs">{fmtCompact(v)}</div>
-								{:else}
-									<div class="font-semibold">{fmtValue(v)}</div>
-								{/if}
-							</div>
-						{/each}
-					</Card.Content>
-				</Card.Root>
-			{/if}
-
-			{@const scalarSections = entries(report.report_data).filter(([, v]) => !isObject(v) && !isArray(v))}
-			{#if scalarSections.length > 0}
-				<Card.Root>
-					<Card.Header><Card.Title class="text-base">Details</Card.Title></Card.Header>
-					<Card.Content class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-						{#each scalarSections as [k, v] (k)}
-							<div>
-								<div class="text-xs text-muted-foreground capitalize">{k.replace(/_/g, ' ')}</div>
-								<div class="font-semibold">{fmtValue(v)}</div>
-							</div>
-						{/each}
-					</Card.Content>
-				</Card.Root>
-			{/if}
-
-			{#each entries(report.report_data).filter(([, v]) => isObject(v) || isArray(v)) as [section, value] (section)}
-				<Card.Root>
-					<Card.Header>
-						<Card.Title class="text-base capitalize">{section.replace(/_/g, ' ')}</Card.Title>
-					</Card.Header>
-					<Card.Content class="text-sm">
-						{#if section === 'metrics_by_tool' && isObject(value) && Object.keys(value).length > 0}
-							{@render metricsByTool(value)}
-						{:else if isArray(value)}
-							{#if value.length === 0}
-								<p class="text-xs text-muted-foreground">No items.</p>
-							{:else if isObjectRows(value)}
-								{@render objectTable(value)}
-							{:else}
-								<ul class="list-disc pl-5 text-xs">
-									{#each value as v, i (i)}<li>{fmtValue(v)}</li>{/each}
-								</ul>
-							{/if}
-						{:else if isObject(value)}
-							{@const flat = entries(value).filter(([k, v]) => !isWide(k, v))}
-							{@const wide = entries(value).filter(([k, v]) => isWide(k, v))}
-							{#if flat.length > 0}
-								<dl class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-									{#each flat as [k, v] (k)}
-										<div>
-											<dt class="text-muted-foreground capitalize">{k.replace(/_/g, ' ')}</dt>
-											<dd class="font-medium">
-												{#if isObject(v) || isArray(v)}
-													<span class="font-normal">{fmtCompact(v)}</span>
-												{:else}
-													{fmtValue(v)}
-												{/if}
-											</dd>
-										</div>
-									{/each}
-								</dl>
-							{/if}
-							{#each wide as [k, v] (k)}
-								<div class="{flat.length > 0 ? 'mt-4 border-t pt-4' : ''}">
-									<h4 class="section-label mb-2">{k.replace(/_/g, ' ')}</h4>
-									{#if k === 'metrics_by_tool' && isObject(v)}
-										{@render metricsByTool(v)}
-									{:else if isObjectRows(v)}
-										{@render objectTable(v)}
-									{:else}
-										<pre class="text-xs bg-muted/40 rounded p-2 overflow-auto">{JSON.stringify(v, null, 2)}</pre>
-									{/if}
-								</div>
-							{/each}
-						{:else}
-							<div class="text-xs">{fmtValue(value)}</div>
-						{/if}
-					</Card.Content>
-				</Card.Root>
-			{/each}
+			<ErrorAlert
+				title="Generation failed"
+				message={report.error_message || 'The report could not be generated.'}
+				onretry={regenerate}
+			/>
+		{:else}
+			<ReportBody {report} />
 		{/if}
 	{/if}
 </div>

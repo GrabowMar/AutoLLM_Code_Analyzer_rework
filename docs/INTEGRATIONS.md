@@ -96,7 +96,10 @@ write). `GET /api/integrations/github/status/` shows the connected login.
 creates the repo and pushes the app (stack skeleton + generated code, junk and files > 1 MB
 skipped) as one commit with an LLM Lab README (model, template, findings summary). With
 `upload_sarif`, the app's findings go to GitHub code scanning (needs a public repo or GitHub
-Advanced Security). Gists hold only the generated files, flattened.
+Advanced Security). Gists hold only the generated files, flattened. The findings summary and the SARIF come from the app's
+canonical analysis run: counted static findings plus one row per AI consensus cluster
+(kept apart). When the static measurement is unavailable (a required tool failed),
+the README says so instead of presenting it as a clean result.
 
 ## 4. Notifications (webhooks)
 
@@ -104,7 +107,11 @@ Advanced Security). Gists hold only the generated files, flattened.
 `discord`, `teams`, `ntfy`, `telegram`, `generic`), a target and a set of events:
 `generation.{completed,failed,cancelled}`, `analysis.{completed,failed,cancelled}`,
 `experiment.{completed,cancelled}`, `report.{completed,failed}`. Jobs inside an experiment
-only notify with `include_experiment_jobs`.
+only notify with `include_experiment_jobs`. The `analysis.*` payload follows the run summary
+(schema 2): `static_measured`, counted findings and `issues`, `ai_findings`,
+`is_complete`, `plan_hash`, `cost_usd` and `cost_complete`; an unscanned run says
+"not measured" instead of reporting 0 findings. The `generation.*` payload's
+`pass_rate` is the conformance rate only.
 
 - URLs and secrets are encrypted and write-only. `generic` deliveries carry
   `X-LLMLab-Event`, `X-LLMLab-Delivery` and, with a secret,

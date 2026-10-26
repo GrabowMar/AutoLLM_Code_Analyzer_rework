@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
+
 from ninja import Query
 from ninja import Router
+from ninja.errors import HttpError
 
 from backend.statistics import services
 from backend.statistics.api.schema import ActivityItemSchema
@@ -48,13 +51,22 @@ def get_models(
     prompt_hash: str | None = None,
     bundle_key: str | None = None,
     experiment_id: str | None = None,
+    plan_hash: str | None = None,
 ):
+    if experiment_id:
+        # An experiment id is a UUID; a malformed one is a client error (422),
+        # not a server crash when the ORM lookup is built.
+        try:
+            experiment_id = str(uuid.UUID(str(experiment_id)))
+        except ValueError as exc:
+            raise HttpError(422, "experiment_id must be a UUID") from exc
     return services.get_model_comparison(
         request.auth,
         limit=limit,
         prompt_hash=prompt_hash,
         bundle_key=bundle_key,
-        experiment_id=experiment_id,
+        experiment_id=experiment_id or None,
+        plan_hash=plan_hash,
     )
 
 
@@ -89,7 +101,17 @@ def get_analyzer_health(request):
 def _study_scope(request, experiment_id: str | None, batch_id: str | None):
     from backend.statistics.services.study import study_jobs
 
+    for name, value in (("experiment_id", experiment_id), ("batch_id", batch_id)):
+        if value:
+            try:
+                uuid.UUID(str(value))
+            except ValueError as exc:
+                # A malformed id is a client error, never a 500 from the ORM.
+                raise HttpError(422, f"{name} must be a UUID") from exc
     return study_jobs(request.auth, experiment_id=experiment_id, batch_id=batch_id)
+
+
+_PLAN_HASH = Query(None, pattern="^[0-9a-f]{64}$", description="Analysis plan to read (default: auto-selected).")
 
 
 @router.get("/study/breakdowns/")
@@ -100,17 +122,26 @@ def get_study_breakdowns(
     include_ai: bool = False,
     line_tolerance: int = Query(2, ge=0, le=20),
     include_issues: bool = False,
+    plan_hash: str | None = _PLAN_HASH,
 ):
-    """Raw vs cross-tool-deduplicated issues per app, model, template and tool, plus tool overlap."""
+    """Counted findings vs deduplicated issues per app, model, template and tool, plus tool overlap.
+
+    Read from each job's canonical run under one analysis plan (``coverage``
+    lists the jobs not measured under it); AI consensus stays in ``ai_*``
+    columns. ``line_tolerance`` is accepted for compatibility: issues are
+    the engine's stored grouping.
+    """
     from backend.statistics.services.study import issue_breakdowns
 
     data = issue_breakdowns(
         _study_scope(request, experiment_id, batch_id),
         include_ai=include_ai,
         line_tolerance=line_tolerance,
+        plan_hash=plan_hash,
     )
     if not include_issues:
         data.pop("issues")
+        data.pop("ai_issues", None)
     return data
 
 

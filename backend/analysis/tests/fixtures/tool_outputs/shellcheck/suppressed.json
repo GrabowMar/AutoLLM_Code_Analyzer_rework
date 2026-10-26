@@ -1,0 +1,45 @@
+{
+ "captured_at": "2026-10-26T08:42:55+00:00",
+ "case": "suppressed",
+ "config": {
+  "exclude": "",
+  "severity": "style"
+ },
+ "files": [
+  {
+   "content": "#!/bin/sh\n# shellcheck disable=SC2086\necho $1\n",
+   "kind": "source",
+   "language": "shell",
+   "path": "suppressed/run.sh",
+   "sha256": "aa1284284d67e5aed166bfcb08d7801b66e64d817d5c57a1055c7c3887c08964"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "sh",
+   "-c",
+   "set -eu; mkdir /tmp/llmlab-src; cd /src; cp --parents -- \"$@\" /tmp/llmlab-src/; cd /tmp/llmlab-src; sed -E -i -e 's/#([[:space:]]*)shellcheck([[:space:]])/#\\1llmlab-overridden\\2/g' -- \"$@\"; mkdir /tmp/llmlab-cwd; cd /tmp/llmlab-cwd; n=$#; for f in \"$@\"; do set -- \"$@\" \"/tmp/llmlab-src/$f\"; done; shift \"$n\"; exec /opt/analyzer/bin/shellcheck --norc --format=json1 --severity=style -- \"$@\"",
+   "stage",
+   "suppressed/run.sh"
+  ],
+  "env": {},
+  "mem_limit": "256m",
+  "report_files": [],
+  "timeout_s": 120
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "{\"comments\":[{\"file\":\"/tmp/llmlab-src/suppressed/run.sh\",\"line\":3,\"endLine\":3,\"column\":6,\"endColumn\":8,\"level\":\"info\",\"code\":2086,\"message\":\"Double quote to prevent globbing and word splitting.\",\"fix\":{\"replacements\":[{\"column\":6,\"endColumn\":6,\"endLine\":3,\"insertionPoint\":\"afterEnd\",\"line\":3,\"precedence\":7,\"replacement\":\"\\\"\"},{\"column\":8,\"endColumn\":8,\"endLine\":3,\"insertionPoint\":\"beforeStart\",\"line\":3,\"precedence\":7,\"replacement\":\"\\\"\"}]}}]}\n",
+  "timed_out": false,
+  "wall_seconds": 0.111
+ },
+ "schema": 1,
+ "tool": "shellcheck",
+ "tool_version": "0.11.0"
+}

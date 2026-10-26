@@ -1,0 +1,100 @@
+{
+ "captured_at": "2026-10-26T08:41:21+00:00",
+ "case": "syntax",
+ "config": {
+  "exclude_rules": "",
+  "per_file_timeout": 30,
+  "rulesets": [
+   "python",
+   "python-audit",
+   "javascript",
+   "javascript-audit",
+   "html"
+  ]
+ },
+ "files": [
+  {
+   "content": "def handler(request:\n    return request\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/broken.py",
+   "sha256": "a213cda8977aafa87b15bec45ead948580c06c66386ac6bd1e94e459981963e4"
+  },
+  {
+   "content": "import subprocess\n\n\ndef run(cmd):\n    return subprocess.call(cmd, shell=True)\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/ok.py",
+   "sha256": "f7ea5d1b7e6029f2c3a436540c2d610a3290ed49060941b39709a9aaefb9254b"
+  },
+  {
+   "content": "export function f( {\n  return eval(x;\n}}}\n",
+   "kind": "source",
+   "language": "javascript",
+   "path": "web/broken.js",
+   "sha256": "94bd2ac573ccb8b2ee0644a822a4bb1921b211a7a935bb82b095c25d49cc98a3"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/semgrep",
+   "scan",
+   "--json",
+   "--output",
+   "/out/semgrep.json",
+   "--quiet",
+   "--metrics",
+   "off",
+   "--disable-version-check",
+   "--oss-only",
+   "--no-git-ignore",
+   "--disable-nosem",
+   "--no-rewrite-rule-ids",
+   "--timeout",
+   "30",
+   "--timeout-threshold",
+   "3",
+   "--max-target-bytes",
+   "4000000",
+   "--jobs",
+   "1",
+   "--config",
+   "/opt/analyzer/rules/semgrep/python.json",
+   "--config",
+   "/opt/analyzer/rules/semgrep/python-audit.json",
+   "--config",
+   "/opt/analyzer/rules/semgrep/javascript.json",
+   "--config",
+   "/opt/analyzer/rules/semgrep/javascript-audit.json",
+   "--config",
+   "/opt/analyzer/rules/semgrep/html.json",
+   "--",
+   "/src/svc/broken.py",
+   "/src/svc/ok.py",
+   "/src/web/broken.js"
+  ],
+  "env": {},
+  "mem_limit": "1g",
+  "report_files": [
+   "semgrep.json"
+  ],
+  "timeout_s": 600
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "semgrep.json": "{\"version\":\"1.180.0\",\"results\":[{\"check_id\":\"python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit\",\"path\":\"/src/svc/ok.py\",\"start\":{\"line\":5,\"col\":12,\"offset\":45},\"end\":{\"line\":5,\"col\":44,\"offset\":77},\"extra\":{\"message\":\"Detected subprocess function 'call' without a static string. If this data can be controlled by a malicious actor, it may be an instance of command injection. Audit the use of this call to ensure it is not controllable by an external resource. You may consider using 'shlex.escape()'.\",\"metadata\":{\"asvs\":{\"control_id\":\"5.3.8 OS Command Injection\",\"control_url\":\"https://github.com/OWASP/ASVS/blob/master/4.0/en/0x13-V5-Validation-Sanitization-Encoding.md#v53-output-encoding-and-injection-prevention-requirements\",\"section\":\"V5: Validation, Sanitization and Encoding Verification Requirements\",\"version\":\"4\"},\"category\":\"security\",\"confidence\":\"LOW\",\"cwe\":[\"CWE-78: Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')\"],\"cwe2021-top25\":true,\"cwe2022-top25\":true,\"impact\":\"HIGH\",\"likelihood\":\"LOW\",\"owasp\":[\"A01:2017 - Injection\",\"A03:2021 - Injection\",\"A05:2025 - Injection\"],\"references\":[\"https://stackoverflow.com/questions/3172470/actual-meaning-of-shell-true-in-subprocess\",\"https://docs.python.org/3/library/subprocess.html\",\"https://docs.python.org/3/library/shlex.html\",\"https://semgrep.dev/docs/cheat-sheets/python-command-injection/\"],\"subcategory\":[\"audit\"],\"technology\":[\"python\"]},\"severity\":\"ERROR\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}},{\"check_id\":\"python.lang.security.audit.subprocess-shell-true.subprocess-shell-true\",\"path\":\"/src/svc/ok.py\",\"start\":{\"line\":5,\"col\":39,\"offset\":72},\"end\":{\"line\":5,\"col\":43,\"offset\":76},\"extra\":{\"message\":\"Found 'subprocess' function 'call' with 'shell=True'. This is dangerous because this call will spawn the command using a shell process. Doing so propagates current shell settings and variables, which makes it much easier for a malicious actor to execute commands. Use 'shell=False' instead.\",\"fix\":\"False\",\"metadata\":{\"category\":\"security\",\"confidence\":\"MEDIUM\",\"cwe\":[\"CWE-78: Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')\"],\"cwe2021-top25\":true,\"cwe2022-top25\":true,\"impact\":\"LOW\",\"likelihood\":\"HIGH\",\"owasp\":[\"A01:2017 - Injection\",\"A03:2021 - Injection\",\"A05:2025 - Injection\"],\"references\":[\"https://stackoverflow.com/questions/3172470/actual-meaning-of-shell-true-in-subprocess\",\"https://docs.python.org/3/library/subprocess.html\"],\"source-rule-url\":\"https://bandit.readthedocs.io/en/latest/plugins/b602_subprocess_popen_with_shell_equals_true.html\",\"subcategory\":[\"secure default\"],\"technology\":[\"python\"]},\"severity\":\"ERROR\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}}],\"errors\":[{\"code\":3,\"level\":\"warn\",\"type\":\"Syntax error\",\"message\":\"Syntax error at line /src/web/broken.js:1:\\n `export function f( {\\n  return eval(x;\\n}}}\\n` was unexpected\",\"path\":\"/src/web/broken.js\"},{\"code\":3,\"level\":\"warn\",\"type\":[\"PartialParsing\",[{\"path\":\"/src/svc/broken.py\",\"start\":{\"line\":1,\"col\":1,\"offset\":0},\"end\":{\"line\":2,\"col\":19,\"offset\":39}}]],\"message\":\"Syntax error at line /src/svc/broken.py:1:\\n `def handler(request:\\n    return request` was unexpected\",\"path\":\"/src/svc/broken.py\",\"spans\":[{\"file\":\"/src/svc/broken.py\",\"start\":{\"line\":1,\"col\":1,\"offset\":0},\"end\":{\"line\":2,\"col\":19,\"offset\":39}}]}],\"paths\":{\"scanned\":[\"/src/svc/broken.py\",\"/src/svc/ok.py\",\"/src/web/broken.js\"]},\"time\":{\"rules\":[],\"rules_parse_time\":0.23848485946655273,\"profiling_times\":{\"config_time\":0.8025610446929932,\"core_time\":0.839754581451416,\"ignores_time\":0.0006418228149414062,\"total_time\":1.651498794555664},\"parsing_time\":{\"total_time\":0.0,\"per_file_time\":{\"mean\":0.0,\"std_dev\":0.0},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_files\":[]},\"scanning_time\":{\"total_time\":0.013138055801391602,\"per_file_time\":{\"mean\":0.00164225697517395,\"std_dev\":8.138199240725895e-06},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_files\":[]},\"matching_time\":{\"total_time\":0.0,\"per_file_and_rule_time\":{\"mean\":0.0,\"std_dev\":0.0},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_rules_on_files\":[]},\"tainting_time\":{\"total_time\":0.0,\"per_def_and_rule_time\":{\"mean\":0.0,\"std_dev\":0.0},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_rules_on_defs\":[]},\"fixpoint_timeouts\":[],\"prefiltering\":{\"project_level_time\":0.0,\"file_level_time\":0.0,\"rules_with_project_prefilters_ratio\":0.0,\"rules_with_file_prefilters_ratio\":0.9941002949852508,\"rules_selected_ratio\":0.014749262536873156,\"rules_matched_ratio\":0.014749262536873156},\"targets\":[],\"total_bytes\":0,\"max_memory_bytes\":272816896},\"engine_requested\":\"OSS\",\"skipped_rules\":[],\"profiling_results\":[]}"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 3.767
+ },
+ "schema": 1,
+ "tool": "semgrep",
+ "tool_version": "1.180.0"
+}

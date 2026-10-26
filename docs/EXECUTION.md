@@ -116,6 +116,13 @@ that does not fit (the default 4 g apps-dind), sandbox runs and evaluations
 post-runs wait while either is busy. A rule broken only by the post-run term
 is allowed; post-runs then wait while sandbox and evaluation are busy.
 
+`ANALYSIS_WORKSPACE_MEM` (1g; the name predates the v2 engine) is the share the
+rule reserves for a post-run's analysis. The analysis runs themselves execute in the
+analysis executor ([Analysis pipeline](/docs/ANALYSIS_PIPELINE#durable-execution)),
+and each tool container waits for memory on its own: the sum of the limits of every
+running container on apps-dind plus the tool must fit `ANALYSIS_DIND_MEMORY_BUDGET`.
+The two checks are independent, so keep both budgets below the apps-dind cap.
+
 ## Leases and reconciliation
 
 `reconcile()` runs at leader start and every 15 s (each step isolated):

@@ -1,0 +1,42 @@
+{
+ "captured_at": "2026-10-26T08:42:47+00:00",
+ "case": "suppressed",
+ "config": {},
+ "files": [
+  {
+   "content": "<!-- htmlhint alt-require:false -->\n<!DOCTYPE html>\n<html lang=\"en\"><head><title>Page</title></head><body><img src=\"/a.png\"></body></html>\n",
+   "kind": "source",
+   "language": "html",
+   "path": "suppressed/page.html",
+   "sha256": "8e4a5e6d80d0ea5d95b40eefca74b1149a60aef31d5021bf43168edfe2c08de9"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "sh",
+   "-c",
+   "set -eu; mkdir /tmp/llmlab-src; cd /src; cp --parents -- \"$@\" /tmp/llmlab-src/; cd /tmp/llmlab-src; sed -E -i -e 's/<!--([[:space:]]*)htmlhint/<!--\\1llmlab-overridden/g' -- \"$@\"; mkdir /tmp/llmlab-cwd; cd /tmp/llmlab-cwd; n=$#; for f in \"$@\"; do set -- \"$@\" \"/tmp/llmlab-src/$f\"; done; shift \"$n\"; exec /opt/analyzer/bin/htmlhint --config /opt/analyzer/config/htmlhint.json --format json --nocolor -- \"$@\"",
+   "stage",
+   "suppressed/page.html"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [],
+  "timeout_s": 120
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "[{\"file\":\"/tmp/llmlab-src/suppressed/page.html\",\"messages\":[{\"type\":\"warning\",\"message\":\"An alt attribute must be present on <img> elements.\",\"raw\":\"<img src=\\\"/a.png\\\">\",\"evidence\":\"<html lang=\\\"en\\\"><head><title>Page</title></head><body><img src=\\\"/a.png\\\"></body></html>\",\"line\":3,\"col\":59,\"rule\":{\"id\":\"alt-require\",\"description\":\"The alt attribute of an <img> element must be present and alt attribute of area[href] and input[type=image] must have a value.\",\"link\":\"https://htmlhint.com/rules/alt-require\"}}],\"time\":4}]\n",
+  "timed_out": false,
+  "wall_seconds": 0.247
+ },
+ "schema": 1,
+ "tool": "htmlhint",
+ "tool_version": "1.9.2"
+}

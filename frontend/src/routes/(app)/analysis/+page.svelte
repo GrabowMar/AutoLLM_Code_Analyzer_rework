@@ -1,384 +1,478 @@
 <script lang="ts">
-	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
+	// Every analysis run the user can see (study runs and ad-hoc runs; self-
+	// tests on request). Filters live in the URL; the list refreshes silently
+	// every 5 s while a run on the page is queued or running.
+	import { untrack } from 'svelte';
+	import { page } from '$app/state';
+	import type {
+		AnalysisRunListItem,
+		Page,
+		RunListParams,
+		RunOrdering,
+		RunPurpose,
+		RunStatus
+	} from '$lib/api/analysis';
+	import {
+		isRunActive,
+		listAnalysisRuns,
+		RUN_ORDERINGS,
+		RUN_PURPOSES,
+		RUN_STATUSES
+	} from '$lib/api/analysis';
+	import { formatApiError, isAbortError } from '$lib/api/core';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
+	import { rowLink, tableFrame } from '$lib/components/table';
+	import * as Card from '$lib/components/ui/card';
+	import * as Select from '$lib/components/ui/select';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
+	import { cn } from '$lib/utils';
+	import Hint from '$lib/components/analysis/Hint.svelte';
+	import NaValue from '$lib/components/analysis/NaValue.svelte';
+	import RunDataBadge from '$lib/components/analysis/RunDataBadge.svelte';
+	import {
+		aiConsensusCell,
+		fmtAgo,
+		fmtDateTime,
+		fmtInt,
+		fmtSeconds,
+		measuredSloc,
+		phaseLabel,
+		PURPOSE_LABELS,
+		shortHash,
+		staticFindingsCell,
+		toolProgress
+	} from '$lib/components/analysis/run-utils';
+	import { csvParam, intParam, replaceParams } from '$lib/components/analysis/run/url';
+	import FlaskConical from '@lucide/svelte/icons/flask-conical';
+	import Microscope from '@lucide/svelte/icons/microscope';
 	import Plus from '@lucide/svelte/icons/plus';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import Microscope from '@lucide/svelte/icons/microscope';
-	import Store from '@lucide/svelte/icons/store';
-	import Eye from '@lucide/svelte/icons/eye';
-	import StopCircle from '@lucide/svelte/icons/circle-stop';
-	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import { onMount } from 'svelte';
-	import { toast } from 'svelte-sonner';
-	import {
-		listRuns,
-		cancelRun,
-		deleteRun,
-		type AnalysisRunListItem,
-	} from '$lib/api/runs';
-	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import PageHeader from '$lib/components/PageHeader.svelte';
-	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import EmptyState from '$lib/components/EmptyState.svelte';
-	import LoadingState from '$lib/components/LoadingState.svelte';
-	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
-	import { severityColors } from '$lib/constants/analysis';
-	import { formatDate, statusLabel } from '$lib/utils/formatters';
-	import { tableFrame } from '$lib/components/table';
+	import SearchX from '@lucide/svelte/icons/search-x';
 
+	const PER_PAGE = 25;
+	const POLL_MS = 5_000;
+
+	const ORDER_LABELS: Record<RunOrdering, string> = {
+		'-created_at': 'Newest first',
+		created_at: 'Oldest first',
+		'-completed_at': 'Recently finished',
+		completed_at: 'First finished',
+		status: 'Status',
+		name: 'Name',
+		'-duration': 'Longest',
+		duration: 'Shortest'
+	};
+
+	// ── URL state ──────────────────────────────────────────────────────
+	const sp = $derived(page.url.searchParams);
+	const statuses = $derived(
+		csvParam(sp.get('status')).filter((s): s is RunStatus =>
+			(RUN_STATUSES as readonly string[]).includes(s)
+		)
+	);
+	const purposes = $derived(
+		csvParam(sp.get('purpose')).filter((s): s is RunPurpose =>
+			(RUN_PURPOSES as readonly string[]).includes(s)
+		)
+	);
+	const complete = $derived(sp.get('complete') ?? '');
+	const q = $derived(sp.get('q') ?? '');
+	const order = $derived<RunOrdering>(
+		(RUN_ORDERINGS as readonly string[]).includes(sp.get('order') ?? '')
+			? (sp.get('order') as RunOrdering)
+			: '-created_at'
+	);
+	const pageNo = $derived(intParam(sp.get('page'), 1));
+	const planHash = $derived(sp.get('plan_hash') ?? '');
+	const studyId = $derived(sp.get('study_id') ?? '');
+	const jobId = $derived(sp.get('generation_job_id') ?? '');
+
+	const params = $derived<RunListParams>({
+		page: pageNo,
+		per_page: PER_PAGE,
+		status: statuses.length ? statuses : undefined,
+		purpose: purposes.length ? purposes : undefined,
+		is_complete: complete === 'yes' ? true : complete === 'no' ? false : undefined,
+		q: q || undefined,
+		ordering: order,
+		plan_hash: planHash || undefined,
+		study_id: studyId || undefined,
+		generation_job_id: jobId || undefined
+	});
+	const paramsKey = $derived(JSON.stringify(params));
+
+	function update(updates: Record<string, string | number | null>, resetPage = true) {
+		void replaceParams(page.url, resetPage ? { ...updates, page: null } : updates);
+	}
+
+	// ── Data ───────────────────────────────────────────────────────────
+	let data = $state<Page<AnalysisRunListItem> | null>(null);
 	let loading = $state(true);
-	let error = $state('');
-	let runs = $state<AnalysisRunListItem[]>([]);
-	let total = $state(0);
-	let totalPages = $state(1);
-	let currentPage = $state(1);
-	let perPage = $state(25);
-	let statusFilter = $state('');
-	let searchQuery = $state('');
 	let refreshing = $state(false);
-	let cancellingIds = $state(new Set<string>());
-	let deletingIds = $state(new Set<string>());
+	let error = $state('');
+	let controller: AbortController | null = null;
 
-	let pollTimer: ReturnType<typeof setInterval> | undefined;
-	let hasActive = $derived(runs.some((r) => r.status === 'running' || r.status === 'pending'));
+	async function load(silent = false) {
+		controller?.abort();
+		const mine = new AbortController();
+		controller = mine;
+		if (!silent) refreshing = true;
+		try {
+			data = await listAnalysisRuns(params, { signal: mine.signal });
+			error = '';
+		} catch (e) {
+			if (isAbortError(e)) return;
+			if (!(silent && data)) error = formatApiError(e, 'Could not load runs.');
+		} finally {
+			if (controller === mine) {
+				loading = false;
+				refreshing = false;
+			}
+		}
+	}
 
-	const statusOptions = ['running', 'pending', 'completed', 'partial', 'failed', 'cancelled'];
+	$effect(() => {
+		void paramsKey;
+		untrack(() => void load());
+		return () => controller?.abort();
+	});
 
-	const activeFilters = $derived.by(() => {
+	const runs = $derived(data?.items ?? []);
+	const anyActive = $derived(runs.some((r) => isRunActive(r.status)));
+
+	$effect(() => {
+		if (!anyActive) return;
+		const timer = setInterval(() => {
+			if (!document.hidden) void load(true);
+		}, POLL_MS);
+		return () => clearInterval(timer);
+	});
+
+	// ── Filters UI ─────────────────────────────────────────────────────
+	let searchText = $state(untrack(() => q));
+	let searchTimer: ReturnType<typeof setTimeout> | undefined;
+	function onSearch(value: string) {
+		clearTimeout(searchTimer);
+		searchTimer = setTimeout(() => update({ q: value.trim() || null }), 300);
+	}
+
+	function toggle(list: string[], value: string, key: string) {
+		const next = list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+		update({ [key]: next.length ? next.join(',') : null });
+	}
+
+	const activeTags = $derived.by((): FilterTag[] => {
 		const tags: FilterTag[] = [];
-		if (statusFilter) {
+		if (statuses.length)
 			tags.push({
 				key: 'status',
-				label: `Status: ${statusLabel(statusFilter)}`,
-				onRemove: () => { statusFilter = ''; currentPage = 1; fetchRuns(); },
+				label: `Status: ${statuses.join(', ')}`,
+				onRemove: () => update({ status: null })
 			});
-		}
+		if (purposes.length)
+			tags.push({
+				key: 'purpose',
+				label: `Purpose: ${purposes.map((p) => PURPOSE_LABELS[p]).join(', ')}`,
+				onRemove: () => update({ purpose: null })
+			});
+		if (complete)
+			tags.push({
+				key: 'complete',
+				label: complete === 'yes' ? 'Complete only' : 'Incomplete only',
+				onRemove: () => update({ complete: null })
+			});
+		if (planHash)
+			tags.push({
+				key: 'plan',
+				label: `Plan ${shortHash(planHash, 10)}`,
+				onRemove: () => update({ plan_hash: null })
+			});
+		if (studyId)
+			tags.push({
+				key: 'study',
+				label: `Study ${studyId.slice(0, 8)}`,
+				onRemove: () => update({ study_id: null })
+			});
+		if (jobId)
+			tags.push({
+				key: 'job',
+				label: `Job ${jobId.slice(0, 8)}`,
+				onRemove: () => update({ generation_job_id: null })
+			});
+		if (q)
+			tags.push({
+				key: 'q',
+				label: `Search: ${q}`,
+				onRemove: () => {
+					searchText = '';
+					update({ q: null });
+				}
+			});
 		return tags;
 	});
 
+	function clearAll() {
+		searchText = '';
+		void replaceParams(page.url, {}, [
+			'status',
+			'purpose',
+			'complete',
+			'q',
+			'order',
+			'page',
+			'plan_hash',
+			'study_id',
+			'generation_job_id'
+		]);
+	}
+
 	const resultsText = $derived(
-		total > 0
-			? `Showing ${(currentPage - 1) * perPage + 1}–${Math.min(currentPage * perPage, total)} of ${total} runs`
-			: '',
+		data
+			? `${data.total.toLocaleString()} run${data.total === 1 ? '' : 's'}${purposes.includes('canary') ? '' : ' · self-tests hidden'}`
+			: ''
 	);
-
-	const displayedRuns = $derived(
-		runs.filter(
-			(r) =>
-				!searchQuery ||
-				(r.name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-				r.id.toLowerCase().includes(searchQuery.toLowerCase()),
-		),
-	);
-
-	function runName(run: AnalysisRunListItem): string {
-		return run.name || `Analysis #${run.id.slice(0, 8)}`;
-	}
-
-	function severityBreakdown(run: AnalysisRunListItem): [string, number][] {
-		const counts = run.summary?.severity_counts as Record<string, number> | undefined;
-		if (!counts || typeof counts !== 'object') return [];
-		return Object.entries(counts).filter(([, v]) => (v as number) > 0) as [string, number][];
-	}
-
-	async function fetchRuns() {
-		try {
-			const data = await listRuns({
-				page: currentPage,
-				per_page: perPage,
-				status: statusFilter || undefined,
-			});
-			runs = data.items;
-			total = data.total;
-			totalPages = data.pages;
-			currentPage = data.page;
-			error = '';
-		} catch (e) {
-			error = 'Failed to load analysis runs.';
-			console.error(e);
-		}
-	}
-
-	async function loadAll(showLoading = true) {
-		if (showLoading) loading = true;
-		await fetchRuns();
-		loading = false;
-		refreshing = false;
-	}
-
-	function handleRefresh() {
-		refreshing = true;
-		loadAll(false);
-	}
-
-	function selectStatus(status: string) {
-		statusFilter = status;
-		currentPage = 1;
-		fetchRuns();
-	}
-
-	function goToPage(page: number) {
-		if (page < 1 || page > totalPages) return;
-		currentPage = page;
-		fetchRuns();
-	}
-
-	async function handleCancel(id: string) {
-		cancellingIds = new Set([...cancellingIds, id]);
-		try {
-			await cancelRun(id);
-			toast.success('Run cancelled');
-			await loadAll(false);
-		} catch (e) {
-			console.error('Failed to cancel run:', e);
-			toast.error('Failed to cancel run');
-		} finally {
-			const next = new Set(cancellingIds);
-			next.delete(id);
-			cancellingIds = next;
-		}
-	}
-
-	// Delete is gated behind a confirmation dialog.
-	let confirmDeleteId = $state<string | null>(null);
-	let confirmOpen = $state(false);
-	let confirmBusy = $state(false);
-
-	function askDelete(id: string) {
-		confirmDeleteId = id;
-		confirmOpen = true;
-	}
-
-	async function confirmDelete() {
-		const id = confirmDeleteId;
-		if (!id) return;
-		confirmBusy = true;
-		deletingIds = new Set([...deletingIds, id]);
-		try {
-			await deleteRun(id);
-			toast.success('Run deleted');
-			confirmOpen = false;
-			await loadAll(false);
-		} catch (e) {
-			console.error('Failed to delete run:', e);
-			toast.error('Failed to delete run');
-		} finally {
-			confirmBusy = false;
-			const next = new Set(deletingIds);
-			next.delete(id);
-			deletingIds = next;
-		}
-	}
-
-	onMount(() => {
-		loadAll();
-		pollTimer = setInterval(() => {
-			if (hasActive) fetchRuns();
-		}, 5000);
-		return () => clearInterval(pollTimer);
-	});
 </script>
 
 <div class="space-y-6">
-	<PageHeader title="Analysis" description="Run and monitor analyzers against your generated apps.">
+	<PageHeader
+		title="Analysis runs"
+		description="Every analysis run: study runs under a locked protocol and ad-hoc checks. Runs are comparable only when their plan hashes match."
+	>
 		{#snippet actions()}
-			<Button variant="outline" size="sm" href="/analyzers">
-				<Store class="mr-2 h-3.5 w-3.5" />
-				Tool Shop
+			<Button variant="outline" size="sm" onclick={() => load()} disabled={refreshing}>
+				<RefreshCw
+					class="size-3.5 {refreshing ? 'animate-spin motion-reduce:animate-none' : ''}"
+				/>Refresh
 			</Button>
-			<Button variant="outline" size="sm" onclick={handleRefresh} disabled={refreshing}>
-				<RefreshCw class="mr-2 h-3.5 w-3.5 {refreshing ? 'animate-spin motion-reduce:animate-none' : ''}" />
-				Refresh
+			<Button variant="outline" size="sm" href="/analysis/studies">
+				<FlaskConical class="size-3.5" />Studies
 			</Button>
 			<Button size="sm" href="/analysis/create">
-				<Plus class="mr-2 h-3.5 w-3.5" />
-				New analysis
+				<Plus class="size-3.5" />Ad-hoc run
 			</Button>
 		{/snippet}
 	</PageHeader>
 
 	<FilterBar
-		searchPlaceholder="Filter loaded runs by name or ID…"
-		bind:searchValue={searchQuery}
-		activeTags={activeFilters}
+		searchPlaceholder="Search name, model, app or harness…"
+		bind:searchValue={searchText}
+		onSearchInput={onSearch}
+		{activeTags}
+		onClearAll={clearAll}
 		{resultsText}
-		onClearAll={() => { statusFilter = ''; searchQuery = ''; currentPage = 1; fetchRuns(); }}
 	>
 		{#snippet filters()}
 			<div class="fb-group">
 				<span class="fb-group-label">Status</span>
-				<button class="fb-chip {statusFilter === '' ? 'fb-chip-on' : ''}" onclick={() => selectStatus('')}>All</button>
-				{#each statusOptions as s}
-					<button class="fb-chip {statusFilter === s ? 'fb-chip-on' : ''}" onclick={() => selectStatus(s)}>{statusLabel(s)}</button>
+				{#each RUN_STATUSES as s (s)}
+					<button
+						type="button"
+						class={cn('fb-chip capitalize', statuses.includes(s) && 'fb-chip-on')}
+						aria-pressed={statuses.includes(s)}
+						onclick={() => toggle(statuses, s, 'status')}>{s}</button
+					>
 				{/each}
 			</div>
 			<div class="fb-group">
-				<span class="fb-group-label">Per page</span>
-				{#each [10, 25, 50, 100] as n}
-					<button class="fb-chip {perPage === n ? 'fb-chip-on' : ''}" onclick={() => { perPage = n; currentPage = 1; fetchRuns(); }}>{n}</button>
+				<span class="fb-group-label">Purpose</span>
+				{#each RUN_PURPOSES as p (p)}
+					<button
+						type="button"
+						class={cn('fb-chip', purposes.includes(p) && 'fb-chip-on')}
+						aria-pressed={purposes.includes(p)}
+						onclick={() => toggle(purposes, p, 'purpose')}>{PURPOSE_LABELS[p]}</button
+					>
 				{/each}
+			</div>
+			<div class="fb-group">
+				<span class="fb-group-label">Data</span>
+				{#each [{ value: 'yes', label: 'Complete' }, { value: 'no', label: 'Incomplete' }] as option (option.value)}
+					<button
+						type="button"
+						class={cn('fb-chip', complete === option.value && 'fb-chip-on')}
+						aria-pressed={complete === option.value}
+						onclick={() =>
+							update({
+								complete: complete === option.value ? null : option.value
+							})}>{option.label}</button
+					>
+				{/each}
+				<span class="fb-group-label ml-auto w-auto">Order</span>
+				<Select.Simple
+					size="sm"
+					class="w-44"
+					aria-label="Order"
+					value={order}
+					items={RUN_ORDERINGS.map((o) => ({
+						value: o,
+						label: ORDER_LABELS[o]
+					}))}
+					onValueChange={(v) => update({ order: v === '-created_at' ? null : v }, false)}
+				/>
 			</div>
 		{/snippet}
 	</FilterBar>
 
-	{#if loading}
-		<LoadingState label="loading analysis runs" />
-	{:else if error}
-		<ErrorAlert message={error} onretry={() => loadAll()} />
-	{:else if runs.length === 0}
-		<EmptyState
-			icon={Microscope}
-			title="No analysis runs found"
-			description={statusFilter ? 'No runs match your filter.' : 'No analysis runs yet.'}
-		>
-			{#snippet action()}
-				{#if statusFilter}
-					<Button variant="outline" size="sm" onclick={() => selectStatus('')}>Clear filter</Button>
-				{:else}
-					<Button size="sm" href="/analysis/create">
-						<Plus class="mr-2 h-3.5 w-3.5" />
-						Run your first analysis
-					</Button>
-				{/if}
-			{/snippet}
-		</EmptyState>
-	{:else}
-		<div class="hidden md:block">
-			<Card.Root class="gap-0 overflow-clip py-0">
-				<Card.Content class="p-0">
-					<div class="table-frame" {@attach tableFrame}>
-						<table>
-							<thead>
-								<tr>
-									<th>Name</th>
-									<th>Created</th>
-									<th>Tools</th>
-									<th>Status</th>
-									<th>Findings</th>
-									<th class="text-right"><span class="sr-only">Actions</span></th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each displayedRuns as run (run.id)}
-									<tr
-										class="row-link group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset {run.status === 'failed' ? 'bg-destructive/[0.03]' : ''}"
-										onclick={() => window.location.href = `/analysis/${run.id}`}
-										onkeydown={(e) => { if (e.key === 'Enter') window.location.href = `/analysis/${run.id}`; }}
-										tabindex="0"
-										role="link"
-										aria-label="Open analysis run {runName(run)}"
-									>
-										<td class="align-top">
-											<div class="flex items-center gap-2.5">
-												<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted group-hover:bg-primary/10 transition-colors">
-													<Microscope class="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
-												</div>
-												<div class="min-w-0">
-													<span class="text-sm font-medium block truncate max-w-[220px]">{runName(run)}</span>
-													<span class="text-[11px] text-muted-foreground font-mono block">{run.id.slice(0, 8)}</span>
-												</div>
-											</div>
-										</td>
-										<td class="text-sm">{formatDate(run.created_at)}</td>
-										<td>
-											<div class="flex flex-wrap gap-1">
-												{#each run.tool_slugs.slice(0, 4) as slug}
-													<Badge variant="secondary" class="text-[11px]">{slug}</Badge>
-												{/each}
-												{#if run.tool_slugs.length > 4}
-													<Badge variant="outline" class="text-[11px]">+{run.tool_slugs.length - 4}</Badge>
-												{/if}
-											</div>
-										</td>
-										<td class="align-top">
-											<StatusBadge status={run.status} label={statusLabel(run.status)} />
-										</td>
-										<td class="align-top">
-											{#if severityBreakdown(run).length > 0}
-												<div class="flex flex-wrap gap-1">
-													{#each severityBreakdown(run) as [sev, count]}
-														<Badge variant="outline" class="text-[11px] {severityColors[sev] ?? ''}">{count} {sev.charAt(0).toUpperCase()}</Badge>
-													{/each}
-												</div>
-											{:else}
-												<span class="text-xs text-muted-foreground">—</span>
-											{/if}
-										</td>
-										<td>
-											<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-											<div class="flex items-center justify-end gap-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
-												<Button variant="ghost" size="sm" class="h-7 w-7 p-0" href="/analysis/{run.id}" title="View results" aria-label="View results">
-													<Eye class="h-3.5 w-3.5" />
-												</Button>
-												{#if run.status === 'running' || run.status === 'pending'}
-													<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Cancel" aria-label="Cancel run" disabled={cancellingIds.has(run.id)} onclick={() => handleCancel(run.id)}>
-														{#if cancellingIds.has(run.id)}
-															<LoaderCircle class="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
-														{:else}
-															<StopCircle class="h-3.5 w-3.5 text-warning-fg" />
-														{/if}
-													</Button>
-												{:else}
-													<Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="Delete" aria-label="Delete run" disabled={deletingIds.has(run.id)} onclick={() => askDelete(run.id)}>
-														{#if deletingIds.has(run.id)}
-															<LoaderCircle class="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
-														{:else}
-															<Trash2 class="h-3.5 w-3.5 text-destructive" />
-														{/if}
-													</Button>
-												{/if}
-											</div>
-										</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-					{@render pager('border-t border-border')}
-				</Card.Content>
-			</Card.Root>
-		</div>
+	{#if error}
+		<ErrorAlert message={error} onretry={() => load()} />
+	{/if}
 
-		<!-- Mobile cards -->
-		<div class="md:hidden space-y-3">
-			{#each displayedRuns as run (run.id)}
-				<a href="/analysis/{run.id}" class="block border rounded-lg p-3 bg-card transition-colors hover:bg-muted/30">
-					<div class="flex items-center justify-between gap-2 mb-2">
-						<div class="flex flex-col min-w-0">
-							<span class="text-sm font-medium truncate">{runName(run)}</span>
-							<span class="font-mono text-xs text-muted-foreground">{run.id.slice(0, 8)}</span>
-						</div>
-						<StatusBadge status={run.status} label={statusLabel(run.status)} />
-					</div>
-					{#if severityBreakdown(run).length > 0}
-						<div class="flex flex-wrap gap-1 mb-2">
-							{#each severityBreakdown(run) as [sev, count]}
-								<Badge variant="outline" class="text-[11px] {severityColors[sev] ?? ''}">{count} {sev.charAt(0).toUpperCase()}</Badge>
+	{#if loading && !data}
+		<LoadingState label="loading runs" />
+	{:else if data && runs.length === 0}
+		{#if activeTags.length > 0}
+			<EmptyState
+				icon={SearchX}
+				title="No runs match these filters"
+				description="Remove a filter or clear them all."
+			>
+				{#snippet action()}
+					<Button variant="outline" size="sm" onclick={clearAll}>Clear filters</Button>
+				{/snippet}
+			</EmptyState>
+		{:else}
+			<EmptyState
+				icon={Microscope}
+				title="No analysis runs yet"
+				description="Start a study to analyse generated apps under a locked protocol, or check one application with an ad-hoc run."
+			>
+				{#snippet action()}
+					<Button variant="outline" size="sm" href="/analysis/studies/new">New study</Button>
+					<Button size="sm" href="/analysis/create">Ad-hoc run</Button>
+				{/snippet}
+			</EmptyState>
+		{/if}
+	{:else if data}
+		<Card.Root class="gap-0 overflow-clip py-0">
+			<Card.Content class="p-0">
+				<div
+					class={cn('table-frame transition-opacity', refreshing && 'opacity-60')}
+					aria-busy={refreshing}
+					{@attach tableFrame}
+				>
+					<table class="table-card-mobile">
+						<thead>
+							<tr>
+								<th>Run</th>
+								<th>Purpose</th>
+								<th>Status</th>
+								<th>Data</th>
+								<th class="num">Static findings</th>
+								<th class="num">AI consensus</th>
+								<th class="num">SLOC</th>
+								<th>Created</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each runs as run (run.id)}
+								{@const st = staticFindingsCell(run)}
+								{@const ai = aiConsensusCell(run)}
+								{@const active = isRunActive(run.status)}
+								{@const progress = toolProgress(run)}
+								{@const sloc = measuredSloc(run)}
+								{@const href = `/analysis/${run.id}`}
+								<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
+								<tr class="row-link" onclick={rowLink(href)}>
+									<td data-label="Run" class="max-w-sm">
+										<div class="min-w-0 flex-1">
+											<a
+												{href}
+												class="block truncate font-medium transition-colors hover:text-primary"
+												title={run.name}>{run.name}</a
+											>
+											<span
+												class="block truncate font-mono text-[11px] text-muted-foreground"
+												title={run.target.label}>{run.target.label}</span
+											>
+										</div>
+									</td>
+									<td data-label="Purpose" class="whitespace-nowrap">
+										{#if run.study_id}
+											<a
+												href="/analysis/studies/{run.study_id}"
+												class="text-xs text-primary underline-offset-2 hover:underline"
+												>{PURPOSE_LABELS[run.purpose]}</a
+											>
+										{:else}
+											<span class="text-xs">{PURPOSE_LABELS[run.purpose]}</span>
+										{/if}
+										{#if run.source === 'inline' && run.purpose !== 'canary'}
+											<Badge variant="outline" class="ml-1 border-warning/40 text-warning-fg"
+												>non-research</Badge
+											>
+										{/if}
+									</td>
+									<td data-label="Status">
+										<div class="flex flex-col items-start gap-0.5">
+											<span class="flex flex-wrap items-center gap-1">
+												<StatusBadge status={run.status} />
+												{#if run.stale}<StatusBadge status="stale" />{/if}
+											</span>
+											{#if active}
+												<span class="text-[11px] text-muted-foreground">
+													{run.cancel_requested ? 'cancelling' : phaseLabel(run.phase)} · {progress.done}/{progress.total}
+													tools
+												</span>
+											{/if}
+										</div>
+									</td>
+									<td data-label="Data" class="whitespace-nowrap">
+										<RunDataBadge {run} />
+									</td>
+									<td data-label="Static findings" class="num">
+										{#if st.value === null}
+											<NaValue reason={st.note} />
+										{:else if st.lowerBound}
+											<Hint text={st.note}>≥ {fmtInt(st.value)}</Hint>
+										{:else}
+											{fmtInt(st.value)}
+										{/if}
+									</td>
+									<td data-label="AI consensus" class="num">
+										{#if ai.value === null}
+											<NaValue reason={ai.note} />
+										{:else}
+											{fmtInt(ai.value)}
+										{/if}
+									</td>
+									<td data-label="SLOC" class="num">
+										{#if sloc === null}
+											<NaValue reason="The sample has not been resolved" />
+										{:else}
+											{fmtInt(sloc)}
+										{/if}
+									</td>
+									<td data-label="Created" class="whitespace-nowrap">
+										<span class="text-xs" title={fmtDateTime(run.created_at)}
+											>{fmtAgo(run.created_at)}</span
+										>
+										{#if run.duration_seconds != null}
+											<span class="block text-[11px] text-muted-foreground"
+												>{fmtSeconds(run.duration_seconds)}</span
+											>
+										{/if}
+									</td>
+								</tr>
 							{/each}
-						</div>
-					{/if}
-					<div class="border-t pt-2 text-xs text-muted-foreground">{formatDate(run.created_at)}</div>
-				</a>
-			{/each}
-			{@render pager('rounded-md border border-border')}
-		</div>
+						</tbody>
+					</table>
+				</div>
+				<PaginationBar
+					{resultsText}
+					page={data.page}
+					pages={data.pages}
+					onGoToPage={(p) => update({ page: p }, false)}
+					class="border-t border-border"
+					scrollToCard
+				/>
+			</Card.Content>
+		</Card.Root>
 	{/if}
 </div>
-
-{#snippet pager(cls: string)}
-	<PaginationBar {resultsText} page={currentPage} pages={totalPages} onGoToPage={goToPage} class={cls} scrollToCard />
-{/snippet}
-
-<ConfirmDialog
-	bind:open={confirmOpen}
-	title="Delete analysis run?"
-	description="This permanently removes the run and all of its findings. This cannot be undone."
-	confirmLabel="Delete"
-	destructive
-	busy={confirmBusy}
-	onConfirm={confirmDelete}
-/>

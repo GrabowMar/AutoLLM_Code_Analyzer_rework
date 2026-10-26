@@ -1,0 +1,44 @@
+{
+ "captured_at": "2026-10-26T08:42:47+00:00",
+ "case": "hostile",
+ "config": {},
+ "files": [
+  {
+   "kind": "source",
+   "language": "html",
+   "path": "vulnerable/frontend/index.html",
+   "sha256": "b44b5d32a7ae39b8c561e6388dc382201733f8cca518ba1758dd8d197d9e5116"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/htmlhint",
+   "--config",
+   "/opt/analyzer/config/htmlhint.json",
+   "--format",
+   "json",
+   "--nocolor",
+   "--",
+   "/src/vulnerable/frontend/index.html"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [],
+  "timeout_s": 120
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "[{\"file\":\"/src/vulnerable/frontend/index.html\",\"messages\":[{\"type\":\"error\",\"message\":\"Doctype must be declared before any non-comment content.\",\"raw\":\"<html lang=\\\"en\\\">\",\"evidence\":\"<html lang=\\\"en\\\">\",\"line\":1,\"col\":1,\"rule\":{\"id\":\"doctype-first\",\"description\":\"Doctype must be declared first (comments and whitespace allowed before DOCTYPE).\",\"link\":\"https://htmlhint.com/rules/doctype-first\"}},{\"type\":\"error\",\"message\":\"<title> must be present in <head> tag.\",\"raw\":\"</head>\",\"evidence\":\"  </head>\",\"line\":4,\"col\":3,\"rule\":{\"id\":\"title-require\",\"description\":\"<title> must be present in <head> tag.\",\"link\":\"https://htmlhint.com/rules/title-require\"}},{\"type\":\"warning\",\"message\":\"An alt attribute must be present on <img> elements.\",\"raw\":\"<img src=\\\"/logo.png\\\">\",\"evidence\":\"    <img src=\\\"/logo.png\\\">\",\"line\":6,\"col\":9,\"rule\":{\"id\":\"alt-require\",\"description\":\"The alt attribute of an <img> element must be present and alt attribute of area[href] and input[type=image] must have a value.\",\"link\":\"https://htmlhint.com/rules/alt-require\"}},{\"type\":\"error\",\"message\":\"The id value [ root ] must be unique.\",\"raw\":\" id=\\\"root\\\"\",\"evidence\":\"    <div id=\\\"root\\\"></div>\",\"line\":8,\"col\":9,\"rule\":{\"id\":\"id-unique\",\"description\":\"The value of id attributes must be unique.\",\"link\":\"https://htmlhint.com/rules/id-unique\"}},{\"type\":\"error\",\"message\":\"Tag must be paired, missing: [ </span> ], start tag match failed [ <span> ] on line 9.\",\"raw\":\"</p>\",\"evidence\":\"    <p><span>Inventory</p>\",\"line\":9,\"col\":8,\"rule\":{\"id\":\"tag-pair\",\"description\":\"Tag must be paired.\",\"link\":\"https://htmlhint.com/rules/tag-pair\"}}],\"time\":5}]\n",
+  "timed_out": false,
+  "wall_seconds": 0.22
+ },
+ "schema": 1,
+ "tool": "htmlhint",
+ "tool_version": "1.9.2"
+}

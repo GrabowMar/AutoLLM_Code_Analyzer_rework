@@ -1,0 +1,75 @@
+{
+ "captured_at": "2026-10-26T08:42:41+00:00",
+ "case": "clean",
+ "config": {
+  "skip_missing": false
+ },
+ "files": [
+  {
+   "kind": "manifest",
+   "language": "json",
+   "path": "clean/frontend/package.json",
+   "sha256": "dbf76517391ec8ef83e2c02f28b04a91bdef86349354cf96e3a92f07d6e01d68"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/App.jsx",
+   "sha256": "50b34bd78e3cd0936b45a21d06065bf3a2816bdc18afdb09f9876378beeb279c"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "clean/frontend/src/TagBadge.vue",
+   "sha256": "47812dbf621a248a8411ee2aa9b0f7cdaaf1fee1d4d2b4e37569ad17d79351f5"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "clean/frontend/src/bookmarks.ts",
+   "sha256": "3872ba6ae0c99822ddbea2b5f454f11d68733ee860e6c078cd659fa4553c0e04"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/components/BookmarkList.jsx",
+   "sha256": "efd7854d492966cc76c2341a178b636bbf4567e6073ee63f1c4b44d1c29f1635"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "clean/frontend/src/components/Panel.tsx",
+   "sha256": "63a402046cdf7b1158644a4a595bf0b5bcd49eb4fb974ff2973f91d97e67f23b"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "sh",
+   "-c",
+   "set -eu; mkdir /tmp/llmlab-src; mkdir /tmp/llmlab-src/p0; cd /src/clean/frontend; cp --parents -- package.json src/App.jsx src/TagBadge.vue src/bookmarks.ts src/components/BookmarkList.jsx src/components/Panel.tsx /tmp/llmlab-src/p0/; cd /tmp/llmlab-src/p0; rc=0; /opt/analyzer/bin/depcheck . --json --config=/opt/analyzer/config/depcheck.json > /out/depcheck-0.out 2> /out/depcheck-0.err || rc=$?; echo $rc > /out/depcheck-0.rc"
+  ],
+  "env": {},
+  "mem_limit": "768m",
+  "report_files": [],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "depcheck-0.err": "",
+   "depcheck-0.out": "{\"dependencies\":[],\"devDependencies\":[],\"missing\":{},\"using\":{\"react\":[\"/tmp/llmlab-src/p0/package.json\",\"/tmp/llmlab-src/p0/src/App.jsx\",\"/tmp/llmlab-src/p0/src/components/Panel.tsx\"],\"vue\":[\"/tmp/llmlab-src/p0/src/TagBadge.vue\"]},\"invalidFiles\":{},\"invalidDirs\":{}}\n",
+   "depcheck-0.rc": "0\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.932
+ },
+ "schema": 1,
+ "tool": "depcheck",
+ "tool_version": "1.4.7"
+}

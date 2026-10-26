@@ -3,8 +3,14 @@
 Static analysis can't tell whether a generated app actually works; this can.
 After a container boots, hit its health endpoint and every GET endpoint the
 app-requirement template declares, and record which respond. The result is
-persisted onto the generation job's metrics so model comparisons can weigh
-"does it run" alongside findings, even after the container is removed.
+persisted on the container and, as ``metrics["smoke"]`` (``source:
+"smoke"``), on the generation job, so it survives the container's removal.
+
+It is a lenient probe (GETs only; health alone passes), a different
+instrument from the hidden conformance evaluator that owns
+``metrics["functional"]``. It never writes there: overwriting the
+evaluator's result would silently mix two instruments in every functional
+pass rate (reports, batch grades, the analysis snapshot).
 """
 
 from __future__ import annotations
@@ -15,6 +21,8 @@ import time
 from typing import TYPE_CHECKING
 
 import requests
+from django.db import transaction
+from django.utils import timezone
 
 from backend.runtime.proxy import _upstream_base
 
@@ -29,6 +37,9 @@ _HEALTH_ATTEMPTS = 3
 _HEALTH_RETRY_S = 2.0
 _REQUEST_TIMEOUT_S = 8
 _PASS_THRESHOLD = 0.8
+# Where the job copy of the probe result lives, and the instrument it names.
+SMOKE_METRICS_KEY = "smoke"
+SMOKE_SOURCE = "smoke"
 
 # ":id" / "{id}"-style path parameters; seeded apps have a record with id 1.
 _PATH_PARAM_RE = re.compile(r":(\w+)|\{(\w+)\}")
@@ -129,9 +140,28 @@ def _persist(job: GenerationJob | None, container: ContainerInstance, result: di
     container.metadata = {**(container.metadata or {}), "smoke": result}
     container.save(update_fields=["metadata", "updated_at"])
     if job is not None:
-        # Keep the job copy lean — reports only need the summary numbers.
-        job.metrics = {
-            **(job.metrics or {}),
-            "functional": {k: v for k, v in result.items() if k != "checks"},
-        }
-        job.save(update_fields=["metrics", "updated_at"])
+        _persist_on_job(job, result)
+
+
+def _persist_on_job(job: GenerationJob, result: dict) -> None:
+    """Merge the probe summary into the job's *current* metrics under ``metrics["smoke"]``.
+
+    Read under a row lock rather than from the (possibly stale) instance: a
+    build can take minutes, and saving the instance's whole ``metrics`` dict
+    would drop whatever the evaluator wrote meanwhile.
+    """
+    from backend.generation.models import GenerationJob
+
+    smoke = {
+        # Keep the job copy lean — summary numbers only.
+        **{k: v for k, v in result.items() if k != "checks"},
+        "source": SMOKE_SOURCE,
+        "probed_at": timezone.now().isoformat(),
+    }
+    with transaction.atomic():
+        current = GenerationJob.objects.select_for_update().filter(id=job.id).values_list("metrics", flat=True).first()
+        if current is None and not GenerationJob.objects.filter(id=job.id).exists():
+            return  # the job was deleted while its app ran
+        metrics = {**(current if isinstance(current, dict) else {}), SMOKE_METRICS_KEY: smoke}
+        GenerationJob.objects.filter(id=job.id).update(metrics=metrics, updated_at=timezone.now())
+    job.metrics = metrics

@@ -1,6 +1,6 @@
 # Study tables
 
-Tools for reporting a study's results: the effect of build healing, cross-tool deduplication of findings, a manual-review sample, and one way of counting tools and executions. Every table describes a *scope* of generation jobs (one experiment, one batch, or all of yours) and counts each job's latest finished analysis run only.
+Tools for reporting a study's results: the effect of build healing, cross-tool deduplication of findings, a manual-review sample, and one way of counting tools and executions. Every table describes a *scope* of generation jobs (one experiment, one batch, or all of yours) and reads each job's **canonical analysis run under one frozen plan**: its latest finished run with that `plan_hash`, through the run's stored measurement (see [Analysis pipeline](/docs/ANALYSIS_PIPELINE#where-results-go)). Pass `plan_hash` (64 hex characters) to choose the plan; without it the plan with the most jobs that have a static measurement is used. Jobs not measured under the plan are listed in a `coverage` block with the reason (not analysed, analysis failed, another plan, excluded), never counted as clean. A missing count is `null`, never 0, and is left out of sums, rates and densities. AI-reviewer consensus is always reported in separate columns and never added to static counts.
 
 ## Build healing
 
@@ -35,19 +35,20 @@ plus which packages were added and which patches fired.
 
 Tools overlap: Ruff's `S` rules mirror Bandit, Semgrep covers much of Bandit, detect-secrets and Gitleaks both flag the same key, and Ruff, Pylint and Vulture all report the same unused import. Raw finding counts therefore count one defect several times.
 
-`statistics/services/dedup.py` maps each finding to an *issue class*. The class comes from an explicit rule equivalence where one is known, otherwise from the finding's CWE (Bandit and Semgrep findings record it), otherwise from its own `tool:rule`, which never merges across tools. Within one app, findings of the same class in the same file whose lines are within `line_tolerance` (default 2, Semgrep ranges included) form one issue. A single tool's findings merge only when they are exact duplicates.
+The study tables use the analysis engine's own deduplication: findings are grouped by the `issue_key` the engine stored at finalize (counted static findings only, measured scope only), and each issue is summarised by the engine's rule (most severe member; a bandit finding's code-based severity wins over ruff's proxy). Findings without a key are clustered with the same algorithm. The algorithm (same file, 2-line window, shared CWE or rule-equivalence class, one line per tool) is in [Analysis methodology](/docs/ANALYSIS_METHODOLOGY#deduplication). `statistics/services/dedup.py` keeps its public functions for existing callers; its issue-class labels come from the engine's equivalence table (`hardcoded-credentials`, `sql-injection`, …), else the CWE, else `tool:rule`.
 
-`GET /api/statistics/study/breakdowns/?experiment_id=&include_ai=false&line_tolerance=2` returns:
+`GET /api/statistics/study/breakdowns/?experiment_id=&batch_id=&plan_hash=&include_ai=false&include_issues=false` returns:
 
 | key | content |
 | --- | --- |
-| `per_app` | raw findings, unique issues, multi-tool issues, unique issues by severity, issues per kLOC |
-| `by_model`, `by_template`, `by_model_template` | the same, aggregated, with mean/median/sd per app |
+| `per_app` | counted static findings, unique issues, multi-tool issues, unique issues by severity, measured SLOC, issues per kLOC; `static_available`, `plan_hash`, and separately `ai_consensus_issues`, `ai_consensus_per_kloc`, `ai_cost_usd`, `ai_cost_complete` |
+| `by_model`, `by_template`, `by_model_template` | the same, aggregated, with mean/median/sd per app; `static_measured_apps`, `security_measured_apps`, `ai_reviewed_apps` |
 | `by_tool` | raw findings, unique issues, issues only this tool found (`exclusive`), issues shared with other tools |
 | `by_tool_rule` | which tool finds which kind of issue (rule → issue class, apps affected, severity) |
 | `tool_pairs` | issues both tools reported, plus their agreement (Jaccard) on the issue classes both can detect |
+| `plan_hash`, `coverage` | the plan the numbers come from and the selection funnel |
 
-AI-reviewer findings are left out unless `include_ai=true`. Pass `include_issues=true` to get every cluster with its finding ids.
+Counts are `null` for apps without a static measurement. `include_ai=true` adds `ai_by_rule` (one row per AI consensus cluster), and with `include_issues=true` also `ai_issues`; it never changes the static counts. `include_issues=true` returns every static cluster with its finding ids, `issue_key`, `end_line` and CWE. `line_tolerance` is accepted for old clients but ignored for findings that have an `issue_key`. A malformed `experiment_id`, `batch_id` or `plan_hash` is a 422.
 
 ## Manual review sample
 
@@ -55,17 +56,17 @@ To check the automated verdicts against a human, export a seeded, stratified sam
 
 ```bash
 python manage.py export_review_sample --experiment <uuid> --size 30 --stratify model --seed 0 --out sample.zip
-# or: GET /api/export/review-sample.zip?experiment_id=&size=30&stratify=model,template&seed=0
+# or: GET /api/export/review-sample.zip?experiment_id=&plan_hash=&size=30&stratify=model,template&seed=0
 ```
 
 The ZIP holds `apps/S001/code/…`, each app's `REQUIREMENTS.md`, and blank sheets in `labels/`:
 
-- `ai_findings.csv`: TP/FP for each AI-reviewer finding,
-- `static_issues.csv`: TP/FP for deduplicated static issues, up to 25 per app,
+- `ai_findings.csv`: TP/FP for each counted AI consensus cluster (one row per cluster, with its replicate count and grounding),
+- `static_issues.csv`: TP/FP for deduplicated, counted static issues (engine issue keys), up to 25 per app,
 - `requirements.csv`: yes/partial/no for each requirement,
 - `apps.csv`: works/partial/broken and a 1–5 quality score.
 
-Model, template and the automated outcomes are kept only in `key.csv` (blind by default; `--no-blind` turns that off). `manifest.json` records the seed, the strata and the population.
+The automated verdicts come from each app's canonical run under one plan (`plan_hash`, else the plan with the most static measurements). Model, template and the automated outcomes are kept only in `key.csv` (blind by default; `--no-blind` turns that off), which also records each app's `analysis_status` and `plan_hash`; a pass rate that was not recorded is an empty cell. `manifest.json` (format version 2) records the seed, the strata, the population, the `plan_hash` and the analysis coverage.
 
 Score the filled-in sheets:
 
@@ -81,7 +82,7 @@ The scores report the precision of AI and static findings (with 95% Wilson inter
 - `GET /api/statistics/study/tools/` lists every catalog analyzer (enabled or not) and the platform's own runtime evaluators (conformance tester, smoke test), with the counts a tool table needs: `catalog_registered`, `catalog_enabled`, deterministic vs AI, by category, and `total_enabled`.
 - `GET /api/statistics/study/accounting/?experiment_id=` counts what actually ran, not tools × apps:
   - apps generated, analyzed, evaluated and deployed,
-  - per tool: executions, completed/failed/skipped and apps covered (latest runs, and separately all runs including re-analyses),
+  - per tool: executions, succeeded/failed/skipped and apps covered (the canonical runs, and separately all runs including re-analyses; tool self-test runs are excluded),
   - `planned_static` (tools the runs selected) next to the executed count,
   - dynamic evaluations by status, and the healing-ablation evaluations.
 
@@ -91,7 +92,7 @@ To export everything for a paper:
 python manage.py export_study_tables --experiment <uuid> --out results/
 ```
 
-This writes one CSV per table above, plus `study_summary.json` with the totals, the healing summary, the tool counts and the accounting.
+This writes one CSV per table above (`--plan-hash` pins the analysis plan; `--include-ai` adds `ai_issue_clusters.csv`), plus `study_summary.json` with the totals, the healing summary, the tool counts, the accounting scoped to the canonical runs, the `plan_hash` and the coverage.
 
 ## Pre-registered analysis plan
 
@@ -125,20 +126,26 @@ Launch freezes the plan. `analysis_plan_frozen_at` and `analysis_plan_hash` (sha
 
 ## Study report
 
-Report type `study_report` (Reports → New → Study Report, or `manage.py study_report --experiment <uuid> --out study.md`). Scope it to one experiment or batch, or leave it on all of your apps. Export it as Markdown, LaTeX (`longtable` + `booktabs`) or JSON with `GET /api/reports/<id>/export/?format=md|tex|json`, or with the buttons on the report page.
+Report type `study_report` (Reports → New → Study Report, or `manage.py study_report --experiment <uuid> [--plan-hash <hash>] --out study.md`). Scope it to one experiment or batch, or leave it on all of your apps. Its config also takes `plan_hash` and the eligibility rules `exclude_invalid`, `exclude_empty_output`, `exclude_truncated` and `exclude_run_limits`. The data is report version 2: analysis numbers come from the v2 measurements, under one plan. Export it as Markdown, LaTeX (`longtable` + `booktabs`) or JSON with `GET /api/reports/<id>/export/?format=md|tex|json`, or with the buttons on the report page.
 
 | Section | What it answers |
 | --- | --- |
-| `protocol` | What ran: models, templates, modes, stacks, prompt versions, cells by trial count, tool and evaluator versions, healing modes, seed, plan hash, and a fingerprint of the data |
+| `protocol` | What ran: models, templates, modes, stacks, prompt versions, cells by trial count, evaluator versions, healing modes, seed, the experiment plan hash, a fingerprint of the data, and `analysis_plan`: the frozen analysis plan's tools with versions, reviewer, analyzer image, engine versions, mapping hashes, `plan_hash` and the rule that chose it |
 | `definitions` | *Generated*, *deployed* and *functionally correct* are different outcomes; each is defined |
-| `funnel` | generated → analyzed → evaluated → deployed → passes every check, per model and template, with Wilson 95% intervals; also correct given deployed |
-| `issues` | Deduplicated issue tables (see above) |
-| `security_bounds` | Per severity: issues, apps affected (with CI) and, for a zero count, the exact 95% upper bound on the per-app rate (zero in 20 apps is ≤ 13.9%, not 0) |
-| `code_metrics` | LOC (backend/frontend), files, backend share and radon complexity per app, model and template; how much models differ on the same template (CV); app-level Spearman of size/complexity vs issues |
+| `funnel` | generated → analyzed → static measured → evaluated → deployed → passes every check, per model and template, with Wilson 95% intervals; also correct given deployed |
+| `issues` | Deduplicated issue tables (see above), with the analysis coverage table and AI consensus columns kept apart |
+| `security_bounds` | Per severity, over apps with a static measurement: issues, apps affected (with CI) and, for a zero count, the exact 95% upper bound on the per-app rate (zero in 20 apps is ≤ 13.9%, not 0) |
+| `code_metrics` | LOC (backend/frontend) and measured SLOC, files, backend share and complexity (from the measurement) per app, model and template; how much models differ on the same template (CV); app-level Spearman of size/complexity vs issues |
 | `correlations` | Model parameters vs outcomes: Spearman ρ, exact (n ≤ 8) or 10k-draw permutation p, bootstrap CI, Holm and BH across the whole family, leave-one-out range with the most influential model, and a sign-flip flag. Nominal and effective (endpoint-limited) context windows are separate predictors. Always marked exploratory |
 | `ranking` | TOPSIS and WSM under the plan's (or default) weights. Sensitivity: equal weights, ±50% one-at-a-time, Monte Carlo weights (near the chosen ones and arbitrary) with 95% rank intervals and P(top 3), and app-bootstrap rank intervals. LOC is not a criterion, so verbosity is not rewarded twice |
 | `planned_comparisons` | Experiments with a plan only: each declared metric, each condition vs the pre-registered baseline, blocked on the app; sign and Wilcoxon tests adjusted as the plan says. Marked interim while the experiment runs |
 | `healing`, `accounting`, `tool_inventory` | The healing ablation and what actually ran |
-| `validity` | Threats found in *this* data: few models or apps, imbalance, truncation, missing evaluations, mixed prompts or modes, single stack, healing without an ablation, zero severe findings, tool failures, effective ≠ nominal context, unstable correlations, duplicate share, no plan |
+| `validity` | Threats found in *this* data: few models or apps, imbalance, truncation, missing evaluations, mixed prompts or modes, single stack, healing without an ablation, zero severe findings, tool failures (timeouts included), effective ≠ nominal context, unstable correlations, duplicate share, no plan; and for the analysis data `not_measured` (apps without a measurement under the plan), `mixed_analysis_plans`, `static_unavailable`, `ai_separate` (AI consensus is never in the static counts) and `ai_cost_incomplete` |
 
-Every resampling step takes the report's `seed`, so a report regenerates identically.
+Every resampling step takes the report's `seed`, so a report regenerates identically. `pass_rate` is `null` when it was not recorded (0 only for apps that failed to build or start); model criteria and security bounds use only apps with a static measurement, with issues divided by measured SLOC.
+
+The funnel, deploy and functional rates still read the live conformance evaluation of each job, not the analysis snapshot: the funnel describes every generated job, not only analysed ones.
+
+### Study Report vs analysis studies
+
+The Study Report answers the experiment's pre-registered plan (deploy rates, functional correctness, per-app issue counts, rankings and planned comparisons against the experiment's baseline). An [analysis study](/docs/RESEARCH_GUIDE) pre-registers an analysis-side protocol (targets, a frozen engine plan, a design and confirmatory outcomes) and tests groups against each other on the v2 outcomes. A study targeting an experiment with a frozen plan inherits its research questions, α, correction and primary outcome where they map. Both read the same measurements, so pinning the post-run's `plan_hash` in both makes their analysis numbers identical; see [Research guide → Studies, experiment plans and the Study Report](/docs/RESEARCH_GUIDE#studies-experiment-plans-and-the-study-report).

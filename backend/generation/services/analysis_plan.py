@@ -23,9 +23,9 @@ METRICS: dict[str, str] = {
     "deploy_rate": "Share of evaluated apps that build and answer their health check",
     "pass_rate": "Mean conformance pass rate (0..1) over evaluated apps",
     "functional_passed": "Share of evaluated apps passing every conformance check",
-    "unique_issues_per_app": "Deduplicated static issues per analyzed app",
-    "issues_per_kloc": "Deduplicated static issues per 1,000 lines",
-    "security_per_app": "Deduplicated security/secret issues per analyzed app",
+    "unique_issues_per_app": "Deduplicated static issues per app with a static measurement",
+    "issues_per_kloc": "Deduplicated static issues per 1,000 measured SLOC (code the model wrote)",
+    "security_per_app": "Deduplicated security/secret issues per app with a static measurement",
     "cost_per_app": "Generation cost per app (USD)",
 }
 CORRECTIONS = ("holm", "bh", "none")

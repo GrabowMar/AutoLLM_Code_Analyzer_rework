@@ -1,0 +1,60 @@
+{
+ "captured_at": "2026-10-26T08:42:00+00:00",
+ "case": "clean",
+ "config": {
+  "extra_disable": "",
+  "report_suppressed": true
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "a7c575e15cf284770b4b33371be54d864c4fb47b4f784dbf9a27db7beb28de46"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/venvs/perflint/bin/pylint",
+   "--rcfile=/opt/analyzer/config/perflint.pylintrc",
+   "--output-format=json2:/out/perflint.json",
+   "--persistent=n",
+   "--jobs=1",
+   "--disable=loop-try-except-usage",
+   "--enable=suppressed-message",
+   "--enable=file-ignored",
+   "--",
+   "/src/clean/backend/app.py",
+   "/src/clean/backend/bookmarks.py"
+  ],
+  "env": {},
+  "mem_limit": "768m",
+  "report_files": [
+   "perflint.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "perflint.json": "{\n    \"messages\": [],\n    \"statistics\": {\n        \"messageTypeCount\": {\n            \"fatal\": 0,\n            \"error\": 0,\n            \"warning\": 0,\n            \"refactor\": 0,\n            \"convention\": 0,\n            \"info\": 0\n        },\n        \"modulesLinted\": 5,\n        \"score\": 10.0\n    }\n}\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.772
+ },
+ "schema": 1,
+ "tool": "perflint",
+ "tool_version": "0.8.1"
+}

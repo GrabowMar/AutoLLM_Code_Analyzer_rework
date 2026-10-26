@@ -12,6 +12,7 @@ import requests
 from django.test import Client
 
 from backend.analysis.models import AnalysisRun
+from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import Finding
 from backend.analysis.models import ToolResult
 from backend.credentials.models import Provider
@@ -79,6 +80,10 @@ class FakeGitHub:
         return [c for c in self.calls if c[0] == method and c[1].endswith(suffix)]
 
 
+def _plan(*slugs: str) -> dict:
+    return {"schema_version": 1, "tools": [{"slug": s} for s in slugs]}
+
+
 @pytest.fixture
 def owner():
     return UserFactory.create()
@@ -114,7 +119,7 @@ def job(owner):
 
 @pytest.fixture
 def findings(owner, job):
-    run = AnalysisRun.objects.create(created_by=owner, generation_job=job, status="completed", tool_slugs=["bandit"])
+    run = AnalysisRun.objects.create(created_by=owner, generation_job=job, status="completed", plan=_plan("bandit"))
     result = ToolResult.objects.create(run=run, tool_slug="bandit", status="completed")
     Finding.objects.create(
         result=result,
@@ -279,7 +284,9 @@ def test_export_repo_with_sarif(client, token, job, findings):
     assert len(results) == 1  # the location-less finding is dropped
     uri = results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
     assert uri == "backend/app.py"  # absolute analyzer path mapped onto the repo
-    assert "informationUri" not in sarif["runs"][0]["tool"]["driver"]
+    # v2 seeds the tool catalog on migrate, so the driver links the tool's docs.
+    docs_url = AnalyzerTool.objects.filter(slug="bandit").values_list("docs_url", flat=True).first()
+    assert sarif["runs"][0]["tool"]["driver"].get("informationUri") == (docs_url or None)
 
 
 @pytest.mark.parametrize("status", [403, 404])
@@ -395,3 +402,42 @@ def test_gist_too_large(client, token, job):
         resp = _post(client, {"application_id": str(job.id), "target": "gist"})
     assert resp.status_code == 413
     assert "repository instead" in resp.json()["detail"]
+
+
+# ── findings summary (v2 measurement semantics) ───────────────────────
+
+
+def test_findings_summary_counts_what_the_measurement_counts(owner, job, findings):
+    ToolResult.objects.filter(run=findings).update(status="succeeded")
+    result = findings.results.get(tool_slug="bandit")
+    # Uncounted (style / out of scope) findings and AI replicates are not static counts.
+    Finding.objects.create(result=result, severity="info", title="Line too long", rule_id="E501", counted=False)
+    ai = ToolResult.objects.create(run=findings, tool_slug="ai_review", status="succeeded")
+    for _ in range(3):
+        Finding.objects.create(result=ai, severity="high", title="AI", is_ai=True, counted=True, issue_key="k")
+    findings.measurement = {"schema_version": 1, "static": {"available": True}}
+    findings.save(update_fields=["measurement"])
+
+    summary = github._findings_summary(findings)
+    assert summary["total"] == 2
+    assert summary["by_tool"] == {"bandit": 2}
+    assert summary["ai_consensus"] == 1
+    assert github._findings_qs(findings).filter(is_ai=True).count() == 1
+    readme = github.build_readme(job, summary, files_count=3)
+    assert "**2 finding(s)**" in readme
+    assert "consensus adds 1" in readme
+
+
+def test_unmeasured_static_is_not_reported_clean(owner, job):
+    run = AnalysisRun.objects.create(
+        created_by=owner,
+        generation_job=job,
+        status="partial",
+        plan=_plan("bandit"),
+        measurement={"schema_version": 1, "static": {"available": False}},
+    )
+    summary = github._findings_summary(run)
+    assert summary["total"] is None
+    readme = github.build_readme(job, summary, files_count=3)
+    assert "not a clean result" in readme
+    assert "No counted findings" not in readme

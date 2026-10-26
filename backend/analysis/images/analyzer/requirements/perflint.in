@@ -1,0 +1,3 @@
+# perflint 0.8.1 requires pylint >=3,<4: its own venv, independent of the pylint tool (4.x).
+perflint==0.8.1
+pylint==3.3.9

@@ -5,7 +5,7 @@
 **Which model writes the best code for a given task?**
 
 Generate one application per LLM, run each in a Docker sandbox,
-and score the code with 14 analysis tools.
+and measure the code with 21 pinned analysis tools and an AI reviewer.
 
 [![CI](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml/badge.svg)](https://github.com/GrabowMar/AutoLLM_Code_Analyzer_rework/actions/workflows/codeql.yml)
@@ -33,16 +33,26 @@ end-to-end: you pick a requirement template and a set of models from
    ([how generation works](docs/GENERATION_PROCESS.md)),
 2. **runs it** in an isolated container with its own subdomain, so you can
    click through the live app,
-3. **analyzes** the code with the tools you select — ruff, bandit, semgrep,
-   eslint, mypy, pylint, gitleaks, detect-secrets, hadolint, codespell,
-   vulture, radon, jscpd, and an LLM code reviewer,
-4. **aggregates** the findings and metrics into reports and per-model
-   rankings.
+3. **analyzes** the code under a frozen analysis plan
+   ([how analysis works](docs/ANALYSIS_PIPELINE.md)): ruff, bandit, semgrep,
+   pylint, mypy, vulture, eslint, gitleaks, detect-secrets, codespell,
+   hadolint, radon, lizard and jscpd by default, plus opt-in flake8, perflint,
+   deptry, depcheck, HTMLHint, Stylelint and ShellCheck — every tool exactly
+   pinned in one image and run in its own network-less container, with strict
+   parsers so a failed tool never reads as clean code. An AI reviewer
+   (switchable model and harness, default `deepseek/deepseek-v4.1-flash`,
+   local models supported) reviews the same code k times; only grounded
+   consensus findings count, and always apart from the static tools,
+4. **aggregates** the measurements into pre-registered
+   [studies](docs/RESEARCH_GUIDE.md) (locked protocol, nonparametric tests
+   with effect sizes, replication package), reports and per-model rankings.
 
-The comparison rests on measured findings, not gut feeling. Everything runs
-from the web UI, or unattended as [automation pipelines](docs/AUTOMATION_GUIDE.md)
-composed in a node-based editor — schedule them or fan them out over a
-parameter matrix. Multi-user support (email login, optional MFA, per-user
+The comparison rests on measured findings, not gut feeling: two analyses are
+compared only when their frozen plan is identical, missing data stays missing
+instead of becoming zero, and only model-written lines are measured.
+Everything runs from the web UI, or unattended as
+[experiments](docs/EXPERIMENTS.md) with cron schedules and post-run analysis
+and reports. Multi-user support (email login, optional MFA, per-user
 OpenRouter keys, API tokens) makes a shared instance practical.
 
 The stack: Django 6 + django-ninja + Celery + PostgreSQL + Redis on the

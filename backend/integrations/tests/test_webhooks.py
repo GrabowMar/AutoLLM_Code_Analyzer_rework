@@ -395,6 +395,51 @@ def test_analysis_and_experiment_events(no_dispatch):
     assert exp.payload["url"].endswith(f"/experiments/{experiment.pk}")
 
 
+def test_analysis_payload_never_reports_an_unscanned_run_as_clean(no_dispatch):
+    user = UserFactory()
+    make_sub(user, events=["analysis.completed"])
+    run = AnalysisRun.objects.create(created_by=user, plan_hash="a" * 64)
+    run.status = AnalysisRun.Status.PARTIAL
+    # summary schema 2: no static tool succeeded -> static counts are None, AI consensus apart.
+    run.summary = {
+        "schema_version": 2,
+        "total_findings": None,
+        "severity_counts": None,
+        "static_measured": False,
+        "issues": None,
+        "ai_findings": 2,
+        "tools_run": 2,
+        "tools_completed": 1,
+        "cost_usd": 0.01,
+        "cost_complete": False,
+    }
+    run.save(update_fields=["status", "summary"])
+    payload = WebhookDelivery.objects.get(event_type="analysis.completed").payload
+    fields = {f["name"]: f["value"] for f in payload["fields"]}
+    assert fields["Findings"].startswith("not measured")
+    assert fields["AI consensus"] == "2"
+    assert "Severity" not in fields
+    data = payload["data"]
+    assert (data["total_findings"], data["static_measured"], data["ai_findings"]) == (None, False, 2)
+    assert (data["plan_hash"], data["cost_complete"]) == ("a" * 64, False)
+
+
+@pytest.mark.parametrize(
+    ("functional", "expected"),
+    [
+        ({"status": "passed", "pass_rate": 0.75, "source": "conformance"}, 0.75),
+        ({"status": "not_applicable", "pass_rate": 0.0, "source": "conformance"}, None),
+        ({"health_ok": True, "pass_rate": 1.0, "source": "smoke"}, None),
+    ],
+)
+def test_generation_payload_pass_rate_is_conformance_only(no_dispatch, functional, expected):
+    from backend.integrations.services.webhooks import _generation_payload
+
+    job = _job(UserFactory(), status=GenerationJob.Status.COMPLETED)
+    job.metrics = {"functional": functional}
+    assert _generation_payload(job)["data"].get("pass_rate") == expected
+
+
 def test_save_without_status_in_update_fields_is_ignored(no_dispatch):
     user = UserFactory()
     make_sub(user, events=["generation.completed"])

@@ -1,0 +1,8 @@
+{
+  "gitignore": false,
+  "absolute": true,
+  "silent": true,
+  "noSymlinks": true,
+  "reporters": ["json"],
+  "output": "/out/jscpd"
+}

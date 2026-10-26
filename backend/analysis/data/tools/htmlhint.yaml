@@ -1,27 +1,28 @@
+# HTMLHint: static analysis of HTML (ported from the v1 tool shop).
 slug: htmlhint
 name: HTMLHint
-description: >-
-  Static analysis for HTML. Flags a missing doctype or title, duplicate ids,
-  unclosed or mismatched tags, and images without alt text.
+kind: static
 category: lint
-kind: container
-target_language: html
-icon: file-code
-version: "1"
+version: "1.9.2"
+adapter_version: 1
+languages: [html]
+file_kinds: [source]
+output_kind: findings
+description: >-
+  Static analysis of HTML documents and templates: unpaired tags, duplicate
+  ids and attributes, empty src attributes, images without alt text, a
+  missing doctype or title and markup style (lowercase names, quoting).
 docs_url: https://htmlhint.com/
-install_cmd: "npm install -g htmlhint@1"
-verify_cmd: "htmlhint --version"
-uninstall_cmd: "npm uninstall -g htmlhint"
-run_cmd: "htmlhint '{target}/**/*.html' --ignore '**/node_modules/**' --format json 2>/dev/null"
-parser_key: htmlhint
-run_timeout: 60
-install_timeout: 120
-display_order: 100
-sample_filename: index.html
-sample_code: |
-  <html>
-  <body>
-    <img src="logo.png">
-    <div id="main"></div><div id="main"></div>
-  </body>
-  </html>
+icon: file-code
+display_order: 170
+default_enabled: false
+default_required: false
+mem_limit: 512m
+timeout_s: 120
+notes: >-
+  Baked --config (HTMLHint's default rules plus alt-require), so an app's
+  .htmlhintrc is never read; inline "<!-- htmlhint rule:false -->" comments
+  are neutralized in staged copies. Jinja/Vue template syntax is plain text
+  to HTMLHint, so partial templates (no doctype/title) get document-level
+  style findings.
+config_schema: []

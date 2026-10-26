@@ -6,14 +6,22 @@ module draws a seeded, stratified sample of apps, writes their code and
 specs plus blank label sheets into a ZIP, and later scores the filled
 sheets against the automated verdicts:
 
-* AI-reviewer and (deduplicated) static findings: precision with a 95%
-  Wilson interval, per severity, category and tool,
+* AI-reviewer consensus findings and deduplicated static issues: precision
+  with a 95% Wilson interval, per severity, category and tool,
 * app-level functional verdict vs the conformance outcome: Cohen's kappa,
 * per-app requirement compliance vs the conformance pass rate: Spearman rho.
 
 With ``blind=True`` (default) sample folders are ``S001``… and model,
 template and automated outcomes live only in ``key.csv``, which the
 reviewer should not open until labelling is done.
+
+The automated verdicts are the ones the measurements count: each sampled
+job's canonical analysis run under one frozen plan
+(``rankings.services.measured.select_measured``), its counted static
+findings grouped into issues by the engine's ``issue_key``, and its counted
+AI consensus clusters (one row per cluster, not per replicate). Apps with
+no measured run under the plan get no finding rows; ``key.csv`` says why
+(``analysis_status``).
 """
 
 from __future__ import annotations
@@ -32,12 +40,11 @@ from typing import Any
 
 from django.utils import timezone
 
-from backend.analysis.models import AnalysisRun
-from backend.analysis.models import AnalyzerTool
-from backend.analysis.models import Finding
 from backend.generation.models import GenerationJob
+from backend.rankings.services.measured import select_measured
 from backend.reports.services.loc import loc_from_job
 from backend.statistics.services.dedup import cluster_findings
+from backend.statistics.services.dedup import load_records
 from backend.statistics.services.inference import cohens_kappa
 from backend.statistics.services.inference import spearman
 from backend.statistics.services.inference import wilson_interval
@@ -45,7 +52,8 @@ from backend.statistics.services.inference import wilson_interval
 if TYPE_CHECKING:
     from django.db.models import QuerySet
 
-SAMPLE_FORMAT_VERSION = 1
+# 2: verdicts from canonical v2 runs (counted findings, engine issue keys, AI consensus clusters).
+SAMPLE_FORMAT_VERSION = 2
 STRATIFY_KEYS = ("model", "template")
 
 AI_FINDING_COLUMNS = [
@@ -61,6 +69,8 @@ AI_FINDING_COLUMNS = [
     "human_verdict",  # TP | FP | unsure
     "human_severity",
     "notes",
+    "replicates",
+    "grounding",
 ]
 STATIC_ISSUE_COLUMNS = [
     "sample_id",
@@ -89,6 +99,8 @@ KEY_COLUMNS = [
     "conformance_pass_rate",
     "deployed",
     "analysis_run_id",
+    "analysis_status",
+    "plan_hash",
 ]
 
 _README = """# Manual review sample
@@ -245,6 +257,11 @@ def _requirements_md(job: GenerationJob, reqs: list[tuple[str, str, str]]) -> st
     return "\n".join(lines) + "\n"
 
 
+def _rate_cell(value: Any) -> Any:
+    """A pass rate for the key sheet: the number, or empty when not recorded (never a guessed 0)."""
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else ""
+
+
 def _csv(columns: list[str], rows: list[dict[str, Any]]) -> str:
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
@@ -263,8 +280,13 @@ def build_review_sample(
     seed: int = 0,
     blind: bool = True,
     max_static_per_app: int = 25,
+    plan_hash: str | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
-    """The review ZIP for a sample of *jobs*, and its manifest."""
+    """The review ZIP for a sample of *jobs*, and its manifest.
+
+    *plan_hash* pins the analysis plan whose runs give the automated
+    verdicts (default: the auto-selected reference plan of the sample).
+    """
     selected, selection = select_sample(jobs, size=size, per_stratum=per_stratum, stratify=stratify, seed=seed)
     rng = random.Random(seed)  # noqa: S311 - reproducible sampling, not crypto
     # Shuffled sample ids: their order must not reveal the stratum.
@@ -274,13 +296,16 @@ def build_review_sample(
     if not blind:
         sample_ids = {j.id: str(j.id) for j in selected}
 
-    run_by_job = dict(
-        AnalysisRun.objects.filter(id__in=AnalysisRun.latest_ids_per_job([j.id for j in selected])).values_list(
-            "generation_job_id",
-            "id",
-        ),
-    )
-    ai_slugs = AnalyzerTool.ai_slugs()
+    analysed = select_measured([j.id for j in selected], plan_hash=plan_hash, rules={})
+    run_by_job = {job_id: run.run_id for job_id, run in analysed.measured.items()}
+    measured_by_job = analysed.measured
+    run_ids = list(run_by_job.values())
+    static_by_run: dict[str, list] = defaultdict(list)
+    for c in cluster_findings(load_records([r.run_id for r in measured_by_job.values() if r.static_available])):
+        static_by_run[c.run_id].append(c)
+    ai_by_run: dict[str, list] = defaultdict(list)
+    for c in cluster_findings(load_records(run_ids, ai=True), ai=True):
+        ai_by_run[c.run_id].append(c)
     ai_rows: list[dict[str, Any]] = []
     static_rows: list[dict[str, Any]] = []
     req_rows: list[dict[str, Any]] = []
@@ -297,51 +322,30 @@ def build_review_sample(
             reqs = _requirements(job)
             zf.writestr(f"apps/{sid}/REQUIREMENTS.md", _requirements_md(job, reqs))
             req_rows += [{"sample_id": sid, "requirement_id": r, "kind": k, "requirement": t} for r, k, t in reqs]
-            app_rows.append({"sample_id": sid, "files": len(files), "loc": loc_from_job(job)["total_loc"]})
+            measured = measured_by_job.get(job.id)
+            loc = measured.measured_sloc() if measured is not None else loc_from_job(job)["total_loc"]
+            app_rows.append({"sample_id": sid, "files": len(files), "loc": "" if loc is None else loc})
 
             run_id = run_by_job.get(job.id)
-            findings = (
-                list(
-                    Finding.objects.filter(result__run_id=run_id)
-                    .select_related("result")
-                    .order_by("file_path", "line_number"),
+            # One row per counted AI consensus cluster (its replicates are one opinion).
+            for c in sorted(ai_by_run.get(str(run_id), []), key=lambda c: (c.file_path, c.line or 0)):
+                first = c.members[0]
+                ai_rows.append(
+                    {
+                        "sample_id": sid,
+                        "finding_id": str(first["id"]),
+                        "file_path": c.file_path,
+                        "line": c.line or "",
+                        "severity": c.severity,
+                        "category": c.category,
+                        "rule_id": first["rule_id"],
+                        "title": first["title"],
+                        "description": (first.get("description") or "")[:2000],
+                        "replicates": len(c.members),
+                        "grounding": first.get("grounding") or "",
+                    },
                 )
-                if run_id
-                else []
-            )
-            for f in findings:
-                if f.result.tool_slug in ai_slugs:
-                    ai_rows.append(
-                        {
-                            "sample_id": sid,
-                            "finding_id": str(f.id),
-                            "file_path": f.file_path,
-                            "line": f.line_number or "",
-                            "severity": f.severity,
-                            "category": f.category,
-                            "rule_id": f.rule_id,
-                            "title": f.title,
-                            "description": f.description[:2000],
-                        },
-                    )
-            static = [
-                {
-                    "id": f.id,
-                    "run_id": str(run_id),
-                    "tool": f.result.tool_slug,
-                    "rule_id": f.rule_id,
-                    "severity": f.severity,
-                    "category": f.category,
-                    "file_path": f.file_path,
-                    "line": f.line_number,
-                    "end_line": (f.tool_specific_data or {}).get("end_line"),
-                    "cwe": (f.tool_specific_data or {}).get("cwe") or "",
-                    "title": f.title,
-                }
-                for f in findings
-                if f.result.tool_slug not in ai_slugs
-            ]
-            clusters = cluster_findings(static)
+            clusters = static_by_run.get(str(run_id), [])
             if len(clusters) > max_static_per_app:
                 clusters = rng.sample(clusters, max_static_per_app)
             for n, c in enumerate(sorted(clusters, key=lambda c: (c.file_path, c.line or 0)), start=1):
@@ -373,9 +377,11 @@ def build_review_sample(
                     "repeat_index": job.repeat_index if job.repeat_index is not None else "",
                     "build_healing": job.build_healing,
                     "conformance_status": status,
-                    "conformance_pass_rate": (evaluation.get("summary") or {}).get("pass_rate", ""),
+                    "conformance_pass_rate": _rate_cell((evaluation.get("summary") or {}).get("pass_rate")),
                     "deployed": "" if not status else int(status in ("passed", "failed")),
                     "analysis_run_id": str(run_id) if run_id else "",
+                    "analysis_status": analysed.status_of(job.id),
+                    "plan_hash": measured.plan_hash if measured is not None else "",
                 },
             )
 
@@ -385,6 +391,8 @@ def build_review_sample(
             "blind": blind,
             "size": len(selected),
             **selection,
+            "plan_hash": analysed.plan_hash,
+            "analysis_coverage": {k: v for k, v in analysed.coverage().items() if k != "run_ids"},
             "counts": {
                 "ai_findings": len(ai_rows),
                 "static_issues": len(static_rows),

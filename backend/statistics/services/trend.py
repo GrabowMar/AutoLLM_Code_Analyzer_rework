@@ -28,7 +28,7 @@ def get_analysis_trends(
     from django.core.cache import cache
 
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
-    cache_key = f"stats_trends_{days}_{u_key}"
+    cache_key = f"stats_trends_v2_{days}_{u_key}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -37,16 +37,20 @@ def get_analysis_trends(
     start = datetime.now(tz=UTC) - timedelta(days=days - 1)
     start = start.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    tasks = _scoped(AnalysisRun.objects.all(), user, "created_by").filter(
-        created_at__gte=start,
+    # Tool self-tests (canary runs) analyse fixtures, not samples: not counted.
+    tasks = (
+        _scoped(AnalysisRun.objects.all(), user, "created_by")
+        .exclude(purpose=AnalysisRun.Purpose.CANARY)
+        .filter(created_at__gte=start)
     )
     rows = (
         tasks.annotate(d=TruncDate("created_at"))
         .values("d")
         .annotate(
             total=Count("id"),
-            completed=Count("id", filter=Q(status="completed")),
-            failed=Count("id", filter=Q(status="failed")),
+            completed=Count("id", filter=Q(status=AnalysisRun.Status.COMPLETED)),
+            partial=Count("id", filter=Q(status=AnalysisRun.Status.PARTIAL)),
+            failed=Count("id", filter=Q(status=AnalysisRun.Status.FAILED)),
         )
         .order_by("d")
     )
@@ -57,6 +61,7 @@ def get_analysis_trends(
             bucket[key] = {
                 "total": int(r["total"]),
                 "completed": int(r["completed"]),
+                "partial": int(r["partial"]),
                 "failed": int(r["failed"]),
             }
 
@@ -70,13 +75,14 @@ def get_analysis_trends(
     )
     while cursor <= today:
         key = cursor.date().isoformat()
-        row = bucket.get(key, {"total": 0, "completed": 0, "failed": 0})
+        row = bucket.get(key, {"total": 0, "completed": 0, "partial": 0, "failed": 0})
         series.append(
             {
                 "date": key,
                 "label": cursor.strftime("%a"),
                 "total": row["total"],
                 "completed": row["completed"],
+                "partial": row["partial"],
                 "failed": row["failed"],
             },
         )

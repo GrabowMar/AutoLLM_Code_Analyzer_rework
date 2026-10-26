@@ -51,11 +51,15 @@ def tool_inventory() -> dict[str, Any]:
             "name",
             "category",
             "kind",
-            "target_language",
+            "languages",
             "version",
             "is_enabled",
         ),
     )
+    for tool in tools:
+        # v1 had one target language per tool; v2 specs list several.
+        languages = tool.get("languages") if isinstance(tool.get("languages"), list) else []
+        tool["target_language"] = ", ".join(str(lang) for lang in languages) or "any"
     enabled = [t for t in tools if t["is_enabled"]]
     by_category = Counter(t["category"] for t in enabled)
     by_kind = Counter(t["kind"] for t in enabled)
@@ -98,8 +102,13 @@ def _tool_rows(results: QuerySet[ToolResult]) -> list[dict[str, Any]]:
                 "tool": slug,
                 "category": categories.get(slug, ""),
                 "executions": sum(counts.values()),
-                "completed": counts.get(ToolResult.Status.COMPLETED, 0),
+                # "completed" kept for v1 readers: v2 calls a clean execution "succeeded".
+                "completed": counts.get(ToolResult.Status.SUCCEEDED, 0),
+                "succeeded": counts.get(ToolResult.Status.SUCCEEDED, 0),
                 "failed": counts.get(ToolResult.Status.FAILED, 0),
+                "timed_out": counts.get(ToolResult.Status.TIMED_OUT, 0),
+                "not_applicable": counts.get(ToolResult.Status.NOT_APPLICABLE, 0),
+                "cancelled": counts.get(ToolResult.Status.CANCELLED, 0),
                 "skipped": counts.get(ToolResult.Status.SKIPPED, 0),
                 "unfinished": counts.get(ToolResult.Status.PENDING, 0) + counts.get(ToolResult.Status.RUNNING, 0),
                 "apps": len(apps[slug]),
@@ -117,9 +126,15 @@ def _evaluation_counts(jobs: list[GenerationJob]) -> dict[str, Any]:
         evaluation = result.get("evaluation")
         if isinstance(evaluation, dict) and evaluation.get("status"):
             conformance[evaluation["status"]] += 1
-        functional = (job.metrics or {}).get("functional") or {}
-        if functional and functional.get("source") != "conformance" and "health_ok" in functional:
-            smoke["passed" if functional.get("passed") else "failed"] += 1
+        metrics = job.metrics if isinstance(job.metrics, dict) else {}
+        probe = metrics.get("smoke") if isinstance(metrics.get("smoke"), dict) else {}
+        if not probe:
+            # Before the probe got its own key it overwrote metrics["functional"].
+            legacy = metrics.get("functional") if isinstance(metrics.get("functional"), dict) else {}
+            if legacy.get("source") != "conformance" and "health_ok" in legacy:
+                probe = legacy
+        if probe:
+            smoke["passed" if probe.get("passed") else "failed"] += 1
         for mode, entry in (result.get("healing_ablation") or {}).items():
             if isinstance(entry, dict) and entry.get("status"):
                 ablation[mode][entry["status"]] += 1
@@ -141,24 +156,24 @@ def _evaluation_counts(jobs: list[GenerationJob]) -> dict[str, Any]:
     }
 
 
-def run_accounting(jobs: QuerySet[GenerationJob]) -> dict[str, Any]:
+def run_accounting(jobs: QuerySet[GenerationJob], *, run_ids: list[Any] | None = None) -> dict[str, Any]:
     """Apps, analysis runs and per-tool executions actually recorded for *jobs*.
 
-    ``latest`` counts each job's latest finished run (what the result
-    tables describe); ``all_runs`` includes re-analyses and unfinished runs.
-    ``planned`` is what the runs asked for (sum of selected tools), so a gap
+    ``latest`` counts the runs the result tables describe: *run_ids* when
+    given (a report's canonical runs under its analysis plan), else each
+    job's latest finished run. ``all_runs`` includes re-analyses and
+    unfinished runs (self-test canary runs are never counted). ``planned``
+    is what the runs asked for (the tools their frozen plans list), so a gap
     between planned and executed is visible instead of assumed away.
     """
     job_list = list(jobs)
     job_ids = [j.id for j in job_list]
     status = Counter(j.status for j in job_list)
-    latest_ids = AnalysisRun.latest_ids_per_job(job_ids)
-    all_runs = AnalysisRun.objects.filter(generation_job_id__in=job_ids)
+    latest_ids = list(run_ids) if run_ids is not None else AnalysisRun.latest_ids_per_job(job_ids)
+    all_runs = AnalysisRun.objects.filter(generation_job_id__in=job_ids).exclude(purpose=AnalysisRun.Purpose.CANARY)
     latest_results = ToolResult.objects.filter(run_id__in=latest_ids)
-    planned = sum(
-        len(slugs or [])
-        for slugs in AnalysisRun.objects.filter(id__in=latest_ids).values_list("tool_slugs", flat=True)
-    )
+    # v2 runs freeze their tool list in the plan (``AnalysisRun.tool_slugs`` reads it).
+    planned = sum(len(run.tool_slugs) for run in AnalysisRun.objects.filter(id__in=latest_ids).only("id", "plan"))
 
     latest_tools = _tool_rows(latest_results)
     evaluations = _evaluation_counts(job_list)
@@ -180,7 +195,7 @@ def run_accounting(jobs: QuerySet[GenerationJob]) -> dict[str, Any]:
         },
         "tools": {
             "latest": latest_tools,
-            "all_runs": _tool_rows(ToolResult.objects.filter(run__generation_job_id__in=job_ids)),
+            "all_runs": _tool_rows(ToolResult.objects.filter(run__in=all_runs)),
             "distinct_tools_executed": len(latest_tools),
         },
         "evaluations": evaluations,

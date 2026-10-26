@@ -1,0 +1,53 @@
+{
+ "captured_at": "2026-10-26T08:42:54+00:00",
+ "case": "config",
+ "config": {
+  "exclude": "SC2164",
+  "severity": "warning"
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "shell",
+   "path": "clean/scripts/backup.sh",
+   "sha256": "3a48cde33cb19bdee22815abb5ce1ea858d15f900a7e8de4b084d5a896b4b557"
+  },
+  {
+   "kind": "source",
+   "language": "shell",
+   "path": "vulnerable/scripts/backup.sh",
+   "sha256": "9abd3644d25880e5115ccc72af120ded63ce639dfc181468ed42dcb5d2f6bb78"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/shellcheck",
+   "--norc",
+   "--format=json1",
+   "--severity=warning",
+   "--exclude=SC2164",
+   "--",
+   "/src/clean/scripts/backup.sh",
+   "/src/vulnerable/scripts/backup.sh"
+  ],
+  "env": {},
+  "mem_limit": "256m",
+  "report_files": [],
+  "timeout_s": 120
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "{\"comments\":[]}\n",
+  "timed_out": false,
+  "wall_seconds": 0.11
+ },
+ "schema": 1,
+ "tool": "shellcheck",
+ "tool_version": "0.11.0"
+}

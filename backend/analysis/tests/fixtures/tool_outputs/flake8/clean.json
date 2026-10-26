@@ -1,0 +1,62 @@
+{
+ "captured_at": "2026-10-26T08:41:49+00:00",
+ "case": "clean",
+ "config": {
+  "extend_ignore": "",
+  "max_complexity": -1,
+  "max_line_length": 120,
+  "select": "E,F,W,C90"
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "a7c575e15cf284770b4b33371be54d864c4fb47b4f784dbf9a27db7beb28de46"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/flake8",
+   "--isolated",
+   "--disable-noqa",
+   "--jobs=1",
+   "--format=%(path)s\u001f%(row)d\u001f%(col)d\u001f%(code)s\u001f%(text)s",
+   "--output-file=/out/flake8.txt",
+   "--max-line-length=120",
+   "--max-complexity=-1",
+   "--select=E,F,W,C90",
+   "/src/clean/backend/app.py",
+   "/src/clean/backend/bookmarks.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "flake8.txt"
+  ],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "flake8.txt": ""
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.255
+ },
+ "schema": 1,
+ "tool": "flake8",
+ "tool_version": "7.4.1"
+}

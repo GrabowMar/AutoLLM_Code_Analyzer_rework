@@ -1,0 +1,56 @@
+# Baked deptry configuration (passed with --config, so the analysed app's pyproject.toml
+# [tool.deptry] table is never read and its own [project] dependencies are not used: the adapter
+# always reads the requirements files it names).
+#
+# The app's dependencies are not installed in the analyzer image (no network at scan time), so
+# deptry cannot read their metadata and assumes "import name == distribution name". This map
+# covers the common distributions whose import name differs (as in the v1 tool).
+[tool.deptry]
+# deptry excludes venv/.venv/tests/... by default; the adapter stages only the selected files, so
+# nothing has to be excluded and test code is checked like the rest.
+exclude = []
+extend_exclude = []
+known_first_party = []
+
+[tool.deptry.package_module_name_map]
+PyJWT = "jwt"
+python-dotenv = "dotenv"
+Pillow = "PIL"
+beautifulsoup4 = "bs4"
+PyYAML = "yaml"
+scikit-learn = "sklearn"
+python-jose = "jose"
+psycopg2-binary = "psycopg2"
+psycopg-binary = "psycopg"
+opencv-python = "cv2"
+python-dateutil = "dateutil"
+python-multipart = "multipart"
+pymongo = ["pymongo", "bson", "gridfs"]
+dnspython = "dns"
+protobuf = "google.protobuf"
+Flask-SQLAlchemy = "flask_sqlalchemy"
+Flask-Cors = "flask_cors"
+Flask-Login = "flask_login"
+Flask-WTF = "flask_wtf"
+Flask-Migrate = "flask_migrate"
+Flask-JWT-Extended = "flask_jwt_extended"
+Flask-Bcrypt = "flask_bcrypt"
+Flask-Limiter = "flask_limiter"
+Flask-SocketIO = "flask_socketio"
+Flask-Mail = "flask_mail"
+Flask-RESTful = "flask_restful"
+Flask-Caching = "flask_caching"
+Flask-Session = "flask_session"
+Flask-Talisman = "flask_talisman"
+Flask-Marshmallow = "flask_marshmallow"
+marshmallow-sqlalchemy = "marshmallow_sqlalchemy"
+SQLAlchemy = "sqlalchemy"
+email-validator = "email_validator"
+pydantic-settings = "pydantic_settings"
+uvicorn = "uvicorn"
+python-socketio = "socketio"
+pyotp = "pyotp"
+argon2-cffi = "argon2"
+pycryptodome = "Crypto"
+pyopenssl = "OpenSSL"
+attrs = ["attr", "attrs"]

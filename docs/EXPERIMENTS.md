@@ -160,20 +160,22 @@ Routes: `GET/POST …/schedules/`, `PATCH/DELETE …/schedules/{sid}/`, `POST �
 
 ```json
 {"evaluate": true,
- "analysis": {"enabled": true, "tool_slugs": ["bandit", "semgrep"], "only_passing": false},
+ "analysis": {"enabled": true, "profile": "research-default", "tool_slugs": [], "only_passing": false},
  "report": {"enabled": true, "exclude_truncated": true}}
 ```
 
 - `evaluate` grades each job right after its run (the hidden conformance suite); it is a per-job step, not a post-run step.
+- `analysis` runs the v2 [analysis engine](/docs/ANALYSIS_PIPELINE). `profile` is an analysis profile id or slug you may use; `tool_slugs` restricts it to those tools (without a profile, it restricts the default profile config; `ai_review` enables the AI reviewer). One of them is required when analysis is enabled; an unknown tool is `400 unknown_analyzer`, an unusable profile `400 unknown_analysis_profile`.
 - When the experiment completes (exactly once per completion, even under concurrent job ends) an `ExperimentPostRun` is created with a frozen copy of the configuration, if analysis or the report is enabled. `POST …/post-run/run/` queues one by hand (400 while one is active).
-- The executor claims post-runs one at a time (leased). Analyses run **sequentially** (the analyzer workspace is shared) over the completed current-attempt jobs that have no analysis yet (`only_passing`: pass rate 1 only); a failed analysis is counted and the rest continue. Then the `experiment_report` is generated synchronously, owned by the experiment's owner. Progress is published as `post_run` events.
-- When the apps daemon's memory cannot fit the analyzer workspace next to full sandbox and evaluation lanes (see [Execution](/docs/EXECUTION)), post-runs wait until those lanes have room.
+- The executor claims post-runs one at a time (leased). The post-run **freezes one analysis plan** (kept on the row, so a resumed post-run uses the same plan) and submits one analysis run per completed current-attempt job that has no non-cancelled run under that plan yet (`only_passing`: pass rate 1 only). The runs execute in the analysis executor, isolated and in its own queue (`ANALYSIS_MAX_CONCURRENT_RUNS`); the post-run renews its lease, waits for all of them (at most 12 h, then unfinished runs are cancelled) and publishes progress as `post_run` events: `analysis_done`, `analysis_total`, `analysis_failed` and `analysis_plan_hash`. A job whose sample cannot be resolved counts as a failed analysis and the rest continue. Then the `experiment_report` is generated synchronously, owned by the experiment's owner.
+- Every analysis of one post-run shares one `plan_hash`, so the measurements are comparable. Use that hash (`GET /api/analysis/plans/?experiment_id=` lists it as `experiment_post_run`) to scope a [Study Report](/docs/STUDY_TABLES#study-report) or an [analysis study](/docs/RESEARCH_GUIDE) to exactly these measurements.
+- When the apps daemon's memory cannot fit the post-run reservation next to full sandbox and evaluation lanes (see [Execution](/docs/EXECUTION)), post-runs wait until those lanes have room; each tool container additionally waits for daemon memory itself.
 
 `GET/PUT …/post-run/` reads and sets the configuration and lists recent post-runs.
 
 ### Reports
 
-The `experiment_report` (`config: {"experiment_id", "exclude_truncated"}`) is owner-scoped: only the experiment's owner (or staff) can generate it. It embeds the leaderboard and the paired-vs-baseline analysis from `experiment_results.compute`, plus per-condition code statistics (findings, LOC, cost, duration). It no longer diffs every condition pair.
+The `experiment_report` (`config: {"experiment_id", "exclude_truncated", "plan_hash"?}`) is owner-scoped: only the experiment's owner (or staff) can generate it. It embeds the leaderboard and the paired-vs-baseline analysis from `experiment_results.compute`, plus per-condition code statistics (findings, LOC, cost, duration). The code statistics read each job's canonical analysis run, all under one analysis plan: `plan_hash` when given, else the plan with the most jobs that have a static measurement (ties: the broader static tool set, then the most recently used plan). It no longer diffs every condition pair. For pre-registered comparisons on analysis outcomes, see the [Study Report](/docs/STUDY_TABLES#study-report) and [analysis studies](/docs/RESEARCH_GUIDE#studies-experiment-plans-and-the-study-report).
 
 ## API summary
 

@@ -1,0 +1,67 @@
+{
+ "captured_at": "2026-10-26T08:42:01+00:00",
+ "case": "hostile",
+ "config": {
+  "extra_disable": "",
+  "report_suppressed": true
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/app.py",
+   "sha256": "b7512ab0181ead6473277204f7f5cb79c467ccfe5c0458c8989e9d4c3facde98"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/reports.py",
+   "sha256": "4c3ad7f0c0309a26c22b308be50c086ca5d3d9436d18702d635fbff2148ef8c0"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/utils.py",
+   "sha256": "faebfaee33659a5f1b2fc249ad25d65194e23e53034e86aa04fd23190c569c13"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/venvs/perflint/bin/pylint",
+   "--rcfile=/opt/analyzer/config/perflint.pylintrc",
+   "--output-format=json2:/out/perflint.json",
+   "--persistent=n",
+   "--jobs=1",
+   "--disable=loop-try-except-usage",
+   "--enable=suppressed-message",
+   "--enable=file-ignored",
+   "--",
+   "/src/vulnerable/backend/app.py",
+   "/src/vulnerable/backend/reports.py",
+   "/src/vulnerable/backend/utils.py"
+  ],
+  "env": {},
+  "mem_limit": "768m",
+  "report_files": [
+   "perflint.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "perflint.json": "{\n    \"messages\": [\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"use-list-copy\",\n            \"message\": \"Use a list copy instead of a for-loop\",\n            \"messageId\": \"W8402\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"reports\",\n            \"obj\": \"order_lines\",\n            \"line\": 11,\n            \"column\": 4,\n            \"endLine\": 12,\n            \"endColumn\": 56,\n            \"path\": \"/src/vulnerable/backend/reports.py\",\n            \"absolutePath\": \"/src/vulnerable/backend/reports.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"unnecessary-list-cast\",\n            \"message\": \"Unnecessary using of list() on an already iterable type.\",\n            \"messageId\": \"W8101\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"reports\",\n            \"obj\": \"taxed_prices\",\n            \"line\": 19,\n            \"column\": 17,\n            \"endLine\": 19,\n            \"endColumn\": 29,\n            \"path\": \"/src/vulnerable/backend/reports.py\",\n            \"absolutePath\": \"/src/vulnerable/backend/reports.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"use-list-copy\",\n            \"message\": \"Use a list copy instead of a for-loop\",\n            \"messageId\": \"W8402\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"reports\",\n            \"obj\": \"taxed_prices\",\n            \"line\": 19,\n            \"column\": 4,\n            \"endLine\": 20,\n            \"endColumn\": 56,\n            \"path\": \"/src/vulnerable/backend/reports.py\",\n            \"absolutePath\": \"/src/vulnerable/backend/reports.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"loop-invariant-statement\",\n            \"message\": \"Consider moving this expression outside of the loop.\",\n            \"messageId\": \"W8201\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"reports\",\n            \"obj\": \"taxed_prices\",\n            \"line\": 20,\n            \"column\": 36,\n            \"endLine\": 20,\n            \"endColumn\": 50,\n            \"path\": \"/src/vulnerable/backend/reports.py\",\n            \"absolutePath\": \"/src/vulnerable/backend/reports.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"loop-invariant-statement\",\n            \"message\": \"Consider moving this expression outside of the loop.\",\n            \"messageId\": \"W8201\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"reports\",\n            \"obj\": \"taxed_prices\",\n            \"line\": 20,\n            \"column\": 36,\n            \"endLine\": 20,\n            \"endColumn\": 50,\n            \"path\": \"/src/vulnerable/backend/reports.py\",\n            \"absolutePath\": \"/src/vulnerable/backend/reports.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"loop-invariant-statement\",\n            \"message\": \"Consider moving this expression outside of the loop.\",\n            \"messageId\": \"W8201\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"reports\",\n            \"obj\": \"taxed_prices\",\n            \"line\": 20,\n            \"column\": 36,\n            \"endLine\": 20,\n            \"endColumn\": 50,\n            \"path\": \"/src/vulnerable/backend/reports.py\",\n            \"absolutePath\": \"/src/vulnerable/backend/reports.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"use-tuple-over-list\",\n            \"message\": \"Use tuple instead of list for a non-mutated sequence\",\n            \"messageId\": \"W8301\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"reports\",\n            \"obj\": \"taxed_prices\",\n            \"line\": 17,\n            \"column\": 13,\n            \"endLine\": 17,\n            \"endColumn\": 30,\n            \"path\": \"/src/vulnerable/backend/reports.py\",\n            \"absolutePath\": \"/src/vulnerable/backend/reports.py\"\n        }\n    ],\n    \"statistics\": {\n        \"messageTypeCount\": {\n            \"fatal\": 0,\n            \"error\": 0,\n            \"warning\": 7,\n            \"refactor\": 0,\n            \"convention\": 0,\n            \"info\": 0\n        },\n        \"modulesLinted\": 6,\n        \"score\": 9.54\n    }\n}\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.804
+ },
+ "schema": 1,
+ "tool": "perflint",
+ "tool_version": "0.8.1"
+}

@@ -1,0 +1,67 @@
+{
+ "captured_at": "2026-10-26T08:42:45+00:00",
+ "case": "syntax",
+ "config": {
+  "skip_missing": false
+ },
+ "files": [
+  {
+   "content": "import left from \"left-pad\";\n\nexport default left;\n",
+   "kind": "source",
+   "language": "javascript",
+   "path": "lib/orphan.js",
+   "sha256": "747f31c87be85cde608bdf65ee27bd10de248869c50a0a373240803a39ea15aa"
+  },
+  {
+   "content": "export default function Broken() {\n  return <div>;\n}\n",
+   "kind": "source",
+   "language": "jsx",
+   "path": "web/broken.jsx",
+   "sha256": "28a5a5d4e28e8a38407fba9a4daee100f364f5ce963ba129cfb03b88455a883d"
+  },
+  {
+   "content": "import { useState } from \"react\";\n\nexport const useFlag = () => useState(false);\n",
+   "kind": "source",
+   "language": "jsx",
+   "path": "web/ok.jsx",
+   "sha256": "5676cdb3d5a9b43fd0d45b3dcae27599e8c368c8cce955d9024823902676d545"
+  },
+  {
+   "content": "{\"name\": \"web\", \"private\": true, \"dependencies\": {\"react\": \"18.3.1\"}}\n",
+   "kind": "manifest",
+   "language": "json",
+   "path": "web/package.json",
+   "sha256": "26d1173ffacda823514104add8d7e855f452f3b24a0db02d723d5fcfe6b3de3b"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "sh",
+   "-c",
+   "set -eu; mkdir /tmp/llmlab-src; mkdir /tmp/llmlab-src/p0; cd /src/web; cp --parents -- broken.jsx ok.jsx package.json /tmp/llmlab-src/p0/; cd /tmp/llmlab-src/p0; rc=0; /opt/analyzer/bin/depcheck . --json --config=/opt/analyzer/config/depcheck.json > /out/depcheck-0.out 2> /out/depcheck-0.err || rc=$?; echo $rc > /out/depcheck-0.rc"
+  ],
+  "env": {},
+  "mem_limit": "768m",
+  "report_files": [],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "depcheck-0.err": "",
+   "depcheck-0.out": "{\"dependencies\":[],\"devDependencies\":[],\"missing\":{},\"using\":{\"react\":[\"/tmp/llmlab-src/p0/ok.jsx\",\"/tmp/llmlab-src/p0/package.json\"]},\"invalidFiles\":{\"/tmp/llmlab-src/p0/broken.jsx\":\"SyntaxError: Unterminated JSX contents. (2:14)\\n    at constructor (/opt/analyzer/node_modules/@babel/parser/lib/index.js:369:19)\\n    at FlowParserMixin.raise (/opt/analyzer/node_modules/@babel/parser/lib/index.js:6622:19)\\n    at FlowParserMixin.jsxReadToken (/opt/analyzer/node_modules/@babel/parser/lib/index.js:4466:20)\\n    at FlowParserMixin.getTokenFromCode (/opt/analyzer/node_modules/@babel/parser/lib/index.js:4792:12)\\n    at FlowParserMixin.getTokenFromCode (/opt/analyzer/node_modules/@babel/parser/lib/index.js:3215:13)\\n    at FlowParserMixin.nextToken (/opt/analyzer/node_modules/@babel/parser/lib/index.js:5805:10)\\n    at FlowParserMixin.next (/opt/analyzer/node_modules/@babel/parser/lib/index.js:5715:10)\\n    at FlowParserMixin.eat (/opt/analyzer/node_modules/@babel/parser/lib/index.js:5719:12)\\n    at FlowParserMixin.expect (/opt/analyzer/node_modules/@babel/parser/lib/index.js:6921:15)\\n    at FlowParserMixin.jsxParseOpeningElementAfterName (/opt/analyzer/node_modules/@babel/parser/lib/index.js:4689:10)\"},\"invalidDirs\":{}}\n",
+   "depcheck-0.rc": "0\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.853
+ },
+ "schema": 1,
+ "tool": "depcheck",
+ "tool_version": "1.4.7"
+}

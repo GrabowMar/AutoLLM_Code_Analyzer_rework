@@ -1,0 +1,69 @@
+{
+ "captured_at": "2026-10-26T08:41:48+00:00",
+ "case": "syntax",
+ "config": {
+  "ignore": "",
+  "select": "E9,F,B,S,PLE",
+  "target_version": "py312"
+ },
+ "files": [
+  {
+   "content": "def handler(request:\n    return request\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/broken.py",
+   "sha256": "a213cda8977aafa87b15bec45ead948580c06c66386ac6bd1e94e459981963e4"
+  },
+  {
+   "content": "import os\n\n\ndef read_setting(name):\n    return os.environ.get(name, \"\")\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/ok.py",
+   "sha256": "377ef7025dd733242011513a97f32da3f320aa58e5463dfb383708e0a03215b7"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/ruff",
+   "check",
+   "--isolated",
+   "--no-cache",
+   "--ignore-noqa",
+   "--no-fix",
+   "--output-format",
+   "json",
+   "--output-file",
+   "/out/ruff.json",
+   "--target-version",
+   "py312",
+   "--select",
+   "E9,F,B,S,PLE",
+   "--",
+   "/src/svc/broken.py",
+   "/src/svc/ok.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "ruff.json"
+  ],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "ruff.json": "[\n  {\n    \"cell\": null,\n    \"code\": \"invalid-syntax\",\n    \"end_location\": {\n      \"column\": 1,\n      \"row\": 2\n    },\n    \"filename\": \"/src/svc/broken.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 21,\n      \"row\": 1\n    },\n    \"message\": \"Expected `)`, found newline\",\n    \"name\": \"invalid-syntax\",\n    \"noqa_row\": null,\n    \"severity\": \"error\",\n    \"url\": null\n  },\n  {\n    \"cell\": null,\n    \"code\": \"invalid-syntax\",\n    \"end_location\": {\n      \"column\": 11,\n      \"row\": 2\n    },\n    \"filename\": \"/src/svc/broken.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 5,\n      \"row\": 2\n    },\n    \"message\": \"Expected an expression\",\n    \"name\": \"invalid-syntax\",\n    \"noqa_row\": null,\n    \"severity\": \"error\",\n    \"url\": null\n  }\n]"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.109
+ },
+ "schema": 1,
+ "tool": "ruff",
+ "tool_version": "0.16.10"
+}

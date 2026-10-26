@@ -1,0 +1,133 @@
+{
+ "captured_at": "2026-10-26T08:41:31+00:00",
+ "case": "findings",
+ "config": {
+  "opt_in_rules": []
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/App.jsx",
+   "sha256": "50b34bd78e3cd0936b45a21d06065bf3a2816bdc18afdb09f9876378beeb279c"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "clean/frontend/src/TagBadge.vue",
+   "sha256": "47812dbf621a248a8411ee2aa9b0f7cdaaf1fee1d4d2b4e37569ad17d79351f5"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "clean/frontend/src/bookmarks.ts",
+   "sha256": "3872ba6ae0c99822ddbea2b5f454f11d68733ee860e6c078cd659fa4553c0e04"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/components/BookmarkList.jsx",
+   "sha256": "efd7854d492966cc76c2341a178b636bbf4567e6073ee63f1c4b44d1c29f1635"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "clean/frontend/src/components/Panel.tsx",
+   "sha256": "63a402046cdf7b1158644a4a595bf0b5bcd49eb4fb974ff2973f91d97e67f23b"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/App.jsx",
+   "sha256": "47a0a1ef7463a2fbdda619183d5a06fc98df96b885fc9ac423f2eb804450cbde"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "vulnerable/frontend/src/Banner.tsx",
+   "sha256": "fde9db28f3a89cc5d70d85571aeef23ae06527ed313e492889de7af3628dd5f2"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "vulnerable/frontend/src/Card.vue",
+   "sha256": "e3f1ac7af90e4290877fa1d335a8ee2ca2e6f6e07d5b18134bc8194d8cb4f5d1"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "vulnerable/frontend/src/api.ts",
+   "sha256": "10db8abdf7e86d4d1fcad8b1032fe585d8de4a9ed01057dc2cca191e1a4dad73"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Footer.jsx",
+   "sha256": "4d21c89dae359815df375738352440af702a72157da2815d9ec744590f4a94b9"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Header.jsx",
+   "sha256": "48f798d3de206f47a4d7edb0baf12379cfc62304952aa884b5117e3c967a9bdc"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/main.jsx",
+   "sha256": "d71c4e2d9fb272535669d50fc740276e318ed4ac0c7a6fe8d6db1fb8d259d487"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "env",
+   "-C",
+   "/src",
+   "/opt/analyzer/bin/eslint",
+   "--no-config-lookup",
+   "--config",
+   "/opt/analyzer/config/eslint.config.mjs",
+   "--no-inline-config",
+   "--format",
+   "json",
+   "--output-file",
+   "/out/eslint.json",
+   "--",
+   "./clean/frontend/src/App.jsx",
+   "./clean/frontend/src/TagBadge.vue",
+   "./clean/frontend/src/bookmarks.ts",
+   "./clean/frontend/src/components/BookmarkList.jsx",
+   "./clean/frontend/src/components/Panel.tsx",
+   "./vulnerable/frontend/src/App.jsx",
+   "./vulnerable/frontend/src/Banner.tsx",
+   "./vulnerable/frontend/src/Card.vue",
+   "./vulnerable/frontend/src/api.ts",
+   "./vulnerable/frontend/src/components/Footer.jsx",
+   "./vulnerable/frontend/src/components/Header.jsx",
+   "./vulnerable/frontend/src/main.jsx"
+  ],
+  "env": {},
+  "mem_limit": "1g",
+  "report_files": [
+   "eslint.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "eslint.json": "[{\"filePath\":\"/src/clean/frontend/src/App.jsx\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/clean/frontend/src/TagBadge.vue\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/clean/frontend/src/bookmarks.ts\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/clean/frontend/src/components/BookmarkList.jsx\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/clean/frontend/src/components/Panel.tsx\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/vulnerable/frontend/src/App.jsx\",\"messages\":[{\"ruleId\":\"no-unused-vars\",\"severity\":2,\"message\":\"'unusedCounter' is assigned a value but never used.\",\"line\":13,\"column\":9,\"messageId\":\"unusedVar\",\"endLine\":13,\"endColumn\":22,\"suggestions\":[{\"messageId\":\"removeVar\",\"data\":{\"varName\":\"unusedCounter\"},\"fix\":{\"range\":[480,504],\"text\":\"\"},\"desc\":\"Remove unused variable 'unusedCounter'.\"}]},{\"ruleId\":\"security/detect-eval-with-expression\",\"severity\":2,\"message\":\"eval with argument of type Identifier\",\"line\":14,\"column\":18,\"endLine\":14,\"endColumn\":34},{\"ruleId\":\"no-eval\",\"severity\":2,\"message\":\"`eval` can be harmful.\",\"line\":14,\"column\":18,\"messageId\":\"unexpected\",\"endLine\":14,\"endColumn\":22},{\"ruleId\":\"no-unsanitized/property\",\"severity\":2,\"message\":\"Unsafe assignment to innerHTML (Variable 'html' declared as function parameter, which is considered unsafe. 'FunctionDeclaration' at 16:2)\",\"line\":17,\"column\":5,\"endLine\":17,\"endColumn\":52}],\"suppressedMessages\":[],\"errorCount\":4,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"source\":\"// CANARY FIXTURE: deliberately vulnerable React component (analyzer self-test).\\n// Header, Footer and Preview are used only as JSX elements and must NOT be reported as unused.\\nimport { useState } from \\\"react\\\";\\nimport Header from \\\"./components/Header\\\";\\nimport Footer from \\\"./components/Footer\\\";\\n\\nfunction Preview({ html }) {\\n  return <div dangerouslySetInnerHTML={{ __html: html }} />;\\n}\\n\\nexport default function App() {\\n  const [expression, setExpression] = useState(\\\"1 + 1\\\");\\n  const unusedCounter = 0;\\n  const result = eval(expression);\\n\\n  function showRaw(html) {\\n    document.getElementById(\\\"raw\\\").innerHTML = html;\\n  }\\n\\n  return (\\n    <main>\\n      <Header title=\\\"Canary\\\" />\\n      <Preview html={expression} />\\n      <p>{String(result)}</p>\\n      <input value={expression} onChange={(event) => setExpression(event.target.value)} />\\n      <button onClick={() => showRaw(expression)}>Show raw</button>\\n      <Footer />\\n    </main>\\n  );\\n}\\n\",\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/vulnerable/frontend/src/Banner.tsx\",\"messages\":[{\"ruleId\":\"@typescript-eslint/no-unused-vars\",\"severity\":2,\"message\":\"'unusedLabel' is assigned a value but never used.\",\"line\":12,\"column\":9,\"messageId\":\"unusedVar\",\"endLine\":12,\"endColumn\":20}],\"suppressedMessages\":[],\"errorCount\":1,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"source\":\"// CANARY FIXTURE: deliberately vulnerable React + TypeScript component (analyzer self-test).\\n// Icon is used only as a JSX element and must NOT be reported as unused.\\ninterface BannerProps {\\n  html: string;\\n}\\n\\nfunction Icon() {\\n  return <span aria-hidden=\\\"true\\\">!</span>;\\n}\\n\\nexport default function Banner({ html }: BannerProps) {\\n  const unusedLabel: string = \\\"banner\\\";\\n  return (\\n    <div className=\\\"banner\\\">\\n      <Icon />\\n      <div dangerouslySetInnerHTML={{ __html: html }} />\\n    </div>\\n  );\\n}\\n\",\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/vulnerable/frontend/src/Card.vue\",\"messages\":[{\"ruleId\":\"vue/no-v-html\",\"severity\":2,\"message\":\"'v-html' directive can lead to XSS attack.\",\"line\":5,\"column\":10,\"messageId\":\"unexpected\",\"endLine\":5,\"endColumn\":23}],\"suppressedMessages\":[],\"errorCount\":1,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"source\":\"<!-- CANARY FIXTURE: deliberately vulnerable Vue component (analyzer self-test). -->\\n<template>\\n  <article class=\\\"card\\\">\\n    <h2>{{ title }}</h2>\\n    <div v-html=\\\"body\\\"></div>\\n  </article>\\n</template>\\n\\n<script setup>\\ndefineProps({\\n  title: { type: String, required: true },\\n  body: { type: String, default: \\\"\\\" },\\n});\\n</script>\\n\",\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/vulnerable/frontend/src/api.ts\",\"messages\":[{\"ruleId\":\"@typescript-eslint/no-unused-vars\",\"severity\":2,\"message\":\"'leftover' is assigned a value but never used.\",\"line\":8,\"column\":9,\"messageId\":\"unusedVar\",\"endLine\":8,\"endColumn\":17},{\"ruleId\":\"security/detect-eval-with-expression\",\"severity\":2,\"message\":\"eval with argument of type Identifier\",\"line\":9,\"column\":10,\"endLine\":9,\"endColumn\":20},{\"ruleId\":\"no-eval\",\"severity\":2,\"message\":\"`eval` can be harmful.\",\"line\":9,\"column\":10,\"messageId\":\"unexpected\",\"endLine\":9,\"endColumn\":14}],\"suppressedMessages\":[],\"errorCount\":3,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"source\":\"// CANARY FIXTURE: deliberately vulnerable TypeScript module (analyzer self-test).\\nexport interface Item {\\n  id: number;\\n  name: string;\\n}\\n\\nexport function evaluate(code: string): unknown {\\n  const leftover: number = 42;\\n  return eval(code);\\n}\\n\\nexport async function fetchItems(): Promise<Item[]> {\\n  const response = await fetch(\\\"/api/items\\\");\\n  return (await response.json()) as Item[];\\n}\\n\",\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/vulnerable/frontend/src/components/Footer.jsx\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/vulnerable/frontend/src/components/Header.jsx\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/vulnerable/frontend/src/main.jsx\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]}]"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 3.127
+ },
+ "schema": 1,
+ "tool": "eslint",
+ "tool_version": "10.12.0"
+}

@@ -42,7 +42,7 @@ Django 6 project; settings in `config/settings/{base,local,production,test}.py`,
 | `users`, `tokens`, `credentials` | Accounts (allauth headless + MFA), Bearer API tokens, encrypted per-user provider keys |
 | `llm_models` | Model catalog synced from OpenRouter |
 | `generation` | Generation jobs, templates, prompt assembly, OpenRouter client |
-| `analysis` | Analyzer workspaces, tool catalog, runs, findings |
+| `analysis` | Analysis engine (`engine/`), research layer (`research/`), tool catalog, profiles, runs, findings, studies |
 | `statistics`, `rankings`, `reports` | Aggregation over findings and jobs, model scoring, saved reports |
 | `runtime` | Builds and runs generated apps as Docker containers, routing/proxy |
 | `realtime` | Server-sent events stream backed by Redis pub/sub |
@@ -63,10 +63,10 @@ SvelteKit with Svelte 5 runes, Tailwind 4, in `frontend/`. Routes live under `sr
 ```bash
 just test                        # whole backend suite
 just test backend/analysis       # one app
-just test -k workspace -x        # any pytest args pass through
+just test -k reviewer -x         # any pytest args pass through
 ```
 
-pytest runs with `--ds=config.settings.test --reuse-db`. Add `--create-db` after changing seed data (e.g. the analyzer tool YAML), since the reused test DB keeps the old catalog. Shared fixtures live in `backend/conftest.py`; per-app factories in `backend/<app>/tests/factories.py`.
+pytest runs with `--ds=config.settings.test --reuse-db`. Add `--create-db` after changing seed data (e.g. the analyzer tool YAML or system profiles), since the reused test DB keeps the old catalog. Tests that need the apps Docker daemon (the analyzer image, real tool runs) are marked `docker` and skip cleanly without it; run them with `just test backend/analysis -m docker`. Shared fixtures live in `backend/conftest.py`; per-app factories in `backend/<app>/tests/factories.py`.
 
 Lint/format is ruff + mypy (backend), `svelte-check` (frontend), wired into `.pre-commit-config.yaml`.
 

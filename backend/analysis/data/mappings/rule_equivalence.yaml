@@ -1,0 +1,191 @@
+# Cross-tool rule equivalence classes for issue deduplication (dedup-v1).
+#
+# Two counted static findings from DIFFERENT tools join one issue when they
+# are on the same file, their lines are within the dedup window, and they
+# share a CWE or a class below. Members are "tool:pattern" with an fnmatch
+# glob on the tool's rule id (semgrep ids carry their vendored namespace, so
+# they match on the trailing rule name). Findings of the SAME tool merge only
+# on the same line (one issue reported under several rules), never across lines.
+version: 1
+
+classes:
+  unused-import:
+    - ruff:F401
+    - flake8:F401
+    - pylint:W0611
+    - pylint:unused-import
+    - "vulture:unused[-_ ]import"
+  unused-variable:
+    - ruff:F841
+    - flake8:F841
+    - ruff:B007
+    - pylint:W0612
+    - pylint:unused-variable
+    - "vulture:unused[-_ ]variable"
+    - eslint:no-unused-vars
+    - "eslint:@typescript-eslint/no-unused-vars"
+  unused-argument:
+    - "ruff:ARG00*"
+    - pylint:W0613
+    - pylint:unused-argument
+    - "vulture:unused[-_ ]argument"
+  unused-function:
+    - "vulture:unused[-_ ]function"
+    - "vulture:unused[-_ ]method"
+    - "vulture:unused[-_ ]class"
+  unreachable-code:
+    - pylint:W0101
+    - pylint:unreachable
+    - "vulture:unreachable*"
+    - eslint:no-unreachable
+  undefined-name:
+    - ruff:F821
+    - flake8:F821
+    - ruff:F822
+    - flake8:F822
+    - pylint:E0602
+    - pylint:undefined-variable
+    - mypy:name-defined
+    - eslint:no-undef
+    - eslint:react/jsx-no-undef
+  redefinition:
+    - ruff:F811
+    - flake8:F811
+    - pylint:E0102
+    - pylint:function-redefined
+    - pylint:W0404
+    - pylint:reimported
+    - mypy:no-redef
+    - eslint:no-redeclare
+    - eslint:no-func-assign
+  duplicate-key:
+    - ruff:F601
+    - flake8:F601
+    - ruff:F602
+    - flake8:F602
+    - pylint:W0109
+    - pylint:duplicate-key
+    - eslint:no-dupe-keys
+  mutable-default:
+    - ruff:B006
+    - pylint:W0102
+    - pylint:dangerous-default-value
+  bare-except:
+    - ruff:E722
+    - flake8:E722
+    - ruff:BLE001
+    - pylint:W0702
+    - pylint:bare-except
+    - pylint:W0718
+    - pylint:broad-exception-caught
+  try-except-pass:
+    - bandit:B110
+    - ruff:S110
+    - ruff:SIM105
+    - pylint:W0107
+  fstring-no-placeholder:
+    - ruff:F541
+    - flake8:F541
+    - pylint:W1309
+    - pylint:f-string-without-interpolation
+  eval:
+    - bandit:B307
+    - ruff:S307
+    - ruff:PGH001
+    - pylint:W0123
+    - pylint:eval-used
+    - "semgrep:*eval*"
+    - eslint:no-eval
+    - eslint:no-implied-eval
+    - eslint:security/detect-eval-with-expression
+  exec:
+    - bandit:B102
+    - ruff:S102
+    - pylint:W0122
+    - pylint:exec-used
+    - "semgrep:*exec-detected*"
+  hardcoded-credentials:
+    - bandit:B105
+    - bandit:B106
+    - bandit:B107
+    - ruff:S105
+    - ruff:S106
+    - ruff:S107
+    - "gitleaks:*"
+    - "detect-secrets:*"
+    - "semgrep:*hardcoded*secret*"
+    - "semgrep:*hardcoded*password*"
+    - "semgrep:*hardcoded*token*"
+    - "semgrep:*detected-*"
+  shell-injection:
+    - bandit:B602
+    - bandit:B604
+    - bandit:B605
+    - ruff:S602
+    - ruff:S604
+    - ruff:S605
+    - "semgrep:*subprocess-shell-true*"
+    - "semgrep:*subprocess-injection*"
+    - "semgrep:*dangerous-subprocess-use*"
+    - "semgrep:*os-system*"
+    - eslint:security/detect-child-process
+  sql-injection:
+    - bandit:B608
+    - ruff:S608
+    - "semgrep:*sql-injection*"
+    - "semgrep:*tainted-sql-string*"
+    - "semgrep:*sqlalchemy-execute-raw-query*"
+    - "semgrep:*formatted-sql-query*"
+  insecure-deserialization:
+    - bandit:B301
+    - bandit:B403
+    - ruff:S301
+    - ruff:S403
+    - "semgrep:*pickle*"
+  unsafe-yaml:
+    - bandit:B506
+    - ruff:S506
+    - "semgrep:*yaml-load*"
+    - "semgrep:*avoid-pyyaml-load*"
+  weak-hash:
+    - bandit:B303
+    - bandit:B324
+    - ruff:S303
+    - ruff:S324
+    - "semgrep:*insecure-hash*"
+    - "semgrep:*md5*"
+    - "semgrep:*sha1*"
+  flask-debug:
+    - bandit:B201
+    - ruff:S201
+    - "semgrep:*debug-enabled*"
+  bind-all-interfaces:
+    - bandit:B104
+    - ruff:S104
+    - "semgrep:*bad[-_]host*"
+    - "semgrep:*bind*all*"
+  no-cert-validation:
+    - bandit:B501
+    - ruff:S501
+    - "semgrep:*verify*false*"
+    - "semgrep:*disabled-cert-validation*"
+  request-timeout:
+    - bandit:B113
+    - ruff:S113
+    - "semgrep:*request*timeout*"
+  insecure-random:
+    - bandit:B311
+    - ruff:S311
+  dom-xss:
+    - eslint:react/no-danger
+    - eslint:no-unsanitized/method
+    - eslint:no-unsanitized/property
+    - eslint:vue/no-v-html
+    - eslint:svelte/no-at-html-tags
+    - "semgrep:*dangerouslysetinnerhtml*"
+    - "semgrep:*innerhtml*"
+    - "semgrep:*insecure-document-method*"
+  jinja-autoescape:
+    - bandit:B701
+    - ruff:S701
+    - "semgrep:*autoescape*"

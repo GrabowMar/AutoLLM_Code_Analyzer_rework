@@ -1,0 +1,84 @@
+{
+ "captured_at": "2026-10-26T08:41:34+00:00",
+ "case": "clean",
+ "config": {
+  "opt_in_rules": []
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/App.jsx",
+   "sha256": "50b34bd78e3cd0936b45a21d06065bf3a2816bdc18afdb09f9876378beeb279c"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "clean/frontend/src/TagBadge.vue",
+   "sha256": "47812dbf621a248a8411ee2aa9b0f7cdaaf1fee1d4d2b4e37569ad17d79351f5"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "clean/frontend/src/bookmarks.ts",
+   "sha256": "3872ba6ae0c99822ddbea2b5f454f11d68733ee860e6c078cd659fa4553c0e04"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/components/BookmarkList.jsx",
+   "sha256": "efd7854d492966cc76c2341a178b636bbf4567e6073ee63f1c4b44d1c29f1635"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "clean/frontend/src/components/Panel.tsx",
+   "sha256": "63a402046cdf7b1158644a4a595bf0b5bcd49eb4fb974ff2973f91d97e67f23b"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "env",
+   "-C",
+   "/src",
+   "/opt/analyzer/bin/eslint",
+   "--no-config-lookup",
+   "--config",
+   "/opt/analyzer/config/eslint.config.mjs",
+   "--no-inline-config",
+   "--format",
+   "json",
+   "--output-file",
+   "/out/eslint.json",
+   "--",
+   "./clean/frontend/src/App.jsx",
+   "./clean/frontend/src/TagBadge.vue",
+   "./clean/frontend/src/bookmarks.ts",
+   "./clean/frontend/src/components/BookmarkList.jsx",
+   "./clean/frontend/src/components/Panel.tsx"
+  ],
+  "env": {},
+  "mem_limit": "1g",
+  "report_files": [
+   "eslint.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "eslint.json": "[{\"filePath\":\"/src/clean/frontend/src/App.jsx\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/clean/frontend/src/TagBadge.vue\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/clean/frontend/src/bookmarks.ts\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/clean/frontend/src/components/BookmarkList.jsx\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/clean/frontend/src/components/Panel.tsx\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]}]"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 2.903
+ },
+ "schema": 1,
+ "tool": "eslint",
+ "tool_version": "10.12.0"
+}

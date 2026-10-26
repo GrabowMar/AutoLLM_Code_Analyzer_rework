@@ -1,0 +1,51 @@
+{
+ "captured_at": "2026-10-26T08:42:36+00:00",
+ "case": "config",
+ "config": {
+  "ignore_rules": "DL3007,DL3008"
+ },
+ "files": [
+  {
+   "kind": "config",
+   "language": "dockerfile",
+   "path": "vulnerable/Dockerfile",
+   "sha256": "d652169744de5618ba7d78ce6db3264d17e98f1a9e08da6aedaa7b6dad97e017"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/hadolint",
+   "--config",
+   "/opt/analyzer/config/hadolint.yaml",
+   "--format",
+   "json",
+   "--no-fail",
+   "--no-color",
+   "--disable-ignore-pragma",
+   "--ignore",
+   "DL3007",
+   "--ignore",
+   "DL3008",
+   "/src/vulnerable/Dockerfile"
+  ],
+  "env": {},
+  "mem_limit": "256m",
+  "report_files": [],
+  "timeout_s": 120
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "[{\"code\":\"DL3009\",\"column\":1,\"file\":\"/src/vulnerable/Dockerfile\",\"level\":\"info\",\"line\":3,\"message\":\"Delete the apt lists (/var/lib/apt/lists) after installing something\"},{\"code\":\"DL3015\",\"column\":1,\"file\":\"/src/vulnerable/Dockerfile\",\"level\":\"info\",\"line\":3,\"message\":\"Avoid additional packages by specifying `--no-install-recommends`\"},{\"code\":\"DL3020\",\"column\":1,\"file\":\"/src/vulnerable/Dockerfile\",\"level\":\"error\",\"line\":4,\"message\":\"Use COPY instead of ADD for files and folders\"},{\"code\":\"DL3025\",\"column\":1,\"file\":\"/src/vulnerable/Dockerfile\",\"level\":\"warning\",\"line\":6,\"message\":\"Use arguments JSON notation for CMD and ENTRYPOINT arguments\"}]",
+  "timed_out": false,
+  "wall_seconds": 0.119
+ },
+ "schema": 1,
+ "tool": "hadolint",
+ "tool_version": "2.15.1"
+}

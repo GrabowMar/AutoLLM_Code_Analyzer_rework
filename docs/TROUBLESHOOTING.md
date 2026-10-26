@@ -8,13 +8,19 @@ Key resolution is per user: your own key from **Settings → API Credentials** w
 
 ## A run is stuck in "running" after a restart
 
-Interactive generation and analysis execute on threads inside the django container — restarting it kills in-flight runs, which stay `running` in the DB. There is no automatic retry; start a new run. (Automation pipeline runs go through Celery and retry.)
+Interactive generation executes on threads inside the django container — restarting it kills in-flight generation runs, which stay `running` in the DB; start a new run.
 
-## Analysis runs fail to start
+Analysis runs recover on their own: reconcile (the `analysis-reconcile` beat entry every minute, or `just manage analysis_reconcile`) requeues a `running` run whose heartbeat is older than `ANALYSIS_STALE_SECONDS` (180 s), or fails it with `infra_error` after `ANALYSIS_MAX_ATTEMPTS`. An AI review that was running when the worker died is failed as *interrupted* and never re-run automatically (it costs money): use **Retry** on the run, which keeps the replicates that already succeeded.
 
-- The django container must reach the `apps-dind` sandbox daemon: check `just logs apps-dind` for `API listen on [::]:2376`, and that `docker compose exec apps-dind docker ps` lists an `analyzer-*` container once provisioned. Workspaces and sample apps live there, not in the host's `docker ps`.
-- The first-ever run builds the `backend/analyzer-base:latest` image, which can take minutes or fail on network hiccups — `just logs django` shows the build output.
-- Install tools **one at a time** from the Analyzers page; parallel installs can race workspace provisioning.
+## Analysis runs fail or never start
+
+- **Stays `queued`.** Every run slot is taken (`ANALYSIS_MAX_CONCURRENT_RUNS`, default 2), or no worker picked it up: a queued run untouched for 5 minutes is re-dispatched by reconcile. Check `just logs celeryworker` (or `django` when no worker runs).
+- **Apps daemon.** The django and worker containers must reach `apps-dind`: check `just logs apps-dind` for `API listen on [::]:2376`. While a run executes, `docker compose exec apps-dind docker ps --filter label=llmlab.analysis-run` lists its tool container; containers exist only while a tool runs.
+- **Image.** The first run builds `llmlab/analyzer:<hash>`, which takes minutes and needs network. Check **Analysis → Tools** (or `just manage analysis_build_image --check`) and the build output in the worker logs. A run whose frozen image tag is gone after the image definition changed fails with an "image unavailable" error: freeze a new plan (start a new run or re-lock the study).
+- **A tool `failed`.** Open the run: each tool result shows its `failure_reason` (`tool_error`, `parse_error`, `oom`, `timeout`, `infra_error`, …), the exit code, the stderr tail and the raw output as artifacts. A failed required tool makes the run `partial` and its outcomes NA — by design, a failed tool never counts as clean code. Run the canary self-test from the Tools page to see whether the tool itself works.
+- **Waiting for memory.** Tool containers wait until they fit `ANALYSIS_DIND_MEMORY_BUDGET` together with every running sample app, agent sandbox and evaluation; after `ANALYSIS_CAPACITY_WAIT_SECONDS` the tool fails as `infra_error`. Stop idle sample apps.
+- **`procedure_drift` or `sample_changed`.** The running code no longer implements the frozen plan (a tool spec, engine stage or mapping table changed), or the job's code or line attribution changed since submission. Freeze a new plan instead of retrying.
+- **AI review `unavailable`.** No OpenRouter key resolves for the run's owner (see the first section).
 
 ## Automation schedules never fire
 

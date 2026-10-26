@@ -1,48 +1,36 @@
+# radon: Python code metrics (cyclomatic complexity, maintainability index, raw).
 slug: radon
 name: Radon
-description: >-
-  Code-metrics analyzer for Python. Computes cyclomatic complexity and flags
-  functions, methods and classes that are too complex to maintain or perform
-  well.
-category: performance
-kind: container
-target_language: python
-icon: gauge
-version: "6"
-docs_url: https://radon.readthedocs.io/
-install_cmd: "pip install --user --upgrade 'radon==6.*'"
-verify_cmd: "radon --version"
-uninstall_cmd: "pip uninstall -y radon"
-# -j = JSON output. All ranks are reported: the parser needs every block to
-# compute complexity metrics; only E/F blocks become findings.
-run_cmd: "radon cc {target} -j"
-parser_key: radon
+kind: metrics
+category: complexity
+version: "6.0.1"
+adapter_version: 2
+languages: [python]
+file_kinds: [source, config]
 output_kind: mixed
-run_timeout: 90
-install_timeout: 180
-display_order: 10
-config_schema: []
-default_config: {}
-sample_code: |
-  def dispatch(code, a, b):
-      if code == 1:
-          return a + b
-      elif code == 2:
-          return a - b
-      elif code == 3:
-          return a * b
-      elif code == 4:
-          return a / b
-      elif code == 5:
-          return a % b
-      elif code == 6:
-          return a ** b
-      elif code == 7:
-          return -a
-      elif code == 8:
-          return abs(a) if a < 0 else a
-      elif code == 9:
-          return max(a, b) if a and b else 0
-      elif code == 10:
-          return min(a, b)
-      return None
+description: >-
+  Python metrics: cyclomatic complexity per function/method/class (ranks
+  A-F), maintainability index and raw line counts. Blocks at or above the
+  finding rank become complexity findings.
+docs_url: https://radon.readthedocs.io/
+icon: gauge
+display_order: 100
+mem_limit: 512m
+timeout_s: 180
+notes: >-
+  Runs radon cc, mi and raw on the selected files, each writing its JSON
+  report to /out. Files radon cannot parse are coverage gaps. radon reads
+  only *.py files: .pyi/.pyw files are reported as skipped and never passed
+  to it.
+config_schema:
+  - name: finding_min_rank
+    type: select
+    label: Finding rank
+    description: Blocks of this cyclomatic-complexity rank or worse are reported as findings (C 11+, D 21+, E 31+, F 41+).
+    default: E
+    applies_to: interpretation
+    options:
+      - {value: C, label: C (11+)}
+      - {value: D, label: D (21+)}
+      - {value: E, label: E (31+)}
+      - {value: F, label: F (41+)}

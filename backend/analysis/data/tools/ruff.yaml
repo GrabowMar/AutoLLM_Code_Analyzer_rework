@@ -1,35 +1,49 @@
+# Ruff: fast Python linter (pyflakes, bugbear, flake8-bandit and pylint-error rules).
 slug: ruff
 name: Ruff
-description: >-
-  Extremely fast Python linter. Catches bugs, unused imports, style issues, and
-  many pyflakes/pycodestyle rules in a single pass.
+kind: static
 category: lint
-kind: container
-target_language: python
-icon: sparkles
-version: "0.6"
+version: "0.16.10"
+adapter_version: 1
+languages: [python]
+file_kinds: [source, config]
+output_kind: findings
+description: >-
+  Extremely fast Python linter. The research rule set covers pyflakes (F:
+  undefined names, unused imports), bugbear (B: likely bugs), flake8-bandit
+  (S: security) and pylint errors (PLE); E9 reports files that cannot be
+  parsed, which are recorded as coverage gaps, not findings.
 docs_url: https://docs.astral.sh/ruff/
-install_cmd: "pip install --user --upgrade 'ruff==0.6.*'"
-verify_cmd: "ruff --version"
-uninstall_cmd: "pip uninstall -y ruff"
-run_cmd: "ruff check {target} --output-format json"
-parser_key: ruff
-run_timeout: 90
-install_timeout: 180
-display_order: 20
+icon: sparkles
+display_order: 40
+mem_limit: 512m
+timeout_s: 180
+notes: >-
+  Run with --isolated (no pyproject/ruff.toml of the app is read), --no-cache
+  (nothing is written next to the sources) and --ignore-noqa (an app's
+  "# noqa" cannot hide a finding).
 config_schema:
   - name: select
     type: string
     label: Rule selection
-    description: Comma-separated rule codes to enable (leave blank for defaults).
+    description: Comma-separated rule codes or prefixes to enable (--select).
+    default: "E9,F,B,S,PLE"
+    pattern: '^[A-Z]+[0-9]*(,[A-Z]+[0-9]*)*$'
+    placeholder: E9,F,B,S,PLE
+  - name: ignore
+    type: string
+    label: Ignored rules
+    description: Comma-separated rule codes or prefixes to disable (--ignore).
     default: ""
-    placeholder: "E,F,W"
-default_config: {}
-sample_code: |
-  import os
-  import sys
-
-
-  def add(a, b):
-      result = a + b
-      return result
+    pattern: '^([A-Z]+[0-9]*(,[A-Z]+[0-9]*)*)?$'
+    placeholder: S101
+  - name: target_version
+    type: select
+    label: Python version
+    description: Python version the code is checked against (--target-version).
+    default: py312
+    options:
+      - {value: py310, label: Python 3.10}
+      - {value: py311, label: Python 3.11}
+      - {value: py312, label: Python 3.12}
+      - {value: py313, label: Python 3.13}

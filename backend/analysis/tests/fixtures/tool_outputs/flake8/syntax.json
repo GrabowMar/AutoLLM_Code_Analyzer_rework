@@ -1,0 +1,64 @@
+{
+ "captured_at": "2026-10-26T08:41:50+00:00",
+ "case": "syntax",
+ "config": {
+  "extend_ignore": "",
+  "max_complexity": -1,
+  "max_line_length": 120,
+  "select": "E,F,W,C90"
+ },
+ "files": [
+  {
+   "content": "def handler(request:\n    return request\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/broken.py",
+   "sha256": "a213cda8977aafa87b15bec45ead948580c06c66386ac6bd1e94e459981963e4"
+  },
+  {
+   "content": "import os\n\n\ndef read_setting(name):\n    return os.environ.get(name, \"\")\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/ok.py",
+   "sha256": "377ef7025dd733242011513a97f32da3f320aa58e5463dfb383708e0a03215b7"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/flake8",
+   "--isolated",
+   "--disable-noqa",
+   "--jobs=1",
+   "--format=%(path)s\u001f%(row)d\u001f%(col)d\u001f%(code)s\u001f%(text)s",
+   "--output-file=/out/flake8.txt",
+   "--max-line-length=120",
+   "--max-complexity=-1",
+   "--select=E,F,W,C90",
+   "/src/svc/broken.py",
+   "/src/svc/ok.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "flake8.txt"
+  ],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "flake8.txt": "/src/svc/broken.py\u001f1\u001f13\u001fE999\u001fSyntaxError: '(' was never closed\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.254
+ },
+ "schema": 1,
+ "tool": "flake8",
+ "tool_version": "7.4.1"
+}

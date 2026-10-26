@@ -1,10 +1,10 @@
 # LLM Lab documentation
 
-Guides and reference for running, using, and extending LLM Lab — the platform that generates one application per LLM, runs each in a Docker sandbox, and scores the code with 14 analysis tools.
+Guides and reference for running, using, and extending LLM Lab — the platform that generates one application per LLM, runs each in a Docker sandbox, and measures the code with a pinned static-analysis toolchain and a replicated AI reviewer.
 
 ## What is LLM Lab
 
-You pick a requirement template and a set of models from OpenRouter. For each model, the platform generates a complete application, can run it live in its own container, analyzes the code with the tools you select, and aggregates findings into statistics, reports, and per-model rankings. Everything works from the web UI or unattended through automation pipelines.
+You pick a requirement template and a set of models from OpenRouter (or your own local models). For each model, the platform generates a complete application, can run it live in its own container, analyzes the code under a frozen analysis plan, and aggregates the measurements into studies, statistics, reports, and per-model rankings. Everything works from the web UI, or unattended through experiment schedules and post-runs.
 
 ## Documentation map
 
@@ -17,11 +17,16 @@ You pick a requirement template and a set of models from OpenRouter. For each mo
 | [Experiments](/docs/EXPERIMENTS) | Designed runs: conditions, presets, comparability, launch and export |
 | [Study tables](/docs/STUDY_TABLES) | Pre-registered plans, the study report (Markdown/LaTeX), healing ablation, deduplicated findings, review sample, tool accounting |
 | [Template packages](/docs/TEMPLATE_PACKAGES) | The package format, import/export rules, and starter packages |
-| [Analysis pipeline](/docs/ANALYSIS_PIPELINE) | Analyzer workspaces, tool execution, findings |
+| [Analysis pipeline](/docs/ANALYSIS_PIPELINE) | The v2 engine: samples and scope, the pinned image and per-tool containers, tool outcomes, normalization, the AI reviewer, plans and durable execution |
+| [Research guide](/docs/RESEARCH_GUIDE) | Running a pre-registered analysis study: targets, design, preflight, protocol, report, exports, a worked example |
+| [Analysis methodology](/docs/ANALYSIS_METHODOLOGY) | Thesis appendix: SLOC, measured scope, mapping tables, dedup, outcomes, AI grounding and consensus, statistics |
 | [Background services](/docs/BACKGROUND_SERVICES) | Celery, the scheduler, and the SSE event stream |
-| [Automation guide](/docs/AUTOMATION_GUIDE) | Pipelines, the DSL, batches, and schedules |
-| [Analyzer guide](/docs/ANALYZER_GUIDE) | The 14 tools, tool YAML format, adding a tool |
+| [Automation guide](/docs/AUTOMATION_GUIDE) | Where automation went (experiment schedules and post-runs) and the analyze step |
+| [Analyzer guide](/docs/ANALYZER_GUIDE) | The 21 pinned tools and the AI reviewer, options, isolation, canary self-test, adding a tool |
 | [Models reference](/docs/MODELS_REFERENCE) | Model catalog sync and API key resolution |
+| [Local models](/docs/LOCAL_MODELS) | Ollama and OpenAI-compatible endpoints, relays, the LLM request queue |
+| [Execution](/docs/EXECUTION) | The job executor: lanes, slots, the memory rule, leases |
+| [Integrations](/docs/INTEGRATIONS) | MCP server, cloud LLM providers, GitHub export, notifications |
 | [API reference](/docs/api-reference) | Auth, conventions, routers, exports, SSE |
 | [Deployment guide](/docs/deployment-guide) | The deploy script and the production Traefik stack |
 | [Troubleshooting](/docs/TROUBLESHOOTING) | Symptom-first fixes for common failures |

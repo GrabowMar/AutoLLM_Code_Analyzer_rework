@@ -151,6 +151,11 @@ unchanged.
   up before the endpoint does.
 - **Priorities.** Experiment calls first; probes −20; AI-review analysis and
   inventory −40.
+- **AI review on a local model.** The analysis reviewer queues its calls with
+  `source="analysis"`, single-shot engine only, and freezes the model's digest
+  into the analysis plan: when the endpoint's weights change, the review fails
+  with `model_unavailable` until a new plan is frozen. See
+  [Analysis pipeline → the AI reviewer](/docs/ANALYSIS_PIPELINE#the-ai-reviewer).
 
 ### Failure handling
 

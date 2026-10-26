@@ -1,0 +1,29 @@
+# Baked configuration of the perflint tool: pylint 3.3.x (perflint 0.8.1 requires pylint <4) with
+# only the perflint checker enabled. The adapter passes --rcfile=<this file>, so an analysed app's
+# pylintrc, .pylintrc, pyproject.toml or setup.cfg is never read. The pylint tool (4.x) runs from
+# its own venv; nothing here changes its findings.
+
+[MAIN]
+jobs=1
+persistent=no
+load-plugins=perflint
+fail-under=0
+limit-inference-results=100
+unsafe-load-any-extension=no
+recursive=no
+py-version=3.12
+
+[MESSAGES CONTROL]
+# Every message off, then perflint's four checkers back on (the messages perflint's own CLI
+# enables; I0013 file-ignored and I0020 suppressed-message are switched on by the adapter). The
+# adapter also passes --disable=loop-try-except-usage (R8203): perflint documents it as applying
+# to Python < 3.11 only (zero-cost exceptions), and the apps target Python 3.12.
+disable=all
+enable=for-loop-checker,
+       loop-invariant-checker,
+       list-checker,
+       comprehension-checker
+
+[REPORTS]
+reports=no
+score=no

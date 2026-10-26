@@ -1,0 +1,211 @@
+{
+ "captured_at": "2026-10-26T08:42:34+00:00",
+ "case": "findings",
+ "config": {
+  "builtin": [
+   "clear",
+   "rare"
+  ]
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "a7c575e15cf284770b4b33371be54d864c4fb47b4f784dbf9a27db7beb28de46"
+  },
+  {
+   "kind": "source",
+   "language": "html",
+   "path": "clean/frontend/index.html",
+   "sha256": "a1dcb89b3bd3bc2f88231758fb9379ee6b74942abd6067a78e87ea4e6c6e143c"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/App.jsx",
+   "sha256": "50b34bd78e3cd0936b45a21d06065bf3a2816bdc18afdb09f9876378beeb279c"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "clean/frontend/src/TagBadge.vue",
+   "sha256": "47812dbf621a248a8411ee2aa9b0f7cdaaf1fee1d4d2b4e37569ad17d79351f5"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "clean/frontend/src/bookmarks.ts",
+   "sha256": "3872ba6ae0c99822ddbea2b5f454f11d68733ee860e6c078cd659fa4553c0e04"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/components/BookmarkList.jsx",
+   "sha256": "efd7854d492966cc76c2341a178b636bbf4567e6073ee63f1c4b44d1c29f1635"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "clean/frontend/src/components/Panel.tsx",
+   "sha256": "63a402046cdf7b1158644a4a595bf0b5bcd49eb4fb974ff2973f91d97e67f23b"
+  },
+  {
+   "kind": "source",
+   "language": "css",
+   "path": "clean/frontend/src/styles.css",
+   "sha256": "4d065f2c05073beba1e53f367ab341c797e2e718946053af4bb6ce8ab0302c28"
+  },
+  {
+   "kind": "source",
+   "language": "shell",
+   "path": "clean/scripts/backup.sh",
+   "sha256": "3a48cde33cb19bdee22815abb5ce1ea858d15f900a7e8de4b084d5a896b4b557"
+  },
+  {
+   "kind": "config",
+   "language": "dockerfile",
+   "path": "vulnerable/Dockerfile",
+   "sha256": "d652169744de5618ba7d78ce6db3264d17e98f1a9e08da6aedaa7b6dad97e017"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/app.py",
+   "sha256": "b7512ab0181ead6473277204f7f5cb79c467ccfe5c0458c8989e9d4c3facde98"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/reports.py",
+   "sha256": "4c3ad7f0c0309a26c22b308be50c086ca5d3d9436d18702d635fbff2148ef8c0"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/utils.py",
+   "sha256": "faebfaee33659a5f1b2fc249ad25d65194e23e53034e86aa04fd23190c569c13"
+  },
+  {
+   "kind": "source",
+   "language": "html",
+   "path": "vulnerable/frontend/index.html",
+   "sha256": "b44b5d32a7ae39b8c561e6388dc382201733f8cca518ba1758dd8d197d9e5116"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/App.jsx",
+   "sha256": "47a0a1ef7463a2fbdda619183d5a06fc98df96b885fc9ac423f2eb804450cbde"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "vulnerable/frontend/src/Banner.tsx",
+   "sha256": "fde9db28f3a89cc5d70d85571aeef23ae06527ed313e492889de7af3628dd5f2"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "vulnerable/frontend/src/Card.vue",
+   "sha256": "e3f1ac7af90e4290877fa1d335a8ee2ca2e6f6e07d5b18134bc8194d8cb4f5d1"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "vulnerable/frontend/src/api.ts",
+   "sha256": "10db8abdf7e86d4d1fcad8b1032fe585d8de4a9ed01057dc2cca191e1a4dad73"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Footer.jsx",
+   "sha256": "4d21c89dae359815df375738352440af702a72157da2815d9ec744590f4a94b9"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Header.jsx",
+   "sha256": "48f798d3de206f47a4d7edb0baf12379cfc62304952aa884b5117e3c967a9bdc"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/main.jsx",
+   "sha256": "d71c4e2d9fb272535669d50fc740276e318ed4ac0c7a6fe8d6db1fb8d259d487"
+  },
+  {
+   "kind": "source",
+   "language": "css",
+   "path": "vulnerable/frontend/src/styles.css",
+   "sha256": "51a2197d0c74a2982c73bbbc12f089566d9ec7877c37a2614c33b95771ed6d69"
+  },
+  {
+   "kind": "source",
+   "language": "shell",
+   "path": "vulnerable/scripts/backup.sh",
+   "sha256": "9abd3644d25880e5115ccc72af120ded63ce639dfc181468ed42dcb5d2f6bb78"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/codespell",
+   "--config",
+   "/opt/analyzer/config/codespell.cfg",
+   "--builtin",
+   "clear,rare",
+   "--disable-colors",
+   "--check-hidden",
+   "--",
+   "/src/clean/backend/app.py",
+   "/src/clean/backend/bookmarks.py",
+   "/src/clean/frontend/index.html",
+   "/src/clean/frontend/src/App.jsx",
+   "/src/clean/frontend/src/TagBadge.vue",
+   "/src/clean/frontend/src/bookmarks.ts",
+   "/src/clean/frontend/src/components/BookmarkList.jsx",
+   "/src/clean/frontend/src/components/Panel.tsx",
+   "/src/clean/frontend/src/styles.css",
+   "/src/clean/scripts/backup.sh",
+   "/src/vulnerable/Dockerfile",
+   "/src/vulnerable/backend/app.py",
+   "/src/vulnerable/backend/reports.py",
+   "/src/vulnerable/backend/utils.py",
+   "/src/vulnerable/frontend/index.html",
+   "/src/vulnerable/frontend/src/App.jsx",
+   "/src/vulnerable/frontend/src/Banner.tsx",
+   "/src/vulnerable/frontend/src/Card.vue",
+   "/src/vulnerable/frontend/src/api.ts",
+   "/src/vulnerable/frontend/src/components/Footer.jsx",
+   "/src/vulnerable/frontend/src/components/Header.jsx",
+   "/src/vulnerable/frontend/src/main.jsx",
+   "/src/vulnerable/frontend/src/styles.css",
+   "/src/vulnerable/scripts/backup.sh"
+  ],
+  "env": {},
+  "mem_limit": "256m",
+  "report_files": [],
+  "timeout_s": 120
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 65,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "Used config files:\n    1: /opt/analyzer/config/codespell.cfg\n/src/vulnerable/backend/app.py:73: recieve ==> receive\n/src/vulnerable/backend/app.py:73: seperate ==> separate\n",
+  "timed_out": false,
+  "wall_seconds": 0.253
+ },
+ "schema": 1,
+ "tool": "codespell",
+ "tool_version": "2.4.3"
+}

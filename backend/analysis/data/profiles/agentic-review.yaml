@@ -1,0 +1,33 @@
+# System profile (seeded; edits create a new version): the static research
+# tool set plus an agentic AI review (a coding-agent harness explores a
+# read-only copy of the app) with one replicate.
+slug: agentic-review
+name: Agentic review
+description: >-
+  All static analyzers and metrics tools plus an agentic AI review: the opencode harness
+  explores a read-only copy of the app behind the LLM gateway and writes its findings (1 replicate).
+config:
+  tools:
+    - {slug: ruff, required: true}
+    - {slug: bandit, required: true}
+    - {slug: semgrep, required: true}
+    - {slug: pylint, required: true}
+    - {slug: mypy, required: true}
+    - {slug: vulture, required: true}
+    - {slug: eslint, required: true}
+    - {slug: gitleaks, required: true}
+    - {slug: detect-secrets, required: true}
+    - {slug: codespell, required: false}
+    - {slug: hadolint, required: false}
+    - {slug: jscpd, required: true}
+    - {slug: radon, required: true}
+    - {slug: lizard, required: true}
+  reviewer:
+    enabled: true
+    required: true
+    engine: agent
+    harness: opencode
+    samples: 1
+    # Reasoning plus answer: DeepSeek V4.1 Flash reasons even at effort low and a
+    # live review truncated at 16k output tokens (a truncated replicate fails).
+    max_output_tokens: 32000

@@ -85,7 +85,7 @@ export interface ExperimentDraft {
 export function defaultPostRun(mode: ComposerMode): PostRunSpec {
   return {
     evaluate: mode === "scaffolding",
-    analysis: { enabled: false, tool_slugs: [], only_passing: false },
+    analysis: { enabled: false, tool_slugs: [], only_passing: false, profile: null },
     report: { enabled: false, exclude_truncated: true },
   };
 }
@@ -381,6 +381,10 @@ export function sanitizeDraft(raw: unknown): ExperimentDraft | null {
             )
           : [],
         only_passing: bool(analysis.only_passing, false),
+        profile:
+          typeof analysis.profile === "string" && analysis.profile
+            ? analysis.profile
+            : null,
       },
       report: {
         enabled: bool(report.enabled, false),

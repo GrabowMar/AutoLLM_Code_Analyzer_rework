@@ -244,3 +244,138 @@ def test_trigger_run_creates_step_runs() -> None:
     PipelineStepFactory.create(pipeline=pipeline, order=1)
     run = trigger_run(pipeline, {}, user)
     assert run.step_runs.count() == 2
+
+
+def _single_step(kind: str, config: dict) -> dict:
+    return {"steps": [{"name": "s", "kind": kind, "config": config, "depends_on": []}]}
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"analyzers": ["bandit"]},
+        {"tool_slugs": ["ruff", "ai_review"], "thresholds": {"high": 0, "total": 10}},
+        {"profile": "research-default"},
+        {"profile_id": "6f1c0a5e-1111-4a4a-9c9c-000000000000", "analyzers": []},
+        {"tool_slugs": "{{params.tools}}", "timeout_seconds": 600},
+        {"profile": "quick-check", "thresholds": {"critical": "{{params.max_critical}}"}},
+    ],
+)
+@pytest.mark.django_db
+def test_validate_dsl_accepts_runnable_analyze_steps(config) -> None:
+    assert validate_pipeline_dsl(_single_step("analyze", config)) == []
+
+
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        ({}, "config.profile or config.tool_slugs is required"),
+        ({"analyzers": []}, "config.analyzers is empty"),
+        ({"tool_slugs": []}, "config.tool_slugs is empty"),
+        ({"tool_slugs": "bandit"}, "must be a list of tool slugs"),
+        ({"tool_slugs": ["bandit", ""]}, "must be a list of tool slugs"),
+        ({"tool_slugs": ["bandit"], "thresholds": {"severe": 1}}, "unknown severity"),
+        ({"tool_slugs": ["bandit"], "thresholds": {"high": -1}}, "non-negative integer"),
+        ({"tool_slugs": ["bandit"], "thresholds": [0]}, "thresholds must map"),
+        ({"tool_slugs": ["bandit"], "timeout_seconds": 0}, "timeout_seconds"),
+        ({"tool_slugs": ["bandit"], "source_code": "print(1)"}, "source_code must map"),
+    ],
+)
+@pytest.mark.django_db
+def test_validate_dsl_rejects_analyze_steps_that_measure_nothing(config, message) -> None:
+    errors = validate_pipeline_dsl(_single_step("analyze", config))
+    assert any(message in e for e in errors), errors
+
+
+@pytest.mark.django_db
+def test_validate_dsl_report_type_must_be_a_generator() -> None:
+    assert validate_pipeline_dsl(_single_step("report", {"report_type": "model_analysis"})) == []
+    assert any("report_type is required" in e for e in validate_pipeline_dsl(_single_step("report", {})))
+    errors = validate_pipeline_dsl(_single_step("report", {"report_type": "summary"}))
+    assert any("'summary' is not one of" in e for e in errors)
+
+
+def test_pipeline_task_has_explicit_time_limits() -> None:
+    from backend.automation import tasks
+
+    task = tasks.run_pipeline_task
+    # Far above the global 60 s / 300 s defaults: pipelines wait on generation + analysis.
+    assert task.soft_time_limit == tasks.PIPELINE_SOFT_TIME_LIMIT
+    assert task.time_limit == tasks.PIPELINE_TIME_LIMIT
+    assert task.soft_time_limit >= 4 * 3600
+    assert task.time_limit > task.soft_time_limit
+
+
+def test_long_acks_late_tasks_fit_in_the_broker_visibility_timeout() -> None:
+    """Redis redelivers an unacknowledged message after the visibility timeout (default 1 h): a healthy
+    long acks_late task must end (at worst at its hard limit) before that, or a second worker starts it."""
+    from django.conf import settings
+
+    from backend.analysis import tasks as analysis_tasks
+    from backend.automation import tasks
+
+    timeout = settings.CELERY_BROKER_TRANSPORT_OPTIONS["visibility_timeout"]
+    for task in (tasks.run_pipeline_task, analysis_tasks.process_run_task):
+        assert task.acks_late is True
+        assert task.time_limit < timeout, task.name
+
+
+@pytest.mark.django_db
+def test_soft_time_limit_fails_the_run_and_cancels_pending_steps(monkeypatch) -> None:
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    from backend.automation.engine import runner
+    from backend.automation.models import PipelineStepRun
+    from backend.automation.tests.factories import PipelineRunFactory
+    from backend.automation.tests.factories import PipelineStepRunFactory
+
+    run = PipelineRunFactory(status="pending")
+    step_run = PipelineStepRunFactory(run=run, step=PipelineStepFactory(pipeline=run.pipeline, kind="wait"))
+
+    def limit(run_id):
+        raise SoftTimeLimitExceeded
+
+    monkeypatch.setattr(runner, "_is_cancelled", limit)
+    monkeypatch.setattr(runner.connection, "close", lambda: None)
+
+    runner.execute_run(run.id)
+
+    run.refresh_from_db()
+    assert run.status == "failed"
+    assert run.error == "Pipeline exceeded its time limit"
+    assert PipelineStepRun.objects.get(id=step_run.id).status == "cancelled"
+
+
+@pytest.mark.django_db
+def test_step_cancelled_in_flight_stays_cancelled_and_is_not_retried(monkeypatch) -> None:
+    from backend.automation.engine import runner
+    from backend.automation.models import PipelineRun
+    from backend.automation.models import PipelineStepRun
+    from backend.automation.tests.factories import PipelineRunFactory
+    from backend.automation.tests.factories import PipelineStepRunFactory
+
+    run = PipelineRunFactory(status="running")
+    step_run = PipelineStepRunFactory(
+        run=run,
+        step=PipelineStepFactory(pipeline=run.pipeline, kind="analyze", config={"tool_slugs": ["bandit"]}),
+        retries_remaining=2,
+    )
+    calls = []
+
+    def dispatcher(sr, params, run_params):
+        calls.append(sr.id)
+        # the user cancels the pipeline while the analysis is being awaited
+        PipelineRun.objects.filter(id=run.id).update(status="cancelled")
+        PipelineStepRun.objects.filter(id=sr.id).update(status="cancelled")
+        return {"status": "running", "error": "Pipeline cancelled; analysis cancellation requested"}
+
+    monkeypatch.setattr(runner, "_get_dispatcher", lambda kind: dispatcher)
+    monkeypatch.setattr(runner.connection, "close", lambda: None)
+
+    runner.execute_step(step_run.id)
+
+    step_run.refresh_from_db()
+    assert calls == [step_run.id]
+    assert step_run.status == "cancelled"
+    assert step_run.retries_remaining == 2
+    assert "Pipeline cancelled" in step_run.error

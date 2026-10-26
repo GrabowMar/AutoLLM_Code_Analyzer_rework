@@ -1,0 +1,132 @@
+{
+ "captured_at": "2026-10-26T08:42:22+00:00",
+ "case": "clean",
+ "config": {
+  "base64_limit": 4.5,
+  "hex_limit": 3.0
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "a7c575e15cf284770b4b33371be54d864c4fb47b4f784dbf9a27db7beb28de46"
+  },
+  {
+   "kind": "manifest",
+   "language": "text",
+   "path": "clean/backend/requirements.txt",
+   "sha256": "267e2c6c3a55cf611ef9f26a7eaee92be8667769659b6546fdfe17f40d130384"
+  },
+  {
+   "kind": "source",
+   "language": "html",
+   "path": "clean/frontend/index.html",
+   "sha256": "a1dcb89b3bd3bc2f88231758fb9379ee6b74942abd6067a78e87ea4e6c6e143c"
+  },
+  {
+   "kind": "manifest",
+   "language": "json",
+   "path": "clean/frontend/package.json",
+   "sha256": "dbf76517391ec8ef83e2c02f28b04a91bdef86349354cf96e3a92f07d6e01d68"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/App.jsx",
+   "sha256": "50b34bd78e3cd0936b45a21d06065bf3a2816bdc18afdb09f9876378beeb279c"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "clean/frontend/src/TagBadge.vue",
+   "sha256": "47812dbf621a248a8411ee2aa9b0f7cdaaf1fee1d4d2b4e37569ad17d79351f5"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "clean/frontend/src/bookmarks.ts",
+   "sha256": "3872ba6ae0c99822ddbea2b5f454f11d68733ee860e6c078cd659fa4553c0e04"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/components/BookmarkList.jsx",
+   "sha256": "efd7854d492966cc76c2341a178b636bbf4567e6073ee63f1c4b44d1c29f1635"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "clean/frontend/src/components/Panel.tsx",
+   "sha256": "63a402046cdf7b1158644a4a595bf0b5bcd49eb4fb974ff2973f91d97e67f23b"
+  },
+  {
+   "kind": "source",
+   "language": "css",
+   "path": "clean/frontend/src/styles.css",
+   "sha256": "4d065f2c05073beba1e53f367ab341c797e2e718946053af4bb6ce8ab0302c28"
+  },
+  {
+   "kind": "source",
+   "language": "shell",
+   "path": "clean/scripts/backup.sh",
+   "sha256": "3a48cde33cb19bdee22815abb5ce1ea858d15f900a7e8de4b084d5a896b4b557"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "env",
+   "-C",
+   "/src",
+   "/opt/analyzer/bin/detect-secrets",
+   "scan",
+   "--all-files",
+   "--no-verify",
+   "--disable-filter",
+   "detect_secrets.filters.allowlist.is_line_allowlisted",
+   "--disable-filter",
+   "detect_secrets.filters.heuristic.is_swagger_file",
+   "--base64-limit",
+   "4.5",
+   "--hex-limit",
+   "3.0",
+   "--",
+   "clean/backend/app.py",
+   "clean/backend/bookmarks.py",
+   "clean/backend/requirements.txt",
+   "clean/frontend/index.html",
+   "clean/frontend/package.json",
+   "clean/frontend/src/App.jsx",
+   "clean/frontend/src/TagBadge.vue",
+   "clean/frontend/src/bookmarks.ts",
+   "clean/frontend/src/components/BookmarkList.jsx",
+   "clean/frontend/src/components/Panel.tsx",
+   "clean/scripts/backup.sh"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "{\n  \"version\": \"1.5.0\",\n  \"plugins_used\": [\n    {\n      \"name\": \"ArtifactoryDetector\"\n    },\n    {\n      \"name\": \"AWSKeyDetector\"\n    },\n    {\n      \"name\": \"AzureStorageKeyDetector\"\n    },\n    {\n      \"name\": \"Base64HighEntropyString\",\n      \"limit\": 4.5\n    },\n    {\n      \"name\": \"BasicAuthDetector\"\n    },\n    {\n      \"name\": \"CloudantDetector\"\n    },\n    {\n      \"name\": \"DiscordBotTokenDetector\"\n    },\n    {\n      \"name\": \"GitHubTokenDetector\"\n    },\n    {\n      \"name\": \"GitLabTokenDetector\"\n    },\n    {\n      \"name\": \"HexHighEntropyString\",\n      \"limit\": 3.0\n    },\n    {\n      \"name\": \"IbmCloudIamDetector\"\n    },\n    {\n      \"name\": \"IbmCosHmacDetector\"\n    },\n    {\n      \"name\": \"IPPublicDetector\"\n    },\n    {\n      \"name\": \"JwtTokenDetector\"\n    },\n    {\n      \"name\": \"KeywordDetector\",\n      \"keyword_exclude\": \"\"\n    },\n    {\n      \"name\": \"MailchimpDetector\"\n    },\n    {\n      \"name\": \"NpmDetector\"\n    },\n    {\n      \"name\": \"OpenAIDetector\"\n    },\n    {\n      \"name\": \"PrivateKeyDetector\"\n    },\n    {\n      \"name\": \"PypiTokenDetector\"\n    },\n    {\n      \"name\": \"SendGridDetector\"\n    },\n    {\n      \"name\": \"SlackDetector\"\n    },\n    {\n      \"name\": \"SoftlayerDetector\"\n    },\n    {\n      \"name\": \"SquareOAuthDetector\"\n    },\n    {\n      \"name\": \"StripeDetector\"\n    },\n    {\n      \"name\": \"TelegramBotTokenDetector\"\n    },\n    {\n      \"name\": \"TwilioKeyDetector\"\n    }\n  ],\n  \"filters_used\": [\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_indirect_reference\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_likely_id_string\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_lock_file\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_not_alphanumeric_string\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_potential_uuid\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_prefixed_with_dollar_sign\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_sequential_string\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_templated_secret\"\n    }\n  ],\n  \"results\": {},\n  \"generated_at\": \"2026-10-26T08:42:22Z\"\n}\n",
+  "timed_out": false,
+  "wall_seconds": 0.904
+ },
+ "schema": 1,
+ "tool": "detect-secrets",
+ "tool_version": "1.5.0"
+}

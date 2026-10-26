@@ -1,0 +1,54 @@
+{
+ "captured_at": "2026-10-26T08:42:53+00:00",
+ "case": "suppressed",
+ "config": {},
+ "files": [
+  {
+   "content": "/* stylelint-disable */\n.card {\n  colr: red;\n}\n",
+   "kind": "source",
+   "language": "css",
+   "path": "suppressed/site.css",
+   "sha256": "1968d2b63531d08889ccdc3a587a49bf889d2579e09a39da217c5ba4315fa09d"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/stylelint",
+   "--config",
+   "/opt/analyzer/config/stylelint.json",
+   "--config-basedir",
+   "/opt/analyzer",
+   "--ignore-disables",
+   "--formatter",
+   "json",
+   "--output-file",
+   "/out/stylelint.json",
+   "--no-color",
+   "--",
+   "/src/suppressed/site.css"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "stylelint.json"
+  ],
+  "timeout_s": 120
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 2,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "stylelint.json": "[{\"source\":\"/src/suppressed/site.css\",\"deprecations\":[],\"invalidOptionWarnings\":[],\"parseErrors\":[],\"errored\":true,\"warnings\":[{\"line\":3,\"column\":3,\"endLine\":3,\"endColumn\":7,\"rule\":\"property-no-unknown\",\"severity\":\"error\",\"text\":\"Unknown property \\\"colr\\\" (property-no-unknown)\"}]}]"
+  },
+  "stderr": "[{\"source\":\"/src/suppressed/site.css\",\"deprecations\":[],\"invalidOptionWarnings\":[],\"parseErrors\":[],\"errored\":true,\"warnings\":[{\"line\":3,\"column\":3,\"endLine\":3,\"endColumn\":7,\"rule\":\"property-no-unknown\",\"severity\":\"error\",\"text\":\"Unknown property \\\"colr\\\" (property-no-unknown)\"}]}]",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.836
+ },
+ "schema": 1,
+ "tool": "stylelint",
+ "tool_version": "17.16.0"
+}

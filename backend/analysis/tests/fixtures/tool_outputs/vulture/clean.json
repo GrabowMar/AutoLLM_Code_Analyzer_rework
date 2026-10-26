@@ -1,0 +1,54 @@
+{
+ "captured_at": "2026-10-26T08:42:14+00:00",
+ "case": "clean",
+ "config": {
+  "min_confidence": 80
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "a7c575e15cf284770b4b33371be54d864c4fb47b4f784dbf9a27db7beb28de46"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/venvs/vulture/bin/python",
+   "-I",
+   "/opt/analyzer/scripts/vulture_isolated.py",
+   "--config",
+   "/opt/analyzer/config/vulture.toml",
+   "--min-confidence",
+   "80",
+   "--",
+   "/src/clean/backend/app.py",
+   "/src/clean/backend/bookmarks.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.159
+ },
+ "schema": 1,
+ "tool": "vulture",
+ "tool_version": "2.16"
+}

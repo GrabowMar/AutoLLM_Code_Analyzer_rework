@@ -1,4 +1,9 @@
-"""Experiment post-runs (spec §F.5): creation on completion, sequential analyses, the report, deferral."""
+"""Experiment post-runs (spec §F.5): creation on completion, v2 analyses, the report, deferral.
+
+The analysis engine is faked at its public boundary (``plan.freeze_plan`` /
+``validate_profile_config`` / ``default_profile_config``, ``catalog.load_specs``,
+``executor.submit_run`` / ``request_cancel``), as in the automation analyze-step tests.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +14,7 @@ import pytest
 from django.utils import timezone
 
 from backend.analysis.models import AnalysisRun
-from backend.analysis.models import AnalyzerTool
+from backend.analysis.tests.factories import AnalysisProfileFactory
 from backend.execution.models import ExecutorSettings
 from backend.generation.models import Experiment
 from backend.generation.models import ExperimentPostRun
@@ -19,24 +24,77 @@ from backend.generation.services.experiments import ExperimentError
 from backend.generation.services.experiments import normalize_post_run
 from backend.generation.tests.test_experiments_v2_api import _graded
 from backend.generation.tests.test_experiments_v2_api import _scaffolding_experiment
+from backend.rankings.tests.measured import fake_engine  # noqa: F401 - fixture
+from backend.rankings.tests.measured import make_run
 from backend.reports.models import Report
 from backend.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
 
 API = "/api/generation"
-EXECUTE = "backend.analysis.services.runner.execute"
 S = GenerationJob.Status
+DEFAULT_CONFIG = {
+    "tools": [{"slug": "ruff", "required": True, "config": {}}, {"slug": "bandit", "required": True, "config": {}}],
+    "reviewer": {"enabled": False},
+    "scope": {},
+    "outcomes": {},
+}
+
+
+class FakeEngine:
+    """Records frozen plans and submissions; a run's final status is configurable per job."""
+
+    def __init__(self):
+        self.frozen: list[dict] = []
+        self.submitted: list = []
+        self.cancelled: list = []
+        self.final: dict = {}
+        self.fail_submit: set = set()
+        self.initial_status = None
+
+    def freeze_plan(self, *, profile=None, config=None, user=None):
+        config = profile.config if profile is not None else config
+        plan = {"schema_version": 1, "tools": [{"slug": t["slug"]} for t in config.get("tools", [])], "reviewer": None}
+        self.frozen.append({"profile": profile, "plan": plan})
+        return plan
+
+    def submit_run(self, *, user, plan, profile=None, generation_job=None, purpose="adhoc", name="", **_):
+        from backend.analysis.engine.plan import plan_hash
+
+        if generation_job.id in self.fail_submit:
+            msg = "No file of the target is in scope for analysis"
+            raise ValueError(msg)
+        self.submitted.append(generation_job.id)
+        status = self.initial_status or self.final.get(generation_job.id, AnalysisRun.Status.COMPLETED)
+        return make_run(generation_job, user=user, plan_hash=plan_hash(plan), status=status, purpose=purpose)
+
+    def request_cancel(self, run):
+        self.cancelled.append(run.id)
+        AnalysisRun.objects.filter(id=run.id).update(status=AnalysisRun.Status.CANCELLED)
+        return run
+
+
+@pytest.fixture
+def engine(monkeypatch, fake_engine):  # noqa: F811
+    from backend.analysis.engine import catalog
+    from backend.analysis.engine import executor
+    from backend.analysis.engine import plan
+
+    fake = FakeEngine()
+    specs = {slug: mock.Mock(kind="static", default_required=True, default_config={}) for slug in ("ruff", "bandit")}
+    monkeypatch.setattr(plan, "default_profile_config", lambda: DEFAULT_CONFIG)
+    monkeypatch.setattr(plan, "validate_profile_config", lambda config: config)
+    monkeypatch.setattr(plan, "freeze_plan", fake.freeze_plan)
+    monkeypatch.setattr(catalog, "load_specs", lambda refresh=False: specs)
+    monkeypatch.setattr(executor, "submit_run", fake.submit_run)
+    monkeypatch.setattr(executor, "request_cancel", fake.request_cancel)
+    monkeypatch.setattr(automation, "_sleep", lambda s: None)
+    return fake
 
 
 @pytest.fixture
 def user():
     return UserFactory()
-
-
-@pytest.fixture
-def tool():
-    return AnalyzerTool.objects.get_or_create(slug="bandit", defaults={"name": "Bandit"})[0]
 
 
 def _completed_experiment(user, *, post_run=None, n_apps=2):
@@ -55,20 +113,8 @@ def _completed_experiment(user, *, post_run=None, n_apps=2):
     return experiment, jobs
 
 
-def _fake_execute(statuses=None):
-    statuses = statuses or {}
-
-    def run(analysis_run):
-        analysis_run.status = statuses.get(analysis_run.generation_job_id, AnalysisRun.Status.COMPLETED)
-        analysis_run.completed_at = timezone.now()
-        analysis_run.save(update_fields=["status", "completed_at"])
-        return analysis_run
-
-    return run
-
-
 class TestCreation:
-    def test_completion_creates_one_frozen_post_run_only_when_enabled(self, user, tool):
+    def test_completion_creates_one_frozen_post_run_only_when_enabled(self, user, engine):
         experiment, _ = _completed_experiment(user)
         assert automation.on_experiment_completed(experiment) is None
         config = normalize_post_run({"analysis": {"enabled": True, "tool_slugs": ["bandit"]}}, "scaffolding")
@@ -115,31 +161,58 @@ class TestCreation:
             automation.create_manual_post_run(experiment)
 
     def test_unknown_analyzer_is_refused(self):
+        # Validated against the v2 tool catalog (data/tools), not v1 rows.
         with pytest.raises(ExperimentError, match="Unknown analyzer"):
             normalize_post_run({"analysis": {"enabled": True, "tool_slugs": ["nope"]}}, "agent")
         with pytest.raises(ExperimentError, match="at least one analyzer"):
             normalize_post_run({"analysis": {"enabled": True, "tool_slugs": []}}, "agent")
+        # Legacy slugs map onto their v2 names.
+        config = normalize_post_run({"analysis": {"enabled": True, "tool_slugs": ["llm_review", "bandit"]}}, "agent")
+        assert config["analysis"]["tool_slugs"] == ["ai_review", "bandit"]
+
+    def test_a_profile_alone_enables_analysis_and_must_be_usable(self, user):
+        profile = AnalysisProfileFactory(created_by=user)
+        config = normalize_post_run({"analysis": {"enabled": True, "profile": profile.slug}}, "agent", user)
+        assert config["analysis"] == {
+            "enabled": True,
+            "tool_slugs": [],
+            "only_passing": False,
+            "profile": profile.slug,
+        }
+        with pytest.raises(ExperimentError, match="not found or not usable"):
+            normalize_post_run({"analysis": {"enabled": True, "profile": profile.slug}}, "agent", UserFactory())
 
 
 class TestAdvance:
-    def test_analyses_run_sequentially_for_jobs_without_one_then_the_report(self, user, tool):
+    def test_analyses_run_under_one_frozen_plan_for_jobs_without_one_then_the_report(self, user, engine):
+        from backend.analysis.engine.plan import plan_hash
+
         config = {
             "analysis": {"enabled": True, "tool_slugs": ["bandit"], "only_passing": False},
             "report": {"enabled": True, "exclude_truncated": True},
         }
         experiment, jobs = _completed_experiment(user, post_run=config)
-        already = next(iter(jobs.values()))
-        AnalysisRun.objects.create(created_by=user, generation_job=already, status=AnalysisRun.Status.COMPLETED)
+        expected_plan = {"schema_version": 1, "tools": [{"slug": "bandit"}], "reviewer": None}
+        completed = [j for j in jobs.values() if j.status == S.COMPLETED]
+        # Already analysed under the same plan: skipped. Under another plan: analysed again.
+        make_run(completed[0], user=user, plan_hash=plan_hash(expected_plan))
+        make_run(completed[1], user=user, plan_hash="0" * 64)
         post_run = automation.on_experiment_completed(experiment)
 
-        with mock.patch(EXECUTE, side_effect=_fake_execute()) as execute:
-            done = automation.advance_post_runs("exec-1")
+        done = automation.advance_post_runs("exec-1")
         assert done.id == post_run.id
         post_run.refresh_from_db()
         assert post_run.status == ExperimentPostRun.Status.COMPLETED, post_run.error
-        # Three completed current jobs, one already analyzed; the failed job is skipped.
-        assert execute.call_count == 2
-        assert post_run.progress == {"analysis_done": 2, "analysis_total": 2, "analysis_failed": 0}
+        # Three completed current jobs, one already analysed under the plan; the failed job is skipped.
+        assert engine.submitted == [completed[1].id, completed[2].id]
+        assert len(engine.frozen) == 1
+        assert post_run.progress == {
+            "analysis_done": 2,
+            "analysis_total": 2,
+            "analysis_failed": 0,
+            "analysis_plan_hash": plan_hash(expected_plan),
+        }
+        assert post_run.config["analysis"]["frozen_plan"] == expected_plan
         assert len(post_run.analysis_run_ids) == 2
         assert (post_run.lease_owner, post_run.lease_expires_at) == ("", None)
         report = post_run.report
@@ -150,38 +223,99 @@ class TestAdvance:
         )
         results = report.report_data["results"]
         assert results["paired"]["pairing"] == "app_blocked"
-        assert "comparisons" not in report.report_data
         # Nothing left to claim.
         assert automation.advance_post_runs("exec-1") is None
 
-    def test_only_passing_filters_on_a_perfect_pass_rate(self, user, tool):
+    def test_a_profile_is_frozen_with_the_tool_list_restricting_it(self, user, engine):
+        profile = AnalysisProfileFactory(created_by=user, config=DEFAULT_CONFIG)
+        config = {"analysis": {"enabled": True, "profile": profile.slug, "tool_slugs": ["ruff"]}}
+        experiment, _ = _completed_experiment(user, post_run=config)
+        automation.on_experiment_completed(experiment)
+        post_run = automation.advance_post_runs("exec-1")
+        post_run.refresh_from_db()
+        assert post_run.status == ExperimentPostRun.Status.COMPLETED, post_run.error
+        assert engine.frozen[0]["plan"]["tools"] == [{"slug": "ruff"}]
+        assert post_run.config["analysis"]["frozen_profile_id"] == str(profile.id)
+
+    def test_only_passing_filters_on_a_perfect_pass_rate(self, user, engine):
         config = {"analysis": {"enabled": True, "tool_slugs": ["bandit"], "only_passing": True}}
         experiment, jobs = _completed_experiment(user, post_run=config)
         automation.on_experiment_completed(experiment)
-        with mock.patch(EXECUTE, side_effect=_fake_execute()) as execute:
-            automation.advance_post_runs("exec-1")
-        analyzed = {call.args[0].generation_job_id for call in execute.call_args_list}
-        assert analyzed == {j.id for j in jobs.values() if (j.metrics.get("functional") or {}).get("pass_rate") == 1.0}
+        automation.advance_post_runs("exec-1")
+        assert set(engine.submitted) == {
+            j.id for j in jobs.values() if (j.metrics.get("functional") or {}).get("pass_rate") == 1.0
+        }
 
-    def test_a_failed_analysis_is_counted_and_the_rest_continue(self, user, tool):
+    def test_a_failed_analysis_is_counted_and_the_rest_continue(self, user, engine):
         config = {"analysis": {"enabled": True, "tool_slugs": ["bandit"]}}
         experiment, jobs = _completed_experiment(user, post_run=config)
         automation.on_experiment_completed(experiment)
-        target = next(j for j in jobs.values() if j.status == S.COMPLETED)
+        completed = [j for j in jobs.values() if j.status == S.COMPLETED]
+        engine.fail_submit = {completed[0].id}
+        engine.final = {completed[1].id: AnalysisRun.Status.FAILED}
 
-        def flaky(analysis_run):
-            if analysis_run.generation_job_id == target.id:
-                msg = "container gone"
-                raise RuntimeError(msg)
-            return _fake_execute()(analysis_run)
-
-        with mock.patch(EXECUTE, side_effect=flaky):
-            post_run = automation.advance_post_runs("exec-1")
+        post_run = automation.advance_post_runs("exec-1")
         post_run.refresh_from_db()
         assert post_run.status == ExperimentPostRun.Status.COMPLETED
-        assert post_run.progress["analysis_failed"] == 1
+        assert post_run.progress["analysis_failed"] == 2
         assert post_run.progress["analysis_done"] == 3
-        assert AnalysisRun.objects.filter(generation_job=target).get().status == AnalysisRun.Status.FAILED
+        assert len(post_run.analysis_run_ids) == 2
+
+    def test_waits_for_queued_runs_and_renews_the_lease(self, user, engine, monkeypatch):
+        config = {"analysis": {"enabled": True, "tool_slugs": ["bandit"]}}
+        experiment, _ = _completed_experiment(user, post_run=config, n_apps=1)
+        automation.on_experiment_completed(experiment)
+        engine.initial_status = AnalysisRun.Status.QUEUED
+        polls = []
+
+        def finish(_seconds):
+            polls.append(1)
+            AnalysisRun.objects.update(status=AnalysisRun.Status.COMPLETED)
+
+        monkeypatch.setattr(automation, "_sleep", finish)
+        post_run = automation.advance_post_runs("exec-1")
+        post_run.refresh_from_db()
+        assert polls == [1]
+        assert post_run.status == ExperimentPostRun.Status.COMPLETED
+        assert post_run.progress["analysis_done"] == 2
+
+    def test_unfinished_runs_are_cancelled_at_the_deadline(self, user, engine, monkeypatch):
+        config = {"analysis": {"enabled": True, "tool_slugs": ["bandit"]}}
+        experiment, _ = _completed_experiment(user, post_run=config, n_apps=1)
+        automation.on_experiment_completed(experiment)
+        engine.initial_status = AnalysisRun.Status.RUNNING
+        monkeypatch.setattr(automation, "POST_RUN_ANALYSIS_TIMEOUT_SECONDS", 0)
+        post_run = automation.advance_post_runs("exec-1")
+        post_run.refresh_from_db()
+        assert len(engine.cancelled) == 2
+        assert post_run.status == ExperimentPostRun.Status.COMPLETED
+        assert post_run.progress["analysis_failed"] == 2
+
+    def test_a_lost_lease_stops_and_the_new_owner_resumes_without_resubmitting(self, user, engine, monkeypatch):
+        config = {"analysis": {"enabled": True, "tool_slugs": ["bandit"]}}
+        experiment, _ = _completed_experiment(user, post_run=config, n_apps=1)
+        post_run = automation.on_experiment_completed(experiment)
+        engine.initial_status = AnalysisRun.Status.QUEUED
+
+        def steal(_seconds):
+            ExperimentPostRun.objects.filter(id=post_run.id).update(
+                lease_owner="other",
+                lease_expires_at=timezone.now() - timezone.timedelta(seconds=1),
+            )
+
+        monkeypatch.setattr(automation, "_sleep", steal)
+        automation.advance_post_runs("exec-1")
+        post_run.refresh_from_db()
+        assert post_run.status == ExperimentPostRun.Status.RUNNING
+        assert len(engine.submitted) == 2
+
+        AnalysisRun.objects.update(status=AnalysisRun.Status.COMPLETED)
+        resumed = automation.advance_post_runs("exec-2")
+        resumed.refresh_from_db()
+        assert resumed.status == ExperimentPostRun.Status.COMPLETED
+        assert len(engine.submitted) == 2  # the recorded runs were waited for, not submitted again
+        assert len(engine.frozen) == 1  # the stored plan was reused
+        assert resumed.progress["analysis_done"] == 2
 
     def test_report_failure_is_recorded(self, user):
         experiment, _ = _completed_experiment(user, post_run={"report": {"enabled": True}})
@@ -241,7 +375,7 @@ class TestAdvance:
         assert automation.advance_post_runs("exec-1") is not None
 
 
-def test_post_run_api(client, user, tool):
+def test_post_run_api(client, user, engine):
     client.force_login(user)
     experiment, _ = _completed_experiment(user)
     base = f"{API}/experiments/{experiment.id}/post-run/"
@@ -257,7 +391,7 @@ def test_post_run_api(client, user, tool):
     }
     res = client.put(base, data=json.dumps(spec), content_type="application/json")
     assert res.status_code == 200, res.content
-    assert res.json()["config"] == spec
+    assert res.json()["config"] == {**spec, "analysis": {**spec["analysis"], "profile": None}}
     res = client.post(f"{base}run/", data="{}", content_type="application/json")
     assert (res.status_code, res.json()["trigger"], res.json()["status"]) == (200, "manual", "pending")
     assert client.post(f"{base}run/", data="{}", content_type="application/json").status_code == 400

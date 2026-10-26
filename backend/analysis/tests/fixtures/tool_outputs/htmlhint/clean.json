@@ -1,0 +1,44 @@
+{
+ "captured_at": "2026-10-26T08:42:46+00:00",
+ "case": "clean",
+ "config": {},
+ "files": [
+  {
+   "kind": "source",
+   "language": "html",
+   "path": "clean/frontend/index.html",
+   "sha256": "a1dcb89b3bd3bc2f88231758fb9379ee6b74942abd6067a78e87ea4e6c6e143c"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/htmlhint",
+   "--config",
+   "/opt/analyzer/config/htmlhint.json",
+   "--format",
+   "json",
+   "--nocolor",
+   "--",
+   "/src/clean/frontend/index.html"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [],
+  "timeout_s": 120
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "[]\n",
+  "timed_out": false,
+  "wall_seconds": 0.221
+ },
+ "schema": 1,
+ "tool": "htmlhint",
+ "tool_version": "1.9.2"
+}

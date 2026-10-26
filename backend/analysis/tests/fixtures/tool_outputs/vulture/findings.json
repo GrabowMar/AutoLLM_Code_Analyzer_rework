@@ -1,0 +1,75 @@
+{
+ "captured_at": "2026-10-26T08:42:13+00:00",
+ "case": "findings",
+ "config": {
+  "min_confidence": 80
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "a7c575e15cf284770b4b33371be54d864c4fb47b4f784dbf9a27db7beb28de46"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/app.py",
+   "sha256": "b7512ab0181ead6473277204f7f5cb79c467ccfe5c0458c8989e9d4c3facde98"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/reports.py",
+   "sha256": "4c3ad7f0c0309a26c22b308be50c086ca5d3d9436d18702d635fbff2148ef8c0"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/utils.py",
+   "sha256": "faebfaee33659a5f1b2fc249ad25d65194e23e53034e86aa04fd23190c569c13"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/venvs/vulture/bin/python",
+   "-I",
+   "/opt/analyzer/scripts/vulture_isolated.py",
+   "--config",
+   "/opt/analyzer/config/vulture.toml",
+   "--min-confidence",
+   "80",
+   "--",
+   "/src/clean/backend/app.py",
+   "/src/clean/backend/bookmarks.py",
+   "/src/vulnerable/backend/app.py",
+   "/src/vulnerable/backend/reports.py",
+   "/src/vulnerable/backend/utils.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 3,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "/src/vulnerable/backend/app.py:9: unused import 'json' (90% confidence)\n/src/vulnerable/backend/app.py:79: unreachable code after 'return' (100% confidence)\n",
+  "timed_out": false,
+  "wall_seconds": 0.166
+ },
+ "schema": 1,
+ "tool": "vulture",
+ "tool_version": "2.16"
+}

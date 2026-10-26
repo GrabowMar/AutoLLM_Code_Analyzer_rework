@@ -1,0 +1,53 @@
+{
+ "captured_at": "2026-10-26T08:42:49+00:00",
+ "case": "clean",
+ "config": {},
+ "files": [
+  {
+   "kind": "source",
+   "language": "css",
+   "path": "clean/frontend/src/styles.css",
+   "sha256": "4d065f2c05073beba1e53f367ab341c797e2e718946053af4bb6ce8ab0302c28"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/stylelint",
+   "--config",
+   "/opt/analyzer/config/stylelint.json",
+   "--config-basedir",
+   "/opt/analyzer",
+   "--ignore-disables",
+   "--formatter",
+   "json",
+   "--output-file",
+   "/out/stylelint.json",
+   "--no-color",
+   "--",
+   "/src/clean/frontend/src/styles.css"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "stylelint.json"
+  ],
+  "timeout_s": 120
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "stylelint.json": "[{\"source\":\"/src/clean/frontend/src/styles.css\",\"deprecations\":[],\"invalidOptionWarnings\":[],\"parseErrors\":[],\"errored\":false,\"warnings\":[]}]"
+  },
+  "stderr": "[{\"source\":\"/src/clean/frontend/src/styles.css\",\"deprecations\":[],\"invalidOptionWarnings\":[],\"parseErrors\":[],\"errored\":false,\"warnings\":[]}]",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.823
+ },
+ "schema": 1,
+ "tool": "stylelint",
+ "tool_version": "17.16.0"
+}

@@ -84,6 +84,10 @@ COPY --from=python-build-stage --chown=django:django ${APP_HOME} ${APP_HOME}
 # explicitly create the media folder before changing ownership below
 RUN mkdir -p ${APP_HOME}/backend/media
 
+# Analysis artifacts volume (ANALYSIS_ARTIFACTS_ROOT); a named volume mounted
+# here inherits this owner, so the django user can write to it.
+RUN mkdir -p ${APP_HOME}/analysis-artifacts && chown django:django ${APP_HOME}/analysis-artifacts
+
 # make django owner of the WORKDIR directory as well.
 RUN chown django:django ${APP_HOME}
 

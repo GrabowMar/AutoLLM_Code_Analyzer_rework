@@ -12,6 +12,7 @@ from django.db.models import Count
 from django.utils import timezone
 
 from backend.analysis.models import AnalysisRun
+from backend.analysis.models import AnalysisStudy
 from backend.generation.models import GenerationJob
 from backend.reports.models import Report
 from backend.runtime.models import ContainerInstance
@@ -149,6 +150,12 @@ def db_stats() -> dict[str, Any]:
     return res
 
 
+def _stale_seconds() -> int:
+    from django.conf import settings
+
+    return int(getattr(settings, "ANALYSIS_STALE_SECONDS", 180))
+
+
 def app_stats() -> dict[str, Any]:
     from django.core.cache import cache
 
@@ -167,8 +174,19 @@ def app_stats() -> dict[str, Any]:
             recent = model.objects.filter(created_at__gte=since).count()
         return {"by_status": by_status, "last_24h": recent}
 
+    analysis = _counts(AnalysisRun)
+    # Self-tests (canary runs) are platform health checks, not sample analyses.
+    analysis["by_purpose"] = {
+        row["purpose"]: row["cnt"]
+        for row in AnalysisRun.objects.values("purpose").annotate(cnt=Count("pk")).order_by()
+    }
+    analysis["stale_heartbeats"] = AnalysisRun.objects.filter(
+        status=AnalysisRun.Status.RUNNING,
+        heartbeat_at__lt=timezone.now() - timedelta(seconds=_stale_seconds()),
+    ).count()
     res = {
-        "analysis_tasks": _counts(AnalysisRun),
+        "analysis_tasks": analysis,
+        "analysis_studies": _counts(AnalysisStudy),
         "generation_jobs": _counts(GenerationJob),
         "reports": _counts(Report),
         "container_instances": _counts(ContainerInstance),

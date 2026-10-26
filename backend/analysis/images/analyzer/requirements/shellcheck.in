@@ -1,0 +1,2 @@
+# shellcheck 0.11.0 (the wheel ships the static release binary).
+shellcheck-py==0.11.0.1

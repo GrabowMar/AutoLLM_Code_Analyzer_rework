@@ -1,43 +1,54 @@
+# Bandit: Python security linter (CWE ids reported natively).
 slug: bandit
 name: Bandit
-description: >-
-  Security-oriented static analyzer for Python. Finds common security issues
-  such as use of insecure functions, hardcoded secrets, and weak crypto.
+kind: static
 category: security
-kind: container
-target_language: python
-icon: shield-alert
-version: "1.7"
+version: "1.9.4"
+adapter_version: 2
+languages: [python]
+file_kinds: [source, config]
+output_kind: findings
+description: >-
+  Security-oriented static analyzer for Python (OpenStack PyCQA). Reports
+  insecure calls such as shell=True, pickle, eval, weak hashes, SQL built
+  from strings and hard-coded passwords, each with a CWE id.
 docs_url: https://bandit.readthedocs.io/
-install_cmd: "pip install --user --upgrade 'bandit==1.7.*'"
-verify_cmd: "bandit --version"
-uninstall_cmd: "pip uninstall -y bandit"
-run_cmd: "bandit -r {target} -f json -q"
-parser_key: bandit
-run_timeout: 120
-install_timeout: 300
+icon: shield-alert
 display_order: 10
+mem_limit: 512m
+timeout_s: 180
+notes: >-
+  Run on the selected files only with --ignore-nosec (an app's "# nosec"
+  cannot hide a finding) and without -c, so no app config is read. Files
+  bandit cannot parse are reported as coverage, not findings. --exclude ""
+  turns off bandit's default excludes, which drop any path containing .git,
+  CVS, .hg, .tox... as a substring; coverage comes from the files bandit's
+  report lists, so a file it passed over is skipped, never "clean".
 config_schema:
+  - name: severity
+    type: select
+    label: Minimum severity
+    description: Report only issues at or above this severity (--severity-level).
+    default: all
+    options:
+      - {value: all, label: All}
+      - {value: low, label: Low}
+      - {value: medium, label: Medium}
+      - {value: high, label: High}
   - name: confidence
     type: select
     label: Minimum confidence
-    description: Only report issues at or above this confidence level.
-    default: low
+    description: Report only issues at or above this confidence (--confidence-level).
+    default: all
     options:
-      - { value: low, label: Low }
-      - { value: medium, label: Medium }
-      - { value: high, label: High }
-default_config:
-  confidence: low
-sample_code: |
-  import hashlib
-
-
-  def make_token(password):
-      # Insecure: MD5 is cryptographically broken
-      return hashlib.md5(password.encode()).hexdigest()
-
-
-  def run(cmd):
-      import subprocess
-      subprocess.call(cmd, shell=True)
+      - {value: all, label: All}
+      - {value: low, label: Low}
+      - {value: medium, label: Medium}
+      - {value: high, label: High}
+  - name: skip
+    type: string
+    label: Skipped tests
+    description: Comma-separated bandit test ids not to run (--skip), e.g. B101,B404.
+    default: ""
+    pattern: '^(B[0-9]{3}(,B[0-9]{3})*)?$'
+    placeholder: B101,B404

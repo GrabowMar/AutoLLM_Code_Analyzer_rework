@@ -4,7 +4,7 @@ Get a local LLM Lab instance running with Docker Compose, from clone to your fir
 
 ## Prerequisites
 
-- Docker with the Compose plugin, able to run one privileged container: analyzer workspaces and generated sample apps run nested inside the `apps-dind` service (Docker-in-Docker), never on the host daemon.
+- Docker with the Compose plugin, able to run one privileged container: analysis tool containers and generated sample apps run nested inside the `apps-dind` service (Docker-in-Docker), never on the host daemon.
 - [just](https://github.com/casey/just) and Python 3 on the host (only used to run the bootstrap script; everything else runs in containers).
 - An [OpenRouter API key](https://openrouter.ai/keys). Not needed to boot the stack, but nothing can be generated or AI-reviewed without one.
 
@@ -46,13 +46,14 @@ just manage createsuperuser
 2. Add your OpenRouter key under **Settings → API Credentials**. It is stored encrypted and takes precedence over the global fallback key.
 3. Sync the model catalog from the Models page so there is something to generate with.
 4. Create a generation job (pick a model, a scaffolding template or a custom prompt) and wait for it to finish.
-5. Open the job and start an analysis run. The first run provisions your personal analyzer workspace container and installs the selected tools, so it takes a while; later runs reuse it.
+5. Open the job and start an analysis run (or create one under **Analysis → Runs** with a profile such as `research-default`). The first run builds the pinned analyzer image `llmlab/analyzer:<hash>` on the apps daemon, which takes several minutes; later runs reuse it. You can build it ahead of time from **Analysis → Tools** or with `just manage analysis_build_image`, and check every tool with the canary self-test there.
 
 > [!NOTE]
-> Generation and analysis run on background threads inside the django container. Restarting the container kills in-flight runs — see [Troubleshooting](/docs/TROUBLESHOOTING).
+> Interactive generation runs on background threads inside the django container; restarting it kills them. Analysis runs are durable: a run whose worker died is requeued — see [Troubleshooting](/docs/TROUBLESHOOTING).
 
 ## Next steps
 
 - [Development guide](/docs/development-guide) — just targets, tests, env vars, code layout.
 - [Architecture](/docs/ARCHITECTURE) — how the pieces fit together.
+- [Research guide](/docs/RESEARCH_GUIDE) — run a pre-registered analysis study.
 - [Troubleshooting](/docs/TROUBLESHOOTING) — when something above didn't work.

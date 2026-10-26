@@ -1,0 +1,131 @@
+{
+ "captured_at": "2026-10-26T08:41:47+00:00",
+ "case": "oom",
+ "config": {
+  "opt_in_rules": []
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/App.jsx",
+   "sha256": "50b34bd78e3cd0936b45a21d06065bf3a2816bdc18afdb09f9876378beeb279c"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "clean/frontend/src/TagBadge.vue",
+   "sha256": "47812dbf621a248a8411ee2aa9b0f7cdaaf1fee1d4d2b4e37569ad17d79351f5"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "clean/frontend/src/bookmarks.ts",
+   "sha256": "3872ba6ae0c99822ddbea2b5f454f11d68733ee860e6c078cd659fa4553c0e04"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/components/BookmarkList.jsx",
+   "sha256": "efd7854d492966cc76c2341a178b636bbf4567e6073ee63f1c4b44d1c29f1635"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "clean/frontend/src/components/Panel.tsx",
+   "sha256": "63a402046cdf7b1158644a4a595bf0b5bcd49eb4fb974ff2973f91d97e67f23b"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/App.jsx",
+   "sha256": "47a0a1ef7463a2fbdda619183d5a06fc98df96b885fc9ac423f2eb804450cbde"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "vulnerable/frontend/src/Banner.tsx",
+   "sha256": "fde9db28f3a89cc5d70d85571aeef23ae06527ed313e492889de7af3628dd5f2"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "vulnerable/frontend/src/Card.vue",
+   "sha256": "e3f1ac7af90e4290877fa1d335a8ee2ca2e6f6e07d5b18134bc8194d8cb4f5d1"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "vulnerable/frontend/src/api.ts",
+   "sha256": "10db8abdf7e86d4d1fcad8b1032fe585d8de4a9ed01057dc2cca191e1a4dad73"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Footer.jsx",
+   "sha256": "4d21c89dae359815df375738352440af702a72157da2815d9ec744590f4a94b9"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Header.jsx",
+   "sha256": "48f798d3de206f47a4d7edb0baf12379cfc62304952aa884b5117e3c967a9bdc"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/main.jsx",
+   "sha256": "d71c4e2d9fb272535669d50fc740276e318ed4ac0c7a6fe8d6db1fb8d259d487"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "env",
+   "-C",
+   "/src",
+   "/opt/analyzer/bin/eslint",
+   "--no-config-lookup",
+   "--config",
+   "/opt/analyzer/config/eslint.config.mjs",
+   "--no-inline-config",
+   "--format",
+   "json",
+   "--output-file",
+   "/out/eslint.json",
+   "--",
+   "./clean/frontend/src/App.jsx",
+   "./clean/frontend/src/TagBadge.vue",
+   "./clean/frontend/src/bookmarks.ts",
+   "./clean/frontend/src/components/BookmarkList.jsx",
+   "./clean/frontend/src/components/Panel.tsx",
+   "./vulnerable/frontend/src/App.jsx",
+   "./vulnerable/frontend/src/Banner.tsx",
+   "./vulnerable/frontend/src/Card.vue",
+   "./vulnerable/frontend/src/api.ts",
+   "./vulnerable/frontend/src/components/Footer.jsx",
+   "./vulnerable/frontend/src/components/Header.jsx",
+   "./vulnerable/frontend/src/main.jsx"
+  ],
+  "env": {},
+  "mem_limit": "40m",
+  "report_files": [
+   "eslint.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 137,
+  "infra_error": null,
+  "oom_killed": true,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.612
+ },
+ "schema": 1,
+ "tool": "eslint",
+ "tool_version": "10.12.0"
+}

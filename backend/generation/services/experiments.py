@@ -1801,15 +1801,51 @@ def normalize_execution_options(options: dict | None, current: dict | None = Non
 def default_post_run(mode: str) -> dict[str, Any]:
     return {
         "evaluate": True,
-        "analysis": {"enabled": False, "tool_slugs": [], "only_passing": False},
+        "analysis": {"enabled": False, "tool_slugs": [], "only_passing": False, "profile": None},
         "report": {"enabled": False, "exclude_truncated": True},
     }
 
 
-def normalize_post_run(spec: dict | None, mode: str) -> dict[str, Any]:
-    """A validated ``Experiment.post_run`` (unknown analyzer slugs are a 400)."""
-    from backend.analysis.models import AnalyzerTool
+def _post_run_tool_slugs(raw: Any) -> list[str]:
+    """Analysis tool slugs (legacy aliases mapped) validated against the v2 tool catalog."""
+    from backend.analysis.engine import catalog
+    from backend.automation.engine.dispatchers import AnalyzeConfigError
+    from backend.automation.engine.dispatchers import requested_tools
 
+    try:
+        slugs = requested_tools({"tool_slugs": list(raw or [])}) or []
+    except AnalyzeConfigError as exc:
+        raise ExperimentError(400, str(exc), "unknown_analyzer") from exc
+    specs = catalog.load_specs()
+    unknown = [s for s in slugs if s not in specs and s != catalog.AI_TOOL_SLUG]
+    if unknown:
+        raise ExperimentError(400, f"Unknown analyzer {', '.join(unknown)}", "unknown_analyzer")
+    return slugs
+
+
+def _post_run_profile(raw: Any, user: AbstractUser | None) -> str | None:
+    """An analysis profile reference (id or slug) the user may use, or None."""
+    if raw in (None, ""):
+        return None
+    ref = str(raw).strip()
+    if user is not None:
+        from backend.automation.engine.dispatchers import AnalyzeConfigError
+        from backend.automation.engine.dispatchers import _resolve_profile
+
+        try:
+            _resolve_profile(ref, user)
+        except AnalyzeConfigError as exc:
+            raise ExperimentError(400, str(exc), "unknown_analysis_profile") from exc
+    return ref
+
+
+def normalize_post_run(spec: dict | None, mode: str, user: AbstractUser | None = None) -> dict[str, Any]:
+    """A validated ``Experiment.post_run`` (unknown analyzer slugs or an unusable profile are a 400).
+
+    ``analysis`` runs the v2 engine: ``profile`` (id or slug) and/or
+    ``tool_slugs`` (restricting the profile, else the default profile) are
+    frozen into one analysis plan per post-run.
+    """
     out = default_post_run(mode)
     if not spec:
         return out
@@ -1817,16 +1853,21 @@ def normalize_post_run(spec: dict | None, mode: str) -> dict[str, Any]:
         out["evaluate"] = bool(spec["evaluate"])
     analysis = spec.get("analysis") or {}
     report = spec.get("report") or {}
-    slugs = list(dict.fromkeys(str(s) for s in analysis.get("tool_slugs") or []))
-    if slugs:
-        known = set(AnalyzerTool.objects.filter(slug__in=slugs).values_list("slug", flat=True))
-        unknown = [s for s in slugs if s not in known]
-        if unknown:
-            raise ExperimentError(400, f"Unknown analyzer {', '.join(unknown)}", "unknown_analyzer")
+    slugs = _post_run_tool_slugs(analysis.get("tool_slugs"))
+    profile = _post_run_profile(analysis.get("profile"), user)
     enabled = bool(analysis.get("enabled", False))
-    if enabled and not slugs:
-        raise ExperimentError(400, "Post-run analysis needs at least one analyzer (tool_slugs).", "no_analyzers")
-    out["analysis"] = {"enabled": enabled, "tool_slugs": slugs, "only_passing": bool(analysis.get("only_passing"))}
+    if enabled and not slugs and not profile:
+        raise ExperimentError(
+            400,
+            "Post-run analysis needs an analysis profile or at least one analyzer (tool_slugs).",
+            "no_analyzers",
+        )
+    out["analysis"] = {
+        "enabled": enabled,
+        "tool_slugs": slugs,
+        "only_passing": bool(analysis.get("only_passing")),
+        "profile": profile,
+    }
     out["report"] = {
         "enabled": bool(report.get("enabled", False)),
         "exclude_truncated": bool(report.get("exclude_truncated", True)),
@@ -2224,7 +2265,7 @@ def _design_experiment(user: AbstractUser, data: dict[str, Any]) -> tuple[Experi
     experiment.agent_config = _validated_agent(data.get("agent_config"))
     experiment.llm_defaults = _validated_params(data.get("llm_defaults"))
     _apply_execution(experiment, data.get("execution"), user)
-    experiment.post_run = normalize_post_run(data.get("post_run"), experiment.mode)
+    experiment.post_run = normalize_post_run(data.get("post_run"), experiment.mode, user)
     experiment.analysis_plan = _validated_plan(data.get("analysis_plan"))
     apps = visible_apps(user, data.get("app_requirement_ids") or [])
     check_design(experiment)
@@ -2316,7 +2357,7 @@ def update_experiment(experiment: Experiment, user: AbstractUser, data: dict[str
             experiment.execution_options,
         )
     if "post_run" in data:
-        data["post_run"] = normalize_post_run(data["post_run"], data.get("mode") or experiment.mode)
+        data["post_run"] = normalize_post_run(data["post_run"], data.get("mode") or experiment.mode, user)
     if "analysis_plan" in data:
         data["analysis_plan"] = _validated_plan(data["analysis_plan"])
     baseline_set = "baseline_condition_id" in data

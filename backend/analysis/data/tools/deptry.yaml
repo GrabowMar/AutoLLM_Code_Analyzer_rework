@@ -1,32 +1,40 @@
+# deptry: Python dependency problems (ported from the v1 tool shop).
 slug: deptry
 name: deptry
+kind: static
+category: lint
+version: "0.25.1"
+adapter_version: 1
+languages: [python, text]
+file_kinds: [source, config, manifest]
+output_kind: findings
 description: >-
-  Finds Python dependency problems: modules imported but missing from
-  requirements (the app crashes at import time), declared but unused
-  packages, and transitive or misplaced dependencies.
-category: dependencies
-kind: container
-target_language: python
-icon: boxes
-version: "0.23"
+  Compares each project's requirements.txt with the imports of its Python
+  code: modules imported but not declared (the app fails at import time),
+  declared packages nothing imports, and development dependencies used by
+  application code.
 docs_url: https://deptry.com/
-install_cmd: "pip install --user --upgrade 'deptry==0.23.*'"
-verify_cmd: "deptry --version"
-uninstall_cmd: "pip uninstall -y deptry"
-# Dependencies aren't installed in the workspace, so deptry can't read their
-# metadata: map distributions whose import name differs from the package name.
-run_cmd: |
-  cd {target} && find . -name 'requirements*.txt' -not -path '*/node_modules/*' -not -path '*/.venv/*' -exec dirname {} \; | sort -u | while IFS= read -r d; do
-    echo "### ${d#./}"
-    rm -f /tmp/deptry.json
-    (cd "$d" && deptry . --json-output /tmp/deptry.json --package-module-name-map 'PyJWT=jwt,python-dotenv=dotenv,Pillow=PIL,beautifulsoup4=bs4,PyYAML=yaml,scikit-learn=sklearn,python-jose=jose,psycopg2-binary=psycopg2,opencv-python=cv2,python-dateutil=dateutil,python-multipart=multipart,pymongo=pymongo|bson,dnspython=dns,protobuf=google.protobuf' >/dev/null 2>&1; cat /tmp/deptry.json 2>/dev/null)
-    echo
-  done
-parser_key: deptry
-run_timeout: 120
-install_timeout: 180
-display_order: 30
-sample_filename: requirements.txt
-sample_code: |
-  flask==3.0.0
-  requests==2.31.0
+icon: boxes
+display_order: 150
+default_enabled: false
+default_required: false
+mem_limit: 512m
+timeout_s: 180
+notes: >-
+  Runs once per directory holding a requirements.txt, on staged copies of
+  that project's Python and requirement files only (the app's pyproject
+  [tool.deptry], .gitignore and excluded files are never seen), with a
+  baked --config and no default excludes. Offline: the app's packages are
+  not installed, so import names come from a baked package -> module map
+  (deptry assumes name == module otherwise) and transitive dependencies
+  cannot be told apart from undeclared ones. Python files outside every
+  project are coverage gaps. Unused-dependency findings sit on the
+  requirements file, which is not measured code.
+config_schema:
+  - name: ignore
+    type: string
+    label: Ignored rules
+    description: Comma-separated deptry codes to ignore (--ignore).
+    default: ""
+    pattern: '^(DEP00[1-5](,DEP00[1-5])*)?$'
+    placeholder: DEP002

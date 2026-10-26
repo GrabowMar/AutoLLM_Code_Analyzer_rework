@@ -1,18 +1,21 @@
 <script lang="ts">
 	/**
 	 * PostRunEditor — what happens after the runs: evaluate (scaffolding;
-	 * agent runs are graded inline), static analysis with chosen analyzers
-	 * (optionally only on passing runs), then the experiment report.
+	 * agent runs are graded inline), analysis under one frozen v2 plan (an
+	 * analysis profile, optionally restricted to some of its tools; optionally
+	 * only on passing runs), then the experiment report.
 	 *
 	 * Props:
 	 * - `value` (bindable `PostRunSpec`): replaced, never mutated.
 	 * - `mode`: 'agent' | 'scaffolding'. `idPrefix`, `disabled`, `onchange()`.
 	 */
 	import { onMount } from 'svelte';
+	import * as Select from '$lib/components/ui/select';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Switch } from '$lib/components/ui/switch';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
-	import { getToolCatalog, type AnalyzerTool } from '$lib/api/analyzers';
+	import { listAnalysisProfiles, listAnalysisTools } from '$lib/api/analysis';
+	import type { AnalysisProfile, AnalysisTool } from '$lib/api/analysis';
 	import { formatApiError } from '$lib/api/core';
 	import type { PostRunSpec } from '$lib/api/types/experiments';
 
@@ -26,15 +29,18 @@
 
 	let { value = $bindable(), mode, idPrefix = 'post-run', disabled = false, onchange }: Props = $props();
 
-	let tools = $state<AnalyzerTool[] | null>(null);
+	let tools = $state<AnalysisTool[] | null>(null);
+	let profiles = $state<AnalysisProfile[]>([]);
 	let toolsError = $state('');
 
 	async function loadTools() {
 		toolsError = '';
 		try {
-			tools = (await getToolCatalog()).filter((t) => t.is_enabled);
+			const [catalog, list] = await Promise.all([listAnalysisTools(), listAnalysisProfiles()]);
+			tools = catalog.filter((t) => t.is_enabled);
+			profiles = list.filter((p) => !p.is_archived);
 		} catch (e) {
-			toolsError = formatApiError(e, 'Could not load the analyzers.');
+			toolsError = formatApiError(e, 'Could not load the analysis tools and profiles.');
 		}
 	}
 
@@ -59,7 +65,15 @@
 		setAnalysis({ tool_slugs: [...set] });
 	}
 
-	const usable = (t: AnalyzerTool) => t.kind === 'ai' || t.installed;
+	const profileItems = $derived(
+		profiles.map((p) => ({
+			value: p.slug,
+			label: p.name,
+			description: `${p.slug} v${p.version}${p.is_system ? ' · system' : ''}`
+		}))
+	);
+	const profileRef = $derived(value.analysis.profile ?? '');
+	const needsChoice = $derived(!profileRef && value.analysis.tool_slugs.length === 0);
 </script>
 
 <div class="space-y-4">
@@ -94,7 +108,7 @@
 			<div class="min-w-0 space-y-0.5">
 				<label for="{idPrefix}-analysis" class="text-sm font-medium">Static analysis when the experiment completes</label>
 				<p id="{idPrefix}-analysis-note" class="text-[11px] text-muted-foreground">
-					Runs the chosen analyzers over the finished runs, one at a time, after every cell is done.
+					Analyses the finished runs under one frozen plan after every cell is done.
 				</p>
 			</div>
 		</div>
@@ -103,25 +117,54 @@
 				{#if toolsError}
 					<ErrorAlert message={toolsError} onretry={loadTools} />
 				{:else if !tools}
-					<p class="loading-mono">loading analyzers</p>
-				{:else if tools.length === 0}
-					<p class="text-[11px] text-muted-foreground">No analyzers are enabled. <a href="/analyzers" class="underline">Set them up</a>.</p>
+					<p class="loading-mono">loading analysis tools</p>
 				{:else}
-					<fieldset class="grid gap-1.5 sm:grid-cols-2" aria-label="Analyzers">
-						{#each tools as tool (tool.slug)}
-							<label class="flex items-center gap-2 text-xs" title={usable(tool) ? tool.description : 'Not installed in your analyzer workspace'}>
-								<Checkbox
-									checked={value.analysis.tool_slugs.includes(tool.slug)}
-									disabled={disabled || !usable(tool)}
-									onCheckedChange={(v) => toggleTool(tool.slug, v === true)}
-								/>
-								<span class="truncate">{tool.name}</span>
-								<span class="text-[11px] text-muted-foreground">{tool.category}{usable(tool) ? '' : ' · not installed'}</span>
-							</label>
-						{/each}
-					</fieldset>
-					{#if value.analysis.tool_slugs.length === 0}
-						<p class="text-[11px] text-warning-fg">Pick at least one analyzer.</p>
+					<div class="max-w-sm space-y-1">
+						<label for="{idPrefix}-profile" class="text-xs font-medium">Analysis profile</label>
+						<Select.Simple
+							id="{idPrefix}-profile"
+							size="sm"
+							value={profileRef}
+							items={profileItems}
+							placeholder="Pick a profile"
+							clearLabel="No profile (tools below restrict the default)"
+							{disabled}
+							onValueChange={(v) => setAnalysis({ profile: v || null })}
+						/>
+						<p class="text-[11px] text-muted-foreground">
+							Frozen into one plan when the post-run starts, so every run of it is comparable.
+							<a href="/analysis/profiles" class="underline">Manage profiles</a>
+						</p>
+					</div>
+					{#if tools.length > 0}
+						<fieldset class="space-y-1.5">
+							<legend class="text-xs font-medium">Only these tools (optional)</legend>
+							<div class="grid gap-1.5 sm:grid-cols-2">
+								{#each tools as tool (tool.slug)}
+									<label class="flex items-center gap-2 text-xs" title={tool.description}>
+										<Checkbox
+											checked={value.analysis.tool_slugs.includes(tool.slug)}
+											{disabled}
+											onCheckedChange={(v) => toggleTool(tool.slug, v === true)}
+										/>
+										<span class="truncate">{tool.name}</span>
+										<span class="text-[11px] text-muted-foreground"
+											>{tool.category}{tool.default_enabled ? '' : ' · opt-in'}</span
+										>
+									</label>
+								{/each}
+							</div>
+							<p class="text-[11px] text-muted-foreground">
+								With a profile, leave empty to run its own tools. <a href="/analysis/tools" class="underline"
+									>About the tools</a
+								>
+							</p>
+						</fieldset>
+					{/if}
+					{#if needsChoice}
+						<p class="text-[11px] text-warning-fg">
+							Pick a profile, or tools to run under the default research profile.
+						</p>
 					{/if}
 				{/if}
 				<label class="flex items-center gap-2 text-xs">

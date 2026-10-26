@@ -14,7 +14,7 @@ An empty models page after a fresh install just means nobody has synced yet.
 
 ## API key resolution
 
-Every OpenRouter call — generation, model sync, the `llm_review` analyzer — resolves its key per user via `backend/credentials/services/resolver.py`:
+Every OpenRouter call — generation, model sync, the AI reviewer (`ai_review`) of an analysis run — resolves its key per user via `backend/credentials/services/resolver.py`:
 
 1. The user's own key, stored encrypted via **Settings → API Credentials**, wins if set.
 2. Otherwise the deployment-wide `OPENROUTER_API_KEY` env var is used, but only while `OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK` is `True` (the default).

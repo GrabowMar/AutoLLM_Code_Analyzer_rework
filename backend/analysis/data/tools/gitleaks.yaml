@@ -1,30 +1,28 @@
+# Gitleaks: secret scanner (upstream default rules).
 slug: gitleaks
 name: Gitleaks
-description: >-
-  Secret scanner. Detects hardcoded passwords, API keys, tokens and other
-  credentials accidentally committed into source code.
+kind: static
 category: secrets
-kind: container
-target_language: any
-icon: key-round
-version: "8.18"
+version: "8.30.1"
+adapter_version: 2
+languages: ["*"]
+file_kinds: [source, config, manifest, doc, env, other]
+output_kind: findings
+description: >-
+  Secret scanner: hard-coded API keys, tokens, passwords and private keys in
+  any text file, using the upstream gitleaks rule set.
 docs_url: https://github.com/gitleaks/gitleaks
-install_cmd: >-
-  mkdir -p /home/analyzer/.local/bin &&
-  curl -sSfL
-  https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz
-  | tar -xz -C /home/analyzer/.local/bin gitleaks
-verify_cmd: "gitleaks version"
-uninstall_cmd: "rm -f /home/analyzer/.local/bin/gitleaks"
-# Write the JSON report to a file and cat only that, sending gitleaks' banner
-# and logs to /dev/null — otherwise the ASCII banner/ANSI logs pollute stdout.
-run_cmd: "gitleaks detect --no-git --source {target} --report-format json --report-path /tmp/gitleaks-report.json --exit-code 0 --redact --no-banner --log-level error >/dev/null 2>&1; cat /tmp/gitleaks-report.json"
-parser_key: gitleaks
-run_timeout: 180
-install_timeout: 300
-display_order: 60
+icon: key-round
+display_order: 80
+mem_limit: 512m
+timeout_s: 180
+notes: >-
+  The selected files are copied into a fresh tmpfs directory and scanned with
+  `gitleaks dir`, an explicit --config and --ignore-gitleaks-allow, so an
+  app's .gitleaks.toml, .gitleaksignore or "gitleaks:allow" comments cannot
+  hide anything. Secrets are redacted in the report; the exit code is
+  checked (--exit-code 0 makes any non-zero status an error). Paths the
+  default global allowlist always skips (bootstrap*/jquery*/angular*.js,
+  swagger-ui*.js, gradlew, go.sum, lock files...) are reported as skipped
+  and never passed to it.
 config_schema: []
-default_config: {}
-sample_code: |
-  AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE"
-  AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"

@@ -1,0 +1,10 @@
+{
+  "name": "bookmarks-web",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "react": "18.3.1",
+    "vue": "3.5.12"
+  }
+}

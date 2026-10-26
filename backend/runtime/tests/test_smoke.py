@@ -56,9 +56,51 @@ def test_smoke_all_ok_passes(user):
 
     job.refresh_from_db()
     container.refresh_from_db()
-    assert job.metrics["functional"]["passed"] is True
-    assert "checks" not in job.metrics["functional"]  # job copy stays lean
+    assert job.metrics["smoke"]["passed"] is True
+    assert job.metrics["smoke"]["source"] == "smoke"
+    assert "checks" not in job.metrics["smoke"]  # job copy stays lean
+    # The probe never writes the conformance evaluator's key.
+    assert "functional" not in job.metrics
     assert container.metadata["smoke"]["checks"]
+
+
+def test_smoke_never_overwrites_the_conformance_result(user):
+    """The lenient probe is another instrument: the evaluator's metrics.functional stays intact."""
+    conformance = {
+        "source": "conformance",
+        "status": "failed",
+        "passed": False,
+        "pass_rate": 0.25,
+        "evaluator_version": 3,
+    }
+    job = _job_with_endpoints(user, metrics={"cost": 0.1})
+    container = ContainerInstanceFactory(generation_job=job, created_by=user)
+    # The evaluator finishes while this (stale) instance is held by the build.
+    type(job).objects.filter(id=job.id).update(metrics={"cost": 0.1, "functional": conformance})
+
+    with mock.patch.object(smoke.requests, "get", side_effect=_status_map({})):
+        result = smoke.run_smoke(job, container)
+
+    assert result["pass_rate"] == 1.0
+    job.refresh_from_db()
+    assert job.metrics["functional"] == conformance
+    assert job.metrics["cost"] == 0.1
+    assert job.metrics["smoke"]["pass_rate"] == 1.0
+
+
+def test_smoke_reports_never_count_the_probe_as_conformance(user):
+    """A probed job's functional record (what reports/analysis read) stays "not evaluated"."""
+    from backend.analysis.engine import sample
+
+    job = _job_with_endpoints(user)
+    container = ContainerInstanceFactory(generation_job=job, created_by=user)
+    with mock.patch.object(smoke.requests, "get", side_effect=_status_map({})):
+        smoke.run_smoke(job, container)
+
+    job.refresh_from_db()
+    functional = sample.functional_from_job(job)
+    assert functional["pass_rate"] is None
+    assert functional["status"] == "not_evaluated"
 
 
 def test_smoke_health_down_fails_without_probing(user):

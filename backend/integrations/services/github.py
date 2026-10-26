@@ -365,21 +365,54 @@ def latest_analysis_run(user: User, job: GenerationJob):
 
 
 def _findings_qs(run):
+    """The findings the run's measurement counts: counted static findings, plus one
+    row per counted AI consensus cluster (its replicates are one opinion).
+
+    Uncounted findings (out of the measured scope, uncounted categories such
+    as style, AI findings without consensus or grounding) are left out.
+    """
+    from django.db.models import Q
+
     from backend.analysis.models import Finding
 
-    return Finding.objects.filter(result__run=run)
+    findings = Finding.objects.filter(run=run, counted=True)
+    ai_ids = list(
+        findings.filter(is_ai=True)
+        .exclude(issue_key="")
+        .order_by("issue_key", "severity_rank", "id")
+        .distinct("issue_key")
+        .values_list("id", flat=True),
+    )
+    return findings.filter(Q(is_ai=False) | Q(is_ai=True, issue_key="") | Q(id__in=ai_ids))
+
+
+def _static_measured(run) -> bool:
+    """Whether the run's static counts are measurements (some static tool scanned the code)."""
+    measurement = run.measurement if isinstance(run.measurement, dict) else {}
+    static = measurement.get("static")
+    if isinstance(static, dict) and "available" in static:
+        return bool(static["available"])
+    summary = run.summary if isinstance(run.summary, dict) else {}
+    if "static_measured" in summary:
+        return bool(summary["static_measured"])
+    return summary.get("total_findings") is not None if summary else True
 
 
 def _findings_summary(run) -> dict[str, Any] | None:
     if run is None:
         return None
-    rows = list(_findings_qs(run).values_list("severity", "result__tool_slug"))
+    rows = list(_findings_qs(run).values_list("severity", "tool_slug", "is_ai"))
+    static = [(sev, tool) for sev, tool, is_ai in rows if not is_ai]
+    measured = _static_measured(run)
     return {
         "run_id": str(run.id),
         "completed_at": run.completed_at,
-        "total": len(rows),
-        "by_severity": Counter(sev for sev, _ in rows),
-        "by_tool": Counter(tool for _, tool in rows),
+        # None (not 0) when the static measurement is unavailable: nothing clean was shown.
+        "static_measured": measured,
+        "total": len(static) if measured else None,
+        "by_severity": Counter(sev for sev, _ in static),
+        "by_tool": Counter(tool for _, tool in static),
+        "ai_consensus": sum(1 for *_, is_ai in rows if is_ai),
         "tools": list(run.tool_slugs or []),
     }
 
@@ -523,8 +556,14 @@ def build_readme(job: GenerationJob, summary: dict[str, Any] | None, *, files_co
     else:
         tools = ", ".join(f"`{t}`" for t in summary["tools"]) or "n/a"
         lines += [f"Latest analysis run `{summary['run_id']}` (tools: {tools}).", ""]
-        if summary["total"] == 0:
-            lines += ["No findings were reported.", ""]
+        if summary.get("total") is None:
+            lines += [
+                "Static counts are not available for this run (a required tool failed or nothing was scanned); "
+                "this is not a clean result.",
+                "",
+            ]
+        elif summary["total"] == 0:
+            lines += ["No counted findings were reported.", ""]
         else:
             lines += [f"**{summary['total']} finding(s)**", "", "| Severity | Count |", "|---|---|"]
             by_sev = summary["by_severity"]
@@ -532,6 +571,12 @@ def build_readme(job: GenerationJob, summary: dict[str, Any] | None, *, files_co
             lines += ["", "| Tool | Findings |", "|---|---|"]
             lines += [f"| `{tool}` | {count} |" for tool, count in summary["by_tool"].most_common()]
             lines.append("")
+        if summary.get("ai_consensus"):
+            lines += [
+                f"The AI reviewer's consensus adds {summary['ai_consensus']} opinion(s), "
+                "reported apart from the static counts.",
+                "",
+            ]
     return "\n".join(lines)
 
 

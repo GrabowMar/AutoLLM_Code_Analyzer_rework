@@ -9,6 +9,8 @@ import Server from "@lucide/svelte/icons/server";
 import AppWindow from "@lucide/svelte/icons/app-window";
 import ScanSearch from "@lucide/svelte/icons/scan-search";
 import Microscope from "@lucide/svelte/icons/microscope";
+import ClipboardList from "@lucide/svelte/icons/clipboard-list";
+import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
 import Container from "@lucide/svelte/icons/container";
 import Trophy from "@lucide/svelte/icons/trophy";
 import ChartColumn from "@lucide/svelte/icons/chart-column";
@@ -53,8 +55,14 @@ export const navSections: NavSection[] = [
     title: "Evaluate",
     items: [
       { label: "Applications", href: "/applications", icon: AppWindow },
-      { label: "Analysis", href: "/analysis", icon: Microscope },
-      { label: "Analyzers", href: "/analyzers", icon: ScanSearch },
+      { label: "Studies", href: "/analysis/studies", icon: ClipboardList },
+      { label: "Runs", href: "/analysis", icon: Microscope },
+      {
+        label: "Profiles",
+        href: "/analysis/profiles",
+        icon: SlidersHorizontal,
+      },
+      { label: "Tools", href: "/analysis/tools", icon: ScanSearch },
       { label: "Runtime", href: "/runtime", icon: Container },
     ],
   },
@@ -89,7 +97,13 @@ const extraLabels: Record<string, string> = {
   "/users/settings": "Settings",
   "/models/compare": "Compare",
   "/models/import": "Import",
-  "/analysis/create": "New analysis",
+  // Runs, studies, profiles and tools share the /analysis prefix: the
+  // breadcrumb names the area, the nav item names the runs list.
+  "/analysis": "Analysis",
+  "/analysis/create": "Ad-hoc run",
+  "/analysis/studies/new": "New study",
+  "/analysis/profiles/new": "New profile",
+  "/analyzers": "Tools",
   "/experiments/new": "New experiment",
   "/endpoints/new": "New endpoint",
   "/sample-generator/batches": "Batches",
@@ -103,24 +117,35 @@ export const routeLabels: Record<string, string> = {
   ...extraLabels,
 };
 
-export function isNavActive(pathname: string, href: string): boolean {
+const navHrefs = navSections.flatMap((s) => s.items.map((i) => i.href));
+
+function matchesHref(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(href + "/");
+}
+
+/**
+ * True when `href` is the nav item for `pathname`. A more specific item
+ * owns its subtree: `/analysis/profiles/x` activates Profiles, not Runs.
+ */
+export function isNavActive(pathname: string, href: string): boolean {
+  if (!matchesHref(pathname, href)) return false;
+  return !navHrefs.some(
+    (other) =>
+      other.length > href.length &&
+      other.startsWith(href) &&
+      matchesHref(pathname, other),
+  );
 }
 
 /** The nav section (and its 1-based position) that owns a path, for page eyebrows. */
 export function navSectionFor(
   pathname: string,
 ): { index: number; section: NavSection } | null {
-  let found: { index: number; section: NavSection } | null = null;
-  let bestLen = -1;
   for (const [i, section] of navSections.entries()) {
     for (const item of section.items) {
-      if (isNavActive(pathname, item.href) && item.href.length > bestLen) {
-        found = { index: i + 1, section };
-        bestLen = item.href.length;
-      }
+      if (isNavActive(pathname, item.href)) return { index: i + 1, section };
     }
   }
-  return found;
+  return null;
 }

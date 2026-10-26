@@ -15,7 +15,13 @@ from backend.reports.models import Report
 class ReportSummarySchema(ModelSchema):
     id: UUID
     generation_job_id: UUID | None = None
+    analysis_run_id: UUID | None = None
+    # Legacy name of analysis_run_id, kept for existing clients.
     analysis_task_id: UUID | None = None
+
+    @staticmethod
+    def resolve_analysis_task_id(obj: Report) -> UUID | None:
+        return obj.analysis_run_id
 
     class Meta:
         model = Report
@@ -37,7 +43,13 @@ class ReportSummarySchema(ModelSchema):
 class ReportDetailSchema(ModelSchema):
     id: UUID
     generation_job_id: UUID | None = None
+    analysis_run_id: UUID | None = None
+    # Legacy name of analysis_run_id, kept for existing clients.
     analysis_task_id: UUID | None = None
+
+    @staticmethod
+    def resolve_analysis_task_id(obj: Report) -> UUID | None:
+        return obj.analysis_run_id
 
     class Meta:
         model = Report
@@ -61,6 +73,9 @@ class ReportDetailSchema(ModelSchema):
 class ReportListResponse(Schema):
     reports: list[ReportSummarySchema]
     pagination: dict[str, int]
+    # The applied title search and ordering (echoed for the client).
+    q: str = ""
+    ordering: str = "-created_at"
 
 
 class GenerateReportIn(Schema):

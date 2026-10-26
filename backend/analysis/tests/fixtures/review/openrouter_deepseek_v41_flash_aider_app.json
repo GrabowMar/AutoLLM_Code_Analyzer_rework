@@ -1,0 +1,46 @@
+{
+ "id": "gen-1792676425-dHXUf54jsGSHiBMx9tfS",
+ "object": "chat.completion",
+ "created": 1792676425,
+ "model": "deepseek/deepseek-v4.1-flash",
+ "provider": "CoreWeave",
+ "system_fingerprint": null,
+ "service_tier": null,
+ "choices": [
+  {
+   "index": 0,
+   "logprobs": null,
+   "finish_reason": "stop",
+   "native_finish_reason": "stop",
+   "message": {
+    "role": "assistant",
+    "content": "{\"findings\": [{\"file\": \"app.py\", \"start_line\": 27, \"end_line\": 27, \"evidence\": \"app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-me')\", \"title\": \"Hard-coded fallback JWT signing secret\", \"rationale\": \"If SECRET_KEY is not set in the environment, the app signs and verifies JWTs with the publicly known string 'dev-secret-key-change-me'. Anyone can forge a token with arbitrary 'sub'/'is_admin' claims, bypassing authentication and gaining admin access.\", \"category\": \"secrets\", \"cwe\": \"CWE-798\", \"severity\": \"critical\", \"confidence\": 0.95, \"fix\": \"Remove the literal default and fail fast at startup when SECRET_KEY is missing (e.g. raise RuntimeError), or generate a random secret persisted outside the repo.\"}, {\"file\": \"app.py\", \"start_line\": 316, \"end_line\": 316, \"evidence\": \"        admin_password = os.environ.get('ADMIN_PASSWORD') or 'admin'\", \"title\": \"Default admin password 'admin'\", \"rationale\": \"When ADMIN_PASSWORD is unset the administrator account is created/reset with the well-known password 'admin', giving anyone full admin access to the deployed instance.\", \"category\": \"secrets\", \"cwe\": \"CWE-798\", \"severity\": \"critical\", \"confidence\": 0.95, \"fix\": \"Require ADMIN_PASSWORD from the environment (abort startup if absent) and never fall back to a fixed literal.\"}, {\"file\": \"app.py\", \"start_line\": 235, \"end_line\": 261, \"evidence\": \"    todo = db.session.get(Todo, todo_id)\\n    if todo is None:\\n        return jsonify({'error': 'todo not found'}), 404\", \"title\": \"Missing ownership check on todo update (IDOR)\", \"rationale\": \"update_todo only requires authentication; it never verifies that the todo belongs to the caller (todo.user_id == g.current_user.id). Any logged-in user can modify any other user's todo by guessing its id.\", \"category\": \"security\", \"cwe\": \"CWE-639\", \"severity\": \"high\", \"confidence\": 0.9, \"fix\": \"After loading the todo, reject the request with 403 unless todo.user_id == g.current_user.id (or the caller is admin).\"}, {\"file\": \"app.py\", \"start_line\": 264, \"end_line\": 272, \"evidence\": \"    todo = db.session.get(Todo, todo_id)\\n    if todo is None:\\n        return jsonify({'error': 'todo not found'}), 404\", \"title\": \"Missing ownership check on todo delete (IDOR)\", \"rationale\": \"delete_todo requires only authentication and performs a soft delete on any todo id supplied, so any authenticated user can hide other users' todos.\", \"category\": \"security\", \"cwe\": \"CWE-639\", \"severity\": \"high\", \"confidence\": 0.9, \"fix\": \"Verify todo.user_id == g.current_user.id (or admin) before setting is_active = False.\"}, {\"file\": \"app.py\", \"start_line\": 257, \"end_line\": 258, \"evidence\": \"    if 'is_active' in data:\\n        todo.is_active = as_bool(data.get('is_active'))\", \"title\": \"Non-admin can change admin-only is_active flag\", \"rationale\": \"is_active is the visibility flag that the admin-only /api/admin/todos/<id>/toggle endpoint is meant to control, but update_todo lets any authenticated user set it through a normal PUT, bypassing the admin authorization boundary.\", \"category\": \"security\", \"cwe\": \"CWE-863\", \"severity\": \"high\", \"confidence\": 0.85, \"fix\": \"Remove the is_active handling from update_todo and only allow it through the require_admin toggle endpoint.\"}, {\"file\": \"app.py\", \"start_line\": 23, \"end_line\": 23, \"evidence\": \"CORS(app)\", \"title\": \"CORS allows all origins\", \"rationale\": \"CORS(app) with no configuration reflects any Origin, so any website can call the API from a victim's browser. Combined with the token being read from localStorage this widens the attack surface for cross-origin requests.\", \"category\": \"security\", \"cwe\": \"CWE-942\", \"severity\": \"medium\", \"confidence\": 0.7, \"fix\": \"Restrict CORS to the known frontend origin(s), e.g. CORS(app, resources={r'/api/*': {'origins': [...]}}).\"}, {\"file\": \"app.py\", \"start_line\": 326, \"end_line\": 326, \"evidence\": \"bootstrap()\", \"title\": \"Bootstrap runs at import and resets admin password every start\", \"rationale\": \"bootstrap() is executed at module import time and unconditionally overwrites the admin password hash on every process start, so any password change is silently reverted and the default 'admin' credential is restored. Import-time DB side effects also make the module hard to test or reuse.\", \"category\": \"bug\", \"cwe\": null, \"severity\": \"medium\", \"confidence\": 0.85, \"fix\": \"Move bootstrap behind an explicit entry point (e.g. call it under if __name__ == '__main__' or a CLI command) and only set the admin password when the account is first created.\"}, {\"file\": \"frontend/src/components/TodoForm.jsx\", \"start_line\": 27, \"end_line\": 30, \"evidence\": \"      await onSubmit({ title: trimmed, description: description.trim(), priority });\\n      setTitle('');\\n      setDescription('');\", \"title\": \"Form clears fields even when submit fails\", \"rationale\": \"HomePage.handleCreate swallows errors and returns undefined, so onSubmit never rejects; the form therefore resets title/description/priority even when the todo was not created, losing the user's input.\", \"category\": \"bug\", \"cwe\": null, \"severity\": \"low\", \"confidence\": 0.7, \"fix\": \"Have handleCreate return a success boolean (or rethrow) and only clear the fields when the submission succeeded.\"}, {\"file\": \"frontend/src/pages/AdminPage.jsx\", \"start_line\": 119, \"end_line\": 122, \"evidence\": \"      {data.items.length === 0 ? (\\n        <div className=\\\"rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500\\\">\\n          No todos yet.\", \"title\": \"Empty state shown while loading or after error\", \"rationale\": \"The 'No todos yet.' message is rendered whenever items is empty, including while the request is in flight and after a failed load, so the admin sees a misleading empty state instead of a loading indicator or the error.\", \"category\": \"bug\", \"cwe\": null, \"severity\": \"low\", \"confidence\": 0.6, \"fix\": \"Render the empty state only when !loading && !error, and show a loading indicator / error message otherwise.\"}], \"files_reviewed\": [\"app.py\", \"frontend/src/App.jsx\", \"frontend/src/AuthContext.jsx\", \"frontend/src/api.js\", \"frontend/src/components/TodoForm.jsx\", \"frontend/src/components/TodoItem.jsx\", \"frontend/src/pages/AdminPage.jsx\", \"frontend/src/pages/HomePage.jsx\", \"frontend/src/pages/LoginPage.jsx\", \"frontend/src/pages/RegisterPage.jsx\"], \"review_complete\": true}",
+    "refusal": null,
+    "reasoning": "[trimmed for the fixture]"
+   }
+  }
+ ],
+ "usage": {
+  "prompt_tokens": 17858,
+  "completion_tokens": 3500,
+  "total_tokens": 21358,
+  "cost": 0.004904163,
+  "is_byok": false,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "cache_write_tokens": 0,
+   "audio_tokens": 0,
+   "video_tokens": 0
+  },
+  "cost_details": {
+   "upstream_inference_cost": 0.0049537,
+   "upstream_inference_prompt_cost": 0.0026787,
+   "upstream_inference_completions_cost": 0.002275
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 1799,
+   "image_tokens": 0,
+   "audio_tokens": 0
+  }
+ }
+}

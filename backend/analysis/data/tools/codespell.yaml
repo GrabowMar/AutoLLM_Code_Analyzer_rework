@@ -1,25 +1,39 @@
+# codespell: spelling checker for source code.
 slug: codespell
 name: Codespell
+kind: static
+category: style
+version: "2.4.3"
+adapter_version: 2
+languages: ["*"]
+file_kinds: [source, config, doc]
+output_kind: findings
 description: >-
-  Spell-checker for source code. Finds common misspellings in comments,
-  docstrings, strings and identifiers without flagging legitimate code words.
-category: lint
-kind: container
-target_language: any
-icon: spell-check
-version: "2"
+  Finds common misspellings in comments, strings and identifiers (style:
+  reported, not counted as a quality defect by default).
 docs_url: https://github.com/codespell-project/codespell
-install_cmd: "pip install --user --upgrade 'codespell==2.*'"
-verify_cmd: "codespell --version"
-uninstall_cmd: "pip uninstall -y codespell"
-run_cmd: "codespell {target} --disable-colors"
-parser_key: codespell
-run_timeout: 60
-install_timeout: 120
-display_order: 70
-config_schema: []
-default_config: {}
-sample_code: |
-  # This function will recieve a payload and seperate it into fields.
-  def process(payload):
-      return payload.split(",")
+icon: spell-check
+display_order: 130
+default_required: false
+mem_limit: 256m
+timeout_s: 120
+notes: >-
+  Baked config (--config) and cwd outside the sources, so an app's
+  setup.cfg/.codespellrc/pyproject cannot add ignore lists. --check-hidden:
+  codespell otherwise silently passes over selected dotfiles
+  (.eslintrc.json, .prettierrc...). Inline "codespell:ignore" tags are
+  neutralized in staged copies when present.
+config_schema:
+  - name: builtin
+    type: multiselect
+    label: Dictionaries
+    description: Built-in dictionaries to use (--builtin).
+    default: [clear, rare]
+    min_items: 1
+    options:
+      - {value: clear, label: Clear misspellings}
+      - {value: rare, label: Rare words}
+      - {value: informal, label: Informal}
+      - {value: usage, label: Usage}
+      - {value: code, label: Code words}
+      - {value: names, label: Names}

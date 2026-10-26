@@ -81,7 +81,9 @@
 		const post = e.post_run ?? {};
 		const steps = [
 			!isAgent && post.evaluate ? 'evaluate' : '',
-			post.analysis?.enabled ? `analysis (${post.analysis.tool_slugs?.join(', ') || 'default tools'})` : '',
+			post.analysis?.enabled
+				? `analysis (${[post.analysis.profile ? `profile ${post.analysis.profile}` : 'default profile', post.analysis.tool_slugs?.length ? post.analysis.tool_slugs.join(', ') : ''].filter(Boolean).join(': ')})`
+				: '',
 			post.report?.enabled ? 'report' : '',
 		].filter(Boolean);
 		list.push({ label: 'After the run', value: steps.length ? steps.join(' · ') : 'nothing' });

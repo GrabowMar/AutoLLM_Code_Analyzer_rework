@@ -10,7 +10,10 @@ Sections (each a JSON object/list in ``report_data``):
 * ``funnel`` -- generated -> analyzed -> evaluated -> deployed -> passes
   every check, per model and template, with Wilson 95% intervals.
 * ``issues`` -- cross-tool deduplicated issues per model/template/tool and
-  the tool-overlap table (``statistics.services.study``).
+  the tool-overlap table (``statistics.services.study``), read from each
+  job's canonical analysis run under ONE frozen analysis plan (its stored
+  measurement and the engine's ``issue_key`` deduplication), with the
+  analysis ``coverage`` funnel (jobs not measured under the plan, and why).
 * ``security_bounds`` -- per severity: issues, apps affected, and for a zero
   count the exact 95% upper bound on the per-app rate.
 * ``code_metrics`` -- size, backend share, complexity per app, model and
@@ -27,6 +30,12 @@ Sections (each a JSON object/list in ``report_data``):
 * ``healing``, ``accounting`` -- the build-healing ablation and what ran.
 * ``validity`` -- threats detected in this data, each with the section it
   affects.
+
+Missing data stays ``None`` (an app whose static measurement is unavailable
+has no issue counts and is left out of sums, rates and densities, never
+counted as clean); issue densities divide by measured SLOC (the code the
+model wrote, the scope the counts cover); AI-reviewer consensus is reported
+in its own ``ai_*`` columns and never added to static issues.
 """
 
 from __future__ import annotations
@@ -41,8 +50,6 @@ from typing import Any
 from django.utils import timezone
 
 from backend.analysis.models import AnalysisRun
-from backend.analysis.models import AnalyzerTool
-from backend.analysis.models import ToolResult
 from backend.generation.models import Experiment
 from backend.generation.models import GenerationJob
 from backend.generation.services.analysis_plan import METRICS as PLAN_METRICS
@@ -50,6 +57,8 @@ from backend.generation.services.analysis_plan import declared_metrics
 from backend.generation.services.evaluation.runner import NON_SAMPLE_STATUSES
 from backend.generation.services.experiment_results import sign_test_p
 from backend.generation.services.experiment_results import wilcoxon_p
+from backend.rankings.services.measured import default_rules
+from backend.rankings.services.measured import select_measured
 from backend.reports.services.loc import loc_from_job
 from backend.statistics.services import inference as inf
 from backend.statistics.services.accounting import run_accounting
@@ -62,43 +71,63 @@ from backend.statistics.services.study import issue_breakdowns
 from backend.statistics.services.study import job_labels
 from backend.statistics.services.study import study_jobs
 
-REPORT_VERSION = 1
+# 2: issue tables from v2 measurements (canonical runs under one plan,
+# engine dedup, measured SLOC, None for missing data, AI apart).
+REPORT_VERSION = 2
 SMALL_N_MODELS = 10
 MIN_APPS_PER_MODEL = 5
-_BACKEND_EXT = (".py",)
-_FRONTEND_EXT = (".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".css", ".html")
+# Eligibility rules a report config may override (as the other report generators).
+RULE_KEYS = ("exclude_invalid", "exclude_empty_output", "exclude_truncated", "exclude_run_limits")
+# Conformance statuses whose app never deployed: pass rate 0 by definition.
+_NOT_DEPLOYED = ("build_failed", "start_failed")
 
 DEFINITIONS = {
     "generated": "The generation job completed and returned code (not a measure of quality).",
     "truncated": "The model's output hit max_tokens; the app is incomplete by construction.",
-    "analyzed": "The app has a finished static-analysis run (its latest one is counted).",
+    "analyzed": (
+        "The app has a complete analysis run under the report's analysis plan (its canonical run is counted); "
+        "apps analysed only under another plan, incompletely, or not at all are listed in issues.coverage."
+    ),
+    "static_measured": "The analyzed app's static measurement is available (no required static tool failed).",
     "evaluated": "The conformance evaluator produced an outcome about the sample (infra errors excluded).",
     "deployed": "The app built in Docker and answered its health check (status passed or failed).",
     "functionally_correct": "The app passed every conformance check (status passed).",
     "pass_rate": "Share of conformance checks passed (0..1); 0 for apps that did not deploy.",
-    "unique_issue": "One deduplicated static issue: findings of equivalent rules from several tools at one location.",
+    "unique_issue": (
+        "One deduplicated static issue: counted findings of equivalent rules (shared CWE or rule class) "
+        "from several tools at one location, as the analysis engine grouped them (issue_key)."
+    ),
+    "measured_loc": "Measured SLOC: non-blank, non-comment lines the model wrote (the scope issue counts cover).",
+    "ai_consensus_issue": (
+        "An AI-reviewer finding reported by a majority of the review's replicates and grounded in the code; "
+        "an opinion, reported apart from static issues."
+    ),
 }
 
 
 # ── per-app table ────────────────────────────────────────────────────────
 
 
-def _split_loc(job: GenerationJob) -> tuple[int, int, int]:
-    data = job.result_data if isinstance(job.result_data, dict) else {}
-    files = data.get("files") if isinstance(data.get("files"), dict) else {}
-    if not files:
-        loc = loc_from_job(job)
-        return loc["backend_loc"], loc["frontend_loc"], 0
-    backend = frontend = 0
-    for path, text in files.items():
-        if not isinstance(text, str):
-            continue
-        lines = sum(1 for line in text.splitlines() if line.strip())
-        if path.startswith("frontend/") or path.endswith(_FRONTEND_EXT):
-            frontend += lines
-        elif path.endswith(_BACKEND_EXT):
-            backend += lines
-    return backend, frontend, len(files)
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _pass_rate(status: str | None, summary: dict[str, Any]) -> float | None:
+    """The conformance pass rate; 0 for an app that never deployed, None when not recorded."""
+    rate = _number(summary.get("pass_rate"))
+    if rate is not None:
+        return rate
+    return 0.0 if status in _NOT_DEPLOYED else None
+
+
+def _rules(config: dict[str, Any]) -> dict[str, Any]:
+    rules = default_rules()
+    for key in RULE_KEYS:
+        if key in config:
+            rules[key] = bool(config[key])
+    return rules
 
 
 def app_table(
@@ -106,18 +135,18 @@ def app_table(
     *,
     include_ai: bool = False,
     line_tolerance: int = 2,
+    plan_hash: str | None = None,
+    rules: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """One row per job with every per-app quantity the report aggregates; plus the issue breakdowns."""
-    issues = issue_breakdowns(jobs, include_ai=include_ai, line_tolerance=line_tolerance)
+    """One row per job with every per-app quantity the report aggregates; plus the issue breakdowns.
+
+    Analysis columns come from the job's canonical run under one plan
+    (``issue_breakdowns``); they are None for jobs not measured under it
+    (``analysis_status`` says why) and for an unavailable static measurement.
+    """
+    selection = select_measured([j.id for j in jobs], plan_hash=plan_hash, rules=rules)
+    issues = issue_breakdowns(jobs, include_ai=include_ai, line_tolerance=line_tolerance, selection=selection)
     by_job = {a["job_id"]: a for a in issues["per_app"]}
-    run_ids = AnalysisRun.latest_ids_per_job([j.id for j in jobs])
-    complexity: dict[str, dict[str, Any]] = {}
-    for job_id, metrics in ToolResult.objects.filter(run_id__in=run_ids, tool_slug="radon").values_list(
-        "run__generation_job_id",
-        "metrics",
-    ):
-        if isinstance(metrics, dict) and metrics.get("average_complexity") is not None:
-            complexity[str(job_id)] = metrics
 
     rows = []
     for job in jobs:
@@ -127,12 +156,14 @@ def app_table(
         evaluation = data.get("evaluation") if isinstance(data.get("evaluation"), dict) else {}
         status = evaluation.get("status")
         evaluated = bool(status) and status not in NON_SAMPLE_STATUSES
-        summary = evaluation.get("summary") or {}
-        backend, frontend, files = _split_loc(job)
-        total = backend + frontend
+        summary = evaluation.get("summary") if isinstance(evaluation.get("summary"), dict) else {}
+        loc = loc_from_job(job)
+        backend, frontend, total = loc["backend_loc"], loc["frontend_loc"], loc["total_loc"]
         analyzed = by_job.get(jid)
-        cx = complexity.get(jid) or {}
+        measured = selection.measured.get(job.id)
+        complexity = ((measured.measurement.get("metrics") or {}).get("complexity") if measured else None) or {}
         healing = ((evaluation.get("build") or {}).get("healing")) or {}
+        static_ok = bool(analyzed and analyzed["static_available"])
         rows.append(
             {
                 **job_labels(job),
@@ -143,7 +174,7 @@ def app_table(
                 "status": job.status,
                 "generated": job.status == GenerationJob.Status.COMPLETED,
                 "truncated": any(data.get(f"{p}_truncated") for p in ("backend", "frontend")),
-                "files": files,
+                "files": loc.get("files"),
                 "loc_backend": backend,
                 "loc_frontend": frontend,
                 "loc": total,
@@ -152,16 +183,25 @@ def app_table(
                 "evaluated": evaluated,
                 "deployed": status in ("passed", "failed") if evaluated else None,
                 "functional_passed": status == "passed" if evaluated else None,
-                "pass_rate": float(summary.get("pass_rate", 0.0)) if evaluated else None,
+                "pass_rate": _pass_rate(status, summary) if evaluated else None,
+                "analysis_status": selection.status_of(job.id),
+                "analysis_run_id": analyzed["run_id"] if analyzed else None,
                 "analyzed": analyzed is not None,
+                "static_measured": static_ok,
+                "measured_loc": analyzed["loc"] if analyzed else None,
                 "raw_findings": analyzed["raw_findings"] if analyzed else None,
                 "unique_issues": analyzed["unique_issues"] if analyzed else None,
                 "security_unique": analyzed["security_unique"] if analyzed else None,
                 "issues_per_kloc": analyzed["unique_per_kloc"] if analyzed else None,
                 **{f"unique_{s}": (analyzed or {}).get(f"unique_{s}") for s in SEVERITIES},
-                "avg_complexity": cx.get("average_complexity"),
-                "max_complexity": cx.get("max_complexity"),
-                "cost": float(metrics["cost"]) if metrics.get("cost") else None,
+                "ai_consensus_issues": analyzed["ai_consensus_issues"] if analyzed else None,
+                "ai_consensus_per_kloc": analyzed["ai_consensus_per_kloc"] if analyzed else None,
+                "ai_cost_usd": analyzed["ai_cost_usd"] if analyzed else None,
+                "ai_cost_complete": analyzed["ai_cost_complete"] if analyzed else None,
+                "avg_complexity": _number(complexity.get("mean")),
+                "max_complexity": _number(complexity.get("max")),
+                "complexity_source": complexity.get("source"),
+                "cost": _number(metrics.get("cost")),
                 "tokens": metrics.get("total_tokens"),
                 "healing_changed": healing.get("changed"),
             },
@@ -181,9 +221,11 @@ def _share(values) -> float | None:
 
 def model_criteria(rows: list[dict[str, Any]]) -> dict[str, float | None]:
     """The plan metrics for one group of app rows (``analysis_plan.METRICS``)."""
-    analyzed = [r for r in rows if r["analyzed"]]
-    loc = sum(r["loc"] for r in analyzed)
-    unique = sum(r["unique_issues"] or 0 for r in analyzed)
+    # Static outcomes only over apps whose static measurement is available;
+    # issues and SLOC of the same apps (measured scope).
+    analyzed = [r for r in rows if r["unique_issues"] is not None]
+    loc = sum(r["measured_loc"] or 0 for r in analyzed)
+    unique = sum(r["unique_issues"] for r in analyzed if r["measured_loc"])
     return {
         "deploy_rate": _share(r["deployed"] for r in rows),
         "pass_rate": _mean(r["pass_rate"] for r in rows),
@@ -219,6 +261,7 @@ def _funnel_row(rows) -> dict[str, Any]:
         "generated": len(generated),
         "truncated": sum(1 for r in generated if r["truncated"]),
         "analyzed": sum(1 for r in rows if r["analyzed"]),
+        "static_measured": sum(1 for r in rows if r["static_measured"]),
         "evaluated": len(evaluated),
         "deployed": len(deployed),
         "functionally_correct": len(passed),
@@ -241,7 +284,8 @@ def funnel_section(rows) -> dict[str, Any]:
 
 
 def security_bounds_section(rows) -> dict[str, Any]:
-    analyzed = [r for r in rows if r["analyzed"]]
+    # Apps without an available static measurement are unknown, not "no issues".
+    analyzed = [r for r in rows if r["static_measured"]]
     n = len(analyzed)
 
     def severity_rows(items):
@@ -300,6 +344,7 @@ def code_metrics_section(rows, seed: int) -> dict[str, Any]:
         return {
             "apps": len(items),
             "loc": inf.describe([r["loc"] for r in items]),
+            "measured_loc": inf.describe([r["measured_loc"] for r in items]),
             "loc_backend": inf.describe([r["loc_backend"] for r in items]),
             "loc_frontend": inf.describe([r["loc_frontend"] for r in items]),
             "files": inf.describe([r["files"] for r in items]),
@@ -318,11 +363,11 @@ def code_metrics_section(rows, seed: int) -> dict[str, Any]:
                 "models": len(per_model),
                 "loc_cv_across_models": inf.coefficient_of_variation([v for v in per_model.values() if v is not None]),
                 "complexity_cv_across_models": inf.coefficient_of_variation([v for v in cx.values() if v is not None]),
-                "loc_min_model": min(per_model, key=lambda m: per_model[m] or 0) if per_model else None,
-                "loc_max_model": max(per_model, key=lambda m: per_model[m] or 0) if per_model else None,
+                "loc_min_model": min(known, key=lambda m: known[m]) if (known := _known(per_model)) else None,
+                "loc_max_model": max(known, key=lambda m: known[m]) if known else None,
             },
         )
-    analyzed = [r for r in generated if r["analyzed"]]
+    analyzed = [r for r in generated if r["static_measured"]]
     return {
         "overall": summary(generated),
         "by_model": [{"model": k, **summary(v)} for k, v in _group(generated, "model").items()],
@@ -330,12 +375,16 @@ def code_metrics_section(rows, seed: int) -> dict[str, Any]:
         "spread_across_models": spread,
         # App-level, so n = apps; apps of one model are not independent.
         "app_level_correlations": [
-            _app_correlation(analyzed, "loc", "unique_issues", seed),
+            _app_correlation(analyzed, "measured_loc", "unique_issues", seed),
             _app_correlation(analyzed, "avg_complexity", "issues_per_kloc", seed),
             _app_correlation([r for r in generated if r["evaluated"]], "loc", "pass_rate", seed),
         ],
         "note": "App-level correlations treat apps as independent; apps of one model or template are clustered.",
     }
+
+
+def _known(values: dict[Any, float | None]) -> dict[Any, float]:
+    return {k: v for k, v in values.items() if v is not None}
 
 
 def _model_parameters(jobs) -> dict[str, dict[str, Any]]:
@@ -506,16 +555,68 @@ def planned_comparisons_section(rows, experiment: Experiment | None, plan: dict[
 
 def _fingerprint(rows) -> str:
     payload = json.dumps(
-        sorted([r["job_id"], r["status"], r["evaluation_status"], r["unique_issues"]] for r in rows),
+        sorted(
+            [r["job_id"], r["status"], r["evaluation_status"], r["analysis_run_id"], r["unique_issues"]] for r in rows
+        ),
         default=str,
     )
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def protocol_section(jobs, rows, experiment: Experiment | None, config: dict[str, Any]) -> dict[str, Any]:
-    run_ids = AnalysisRun.latest_ids_per_job([j.id for j in jobs])
-    tools_used = sorted(set(ToolResult.objects.filter(run_id__in=run_ids).values_list("tool_slug", flat=True)))
-    versions = dict(AnalyzerTool.objects.filter(slug__in=tools_used).values_list("slug", "version"))
+def _analysis_plan_block(plan_hash: str | None, coverage: dict[str, Any]) -> dict[str, Any]:
+    """The frozen analysis plan the issue tables read: tools + versions, reviewer, image, engine versions."""
+    plan = {}
+    if plan_hash:
+        plan = (
+            AnalysisRun.objects.filter(plan_hash=plan_hash)
+            .exclude(purpose=AnalysisRun.Purpose.CANARY)
+            .order_by("-created_at")
+            .values_list("plan", flat=True)
+            .first()
+        ) or {}
+    reviewer = plan.get("reviewer") if isinstance(plan.get("reviewer"), dict) else {}
+    model = reviewer.get("model") if isinstance(reviewer.get("model"), dict) else {}
+    return {
+        "plan_hash": plan_hash,
+        "plan_rule": coverage.get("plan_rule"),
+        "profile": plan.get("profile"),
+        "tools": [
+            {
+                "slug": t.get("slug"),
+                "version": t.get("version") or "",
+                "kind": t.get("kind"),
+                "category": t.get("category"),
+                "required": t.get("required"),
+                "config_hash": t.get("config_hash"),
+            }
+            for t in plan.get("tools") or []
+            if isinstance(t, dict)
+        ],
+        "reviewer": None
+        if not reviewer.get("enabled")
+        else {
+            "engine": reviewer.get("engine"),
+            "harness": reviewer.get("harness"),
+            "model": model.get("canonical_slug") or model.get("slug"),
+            "samples": reviewer.get("samples"),
+            "prompt_sha256": reviewer.get("prompt_sha256"),
+        },
+        "analyzer_image": (plan.get("analyzer_image") or {}).get("tag"),
+        "engine_versions": plan.get("engine_versions") or {},
+        "mapping_hashes": plan.get("mapping_hashes") or {},
+    }
+
+
+def protocol_section(
+    jobs,
+    rows,
+    experiment: Experiment | None,
+    config: dict[str, Any],
+    *,
+    issues: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    coverage = (issues or {}).get("coverage") or {}
+    analysis = _analysis_plan_block((issues or {}).get("plan_hash"), coverage)
     evaluators = Counter()
     for job in jobs:
         ev = (job.result_data or {}).get("evaluation") if isinstance(job.result_data, dict) else None
@@ -556,12 +657,15 @@ def protocol_section(jobs, rows, experiment: Experiment | None, config: dict[str
         "prompt_versions": len({r["prompt_hash"] for r in rows if r["prompt_hash"]}),
         "apps_per_model": dict(repeats),
         "trials_per_cell": dict(Counter(cells.values())),
-        "tools": [{"slug": t, "version": versions.get(t, "")} for t in tools_used],
+        # The analysis plan's tools with the versions it froze (from the analyzer image manifest).
+        "tools": [{"slug": t["slug"], "version": t["version"]} for t in analysis["tools"]],
+        "analysis_plan": analysis,
         "evaluators": dict(evaluators),
         "settings": {
             "include_ai": bool(config.get("include_ai")),
             "line_tolerance": int(config.get("line_tolerance", 2)),
             "exclude_truncated": bool(config.get("exclude_truncated", True)),
+            "plan_hash": config.get("plan_hash") or None,
             "seed": int(config.get("seed", 0)),
         },
         "data_fingerprint": _fingerprint(rows),
@@ -671,20 +775,61 @@ def validity_section(
             f"No {' or '.join(zero)} issues in {security['apps_analyzed']} apps: the per-app rate is bounded at "
             f"{bound:.1%} (95%), not zero; the templates may not exercise these classes.",
         )
-    if not config.get("include_ai"):
+    add(
+        "ai_separate",
+        "info",
+        "issues",
+        "AI-reviewer findings are never part of static issue counts (opinions, not measurements); "
+        "their consensus is reported in the ai_* columns.",
+    )
+    coverage = issues.get("coverage") or {}
+    unmeasured = {
+        key: coverage.get(key, 0)
+        for key in ("not_analysed", "analysis_failed", "in_progress", "incomplete", "other_plan", "excluded")
+        if coverage.get(key)
+    }
+    if unmeasured:
         add(
-            "ai_excluded",
+            "not_measured",
+            "warning",
+            "issues, security_bounds, ranking",
+            f"{sum(unmeasured.values())} app(s) have no measurement under the analysis plan ("
+            + ", ".join(f"{k}: {v}" for k, v in unmeasured.items())
+            + "); issue tables leave them out rather than count them as clean.",
+        )
+    if coverage.get("mixed_plans"):
+        add(
+            "mixed_analysis_plans",
             "info",
             "issues",
-            "AI-reviewer findings are excluded from issue counts (opinions, not measurements).",
+            f"Apps were analysed under {len(coverage.get('plans') or {})} analysis plans; only runs of plan "
+            f"{(coverage.get('plan_hash') or '')[:12]} ({coverage.get('plan_rule')}) are compared. "
+            "Pin plan_hash to choose another.",
         )
-    failed = sum(t["failed"] for t in accounting["tools"]["latest"])
+    static_missing = sum(1 for r in rows if r["analyzed"] and not r["static_measured"])
+    if static_missing:
+        add(
+            "static_unavailable",
+            "warning",
+            "issues, security_bounds",
+            f"{static_missing} analysed app(s) have no static measurement (a required tool failed); "
+            "their issue counts are missing, not zero.",
+        )
+    if any(r["ai_cost_complete"] is False for r in rows):
+        add(
+            "ai_cost_incomplete",
+            "info",
+            "accounting",
+            "The AI review cost of some apps is a lower bound (a replicate's spend is unknown).",
+        )
+    failed = sum(t["failed"] + t["timed_out"] for t in accounting["tools"]["latest"])
     if failed:
         add(
             "tool_failures",
             "warning",
             "issues",
-            f"{failed} tool execution(s) failed; affected apps undercount issues.",
+            f"{failed} tool execution(s) failed or timed out; a failed required tool makes that app's "
+            "static measurement unavailable (missing data), an optional one is listed per run.",
         )
     if correlations["effective_context_differs"]:
         add(
@@ -703,7 +848,7 @@ def validity_section(
             "correlations",
             f"{len(unstable)} correlation(s) change sign when one model is removed.",
         )
-    if issues["totals"]["raw_findings"] and issues["totals"]["duplicate_findings"]:
+    if issues["totals"]["raw_findings"] and issues["totals"]["duplicate_findings"]:  # both None-safe
         share = issues["totals"]["duplicate_findings"] / issues["totals"]["raw_findings"]
         add(
             "duplicates",
@@ -746,7 +891,13 @@ def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any
         jobs_qs = jobs_qs.filter(id__in=[j.id for j in jobs])
     plan = (experiment.analysis_plan if experiment else None) or {}
 
-    rows, issues = app_table(jobs, include_ai=include_ai, line_tolerance=line_tolerance)
+    rows, issues = app_table(
+        jobs,
+        include_ai=include_ai,
+        line_tolerance=line_tolerance,
+        plan_hash=config.get("plan_hash") or None,
+        rules=_rules(config),
+    )
 
     by_model = _group([r for r in rows if r["model"]], "model")
     criteria_by_model = {m: model_criteria(v) for m, v in by_model.items()}
@@ -765,11 +916,11 @@ def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any
     correlations = correlations_section(_model_parameters(jobs), criteria_by_model, seed)
     security = security_bounds_section(rows)
     healing = healing_impact(jobs_qs)
-    accounting = run_accounting(jobs_qs)
-    protocol = protocol_section(jobs, rows, experiment, config)
+    accounting = run_accounting(jobs_qs, run_ids=[r["analysis_run_id"] for r in rows if r["analysis_run_id"]])
+    protocol = protocol_section(jobs, rows, experiment, config, issues=issues)
     protocol["truncated_excluded"] = total_jobs - len(jobs)
 
-    issues_out = {k: v for k, v in issues.items() if k not in ("issues", "per_app")}
+    issues_out = {k: v for k, v in issues.items() if k not in ("issues", "per_app", "ai_issues")}
     return {
         "protocol": protocol,
         "definitions": DEFINITIONS,

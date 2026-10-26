@@ -20,6 +20,11 @@ import markedAlert from "marked-alert";
 import { gfmHeadingId } from "marked-gfm-heading-id";
 import DOMPurify from "dompurify";
 import type { Highlighter } from "shiki";
+import {
+  getHighlighter,
+  resolveLanguage,
+  SHIKI_THEMES,
+} from "$lib/utils/highlight";
 
 export interface Heading {
   id: string;
@@ -33,87 +38,27 @@ export interface RenderedDoc {
   hasMermaid: boolean;
 }
 
-const SHIKI_LANGS = [
-  "bash",
-  "sh",
-  "shell",
-  "console",
-  "python",
-  "py",
-  "javascript",
-  "js",
-  "typescript",
-  "ts",
-  "tsx",
-  "jsx",
-  "json",
-  "jsonc",
-  "yaml",
-  "yml",
-  "toml",
-  "ini",
-  "dockerfile",
-  "docker",
-  "html",
-  "css",
-  "scss",
-  "svelte",
-  "sql",
-  "diff",
-  "markdown",
-  "md",
-  "text",
-  "plaintext",
-];
+type Transformers = typeof import("@shikijs/transformers");
 
-const LANG_ALIASES: Record<string, string> = {
-  py: "python",
-  js: "javascript",
-  ts: "typescript",
-  yml: "yaml",
-  docker: "dockerfile",
-  sh: "bash",
-  shell: "bash",
-  console: "bash",
-  plaintext: "text",
-  md: "markdown",
-};
+let _transformersPromise: Promise<Transformers> | null = null;
 
-let _highlighterPromise: Promise<{
+/** The shared highlighter (`$lib/utils/highlight`) plus the notation transformers. */
+async function getDocsHighlighter(): Promise<{
   highlighter: Highlighter;
-  transformerNotationDiff: any;
-  transformerNotationHighlight: any;
-  transformerNotationFocus: any;
-}> | null = null;
-
-function getHighlighter(): Promise<{
-  highlighter: Highlighter;
-  transformerNotationDiff: any;
-  transformerNotationHighlight: any;
-  transformerNotationFocus: any;
+  transformers: Transformers;
 }> {
-  if (!_highlighterPromise) {
-    _highlighterPromise = Promise.all([
-      import("shiki"),
-      import("@shikijs/transformers"),
-    ]).then(([shiki, transformers]) => {
-      return shiki
-        .createHighlighter({
-          themes: ["github-light", "github-dark"],
-          langs: SHIKI_LANGS,
-        })
-        .then((highlighter) => {
-          return {
-            highlighter,
-            transformerNotationDiff: transformers.transformerNotationDiff,
-            transformerNotationHighlight:
-              transformers.transformerNotationHighlight,
-            transformerNotationFocus: transformers.transformerNotationFocus,
-          };
-        });
+  if (!_transformersPromise) {
+    const promise = import("@shikijs/transformers");
+    _transformersPromise = promise;
+    promise.catch(() => {
+      if (_transformersPromise === promise) _transformersPromise = null;
     });
   }
-  return _highlighterPromise;
+  const [highlighter, transformers] = await Promise.all([
+    getHighlighter(),
+    _transformersPromise,
+  ]);
+  return { highlighter, transformers };
 }
 
 function escapeHtml(s: string): string {
@@ -127,13 +72,6 @@ function escapeHtml(s: string): string {
 
 function escapeAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-}
-
-function langOrFallback(lang: string, highlighter: Highlighter): string {
-  const aliased = LANG_ALIASES[lang] ?? lang;
-  const loaded = new Set<string>(highlighter.getLoadedLanguages());
-  if (loaded.has(aliased)) return aliased;
-  return "text";
 }
 
 interface CodeMeta {
@@ -191,12 +129,12 @@ function parseCodeMeta(rawLang: string): CodeMeta {
 
 /** Render markdown to sanitized HTML. */
 export async function renderMarkdown(raw: string): Promise<RenderedDoc> {
+  const { highlighter, transformers } = await getDocsHighlighter();
   const {
-    highlighter,
     transformerNotationDiff,
     transformerNotationHighlight,
     transformerNotationFocus,
-  } = await getHighlighter();
+  } = transformers;
 
   const marked = new Marked({
     gfm: true,
@@ -214,12 +152,12 @@ export async function renderMarkdown(raw: string): Promise<RenderedDoc> {
           return `<div class="mermaid-placeholder" data-source="${escapeAttr(text)}"></div>`;
         }
 
-        const effective = langOrFallback(meta.lang || "text", highlighter);
+        const effective = resolveLanguage(meta.lang || "text", highlighter);
         const displayLang = meta.lang || "text";
 
         const highlighted = highlighter.codeToHtml(text, {
           lang: effective,
-          themes: { light: "github-light", dark: "github-dark" },
+          themes: SHIKI_THEMES,
           defaultColor: false,
           transformers: [
             transformerNotationDiff({ matchAlgorithm: "v3" }),

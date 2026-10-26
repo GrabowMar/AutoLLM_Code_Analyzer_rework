@@ -3,11 +3,12 @@ from __future__ import annotations
 import factory
 from factory.django import DjangoModelFactory
 
+from backend.analysis.models import AnalysisProfile
 from backend.analysis.models import AnalysisRun
+from backend.analysis.models import AnalysisStudy
 from backend.analysis.models import AnalyzerTool
-from backend.analysis.models import AnalyzerWorkspace
 from backend.analysis.models import Finding
-from backend.analysis.models import InstalledTool
+from backend.analysis.models import ReviewSample
 from backend.analysis.models import ToolResult
 from backend.users.tests.factories import UserFactory
 
@@ -20,30 +21,26 @@ class AnalyzerToolFactory(DjangoModelFactory):
     slug = factory.Sequence(lambda n: f"tool-{n}")
     name = factory.LazyAttribute(lambda o: o.slug.title())
     category = "lint"
-    kind = "container"
-    target_language = "python"
-    install_cmd = "pip install --user demo"
-    verify_cmd = "demo --version"
-    run_cmd = "demo {target} --json"
-    parser_key = "ruff"
+    kind = "static"
+    languages = factory.LazyFunction(lambda: ["python"])
     is_enabled = True
 
 
-class AnalyzerWorkspaceFactory(DjangoModelFactory):
+class AnalysisProfileFactory(DjangoModelFactory):
     class Meta:
-        model = AnalyzerWorkspace
+        model = AnalysisProfile
 
-    user = factory.SubFactory(UserFactory)
-    status = AnalyzerWorkspace.Status.READY
+    slug = factory.Sequence(lambda n: f"profile-{n}")
+    name = factory.LazyAttribute(lambda o: o.slug.title())
+    config = factory.LazyFunction(lambda: {"tools": [{"slug": "bandit", "required": True, "config": {}}]})
 
 
-class InstalledToolFactory(DjangoModelFactory):
+class AnalysisStudyFactory(DjangoModelFactory):
     class Meta:
-        model = InstalledTool
+        model = AnalysisStudy
 
-    workspace = factory.SubFactory(AnalyzerWorkspaceFactory)
-    tool = factory.SubFactory(AnalyzerToolFactory)
-    status = InstalledTool.Status.INSTALLED
+    name = factory.Sequence(lambda n: f"study-{n}")
+    created_by = factory.SubFactory(UserFactory)
 
 
 class AnalysisRunFactory(DjangoModelFactory):
@@ -52,8 +49,11 @@ class AnalysisRunFactory(DjangoModelFactory):
 
     name = factory.Sequence(lambda n: f"run-{n}")
     created_by = factory.SubFactory(UserFactory)
-    tool_slugs = factory.LazyFunction(lambda: ["bandit"])
-    source_code = factory.LazyFunction(lambda: {"backend": "print('hi')"})
+    plan = factory.LazyFunction(lambda: {"schema_version": 1, "tools": [{"slug": "bandit", "required": True}]})
+    plan_hash = factory.Sequence(lambda n: f"{n:064x}")
+    source_code = factory.LazyFunction(lambda: {"app.py": "print('hi')"})
+    status = AnalysisRun.Status.COMPLETED
+    is_complete = True
 
 
 class ToolResultFactory(DjangoModelFactory):
@@ -62,8 +62,20 @@ class ToolResultFactory(DjangoModelFactory):
 
     run = factory.SubFactory(AnalysisRunFactory)
     tool_slug = "bandit"
+    tool_kind = "static"
     category = "security"
-    status = ToolResult.Status.COMPLETED
+    status = ToolResult.Status.SUCCEEDED
+
+
+class ReviewSampleFactory(DjangoModelFactory):
+    class Meta:
+        model = ReviewSample
+
+    result = factory.SubFactory(ToolResultFactory, tool_slug="ai_review", tool_kind="ai", category="ai")
+    index = factory.Sequence(lambda n: n)
+    engine = "single_shot"
+    model_slug = "deepseek/deepseek-v4.1-flash"
+    status = ReviewSample.Status.SUCCEEDED
 
 
 class FindingFactory(DjangoModelFactory):
@@ -71,6 +83,11 @@ class FindingFactory(DjangoModelFactory):
         model = Finding
 
     result = factory.SubFactory(ToolResultFactory)
+    run = factory.LazyAttribute(lambda o: o.result.run)
+    tool_slug = factory.LazyAttribute(lambda o: o.result.tool_slug)
     severity = "high"
     category = "security"
     title = factory.Sequence(lambda n: f"Finding {n}")
+    file_path = "app.py"
+    line_number = 1
+    counted = True

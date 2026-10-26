@@ -76,6 +76,9 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
         ("Tools", ", ".join(f"{t['slug']} {t['version']}".strip() for t in protocol.get("tools") or [])),
         ("Evaluators", protocol.get("evaluators")),
         ("Analysis plan hash", experiment.get("analysis_plan_hash")),
+        ("Analyzer plan (plan_hash)", ((protocol.get("analysis_plan") or {}).get("plan_hash") or "")[:16] or None),
+        ("Analyzer plan chosen by", (protocol.get("analysis_plan") or {}).get("plan_rule")),
+        ("Analyzer image", (protocol.get("analysis_plan") or {}).get("analyzer_image")),
         ("Plan frozen at", experiment.get("analysis_plan_frozen_at")),
         ("Data fingerprint", (protocol.get("data_fingerprint") or "")[:16]),
         ("Seed", (protocol.get("settings") or {}).get("seed")),
@@ -124,8 +127,31 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
     )
 
     issues = data.get("issues") or {}
+    coverage = issues.get("coverage") or {}
+    if coverage:
+        tables.append(
+            Table(
+                "Analysis coverage",
+                [("k", "Apps"), ("v", "Count")],
+                [
+                    {"k": label, "v": coverage.get(key)}
+                    for key, label in (
+                        ("jobs", "In scope"),
+                        ("measured", "Measured under the plan"),
+                        ("excluded", "Excluded (eligibility rules)"),
+                        ("incomplete", "Only incomplete runs"),
+                        ("other_plan", "Analysed under another plan"),
+                        ("analysis_failed", "Analysis failed"),
+                        ("in_progress", "Analysis in progress"),
+                        ("not_analysed", "Not analysed"),
+                    )
+                ],
+                "Unmeasured apps are left out of the issue tables, never counted as clean.",
+            ),
+        )
     issue_cols = [
         ("apps", "Apps"),
+        ("static_measured_apps", "Measured"),
         ("raw_findings", "Raw findings"),
         ("unique_issues", "Unique issues"),
         ("duplicate_findings", "Duplicates"),
@@ -135,6 +161,7 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
         ("security_unique", "Security"),
         ("unique_critical", "Critical"),
         ("unique_high", "High"),
+        ("ai_consensus_issues", "AI consensus"),
     ]
     tables.append(
         Table("Issues by model (deduplicated)", [("model", "Model"), *issue_cols], issues.get("by_model") or []),

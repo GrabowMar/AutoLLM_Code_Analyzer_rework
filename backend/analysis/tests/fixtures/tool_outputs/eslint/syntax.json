@@ -1,0 +1,81 @@
+{
+ "captured_at": "2026-10-26T08:41:43+00:00",
+ "case": "syntax",
+ "config": {
+  "opt_in_rules": []
+ },
+ "files": [
+  {
+   "content": "<template>\n  <p>{{ msg }}</p>\n</template>\n\n<script setup>\nconst msg = ;\n</script>\n",
+   "kind": "source",
+   "language": "vue",
+   "path": "web/Broken.vue",
+   "sha256": "782ec9c791376cbe53243d45cb797df07f47857659ecc50a65f604fb1961e190"
+  },
+  {
+   "content": "export default function Broken() {\n  return <div>;\n}\n",
+   "kind": "source",
+   "language": "jsx",
+   "path": "web/broken.jsx",
+   "sha256": "28a5a5d4e28e8a38407fba9a4daee100f364f5ce963ba129cfb03b88455a883d"
+  },
+  {
+   "content": "export const total: = 1;\n",
+   "kind": "source",
+   "language": "typescript",
+   "path": "web/broken.ts",
+   "sha256": "9b84e2eca240145781062755c149e05c524081a6374bf25fafb848788df5da0d"
+  },
+  {
+   "content": "export default function Ok({ title }) {\n  return <h1>{title}</h1>;\n}\n",
+   "kind": "source",
+   "language": "jsx",
+   "path": "web/ok.jsx",
+   "sha256": "21905e57d07bf1373feddd9293814cca29f3e41a72b2dc25df51dfbdd768444a"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "env",
+   "-C",
+   "/src",
+   "/opt/analyzer/bin/eslint",
+   "--no-config-lookup",
+   "--config",
+   "/opt/analyzer/config/eslint.config.mjs",
+   "--no-inline-config",
+   "--format",
+   "json",
+   "--output-file",
+   "/out/eslint.json",
+   "--",
+   "./web/Broken.vue",
+   "./web/broken.jsx",
+   "./web/broken.ts",
+   "./web/ok.jsx"
+  ],
+  "env": {},
+  "mem_limit": "1g",
+  "report_files": [
+   "eslint.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "eslint.json": "[{\"filePath\":\"/src/web/Broken.vue\",\"messages\":[{\"ruleId\":null,\"fatal\":true,\"severity\":2,\"message\":\"Parsing error: Unexpected token ;\",\"line\":6,\"column\":12}],\"suppressedMessages\":[],\"errorCount\":1,\"fatalErrorCount\":1,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"source\":\"<template>\\n  <p>{{ msg }}</p>\\n</template>\\n\\n<script setup>\\nconst msg = ;\\n</script>\\n\",\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/web/broken.jsx\",\"messages\":[{\"ruleId\":null,\"fatal\":true,\"severity\":2,\"message\":\"Parsing error: Unexpected token `}`. Did you mean `&rbrace;` or `{\\\"}\\\"}`?\",\"line\":3,\"column\":1}],\"suppressedMessages\":[],\"errorCount\":1,\"fatalErrorCount\":1,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"source\":\"export default function Broken() {\\n  return <div>;\\n}\\n\",\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/web/broken.ts\",\"messages\":[{\"ruleId\":null,\"fatal\":true,\"severity\":2,\"message\":\"Parsing error: Type expected.\",\"line\":1,\"column\":20}],\"suppressedMessages\":[],\"errorCount\":1,\"fatalErrorCount\":1,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"source\":\"export const total: = 1;\\n\",\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/web/ok.jsx\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]}]"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 2.505
+ },
+ "schema": 1,
+ "tool": "eslint",
+ "tool_version": "10.12.0"
+}

@@ -1,0 +1,7 @@
+# Baked gitleaks configuration of the llmlab analyzer (gitleaks 8.30), passed
+# with --config so an analysed app's .gitleaks.toml is never loaded. The
+# upstream default rule set, unchanged.
+title = "llmlab analyzer"
+
+[extend]
+useDefault = true

@@ -1,0 +1,72 @@
+{
+ "captured_at": "2026-10-26T08:41:51+00:00",
+ "case": "suppressed",
+ "config": {
+  "extend_ignore": "",
+  "max_complexity": -1,
+  "max_line_length": 120,
+  "select": "E,F,W,C90"
+ },
+ "files": [
+  {
+   "content": "import json  # noqa: F401  # pylint: disable=unused-import\n\n\ndef calculate(expression):\n    return eval(expression)  # nosec B307  # noqa: S307  # nosemgrep  # pylint: disable=eval-used\n\n\nAPI_PASSWORD = \"Wr4ngle-Canary-Pass-91\"  # nosec  # noqa: S105  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/app.py",
+   "sha256": "0fc0e4ae4c4c42060a507f0aef522d3d3f3fc527f022f6991ab3d5afa7f9bfd5"
+  },
+  {
+   "content": "def order_lines(orders: list[dict]) -> list[str]:\n    lines = []\n    for order in orders:  # pylint: disable=use-list-copy\n        lines.append(str(order))\n    return lines\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/perf.py",
+   "sha256": "aedd0aa2c555da747142b912eadc51bcbdebbf4d51c41273e2ac8b3335606d33"
+  },
+  {
+   "content": "AWS_ACCESS_KEY_ID = \"AKIAZ7QX3LKD5PMW2N4J\"  # gitleaks:allow  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/settings.py",
+   "sha256": "6221abca0f58a4cde431ff6fdc4757345c028d1a3654ef3f7173805410f917ef"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/flake8",
+   "--isolated",
+   "--disable-noqa",
+   "--jobs=1",
+   "--format=%(path)s\u001f%(row)d\u001f%(col)d\u001f%(code)s\u001f%(text)s",
+   "--output-file=/out/flake8.txt",
+   "--max-line-length=120",
+   "--max-complexity=-1",
+   "--select=E,F,W,C90",
+   "/src/suppressed/app.py",
+   "/src/suppressed/perf.py",
+   "/src/suppressed/settings.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "flake8.txt"
+  ],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "flake8.txt": "/src/suppressed/app.py\u001f1\u001f1\u001fF401\u001f'json' imported but unused\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.26
+ },
+ "schema": 1,
+ "tool": "flake8",
+ "tool_version": "7.4.1"
+}

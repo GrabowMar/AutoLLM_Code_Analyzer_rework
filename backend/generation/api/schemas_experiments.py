@@ -110,6 +110,8 @@ class PostRunAnalysisSchema(Schema):
     enabled: bool = False
     tool_slugs: list[str] = []
     only_passing: bool = False
+    # Analysis profile id or slug (v2 engine); tool_slugs then restrict it.
+    profile: str | None = None
 
 
 class PostRunReportSchema(Schema):

@@ -1,32 +1,30 @@
+# hadolint: Dockerfile linter.
 slug: hadolint
 name: Hadolint
+kind: static
+category: container
+version: "2.15.1"
+adapter_version: 1
+languages: [dockerfile]
+file_kinds: ["*"]
+output_kind: findings
 description: >-
-  Dockerfile linter. Enforces best practices such as pinned base images,
-  cleaned-up package caches and COPY over ADD.
-category: lint
-kind: container
-target_language: any
-icon: container
-version: "2.12"
+  Dockerfile linter (best practices, pinned base images, ShellCheck on RUN).
+  Usually not applicable: generated apps' Dockerfiles are platform-owned.
 docs_url: https://github.com/hadolint/hadolint
-install_cmd: >-
-  mkdir -p /home/analyzer/.local/bin &&
-  curl -sSfL -o /home/analyzer/.local/bin/hadolint
-  https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64 &&
-  chmod +x /home/analyzer/.local/bin/hadolint
-verify_cmd: "hadolint --version"
-uninstall_cmd: "rm -f /home/analyzer/.local/bin/hadolint"
-# hadolint takes explicit file arguments, so find Dockerfiles first; --no-fail
-# keeps the exit code at 0 and -r makes xargs a no-op when none exist.
-run_cmd: "find {target} -type f \\( -name Dockerfile -o -name 'Dockerfile.*' -o -name '*.dockerfile' \\) -print0 | xargs -0 -r hadolint -f json --no-fail"
-parser_key: hadolint
-run_timeout: 60
-install_timeout: 120
-display_order: 90
-config_schema: []
-default_config: {}
-sample_filename: Dockerfile
-sample_code: |
-  FROM python:latest
-  RUN apt-get update && apt-get install curl
-  ADD app.py /app/
+icon: container
+display_order: 140
+default_required: false
+mem_limit: 256m
+timeout_s: 120
+notes: >-
+  Baked config (--config) and --disable-ignore-pragma, so neither an app's
+  .hadolint.yaml nor "# hadolint ignore=" comments apply. DL1000 (the
+  Dockerfile does not parse) is a coverage gap, not a finding.
+config_schema:
+  - name: ignore_rules
+    type: string
+    label: Ignored rules
+    description: Comma-separated DL/SC rule codes to ignore (--ignore).
+    default: ""
+    pattern: '^((DL|SC)[0-9]{4}(,(DL|SC)[0-9]{4})*)?$'

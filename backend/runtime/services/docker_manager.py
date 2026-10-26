@@ -294,7 +294,7 @@ def exec_in(
         if timeout_s and timeout_s > 0:
             # -s KILL (not --signal=KILL): the short form is the only one
             # BusyBox's timeout (Alpine-based images) understands; GNU
-            # coreutils' timeout (analyzer-base) accepts both.
+            # coreutils' timeout (Debian-based images) accepts both.
             run_cmd = ["timeout", "-s", "KILL", str(timeout_s), *run_cmd]
         result = container.exec_run(
             run_cmd,
@@ -344,49 +344,6 @@ def copy_files_in(name: str, files: dict[str, str], dest: str = "/work") -> dict
         return {"error": str(exc)}
     else:
         return {"status": "ok"}
-
-
-def run_detached(
-    image: str,
-    name: str,
-    command: list[str] | str,
-    env: dict[str, str] | None = None,
-    container_instance_id: str = "",
-    network: str = "",
-) -> str:
-    """Start a long-lived, hardened, network-isolated container and return its id.
-
-    Used for analyzer workspaces: no ports are published, all capabilities are
-    dropped, privilege escalation is disabled and a PID limit is enforced. The
-    container stays alive running *command* (typically ``sleep infinity``) so
-    tools can be installed and executed via :func:`exec_in`.
-    """
-    c = client()
-    if c is None:
-        msg = "Docker daemon unavailable"
-        raise ConnectionError(msg)
-
-    kwargs: dict[str, Any] = {
-        "name": name,
-        "command": command,
-        "environment": env or {},
-        "detach": True,
-        "cap_drop": ["ALL"],
-        "security_opt": ["no-new-privileges"],
-        "pids_limit": 256,
-        "mem_limit": "1g",
-        "cpu_period": 100000,
-        "cpu_quota": 100000,
-        "labels": {
-            "backend.managed": "true",
-            "backend.kind": "analyzer-workspace",
-            "backend.instance_id": container_instance_id,
-        },
-    }
-    if network:
-        kwargs["network"] = network
-    container = c.containers.run(image, **kwargs)
-    return container.id
 
 
 def run_once_with_files(

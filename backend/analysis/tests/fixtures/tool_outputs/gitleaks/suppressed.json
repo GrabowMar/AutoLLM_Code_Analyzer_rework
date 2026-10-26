@@ -1,0 +1,110 @@
+{
+ "captured_at": "2026-10-26T08:42:19+00:00",
+ "case": "suppressed",
+ "config": {},
+ "files": [
+  {
+   "content": "# hadolint ignore=DL3007\nFROM python:latest\n",
+   "kind": "config",
+   "language": "dockerfile",
+   "path": "suppressed/Dockerfile",
+   "sha256": "027ef084c0b7461355e8c4ae14b9eed1dea68fc05453d6710a2820b5a88858ec"
+  },
+  {
+   "content": "<template>\n  <!-- eslint-disable -->\n  <div v-html=\"html\"></div>\n</template>\n\n<script setup>\ndefineProps({ html: { type: String, default: \"\" } });\n</script>\n",
+   "kind": "source",
+   "language": "vue",
+   "path": "suppressed/Raw.vue",
+   "sha256": "b643d762a7f53d3c14568a99dff7aa0e5339044d8065abedbf42858b524e9d77"
+  },
+  {
+   "content": "import json  # noqa: F401  # pylint: disable=unused-import\n\n\ndef calculate(expression):\n    return eval(expression)  # nosec B307  # noqa: S307  # nosemgrep  # pylint: disable=eval-used\n\n\nAPI_PASSWORD = \"Wr4ngle-Canary-Pass-91\"  # nosec  # noqa: S105  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/app.py",
+   "sha256": "0fc0e4ae4c4c42060a507f0aef522d3d3f3fc527f022f6991ab3d5afa7f9bfd5"
+  },
+  {
+   "content": "<!-- htmlhint alt-require:false -->\n<!DOCTYPE html>\n<html lang=\"en\"><head><title>Page</title></head><body><img src=\"/a.png\"></body></html>\n",
+   "kind": "source",
+   "language": "html",
+   "path": "suppressed/page.html",
+   "sha256": "8e4a5e6d80d0ea5d95b40eefca74b1149a60aef31d5021bf43168edfe2c08de9"
+  },
+  {
+   "content": "def order_lines(orders: list[dict]) -> list[str]:\n    lines = []\n    for order in orders:  # pylint: disable=use-list-copy\n        lines.append(str(order))\n    return lines\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/perf.py",
+   "sha256": "aedd0aa2c555da747142b912eadc51bcbdebbf4d51c41273e2ac8b3335606d33"
+  },
+  {
+   "content": "// eslint-disable-next-line no-eval\nexport const run = (code) => eval(code);\n/* eslint-disable */\nexport const leftover = () => { const unused = 1; return 0; };\n",
+   "kind": "source",
+   "language": "javascript",
+   "path": "suppressed/run.js",
+   "sha256": "7d574a95ea3a6fd4706e740b142a31639288d9923385bda1b554bd0e6bfb10e7"
+  },
+  {
+   "content": "#!/bin/sh\n# shellcheck disable=SC2086\necho $1\n",
+   "kind": "source",
+   "language": "shell",
+   "path": "suppressed/run.sh",
+   "sha256": "aa1284284d67e5aed166bfcb08d7801b66e64d817d5c57a1055c7c3887c08964"
+  },
+  {
+   "content": "AWS_ACCESS_KEY_ID = \"AKIAZ7QX3LKD5PMW2N4J\"  # gitleaks:allow  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/settings.py",
+   "sha256": "6221abca0f58a4cde431ff6fdc4757345c028d1a3654ef3f7173805410f917ef"
+  },
+  {
+   "content": "/* stylelint-disable */\n.card {\n  colr: red;\n}\n",
+   "kind": "source",
+   "language": "css",
+   "path": "suppressed/site.css",
+   "sha256": "1968d2b63531d08889ccdc3a587a49bf889d2579e09a39da217c5ba4315fa09d"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "sh",
+   "-c",
+   "set -eu; mkdir /tmp/scan; cd /src; cp --parents -- \"$@\" /tmp/scan/; cd /tmp; exec /opt/analyzer/bin/gitleaks dir /tmp/scan --config /opt/analyzer/config/gitleaks.toml --gitleaks-ignore-path /opt/analyzer/config --ignore-gitleaks-allow --report-format json --report-path /out/gitleaks.json --exit-code 0 --redact --no-banner --no-color --log-level warn",
+   "gitleaks",
+   "./suppressed/Dockerfile",
+   "./suppressed/Raw.vue",
+   "./suppressed/app.py",
+   "./suppressed/page.html",
+   "./suppressed/perf.py",
+   "./suppressed/run.js",
+   "./suppressed/run.sh",
+   "./suppressed/settings.py",
+   "./suppressed/site.css"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "gitleaks.json"
+  ],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "gitleaks.json": "[\n {\n  \"RuleID\": \"generic-api-key\",\n  \"Description\": \"Detected a Generic API Key, potentially exposing access to various services and sensitive operations.\",\n  \"StartLine\": 8,\n  \"EndLine\": 8,\n  \"StartColumn\": 2,\n  \"EndColumn\": 40,\n  \"Match\": \"API_PASSWORD = \\\"REDACTED\\\"\",\n  \"Secret\": \"REDACTED\",\n  \"File\": \"/tmp/scan/suppressed/app.py\",\n  \"SymlinkFile\": \"\",\n  \"Commit\": \"\",\n  \"Entropy\": 3.7544417,\n  \"Author\": \"\",\n  \"Email\": \"\",\n  \"Date\": \"\",\n  \"Message\": \"\",\n  \"Tags\": [],\n  \"Fingerprint\": \"/tmp/scan/suppressed/app.py:generic-api-key:8\"\n },\n {\n  \"RuleID\": \"aws-access-token\",\n  \"Description\": \"Identified a pattern that may indicate AWS credentials, risking unauthorized cloud resource access and data breaches on AWS platforms.\",\n  \"StartLine\": 1,\n  \"EndLine\": 1,\n  \"StartColumn\": 22,\n  \"EndColumn\": 41,\n  \"Match\": \"REDACTED\",\n  \"Secret\": \"REDACTED\",\n  \"File\": \"/tmp/scan/suppressed/settings.py\",\n  \"SymlinkFile\": \"\",\n  \"Commit\": \"\",\n  \"Entropy\": 4.121928,\n  \"Author\": \"\",\n  \"Email\": \"\",\n  \"Date\": \"\",\n  \"Message\": \"\",\n  \"Tags\": [],\n  \"Fingerprint\": \"/tmp/scan/suppressed/settings.py:aws-access-token:1\"\n }\n]\n"
+  },
+  "stderr": "8:42AM WRN leaks found: 2\n",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.748
+ },
+ "schema": 1,
+ "tool": "gitleaks",
+ "tool_version": "8.30.1"
+}

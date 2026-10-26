@@ -1,0 +1,243 @@
+{
+ "captured_at": "2026-10-26T08:42:24+00:00",
+ "case": "config",
+ "config": {
+  "base64_limit": 5.5,
+  "hex_limit": 4.0
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "a7c575e15cf284770b4b33371be54d864c4fb47b4f784dbf9a27db7beb28de46"
+  },
+  {
+   "kind": "manifest",
+   "language": "text",
+   "path": "clean/backend/requirements.txt",
+   "sha256": "267e2c6c3a55cf611ef9f26a7eaee92be8667769659b6546fdfe17f40d130384"
+  },
+  {
+   "kind": "source",
+   "language": "html",
+   "path": "clean/frontend/index.html",
+   "sha256": "a1dcb89b3bd3bc2f88231758fb9379ee6b74942abd6067a78e87ea4e6c6e143c"
+  },
+  {
+   "kind": "manifest",
+   "language": "json",
+   "path": "clean/frontend/package.json",
+   "sha256": "dbf76517391ec8ef83e2c02f28b04a91bdef86349354cf96e3a92f07d6e01d68"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/App.jsx",
+   "sha256": "50b34bd78e3cd0936b45a21d06065bf3a2816bdc18afdb09f9876378beeb279c"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "clean/frontend/src/TagBadge.vue",
+   "sha256": "47812dbf621a248a8411ee2aa9b0f7cdaaf1fee1d4d2b4e37569ad17d79351f5"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "clean/frontend/src/bookmarks.ts",
+   "sha256": "3872ba6ae0c99822ddbea2b5f454f11d68733ee860e6c078cd659fa4553c0e04"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/components/BookmarkList.jsx",
+   "sha256": "efd7854d492966cc76c2341a178b636bbf4567e6073ee63f1c4b44d1c29f1635"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "clean/frontend/src/components/Panel.tsx",
+   "sha256": "63a402046cdf7b1158644a4a595bf0b5bcd49eb4fb974ff2973f91d97e67f23b"
+  },
+  {
+   "kind": "source",
+   "language": "css",
+   "path": "clean/frontend/src/styles.css",
+   "sha256": "4d065f2c05073beba1e53f367ab341c797e2e718946053af4bb6ce8ab0302c28"
+  },
+  {
+   "kind": "source",
+   "language": "shell",
+   "path": "clean/scripts/backup.sh",
+   "sha256": "3a48cde33cb19bdee22815abb5ce1ea858d15f900a7e8de4b084d5a896b4b557"
+  },
+  {
+   "kind": "config",
+   "language": "dockerfile",
+   "path": "vulnerable/Dockerfile",
+   "sha256": "d652169744de5618ba7d78ce6db3264d17e98f1a9e08da6aedaa7b6dad97e017"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/app.py",
+   "sha256": "b7512ab0181ead6473277204f7f5cb79c467ccfe5c0458c8989e9d4c3facde98"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/reports.py",
+   "sha256": "4c3ad7f0c0309a26c22b308be50c086ca5d3d9436d18702d635fbff2148ef8c0"
+  },
+  {
+   "kind": "manifest",
+   "language": "text",
+   "path": "vulnerable/backend/requirements.txt",
+   "sha256": "09721ecb6d0151460f7f4fa6356620d4f69b186aeb4daedad2bf6d41023eb722"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/utils.py",
+   "sha256": "faebfaee33659a5f1b2fc249ad25d65194e23e53034e86aa04fd23190c569c13"
+  },
+  {
+   "kind": "source",
+   "language": "html",
+   "path": "vulnerable/frontend/index.html",
+   "sha256": "b44b5d32a7ae39b8c561e6388dc382201733f8cca518ba1758dd8d197d9e5116"
+  },
+  {
+   "kind": "manifest",
+   "language": "json",
+   "path": "vulnerable/frontend/package.json",
+   "sha256": "f8e68f2178a1127af90594b6541289ab1339e12a6db33838fe833a21463a47cc"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/App.jsx",
+   "sha256": "47a0a1ef7463a2fbdda619183d5a06fc98df96b885fc9ac423f2eb804450cbde"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "vulnerable/frontend/src/Banner.tsx",
+   "sha256": "fde9db28f3a89cc5d70d85571aeef23ae06527ed313e492889de7af3628dd5f2"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "vulnerable/frontend/src/Card.vue",
+   "sha256": "e3f1ac7af90e4290877fa1d335a8ee2ca2e6f6e07d5b18134bc8194d8cb4f5d1"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "vulnerable/frontend/src/api.ts",
+   "sha256": "10db8abdf7e86d4d1fcad8b1032fe585d8de4a9ed01057dc2cca191e1a4dad73"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Footer.jsx",
+   "sha256": "4d21c89dae359815df375738352440af702a72157da2815d9ec744590f4a94b9"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Header.jsx",
+   "sha256": "48f798d3de206f47a4d7edb0baf12379cfc62304952aa884b5117e3c967a9bdc"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/main.jsx",
+   "sha256": "d71c4e2d9fb272535669d50fc740276e318ed4ac0c7a6fe8d6db1fb8d259d487"
+  },
+  {
+   "kind": "source",
+   "language": "css",
+   "path": "vulnerable/frontend/src/styles.css",
+   "sha256": "51a2197d0c74a2982c73bbbc12f089566d9ec7877c37a2614c33b95771ed6d69"
+  },
+  {
+   "kind": "source",
+   "language": "shell",
+   "path": "vulnerable/scripts/backup.sh",
+   "sha256": "9abd3644d25880e5115ccc72af120ded63ce639dfc181468ed42dcb5d2f6bb78"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "env",
+   "-C",
+   "/src",
+   "/opt/analyzer/bin/detect-secrets",
+   "scan",
+   "--all-files",
+   "--no-verify",
+   "--disable-filter",
+   "detect_secrets.filters.allowlist.is_line_allowlisted",
+   "--disable-filter",
+   "detect_secrets.filters.heuristic.is_swagger_file",
+   "--base64-limit",
+   "5.5",
+   "--hex-limit",
+   "4.0",
+   "--",
+   "clean/backend/app.py",
+   "clean/backend/bookmarks.py",
+   "clean/backend/requirements.txt",
+   "clean/frontend/index.html",
+   "clean/frontend/package.json",
+   "clean/frontend/src/App.jsx",
+   "clean/frontend/src/TagBadge.vue",
+   "clean/frontend/src/bookmarks.ts",
+   "clean/frontend/src/components/BookmarkList.jsx",
+   "clean/frontend/src/components/Panel.tsx",
+   "clean/scripts/backup.sh",
+   "vulnerable/Dockerfile",
+   "vulnerable/backend/app.py",
+   "vulnerable/backend/reports.py",
+   "vulnerable/backend/requirements.txt",
+   "vulnerable/backend/utils.py",
+   "vulnerable/frontend/index.html",
+   "vulnerable/frontend/package.json",
+   "vulnerable/frontend/src/App.jsx",
+   "vulnerable/frontend/src/Banner.tsx",
+   "vulnerable/frontend/src/Card.vue",
+   "vulnerable/frontend/src/api.ts",
+   "vulnerable/frontend/src/components/Footer.jsx",
+   "vulnerable/frontend/src/components/Header.jsx",
+   "vulnerable/frontend/src/main.jsx",
+   "vulnerable/scripts/backup.sh"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "{\n  \"version\": \"1.5.0\",\n  \"plugins_used\": [\n    {\n      \"name\": \"ArtifactoryDetector\"\n    },\n    {\n      \"name\": \"AWSKeyDetector\"\n    },\n    {\n      \"name\": \"AzureStorageKeyDetector\"\n    },\n    {\n      \"name\": \"Base64HighEntropyString\",\n      \"limit\": 5.5\n    },\n    {\n      \"name\": \"BasicAuthDetector\"\n    },\n    {\n      \"name\": \"CloudantDetector\"\n    },\n    {\n      \"name\": \"DiscordBotTokenDetector\"\n    },\n    {\n      \"name\": \"GitHubTokenDetector\"\n    },\n    {\n      \"name\": \"GitLabTokenDetector\"\n    },\n    {\n      \"name\": \"HexHighEntropyString\",\n      \"limit\": 4.0\n    },\n    {\n      \"name\": \"IbmCloudIamDetector\"\n    },\n    {\n      \"name\": \"IbmCosHmacDetector\"\n    },\n    {\n      \"name\": \"IPPublicDetector\"\n    },\n    {\n      \"name\": \"JwtTokenDetector\"\n    },\n    {\n      \"name\": \"KeywordDetector\",\n      \"keyword_exclude\": \"\"\n    },\n    {\n      \"name\": \"MailchimpDetector\"\n    },\n    {\n      \"name\": \"NpmDetector\"\n    },\n    {\n      \"name\": \"OpenAIDetector\"\n    },\n    {\n      \"name\": \"PrivateKeyDetector\"\n    },\n    {\n      \"name\": \"PypiTokenDetector\"\n    },\n    {\n      \"name\": \"SendGridDetector\"\n    },\n    {\n      \"name\": \"SlackDetector\"\n    },\n    {\n      \"name\": \"SoftlayerDetector\"\n    },\n    {\n      \"name\": \"SquareOAuthDetector\"\n    },\n    {\n      \"name\": \"StripeDetector\"\n    },\n    {\n      \"name\": \"TelegramBotTokenDetector\"\n    },\n    {\n      \"name\": \"TwilioKeyDetector\"\n    }\n  ],\n  \"filters_used\": [\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_indirect_reference\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_likely_id_string\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_lock_file\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_not_alphanumeric_string\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_potential_uuid\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_prefixed_with_dollar_sign\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_sequential_string\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_templated_secret\"\n    }\n  ],\n  \"results\": {\n    \"vulnerable/backend/app.py\": [\n      {\n        \"type\": \"Secret Keyword\",\n        \"filename\": \"vulnerable/backend/app.py\",\n        \"hashed_secret\": \"45528b2fa5807d056b6ce46df857c1dc19b46d20\",\n        \"is_verified\": false,\n        \"line_number\": 23\n      },\n      {\n        \"type\": \"Secret Keyword\",\n        \"filename\": \"vulnerable/backend/app.py\",\n        \"hashed_secret\": \"8912c3479b1898edd24859956d0fa05fb464dff1\",\n        \"is_verified\": false,\n        \"line_number\": 24\n      },\n      {\n        \"type\": \"AWS Access Key\",\n        \"filename\": \"vulnerable/backend/app.py\",\n        \"hashed_secret\": \"2feb998de6165d1f3fd6e9d233618ebe75c85f55\",\n        \"is_verified\": false,\n        \"line_number\": 25\n      },\n      {\n        \"type\": \"Secret Keyword\",\n        \"filename\": \"vulnerable/backend/app.py\",\n        \"hashed_secret\": \"2b62accd50655add19d6f34b93646db737f941bb\",\n        \"is_verified\": false,\n        \"line_number\": 26\n      }\n    ]\n  },\n  \"generated_at\": \"2026-10-26T08:42:24Z\"\n}\n",
+  "timed_out": false,
+  "wall_seconds": 1.112
+ },
+ "schema": 1,
+ "tool": "detect-secrets",
+ "tool_version": "1.5.0"
+}

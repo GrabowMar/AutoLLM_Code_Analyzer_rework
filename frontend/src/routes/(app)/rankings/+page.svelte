@@ -1,572 +1,754 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
+	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
-	import Trophy from '@lucide/svelte/icons/trophy';
-	import Download from '@lucide/svelte/icons/download';
-	import Info from '@lucide/svelte/icons/info';
-	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
-	import { Checkbox } from '$lib/components/ui/checkbox';
-	import { SortableTh, TableToolbar, ScoreCell, rowLink, tableFrame, shortModelName, modelNamePrefix } from '$lib/components/table';
-	import ExternalLink from '@lucide/svelte/icons/external-link';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import { TableToolbar } from '$lib/components/table';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import CoverageFunnel from '$lib/components/insights/CoverageFunnel.svelte';
+	import CoverageNotice from '$lib/components/insights/CoverageNotice.svelte';
+	import SensitivityTable from '$lib/components/insights/SensitivityTable.svelte';
+	import { funnelGapCount, funnelGapLines, funnelTotal } from '$lib/components/insights/coverage';
+	import { fmtScore, shortHash } from '$lib/components/insights/format';
+	import RankingsTable from './RankingsTable.svelte';
+	import Trophy from '@lucide/svelte/icons/trophy';
+	import Download from '@lucide/svelte/icons/download';
+	import Info from '@lucide/svelte/icons/info';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
+	import ExternalLink from '@lucide/svelte/icons/external-link';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import Scale from '@lucide/svelte/icons/scale';
+	import X from '@lucide/svelte/icons/x';
+	import { formatApiError, isAbortError } from '$lib/api/core';
+	import { getProviders } from '$lib/api/models';
+	import { listExperiments, type ExperimentListItem } from '$lib/api/experiments';
 	import {
+		exportRankingsUrl,
 		getRankings,
 		getRankingsSensitivity,
-		exportRankingsUrl,
-		type RankingRow,
+		type RankingSortKey,
+		type RankingsFilters,
 		type RankingsResponse,
-		type SensitivityResponse,
-	} from '$lib/api/client';
+		type SensitivityResponse
+	} from '$lib/api/rankings';
 
-	type SortKey = 'mss' | 'empirical' | 'composite' | 'benchmark' | 'cost_efficiency' | 'accessibility' | 'adoption';
+	type SortDir = 'asc' | 'desc';
 
-	let searchQuery = $state('');
-	let providerFilter = $state('all');
-	let sortBy = $state<SortKey>('mss');
-	let sortAsc = $state(false);
-	let showMethodology = $state(false);
-	let selectedModels = $state<Set<string>>(new Set());
-	let includeFree = $state(true);
-	let hasBenchmarksOnly = $state(false);
-	let page = $state(1);
-	let perPage = $state(25);
+	const SORT_ITEMS: { value: RankingSortKey; label: string }[] = [
+		{ value: 'empirical', label: 'Empirical (measured)' },
+		{ value: 'n_trials', label: 'Analysed trials' },
+		{ value: 'composite', label: 'Composite' },
+		{ value: 'mss', label: 'MSS (metadata)' },
+		{ value: 'benchmark', label: 'Benchmarks' },
+		{ value: 'cost_efficiency', label: 'Cost efficiency' },
+		{ value: 'accessibility', label: 'Accessibility' },
+		{ value: 'adoption', label: 'Adoption' },
+		{ value: 'apps', label: 'Apps generated' },
+		{ value: 'name', label: 'Name' }
+	];
+	const PER_PAGE_OPTIONS = [25, 50, 100];
+	const MAX_COMPARE = 10;
 
+	// ── State (initialised from the URL; written back on every change) ──
+	const initial = page.url.searchParams;
+	const param = (key: string) => initial.get(key) ?? '';
+	const isSortKey = (v: string): v is RankingSortKey => SORT_ITEMS.some((s) => s.value === v);
+
+	let searchInput = $state(param('q'));
+	let search = $state(param('q'));
+	let provider = $state(param('provider'));
+	let paidOnly = $state(param('paid') === '1');
+	let benchOnly = $state(param('bench') === '1');
+	let sortBy = $state<RankingSortKey>(
+		isSortKey(param('sort')) ? (param('sort') as RankingSortKey) : 'empirical'
+	);
+	let sortDir = $state<SortDir>(param('dir') === 'asc' ? 'asc' : 'desc');
+	let pageNo = $state(Math.max(1, Number(param('page')) || 1));
+	let perPage = $state(PER_PAGE_OPTIONS.includes(Number(param('per'))) ? Number(param('per')) : 25);
+	let experimentId = $state(param('experiment'));
+	let planHash = $state(param('plan'));
+	let promptHash = $state(param('prompt_hash'));
+	let bundleKey = $state(param('bundle_key'));
+
+	let data = $state<RankingsResponse | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
-	let data = $state<RankingsResponse | null>(null);
+	let selected = $state<Set<string>>(new Set());
+
+	let experiments = $state<ExperimentListItem[]>([]);
+	let providers = $state<string[]>([]);
+
+	let showMethodology = $state(false);
 	let sensitivity = $state<SensitivityResponse | null>(null);
-	let sensitivityError = $state(false);
+	let sensitivityError = $state<string | null>(null);
+	let sensitivityLoading = $state(false);
 
-	function toggleMethodology() {
-		showMethodology = !showMethodology;
-		if (showMethodology && !sensitivity && !sensitivityError) {
-			getRankingsSensitivity()
-				.then((s) => (sensitivity = s))
-				.catch(() => (sensitivityError = true));
-		}
-	}
+	const filters = $derived<RankingsFilters>({
+		search: search || undefined,
+		provider: provider || undefined,
+		include_free: paidOnly ? false : undefined,
+		has_benchmarks: benchOnly || undefined,
+		experiment_id: experimentId || undefined,
+		plan_hash: planHash || undefined,
+		prompt_hash: promptHash || undefined,
+		bundle_key: bundleKey || undefined
+	});
+	const filtersKey = $derived(JSON.stringify(filters));
 
-	let providers = $derived(() => {
-		const set = new Set<string>();
-		for (const r of data?.rankings ?? []) if (r.provider) set.add(r.provider);
-		return [...set].sort();
+	// ── URL sync ──
+	$effect(() => {
+		const usp = new URLSearchParams();
+		if (search) usp.set('q', search);
+		if (provider) usp.set('provider', provider);
+		if (paidOnly) usp.set('paid', '1');
+		if (benchOnly) usp.set('bench', '1');
+		if (sortBy !== 'empirical') usp.set('sort', sortBy);
+		if (sortDir !== 'desc') usp.set('dir', sortDir);
+		if (pageNo > 1) usp.set('page', String(pageNo));
+		if (perPage !== 25) usp.set('per', String(perPage));
+		if (experimentId) usp.set('experiment', experimentId);
+		if (planHash) usp.set('plan', planHash);
+		if (promptHash) usp.set('prompt_hash', promptHash);
+		if (bundleKey) usp.set('bundle_key', bundleKey);
+		const next = usp.toString();
+		untrack(() => {
+			if (next === page.url.searchParams.toString()) return;
+			const url = new URL(page.url);
+			url.search = next;
+			goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+		});
 	});
 
+	// ── Loading: one request per state change, superseded ones aborted ──
+	let controller: AbortController | null = null;
+
 	async function load() {
+		controller?.abort();
+		const c = new AbortController();
+		controller = c;
 		loading = true;
 		error = null;
 		try {
-			data = await getRankings({
-				page,
-				per_page: perPage,
-				sort_by: sortBy,
-				sort_dir: sortAsc ? 'asc' : 'desc',
-				search: searchQuery || undefined,
-				provider: providerFilter === 'all' ? undefined : providerFilter,
-				include_free: includeFree,
-				has_benchmarks: hasBenchmarksOnly || undefined,
-			});
+			const res = await getRankings(
+				{ ...filters, page: pageNo, per_page: perPage, sort_by: sortBy, sort_dir: sortDir },
+				{ signal: c.signal }
+			);
+			if (c.signal.aborted) return;
+			data = res;
+			// A filter change can leave the page past the end: go to the last page.
+			if (res.pagination.total > 0 && pageNo > res.pagination.total_pages) {
+				pageNo = res.pagination.total_pages;
+			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load rankings';
+			if (c.signal.aborted || isAbortError(e)) return;
+			error = formatApiError(e, 'Could not load the rankings.');
 		} finally {
-			loading = false;
+			if (controller === c) loading = false;
 		}
 	}
-
-	onMount(load);
 
 	$effect(() => {
-		// Re-load when filters/sort/pagination change.
-		void [searchQuery, providerFilter, sortBy, sortAsc, includeFree, hasBenchmarksOnly, page, perPage];
-		load();
+		void [filtersKey, pageNo, perPage, sortBy, sortDir];
+		untrack(load);
 	});
 
-	function toggleSort(col: SortKey) {
-		if (sortBy === col) sortAsc = !sortAsc;
-		else { sortBy = col; sortAsc = false; }
-		page = 1;
+	// Sensitivity follows the same filters, fetched only while the panel is open.
+	let sensitivityController: AbortController | null = null;
+	async function loadSensitivity() {
+		sensitivityController?.abort();
+		const c = new AbortController();
+		sensitivityController = c;
+		sensitivityLoading = true;
+		sensitivityError = null;
+		try {
+			const res = await getRankingsSensitivity(filters, { signal: c.signal });
+			if (!c.signal.aborted) sensitivity = res;
+		} catch (e) {
+			if (c.signal.aborted || isAbortError(e)) return;
+			sensitivityError = formatApiError(e, 'Could not load the sensitivity analysis.');
+		} finally {
+			if (sensitivityController === c) sensitivityLoading = false;
+		}
 	}
 
-	function toggleSelect(slug: string) {
-		const next = new Set(selectedModels);
-		if (next.has(slug)) next.delete(slug);
-		else if (next.size < 10) next.add(slug);
-		selectedModels = next;
-	}
+	$effect(() => {
+		void filtersKey;
+		if (showMethodology) untrack(loadSensitivity);
+	});
 
-	const metaCols: { key: SortKey; field: keyof RankingRow; label: string; help: string }[] = [
-		{ key: 'mss', field: 'mss_score', label: 'MSS', help: 'Model Scoring System: weighted blend of the four dimensions' },
-		{ key: 'composite', field: 'composite_score', label: 'Composite', help: 'MSS 60% + empirical 40% where measured; otherwise equal to MSS' },
-		{ key: 'adoption', field: 'adoption_score', label: 'Adoption', help: 'OpenRouter rank and local generation count (35%)' },
-		{ key: 'benchmark', field: 'benchmark_score', label: 'Bench', help: 'Public coding benchmarks (30%)' },
-		{ key: 'cost_efficiency', field: 'cost_efficiency_score', label: 'Cost', help: 'Performance per dollar + context bonus (20%)' },
-		{ key: 'accessibility', field: 'accessibility_score', label: 'Access', help: 'License, API stability, documentation (15%)' },
-	];
-	const ALL_BENCH = [
-		{ key: 'humaneval', label: 'HumanEval' },
-		{ key: 'mbpp', label: 'MBPP' },
-		{ key: 'swebench', label: 'SWE-bench' },
-	];
-	// Benchmark columns with no value anywhere on this page are hidden (named in the toolbar).
-	const benchCols = $derived(ALL_BENCH.filter((c) => (data?.rankings ?? []).some((r) => typeof r[c.key] === 'number')));
-	const hiddenBench = $derived(ALL_BENCH.filter((c) => !benchCols.includes(c)).map((c) => c.label));
-	const colMax = $derived.by(() => {
-		const rows = data?.rankings ?? [];
-		const max = (f: (r: RankingRow) => number | null | undefined) =>
-			rows.reduce<number | null>((m, r) => {
-				const v = f(r);
-				return v != null && v > 0 && (m == null || v > m) ? v : m;
-			}, null);
-		// A "best" shared by most of the page (ties at 100.0) isn't a signal — only mark it when ≤ 2 rows hold it.
-		const lead = (f: (r: RankingRow) => number | null | undefined) => {
-			const m = max(f);
-			return m != null && rows.filter((r) => f(r) === m).length <= 2 ? m : null;
+	onMount(() => {
+		listExperiments({ per_page: 100, ordering: '-updated_at' })
+			.then((res) => (experiments = res.items.filter((e) => e.status !== 'draft')))
+			.catch(() => (experiments = []));
+		getProviders()
+			.then((list) => (providers = [...list].sort((a, b) => a.localeCompare(b))))
+			.catch(() => (providers = []));
+		return () => {
+			clearTimeout(searchTimer);
+			controller?.abort();
+			sensitivityController?.abort();
 		};
-		const out: Record<string, number | null> = { empirical: lead((r) => r.empirical_quality_score) };
-		for (const c of metaCols) out[c.key] = lead((r) => r[c.field] as number);
-		return out;
 	});
-	const sortLabel = $derived(
-		sortBy === 'empirical' ? 'Empirical' : (metaCols.find((c) => c.key === sortBy)?.label ?? sortBy)
-	);
 
-	function pct(v: number | null | undefined): string {
-		if (v == null) return '—';
-		return `${(v * 100).toFixed(1)}`;
+	// ── Interactions ──
+	let searchTimer: ReturnType<typeof setTimeout> | undefined;
+	function onSearchInput(value: string) {
+		clearTimeout(searchTimer);
+		searchTimer = setTimeout(() => {
+			if (value.trim() === search) return;
+			search = value.trim();
+			pageNo = 1;
+		}, 300);
 	}
 
-	function fmtBench(row: RankingRow, key: string): string {
-		const v = row[key];
-		if (typeof v !== 'number') return '—';
-		return v.toFixed(1);
-	}
-
-	function empiricalTitle(model: RankingRow): string {
-		const v = model.variance;
-		const parts = [`${model.n_trials} completed trial${model.n_trials === 1 ? 's — single runs are anecdotes' : 's'}`];
-		if (v?.density_per_kloc_mean != null) {
-			parts.push(`weighted findings density ${v.density_per_kloc_mean.toFixed(1)}/KLOC` +
-				(v.density_per_kloc_stdev != null ? ` (±${v.density_per_kloc_stdev.toFixed(1)} between trials)` : ''));
+	function onSort(key: RankingSortKey) {
+		if (sortBy === key) sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+		else {
+			sortBy = key;
+			sortDir = key === 'name' ? 'asc' : 'desc';
 		}
-		if (model.functional_pass_rate != null) {
-			parts.push(`smoke pass rate ${(model.functional_pass_rate * 100).toFixed(0)}%` +
-				(v?.smoke_pass_rate_stdev != null ? ` (±${(v.smoke_pass_rate_stdev * 100).toFixed(0)}pp)` : ''));
-		}
-		return parts.join(' · ');
+		pageNo = 1;
 	}
 
-	function indexOnPage(i: number): number {
-		return (page - 1) * perPage + i + 1;
+	function toggleSelect(id: string) {
+		const next = new Set(selected);
+		if (next.has(id)) next.delete(id);
+		else if (next.size < MAX_COMPARE) next.add(id);
+		selected = next;
 	}
 
-	const activeFilters = $derived.by((): FilterTag[] => {
+	function clearAllFilters() {
+		clearTimeout(searchTimer);
+		searchInput = '';
+		search = '';
+		provider = '';
+		paidOnly = false;
+		benchOnly = false;
+		pageNo = 1;
+	}
+
+	function clearScope() {
+		experimentId = '';
+		planHash = '';
+		promptHash = '';
+		bundleKey = '';
+		pageNo = 1;
+	}
+
+	function setPlan(hash: string) {
+		planHash = hash;
+		pageNo = 1;
+	}
+
+	const activeTags = $derived.by((): FilterTag[] => {
 		const tags: FilterTag[] = [];
-		if (providerFilter !== 'all') {
-			tags.push({ key: 'provider', label: `Provider: ${providerFilter}`, onRemove: () => { providerFilter = 'all'; page = 1; } });
+		if (search) {
+			tags.push({
+				key: 'search',
+				label: `“${search}”`,
+				onRemove: () => {
+					searchInput = '';
+					search = '';
+					pageNo = 1;
+				}
+			});
 		}
-		if (!includeFree) {
-			tags.push({ key: 'nofree', label: 'Paid only', onRemove: () => { includeFree = true; page = 1; } });
+		if (provider) {
+			tags.push({
+				key: 'provider',
+				label: `Provider: ${provider}`,
+				onRemove: () => {
+					provider = '';
+					pageNo = 1;
+				}
+			});
 		}
-		if (hasBenchmarksOnly) {
-			tags.push({ key: 'bench', label: 'With benchmarks', onRemove: () => { hasBenchmarksOnly = false; page = 1; } });
+		if (paidOnly) {
+			tags.push({
+				key: 'paid',
+				label: 'Paid only',
+				onRemove: () => {
+					paidOnly = false;
+					pageNo = 1;
+				}
+			});
 		}
-		if (searchQuery) {
-			tags.push({ key: 'search', label: `"${searchQuery}"`, onRemove: () => { searchQuery = ''; page = 1; } });
+		if (benchOnly) {
+			tags.push({
+				key: 'bench',
+				label: 'With benchmarks',
+				onRemove: () => {
+					benchOnly = false;
+					pageNo = 1;
+				}
+			});
 		}
 		return tags;
 	});
 
-	function clearAllFilters() {
-		searchQuery = '';
-		providerFilter = 'all';
-		includeFree = true;
-		hasBenchmarksOnly = false;
-		page = 1;
-	}
+	// ── Derived view data ──
+	const comparability = $derived(data?.comparability ?? null);
+	const gapCount = $derived(comparability ? funnelGapCount(comparability) : 0);
+	const experimentItems = $derived(
+		experiments.map((e) => ({ value: e.id, label: e.name, description: e.status }))
+	);
+	const selectedExperiment = $derived(experiments.find((e) => e.id === experimentId) ?? null);
+	const planItems = $derived.by(() => {
+		const plans = Object.entries(comparability?.plans ?? {}).sort((a, b) => b[1] - a[1]);
+		const items = plans.map(([hash, n]) => ({
+			value: hash,
+			label: `${shortHash(hash, 12)} · ${n} job${n === 1 ? '' : 's'}`
+		}));
+		if (planHash && !items.some((i) => i.value === planHash)) {
+			items.unshift({ value: planHash, label: `${shortHash(planHash, 12)} · no jobs in scope` });
+		}
+		return items;
+	});
+	const providerItems = $derived(providers.map((p) => ({ value: p, label: p })));
+	const exportHref = $derived(
+		exportRankingsUrl({ ...filters, sort_by: sortBy, sort_dir: sortDir })
+	);
+	const names = $derived(
+		Object.fromEntries((data?.rankings ?? []).map((r) => [r.model_id, r.model_name]))
+	);
+	const scopeActive = $derived(!!(experimentId || planHash || promptHash || bundleKey));
+	const sortLabel = $derived(SORT_ITEMS.find((s) => s.value === sortBy)?.label ?? sortBy);
+	const startRank = $derived(((data?.pagination.page ?? pageNo) - 1) * perPage + 1);
+	const weightsText = $derived(
+		comparability
+			? Object.entries(comparability.severity_weights)
+					.map(([k, v]) => `${k} ${v}`)
+					.join(', ')
+			: ''
+	);
 </script>
 
 <div class="space-y-6">
-	<PageHeader title="Model Rankings" description="Empirical quality measured on this platform, alongside the metadata-based MSS decision aid.">
+	<PageHeader
+		title="Model Rankings"
+		description="Quality measured by this platform's analyses, next to the metadata-based MSS decision aid. Every empirical number comes from one analysis plan."
+	>
 		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={load} disabled={loading}>
-				<RefreshCw class="mr-1.5 h-3.5 w-3.5 {loading ? 'animate-spin' : ''}" />
+				<RefreshCw class="h-3.5 w-3.5 {loading ? 'animate-spin motion-reduce:animate-none' : ''}" />
 				Refresh
 			</Button>
-			<Button variant="outline" size="sm" href={exportRankingsUrl()} target="_blank" rel="noopener noreferrer">
-				<Download class="mr-1.5 h-3.5 w-3.5" />
+			<Button variant="outline" size="sm" href={exportHref} download>
+				<Download class="h-3.5 w-3.5" />
 				Export CSV
 			</Button>
 		{/snippet}
 	</PageHeader>
 
-	<!-- Stats summary -->
+	<!-- Scope: which jobs and which analysis plan the empirical columns describe -->
+	<Card.Root>
+		<Card.Header class="pb-3">
+			<div class="flex flex-wrap items-start justify-between gap-2">
+				<div class="min-w-0">
+					<Card.Title class="flex items-center gap-2 text-base">
+						<Scale class="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+						Scope & comparability
+					</Card.Title>
+					<Card.Description>
+						Runs are comparable only under one frozen analysis plan. Jobs outside it are counted
+						here, never as zero findings.
+					</Card.Description>
+				</div>
+				{#if scopeActive}
+					<Button variant="ghost" size="sm" onclick={clearScope}>
+						<X class="h-3.5 w-3.5" />Reset scope
+					</Button>
+				{/if}
+			</div>
+		</Card.Header>
+		<Card.Content class="space-y-4">
+			<div class="grid gap-3 sm:grid-cols-2">
+				<div class="min-w-0 space-y-1.5">
+					<label for="rk-experiment" class="text-xs font-medium">Experiment</label>
+					<Select.Simple
+						id="rk-experiment"
+						value={experimentId}
+						items={experimentItems}
+						placeholder="All my generation jobs"
+						clearLabel="All my generation jobs"
+						onValueChange={(v) => {
+							experimentId = v;
+							pageNo = 1;
+						}}
+					/>
+				</div>
+				<div class="min-w-0 space-y-1.5">
+					<label for="rk-plan" class="text-xs font-medium">Analysis plan</label>
+					<Select.Simple
+						id="rk-plan"
+						value={planHash}
+						items={planItems}
+						placeholder="Auto: the plan that measured most jobs"
+						clearLabel="Auto: the plan that measured most jobs"
+						onValueChange={setPlan}
+					/>
+				</div>
+			</div>
+			{#if promptHash || bundleKey}
+				<div class="flex flex-wrap items-center gap-2 text-xs">
+					<span class="text-muted-foreground">Also limited to</span>
+					{#if promptHash}
+						<span class="fb-tag">
+							prompt {shortHash(promptHash, 12)}
+							<button
+								type="button"
+								class="cursor-pointer rounded p-0.5 hover:bg-background"
+								aria-label="Remove the prompt filter"
+								onclick={() => {
+									promptHash = '';
+									pageNo = 1;
+								}}><X class="h-3 w-3" /></button
+							>
+						</span>
+					{/if}
+					{#if bundleKey}
+						<span class="fb-tag">
+							bundle {bundleKey}
+							<button
+								type="button"
+								class="cursor-pointer rounded p-0.5 hover:bg-background"
+								aria-label="Remove the bundle filter"
+								onclick={() => {
+									bundleKey = '';
+									pageNo = 1;
+								}}><X class="h-3 w-3" /></button
+							>
+						</span>
+					{/if}
+				</div>
+			{/if}
+
+			{#if comparability}
+				<CoverageFunnel coverage={comparability} onSelectPlan={setPlan} />
+				<p class="text-[11px] text-muted-foreground">
+					Scoring <span class="mono-tag">{comparability.scoring_version}</span> · {comparability.density_basis}
+					· severity weights {weightsText} · density cap {comparability.density_cap}/KLOC
+					(provisional for this scoring version)
+				</p>
+			{:else if loading && !data}
+				<div class="skeleton h-16" aria-hidden="true"></div>
+			{/if}
+		</Card.Content>
+	</Card.Root>
+
+	{#if comparability && gapCount > 0}
+		<CoverageNotice
+			title="{gapCount} of {funnelTotal(
+				comparability
+			)} completed jobs are not in the empirical columns{selectedExperiment
+				? ` of ${selectedExperiment.name}`
+				: ''}"
+			items={funnelGapLines(comparability)}
+		/>
+	{/if}
+
 	{#if data}
-		<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+		<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
 			<div class="kpi-card">
-				<div class="kpi-label">Total Models</div>
+				<div class="kpi-label">Models</div>
 				<div class="kpi-value">{data.statistics.total}</div>
+				<div class="text-xs text-muted-foreground">
+					{data.statistics.unique_providers} providers
+				</div>
 			</div>
 			<div class="kpi-card">
-				<div class="kpi-label">With Benchmarks</div>
-				<div class="kpi-value">{data.statistics.with_benchmarks}</div>
+				<div class="kpi-label">With empirical score</div>
+				<div class="kpi-value">{data.statistics.measured_models ?? '—'}</div>
+				<div class="text-xs text-muted-foreground">usable static measurement</div>
 			</div>
 			<div class="kpi-card">
-				<div class="kpi-label">Free Models</div>
-				<div class="kpi-value">{data.statistics.free_models}</div>
+				<div class="kpi-label">Measured jobs</div>
+				<div class="kpi-value">{comparability?.measured ?? '—'}</div>
+				<div class="text-xs text-muted-foreground">
+					{#if comparability}of {funnelTotal(comparability)} completed{:else}no coverage data{/if}
+				</div>
 			</div>
 			<div class="kpi-card">
 				<div class="kpi-label">Avg MSS (decision aid)</div>
-				<div class="kpi-value">{(data.statistics.avg_mss * 100).toFixed(1)}</div>
+				<div class="kpi-value">{fmtScore(data.statistics.avg_mss)}</div>
+				<div class="text-xs text-muted-foreground">
+					{data.statistics.with_benchmarks} with benchmarks
+				</div>
 			</div>
 		</div>
 	{/if}
 
-	<!-- Filters -->
 	<FilterBar
-		searchPlaceholder="Search models..."
-		bind:searchValue={searchQuery}
-		activeTags={activeFilters}
+		searchPlaceholder="Search models…"
+		bind:searchValue={searchInput}
+		{onSearchInput}
+		{activeTags}
 		resultsText={data
-			? `${data.statistics.total} models · ${data.statistics.free_models} free · ${data.statistics.with_benchmarks} with benchmarks`
+			? `${data.statistics.total} models · ${data.statistics.measured_models ?? 0} measured · ${data.statistics.with_benchmarks} with benchmarks`
 			: ''}
+		page={data?.pagination.page}
+		pages={data?.pagination.total_pages}
+		onGoToPage={(p) => (pageNo = p)}
 		onClearAll={clearAllFilters}
 	>
 		{#snippet filters()}
-			<!-- Row 1: Provider -->
 			<div class="fb-group">
 				<span class="fb-group-label">Provider</span>
-				<select
-					class="fb-select"
+				<Select.Simple
+					size="sm"
+					class="w-48"
 					aria-label="Filter by provider"
-					bind:value={providerFilter}
-					onchange={() => { page = 1; }}
-				>
-					<option value="all">All Providers</option>
-					{#each providers() as p}
-						<option value={p}>{p}</option>
-					{/each}
-				</select>
+					value={provider}
+					items={providerItems}
+					placeholder="All providers"
+					clearLabel="All providers"
+					onValueChange={(v) => {
+						provider = v;
+						pageNo = 1;
+					}}
+				/>
 			</div>
-
-			<!-- Row 2: Options -->
 			<div class="fb-group">
 				<span class="fb-group-label">Options</span>
-				<button
-					class="fb-chip {includeFree ? '' : 'fb-chip-on'}"
-					onclick={() => { includeFree = !includeFree; page = 1; }}
-					aria-pressed={!includeFree}
-				>Paid only</button>
-				<button
-					class="fb-chip {hasBenchmarksOnly ? 'fb-chip-on' : ''}"
-					onclick={() => { hasBenchmarksOnly = !hasBenchmarksOnly; page = 1; }}
-					aria-pressed={hasBenchmarksOnly}
-				>Has Benchmarks</button>
+				<label class="flex cursor-pointer items-center gap-2 text-xs">
+					<Checkbox
+						checked={paidOnly}
+						onCheckedChange={(v) => {
+							paidOnly = v === true;
+							pageNo = 1;
+						}}
+					/>
+					Paid models only
+				</label>
+				<label class="ml-3 flex cursor-pointer items-center gap-2 text-xs">
+					<Checkbox
+						checked={benchOnly}
+						onCheckedChange={(v) => {
+							benchOnly = v === true;
+							pageNo = 1;
+						}}
+					/>
+					With public benchmarks
+				</label>
 			</div>
-
-			<!-- Row 3: Sort -->
 			<div class="fb-group">
 				<span class="fb-group-label">Sort</span>
-				<button class="fb-chip {sortBy === 'mss' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'mss'} onclick={() => toggleSort('mss')}>MSS</button>
-				<button class="fb-chip {sortBy === 'empirical' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'empirical'} onclick={() => toggleSort('empirical')}>Empirical</button>
-				<button class="fb-chip {sortBy === 'composite' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'composite'} onclick={() => toggleSort('composite')}>Composite</button>
-				<button class="fb-chip {sortBy === 'benchmark' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'benchmark'} onclick={() => toggleSort('benchmark')}>Benchmark</button>
-				<button class="fb-chip {sortBy === 'cost_efficiency' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'cost_efficiency'} onclick={() => toggleSort('cost_efficiency')}>Cost</button>
-				<button class="fb-chip {sortBy === 'accessibility' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'accessibility'} onclick={() => toggleSort('accessibility')}>Accessibility</button>
-				<button class="fb-chip {sortBy === 'adoption' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'adoption'} onclick={() => toggleSort('adoption')}>Adoption</button>
+				<Select.Simple
+					size="sm"
+					class="w-52"
+					aria-label="Sort by"
+					value={sortBy}
+					items={SORT_ITEMS}
+					onValueChange={(v) => {
+						if (isSortKey(v)) {
+							sortBy = v;
+							pageNo = 1;
+						}
+					}}
+				/>
+				<Button
+					variant="outline"
+					size="sm"
+					onclick={() => {
+						sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+						pageNo = 1;
+					}}
+					aria-label="Sort direction: {sortDir === 'desc' ? 'descending' : 'ascending'}"
+				>
+					{sortDir === 'desc' ? 'High → low' : 'Low → high'}
+				</Button>
 			</div>
-
-			<!-- Row 4: Per page -->
 			<div class="fb-group">
 				<span class="fb-group-label">Per page</span>
-				<button class="fb-chip {perPage === 25 ? 'fb-chip-on' : ''}" aria-pressed={perPage === 25} onclick={() => { perPage = 25; page = 1; }}>25</button>
-				<button class="fb-chip {perPage === 50 ? 'fb-chip-on' : ''}" aria-pressed={perPage === 50} onclick={() => { perPage = 50; page = 1; }}>50</button>
-				<button class="fb-chip {perPage === 100 ? 'fb-chip-on' : ''}" aria-pressed={perPage === 100} onclick={() => { perPage = 100; page = 1; }}>100</button>
+				<Select.Simple
+					size="sm"
+					class="w-24"
+					aria-label="Rows per page"
+					value={String(perPage)}
+					items={PER_PAGE_OPTIONS.map((n) => ({ value: String(n), label: String(n) }))}
+					onValueChange={(v) => {
+						perPage = Number(v);
+						pageNo = 1;
+					}}
+				/>
 			</div>
 		{/snippet}
-
 	</FilterBar>
 
-	<!-- Leaderboard -->
 	<Card.Root class="gap-0 overflow-clip py-0">
-		<Card.Content class="p-0">
+		<Card.Content class="p-0 {loading && data ? 'opacity-70 transition-opacity' : ''}">
 			{#if error}
 				<div class="p-4"><ErrorAlert message={error} onretry={load} /></div>
 			{:else if loading && !data}
 				<LoadingState label="loading rankings" />
 			{:else if data && data.rankings.length === 0}
-				<EmptyState compact icon={Trophy} title="No ranked models" description="No models match the current filters.">
+				<EmptyState
+					compact
+					icon={Trophy}
+					title="No models match"
+					description="No models match the current filters."
+				>
 					{#snippet action()}
-						<Button variant="outline" size="sm" onclick={clearAllFilters}>Clear all filters</Button>
+						<Button variant="outline" size="sm" onclick={clearAllFilters}>Clear filters</Button>
 					{/snippet}
 				</EmptyState>
 			{:else if data}
-				<TableToolbar selectedCount={selectedModels.size} noun="model" onClearSelection={() => (selectedModels = new Set())}>
+				<TableToolbar
+					selectedCount={selected.size}
+					noun="model"
+					onClearSelection={() => (selected = new Set())}
+				>
 					{#snippet summary()}
 						<span class="inline-flex items-center gap-1.5">
 							<Trophy class="size-3.5" aria-hidden="true" />
-							Ranked by <span class="font-medium text-foreground">{sortLabel}</span>{sortAsc ? ' (lowest first)' : ''}
-							<span class="opacity-50">·</span> column leaders highlighted
-							{#if hiddenBench.length}
-								<span class="opacity-50">·</span>
-								<span title="Columns without data on this page are hidden">{hiddenBench.join(', ')} hidden (no data)</span>
-							{/if}
+							<span
+								title="Analysed trials = complete, eligible jobs measured under the reference plan / completed jobs. A warning sign marks models with jobs missing from the numbers; hover it for the reasons."
+								>Ranked by <span class="font-medium text-foreground">{sortLabel}</span>{sortDir ===
+								'asc'
+									? ' (lowest first)'
+									: ''}</span
+							>
 						</span>
 					{/snippet}
 					{#snippet bulk()}
 						<Button
 							size="sm"
 							class="h-7 px-2.5 text-xs"
-							href={selectedModels.size >= 2 ? `/models/compare?models=${[...selectedModels].join(',')}` : undefined}
-							disabled={selectedModels.size < 2}
-							title={selectedModels.size < 2 ? 'Pick at least two models' : undefined}
+							href={selected.size >= 2
+								? `/models/compare?models=${[...selected].map(encodeURIComponent).join(',')}`
+								: undefined}
+							disabled={selected.size < 2}
+							title={selected.size < 2 ? 'Pick at least two models' : undefined}
 						>
 							<GitCompareArrows class="size-3.5" />Compare
 						</Button>
-						<span class="text-[11px]">up to 10</span>
+						<span class="text-[11px]">up to {MAX_COMPARE}</span>
 					{/snippet}
 				</TableToolbar>
-
-				<!-- Desktop table (768px+) -->
-				<div class="table-frame hidden md:block" {@attach tableFrame}>
-					<table>
-						<thead>
-							<tr class="[&>th]:pb-1 [&>th]:pt-2">
-								<th class="col-sticky" rowspan="2">
-									<div class="flex items-center gap-3">
-										<span class="w-4"></span>
-										<span class="w-8">Rank</span>
-										<span>Model</span>
-									</div>
-								</th>
-								<th class="border-l border-border text-center" title="Measured on this platform">Measured</th>
-								<th class="border-l border-border text-center" colspan={metaCols.length} title="Model Scoring System — an opinionated composite of metadata, not a measurement">MSS decision aid</th>
-								{#if benchCols.length}
-									<th class="border-l border-border text-center" colspan={benchCols.length}>Public benchmarks</th>
-								{/if}
-								<th class="border-l border-border" rowspan="2"><span class="block text-right" title="Applications generated with this model here">Apps</span></th>
-							</tr>
-							<tr>
-								<SortableTh label="Empirical" field="empirical" sortBy={sortBy} sortDir={sortAsc ? 'asc' : 'desc'} onSort={(f) => toggleSort(f as SortKey)} align="right" help="Severity-weighted findings per KLOC blended with the smoke pass rate" class="border-l border-border" />
-								{#each metaCols as col, ci (col.key)}
-									<SortableTh label={col.label} field={col.key} sortBy={sortBy} sortDir={sortAsc ? 'asc' : 'desc'} onSort={(f) => toggleSort(f as SortKey)} align="right" help={col.help} class={ci === 0 ? 'border-l border-border' : ''} />
-								{/each}
-								{#each benchCols as col, ci (col.key)}
-									<th class="num {ci === 0 ? 'border-l border-border' : ''}">{col.label}</th>
-								{/each}
-							</tr>
-						</thead>
-						<tbody>
-							{#each data.rankings as model, i (model.model_id)}
-								{@const rank = indexOnPage(i)}
-								{@const selected = selectedModels.has(model.model_id)}
-								{@const href = `/models/${encodeURIComponent(model.model_id)}`}
-								<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
-								<tr class="row-link" data-selected={selected} onclick={rowLink(href)}>
-									<td class="col-sticky">
-										<div class="flex items-center gap-3">
-											<Checkbox
-												checked={selected}
-												disabled={!selected && selectedModels.size >= 10}
-												onCheckedChange={() => toggleSelect(model.model_id)}
-												aria-label="Select {model.model_name} for comparison"
-											/>
-											<span
-												class="inline-flex h-6 w-8 items-center justify-center rounded-sm font-mono text-xs tabular-nums {rank <= 3 && !sortAsc ? 'bg-primary/12 font-semibold text-primary' : 'text-muted-foreground'}"
-											>{rank}</span>
-											<div class="min-w-0 max-w-[280px]">
-												<a {href} class="block truncate font-medium hover:text-primary" title={model.model_name}>{shortModelName(model.model_name)}</a>
-												<div class="cell-sub flex items-center gap-1.5 text-[11px] text-muted-foreground">
-													<span class="truncate">{modelNamePrefix(model.model_name) || model.provider}</span>
-													{#if model.is_free}<span class="rounded-sm bg-success/12 px-1 font-medium text-success-fg">Free</span>{/if}
-												</div>
-											</div>
-										</div>
-									</td>
-									<ScoreCell
-										value={model.empirical_quality_score}
-										strong
-										best={model.empirical_quality_score != null && model.empirical_quality_score === colMax.empirical}
-										title={empiricalTitle(model)}
-										sub={model.empirical_quality_score != null ? `n=${model.n_trials}` : undefined}
-										class="border-l border-border/60"
-									/>
-									{#each metaCols as col, ci (col.key)}
-										<ScoreCell value={model[col.field] as number} strong={col.key === 'mss'} best={model[col.field] === colMax[col.key]} class={ci === 0 ? 'border-l border-border/60' : ''} />
-									{/each}
-									{#each benchCols as col, ci (col.key)}
-										<td class="num text-xs {ci === 0 ? 'border-l border-border/60' : ''}">{fmtBench(model, col.key)}</td>
-									{/each}
-									<td class="num border-l border-border/60 text-xs {model.apps ? '' : 'text-muted-foreground'}">{model.apps || '—'}</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-
-				<!-- Mobile list (below 768px) -->
-				<ul class="md:hidden">
-					{#each data.rankings as model, i (model.model_id)}
-						{@const rank = indexOnPage(i)}
-						{@const selected = selectedModels.has(model.model_id)}
-						{@const headline = model.empirical_quality_score != null ? { label: `Empirical · n=${model.n_trials}`, v: model.empirical_quality_score } : { label: 'MSS (meta)', v: model.mss_score }}
-						<li class="data-list-row px-3" data-active={selected}>
-							<div class="flex items-start gap-3">
-								<Checkbox
-									class="mt-1.5"
-									checked={selected}
-									disabled={!selected && selectedModels.size >= 10}
-									onCheckedChange={() => toggleSelect(model.model_id)}
-									aria-label="Select {model.model_name} for comparison"
-								/>
-								<span class="inline-flex h-6 w-8 shrink-0 items-center justify-center rounded-sm font-mono text-xs tabular-nums {rank <= 3 && !sortAsc ? 'bg-primary/12 font-semibold text-primary' : 'text-muted-foreground'}">{rank}</span>
-								<div class="min-w-0 flex-1">
-									<div class="flex items-start justify-between gap-2">
-										<div class="min-w-0">
-											<a href="/models/{encodeURIComponent(model.model_id)}" class="block truncate text-sm font-medium hover:text-primary" title={model.model_name}>{shortModelName(model.model_name)}</a>
-											<p class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-												<span class="truncate">{modelNamePrefix(model.model_name) || model.provider}</span>
-												{#if model.is_free}<span class="rounded-sm bg-success/12 px-1 font-medium text-success-fg">Free</span>{/if}
-											</p>
-										</div>
-										<div class="shrink-0 text-right" title={empiricalTitle(model)}>
-											<div class="font-mono text-lg font-medium leading-none tabular-nums">{pct(headline.v)}</div>
-											<div class="mt-1 text-[11px] text-muted-foreground">{headline.label}</div>
-										</div>
-									</div>
-									<dl class="mt-2.5 grid grid-cols-3 gap-x-3 gap-y-2 text-[11px]">
-										{#each metaCols as col (col.key)}
-											{@const v = model[col.field] as number}
-											<div>
-												<dt class="text-muted-foreground">{col.label}</dt>
-												<dd class="flex items-center gap-1.5">
-													<span class="w-9 font-mono text-xs tabular-nums {v ? '' : 'text-muted-foreground'}">{pct(v)}</span>
-													<span class="h-[3px] flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true"><span class="block h-full rounded-full bg-muted-foreground/45" style:width="{Math.max(0, Math.min(1, v ?? 0)) * 100}%"></span></span>
-												</dd>
-											</div>
-										{/each}
-									</dl>
-									{#if benchCols.length || model.apps}
-										<p class="mt-2 font-mono text-[11px] text-muted-foreground">
-											{#each benchCols as col (col.key)}{col.label} {fmtBench(model, col.key)} · {/each}{model.apps} app{model.apps === 1 ? '' : 's'}
-										</p>
-									{/if}
-								</div>
-							</div>
-						</li>
-					{/each}
-				</ul>
+				<RankingsTable
+					rows={data.rankings}
+					{startRank}
+					{sortBy}
+					{sortDir}
+					{onSort}
+					{selected}
+					maxSelected={MAX_COMPARE}
+					onToggle={toggleSelect}
+				/>
+				<PaginationBar
+					resultsText="Showing {startRank}–{Math.min(
+						startRank + perPage - 1,
+						data.pagination.total
+					)} of {data.pagination.total} models"
+					page={data.pagination.page}
+					pages={data.pagination.total_pages}
+					onGoToPage={(p) => (pageNo = p)}
+					class="border-t border-border"
+					scrollToCard
+				/>
 			{/if}
-			<PaginationBar
-				resultsText={data
-					? `Showing ${(page - 1) * perPage + 1}–${Math.min(page * perPage, data.pagination.total)} of ${data.pagination.total} models`
-					: ''}
-				page={data?.pagination.page}
-				pages={data?.pagination.total_pages}
-				onGoToPage={(p) => { page = p; }}
-				class="border-t border-border"
-				scrollToCard
-			/>
 		</Card.Content>
 	</Card.Root>
 
-	<!-- Methodology Panel -->
+	<!-- Methodology + sensitivity -->
 	<Card.Root>
-		<button class="flex w-full cursor-pointer items-center gap-3 p-4 text-left text-sm" onclick={toggleMethodology} aria-expanded={showMethodology}>
-			<Info class="h-4 w-4 text-muted-foreground shrink-0" />
-			<span class="font-medium">Methodology: what is measured vs. what is opinion</span>
-			<Badge variant="outline" class="ml-auto text-[11px]">{showMethodology ? 'Hide' : 'Show'}</Badge>
+		<button
+			type="button"
+			class="flex w-full cursor-pointer items-center gap-3 p-4 text-left text-sm"
+			onclick={() => (showMethodology = !showMethodology)}
+			aria-expanded={showMethodology}
+			aria-controls="rk-methodology"
+		>
+			<Info class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+			<span class="font-medium">Methodology & rank sensitivity</span>
+			<ChevronDown
+				class="ml-auto h-4 w-4 text-muted-foreground transition-transform duration-200 {showMethodology
+					? 'rotate-180'
+					: ''}"
+				aria-hidden="true"
+			/>
 		</button>
 		{#if showMethodology}
-			<Card.Content class="pt-0 text-sm text-muted-foreground space-y-4">
-				<div class="space-y-2">
-					<p class="section-label text-foreground">Measurement — Empirical quality</p>
+			<Card.Content id="rk-methodology" class="space-y-5 pt-0 text-sm text-muted-foreground">
+				<section class="space-y-2">
+					<h2 class="section-label text-foreground">Measurement — empirical quality</h2>
 					<p>
-						Measured on this platform: severity-weighted findings from the <strong>deterministic analysis
-						tools only</strong> (AI-reviewer findings are tracked separately and never enter this score),
-						normalized per KLOC of generated code, blended 60/40 with the <strong>smoke pass rate</strong>.
-						The smoke test probes <code>/api/health</code> plus the template's declared GET endpoints —
-						it shows the app runs, not that it is functionally correct. Scores come with the number of
-						trials (n) and between-trial spread; treat n=1 as an anecdote, not a result.
+						For each completed job the platform takes its <strong>canonical complete run</strong>
+						under the reference plan and reads the stored measurement. The score is the
+						<strong>severity-weighted density of counted static issues</strong> (findings
+						deduplicated across tools, model-written lines only) per KLOC of measured SLOC, squashed
+						to 0–100 and blended 60/40 with the <strong>functional pass rate</strong> of the same jobs
+						when it exists. A failed, timed-out or skipped tool makes a job's static numbers missing
+						— never "no issues". AI-reviewer findings are opinions: shown in their own column, never
+						scored.
 					</p>
-				</div>
-				<div class="space-y-2">
-					<p class="section-label text-foreground">Decision aid — MSS</p>
-					<p>The <strong>Model Scoring System (MSS)</strong> is an opinionated composite of model metadata (0–1), not a measurement. Its four dimensions and weights are asserted, not derived:</p>
-					<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-						{#each [
-							{ label: 'Adoption (35%)', desc: 'OpenRouter rank and local app generation count' },
-							{ label: 'Benchmarks (30%)', desc: 'Public coding benchmarks: HumanEval, MBPP, SWE-bench, BFCL, WebDev Elo, LiveBench, etc.' },
-							{ label: 'Cost Efficiency (20%)', desc: 'Performance per dollar + context window bonus' },
-							{ label: 'Accessibility (15%)', desc: 'License, API stability, documentation quality' },
-						] as dim}
-							<div class="rounded-md border p-2.5">
-								<span class="text-xs font-medium text-foreground">{dim.label}</span>
-								<p class="text-[11px] text-muted-foreground">{dim.desc}</p>
-							</div>
-						{/each}
-					</div>
-					<p class="text-[11px]"><strong>Composite</strong> blends MSS (60%) with empirical quality (40%) when local measurements exist; models never exercised here keep composite = MSS.</p>
-				</div>
-				<div class="space-y-2">
-					<p class="section-label text-foreground">Sensitivity — do the severity weights matter?</p>
-					<p class="text-[11px]">
-						The empirical ranking is recomputed under alternative severity weightings. Kendall's tau near 1.0
-						means the order barely depends on the chosen weights; listed pairs swap places under that scheme.
+					<p>
+						<strong>Analysed trials</strong> counts only those measured jobs; jobs that are excluded,
+						incomplete, failed, still running, unanalysed or analysed under another plan are listed in
+						the coverage panel. Treat n=1 as an anecdote.
 					</p>
-					{#if sensitivity && sensitivity.models_evaluated >= 2}
-						<div class="overflow-x-auto">
-							<table class="w-full text-xs">
-								<thead>
-									<tr class="border-b text-left text-muted-foreground">
-										<th class="py-1.5 pr-3 font-medium">Scheme</th>
-										<th class="py-1.5 pr-3 font-medium">Weights (crit/high/med/low/info)</th>
-										<th class="py-1.5 pr-3 text-right font-medium">Kendall's τ</th>
-										<th class="py-1.5 font-medium">Rank swaps vs. baseline</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each sensitivity.schemes as s}
-										<tr class="border-b border-border/50">
-											<td class="py-1.5 pr-3 font-mono">{s.scheme}</td>
-											<td class="py-1.5 pr-3 font-mono tabular-nums">{s.weights.critical}/{s.weights.high}/{s.weights.medium}/{s.weights.low}/{s.weights.info}</td>
-											<td class="py-1.5 pr-3 text-right font-mono tabular-nums {s.kendall_tau >= 0.9 ? 'text-success-fg' : s.kendall_tau >= 0.7 ? 'text-warning-fg' : 'text-danger-fg'}">{s.kendall_tau.toFixed(2)}</td>
-											<td class="py-1.5">
-												{#if s.adjacent_swaps.length === 0}
-													<span class="text-success-fg">none — stable</span>
-												{:else}
-													{s.adjacent_swaps.map((p) => p.join(' ⇄ ')).join(', ')}
-												{/if}
-											</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
+				</section>
+				<section class="space-y-2">
+					<h2 class="section-label text-foreground">Decision aid — MSS</h2>
+					<p>
+						The <strong>Model Scoring System</strong> is an opinionated composite of model metadata,
+						not a measurement: adoption 35%, public benchmarks 30%, cost efficiency 20%,
+						accessibility 15%. <strong>Composite</strong> blends MSS (60%) with empirical quality (40%)
+						when a model is measured; unmeasured models keep composite = MSS.
+					</p>
+				</section>
+				<section class="space-y-2">
+					<h2 class="section-label text-foreground">
+						Sensitivity — do the severity weights matter?
+					</h2>
+					<p class="text-xs">
+						The empirical ranking is recomputed under alternative severity weights (same scope and
+						plan as the table). Kendall's τ near 1 means the order barely depends on the weights;
+						listed pairs swap places.
+					</p>
+					{#if sensitivityError}
+						<ErrorAlert message={sensitivityError} onretry={loadSensitivity} />
 					{:else if sensitivity}
-						<p class="text-[11px] italic">Fewer than two models have local measurements — run experiments on more models to compare rank stability.</p>
-					{:else if sensitivityError}
-						<p class="text-[11px] italic">Sensitivity data unavailable.</p>
+						<div class={sensitivityLoading ? 'opacity-70 transition-opacity' : ''}>
+							<SensitivityTable {sensitivity} {names} />
+						</div>
 					{:else}
-						<p class="text-[11px] italic">Loading sensitivity analysis…</p>
+						<LoadingState label="loading sensitivity" class="py-6" />
 					{/if}
-				</div>
-				<div class="flex flex-wrap gap-2 pt-1">
-					<a href="https://www.swebench.com" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-						SWE-bench <ExternalLink class="h-3 w-3" />
+				</section>
+				<div class="flex flex-wrap gap-3 pt-1">
+					<a
+						href="https://www.swebench.com"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+					>
+						SWE-bench <ExternalLink class="h-3 w-3" aria-hidden="true" />
 					</a>
-					<a href="https://evalplus.github.io/leaderboard.html" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-						EvalPlus (HumanEval/MBPP+) <ExternalLink class="h-3 w-3" />
+					<a
+						href="https://evalplus.github.io/leaderboard.html"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+					>
+						EvalPlus (HumanEval/MBPP+) <ExternalLink class="h-3 w-3" aria-hidden="true" />
 					</a>
-					<a href="https://livebench.ai/" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-						LiveBench <ExternalLink class="h-3 w-3" />
+					<a
+						href="https://livebench.ai/"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+					>
+						LiveBench <ExternalLink class="h-3 w-3" aria-hidden="true" />
 					</a>
 				</div>
 			</Card.Content>

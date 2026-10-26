@@ -25,17 +25,34 @@ const statusTones: Record<string, Tone> = {
   passed: "success",
   ready: "success",
   approved: "success",
+  submitted: "success",
   running: "info",
   generating: "info",
   building: "info",
   in_progress: "info",
   processing: "info",
+  submitting: "info",
+  // Analysis study: protocol frozen, ready to launch.
+  locked: "info",
   partial: "warning",
   warning: "warning",
   degraded: "warning",
   timeout: "warning",
   budget_exhausted: "warning",
   resource_limit: "warning",
+  truncated: "warning",
+  interrupted: "warning",
+  stale: "warning",
+  // A tool that did not run leaves a gap in the data: never a neutral "done".
+  skipped: "warning",
+  missing: "warning",
+  not_launched: "warning",
+  // Self-test without evidence: no proof the tool works on this image.
+  unverified: "warning",
+  untested: "warning",
+  config_untested: "warning",
+  canary_unknown: "warning",
+  image_missing: "warning",
   harness_killed: "danger",
   build_failed: "danger",
   start_failed: "danger",
@@ -43,6 +60,10 @@ const statusTones: Record<string, Tone> = {
   not_applicable: "neutral",
   harness_error: "danger",
   failed: "danger",
+  // A timed-out tool produced no data, exactly like a failed one.
+  timed_out: "danger",
+  invalid_output: "danger",
+  canary_failed: "danger",
   error: "danger",
   rejected: "danger",
   unhealthy: "danger",
@@ -57,7 +78,10 @@ const statusTones: Record<string, Tone> = {
   retry_backoff: "warning",
   paused: "warning",
   draining: "warning",
+  pending: "neutral",
   cancelled: "neutral",
+  draft: "neutral",
+  not_run: "neutral",
   // Endpoints and relay sessions.
   online: "success",
   offline: "danger",
@@ -67,8 +91,10 @@ const statusTones: Record<string, Tone> = {
 
 /** Statuses that represent work in flight; StatusBadge pulses their dot. */
 export const liveStatuses = new Set([
+  "queued",
   "running",
   "generating",
+  "submitting",
   "building",
   "in_progress",
   "processing",
@@ -79,6 +105,18 @@ export const liveStatuses = new Set([
   "installing",
   "updating",
 ]);
+
+/**
+ * AI finding grounding verdicts (StatusBadge `tones`): only exact and
+ * relocated evidence can be counted; the rest is unreliable evidence.
+ */
+export const groundingTones: Partial<Record<string, Tone>> = {
+  exact: "success",
+  relocated: "info",
+  ungrounded: "warning",
+  invalid_file: "danger",
+  out_of_range: "danger",
+};
 
 /** Containers: "running" is the healthy steady state, not work in progress. */
 export const containerTones: Partial<Record<string, Tone>> = {

@@ -6,6 +6,8 @@ working.
 """
 
 from backend.export.services.findings import FINDING_HEADERS
+from backend.export.services.findings import finding_record
+from backend.export.services.findings import finding_row
 from backend.export.services.findings import findings_csv
 from backend.export.services.findings import findings_json
 from backend.export.services.findings import findings_sarif
@@ -13,13 +15,17 @@ from backend.export.services.jobs import generation_jobs_csv
 from backend.export.services.jobs import generation_jobs_json
 from backend.export.services.reports import reports_csv
 from backend.export.services.reports import reports_json
+from backend.export.services.tasks import TASK_HEADERS
 from backend.export.services.tasks import analysis_tasks_csv
 from backend.export.services.tasks import analysis_tasks_json
 
 __all__ = [
     "FINDING_HEADERS",
+    "TASK_HEADERS",
     "analysis_tasks_csv",
     "analysis_tasks_json",
+    "finding_record",
+    "finding_row",
     "findings_csv",
     "findings_json",
     "findings_sarif",

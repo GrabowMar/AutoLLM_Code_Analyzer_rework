@@ -35,7 +35,12 @@ class Command(BaseCommand):
         parser.add_argument("--batch", default=None)
         parser.add_argument("--user", default=None, help="Scope to this username's jobs")
         parser.add_argument("--seed", type=int, default=0)
-        parser.add_argument("--include-ai", action="store_true")
+        parser.add_argument("--include-ai", action="store_true", help="Also list AI consensus issues (kept apart)")
+        parser.add_argument(
+            "--plan-hash",
+            default=None,
+            help="Analysis plan whose runs the issue tables read (default: auto-selected, see issues.coverage)",
+        )
         parser.add_argument("--no-bootstrap", action="store_true")
         parser.add_argument("--save", action="store_true", help="Also store a Report row")
 
@@ -62,6 +67,7 @@ class Command(BaseCommand):
             "batch_id": opts["batch"],
             "seed": opts["seed"],
             "include_ai": opts["include_ai"],
+            "plan_hash": opts["plan_hash"],
             "bootstrap": not opts["no_bootstrap"],
         }
         try:

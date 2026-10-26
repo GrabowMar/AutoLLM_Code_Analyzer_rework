@@ -14,15 +14,17 @@ recorded on the rows and never raised.
   so an executor that was down never fires a burst of catch-up runs.
 * A post-run (``ExperimentPostRun``) is created once per completion
   (:func:`on_experiment_completed`, called by ``maybe_complete_experiment``
-  only when its conditional UPDATE won) or by hand. It runs the configured
-  analyzers sequentially over the completed current-attempt jobs that have no
-  analysis yet (the analyzer workspace's ``/work`` is shared), then the
-  ``experiment_report``, publishing ``post_run`` events as it goes.
+  only when its conditional UPDATE won) or by hand. It freezes one analysis
+  plan (profile and/or tool_slugs), submits a v2 analysis run for every
+  completed current-attempt job without one under that plan, waits for the
+  analysis executor to finish them, then generates the ``experiment_report``,
+  publishing ``post_run`` events as it goes.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 from datetime import timedelta
 from itertools import pairwise
@@ -55,6 +57,9 @@ MAX_REPLICATES_PER_FIRE = 5
 MAX_REPEATS = 100
 DEFAULT_NAME_TEMPLATE = "{name} {date}"
 _ACTIVE = (GenerationJob.Status.PENDING, GenerationJob.Status.RUNNING)
+# Post-run analyses are submitted to the analysis executor and waited for.
+POST_RUN_ANALYSIS_POLL_SECONDS = 5.0
+POST_RUN_ANALYSIS_TIMEOUT_SECONDS = 12 * 3600
 
 
 class ScheduleError(ValueError):
@@ -440,7 +445,7 @@ def _wake_on_commit() -> None:
 def _post_run_deferred() -> bool:
     """Whether the memory rule needs post-runs to wait while sandboxes and evaluations fill their slots (§C.10).
 
-    The analyzer workspace only fits next to full sandbox + eval lanes when
+    The post-run analysis containers only fit next to full sandbox + eval lanes when
     the memory formula (``execution.capacity.check_memory``) holds with the
     post-run term included.
     """
@@ -506,8 +511,17 @@ def _save_progress(post_run: ExperimentPostRun, **fields: Any) -> None:
     _publish_post_run(post_run)
 
 
-def analysis_targets(experiment: Experiment, *, only_passing: bool) -> list[GenerationJob]:
-    """Completed current-attempt jobs of *experiment* that have no analysis run yet."""
+def analysis_targets(
+    experiment: Experiment,
+    *,
+    only_passing: bool,
+    plan_hash: str | None = None,
+) -> list[GenerationJob]:
+    """Completed current-attempt jobs of *experiment* that have no (non-cancelled) analysis run yet.
+
+    With *plan_hash* only runs under that frozen plan count: a job analysed
+    under another plan is not comparable and is analysed again.
+    """
     from backend.analysis.models import AnalysisRun
     from backend.generation.services.experiments import current_jobs
 
@@ -519,57 +533,140 @@ def analysis_targets(experiment: Experiment, *, only_passing: bool) -> list[Gene
             for r in rows
             if r["status"] == GenerationJob.Status.COMPLETED and r["metrics__functional__pass_rate"] == 1
         ]
-    analyzed = set(
-        AnalysisRun.objects.filter(generation_job_id__in=ids)
-        .exclude(status=AnalysisRun.Status.CANCELLED)
-        .values_list("generation_job_id", flat=True),
-    )
+    runs = AnalysisRun.objects.filter(generation_job_id__in=ids).exclude(status=AnalysisRun.Status.CANCELLED)
+    if plan_hash:
+        runs = runs.filter(plan_hash=plan_hash)
+    analyzed = set(runs.values_list("generation_job_id", flat=True))
     return list(GenerationJob.objects.filter(id__in=[i for i in ids if i not in analyzed]).order_by("created_at"))
 
 
+def _analysis_plan(post_run: ExperimentPostRun, experiment: Experiment, analysis: dict[str, Any]):
+    """``(frozen plan, profile)`` for this post-run, frozen once and kept on the row.
+
+    The same path as the automation analyze step (profile and/or tool_slugs
+    -> frozen plan). A post-run that changes executor (lease takeover)
+    reuses the stored plan, so every run of one post-run shares one
+    ``plan_hash`` (comparable measurements).
+    """
+    from backend.analysis.models import AnalysisProfile
+    from backend.automation.engine.dispatchers import build_analysis_plan
+
+    stored = analysis.get("frozen_plan")
+    if isinstance(stored, dict) and stored:
+        profile_id = analysis.get("frozen_profile_id")
+        profile = AnalysisProfile.objects.filter(id=profile_id).first() if profile_id else None
+        return stored, profile
+    params: dict[str, Any] = {}
+    if analysis.get("profile"):
+        params["profile"] = analysis["profile"]
+    if analysis.get("tool_slugs"):
+        params["tool_slugs"] = list(analysis["tool_slugs"])
+    frozen, profile = build_analysis_plan(params, experiment.created_by)
+    config = dict(post_run.config or {})
+    config["analysis"] = {
+        **analysis,
+        "frozen_plan": frozen,
+        "frozen_profile_id": str(profile.id) if profile is not None else None,
+    }
+    _save_progress(post_run, config=config)
+    return frozen, profile
+
+
+def _sleep(seconds: float) -> None:
+    """Indirection so tests can drive the wait loop without sleeping."""
+    time.sleep(seconds)
+
+
 def _run_analyses(post_run: ExperimentPostRun, experiment: Experiment, config: dict[str, Any]) -> bool:
-    """Analyze each target job sequentially; returns False when the lease was lost."""
+    """Submit one v2 analysis run per target job under one frozen plan and wait for all of them.
+
+    The executor runs them (isolated, in its own queue); this thread only
+    renews the post-run lease and publishes progress while it waits.
+    Returns False when the lease was lost (the new owner resumes: runs
+    already recorded on the row are waited for, not submitted again).
+    """
+    from backend.analysis.engine import executor
     from backend.analysis.models import AnalysisRun
-    from backend.analysis.services import runner
-    from backend.analysis.services import workspace_service
 
     analysis = config.get("analysis") or {}
-    targets = analysis_targets(experiment, only_passing=bool(analysis.get("only_passing")))
     user = experiment.created_by
-    workspace = workspace_service.get_workspace(user)
-    progress = {"analysis_done": 0, "analysis_total": len(targets), "analysis_failed": 0}
-    run_ids: list[str] = list(post_run.analysis_run_ids or [])
+    frozen, profile = _analysis_plan(post_run, experiment, analysis)
+    plan_hash = _plan_hash(frozen)
+    run_ids: list[str] = [str(r) for r in (post_run.analysis_run_ids or [])]
+    targets = analysis_targets(experiment, only_passing=bool(analysis.get("only_passing")), plan_hash=plan_hash)
+    progress = {
+        "analysis_done": 0,
+        "analysis_total": len(targets) + len(run_ids),
+        "analysis_failed": 0,
+        "analysis_plan_hash": plan_hash,
+    }
     _save_progress(post_run, progress=progress)
     for job in targets:
         if not _renew(post_run):
             return False
-        run = AnalysisRun.objects.create(
-            name=f"Experiment {experiment.slug} post-run",
-            created_by=user,
-            workspace=workspace,
-            generation_job=job,
-            tool_slugs=list(analysis.get("tool_slugs") or []),
-        )
-        run_ids.append(str(run.id))
         try:
-            runner.execute(AnalysisRun.objects.select_related("created_by", "workspace").get(id=run.id))
-            run.refresh_from_db(fields=["status"])
-            failed = run.status == AnalysisRun.Status.FAILED
-        except Exception:
-            logger.exception("Post-run analysis %s failed", run.id)
-            AnalysisRun.objects.filter(id=run.id).update(
-                status=AnalysisRun.Status.FAILED,
-                error_message="Internal error during analysis",
-                completed_at=timezone.now(),
+            run = executor.submit_run(
+                user=user,
+                plan=frozen,
+                profile=profile,
+                generation_job=job,
+                purpose=AnalysisRun.Purpose.ADHOC,
+                name=f"Experiment {experiment.slug} post-run",
             )
-            failed = True
-        progress = {
-            **progress,
-            "analysis_done": progress["analysis_done"] + 1,
-            "analysis_failed": progress["analysis_failed"] + int(failed),
-        }
-        _save_progress(post_run, progress=progress, analysis_run_ids=run_ids)
-    return True
+        except Exception:
+            # An unresolvable sample (no files in scope, missing output) is
+            # this job's failure, not the post-run's.
+            logger.exception("Post-run %s could not submit an analysis of job %s", post_run.id, job.id)
+            progress = {
+                **progress,
+                "analysis_done": progress["analysis_done"] + 1,
+                "analysis_failed": progress["analysis_failed"] + 1,
+            }
+            _save_progress(post_run, progress=progress)
+            continue
+        run_ids.append(str(run.id))
+        _save_progress(post_run, analysis_run_ids=run_ids)
+    return _wait_for_analyses(post_run, run_ids, progress)
+
+
+def _wait_for_analyses(post_run: ExperimentPostRun, run_ids: list[str], progress: dict[str, Any]) -> bool:
+    """Poll the submitted runs until all are terminal, renewing the lease; False when it was lost.
+
+    Bounded by ``POST_RUN_ANALYSIS_TIMEOUT_SECONDS``: runs still unfinished
+    then are cancelled (the executor stops them cooperatively) and counted
+    as failed, so a stuck run cannot hold the post-run forever.
+    """
+    from backend.analysis.engine import executor
+    from backend.analysis.models import AnalysisRun
+
+    submit_failed = progress["analysis_failed"]
+    deadline = time.monotonic() + POST_RUN_ANALYSIS_TIMEOUT_SECONDS
+    while True:
+        found = {str(k): v for k, v in AnalysisRun.objects.filter(id__in=run_ids).values_list("id", "status")}
+        # A deleted run will never finish: it counts as a failed analysis.
+        statuses = [found.get(rid, AnalysisRun.Status.CANCELLED) for rid in run_ids]
+        terminal = [st for st in statuses if st in AnalysisRun.TERMINAL_STATUSES]
+        failed = sum(1 for st in terminal if st in (AnalysisRun.Status.FAILED, AnalysisRun.Status.CANCELLED))
+        done = submit_failed + len(terminal)
+        new = {**progress, "analysis_done": done, "analysis_failed": submit_failed + failed}
+        if new != progress:
+            progress = new
+            _save_progress(post_run, progress=progress)
+        if len(terminal) == len(run_ids):
+            return True
+        if not _renew(post_run):
+            return False
+        if time.monotonic() >= deadline:
+            for run in AnalysisRun.objects.filter(id__in=run_ids).exclude(status__in=AnalysisRun.TERMINAL_STATUSES):
+                executor.request_cancel(run)
+            deadline = float("inf")  # cancellation is final; wait for it to land
+        _sleep(POST_RUN_ANALYSIS_POLL_SECONDS)
+
+
+def _plan_hash(frozen: dict[str, Any]) -> str:
+    from backend.analysis.engine.plan import plan_hash
+
+    return plan_hash(frozen)
 
 
 def _run_report(post_run: ExperimentPostRun, experiment: Experiment, config: dict[str, Any]) -> None:
@@ -624,8 +721,8 @@ def run_post_run(post_run: ExperimentPostRun) -> ExperimentPostRun:
 def advance_post_runs(executor_id: str) -> ExperimentPostRun | None:
     """Claim one pending post-run (SKIP LOCKED, leased to ``executor_id``) and run it to completion.
 
-    Analyses run sequentially over completed current-attempt jobs without an
-    analysis (``only_passing`` → ``pass_rate == 1``), then the
+    Analyses run under one frozen plan over completed current-attempt jobs
+    without an analysis under it (``only_passing`` → ``pass_rate == 1``), then the
     ``experiment_report``; progress is published as ``post_run`` events.
     Deferred (returns None) while the memory rule needs the sandbox and
     evaluation lanes to drain first, and while draining. Returns the

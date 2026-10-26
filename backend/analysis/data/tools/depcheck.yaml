@@ -1,32 +1,36 @@
+# depcheck: JavaScript dependency problems (ported from the v1 tool shop).
 slug: depcheck
 name: depcheck
+kind: static
+category: lint
+version: "1.4.7"
+adapter_version: 1
+languages: [javascript, jsx, typescript, tsx, vue, json]
+file_kinds: [source, config, manifest]
+output_kind: findings
 description: >-
-  Finds JavaScript dependency problems: packages imported but missing from
-  package.json (the build fails) and declared dependencies nothing uses.
-category: dependencies
-kind: container
-target_language: javascript
-icon: package-check
-version: "1.4"
+  Compares each package.json with the imports of the JavaScript, TypeScript
+  and Vue code beside it: packages imported but not declared (the build
+  fails) and declared dependencies nothing uses.
 docs_url: https://github.com/depcheck/depcheck
-install_cmd: "npm install -g depcheck@1.4"
-verify_cmd: "depcheck --version"
-uninstall_cmd: "npm uninstall -g depcheck"
-# Build tooling referenced only from config files reads as unused; ignore it.
-run_cmd: |
-  cd {target} && find . -name package.json -not -path '*/node_modules/*' | sort | while IFS= read -r f; do
-    echo "### ${f#./}"
-    depcheck "$(dirname "$f")" --json --ignores='tailwindcss,postcss,autoprefixer,@types/*,eslint*,prettier*,typescript,@vitejs/*,vite' 2>/dev/null
-    echo
-  done
-parser_key: depcheck
-run_timeout: 120
-install_timeout: 180
-display_order: 40
-sample_filename: package.json
-sample_code: |
-  {
-    "name": "sample",
-    "version": "1.0.0",
-    "dependencies": { "lodash": "^4.17.21" }
-  }
+icon: package-check
+display_order: 160
+default_enabled: false
+default_required: false
+mem_limit: 768m
+timeout_s: 180
+notes: >-
+  Runs once per directory holding a package.json, on staged copies of that
+  project's script files and package.json only (the app's .depcheckrc, the
+  "depcheck" key of its package.json and .gitignore are never used), with a
+  baked --config whose ignores cover build tooling referenced only from
+  config files depcheck cannot read (Tailwind/PostCSS, @types/*,
+  TypeScript, linters, Vite). depcheck 1.4.7 (2023) is the last release.
+  Files it cannot parse are coverage gaps; unused-dependency findings sit
+  on package.json, which is not measured code.
+config_schema:
+  - name: skip_missing
+    type: boolean
+    label: Skip missing dependencies
+    description: Do not report imported-but-undeclared packages (--skip-missing).
+    default: false

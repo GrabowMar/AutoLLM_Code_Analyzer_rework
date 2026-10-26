@@ -1,0 +1,124 @@
+{
+ "captured_at": "2026-10-26T08:41:25+00:00",
+ "case": "suppressed",
+ "config": {
+  "exclude_rules": "",
+  "per_file_timeout": 30,
+  "rulesets": [
+   "python",
+   "python-audit",
+   "javascript",
+   "javascript-audit",
+   "html"
+  ]
+ },
+ "files": [
+  {
+   "content": "<template>\n  <!-- eslint-disable -->\n  <div v-html=\"html\"></div>\n</template>\n\n<script setup>\ndefineProps({ html: { type: String, default: \"\" } });\n</script>\n",
+   "kind": "source",
+   "language": "vue",
+   "path": "suppressed/Raw.vue",
+   "sha256": "b643d762a7f53d3c14568a99dff7aa0e5339044d8065abedbf42858b524e9d77"
+  },
+  {
+   "content": "import json  # noqa: F401  # pylint: disable=unused-import\n\n\ndef calculate(expression):\n    return eval(expression)  # nosec B307  # noqa: S307  # nosemgrep  # pylint: disable=eval-used\n\n\nAPI_PASSWORD = \"Wr4ngle-Canary-Pass-91\"  # nosec  # noqa: S105  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/app.py",
+   "sha256": "0fc0e4ae4c4c42060a507f0aef522d3d3f3fc527f022f6991ab3d5afa7f9bfd5"
+  },
+  {
+   "content": "<!-- htmlhint alt-require:false -->\n<!DOCTYPE html>\n<html lang=\"en\"><head><title>Page</title></head><body><img src=\"/a.png\"></body></html>\n",
+   "kind": "source",
+   "language": "html",
+   "path": "suppressed/page.html",
+   "sha256": "8e4a5e6d80d0ea5d95b40eefca74b1149a60aef31d5021bf43168edfe2c08de9"
+  },
+  {
+   "content": "def order_lines(orders: list[dict]) -> list[str]:\n    lines = []\n    for order in orders:  # pylint: disable=use-list-copy\n        lines.append(str(order))\n    return lines\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/perf.py",
+   "sha256": "aedd0aa2c555da747142b912eadc51bcbdebbf4d51c41273e2ac8b3335606d33"
+  },
+  {
+   "content": "// eslint-disable-next-line no-eval\nexport const run = (code) => eval(code);\n/* eslint-disable */\nexport const leftover = () => { const unused = 1; return 0; };\n",
+   "kind": "source",
+   "language": "javascript",
+   "path": "suppressed/run.js",
+   "sha256": "7d574a95ea3a6fd4706e740b142a31639288d9923385bda1b554bd0e6bfb10e7"
+  },
+  {
+   "content": "AWS_ACCESS_KEY_ID = \"AKIAZ7QX3LKD5PMW2N4J\"  # gitleaks:allow  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/settings.py",
+   "sha256": "6221abca0f58a4cde431ff6fdc4757345c028d1a3654ef3f7173805410f917ef"
+  }
+ ],
+ "image": "llmlab/analyzer:d3cfb8b63b4f",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/semgrep",
+   "scan",
+   "--json",
+   "--output",
+   "/out/semgrep.json",
+   "--quiet",
+   "--metrics",
+   "off",
+   "--disable-version-check",
+   "--oss-only",
+   "--no-git-ignore",
+   "--disable-nosem",
+   "--no-rewrite-rule-ids",
+   "--timeout",
+   "30",
+   "--timeout-threshold",
+   "3",
+   "--max-target-bytes",
+   "4000000",
+   "--jobs",
+   "1",
+   "--config",
+   "/opt/analyzer/rules/semgrep/python.json",
+   "--config",
+   "/opt/analyzer/rules/semgrep/python-audit.json",
+   "--config",
+   "/opt/analyzer/rules/semgrep/javascript.json",
+   "--config",
+   "/opt/analyzer/rules/semgrep/javascript-audit.json",
+   "--config",
+   "/opt/analyzer/rules/semgrep/html.json",
+   "--",
+   "/src/suppressed/Raw.vue",
+   "/src/suppressed/app.py",
+   "/src/suppressed/page.html",
+   "/src/suppressed/perf.py",
+   "/src/suppressed/run.js",
+   "/src/suppressed/settings.py"
+  ],
+  "env": {},
+  "mem_limit": "1g",
+  "report_files": [
+   "semgrep.json"
+  ],
+  "timeout_s": 600
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "semgrep.json": "{\"version\":\"1.180.0\",\"results\":[{\"check_id\":\"javascript.vue.security.audit.xss.templates.avoid-v-html.avoid-v-html\",\"path\":\"/src/suppressed/Raw.vue\",\"start\":{\"line\":3,\"col\":3,\"offset\":39},\"end\":{\"line\":3,\"col\":15,\"offset\":51},\"extra\":{\"message\":\"Dynamically rendering arbitrary HTML on your website can be very dangerous because it can easily lead to XSS vulnerabilities. Only use HTML interpolation on trusted content and never on user-provided content.\",\"metadata\":{\"category\":\"security\",\"confidence\":\"LOW\",\"cwe\":[\"CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')\"],\"cwe2021-top25\":true,\"cwe2022-top25\":true,\"impact\":\"LOW\",\"likelihood\":\"LOW\",\"owasp\":[\"A07:2017 - Cross-Site Scripting (XSS)\",\"A03:2021 - Injection\",\"A05:2025 - Injection\"],\"references\":[\"https://vuejs.org/v2/guide/syntax.html#Raw-HTML\"],\"subcategory\":[\"audit\"],\"technology\":[\"vue\"]},\"severity\":\"WARNING\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}},{\"check_id\":\"python.lang.security.audit.eval-detected.eval-detected\",\"path\":\"/src/suppressed/app.py\",\"start\":{\"line\":5,\"col\":12,\"offset\":99},\"end\":{\"line\":5,\"col\":28,\"offset\":115},\"extra\":{\"message\":\"Detected the use of eval(). eval() can be dangerous if used to evaluate dynamic content. If this content can be input from outside the program, this may be a code injection vulnerability. Ensure evaluated content is not definable by external sources.\",\"metadata\":{\"asvs\":{\"control_id\":\"5.2.4 Dyanmic Code Execution Features\",\"control_url\":\"https://github.com/OWASP/ASVS/blob/master/4.0/en/0x13-V5-Validation-Sanitization-Encoding.md#v52-sanitization-and-sandboxing-requirements\",\"section\":\"V5: Validation, Sanitization and Encoding Verification Requirements\",\"version\":\"4\"},\"category\":\"security\",\"confidence\":\"LOW\",\"cwe\":[\"CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code ('Eval Injection')\"],\"impact\":\"HIGH\",\"likelihood\":\"LOW\",\"owasp\":[\"A03:2021 - Injection\",\"A05:2025 - Injection\"],\"references\":[\"https://owasp.org/Top10/A03_2021-Injection\"],\"source-rule-url\":\"https://bandit.readthedocs.io/en/latest/blacklists/blacklist_calls.html#b307-eval\",\"subcategory\":[\"audit\"],\"technology\":[\"python\"]},\"severity\":\"WARNING\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}},{\"check_id\":\"javascript.browser.security.eval-detected.eval-detected\",\"path\":\"/src/suppressed/run.js\",\"start\":{\"line\":2,\"col\":30,\"offset\":65},\"end\":{\"line\":2,\"col\":40,\"offset\":75},\"extra\":{\"message\":\"Detected the use of eval(). eval() can be dangerous if used to evaluate dynamic content. If this content can be input from outside the program, this may be a code injection vulnerability. Ensure evaluated content is not definable by external sources.\",\"metadata\":{\"asvs\":{\"control_id\":\"5.2.4 Dynamic Code Execution Features\",\"control_url\":\"https://github.com/OWASP/ASVS/blob/master/4.0/en/0x13-V5-Validation-Sanitization-Encoding.md#v52-sanitization-and-sandboxing\",\"section\":\"V5 Validation, Sanitization and Encoding\",\"version\":\"4\"},\"category\":\"security\",\"confidence\":\"LOW\",\"cwe\":[\"CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code ('Eval Injection')\"],\"impact\":\"MEDIUM\",\"likelihood\":\"LOW\",\"owasp\":[\"A03:2021 - Injection\",\"A05:2025 - Injection\"],\"references\":[\"https://owasp.org/Top10/A03_2021-Injection\"],\"subcategory\":[\"audit\"],\"technology\":[\"browser\"]},\"severity\":\"WARNING\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}}],\"errors\":[],\"paths\":{\"scanned\":[\"/src/suppressed/Raw.vue\",\"/src/suppressed/app.py\",\"/src/suppressed/page.html\",\"/src/suppressed/perf.py\",\"/src/suppressed/run.js\",\"/src/suppressed/settings.py\"]},\"time\":{\"rules\":[],\"rules_parse_time\":0.21474909782409668,\"profiling_times\":{\"config_time\":0.8012561798095703,\"core_time\":1.1509509086608887,\"ignores_time\":0.0006098747253417969,\"total_time\":1.961364507675171},\"parsing_time\":{\"total_time\":0.0,\"per_file_time\":{\"mean\":0.0,\"std_dev\":0.0},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_files\":[]},\"scanning_time\":{\"total_time\":0.0167086124420166,\"per_file_time\":{\"mean\":0.0011139074961344399,\"std_dev\":7.171488273848404e-06},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_files\":[]},\"matching_time\":{\"total_time\":0.0,\"per_file_and_rule_time\":{\"mean\":0.0,\"std_dev\":0.0},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_rules_on_files\":[]},\"tainting_time\":{\"total_time\":0.0,\"per_def_and_rule_time\":{\"mean\":0.0,\"std_dev\":0.0},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_rules_on_defs\":[]},\"fixpoint_timeouts\":[],\"prefiltering\":{\"project_level_time\":0.0,\"file_level_time\":0.0,\"rules_with_project_prefilters_ratio\":0.0,\"rules_with_file_prefilters_ratio\":0.9842271293375394,\"rules_selected_ratio\":0.022082018927444796,\"rules_matched_ratio\":0.022082018927444796},\"targets\":[],\"total_bytes\":0,\"max_memory_bytes\":271175424},\"engine_requested\":\"OSS\",\"skipped_rules\":[],\"profiling_results\":[]}"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 4.087
+ },
+ "schema": 1,
+ "tool": "semgrep",
+ "tool_version": "1.180.0"
+}

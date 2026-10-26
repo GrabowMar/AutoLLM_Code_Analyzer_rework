@@ -1,8 +1,9 @@
 // Barrel module — re-exports the entire API surface from per-domain modules.
 // Existing route imports (`import { fooBar } from '$lib/api/client'`) keep
 // working unchanged. New code should import from the domain module directly.
+// The analysis client (`$lib/api/analysis`) is not re-exported here: its
+// names would clash with the automation client's (`getRun`, `PaginatedRuns`).
 
-export * from "./analysis";
 export * from "./applications";
 export * from "./credentials";
 export * from "./generation";

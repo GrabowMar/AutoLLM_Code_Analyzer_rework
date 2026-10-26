@@ -47,13 +47,74 @@ _VALID_STEP_KINDS: frozenset[str] = frozenset(
 )
 
 
+def _is_template(value: Any) -> bool:
+    """``{{steps.x.output.y}}`` / ``{{params.z}}`` values resolve at run time."""
+    return isinstance(value, str) and "{{" in value
+
+
+def _validate_analyze_config(config: dict[str, Any]) -> list[str]:
+    """Static checks of an analyze step (the dispatcher re-validates at run time).
+
+    An analysis must name what to run: a ``profile`` (id or slug) or a
+    non-empty tool list (``tool_slugs`` / legacy ``analyzers``). An empty
+    list without a profile would produce a run that measures nothing.
+    """
+    from backend.automation.engine.dispatchers import ANALYZE_MAX_TIMEOUT_SECONDS
+    from backend.automation.engine.dispatchers import THRESHOLD_KEYS
+
+    errors: list[str] = []
+    has_profile = any(config.get(k) not in (None, "") for k in ("profile", "profile_id", "profile_slug"))
+    tools_key = "tool_slugs" if "tool_slugs" in config else "analyzers" if "analyzers" in config else None
+    tools = config.get(tools_key) if tools_key else None
+    if tools is not None and not _is_template(tools):
+        if not isinstance(tools, list) or not all(isinstance(t, str) and t.strip() for t in tools):
+            errors.append(f"config.{tools_key} must be a list of tool slugs")
+        elif not tools and not has_profile:
+            errors.append(f"config.{tools_key} is empty; select at least one tool or a profile")
+    elif tools is None and not has_profile:
+        errors.append("config.profile or config.tool_slugs is required")
+
+    thresholds = config.get("thresholds")
+    if thresholds not in (None, {}) and not _is_template(thresholds):
+        if not isinstance(thresholds, dict):
+            errors.append("config.thresholds must map a severity (or 'total') to a maximum count")
+        else:
+            for key, limit in thresholds.items():
+                if key not in THRESHOLD_KEYS:
+                    errors.append(f"config.thresholds.{key}: unknown severity (use one of {list(THRESHOLD_KEYS)})")
+                elif not _is_template(limit) and (isinstance(limit, bool) or not isinstance(limit, int) or limit < 0):
+                    errors.append(f"config.thresholds.{key} must be a non-negative integer")
+
+    timeout = config.get("timeout_seconds")
+    if timeout is not None and not _is_template(timeout):
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or not 0 < timeout <= ANALYZE_MAX_TIMEOUT_SECONDS:
+            errors.append(f"config.timeout_seconds must be an integer in 1..{ANALYZE_MAX_TIMEOUT_SECONDS}")
+
+    source = config.get("source_code")
+    if source is not None and not _is_template(source) and not isinstance(source, dict):
+        errors.append("config.source_code must map file paths to file contents")
+    return errors
+
+
+def _validate_report_config(config: dict[str, Any]) -> list[str]:
+    from backend.reports.services import GENERATORS
+
+    report_type = config.get("report_type")
+    if not report_type:
+        return ["config.report_type is required"]
+    if not _is_template(report_type) and report_type not in GENERATORS:
+        return [f"config.report_type '{report_type}' is not one of {sorted(GENERATORS)}"]
+    return []
+
+
 def validate_pipeline_dsl(config: dict[str, Any]) -> list[str]:
     """Validate a pipeline DSL config. Returns a list of error strings.
 
     Rules:
     - ``steps`` must be a list of objects.
     - Each step needs a ``name`` and a known ``kind``.
-    - Required config fields per kind (see ``_REQUIRED_STEP_FIELDS``).
+    - Required config fields per kind (see ``_REQUIRED_STEP_FIELDS``); analyze
+      steps must name a profile or a non-empty tool list (``_validate_analyze_config``).
     - ``depends_on`` may reference steps by **name** (preferred — matches the
       runner) *or* by ``id`` field, whichever is set on the target step.
     - Names and ids must be unique within the pipeline.
@@ -98,6 +159,10 @@ def validate_pipeline_dsl(config: dict[str, Any]) -> list[str]:
                 for field in required
                 if not step_config.get(field)
             )
+            if kind == "analyze":
+                errors.extend(f"{prefix} (kind=analyze): {e}" for e in _validate_analyze_config(step_config))
+            if kind == "report":
+                errors.extend(f"{prefix} (kind=report): {e}" for e in _validate_report_config(step_config))
 
         step_id = step.get("id")
         if step_id:

@@ -87,7 +87,14 @@ export interface ExecutionSpec {
 
 export interface PostRunSpec {
   evaluate: boolean;
-  analysis: { enabled: boolean; tool_slugs: string[]; only_passing: boolean };
+  analysis: {
+    enabled: boolean;
+    /** Restricts the profile (or, without one, the default research profile) to these tools. */
+    tool_slugs: string[];
+    only_passing: boolean;
+    /** Analysis profile slug (latest version) or version id (pinned); null/absent: default profile. */
+    profile?: string | null;
+  };
   report: { enabled: boolean; exclude_truncated: boolean };
 }
 
@@ -123,6 +130,8 @@ export interface PostRunOut {
     analysis_done?: number;
     analysis_total?: number;
     analysis_failed?: number;
+    /** The one frozen analysis plan every post-run analysis shares (comparable runs). */
+    analysis_plan_hash?: string;
   };
   analysis_run_ids: (number | string)[];
   report_id: string | null;
