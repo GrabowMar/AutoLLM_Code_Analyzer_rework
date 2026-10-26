@@ -28,6 +28,7 @@ class AnalyzerToolSchema(Schema):
     installed: bool = False
     install_status: str = ""
     installed_version: str = ""
+    update_available: bool = False
 
 
 # --- Workspace --------------------------------------------------------------
@@ -50,12 +51,31 @@ class InstalledToolSchema(Schema):
     category: str
     status: str
     installed_version: str
+    catalog_version: str = ""
+    latest_version: str = ""
+    update_available: bool = False
     config: dict[str, Any]
     install_log: str
+    updated_at: str | None = None
 
 
 class InstallToolSchema(Schema):
     tool_slug: str
+
+
+class BulkInstallSchema(Schema):
+    tool_slugs: list[str]
+
+
+class UpdateAllSchema(Schema):
+    # False reinstalls every installed tool (repair after a container rebuild).
+    only_outdated: bool = True
+
+
+class UninstallResultSchema(Schema):
+    status: str
+    tool_slug: str
+    message: str = ""
 
 
 class ToolConfigSchema(Schema):

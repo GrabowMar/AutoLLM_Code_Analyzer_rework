@@ -31,7 +31,7 @@ let { job, costData, artifactCount, iterationCount }: Props = $props();
 		<Card.Root>
 			<Card.Header class="pb-3"><Card.Title class="text-sm font-medium flex items-center gap-2"><DollarSign class="h-4 w-4" /> Cost</Card.Title></Card.Header>
 			<Card.Content>
-				<div class="text-3xl font-bold font-display tabular-nums mb-3">{fmtCost(costData.totalCost)}</div>
+				<div class="text-3xl font-medium font-mono tabular-nums mb-3">{fmtCost(costData.totalCost)}</div>
 				{#if Object.keys(costData.byStage).length > 0}
 					<div class="space-y-1.5 text-sm">
 						{#each Object.entries(costData.byStage) as [stage, data]}
@@ -49,7 +49,7 @@ let { job, costData, artifactCount, iterationCount }: Props = $props();
 		<Card.Root>
 			<Card.Header class="pb-3"><Card.Title class="text-sm font-medium flex items-center gap-2"><Hash class="h-4 w-4" /> Token Usage</Card.Title></Card.Header>
 			<Card.Content>
-				<div class="text-3xl font-bold font-display tabular-nums mb-3">{fmt(costData.totalTokens, 0)}</div>
+				<div class="text-3xl font-medium font-mono tabular-nums mb-3">{fmt(costData.totalTokens, 0)}</div>
 				{#if costData.totalTokens > 0}
 					<div class="h-4 rounded-full overflow-hidden bg-muted flex mb-2">
 						<div class="bg-info h-full" style="width: {(costData.totalPrompt / costData.totalTokens) * 100}%"></div>
@@ -67,7 +67,7 @@ let { job, costData, artifactCount, iterationCount }: Props = $props();
 		<Card.Root>
 			<Card.Header class="pb-3"><Card.Title class="text-sm font-medium flex items-center gap-2"><Timer class="h-4 w-4" /> Performance</Card.Title></Card.Header>
 			<Card.Content>
-				<div class="text-3xl font-bold font-display tabular-nums mb-3">{costData.tokensPerSec > 0 ? fmt(costData.tokensPerSec, 1) : '—'} <span class="text-sm font-normal text-muted-foreground">tok/s</span></div>
+				<div class="text-3xl font-medium font-mono tabular-nums mb-3">{costData.tokensPerSec > 0 ? fmt(costData.tokensPerSec, 1) : '—'} <span class="text-sm font-normal text-muted-foreground">tok/s</span></div>
 				<div class="space-y-1.5 text-sm">
 					<div class="flex justify-between"><span class="text-muted-foreground">Total Duration</span><span>{fmtDur(job.duration_seconds)}</span></div>
 					<div class="flex justify-between"><span class="text-muted-foreground">Artifacts</span><span>{artifactCount}</span></div>

@@ -51,7 +51,8 @@
 	</div>
 {:else if auth.isAuthenticated}
 	<div
-		class="flex min-h-screen bg-background"
+		class="lab-canvas flex min-h-screen"
+		data-density={prefs.compactTables ? 'compact' : 'comfortable'}
 		style:--app-sidebar-offset={sidebarOffset}
 	>
 		<AppSidebar />

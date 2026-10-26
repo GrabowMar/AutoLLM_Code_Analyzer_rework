@@ -11,6 +11,7 @@
 	import TrendingUp from '@lucide/svelte/icons/trending-up';
 	import Layers from '@lucide/svelte/icons/layers';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
+	import Microscope from '@lucide/svelte/icons/microscope';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -38,7 +39,8 @@
 		{ key: 'tool_analysis', label: 'Tool Analysis', description: 'Findings breakdown across analyzers / security tools.', icon: Wrench },
 		{ key: 'generation_analytics', label: 'Generation Analytics', description: 'Throughput and success rate over a time window.', icon: TrendingUp },
 		{ key: 'comprehensive', label: 'Comprehensive', description: 'Platform-wide rollup of generation, analysis, and tools.', icon: Layers },
-		{ key: 'experiment_report', label: 'Experiment Report', description: 'Leaderboard and paired comparisons against the pre-registered baseline for one experiment.', icon: FlaskConical }
+		{ key: 'experiment_report', label: 'Experiment Report', description: 'Leaderboard and paired comparisons against the pre-registered baseline for one experiment.', icon: FlaskConical },
+		{ key: 'study_report', label: 'Study Report', description: 'Paper-ready tables: outcome funnel, deduplicated issues, correlations and rankings with uncertainty, validity threats. Exports to Markdown and LaTeX.', icon: Microscope }
 	];
 
 	let step = $state<1 | 2>(1);
@@ -50,6 +52,9 @@
 	let toolName = $state('');
 	let days = $state(30);
 	let experimentId = $state('');
+	let includeAi = $state(false);
+	let bootstrap = $state(true);
+	let seed = $state(0);
 	let submitting = $state(false);
 	let error = $state('');
 
@@ -116,6 +121,13 @@
 				return;
 			}
 			config.experiment_id = experimentId;
+		}
+		if (selectedType === 'study_report') {
+			// No experiment: every app you own.
+			if (experimentId) config.experiment_id = experimentId;
+			config.include_ai = includeAi;
+			config.bootstrap = bootstrap;
+			config.seed = Number(seed) || 0;
 		}
 		submitting = true;
 		error = '';
@@ -245,6 +257,35 @@
 							items={experiments.map((ex) => ({ value: ex.id, label: ex.name, description: `${ex.status} · ${ex.condition_count} conditions` }))}
 						/>
 					</div>
+				{:else if selectedType === 'study_report'}
+					<div class="space-y-2">
+						<label for="rep-study-experiment" class="text-sm font-medium">Experiment (optional)</label>
+						<Select.Simple
+							id="rep-study-experiment"
+							bind:value={experimentId}
+							placeholder="All my apps"
+							items={[
+								{ value: '', label: 'All my apps' },
+								...experiments.map((ex) => ({ value: ex.id, label: ex.name, description: `${ex.status} · ${ex.condition_count} conditions` }))
+							]}
+						/>
+						<p class="text-xs text-muted-foreground">
+							With an experiment, its pre-registered analysis plan decides which comparisons are confirmatory.
+						</p>
+					</div>
+					<div class="space-y-2">
+						<label for="rep-seed" class="text-sm font-medium">Random seed</label>
+						<input id="rep-seed" type="number" min="0" bind:value={seed} class="block w-full std-select py-2" />
+						<p class="text-xs text-muted-foreground">Fixes every bootstrap and permutation draw, so the report regenerates identically.</p>
+					</div>
+					<label class="flex items-center gap-2 text-sm">
+						<input type="checkbox" bind:checked={bootstrap} />
+						Bootstrap rank intervals over apps (slower)
+					</label>
+					<label class="flex items-center gap-2 text-sm">
+						<input type="checkbox" bind:checked={includeAi} />
+						Count AI-reviewer findings as issues
+					</label>
 				{/if}
 
 				{#if error}

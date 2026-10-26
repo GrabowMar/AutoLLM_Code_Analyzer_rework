@@ -15,6 +15,10 @@ class AnalysisConfig(AppConfig):
     def ready(self) -> None:
         from django.db.models.signals import post_migrate
 
+        # Registers the dependency / web / extra lint parsers alongside the
+        # built-in ones in services.parsers.
+        from backend.analysis.services import extra_parsers  # noqa: F401
+
         post_migrate.connect(
             _seed_catalog,
             sender=self,

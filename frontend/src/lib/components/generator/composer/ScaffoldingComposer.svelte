@@ -437,7 +437,7 @@
 			>
 				<div class="rounded-md border border-border bg-surface-2 p-3" aria-live="polite">
 					<p class="flex items-baseline gap-2">
-						<span class="font-display text-2xl font-semibold tabular-nums">{runCount}</span>
+						<span class="font-mono text-2xl font-medium tabular-nums">{runCount}</span>
 						<span class="text-sm text-muted-foreground">run{runCount === 1 ? '' : 's'}</span>
 					</p>
 					<p class="text-xs text-muted-foreground tabular-nums">

@@ -31,6 +31,7 @@
 	import { subscribe } from '$lib/api/sse';
 	import { formatDateTime } from '$lib/utils/formatters';
 	import { cn } from '$lib/utils';
+	import { tableFrame } from '$lib/components/table';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
@@ -501,14 +502,14 @@
 				{/if}
 
 				{#if canEdit && isRelay}
-					<Card.Root>
-						<Card.Header class="pb-3">
+					<Card.Root class="gap-0 overflow-clip py-0">
+						<Card.Header class="border-b border-border py-3">
 							<Card.Title class="text-base">Relay sessions</Card.Title>
 							<Card.Description>
 								One relay is active; others wait as standby and take over if it disappears.
 							</Card.Description>
 						</Card.Header>
-						<Card.Content>
+						<Card.Content class="p-0">
 							<SessionsTable {sessions} {now} newHosts={flaggedHosts} />
 						</Card.Content>
 					</Card.Root>
@@ -560,31 +561,31 @@
 			<!-- ── Tokens ───────────────────────────────────────────── -->
 			{#if canEdit && isRelay}
 				<Tabs.Content value="tokens" class="space-y-6">
-					<Card.Root>
-						<Card.Header class="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0 pb-3">
+					<Card.Root class="gap-0 overflow-clip py-0">
+						<Card.Header class="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0 border-b border-border py-3">
 							<div class="space-y-1">
 								<Card.Title class="text-base">Relay tokens</Card.Title>
 								<Card.Description>Each relay authenticates with a token scoped to this endpoint.</Card.Description>
 							</div>
 							<Button size="sm" onclick={() => (newTokenOpen = true)}><Plus />New token</Button>
 						</Card.Header>
-						<Card.Content>
+						<Card.Content class="p-0">
 							{#if tokensError}
-								<ErrorAlert message={tokensError} onretry={loadTokens} />
+								<div class="p-4"><ErrorAlert message={tokensError} onretry={loadTokens} /></div>
 							{:else if tokens === null}
 								<LoadingState label="loading tokens" class="py-6" />
 							{:else if tokens.length === 0}
-								<EmptyState compact icon={KeyRound} title="No tokens" description="Create one for the relay." />
+								<div class="p-4"><EmptyState compact icon={KeyRound} title="No tokens" description="Create one for the relay." /></div>
 							{:else}
-								<div class="relative overflow-x-auto md:rounded-md md:border md:border-border">
-									<table class="table-card-mobile w-full text-sm md:[&_td]:px-2 md:[&_th]:px-2">
+								<div class="table-frame max-md:p-3" {@attach tableFrame}>
+									<table class="table-card-mobile">
 										<thead>
 											<tr>
 												<th scope="col">Token</th>
 												<th scope="col">Created</th>
 												<th scope="col">Last used</th>
 												<th scope="col">State</th>
-												<th scope="col" class="text-right">Sessions</th>
+												<th scope="col" class="num">Sessions</th>
 												<th scope="col" class="text-right"><span class="sr-only">Actions</span></th>
 											</tr>
 										</thead>
@@ -596,8 +597,8 @@
 														<code class="mono-tag">{t.prefix}…</code>
 														{#if t.label}<span class="ml-1 text-xs">{t.label}</span>{/if}
 													</td>
-													<td data-label="Created" class="text-xs" title={formatDateTime(t.created_at)}>{formatAgo(t.created_at, now)}</td>
-													<td data-label="Last used" class="text-xs" title={formatDateTime(t.last_used_at)}>{formatAgo(t.last_used_at, now)}</td>
+													<td data-label="Created" class="whitespace-nowrap text-xs" title={formatDateTime(t.created_at)}>{formatAgo(t.created_at, now)}</td>
+													<td data-label="Last used" class="whitespace-nowrap text-xs" title={formatDateTime(t.last_used_at)}>{formatAgo(t.last_used_at, now)}</td>
 													<td data-label="State" class="text-xs">
 														{#if t.revoked_at}
 															<StatusBadge status="revoked" tone="neutral" />
@@ -609,12 +610,14 @@
 															<StatusBadge status="active" />
 														{/if}
 													</td>
-													<td data-label="Sessions" class="text-right tabular-nums">{t.active_sessions}</td>
-													<td data-label="" class="text-right">
+													<td data-label="Sessions" class="num">{t.active_sessions}</td>
+													<td data-label="" class="w-px whitespace-nowrap text-right">
 														{#if !t.revoked_at && !expired}
-															<span class="inline-flex gap-1">
-																<Button variant="outline" size="sm" class="h-7 px-2" onclick={() => { rotateGrace = 24 * 60; rotateTarget = t; }}>Rotate</Button>
-																<Button variant="outline" size="sm" class="h-7 px-2 text-danger-fg" onclick={() => (revokeTarget = t)}>Revoke</Button>
+															<span class="inline-flex gap-0.5">
+																<span class="row-actions-more">
+																	<Button variant="ghost" size="sm" class="h-7 px-2 text-xs text-danger-fg hover:bg-destructive/10 hover:text-danger-fg" title="Revoke token {t.prefix}…" onclick={() => (revokeTarget = t)}>Revoke</Button>
+																</span>
+																<Button variant="ghost" size="sm" class="h-7 px-2 text-xs" title="Rotate token {t.prefix}…" onclick={() => { rotateGrace = 24 * 60; rotateTarget = t; }}>Rotate</Button>
 															</span>
 														{/if}
 													</td>
@@ -624,7 +627,7 @@
 									</table>
 								</div>
 								{#if liveTokens.length === 0}
-									<p class="mt-2 text-xs text-warning-fg">No usable token: relays cannot connect until you create one.</p>
+									<p class="border-t border-border px-4 py-2 text-xs text-warning-fg">No usable token: relays cannot connect until you create one.</p>
 								{/if}
 							{/if}
 						</Card.Content>

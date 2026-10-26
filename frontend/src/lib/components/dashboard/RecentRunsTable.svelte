@@ -6,6 +6,7 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import type { RecentAnalysis } from '$lib/utils/dashboard';
+	import { rowLink } from '$lib/components/table';
 
 	interface Props {
 		analyses: RecentAnalysis[];
@@ -14,8 +15,8 @@
 	let { analyses }: Props = $props();
 </script>
 
-<Card.Root>
-	<Card.Header>
+<Card.Root class="gap-0 overflow-clip py-0">
+	<Card.Header class="border-b border-border py-3">
 		<div class="flex items-center justify-between">
 			<div class="flex items-center gap-2">
 				<FlaskConical class="h-4 w-4 text-muted-foreground" />
@@ -32,28 +33,26 @@
 	</Card.Header>
 	<Card.Content class="p-0">
 		<div class="overflow-x-auto">
-			<table class="table-card-mobile w-full">
+			<table class="table-card-mobile">
 				<thead>
-					<tr class="border-b bg-muted/30">
-						<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Task</th>
-						<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Status</th>
-						<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Time</th>
+					<tr>
+						<th>Task</th>
+						<th>Status</th>
+						<th>Time</th>
 					</tr>
 				</thead>
-				<tbody class="divide-y">
+				<tbody>
 					{#each analyses as analysis (analysis.id)}
-						<tr class="transition-colors hover:bg-muted/30">
-							<td class="px-4 py-2.5" data-label="Task">
-								<a
-									href="/analysis/{analysis.id}"
-									class="text-sm font-medium hover:text-primary hover:underline"
-									>{analysis.name}</a
-								>
+						{@const href = `/analysis/${analysis.id}`}
+						<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
+						<tr class="row-link" onclick={rowLink(href)}>
+							<td data-label="Task">
+								<a {href} class="block max-w-[26rem] truncate font-medium transition-colors hover:text-primary" title={analysis.name}>{analysis.name}</a>
 							</td>
-							<td class="px-4 py-2.5" data-label="Status">
+							<td class="whitespace-nowrap" data-label="Status">
 								<StatusBadge status={analysis.status} />
 							</td>
-							<td class="px-4 py-2.5" data-label="Time">
+							<td class="whitespace-nowrap" data-label="Time">
 								<span class="text-xs text-muted-foreground">{analysis.time}</span>
 							</td>
 						</tr>

@@ -15,6 +15,7 @@ import ChartColumn from "@lucide/svelte/icons/chart-column";
 import FileText from "@lucide/svelte/icons/file-text";
 import BookOpen from "@lucide/svelte/icons/book-open";
 import Activity from "@lucide/svelte/icons/activity";
+import Plug from "@lucide/svelte/icons/plug";
 
 export interface NavItem {
   label: string;
@@ -66,6 +67,10 @@ export const navSections: NavSection[] = [
     ],
   },
   {
+    title: "Connect",
+    items: [{ label: "Integrations", href: "/integrations", icon: Plug }],
+  },
+  {
     title: "Help",
     items: [{ label: "Docs", href: "/docs", icon: BookOpen }],
   },
@@ -101,4 +106,21 @@ export const routeLabels: Record<string, string> = {
 export function isNavActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(href + "/");
+}
+
+/** The nav section (and its 1-based position) that owns a path, for page eyebrows. */
+export function navSectionFor(
+  pathname: string,
+): { index: number; section: NavSection } | null {
+  let found: { index: number; section: NavSection } | null = null;
+  let bestLen = -1;
+  for (const [i, section] of navSections.entries()) {
+    for (const item of section.items) {
+      if (isNavActive(pathname, item.href) && item.href.length > bestLen) {
+        found = { index: i + 1, section };
+        bestLen = item.href.length;
+      }
+    }
+  }
+  return found;
 }

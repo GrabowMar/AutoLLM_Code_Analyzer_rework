@@ -41,6 +41,7 @@ def serialize_tool(tool: AnalyzerTool, installs: dict[str, InstalledTool]) -> di
         "installed": installed is not None,
         "install_status": installed.status if installed else "",
         "installed_version": installed.installed_version if installed else "",
+        "update_available": installed.update_available if installed else False,
     }
 
 

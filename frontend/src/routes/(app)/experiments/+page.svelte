@@ -347,7 +347,7 @@
 			</EmptyState>
 		{/if}
 	{:else if data}
-		<ul class="space-y-2">
+		<ul class="data-list">
 			{#each items as exp, i (exp.id)}
 				<li class="rise-in" style="--stagger-i: {Math.min(i, 8)}">
 					<ExperimentRow experiment={exp} busy={busyId === exp.id} onaction={(action) => act(exp, action)} />

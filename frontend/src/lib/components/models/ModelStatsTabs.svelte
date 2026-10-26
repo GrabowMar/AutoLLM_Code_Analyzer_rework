@@ -34,7 +34,6 @@
 	import ModelUsageSection from './ModelUsageSection.svelte';
 	import {
 		formatPrice,
-		formatTokens,
 		formatNumber,
 		formatMetaValue,
 		stripMarkdown,
@@ -144,74 +143,63 @@
 <section id="overview" class="space-y-4">
 	<h2 class="text-lg font-semibold flex items-center gap-2"><Info class="h-5 w-5" /> Overview</h2>
 
-	<div class="grid gap-3 lg:grid-cols-2">
-		<!-- Identity Card -->
+	<div class="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+		<!-- About: what the model is, where to read more -->
 		<Card.Root>
-			<Card.Header class="pb-2"><Card.Title class="text-sm font-medium">Identity</Card.Title></Card.Header>
-			<Card.Content class="space-y-2 text-sm">
-				<div class="flex justify-between"><span class="text-muted-foreground">Model ID</span><code class="text-xs truncate max-w-[180px]" title={model.model_id}>{model.model_id}</code></div>
-				<div class="flex justify-between"><span class="text-muted-foreground">Provider</span><Badge variant="outline" class="text-xs">{model.provider}</Badge></div>
-				<div class="flex justify-between"><span class="text-muted-foreground">Last Updated</span><span class="text-xs">{new Date(model.updated_at).toLocaleDateString()}</span></div>
-				{#if hfId}
-					<div class="flex justify-between"><span class="text-muted-foreground">HuggingFace</span><code class="text-xs truncate max-w-[140px]">{hfId}</code></div>
-				{/if}
+			<Card.Header class="pb-0"><Card.Title class="text-base">About</Card.Title></Card.Header>
+			<Card.Content class="space-y-3">
+				<p class="text-sm leading-relaxed break-words text-muted-foreground">
+					{#if model.description}{stripMarkdown(model.description)}{:else}{model.model_name} by {model.provider}. A large language model available via OpenRouter.{/if}
+				</p>
+				<div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
+					<a href="https://openrouter.ai/models/{model.model_id}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 font-medium text-primary hover:underline">
+						<Globe class="size-3.5" aria-hidden="true" />OpenRouter<ExternalLink class="size-3" aria-hidden="true" />
+					</a>
+					{#if hfId}
+						<a href="https://huggingface.co/{hfId}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-primary hover:underline">
+							Hugging Face<ExternalLink class="size-3" aria-hidden="true" />
+						</a>
+					{/if}
+				</div>
 			</Card.Content>
 		</Card.Root>
 
-		<!-- Capacity Card -->
+		<!-- Identity: exact ids and properties, never truncated -->
 		<Card.Root>
-			<Card.Header class="pb-2"><Card.Title class="text-sm font-medium">Capacity</Card.Title></Card.Header>
+			<Card.Header class="pb-0"><Card.Title class="text-base">Identity</Card.Title></Card.Header>
 			<Card.Content>
-				<div class="flex items-center justify-around mb-3">
-					<div class="text-center">
-						<div class="text-2xl font-bold text-primary">{model.context_window_display}</div>
-						<div class="section-label">Context</div>
-					</div>
-					<div class="text-center">
-						<div class="text-2xl font-bold text-success-fg">{model.max_output_tokens ? formatTokens(model.max_output_tokens) : '—'}</div>
-						<div class="section-label">Max Output</div>
-					</div>
-				</div>
-				<div class="flex flex-wrap gap-1 justify-center">
-					{#if model.is_free}
-						<Badge variant="secondary" class="gap-1 text-success-fg"><Gift class="h-3 w-3" /> Free</Badge>
+				<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-sm">
+					<dt class="text-muted-foreground">Model ID</dt>
+					<dd class="font-mono text-xs break-all">{model.model_id}</dd>
+					<dt class="text-muted-foreground">Provider</dt>
+					<dd>{model.provider}</dd>
+					{#if hfId}
+						<dt class="text-muted-foreground">Weights</dt>
+						<dd class="font-mono text-xs break-all">{hfId}</dd>
 					{/if}
-					{#if (meta.openrouter_top_provider as Record<string, unknown>)?.is_moderated}
-						<Badge variant="secondary" class="gap-1 text-info-fg"><Shield class="h-3 w-3" /> Moderated</Badge>
+					{#if inputMods.length || outputMods.length}
+						<dt class="text-muted-foreground">Modalities</dt>
+						<dd class="text-xs">
+							<span class="capitalize">{inputMods.join(', ') || 'text'}</span>
+							<span class="text-muted-foreground"> → </span>
+							<span class="capitalize">{outputMods.join(', ') || 'text'}</span>
+						</dd>
 					{/if}
-				</div>
+					<dt class="text-muted-foreground">Access</dt>
+					<dd class="flex flex-wrap gap-1.5">
+						{#if model.is_free}<Badge variant="outline" class="h-5 gap-1 px-1.5 text-[11px] text-success-fg"><Gift class="size-3" />Free</Badge>{/if}
+						{#if (meta.openrouter_top_provider as Record<string, unknown>)?.is_moderated}
+							<Badge variant="outline" class="h-5 gap-1 px-1.5 text-[11px]"><Shield class="size-3" />Moderated</Badge>
+						{:else}
+							<span class="text-xs text-muted-foreground">Unmoderated</span>
+						{/if}
+					</dd>
+					<dt class="text-muted-foreground">Metadata</dt>
+					<dd class="font-mono text-xs">{new Date(model.updated_at).toLocaleDateString()}</dd>
+				</dl>
 			</Card.Content>
 		</Card.Root>
 	</div>
-
-	<!-- Description & Links -->
-	<Card.Root>
-		<Card.Content class="p-4">
-			<div class="flex flex-wrap items-center gap-3">
-				<a href="https://openrouter.ai/models/{model.model_id}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-primary hover:underline font-medium">
-					<Globe class="h-3.5 w-3.5" />
-					View on OpenRouter
-					<ExternalLink class="h-3 w-3" />
-				</a>
-				{#if hfId}
-					<Separator orientation="vertical" class="h-4" />
-					<a href="https://huggingface.co/{hfId}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-primary hover:underline">
-						<code class="text-xs">{hfId}</code>
-						<ExternalLink class="h-3 w-3" />
-					</a>
-				{/if}
-			</div>
-			{#if model.description}
-				<p class="text-sm text-muted-foreground leading-relaxed mt-2 break-words">
-					{stripMarkdown(model.description)}
-				</p>
-			{:else}
-				<p class="text-sm text-muted-foreground leading-relaxed mt-2 break-words">
-					{model.model_name} by {model.provider}. A large language model available via OpenRouter.
-				</p>
-			{/if}
-		</Card.Content>
-	</Card.Root>
 </section>
 
 <!-- ==================== CAPABILITIES SECTION ==================== -->
@@ -418,38 +406,38 @@
 	</div>
 
 	<!-- Pricing Table -->
-	<Card.Root>
-		<Card.Header class="pb-2"><Card.Title class="text-sm font-medium">Pricing Breakdown</Card.Title></Card.Header>
+	<Card.Root class="gap-0 overflow-clip py-0">
+		<Card.Header class="border-b border-border py-3"><Card.Title class="text-sm font-medium">Pricing Breakdown</Card.Title></Card.Header>
 		<Card.Content class="p-0">
-			<div class="table-scroll-wrapper">
-			<table class="w-full">
+			<div class="overflow-x-auto">
+			<table>
 				<thead>
-					<tr class="border-b bg-muted/30">
-						<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Type</th>
-						<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Per 1M tokens</th>
-						<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Per 1K tokens</th>
-						<th class="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Per token</th>
+					<tr>
+						<th>Type</th>
+						<th class="num">Per 1M tokens</th>
+						<th class="num">Per 1K tokens</th>
+						<th class="num">Per token</th>
 					</tr>
 				</thead>
-				<tbody class="divide-y">
-					<tr class="hover:bg-muted/30">
-						<td class="px-4 py-2.5 text-sm font-medium">Input</td>
-						<td class="px-4 py-2.5 text-sm font-mono">{formatPrice(model.input_price_per_million)}</td>
-						<td class="px-4 py-2.5 text-sm font-mono text-muted-foreground">{formatPrice(model.input_price_per_million / 1000)}</td>
-						<td class="px-4 py-2.5 text-sm font-mono text-muted-foreground">{model.input_price_per_token === 0 ? 'Free' : `$${model.input_price_per_token.toExponential(2)}`}</td>
+				<tbody>
+					<tr>
+						<td class="font-medium">Input</td>
+						<td class="num">{formatPrice(model.input_price_per_million)}</td>
+						<td class="num text-muted-foreground">{formatPrice(model.input_price_per_million / 1000)}</td>
+						<td class="num text-muted-foreground">{model.input_price_per_token === 0 ? 'Free' : `$${model.input_price_per_token.toExponential(2)}`}</td>
 					</tr>
-					<tr class="hover:bg-muted/30">
-						<td class="px-4 py-2.5 text-sm font-medium">Output</td>
-						<td class="px-4 py-2.5 text-sm font-mono">{formatPrice(model.output_price_per_million)}</td>
-						<td class="px-4 py-2.5 text-sm font-mono text-muted-foreground">{formatPrice(model.output_price_per_million / 1000)}</td>
-						<td class="px-4 py-2.5 text-sm font-mono text-muted-foreground">{model.output_price_per_token === 0 ? 'Free' : `$${model.output_price_per_token.toExponential(2)}`}</td>
+					<tr>
+						<td class="font-medium">Output</td>
+						<td class="num">{formatPrice(model.output_price_per_million)}</td>
+						<td class="num text-muted-foreground">{formatPrice(model.output_price_per_million / 1000)}</td>
+						<td class="num text-muted-foreground">{model.output_price_per_token === 0 ? 'Free' : `$${model.output_price_per_token.toExponential(2)}`}</td>
 					</tr>
 					{#each getAllPricingTiers(model) as tier}
-						<tr class="hover:bg-muted/30 bg-muted/10">
-							<td class="px-4 py-2.5 text-sm font-medium text-muted-foreground">{tier.label}</td>
-							<td class="px-4 py-2.5 text-sm font-mono">{formatPrice(tier.perMillionTokens)}</td>
-							<td class="px-4 py-2.5 text-sm font-mono text-muted-foreground">{formatPrice(tier.perMillionTokens / 1000)}</td>
-							<td class="px-4 py-2.5 text-sm font-mono text-muted-foreground">${(tier.perMillionTokens / 1_000_000).toExponential(2)}</td>
+						<tr>
+							<td class="text-muted-foreground">{tier.label}</td>
+							<td class="num">{formatPrice(tier.perMillionTokens)}</td>
+							<td class="num text-muted-foreground">{formatPrice(tier.perMillionTokens / 1000)}</td>
+							<td class="num text-muted-foreground">${(tier.perMillionTokens / 1_000_000).toExponential(2)}</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -457,6 +445,7 @@
 			</div>
 		</Card.Content>
 	</Card.Root>
+
 
 	<!-- Cost Calculator -->
 	<Card.Root>
@@ -536,8 +525,8 @@
 	<div class="grid gap-3 lg:grid-cols-2">
 		<!-- OpenRouter Metadata -->
 		{#if Object.keys(caps).length}
-			<Card.Root>
-				<Card.Header class="pb-2">
+			<Card.Root class="gap-0 overflow-clip py-0">
+				<Card.Header class="border-b border-border py-3">
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<Code class="h-4 w-4 text-muted-foreground" />
 						OpenRouter Metadata
@@ -546,12 +535,12 @@
 				</Card.Header>
 				<Card.Content class="p-0">
 					<div class="max-h-[300px] overflow-y-auto">
-						<table class="w-full">
-							<tbody class="divide-y">
+						<table>
+							<tbody>
 								{#each Object.entries(caps).filter(([, v]) => v !== null && v !== '') as [key, value]}
-									<tr class="hover:bg-muted/30">
-										<td class="px-3 py-1.5 text-xs text-muted-foreground w-2/5"><code>{key}</code></td>
-										<td class="px-3 py-1.5 text-xs">{formatMetaValue(value)}</td>
+									<tr>
+										<td class="w-2/5 font-mono text-xs text-muted-foreground">{key}</td>
+										<td class="text-xs break-words">{formatMetaValue(value)}</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -563,8 +552,8 @@
 
 		<!-- Enriched Metadata -->
 		{#if Object.keys(meta).length}
-			<Card.Root>
-				<Card.Header class="pb-2">
+			<Card.Root class="gap-0 overflow-clip py-0">
+				<Card.Header class="border-b border-border py-3">
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<Layers class="h-4 w-4 text-muted-foreground" />
 						Enriched Dataset
@@ -573,12 +562,12 @@
 				</Card.Header>
 				<Card.Content class="p-0">
 					<div class="max-h-[300px] overflow-y-auto">
-						<table class="w-full">
-							<tbody class="divide-y">
+						<table>
+							<tbody>
 								{#each Object.entries(meta).filter(([, v]) => v !== null && v !== '') as [key, value]}
-									<tr class="hover:bg-muted/30">
-										<td class="px-3 py-1.5 text-xs text-muted-foreground w-2/5"><code>{key}</code></td>
-										<td class="px-3 py-1.5 text-xs">{formatMetaValue(value)}</td>
+									<tr>
+										<td class="w-2/5 font-mono text-xs text-muted-foreground">{key}</td>
+										<td class="text-xs break-words">{formatMetaValue(value)}</td>
 									</tr>
 								{/each}
 							</tbody>

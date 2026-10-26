@@ -12,8 +12,10 @@ from typing import TYPE_CHECKING
 
 from django.http import HttpResponse
 from django.http import StreamingHttpResponse
+from ninja import File
 from ninja import Query
 from ninja import Router
+from ninja.files import UploadedFile  # noqa: TC002 - ninja resolves the annotation at runtime
 
 from backend.analysis.models import AnalysisRun
 from backend.analysis.models import Finding
@@ -278,3 +280,48 @@ def reports_json(
         return HttpResponse(status=401)
     qs = _build_qs(_REPORTS, request, {"status": status, "report_type": report_type}, since, limit)
     return _json_response(services.reports_json(qs))
+
+
+# ── Manual review sample ─────────────────────────────────────────────────────
+
+
+@router.get("/review-sample.zip")
+def review_sample_zip(
+    request,
+    experiment_id: str | None = None,
+    batch_id: str | None = None,
+    size: int = Query(30, ge=1, le=500),
+    per_stratum: int | None = Query(None, ge=1, le=100),
+    stratify: str = Query("model", pattern="^(|model|template|model,template)$"),
+    seed: int = Query(0, ge=0),
+    blind: bool = True,
+):
+    """A seeded, stratified sample of apps with blank label sheets for manual review."""
+    from backend.export.services.review_sample import build_review_sample
+    from backend.statistics.services.study import study_jobs
+
+    jobs = study_jobs(request.auth, experiment_id=experiment_id, batch_id=batch_id)
+    data, _manifest = build_review_sample(
+        jobs,
+        size=size,
+        per_stratum=per_stratum,
+        stratify=tuple(k for k in stratify.split(",") if k),
+        seed=seed,
+        blind=blind,
+    )
+    resp = HttpResponse(data, content_type="application/zip")
+    resp["Content-Disposition"] = f'attachment; filename="review-sample-seed{seed}.zip"'
+    return resp
+
+
+@router.post("/review-sample/score/")
+def review_sample_score(request, file: UploadedFile = File(...)):  # noqa: B008
+    """Score a filled-in review sample ZIP: precision, Cohen's kappa, Spearman rho."""
+    import zipfile
+
+    from backend.export.services.review_sample import score_review_labels
+
+    try:
+        return score_review_labels(file.read())
+    except zipfile.BadZipFile:
+        return HttpResponse("Upload the review sample as a .zip", status=400)

@@ -152,6 +152,9 @@ export interface ExperimentCreateV2 {
   agent_config?: AgentConfig;
   continuation_limit?: number;
   enable_repair?: boolean;
+  build_healing?: "full" | "no_deps" | "none";
+  /** Pre-registered analysis plan; frozen (hashed) at launch. */
+  analysis_plan?: AnalysisPlan | null;
   llm_defaults?: LLMParams;
   conditions: ConditionSetSpec;
   execution?: ExecutionSpec;
@@ -628,4 +631,37 @@ export interface ExperimentResults {
   };
   notes: string[];
   generated_at: string;
+}
+
+export type PlanMetric =
+  | "deploy_rate"
+  | "pass_rate"
+  | "functional_passed"
+  | "unique_issues_per_app"
+  | "issues_per_kloc"
+  | "security_per_app"
+  | "cost_per_app";
+
+/** backend/generation/services/analysis_plan.py */
+export interface AnalysisPlan {
+  research_questions?: {
+    id?: string;
+    question: string;
+    hypothesis?: string;
+    metric?: PlanMetric;
+    direction?: "two-sided" | "greater" | "less";
+  }[];
+  primary_metric: PlanMetric;
+  secondary_metrics?: PlanMetric[];
+  alpha?: number;
+  correction?: "holm" | "bh" | "none";
+  ranking_criteria?: {
+    key: PlanMetric;
+    direction: "benefit" | "cost";
+    weight: number;
+    label?: string;
+  }[];
+  exclusions?: { truncated?: boolean };
+  min_apps_per_condition?: number;
+  notes?: string;
 }

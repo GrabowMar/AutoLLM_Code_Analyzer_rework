@@ -74,10 +74,15 @@
 			{/each}
 		</span>
 	{/if}
-	{#each warnings as warning (warning)}
-		<span class={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]', toneClasses.warning)} title={warning}>
-			<TriangleAlert class="size-3" aria-hidden="true" />
-			<span class="max-w-60 truncate">{warning}</span>
-		</span>
-	{/each}
+	<!-- Warnings are sentences: their own wrapped row, never truncated pills. -->
+	{#if warnings.length > 0}
+		<ul class="basis-full space-y-1 border-t border-border pt-2 text-warning-fg">
+			{#each warnings as warning (warning)}
+				<li class="flex items-start gap-1.5">
+					<TriangleAlert class="mt-px size-3.5 shrink-0" aria-hidden="true" />
+					<span>{warning}</span>
+				</li>
+			{/each}
+		</ul>
+	{/if}
 </div>

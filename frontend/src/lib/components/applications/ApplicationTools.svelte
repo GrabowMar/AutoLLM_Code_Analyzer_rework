@@ -1,4 +1,5 @@
 <script lang="ts">
+import { tableFrame } from '$lib/components/table';
 import { onMount } from 'svelte';
 import * as Card from '$lib/components/ui/card';
 import { Button } from '$lib/components/ui/button';
@@ -173,8 +174,8 @@ const TABS = [
 						{:else if Object.keys(inspect.env || {}).length === 0}
 							<EmptyState compact title="No environment variables" />
 						{:else}
-							<div class="overflow-x-auto">
-								<table class="w-full text-sm">
+							<div class="table-frame rounded-md border border-border" {@attach tableFrame}>
+								<table>
 									<thead>
 										<tr>
 											<th>Key</th>
@@ -184,7 +185,7 @@ const TABS = [
 									<tbody>
 										{#each Object.entries(inspect.env) as [k, v] (k)}
 											<tr>
-												<td class="font-mono text-xs">{k}</td>
+												<td class="whitespace-nowrap font-mono text-xs">{k}</td>
 												<td class="font-mono text-xs break-all">{v}</td>
 											</tr>
 										{/each}

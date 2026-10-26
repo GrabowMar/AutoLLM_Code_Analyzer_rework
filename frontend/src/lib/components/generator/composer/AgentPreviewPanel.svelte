@@ -145,7 +145,7 @@
 				<div class={cn('space-y-4 transition-opacity duration-200', stale && 'opacity-60')} aria-busy={stale}>
 					<div class="rounded-md border border-border bg-surface-2 p-3">
 						<p class="flex items-baseline gap-2" aria-live="polite">
-							<span class="font-display text-2xl font-semibold tabular-nums">{preview.run_count}</span>
+							<span class="font-mono text-2xl font-medium tabular-nums">{preview.run_count}</span>
 							<span class="text-sm text-muted-foreground">run{preview.run_count === 1 ? '' : 's'}</span>
 						</p>
 						<p class="text-xs text-muted-foreground tabular-nums">
@@ -229,20 +229,20 @@
 						<div class="space-y-1.5">
 							<p class="section-label">Per model</p>
 							<div class="overflow-x-auto rounded-md border border-border">
-								<table class="w-full text-xs">
+								<table class="text-xs">
 									<thead>
-										<tr class="bg-surface-2 text-left text-[11px] text-muted-foreground">
-											<th scope="col" class="px-2 py-1.5 font-medium">Model</th>
-											<th scope="col" class="px-2 py-1.5 font-medium">Tools</th>
-											<th scope="col" class="px-2 py-1.5 text-right font-medium">Output cap</th>
-											<th scope="col" class="px-2 py-1.5 font-medium">Seed</th>
+										<tr>
+											<th scope="col">Model</th>
+											<th scope="col">Tools</th>
+											<th scope="col" class="num">Output cap</th>
+											<th scope="col">Seed</th>
 										</tr>
 									</thead>
 									<tbody>
 										{#each preview.models as m (m.model_id)}
 											{@const dropped = Object.entries(m.dropped_params)}
-											<tr class="border-t border-border/60 align-top">
-												<td class="min-w-[9rem] px-2 py-1.5">
+											<tr class="align-top">
+												<td class="min-w-[9rem]">
 													<span class="font-medium text-foreground">{m.name}</span>
 													{#if dropped.length > 0 || m.context_window_source === 'fallback' || m.params_support === 'unknown'}
 														<span class="mt-1 flex flex-wrap gap-1">
@@ -265,7 +265,7 @@
 														</span>
 													{/if}
 												</td>
-												<td class="px-2 py-1.5">
+												<td>
 													{#if !m.tool_harness_ok}
 														<span class="inline-flex items-center gap-0.5 font-medium text-danger-fg"
 															><X class="size-3.5" aria-hidden="true" />missing</span
@@ -276,13 +276,13 @@
 														<Minus class="size-3.5 text-muted-foreground" aria-label="not needed" />
 													{/if}
 												</td>
-												<td class="px-2 py-1.5 text-right tabular-nums">
-													{m.output_cap != null ? formatTokens(m.output_cap) : '—'}
+												<td class="num">
+													{#if m.output_cap != null}{formatTokens(m.output_cap)}{:else}<span class="text-muted-foreground">—</span>{/if}
 													{#if m.context_window != null}
-														<span class="block text-[11px] text-muted-foreground">{formatTokens(m.context_window)} ctx</span>
+														<span class="cell-sub block text-[11px] text-muted-foreground">{formatTokens(m.context_window)} ctx</span>
 													{/if}
 												</td>
-												<td class="px-2 py-1.5">
+												<td>
 													{#if baseSeed == null}
 														<span class="text-muted-foreground">random</span>
 													{:else if m.seed_forwarded}

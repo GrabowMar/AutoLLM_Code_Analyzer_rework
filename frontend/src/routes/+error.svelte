@@ -24,15 +24,10 @@
 
 <div class="flex min-h-[70vh] items-center justify-center p-4">
 	<div class="w-full max-w-lg">
-		<div class="terminal mb-4 text-xs">
-			<span class="text-primary">$</span> cat /var/log/error.log <span class="text-muted-foreground">| tail -1</span>
-		</div>
-		<div class="rounded-md border border-border bg-card overflow-hidden">
-			<div class="flex items-center gap-2 border-b border-border bg-surface-2 px-4 py-2 text-xs font-mono">
-				<span aria-hidden="true" class="h-2.5 w-2.5 rounded-full bg-destructive/70"></span>
-				<span aria-hidden="true" class="h-2.5 w-2.5 rounded-full bg-warning/60"></span>
-				<span aria-hidden="true" class="h-2.5 w-2.5 rounded-full bg-success/60"></span>
-				<span class="ml-2 text-muted-foreground">error_handler.ts — line {page.status}</span>
+		<div class="overflow-hidden rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
+			<div class="flex items-center justify-between border-b border-border bg-surface-2 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+				<span>Error report</span>
+				<span class="tabular-nums">HTTP {page.status}</span>
 			</div>
 			<div class="px-6 py-8 text-center">
 				<div class="mb-5 flex justify-center">
@@ -40,10 +35,10 @@
 						<Icon class="h-8 w-8" />
 					</div>
 				</div>
-				<div class="text-5xl font-bold tabular-nums tracking-tight font-display">
+				<div class="text-5xl font-medium tabular-nums tracking-tight font-mono">
 					{page.status}
 				</div>
-				<div class="mt-1 text-sm font-medium text-foreground font-display">
+				<div class="mt-1 font-display text-xl font-semibold text-foreground">
 					{info.title}
 				</div>
 				<p class="mt-3 text-sm text-muted-foreground">
@@ -53,9 +48,6 @@
 					<Button href="/">Go to Dashboard</Button>
 					<Button variant="outline" onclick={() => history.back()}>Go Back</Button>
 				</div>
-				<p class="mt-6 text-[11px] uppercase tracking-wider text-muted-foreground font-mono">
-					// error_code: {page.status}
-				</p>
 			</div>
 		</div>
 	</div>

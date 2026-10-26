@@ -25,6 +25,7 @@ CATEGORY_MAP: dict[str, str] = {
     "BACKGROUND_SERVICES": "Architecture",
     "GENERATION_PROCESS": "Architecture",
     "EXPERIMENTS": "Architecture",
+    "STUDY_TABLES": "Reference",
     "architecture": "Architecture",
     "api-reference": "Reference",
     "api": "Reference",

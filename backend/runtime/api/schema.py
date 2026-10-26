@@ -119,6 +119,9 @@ class DockerInfo(Schema):
     version: str | None = None
     os: str | None = None
     arch: str | None = None
+    containers_running: int | None = None
+    containers_stopped: int | None = None
+    images: int | None = None
 
 
 class ContainerHealthResponse(Schema):

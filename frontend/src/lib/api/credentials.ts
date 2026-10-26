@@ -1,6 +1,6 @@
 import { apiFetch } from "./core";
 
-export type CredentialProvider = "openrouter" | "huggingface";
+export type CredentialProvider = "openrouter" | "huggingface" | "github";
 
 export interface CredentialStatus {
   provider: CredentialProvider;

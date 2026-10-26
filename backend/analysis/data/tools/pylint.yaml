@@ -9,8 +9,9 @@ target_language: python
 icon: badge-check
 version: "3"
 docs_url: https://pylint.readthedocs.io/
-install_cmd: "pip install --user pylint"
+install_cmd: "pip install --user --upgrade pylint"
 verify_cmd: "pylint --version"
+uninstall_cmd: "pip uninstall -y pylint"
 run_cmd: "pylint {target} -f json --exit-zero --disable=import-error"
 parser_key: pylint
 run_timeout: 180

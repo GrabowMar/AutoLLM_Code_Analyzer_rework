@@ -10,8 +10,9 @@ target_language: python
 icon: gauge
 version: "6"
 docs_url: https://radon.readthedocs.io/
-install_cmd: "pip install --user 'radon==6.*'"
+install_cmd: "pip install --user --upgrade 'radon==6.*'"
 verify_cmd: "radon --version"
+uninstall_cmd: "pip uninstall -y radon"
 # -j = JSON output. All ranks are reported: the parser needs every block to
 # compute complexity metrics; only E/F blocks become findings.
 run_cmd: "radon cc {target} -j"

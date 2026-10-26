@@ -255,7 +255,7 @@
 			>
 				<div class="rounded-md border border-border bg-surface-2 p-3 text-xs">
 					<p class="flex items-baseline gap-2">
-						<span class="font-display text-2xl font-semibold tabular-nums">1</span>
+						<span class="font-mono text-2xl font-medium tabular-nums">1</span>
 						<span class="text-sm text-muted-foreground">run</span>
 					</p>
 					<p class="text-muted-foreground">

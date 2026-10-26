@@ -9,6 +9,9 @@
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { formatApiError } from '$lib/api/core';
+	import { toast } from 'svelte-sonner';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Eye from '@lucide/svelte/icons/eye';
 	import Play from '@lucide/svelte/icons/play';
@@ -60,10 +63,16 @@
 			const fn = { start: startContainer, stop: stopContainer, restart: restartContainer, remove: removeContainer }[action];
 			await fn(id);
 			await load();
+		} catch (e) {
+			toast.error(`${action[0].toUpperCase()}${action.slice(1)} failed: ${formatApiError(e, 'unknown error')}`);
 		} finally {
 			actionLoading = { ...actionLoading, [id]: false };
 		}
 	}
+
+	// Removing discards the container: confirm first.
+	let removeId = $state<string | null>(null);
+	let removeOpen = $state(false);
 
 	$effect(() => {
 		void statusFilter;
@@ -83,16 +92,16 @@
 	</PageHeader>
 
 	{#if dockerInfo}
-		<Card.Root>
-			<Card.Content class="p-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+		<Card.Root class="py-0">
+			<Card.Content class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 text-sm">
 				{#if dockerInfo.daemon_available}
 					<StatusBadge status="healthy" label="Docker daemon online" />
 					{#if dockerInfo.version}
 						<span class="text-muted-foreground">v{dockerInfo.version}</span>
 					{/if}
-					{#if dockerInfo.containers_running !== null}
-						<span class="text-muted-foreground sm:ml-auto">
-							{dockerInfo.containers_running} running · {dockerInfo.containers_stopped} stopped · {dockerInfo.images} images
+					{#if dockerInfo.containers_running != null}
+						<span class="font-mono text-xs text-muted-foreground tabular-nums sm:ml-auto">
+							{dockerInfo.containers_running} running · {dockerInfo.containers_stopped ?? 0} stopped · {dockerInfo.images ?? 0} images
 						</span>
 					{/if}
 				{:else}
@@ -150,34 +159,31 @@
 						{/if}
 					</Card.Header>
 					<Card.Content class="flex-1 text-xs text-muted-foreground space-y-1">
-						{#if c.app_port}
-							<div>Port: :{c.app_port}</div>
-						{/if}
 						<div>Created: {formatDate(c.created_at)}</div>
 						{#if c.last_error}
 							<div class="text-danger-fg line-clamp-2">{c.last_error}</div>
 						{/if}
 					</Card.Content>
 					<Card.Footer class="gap-1 pt-3 flex-wrap">
-						<Button size="sm" variant="outline" href={`/runtime/${c.id}`} aria-label="View container">
-							<Eye class="h-3 w-3" />
+						<Button size="sm" variant="ghost" href={`/runtime/${c.id}`}>
+							<Eye />Details
 						</Button>
 						{#if c.status === 'stopped' || c.status === 'failed'}
-							<Button size="sm" variant="outline" aria-label="Start container" onclick={() => act(c.id, 'start')} disabled={actionLoading[c.id]}>
-								<Play class="h-3 w-3" />
+							<Button size="icon" variant="ghost" class="size-8" aria-label="Start container" title="Start container" onclick={() => act(c.id, 'start')} disabled={actionLoading[c.id]}>
+								<Play />
 							</Button>
 						{/if}
 						{#if c.status === 'running'}
-							<Button size="sm" variant="outline" aria-label="Stop container" onclick={() => act(c.id, 'stop')} disabled={actionLoading[c.id]}>
-								<Square class="h-3 w-3" />
+							<Button size="icon" variant="ghost" class="size-8" aria-label="Stop container" title="Stop container" onclick={() => act(c.id, 'stop')} disabled={actionLoading[c.id]}>
+								<Square />
 							</Button>
-							<Button size="sm" variant="outline" aria-label="Restart container" onclick={() => act(c.id, 'restart')} disabled={actionLoading[c.id]}>
-								<RotateCcw class="h-3 w-3" />
+							<Button size="icon" variant="ghost" class="size-8" aria-label="Restart container" title="Restart container" onclick={() => act(c.id, 'restart')} disabled={actionLoading[c.id]}>
+								<RotateCcw />
 							</Button>
 						{/if}
 						{#if c.status !== 'removed'}
-							<Button size="sm" variant="outline" aria-label="Remove container" onclick={() => act(c.id, 'remove')} disabled={actionLoading[c.id]}>
-								<Trash2 class="h-3 w-3" />
+							<Button size="icon" variant="ghost" class="ml-auto size-8 hover:bg-destructive/10 hover:text-danger-fg" aria-label="Remove container" title="Remove container" onclick={() => { removeId = c.id; removeOpen = true; }} disabled={actionLoading[c.id]}>
+								<Trash2 />
 							</Button>
 						{/if}
 					</Card.Footer>
@@ -186,3 +192,15 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmDialog
+	bind:open={removeOpen}
+	title="Remove this container?"
+	description="Stops and removes the container. The generated code is kept."
+	confirmLabel="Remove container"
+	destructive
+	onConfirm={() => {
+		removeOpen = false;
+		if (removeId) act(removeId, 'remove');
+	}}
+/>

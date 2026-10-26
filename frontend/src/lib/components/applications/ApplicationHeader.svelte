@@ -15,8 +15,12 @@ import Trash2 from '@lucide/svelte/icons/trash-2';
 import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 import type { GenerationJob } from '$lib/api/client';
 import { batchHref, jobDisplayStatus, jobPhaseTones } from '$lib/components/generator/batches';
-import { fmt, fmtDur, fmtCost, copyText, type CodeFootprint } from './utils';
+import { fmt, fmtDur, fmtCost, copyText, jobDescription, type CodeFootprint } from './utils';
+import ProviderIcon from '$lib/components/ProviderIcon.svelte';
+import Layers from '@lucide/svelte/icons/layers';
+import { shortModelName, modelNamePrefix } from '$lib/components/table';
 import AppRuntimeControls from './AppRuntimeControls.svelte';
+import CloudUpload from '@lucide/svelte/icons/cloud-upload';
 
 interface Props {
 	job: GenerationJob;
@@ -29,6 +33,8 @@ interface Props {
 	onExport: () => void;
 	onDownloadCode: () => void;
 	onDelete: () => void;
+	/** Opens the GitHub export dialog; the button is hidden without it. */
+	onExportGithub?: () => void;
 }
 
 let {
@@ -42,6 +48,7 @@ let {
 	onExport,
 	onDownloadCode,
 	onDelete,
+	onExportGithub,
 }: Props = $props();
 
 // Agent runs sample at the provider default unless a temperature was set explicitly.
@@ -50,22 +57,23 @@ const temperature = $derived(
 );
 
 const kpis = $derived([
-	{ label: 'Duration', value: fmtDur(job.duration_seconds) },
-	{ label: 'Tokens', value: fmt(totalTokens, 0) },
-	{ label: 'Cost', value: fmtCost(totalCost) },
-	{ label: 'Temperature', value: temperature },
-	{ label: 'Max Tokens', value: fmt(job.max_tokens, 0) },
-	{ label: 'Lines of Code', value: fmt(codeFootprint?.totalLines ?? 0, 0) },
+	{ label: 'Duration', value: fmtDur(job.duration_seconds), sub: job.started_at ? 'wall clock' : 'not started' },
+	{ label: 'Tokens', value: fmt(totalTokens, 0), sub: 'prompt + completion' },
+	{ label: 'Cost', value: fmtCost(totalCost), sub: 'USD' },
+	{ label: 'Lines of code', value: fmt(codeFootprint?.totalLines ?? 0, 0), sub: codeFootprint ? `${codeFootprint.fileCount} file${codeFootprint.fileCount === 1 ? '' : 's'}` : 'no code' },
+	{ label: 'Temperature', value: temperature, sub: 'sampling' },
+	{ label: 'Max tokens', value: fmt(job.max_tokens, 0), sub: 'per response' },
 ]);
 </script>
 
 <PageHeader
-	title={job.model_name ?? 'Unknown Model'}
+	title={jobDescription(job)}
+	documentTitle="{jobDescription(job)} · {job.model_name ?? 'Unknown model'}"
 	back={{ href: '/applications', label: 'Applications' }}
 >
 	{#snippet meta()}
-		<Badge variant="outline" class="capitalize">{job.mode}</Badge>
 		<StatusBadge status={jobDisplayStatus(job)} tones={jobPhaseTones} />
+		<Badge variant="outline" class="capitalize">{job.mode}</Badge>
 	{/snippet}
 	{#snippet actions()}
 		<AppRuntimeControls jobId={job.id} jobStatus={job.status} />
@@ -79,20 +87,24 @@ const kpis = $derived([
 				<RotateCcw class="h-3.5 w-3.5" />Retry
 			</Button>
 		{/if}
-		<Button variant="outline" size="sm" onclick={() => copyText(job.id, 'Copied Job ID')} title="Copy Job ID">
-			<Copy class="h-3.5 w-3.5" />ID
-		</Button>
-		<Button variant="outline" size="sm" onclick={onExport} title="Export as JSON">
-			<Download class="h-3.5 w-3.5" />Export
-		</Button>
-		<Button variant="outline" size="sm" onclick={onDownloadCode} title="Download generated code">
-			<FileCode class="h-3.5 w-3.5" />Code
-		</Button>
-		{#if job.status !== 'running'}
-			<Button variant="outline" size="sm" onclick={onDelete} title="Delete job" class="border-destructive/30 text-destructive hover:bg-destructive/10">
-				<Trash2 class="h-3.5 w-3.5" />Delete
+		<div class="flex items-center gap-0.5">
+			<Button variant="ghost" size="sm" class="size-8 p-0" onclick={onDownloadCode} title="Download generated code" aria-label="Download generated code">
+				<FileCode />
 			</Button>
-		{/if}
+			<Button variant="ghost" size="sm" class="size-8 p-0" onclick={onExport} title="Export run as JSON" aria-label="Export run as JSON">
+				<Download />
+			</Button>
+			{#if onExportGithub}
+				<Button variant="ghost" size="sm" class="size-8 p-0" onclick={onExportGithub} title="Export to GitHub" aria-label="Export to GitHub">
+					<CloudUpload />
+				</Button>
+			{/if}
+			{#if job.status !== 'running'}
+				<Button variant="ghost" size="sm" class="size-8 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-danger-fg" onclick={onDelete} title="Delete job" aria-label="Delete job">
+					<Trash2 />
+				</Button>
+			{/if}
+		</div>
 		<Button
 			size="sm"
 			href="/sample-generator?from_job={job.id}"
@@ -101,16 +113,32 @@ const kpis = $derived([
 			<RefreshCw class="h-3.5 w-3.5" />Re-generate
 		</Button>
 	{/snippet}
-	<div class="flex flex-wrap items-center gap-2 pt-1">
-		<Badge variant="outline">{provider}</Badge>
-		{#if job.template_name}<Badge variant="outline">{job.template_name}</Badge>{/if}
-		{#if job.stack_slug}<Badge variant="outline" class="font-mono">{job.stack_slug}</Badge>{/if}
+	<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+		<span class="inline-flex items-center gap-1.5 text-foreground" title={job.model_name ?? undefined}>
+			{#if provider && provider !== '—'}<ProviderIcon {provider} size={16} />{/if}
+			{shortModelName(job.model_name) || 'Unknown model'}
+			{#if modelNamePrefix(job.model_name)}<span class="text-muted-foreground">· {modelNamePrefix(job.model_name)}</span>{/if}
+		</span>
+		{#if job.stack_slug}
+			<span aria-hidden="true" class="opacity-50">·</span>
+			<span class="inline-flex items-center gap-1"><Layers class="size-3" aria-hidden="true" /><span class="font-mono">{job.stack_slug}</span></span>
+		{/if}
 		{#if job.batch_id}
-			<a href={batchHref(job.batch_id)} class="rounded-full transition-colors hover:text-primary" title="Open the batch">
-				<Badge variant="outline" class="hover:border-primary/50"><GitBranch class="h-3 w-3" />{job.batch_name || 'Batch'}</Badge>
+			<span aria-hidden="true" class="opacity-50">·</span>
+			<a href={batchHref(job.batch_id)} class="inline-flex items-center gap-1 hover:text-primary" title="Open the batch">
+				<GitBranch class="size-3" aria-hidden="true" />{job.batch_name || 'Batch'}
 			</a>
 		{/if}
-		<span class="truncate font-mono text-xs text-muted-foreground">{job.model_id_str} · {job.id.substring(0, 8)}</span>
+		<span aria-hidden="true" class="opacity-50">·</span>
+		<button
+			type="button"
+			class="group/id inline-flex cursor-pointer items-center gap-1 font-mono hover:text-foreground"
+			title="Copy job ID {job.id}"
+			onclick={() => copyText(job.id, 'Copied Job ID')}
+		>
+			{job.id.substring(0, 8)}<Copy class="size-3 opacity-60 group-hover/id:opacity-100" aria-hidden="true" />
+			<span class="sr-only">Copy job ID</span>
+		</button>
 	</div>
 </PageHeader>
 
@@ -132,6 +160,7 @@ const kpis = $derived([
 		<div class="kpi-card">
 			<span class="kpi-label">{kpi.label}</span>
 			<span class="kpi-value text-xl">{kpi.value}</span>
+			<span class="text-[11px] text-muted-foreground">{kpi.sub}</span>
 		</div>
 	{/each}
 </div>

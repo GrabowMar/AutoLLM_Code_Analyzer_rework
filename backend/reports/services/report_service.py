@@ -151,11 +151,15 @@ def _validate_config(report_type: str, config: dict[str, Any], user=None) -> Non
         if not (config or {}).get(key):
             msg = f"Missing required config key for {report_type}: {key}"
             raise ValueError(msg)
-    if report_type == "experiment_report":
+    if report_type in ("experiment_report", "study_report") and (config or {}).get("experiment_id"):
         from .generators import owned_experiment
 
         # Raises ValueError("Experiment not found") for another user's experiment.
         owned_experiment(config["experiment_id"], user)
+    if report_type == "study_report" and (config or {}).get("ranking_criteria"):
+        from backend.statistics.services.mcdm import criteria_from_config
+
+        criteria_from_config(config["ranking_criteria"])
 
 
 def _default_title(report_type: str, config: dict[str, Any]) -> str:  # noqa: PLR0911 - one branch per type
@@ -172,6 +176,9 @@ def _default_title(report_type: str, config: dict[str, Any]) -> str:  # noqa: PL
         return f"Comprehensive report ({config.get('days', 30)}d)"
     if report_type == "experiment_report":
         return f"Experiment report: {config.get('experiment_id', '?')}"
+    if report_type == "study_report":
+        scope = config.get("experiment_id") or config.get("batch_id") or "all my apps"
+        return f"Study report: {scope}"
     return "Report"
 
 
@@ -216,6 +223,18 @@ def _make_summary(report_type: str, data: dict[str, Any]) -> dict[str, Any]:  # 
             "leader": leader.get("label"),
             "leader_pass_rate": leader.get("pass_rate_mean"),
             "interim": results.get("interim"),
+        }
+    if report_type == "study_report":
+        funnel = (data.get("funnel") or {}).get("overall") or {}
+        ranking = (data.get("ranking") or {}).get("ranking") or [{}]
+        return {
+            "jobs": funnel.get("jobs", 0),
+            "models": len((data.get("protocol") or {}).get("models") or []),
+            "deploy_rate": (funnel.get("deploy_rate") or {}).get("rate"),
+            "functional_rate": (funnel.get("functional_rate") or {}).get("rate"),
+            "unique_issues": ((data.get("issues") or {}).get("totals") or {}).get("unique_issues", 0),
+            "leader": ranking[0].get("model") if ranking else None,
+            "warnings": sum(1 for v in data.get("validity") or [] if v.get("level") == "warning"),
         }
     return {}
 

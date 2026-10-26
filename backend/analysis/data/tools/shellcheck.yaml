@@ -1,0 +1,24 @@
+slug: shellcheck
+name: ShellCheck
+description: >-
+  Static analysis for shell scripts: unquoted variables, word-splitting and
+  globbing bugs, dangerous rm -rf expansions and portability problems.
+category: lint
+kind: container
+target_language: shell
+icon: terminal
+version: "0.10"
+docs_url: https://www.shellcheck.net/
+install_cmd: "pip install --user --upgrade 'shellcheck-py==0.10.*'"
+verify_cmd: "shellcheck --version"
+uninstall_cmd: "pip uninstall -y shellcheck-py"
+run_cmd: "find {target} -type f \\( -name '*.sh' -o -name '*.bash' \\) -not -path '*/node_modules/*' -print0 | xargs -0 -r shellcheck -f json 2>/dev/null"
+parser_key: shellcheck
+run_timeout: 60
+install_timeout: 120
+display_order: 95
+sample_filename: start.sh
+sample_code: |
+  #!/bin/sh
+  cp $SRC/* $DEST
+  cd $1

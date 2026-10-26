@@ -1,0 +1,33 @@
+slug: eslint-security
+name: ESLint Security
+description: >-
+  Security rules for JavaScript and Node.js via eslint-plugin-security: eval
+  with expressions, non-literal regular expressions (ReDoS), unsafe child
+  processes, timing-unsafe comparisons and pseudo-random bytes.
+category: security
+kind: container
+target_language: javascript
+icon: shield-check
+version: "1"
+docs_url: https://github.com/eslint-community/eslint-plugin-security
+install_cmd: "npm install -g eslint@8 eslint-plugin-security@1"
+verify_cmd: "eslint --version && npm ls -g eslint-plugin-security >/dev/null"
+uninstall_cmd: "npm uninstall -g eslint-plugin-security"
+# detect-object-injection flags every obj[key] and drowns out real issues.
+run_cmd: |
+  printf '%s' '{"root":true,"env":{"browser":true,"node":true,"es2022":true},"parserOptions":{"ecmaVersion":"latest","sourceType":"module","ecmaFeatures":{"jsx":true}},"plugins":["security"],"extends":["plugin:security/recommended"],"rules":{"security/detect-object-injection":"off"}}' > /tmp/eslint-security.json
+  eslint {target} --ext .js,.jsx,.cjs,.mjs -f json --no-eslintrc -c /tmp/eslint-security.json --resolve-plugins-relative-to "$(npm root -g)" --ignore-pattern node_modules 2>/dev/null
+parser_key: eslint_security
+run_timeout: 120
+install_timeout: 300
+display_order: 30
+sample_filename: server.js
+sample_code: |
+  const { exec } = require("child_process");
+
+  function run(input) {
+    eval("1 + " + input);
+    const re = new RegExp(input);
+    exec("ls " + input);
+    return re;
+  }

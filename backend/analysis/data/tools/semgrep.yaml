@@ -10,8 +10,9 @@ target_language: any
 icon: radar
 version: "1"
 docs_url: https://semgrep.dev/docs/
-install_cmd: "pip install --user 'semgrep==1.*'"
+install_cmd: "pip install --user --upgrade 'semgrep==1.*'"
 verify_cmd: "semgrep --version"
+uninstall_cmd: "pip uninstall -y semgrep"
 # Explicit rule packs (py + js/jsx) instead of `--config auto`, which semgrep
 # refuses when metrics are disabled. Packs are fetched from the registry once.
 run_cmd: "semgrep --config p/python --config p/javascript --json --quiet --metrics off --disable-version-check {target}"

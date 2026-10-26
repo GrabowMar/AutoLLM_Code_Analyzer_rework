@@ -1,0 +1,32 @@
+slug: depcheck
+name: depcheck
+description: >-
+  Finds JavaScript dependency problems: packages imported but missing from
+  package.json (the build fails) and declared dependencies nothing uses.
+category: dependencies
+kind: container
+target_language: javascript
+icon: package-check
+version: "1.4"
+docs_url: https://github.com/depcheck/depcheck
+install_cmd: "npm install -g depcheck@1.4"
+verify_cmd: "depcheck --version"
+uninstall_cmd: "npm uninstall -g depcheck"
+# Build tooling referenced only from config files reads as unused; ignore it.
+run_cmd: |
+  cd {target} && find . -name package.json -not -path '*/node_modules/*' | sort | while IFS= read -r f; do
+    echo "### ${f#./}"
+    depcheck "$(dirname "$f")" --json --ignores='tailwindcss,postcss,autoprefixer,@types/*,eslint*,prettier*,typescript,@vitejs/*,vite' 2>/dev/null
+    echo
+  done
+parser_key: depcheck
+run_timeout: 120
+install_timeout: 180
+display_order: 40
+sample_filename: package.json
+sample_code: |
+  {
+    "name": "sample",
+    "version": "1.0.0",
+    "dependencies": { "lodash": "^4.17.21" }
+  }

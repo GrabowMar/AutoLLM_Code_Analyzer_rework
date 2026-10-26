@@ -1,0 +1,37 @@
+slug: lizard
+name: Lizard
+description: >-
+  Cyclomatic complexity and function length for Python and JavaScript/JSX
+  alike. Reports per-function metrics and flags functions too complex to
+  maintain or test.
+category: performance
+kind: container
+target_language: any
+icon: activity
+version: "1.17"
+docs_url: https://github.com/terryyin/lizard
+install_cmd: "pip install --user --upgrade 'lizard==1.17.*'"
+verify_cmd: "lizard --version"
+uninstall_cmd: "pip uninstall -y lizard"
+run_cmd: "lizard {target} --csv -l python -l javascript -l typescript -x '*/node_modules/*' 2>/dev/null"
+parser_key: lizard
+output_kind: mixed
+run_timeout: 120
+install_timeout: 120
+display_order: 20
+sample_code: |
+  def grade(score, bonus, late, curve):
+      if score > 90:
+          if bonus and not late:
+              return "A+"
+          return "A"
+      elif score > 80:
+          return "B" if not late else "C"
+      elif score > 70 and curve:
+          return "C"
+      elif score > 60 or (bonus and curve):
+          return "D"
+      for _ in range(3):
+          if late:
+              score -= 5
+      return "F"

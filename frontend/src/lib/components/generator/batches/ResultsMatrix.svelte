@@ -27,6 +27,7 @@
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import ArrowUpRight from '@lucide/svelte/icons/arrow-up-right';
 	import { cn } from '$lib/utils';
+	import { tableFrame, shortModelName } from '$lib/components/table';
 	import {
 		TRIAL_DOT_CLASSES,
 		TRIAL_OUTCOME_LABELS,
@@ -172,7 +173,7 @@
 		{/if}
 	{:else}
 		{@const col = axis.item}
-		<span class="block truncate text-xs font-semibold text-foreground" title={col.modelId ?? col.model}>{col.model}</span>
+		<span class="block truncate text-xs font-semibold text-foreground" title="{col.model}{col.modelId ? ` (${col.modelId})` : ''}">{shortModelName(col.model)}</span>
 		{#if col.variant}
 			<span class="block truncate font-mono text-[11px] font-normal text-muted-foreground" title="{columnLabel}: {col.variant}">{col.variant}</span>
 		{/if}
@@ -197,18 +198,18 @@
 {/snippet}
 
 <div class="space-y-3">
-	<div class="relative overflow-x-auto rounded-md border border-border" role="region" aria-label="Results matrix">
+	<div class="table-frame rounded-md border border-border bg-card" role="region" aria-label="Results matrix" {@attach tableFrame}>
 		<table class="w-max min-w-full">
 			<thead>
 				<tr>
-					<th scope="col" class="left-0 z-20 w-28 min-w-28 max-w-28 sm:w-auto sm:min-w-36 sm:max-w-56 bg-surface-2 backdrop-blur-none">{cornerLabel}</th>
+					<th scope="col" class="col-sticky w-28 min-w-28 max-w-28 align-bottom sm:w-auto sm:min-w-36 sm:max-w-56">{cornerLabel}</th>
 					{#each displayCols as col (col.item.key)}
-						<th scope="col" class="min-w-36 max-w-56 bg-surface-2 align-bottom normal-case tracking-normal backdrop-blur-none">
+						<th scope="col" class="min-w-36 max-w-56 align-bottom font-sans normal-case tracking-normal">
 							{@render axisLabel(col, true)}
 						</th>
 					{/each}
 					{#if transpose && showAggregate}
-						<th scope="col" class="min-w-32 bg-surface-2 align-bottom normal-case tracking-normal backdrop-blur-none">
+						<th scope="col" class="min-w-32 align-bottom font-sans normal-case tracking-normal">
 							<span class="block text-xs font-semibold text-foreground">All tasks</span>
 						</th>
 					{/if}
@@ -216,10 +217,10 @@
 			</thead>
 			<tbody>
 				{#each displayRows as row (row.item.key)}
-					<tr>
+					<tr class="group">
 						<th
 							scope="row"
-							class="top-auto left-0 z-10 w-28 min-w-28 max-w-28 sm:w-auto sm:min-w-36 sm:max-w-56 bg-card align-top text-sm font-medium normal-case tracking-normal text-foreground backdrop-blur-none"
+							class="col-sticky top-auto z-[1] w-28 min-w-28 max-w-28 border-b-border/60 bg-card font-sans normal-case tracking-normal backdrop-blur-none sm:w-auto sm:min-w-36 sm:max-w-56 group-hover:bg-[color-mix(in_oklab,var(--primary)_5%,var(--card))] align-top text-sm font-medium text-foreground"
 						>
 							{@render axisLabel(row, false)}
 						</th>
@@ -258,7 +259,7 @@
 							</td>
 						{/each}
 						{#if transpose && showAggregate}
-							<td class="border-l border-border px-3.5 py-2 align-top">
+							<td class="border-l border-border px-3.5 align-top">
 								{@render aggregate(matrix.columnStats.get(row.item.key), 'Mean pass rate over every graded trial')}
 							</td>
 						{/if}
@@ -268,11 +269,11 @@
 			{#if !transpose && showAggregate}
 				<tfoot>
 					<tr>
-						<th scope="row" class="top-auto left-0 z-10 w-28 min-w-28 max-w-28 sm:w-auto sm:min-w-36 sm:max-w-56 border-t border-border bg-card normal-case tracking-normal backdrop-blur-none">
+						<th scope="row" class="col-sticky top-auto z-[1] w-28 min-w-28 max-w-28 border-b-border/60 bg-card font-sans normal-case tracking-normal backdrop-blur-none sm:w-auto sm:min-w-36 sm:max-w-56 border-t border-t-border align-top text-xs font-medium text-muted-foreground">
 							All tasks
 						</th>
 						{#each matrix.columns as col (col.key)}
-							<td class="border-t border-border px-3.5 py-2 align-top">
+							<td class="border-t border-border px-3.5 align-top">
 								{@render aggregate(matrix.columnStats.get(col.key), 'Mean pass rate over every graded trial')}
 							</td>
 						{/each}
@@ -326,10 +327,10 @@
 							the fingerprints below before pooling them.
 						</p>
 					{/if}
-					<ul class="divide-y divide-border rounded-md border border-border">
+					<ul class="data-list shadow-none">
 						{#each selected.trials as trial (trial.job.id)}
 							{@const job = trial.job}
-							<li class={cn('flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 text-sm', trial.superseded && 'opacity-60')}>
+							<li class={cn('data-list-row flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 text-sm', trial.superseded && 'opacity-60')}>
 								<span class="w-16 shrink-0 font-medium">{trial.label}</span>
 								<StatusBadge status={jobDisplayStatus(job)} tones={jobPhaseTones} />
 								{#if job.eval_status}

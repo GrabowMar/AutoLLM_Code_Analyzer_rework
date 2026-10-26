@@ -9,8 +9,9 @@ target_language: any
 icon: spell-check
 version: "2"
 docs_url: https://github.com/codespell-project/codespell
-install_cmd: "pip install --user 'codespell==2.*'"
+install_cmd: "pip install --user --upgrade 'codespell==2.*'"
 verify_cmd: "codespell --version"
+uninstall_cmd: "pip uninstall -y codespell"
 run_cmd: "codespell {target} --disable-colors"
 parser_key: codespell
 run_timeout: 60

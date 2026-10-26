@@ -20,7 +20,8 @@
 	interface Props {
 		stacks: Stack[];
 		loading: boolean;
-		compact: boolean;
+		/** Unused since the list layout adapts via a container query; kept for callers. */
+		compact?: boolean;
 		activeSlug?: string | null;
 		/** Staff: may edit and archive every user stack, not only their own. */
 		canModerate?: boolean;
@@ -31,7 +32,7 @@
 	let {
 		stacks,
 		loading,
-		compact,
+		compact: _compact = false,
 		activeSlug = null,
 		canModerate = false,
 		onEdit,
@@ -50,76 +51,76 @@
 {:else if stacks.length === 0}
 	<EmptyState icon={Layers} title="No stacks found" description="Clear the search, or run migrations to seed the builtin stacks." />
 {:else}
-	<div class="grid gap-3 sm:grid-cols-2 {compact ? 'xl:grid-cols-1' : 'xl:grid-cols-3'}">
+	<div class="data-list @container">
+		<div class="data-list-head" aria-hidden="true">
+			<span class="flex-1">Stack</span>
+			<span class="hidden w-28 @xl:block">Kind</span>
+			<span class="w-[8.5rem]"></span>
+		</div>
 		{#each stacks as stack (stack.slug)}
-			<div
-				class="flex flex-col rounded-md border border-border bg-card text-card-foreground {activeSlug === stack.slug
-					? 'ring-2 ring-primary'
-					: ''}"
-			>
-				<div class="flex-1 space-y-2 p-4">
-					<div class="flex items-start justify-between gap-2">
-						<div class="min-w-0">
-							<h3 class="flex items-center gap-1.5 truncate text-sm font-semibold">
-								<Layers class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-								<span class="truncate">{stack.name || stack.slug}</span>
-							</h3>
-							<p class="font-mono text-[11px] text-muted-foreground">{stack.slug}@v{stack.version}</p>
+			<div class="data-list-row" data-active={activeSlug === stack.slug}>
+				<div class="flex items-center gap-4">
+					<div class="min-w-0 flex-1">
+						<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+							<Layers class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+							<span class="text-sm font-medium">{stack.name || stack.slug}</span>
+							<span class="font-mono text-[11px] text-muted-foreground">{stack.slug}@v{stack.version}</span>
+							{#if stack.is_builtin}
+								<Badge variant="secondary" class="h-5 px-1.5 text-[11px]">Builtin</Badge>
+							{:else}
+								<Badge variant="outline" class="h-5 px-1.5 text-[11px]">Custom</Badge>
+							{/if}
+							<!-- Strict check: older API responses omit is_approved. -->
+							{#if !stack.is_builtin && stack.is_approved === false}
+								<Badge variant="outline" class="h-5 border-warning/30 bg-warning/10 px-1.5 text-[11px] text-warning-fg">
+									Pending approval — only you can run it
+								</Badge>
+							{/if}
+							{#each stack.aliases ?? [] as alias (alias)}
+								<Badge variant="outline" class="h-5 px-1.5 font-mono text-[11px]">{alias}</Badge>
+							{/each}
 						</div>
-						<!-- Outline, not the tinted default variant: green-on-tint is under 4.5:1 in light mode. -->
-						<Badge variant={stack.has_frontend ? 'outline' : 'secondary'} class="shrink-0 {stack.has_frontend ? 'text-success-fg' : ''}">
-							{stack.has_frontend ? 'full-stack' : 'backend-only'}
-						</Badge>
-					</div>
-					<div class="flex flex-wrap gap-1">
-						{#if stack.is_builtin}
-							<Badge variant="secondary">Builtin</Badge>
-						{:else}
-							<Badge variant="outline">Custom</Badge>
+						{#if stack.description}
+							<p class="cell-sub mt-0.5 line-clamp-1 text-xs text-muted-foreground" title={stack.description}>{stack.description}</p>
 						{/if}
-						<!-- Strict check: older API responses omit is_approved. -->
-						{#if !stack.is_builtin && stack.is_approved === false}
-							<Badge variant="outline" class="border-warning/30 bg-warning/10 text-warning-fg">
-								Pending approval — only you can run it
-							</Badge>
-						{/if}
-						{#each stack.aliases ?? [] as alias (alias)}
-							<Badge variant="outline" class="font-mono">{alias}</Badge>
-						{/each}
 					</div>
-					{#if stack.description}
-						<p class="line-clamp-2 text-xs text-muted-foreground">{stack.description}</p>
-					{/if}
-				</div>
-				<div class="flex flex-wrap gap-1.5 border-t px-4 py-2.5">
-					{#if canChange(stack) && onEdit}
-						<Button variant="outline" size="sm" title="Edit as a new version" onclick={() => onEdit(stack)}>
-							<Pencil /> Edit
-						</Button>
-					{/if}
-					{#if onDuplicate}
-						<Button
-							variant="outline"
-							size="sm"
-							title="Duplicate as a new stack"
-							aria-label="Duplicate {stack.slug}"
-							onclick={() => onDuplicate(stack)}
-						>
-							<Copy />{#if stack.is_builtin}<span>Duplicate</span>{/if}
-						</Button>
-					{/if}
-					{#if canChange(stack) && onArchive}
-						<Button
-							variant="outline"
-							size="sm"
-							class="hover:bg-destructive/10 hover:text-danger-fg"
-							title="Archive all versions (jobs keep their pinned snapshots)"
-							aria-label="Archive {stack.slug}"
-							onclick={() => onArchive(stack)}
-						>
-							<Archive />
-						</Button>
-					{/if}
+					<!-- Text, not a green tint: green-on-tint is under 4.5:1 in light mode. -->
+					<span class="hidden w-28 text-xs @xl:block {stack.has_frontend ? 'text-success-fg' : 'text-muted-foreground'}">
+						{stack.has_frontend ? 'Full-stack' : 'Backend only'}
+					</span>
+					<div class="flex w-[8.5rem] shrink-0 items-center justify-end gap-0.5">
+						{#if canChange(stack) && onArchive}
+							<div class="row-actions-more">
+								<Button
+									variant="ghost"
+									size="sm"
+									class="size-8 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-danger-fg"
+									title="Archive all versions (jobs keep their pinned snapshots)"
+									aria-label="Archive {stack.slug}"
+									onclick={() => onArchive(stack)}
+								>
+									<Archive />
+								</Button>
+							</div>
+						{/if}
+						{#if onDuplicate}
+							<Button
+								variant="ghost"
+								size="sm"
+								class="h-8 text-muted-foreground hover:text-foreground {canChange(stack) && onEdit ? 'w-8 p-0' : 'px-2'}"
+								title="Duplicate as a new stack"
+								aria-label="Duplicate {stack.slug}"
+								onclick={() => onDuplicate(stack)}
+							>
+								<Copy />{#if !(canChange(stack) && onEdit)}<span>Duplicate</span>{/if}
+							</Button>
+						{/if}
+						{#if canChange(stack) && onEdit}
+							<Button variant="ghost" size="sm" class="h-8 px-2" title="Edit as a new version" onclick={() => onEdit(stack)}>
+								<Pencil /> Edit
+							</Button>
+						{/if}
+					</div>
 				</div>
 			</div>
 		{/each}

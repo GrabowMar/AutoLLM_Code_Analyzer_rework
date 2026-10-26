@@ -202,6 +202,7 @@ def clone_job(
             task_description=original.task_description,
             agent_config=copy.deepcopy(original.agent_config or {}),
             harness_options=copy.deepcopy(original.harness_options or {}),
+            build_healing=original.build_healing,
             harness_preset=original.harness_preset,
             sampling_preset=original.sampling_preset,
             budget_preset=original.budget_preset,

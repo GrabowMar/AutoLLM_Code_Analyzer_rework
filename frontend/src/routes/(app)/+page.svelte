@@ -184,9 +184,12 @@
 		}
 	}
 
-	const userName = $derived(
-		auth.isAuthenticated && auth.user ? auth.user.display || auth.user.email.split('@')[0] : null
-	);
+	// allauth's `display` falls back to the email; greet by the local part instead.
+	const userName = $derived.by(() => {
+		if (!auth.isAuthenticated || !auth.user) return null;
+		const name = auth.user.name || auth.user.display || auth.user.email;
+		return name.includes('@') ? name.split('@')[0] : name;
+	});
 
 	const analysesSubtitle = $derived(
 		completedAnalyses !== null ? `${completedAnalyses} completed` : ''

@@ -123,6 +123,8 @@
 		return list;
 	});
 
+	const NUMERIC = new Set(['cap', 'ctx']);
+
 	function differs(column: CompColumn): boolean {
 		return highlightDiffers && column.keys.some((k) => differsOn.has(k));
 	}
@@ -149,14 +151,15 @@
 			<p class="text-xs text-muted-foreground">Conditions differ only in model and harness preset / profile.</p>
 		{/if}
 	{/if}
-	<div class="overflow-x-auto rounded-md border">
-		<table class="w-full min-w-[40rem] text-xs">
+	<!-- Plain scroll frame (no fit attachment): this table also renders inside a Sheet. -->
+	<div class="table-frame rounded-md border border-border bg-card">
+		<table class="min-w-[40rem]">
 			<thead>
 				<tr>
-					<th scope="col" class="left-0 z-20 bg-surface-2">Condition</th>
+					<th scope="col" class="col-sticky">Condition</th>
 					{#each columns as column (column.id)}
-						<th scope="col" class={cn(differs(column) && 'text-warning-fg')}>
-							{column.label}{#if differs(column)}{' '}<span class="font-normal normal-case">· differs</span>{/if}
+						<th scope="col" class={cn('whitespace-nowrap', NUMERIC.has(column.id) && 'num', differs(column) && 'text-warning-fg')} title={differs(column) ? 'Conditions differ on this column' : undefined}>
+							{column.label}{#if differs(column)}{' '}<span class="normal-case tracking-normal">· differs</span>{/if}
 						</th>
 					{/each}
 					<th scope="col">Problems</th>
@@ -164,14 +167,16 @@
 			</thead>
 			<tbody>
 				{#each rows as row (row.condition_id)}
-					<tr>
-						<th scope="row" class="top-auto left-0 z-10 max-w-56 bg-card font-mono text-xs font-normal normal-case tracking-normal text-foreground">
+					<tr class="group">
+						<th scope="row" class="col-sticky top-auto z-[1] min-w-44 max-w-56 border-b-border/60 bg-card group-hover:bg-[color-mix(in_oklab,var(--primary)_5%,var(--card))] text-xs font-medium normal-case tracking-normal text-foreground backdrop-blur-none">
 							<span class="block truncate" title={label(row)}>{label(row)}</span>
 						</th>
 						{#each columns as column (column.id)}
-							<td class={cn('font-mono', differs(column) && 'bg-warning/5')}>{column.cell(row)}</td>
+							<td class={cn('font-mono text-xs', NUMERIC.has(column.id) && 'num', differs(column) && 'bg-warning/5')}>
+								{#if column.cell(row) === '—'}<span class="text-muted-foreground">—</span>{:else}{column.cell(row)}{/if}
+							</td>
 						{/each}
-						<td class="min-w-[12rem]">
+						<td class="min-w-[12rem] text-xs">
 							{#if row.problems.length === 0}
 								<span class="text-muted-foreground">—</span>
 							{:else}

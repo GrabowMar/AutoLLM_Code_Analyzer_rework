@@ -7,6 +7,7 @@ import ChevronDown from '@lucide/svelte/icons/chevron-down';
 import ChevronRight from '@lucide/svelte/icons/chevron-right';
 import type { GenerationArtifact } from '$lib/api/client';
 import { fmt, fmtCost, fmtDate } from './utils';
+import { tableFrame } from '$lib/components/table';
 
 interface Props {
 	artifacts: GenerationArtifact[];
@@ -32,45 +33,54 @@ function toggleArtifact(id: number) {
 			</Card.Content>
 		</Card.Root>
 	{:else}
-		<Card.Root>
-			<Card.Header>
+		<Card.Root class="gap-0 overflow-clip py-0">
+			<Card.Header class="border-b border-border py-3">
 				<Card.Title>LLM artifacts</Card.Title>
 				<Card.Description>Stored request/response payloads per stage. Click a row to expand.</Card.Description>
 			</Card.Header>
-			<Card.Content class="border-t p-0">
-				<div class="overflow-x-auto">
-					<table class="w-full text-sm">
+			<Card.Content class="p-0">
+				<div class="table-frame" {@attach tableFrame}>
+					<table>
 						<thead>
 							<tr>
 								<th class="w-8"><span class="sr-only">Expand</span></th>
 								<th>Stage</th>
 								<th>Model</th>
-								<th>Prompt</th>
-								<th>Completion</th>
-								<th>Cost</th>
+								<th class="num">Prompt</th>
+								<th class="num">Completion</th>
+								<th class="num">Cost</th>
 								<th>Created</th>
 							</tr>
 						</thead>
 						<tbody>
 							{#each artifacts as art}
-								<tr class="cursor-pointer" onclick={() => toggleArtifact(art.id)}>
-									<td>
-										{#if expandedArtifacts.has(art.id)}
-											<ChevronDown class="h-4 w-4 text-muted-foreground" />
-										{:else}
-											<ChevronRight class="h-4 w-4 text-muted-foreground" />
-										{/if}
+								{@const open = expandedArtifacts.has(art.id)}
+								{@const model = art.request_payload?.model ?? art.response_payload?.model}
+								<tr class="cursor-pointer" data-selected={open} onclick={() => toggleArtifact(art.id)}>
+									<td class="w-px">
+										<button
+											type="button"
+											class="-m-1 flex rounded p-1 text-muted-foreground hover:text-foreground"
+											aria-expanded={open}
+											aria-label={open ? 'Collapse artifact' : 'Expand artifact'}
+											title={open ? 'Collapse' : 'Expand'}
+											onclick={(e) => { e.stopPropagation(); toggleArtifact(art.id); }}
+										>
+											{#if open}<ChevronDown class="size-4" />{:else}<ChevronRight class="size-4" />{/if}
+										</button>
 									</td>
-									<td><Badge variant="outline" class="text-xs">{art.stage}</Badge></td>
-									<td class="font-mono text-xs">{art.request_payload?.model ?? art.response_payload?.model ?? '—'}</td>
-									<td>{fmt(art.prompt_tokens, 0)}</td>
-									<td>{fmt(art.completion_tokens, 0)}</td>
-									<td>{fmtCost(art.total_cost)}</td>
-									<td class="text-muted-foreground">{fmtDate(art.created_at)}</td>
+									<td class="whitespace-nowrap"><Badge variant="outline" class="text-xs">{art.stage}</Badge></td>
+									<td class="font-mono text-xs">
+										{#if model}{model}{:else}<span class="text-muted-foreground">—</span>{/if}
+									</td>
+									<td class="num">{@render numCell(art.prompt_tokens, fmt(art.prompt_tokens, 0))}</td>
+									<td class="num">{@render numCell(art.completion_tokens, fmt(art.completion_tokens, 0))}</td>
+									<td class="num">{@render numCell(art.total_cost, art.total_cost == null ? '' : fmtCost(art.total_cost))}</td>
+									<td class="whitespace-nowrap text-xs text-muted-foreground">{fmtDate(art.created_at)}</td>
 								</tr>
 								{#if expandedArtifacts.has(art.id)}
 									<tr>
-										<td colspan="7" class="px-4 py-4 bg-muted/20">
+										<td colspan="7" class="bg-muted/20 p-4">
 											<!-- Token bar -->
 											{#if (art.prompt_tokens ?? 0) + (art.completion_tokens ?? 0) > 0}
 												{@const total = (art.prompt_tokens ?? 0) + (art.completion_tokens ?? 0)}
@@ -123,3 +133,7 @@ function toggleArtifact(id: number) {
 		</Card.Root>
 	{/if}
 </section>
+
+{#snippet numCell(value: number | null | undefined, text: string)}
+	{#if value == null}<span class="text-muted-foreground">—</span>{:else}{text}{/if}
+{/snippet}

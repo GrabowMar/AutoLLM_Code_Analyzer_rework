@@ -6,10 +6,11 @@
 	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import Trophy from '@lucide/svelte/icons/trophy';
-	import Medal from '@lucide/svelte/icons/medal';
 	import Download from '@lucide/svelte/icons/download';
 	import Info from '@lucide/svelte/icons/info';
-	import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down';
+	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { SortableTh, TableToolbar, ScoreCell, rowLink, tableFrame, shortModelName, modelNamePrefix } from '$lib/components/table';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -101,11 +102,41 @@
 		selectedModels = next;
 	}
 
-	function scoreColor01(v: number): string {
-		if (v >= 0.8) return 'text-success-fg';
-		if (v >= 0.4) return 'text-warning-fg';
-		return 'text-danger-fg';
-	}
+	const metaCols: { key: SortKey; field: keyof RankingRow; label: string; help: string }[] = [
+		{ key: 'mss', field: 'mss_score', label: 'MSS', help: 'Model Scoring System: weighted blend of the four dimensions' },
+		{ key: 'composite', field: 'composite_score', label: 'Composite', help: 'MSS 60% + empirical 40% where measured; otherwise equal to MSS' },
+		{ key: 'adoption', field: 'adoption_score', label: 'Adoption', help: 'OpenRouter rank and local generation count (35%)' },
+		{ key: 'benchmark', field: 'benchmark_score', label: 'Bench', help: 'Public coding benchmarks (30%)' },
+		{ key: 'cost_efficiency', field: 'cost_efficiency_score', label: 'Cost', help: 'Performance per dollar + context bonus (20%)' },
+		{ key: 'accessibility', field: 'accessibility_score', label: 'Access', help: 'License, API stability, documentation (15%)' },
+	];
+	const ALL_BENCH = [
+		{ key: 'humaneval', label: 'HumanEval' },
+		{ key: 'mbpp', label: 'MBPP' },
+		{ key: 'swebench', label: 'SWE-bench' },
+	];
+	// Benchmark columns with no value anywhere on this page are hidden (named in the toolbar).
+	const benchCols = $derived(ALL_BENCH.filter((c) => (data?.rankings ?? []).some((r) => typeof r[c.key] === 'number')));
+	const hiddenBench = $derived(ALL_BENCH.filter((c) => !benchCols.includes(c)).map((c) => c.label));
+	const colMax = $derived.by(() => {
+		const rows = data?.rankings ?? [];
+		const max = (f: (r: RankingRow) => number | null | undefined) =>
+			rows.reduce<number | null>((m, r) => {
+				const v = f(r);
+				return v != null && v > 0 && (m == null || v > m) ? v : m;
+			}, null);
+		// A "best" shared by most of the page (ties at 100.0) isn't a signal — only mark it when ≤ 2 rows hold it.
+		const lead = (f: (r: RankingRow) => number | null | undefined) => {
+			const m = max(f);
+			return m != null && rows.filter((r) => f(r) === m).length <= 2 ? m : null;
+		};
+		const out: Record<string, number | null> = { empirical: lead((r) => r.empirical_quality_score) };
+		for (const c of metaCols) out[c.key] = lead((r) => r[c.field] as number);
+		return out;
+	});
+	const sortLabel = $derived(
+		sortBy === 'empirical' ? 'Empirical' : (metaCols.find((c) => c.key === sortBy)?.label ?? sortBy)
+	);
 
 	function pct(v: number | null | undefined): string {
 		if (v == null) return '—';
@@ -206,9 +237,6 @@
 		resultsText={data
 			? `${data.statistics.total} models · ${data.statistics.free_models} free · ${data.statistics.with_benchmarks} with benchmarks`
 			: ''}
-		page={data?.pagination.page}
-		pages={data?.pagination.total_pages}
-		onGoToPage={(p) => { page = p; }}
 		onClearAll={clearAllFilters}
 	>
 		{#snippet filters()}
@@ -264,25 +292,11 @@
 			</div>
 		{/snippet}
 
-		{#snippet actions()}
-			{#if selectedModels.size >= 2}
-				<Button size="sm" href="/models/compare?models={[...selectedModels].join(',')}">
-					<ArrowUpDown class="mr-1.5 h-3.5 w-3.5" />
-					Compare {selectedModels.size}
-				</Button>
-			{/if}
-		{/snippet}
 	</FilterBar>
 
 	<!-- Leaderboard -->
-	<Card.Root>
-		<Card.Header class="pb-0">
-			<div class="flex items-center gap-2">
-				<Trophy class="h-4 w-4 text-muted-foreground" />
-				<Card.Title>Leaderboard</Card.Title>
-			</div>
-		</Card.Header>
-		<Card.Content class="p-0 pt-4">
+	<Card.Root class="gap-0 overflow-clip py-0">
+		<Card.Content class="p-0">
 			{#if error}
 				<div class="p-4"><ErrorAlert message={error} onretry={load} /></div>
 			{:else if loading && !data}
@@ -294,170 +308,174 @@
 					{/snippet}
 				</EmptyState>
 			{:else if data}
+				<TableToolbar selectedCount={selectedModels.size} noun="model" onClearSelection={() => (selectedModels = new Set())}>
+					{#snippet summary()}
+						<span class="inline-flex items-center gap-1.5">
+							<Trophy class="size-3.5" aria-hidden="true" />
+							Ranked by <span class="font-medium text-foreground">{sortLabel}</span>{sortAsc ? ' (lowest first)' : ''}
+							<span class="opacity-50">·</span> column leaders highlighted
+							{#if hiddenBench.length}
+								<span class="opacity-50">·</span>
+								<span title="Columns without data on this page are hidden">{hiddenBench.join(', ')} hidden (no data)</span>
+							{/if}
+						</span>
+					{/snippet}
+					{#snippet bulk()}
+						<Button
+							size="sm"
+							class="h-7 px-2.5 text-xs"
+							href={selectedModels.size >= 2 ? `/models/compare?models=${[...selectedModels].join(',')}` : undefined}
+							disabled={selectedModels.size < 2}
+							title={selectedModels.size < 2 ? 'Pick at least two models' : undefined}
+						>
+							<GitCompareArrows class="size-3.5" />Compare
+						</Button>
+						<span class="text-[11px]">up to 10</span>
+					{/snippet}
+				</TableToolbar>
+
 				<!-- Desktop table (768px+) -->
-				<div class="hidden md:block overflow-x-auto">
-					<table class="w-full text-sm">
+				<div class="table-frame hidden md:block" {@attach tableFrame}>
+					<table>
 						<thead>
-							<tr class="border-b bg-muted/40 sticky top-0 z-10">
-								<th class="w-10 px-3 py-2.5"></th>
-								<th class="w-14 px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Rank</th>
-								<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Model</th>
-								{#each [
-									{ key: 'empirical' as SortKey, label: 'Empirical (measured)' },
-									{ key: 'mss' as SortKey, label: 'MSS (meta)' },
-									{ key: 'composite' as SortKey, label: 'Composite' },
-									{ key: 'adoption' as SortKey, label: 'Adoption' },
-									{ key: 'benchmark' as SortKey, label: 'Bench' },
-									{ key: 'cost_efficiency' as SortKey, label: 'Cost-Eff.' },
-									{ key: 'accessibility' as SortKey, label: 'Access.' },
-								] as col}
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">
-										<button class="inline-flex items-center gap-1 hover:text-foreground" onclick={() => toggleSort(col.key)}>
-											{col.label}
-											<ArrowUpDown class="h-3 w-3 {sortBy === col.key ? 'text-foreground' : ''}" />
-										</button>
-									</th>
+							<tr class="[&>th]:pb-1 [&>th]:pt-2">
+								<th class="col-sticky" rowspan="2">
+									<div class="flex items-center gap-3">
+										<span class="w-4"></span>
+										<span class="w-8">Rank</span>
+										<span>Model</span>
+									</div>
+								</th>
+								<th class="border-l border-border text-center" title="Measured on this platform">Measured</th>
+								<th class="border-l border-border text-center" colspan={metaCols.length} title="Model Scoring System — an opinionated composite of metadata, not a measurement">MSS decision aid</th>
+								{#if benchCols.length}
+									<th class="border-l border-border text-center" colspan={benchCols.length}>Public benchmarks</th>
+								{/if}
+								<th class="border-l border-border" rowspan="2"><span class="block text-right" title="Applications generated with this model here">Apps</span></th>
+							</tr>
+							<tr>
+								<SortableTh label="Empirical" field="empirical" sortBy={sortBy} sortDir={sortAsc ? 'asc' : 'desc'} onSort={(f) => toggleSort(f as SortKey)} align="right" help="Severity-weighted findings per KLOC blended with the smoke pass rate" class="border-l border-border" />
+								{#each metaCols as col, ci (col.key)}
+									<SortableTh label={col.label} field={col.key} sortBy={sortBy} sortDir={sortAsc ? 'asc' : 'desc'} onSort={(f) => toggleSort(f as SortKey)} align="right" help={col.help} class={ci === 0 ? 'border-l border-border' : ''} />
 								{/each}
-								<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">HumanEval</th>
-								<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">MBPP</th>
-								<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">SWE-bench</th>
-								<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Apps</th>
+								{#each benchCols as col, ci (col.key)}
+									<th class="num {ci === 0 ? 'border-l border-border' : ''}">{col.label}</th>
+								{/each}
 							</tr>
 						</thead>
 						<tbody>
-							{#each data.rankings as model, i}
+							{#each data.rankings as model, i (model.model_id)}
 								{@const rank = indexOnPage(i)}
-								<tr class="border-b transition-colors hover:bg-muted/50 group {i % 2 === 0 ? '' : 'bg-muted/15'} {selectedModels.has(model.model_id) ? 'ring-1 ring-inset ring-primary/40' : ''}">
-									<td class="px-3 py-2 align-top">
-										<input type="checkbox" checked={selectedModels.has(model.model_id)} onchange={() => toggleSelect(model.model_id)} class="rounded" aria-label="Select {model.model_name} for comparison" />
-									</td>
-									<td class="px-3 py-2 align-top">
-										<div class="flex items-center gap-1.5">
-											{#if rank <= 3}
-												<Medal class="h-4 w-4 {rank === 1 ? 'text-warning-fg' : rank === 2 ? 'text-muted-foreground' : 'text-warning-fg/60'}" />
-											{/if}
-											<span class="text-xs font-semibold">#{rank}</span>
-										</div>
-									</td>
-									<td class="px-3 py-2 align-top">
-										<div>
-											<a href="/models/{encodeURIComponent(model.model_id)}" class="font-medium hover:underline">{model.model_name}</a>
-											<div class="text-[11px] text-muted-foreground">
-												{model.provider}
-												{#if model.is_free}<Badge variant="outline" class="ml-1 px-1 py-0 text-[11px]">Free</Badge>{/if}
+								{@const selected = selectedModels.has(model.model_id)}
+								{@const href = `/models/${encodeURIComponent(model.model_id)}`}
+								<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
+								<tr class="row-link" data-selected={selected} onclick={rowLink(href)}>
+									<td class="col-sticky">
+										<div class="flex items-center gap-3">
+											<Checkbox
+												checked={selected}
+												disabled={!selected && selectedModels.size >= 10}
+												onCheckedChange={() => toggleSelect(model.model_id)}
+												aria-label="Select {model.model_name} for comparison"
+											/>
+											<span
+												class="inline-flex h-6 w-8 items-center justify-center rounded-sm font-mono text-xs tabular-nums {rank <= 3 && !sortAsc ? 'bg-primary/12 font-semibold text-primary' : 'text-muted-foreground'}"
+											>{rank}</span>
+											<div class="min-w-0 max-w-[280px]">
+												<a {href} class="block truncate font-medium hover:text-primary" title={model.model_name}>{shortModelName(model.model_name)}</a>
+												<div class="cell-sub flex items-center gap-1.5 text-[11px] text-muted-foreground">
+													<span class="truncate">{modelNamePrefix(model.model_name) || model.provider}</span>
+													{#if model.is_free}<span class="rounded-sm bg-success/12 px-1 font-medium text-success-fg">Free</span>{/if}
+												</div>
 											</div>
 										</div>
 									</td>
-									<td class="px-3 py-2 text-right align-top" title={empiricalTitle(model)}>
-										{#if model.empirical_quality_score != null}
-											<div class="font-mono tabular-nums font-bold {scoreColor01(model.empirical_quality_score)}">{pct(model.empirical_quality_score)}</div>
-											<div class="text-[11px] text-muted-foreground whitespace-nowrap">n={model.n_trials}{model.variance?.density_per_kloc_stdev != null ? ` · ±${model.variance.density_per_kloc_stdev.toFixed(1)}/KLOC` : ''}</div>
-										{:else}
-											<span class="text-xs text-muted-foreground">—</span>
-										{/if}
-									</td>
-									<td class="px-3 py-2 text-right align-top font-mono tabular-nums {scoreColor01(model.mss_score)}">{pct(model.mss_score)}</td>
-									<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor01(model.composite_score)}">{pct(model.composite_score)}</td>
-									<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor01(model.adoption_score)}">{pct(model.adoption_score)}</td>
-									<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor01(model.benchmark_score)}">{pct(model.benchmark_score)}</td>
-									<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor01(model.cost_efficiency_score)}">{pct(model.cost_efficiency_score)}</td>
-									<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor01(model.accessibility_score)}">{pct(model.accessibility_score)}</td>
-									<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs">{fmtBench(model, 'humaneval')}</td>
-									<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs">{fmtBench(model, 'mbpp')}</td>
-									<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs">{fmtBench(model, 'swebench')}</td>
-									<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs text-muted-foreground">{model.apps}</td>
+									<ScoreCell
+										value={model.empirical_quality_score}
+										strong
+										best={model.empirical_quality_score != null && model.empirical_quality_score === colMax.empirical}
+										title={empiricalTitle(model)}
+										sub={model.empirical_quality_score != null ? `n=${model.n_trials}` : undefined}
+										class="border-l border-border/60"
+									/>
+									{#each metaCols as col, ci (col.key)}
+										<ScoreCell value={model[col.field] as number} strong={col.key === 'mss'} best={model[col.field] === colMax[col.key]} class={ci === 0 ? 'border-l border-border/60' : ''} />
+									{/each}
+									{#each benchCols as col, ci (col.key)}
+										<td class="num text-xs {ci === 0 ? 'border-l border-border/60' : ''}">{fmtBench(model, col.key)}</td>
+									{/each}
+									<td class="num border-l border-border/60 text-xs {model.apps ? '' : 'text-muted-foreground'}">{model.apps || '—'}</td>
 								</tr>
 							{/each}
 						</tbody>
 					</table>
 				</div>
 
-				<!-- Mobile card view (below 768px) -->
-				<div class="md:hidden space-y-3 px-4 pb-4">
-					{#each data.rankings as model, i}
+				<!-- Mobile list (below 768px) -->
+				<ul class="md:hidden">
+					{#each data.rankings as model, i (model.model_id)}
 						{@const rank = indexOnPage(i)}
-						<div class="bg-card border rounded-lg p-4 {selectedModels.has(model.model_id) ? 'ring-1 ring-inset ring-primary/40' : ''}">
-							<div class="flex items-center gap-3">
-								<input type="checkbox" checked={selectedModels.has(model.model_id)} onchange={() => toggleSelect(model.model_id)} class="rounded shrink-0" aria-label="Select {model.model_name} for comparison" />
-								<div class="flex items-center gap-1.5 shrink-0">
-									{#if rank <= 3}
-										<Medal class="h-5 w-5 {rank === 1 ? 'text-warning-fg' : rank === 2 ? 'text-muted-foreground' : 'text-warning-fg/60'}" />
-									{/if}
-									<span class="text-xs font-bold text-muted-foreground">#{rank}</span>
-								</div>
+						{@const selected = selectedModels.has(model.model_id)}
+						{@const headline = model.empirical_quality_score != null ? { label: `Empirical · n=${model.n_trials}`, v: model.empirical_quality_score } : { label: 'MSS (meta)', v: model.mss_score }}
+						<li class="data-list-row px-3" data-active={selected}>
+							<div class="flex items-start gap-3">
+								<Checkbox
+									class="mt-1.5"
+									checked={selected}
+									disabled={!selected && selectedModels.size >= 10}
+									onCheckedChange={() => toggleSelect(model.model_id)}
+									aria-label="Select {model.model_name} for comparison"
+								/>
+								<span class="inline-flex h-6 w-8 shrink-0 items-center justify-center rounded-sm font-mono text-xs tabular-nums {rank <= 3 && !sortAsc ? 'bg-primary/12 font-semibold text-primary' : 'text-muted-foreground'}">{rank}</span>
 								<div class="min-w-0 flex-1">
-									<a href="/models/{encodeURIComponent(model.model_id)}" class="font-medium text-sm hover:underline truncate block">{model.model_name}</a>
-									<Badge variant="outline" class="mt-0.5 text-[11px]">{model.provider}</Badge>
-								</div>
-								<div class="text-right shrink-0" title={empiricalTitle(model)}>
-									{#if model.empirical_quality_score != null}
-										<div class="text-[11px] font-medium text-muted-foreground">Empirical (n={model.n_trials})</div>
-										<div class="text-lg font-bold font-mono {scoreColor01(model.empirical_quality_score)}">{pct(model.empirical_quality_score)}</div>
-									{:else}
-										<div class="text-[11px] font-medium text-muted-foreground">MSS (meta)</div>
-										<div class="text-lg font-bold font-mono {scoreColor01(model.mss_score)}">{pct(model.mss_score)}</div>
+									<div class="flex items-start justify-between gap-2">
+										<div class="min-w-0">
+											<a href="/models/{encodeURIComponent(model.model_id)}" class="block truncate text-sm font-medium hover:text-primary" title={model.model_name}>{shortModelName(model.model_name)}</a>
+											<p class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+												<span class="truncate">{modelNamePrefix(model.model_name) || model.provider}</span>
+												{#if model.is_free}<span class="rounded-sm bg-success/12 px-1 font-medium text-success-fg">Free</span>{/if}
+											</p>
+										</div>
+										<div class="shrink-0 text-right" title={empiricalTitle(model)}>
+											<div class="font-mono text-lg font-medium leading-none tabular-nums">{pct(headline.v)}</div>
+											<div class="mt-1 text-[11px] text-muted-foreground">{headline.label}</div>
+										</div>
+									</div>
+									<dl class="mt-2.5 grid grid-cols-3 gap-x-3 gap-y-2 text-[11px]">
+										{#each metaCols as col (col.key)}
+											{@const v = model[col.field] as number}
+											<div>
+												<dt class="text-muted-foreground">{col.label}</dt>
+												<dd class="flex items-center gap-1.5">
+													<span class="w-9 font-mono text-xs tabular-nums {v ? '' : 'text-muted-foreground'}">{pct(v)}</span>
+													<span class="h-[3px] flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true"><span class="block h-full rounded-full bg-muted-foreground/45" style:width="{Math.max(0, Math.min(1, v ?? 0)) * 100}%"></span></span>
+												</dd>
+											</div>
+										{/each}
+									</dl>
+									{#if benchCols.length || model.apps}
+										<p class="mt-2 font-mono text-[11px] text-muted-foreground">
+											{#each benchCols as col (col.key)}{col.label} {fmtBench(model, col.key)} · {/each}{model.apps} app{model.apps === 1 ? '' : 's'}
+										</p>
 									{/if}
 								</div>
 							</div>
-
-							<div class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
-								<div class="flex items-center justify-between">
-									<span class="text-[11px] text-muted-foreground">MSS (meta)</span>
-									<span class="text-xs font-mono font-medium {scoreColor01(model.mss_score)}">{pct(model.mss_score)}</span>
-								</div>
-								<div class="flex items-center justify-between">
-									<span class="text-[11px] text-muted-foreground">Composite</span>
-									<span class="text-xs font-mono font-medium {scoreColor01(model.composite_score)}">{pct(model.composite_score)}</span>
-								</div>
-								<div class="flex items-center justify-between">
-									<span class="text-[11px] text-muted-foreground">Adoption</span>
-									<span class="text-xs font-mono font-medium {scoreColor01(model.adoption_score)}">{pct(model.adoption_score)}</span>
-								</div>
-								<div class="flex items-center justify-between">
-									<span class="text-[11px] text-muted-foreground">Benchmarks</span>
-									<span class="text-xs font-mono font-medium {scoreColor01(model.benchmark_score)}">{pct(model.benchmark_score)}</span>
-								</div>
-								<div class="flex items-center justify-between">
-									<span class="text-[11px] text-muted-foreground">Cost-Eff.</span>
-									<span class="text-xs font-mono font-medium {scoreColor01(model.cost_efficiency_score)}">{pct(model.cost_efficiency_score)}</span>
-								</div>
-								<div class="flex items-center justify-between">
-									<span class="text-[11px] text-muted-foreground">Accessibility</span>
-									<span class="text-xs font-mono font-medium {scoreColor01(model.accessibility_score)}">{pct(model.accessibility_score)}</span>
-								</div>
-								<div class="flex items-center justify-between">
-									<span class="text-[11px] text-muted-foreground">HumanEval</span>
-									<span class="text-xs font-mono font-medium">{fmtBench(model, 'humaneval')}</span>
-								</div>
-								<div class="flex items-center justify-between">
-									<span class="text-[11px] text-muted-foreground">MBPP</span>
-									<span class="text-xs font-mono font-medium">{fmtBench(model, 'mbpp')}</span>
-								</div>
-								<div class="flex items-center justify-between">
-									<span class="text-[11px] text-muted-foreground">SWE-bench</span>
-									<span class="text-xs font-mono font-medium">{fmtBench(model, 'swebench')}</span>
-								</div>
-								<div class="flex items-center justify-between">
-									<span class="text-[11px] text-muted-foreground">Apps</span>
-									<span class="text-xs font-mono font-medium text-muted-foreground">{model.apps}</span>
-								</div>
-							</div>
-						</div>
+						</li>
 					{/each}
-				</div>
+				</ul>
 			{/if}
+			<PaginationBar
+				resultsText={data
+					? `Showing ${(page - 1) * perPage + 1}–${Math.min(page * perPage, data.pagination.total)} of ${data.pagination.total} models`
+					: ''}
+				page={data?.pagination.page}
+				pages={data?.pagination.total_pages}
+				onGoToPage={(p) => { page = p; }}
+				class="border-t border-border"
+				scrollToCard
+			/>
 		</Card.Content>
 	</Card.Root>
-
-	<PaginationBar
-		resultsText={data
-			? `Showing ${(page - 1) * perPage + 1}–${Math.min(page * perPage, data.pagination.total)} of ${data.pagination.total} models`
-			: ''}
-		page={data?.pagination.page}
-		pages={data?.pagination.total_pages}
-		onGoToPage={(p) => { page = p; }}
-		class="rounded-md border border-border"
-	/>
 
 	<!-- Methodology Panel -->
 	<Card.Root>

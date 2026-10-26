@@ -14,6 +14,9 @@ categories:
   - slug: secrets
     label: Secrets
     description: Detect leaked credentials and secrets.
+  - slug: dependencies
+    label: Dependencies
+    description: Vulnerable, missing and unused packages.
   - slug: ai
     label: AI review
     description: LLM-assisted code review.

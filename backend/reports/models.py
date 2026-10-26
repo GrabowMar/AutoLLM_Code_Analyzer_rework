@@ -25,6 +25,7 @@ class Report(models.Model):
         GENERATION_ANALYTICS = "generation_analytics", _("Generation analytics")
         COMPREHENSIVE = "comprehensive", _("Comprehensive")
         EXPERIMENT_REPORT = "experiment_report", _("Experiment report")
+        STUDY_REPORT = "study_report", _("Study report")
 
     class Status(models.TextChoices):
         PENDING = "pending", _("Pending")

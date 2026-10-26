@@ -30,6 +30,8 @@ export interface AnalyzerTool {
   installed: boolean;
   install_status: string;
   installed_version: string;
+  update_available: boolean;
+  output_kind?: string;
 }
 
 export interface Workspace {
@@ -47,16 +49,31 @@ export interface InstalledTool {
   tool_slug: string;
   tool_name: string;
   category: string;
-  status: "installing" | "installed" | "failed";
+  status: "installing" | "updating" | "installed" | "failed";
   installed_version: string;
+  /** Catalog version this install was made from. */
+  catalog_version: string;
+  /** Version the catalog currently pins. */
+  latest_version: string;
+  update_available: boolean;
   config: Record<string, unknown>;
   install_log: string;
+  updated_at: string | null;
+}
+
+export interface UninstallResult {
+  status: string;
+  tool_slug: string;
+  /** What happened to the package files (empty when nothing to remove). */
+  message: string;
 }
 
 export interface TestResult {
   available: boolean;
   message: string;
   findings: Record<string, unknown>[];
+  /** Aggregate metrics from metric-shaped tools (complexity, duplication…). */
+  metrics: Record<string, unknown>;
   raw_output: Record<string, unknown>;
 }
 
@@ -116,8 +133,40 @@ export async function installTool(toolSlug: string): Promise<InstalledTool> {
   return res.json();
 }
 
-export async function uninstallTool(slug: string): Promise<void> {
-  await apiFetch(`/analyzers/workspace/tools/${slug}/`, { method: "DELETE" });
+export async function bulkInstallTools(
+  toolSlugs: string[],
+): Promise<InstalledTool[]> {
+  const res = await apiFetch("/analyzers/workspace/tools/bulk/", {
+    method: "POST",
+    body: JSON.stringify({ tool_slugs: toolSlugs }),
+  });
+  return res.json();
+}
+
+/** Re-run a tool's install to upgrade it (or retry a failed install). */
+export async function updateTool(slug: string): Promise<InstalledTool> {
+  const res = await apiFetch(`/analyzers/workspace/tools/${slug}/update/`, {
+    method: "POST",
+  });
+  return res.json();
+}
+
+/** Update outdated tools, or with `onlyOutdated: false` reinstall them all. */
+export async function updateAllTools(
+  onlyOutdated = true,
+): Promise<InstalledTool[]> {
+  const res = await apiFetch("/analyzers/workspace/tools/update-all/", {
+    method: "POST",
+    body: JSON.stringify({ only_outdated: onlyOutdated }),
+  });
+  return res.json();
+}
+
+export async function uninstallTool(slug: string): Promise<UninstallResult> {
+  const res = await apiFetch(`/analyzers/workspace/tools/${slug}/`, {
+    method: "DELETE",
+  });
+  return res.json();
 }
 
 export async function updateToolConfig(

@@ -126,15 +126,15 @@
 		<div class="grid grid-cols-3 gap-2">
 			<div class="rounded-md border border-border bg-surface-2 px-2.5 py-2">
 				<p class="kpi-label">Conditions</p>
-				<p class="font-display text-xl font-semibold tabular-nums">{conditions}</p>
+				<p class="font-mono text-xl font-medium tabular-nums">{conditions}</p>
 			</div>
 			<div class="rounded-md border border-border bg-surface-2 px-2.5 py-2">
 				<p class="kpi-label">Cells</p>
-				<p class="font-display text-xl font-semibold tabular-nums">{cells.toLocaleString()}</p>
+				<p class="font-mono text-xl font-medium tabular-nums">{cells.toLocaleString()}</p>
 			</div>
 			<div class="rounded-md border border-border bg-surface-2 px-2.5 py-2">
 				<p class="kpi-label">Apps × R</p>
-				<p class="font-display text-xl font-semibold tabular-nums">{apps}×{repeats}</p>
+				<p class="font-mono text-xl font-medium tabular-nums">{apps}×{repeats}</p>
 			</div>
 		</div>
 

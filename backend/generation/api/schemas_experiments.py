@@ -194,12 +194,15 @@ class ExperimentCreateV2(Schema):
     agent_config: AgentConfigSchema | None = None
     continuation_limit: int = Field(1, ge=0, le=5)
     enable_repair: bool = True
+    build_healing: Literal["full", "no_deps", "none"] = "full"
     llm_defaults: LLMParamsSchema | None = None
     # v2 (a draft may start without conditions; a launch needs at least one)
     conditions: ConditionSetSpec | None = None
     execution: ExecutionSpecSchema | None = None
     post_run: PostRunSpec | None = None
     schedules: list[ScheduleSpec] | None = None
+    # Pre-registered analysis plan (services/analysis_plan.py); frozen at launch.
+    analysis_plan: dict[str, Any] | None = None
 
 
 class ExperimentUpdateV2(Schema):
@@ -220,6 +223,7 @@ class ExperimentUpdateV2(Schema):
     agent_config: AgentConfigSchema | None = None
     continuation_limit: int | None = Field(None, ge=0, le=5)
     enable_repair: bool | None = None
+    build_healing: Literal["full", "no_deps", "none"] | None = None
     llm_defaults: LLMParamsSchema | None = None
     baseline_condition_id: int | None = None
     scheduling_policy: SchedulingPolicy | None = None
@@ -228,6 +232,7 @@ class ExperimentUpdateV2(Schema):
     infra_retries: int | None = Field(None, ge=0, le=5)
     execution_options: ExecutionOptionsSchema | None = None
     post_run: PostRunSpec | None = None
+    analysis_plan: dict[str, Any] | None = None
 
 
 # ── Lifecycle bodies ───────────────────────────────────────────────────

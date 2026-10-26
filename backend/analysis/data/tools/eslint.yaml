@@ -11,6 +11,7 @@ version: "8"
 docs_url: https://eslint.org/docs/latest/
 install_cmd: "npm install -g eslint@8"
 verify_cmd: "eslint --version"
+uninstall_cmd: "npm uninstall -g eslint"
 # es2022 is needed alongside browser/node: without it Promise, Set, etc. are
 # "not defined" and no-undef floods the results with false positives.
 run_cmd: "eslint {target} --ext .js,.jsx,.cjs,.mjs -f json --no-eslintrc --env browser,node,es2022 --parser-options=ecmaVersion:latest,sourceType:module,ecmaFeatures:{jsx:true} --rule '{\"no-undef\":\"error\",\"no-unused-vars\":\"warn\"}'"

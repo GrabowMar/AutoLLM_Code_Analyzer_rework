@@ -25,7 +25,7 @@
 				</div>
 			</div>
 			<div class="text-right">
-				<div class="text-xl font-bold font-display">
+				<div class="text-xl font-medium font-mono">
 					{trends?.total ?? 0}
 				</div>
 				<p class="text-[11px] text-muted-foreground">total runs</p>
@@ -35,10 +35,10 @@
 	<Card.Content>
 		{#if loading}
 			<ChartSkeleton />
-		{:else if trends && trends.series.length > 1}
+		{:else if trends && trends.series.length > 1 && trends.total > 0}
 			<TrendAreaChart points={trends.series} />
 		{:else}
-			<ChartEmpty />
+			<ChartEmpty message={trends ? `No analyses in the last ${trends.days} days.` : undefined} />
 		{/if}
 	</Card.Content>
 </Card.Root>

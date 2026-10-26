@@ -28,6 +28,7 @@
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import { severityColors } from '$lib/constants/analysis';
 	import { formatDate, statusLabel } from '$lib/utils/formatters';
+	import { tableFrame } from '$lib/components/table';
 
 	let loading = $state(true);
 	let error = $state('');
@@ -205,9 +206,6 @@
 		bind:searchValue={searchQuery}
 		activeTags={activeFilters}
 		{resultsText}
-		page={currentPage}
-		pages={totalPages}
-		onGoToPage={goToPage}
 		onClearAll={() => { statusFilter = ''; searchQuery = ''; currentPage = 1; fetchRuns(); }}
 	>
 		{#snippet filters()}
@@ -250,31 +248,31 @@
 		</EmptyState>
 	{:else}
 		<div class="hidden md:block">
-			<Card.Root>
+			<Card.Root class="gap-0 overflow-clip py-0">
 				<Card.Content class="p-0">
-					<div class="overflow-x-auto">
-						<table class="w-full">
+					<div class="table-frame" {@attach tableFrame}>
+						<table>
 							<thead>
-								<tr class="border-b bg-muted/40">
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">Name</th>
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">Created</th>
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">Tools</th>
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">Status</th>
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">Findings</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground">Actions</th>
+								<tr>
+									<th>Name</th>
+									<th>Created</th>
+									<th>Tools</th>
+									<th>Status</th>
+									<th>Findings</th>
+									<th class="text-right"><span class="sr-only">Actions</span></th>
 								</tr>
 							</thead>
 							<tbody>
-								{#each displayedRuns as run, i (run.id)}
+								{#each displayedRuns as run (run.id)}
 									<tr
-										class="border-b transition-colors hover:bg-muted/50 group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset {i % 2 === 0 ? '' : 'bg-muted/15'} {run.status === 'failed' ? 'bg-destructive/[0.03]' : ''}"
+										class="row-link group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset {run.status === 'failed' ? 'bg-destructive/[0.03]' : ''}"
 										onclick={() => window.location.href = `/analysis/${run.id}`}
 										onkeydown={(e) => { if (e.key === 'Enter') window.location.href = `/analysis/${run.id}`; }}
 										tabindex="0"
 										role="link"
 										aria-label="Open analysis run {runName(run)}"
 									>
-										<td class="px-3 py-2 align-top">
+										<td class="align-top">
 											<div class="flex items-center gap-2.5">
 												<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted group-hover:bg-primary/10 transition-colors">
 													<Microscope class="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
@@ -285,8 +283,8 @@
 												</div>
 											</div>
 										</td>
-										<td class="px-3 py-2 text-sm">{formatDate(run.created_at)}</td>
-										<td class="px-3 py-2">
+										<td class="text-sm">{formatDate(run.created_at)}</td>
+										<td>
 											<div class="flex flex-wrap gap-1">
 												{#each run.tool_slugs.slice(0, 4) as slug}
 													<Badge variant="secondary" class="text-[11px]">{slug}</Badge>
@@ -296,10 +294,10 @@
 												{/if}
 											</div>
 										</td>
-										<td class="px-3 py-2 align-top">
+										<td class="align-top">
 											<StatusBadge status={run.status} label={statusLabel(run.status)} />
 										</td>
-										<td class="px-3 py-2 align-top">
+										<td class="align-top">
 											{#if severityBreakdown(run).length > 0}
 												<div class="flex flex-wrap gap-1">
 													{#each severityBreakdown(run) as [sev, count]}
@@ -310,7 +308,7 @@
 												<span class="text-xs text-muted-foreground">—</span>
 											{/if}
 										</td>
-										<td class="px-3 py-2">
+										<td>
 											<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
 											<div class="flex items-center justify-end gap-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
 												<Button variant="ghost" size="sm" class="h-7 w-7 p-0" href="/analysis/{run.id}" title="View results" aria-label="View results">
@@ -340,6 +338,7 @@
 							</tbody>
 						</table>
 					</div>
+					{@render pager('border-t border-border')}
 				</Card.Content>
 			</Card.Root>
 		</div>
@@ -365,17 +364,14 @@
 					<div class="border-t pt-2 text-xs text-muted-foreground">{formatDate(run.created_at)}</div>
 				</a>
 			{/each}
+			{@render pager('rounded-md border border-border')}
 		</div>
 	{/if}
-
-	<PaginationBar
-		resultsText={resultsText}
-		page={currentPage}
-		pages={totalPages}
-		onGoToPage={goToPage}
-		class="rounded-md border border-border"
-	/>
 </div>
+
+{#snippet pager(cls: string)}
+	<PaginationBar {resultsText} page={currentPage} pages={totalPages} onGoToPage={goToPage} class={cls} scrollToCard />
+{/snippet}
 
 <ConfirmDialog
 	bind:open={confirmOpen}

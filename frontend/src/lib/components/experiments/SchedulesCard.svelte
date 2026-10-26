@@ -166,7 +166,7 @@
 			<EmptyState compact icon={CalendarClock} title="No schedules" description="Add one to re-run failed cells nightly or replicate weekly." />
 		{:else}
 			<div class="overflow-x-auto rounded-md border border-border">
-				<table class="table-card-mobile w-full text-xs">
+				<table class="table-card-mobile">
 					<thead>
 						<tr>
 							<th scope="col">On</th>
@@ -190,15 +190,15 @@
 								</td>
 								<td data-label="When">
 									<span title="{s.cron} ({s.timezone})">{describeCron(s.cron)}</span>
-									<span class="block text-[11px] text-muted-foreground">{s.timezone}{s.skip_if_active ? ' · skips while running' : ''}</span>
+									<span class="cell-sub block text-[11px] text-muted-foreground">{s.timezone}{s.skip_if_active ? ' · skips while running' : ''}</span>
 								</td>
-								<td data-label="Next run" class="tabular-nums" title={s.next_run_at ? new Date(s.next_run_at).toLocaleString() : ''}>
-									{s.enabled ? timeUntil(s.next_run_at) : 'paused'}
+								<td data-label="Next run" class="whitespace-nowrap tabular-nums" title={s.next_run_at ? new Date(s.next_run_at).toLocaleString() : ''}>
+									{#if s.enabled}{timeUntil(s.next_run_at)}{:else}<span class="text-muted-foreground">paused</span>{/if}
 								</td>
 								<td data-label="Last result">
 									{#if result}
 										<span class="inline-block rounded-full border px-2 py-0.5 text-[11px] {toneClasses[result.tone]}">{result.text}</span>
-										<span class="block text-[11px] text-muted-foreground">{timeAgo(s.last_run_at)}</span>
+										<span class="cell-sub mt-0.5 block text-[11px] text-muted-foreground">{timeAgo(s.last_run_at)}</span>
 										{#if s.last_result.experiment_id && s.last_result.experiment_id !== experimentId}
 											<a href="/experiments/{s.last_result.experiment_id}" class="text-[11px] text-success-fg hover:underline">Open the clone</a>
 										{/if}
@@ -206,26 +206,40 @@
 										<span class="text-muted-foreground">never ran</span>
 									{/if}
 								</td>
-								<td data-label="">
-									<span class="flex justify-end gap-1">
-										{#if !readonly}
-											<Button variant="outline" size="sm" disabled={busy === s.id} onclick={() => runNow(s)}>
-												{#if busy === s.id}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Play />{/if}Run now
+								<td data-label="" class="w-px whitespace-nowrap">
+									<span class="flex items-center justify-end gap-0.5">
+										<span class="row-actions-more flex items-center gap-0.5">
+											{#if !readonly}
+												<Button
+													variant="ghost"
+													size="sm"
+													class="size-8 p-0 text-muted-foreground hover:text-foreground"
+													aria-label="Edit schedule"
+													title="Edit schedule"
+													onclick={() => openEditor(s)}
+												>
+													<Pencil class="size-4" />
+												</Button>
+											{/if}
+											<Button
+												variant="ghost"
+												size="sm"
+												class="size-8 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-danger-fg"
+												aria-label="Delete schedule"
+												title="Delete schedule"
+												onclick={() => {
+													deleteTarget = s;
+													deleteOpen = true;
+												}}
+											>
+												<Trash2 class="size-4" />
 											</Button>
-											<Button variant="ghost" size="icon" class="size-8" aria-label="Edit schedule" onclick={() => openEditor(s)}><Pencil class="size-3.5" /></Button>
+										</span>
+										{#if !readonly}
+											<Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs" disabled={busy === s.id} onclick={() => runNow(s)}>
+												{#if busy === s.id}<LoaderCircle class="size-3 animate-spin motion-reduce:animate-none" />{:else}<Play class="size-3" />{/if}Run now
+											</Button>
 										{/if}
-										<Button
-											variant="ghost"
-											size="icon"
-											class="size-8 text-muted-foreground hover:text-destructive"
-											aria-label="Delete schedule"
-											onclick={() => {
-												deleteTarget = s;
-												deleteOpen = true;
-											}}
-										>
-											<Trash2 class="size-3.5" />
-										</Button>
 									</span>
 								</td>
 							</tr>

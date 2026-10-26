@@ -1,4 +1,5 @@
 <script lang="ts">
+import { tableFrame } from '$lib/components/table';
 import * as Card from '$lib/components/ui/card';
 import { Badge } from '$lib/components/ui/badge';
 import Package from '@lucide/svelte/icons/package';
@@ -14,16 +15,16 @@ let { deps, mode }: Props = $props();
 
 <section id="dependencies" class="space-y-4">
 	{#if deps.length > 0}
-		<Card.Root>
-			<Card.Header class="pb-3">
+		<Card.Root class="gap-0 overflow-clip py-0">
+			<Card.Header class="border-b border-border py-3">
 				<Card.Title class="text-sm font-medium flex items-center gap-2">
 					{mode === 'scaffolding' ? 'Backend' : ''} Dependencies
 					<Badge variant="outline" class="text-xs">{deps.length}</Badge>
 				</Card.Title>
 			</Card.Header>
 			<Card.Content class="p-0">
-				<div class="overflow-x-auto">
-					<table class="w-full text-sm">
+				<div class="table-frame" {@attach tableFrame}>
+					<table>
 						<thead>
 							<tr>
 								<th>Package</th>

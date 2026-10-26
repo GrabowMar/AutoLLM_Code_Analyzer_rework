@@ -13,6 +13,7 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { Segmented } from '$lib/components/ui/segmented';
 	import { formatDuration } from '$lib/utils/formatters';
+	import { rowLink, tableFrame, shortModelName, modelNamePrefix } from '$lib/components/table';
 	import ListFilter from '@lucide/svelte/icons/list-filter';
 	import {
 		formatPassRate,
@@ -89,42 +90,50 @@
 	{#if visible.length === 0}
 		<EmptyState compact icon={ListFilter} title="No runs match this filter" />
 	{:else}
-		<div class="relative overflow-x-auto md:rounded-md md:border md:border-border">
-			<table class="table-card-mobile w-full md:[&_td]:px-2 md:[&_th]:px-2">
+		<div class="table-frame md:rounded-md md:border md:border-border md:bg-card" {@attach tableFrame}>
+			<table class="table-card-mobile">
 				<thead>
 					<tr>
 						<th scope="col">Task</th>
 						<th scope="col">Model</th>
 						{#if variantHeader}<th scope="col">{variantHeader}</th>{/if}
-						<th scope="col">Trial</th>
+						<th scope="col" class="num">Trial</th>
 						<th scope="col">Status</th>
 						{#if graded}<th scope="col">Evaluation</th>{/if}
-						<th scope="col" class="text-right">Cost</th>
-						<th scope="col" class="hidden text-right lg:table-cell">Duration</th>
-						<th scope="col" class="hidden text-right lg:table-cell">Seed</th>
+						<th scope="col" class="num">Cost</th>
+						<th scope="col" class="num hidden lg:table-cell">Duration</th>
+						<th scope="col" class="num hidden lg:table-cell">Seed</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each visible as job (job.id)}
-						<tr>
+						{@const href = `/applications/${job.id}`}
+						{@const provider = modelNamePrefix(job.model_name)}
+						<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
+						<tr class="row-link" onclick={rowLink(href)}>
 							<td data-label="Task" class="md:max-w-40">
 								<a
-									href="/applications/{job.id}"
-									class="block min-w-0 break-words font-medium md:truncate transition-colors hover:text-primary hover:underline"
+									{href}
+									class="block min-w-0 break-words font-medium transition-colors hover:text-primary md:truncate"
 									title="Open this run ({shortId(job.id)})"
 									aria-label="Open run: {job.template_name || 'Task'}, {job.model_name ?? 'model'}{job.repeat_index != null ? `, trial ${job.repeat_index + 1}` : ''}"
 								>{job.template_name || 'Task'}</a>
 							</td>
 							<td data-label="Model" class="md:max-w-44">
-								<span class="block min-w-0 break-words md:truncate" title={job.model_id_str ?? ''}>{job.model_name ?? '—'}</span>
+								{#if job.model_name}
+									<span class="block min-w-0 break-words md:truncate" title={job.model_id_str ?? job.model_name}>{shortModelName(job.model_name)}</span>
+									{#if provider}<span class="cell-sub block truncate text-[11px] text-muted-foreground">{provider}</span>{/if}
+								{:else}
+									<span class="text-muted-foreground">—</span>
+								{/if}
 							</td>
 							{#if variantHeader}
 								<td data-label={variantHeader} class="md:max-w-48">
-									<span class="block min-w-0 break-all font-mono text-xs md:truncate md:break-normal">{variantOf(job)}</span>
+									<span class="block min-w-0 break-all font-mono text-xs md:truncate md:break-normal" title={variantOf(job)}>{variantOf(job)}</span>
 								</td>
 							{/if}
-							<td data-label="Trial" class="font-mono text-xs tabular-nums">
-								{job.repeat_index != null ? job.repeat_index + 1 : '—'}
+							<td data-label="Trial" class="num text-xs max-md:text-left">
+								{#if job.repeat_index != null}{job.repeat_index + 1}{:else}<span class="text-muted-foreground">—</span>{/if}
 							</td>
 							<td data-label="Status">
 								<span class="inline-flex flex-wrap items-center gap-1">
@@ -136,7 +145,7 @@
 									{/if}
 								</span>
 								{#if job.error_message}
-									<span class="mt-0.5 line-clamp-2 min-w-0 break-words text-[11px] text-danger-fg md:block md:max-w-44 md:truncate" title={job.error_message}>{job.error_message}</span>
+									<span class="cell-sub mt-0.5 line-clamp-2 min-w-0 break-words text-[11px] text-danger-fg md:block md:max-w-44 md:truncate" title={job.error_message}>{job.error_message}</span>
 								{/if}
 							</td>
 							{#if graded}
@@ -153,11 +162,15 @@
 									{/if}
 								</td>
 							{/if}
-							<td data-label="Cost" class="font-mono text-xs tabular-nums md:text-right">{formatUsd(job.cost_usd)}</td>
-							<td data-label="Duration" class="hidden whitespace-nowrap text-right lg:table-cell font-mono text-xs tabular-nums">
-								{formatDuration(job.duration_seconds)}
+							<td data-label="Cost" class="num text-xs max-md:text-left">
+								{#if job.cost_usd != null}{formatUsd(job.cost_usd)}{:else}<span class="text-muted-foreground">—</span>{/if}
 							</td>
-							<td data-label="Seed" class="hidden text-right lg:table-cell font-mono text-xs tabular-nums">{job.experiment_seed ?? '—'}</td>
+							<td data-label="Duration" class="num hidden text-xs lg:table-cell">
+								{#if job.duration_seconds != null}{formatDuration(job.duration_seconds)}{:else}<span class="text-muted-foreground">—</span>{/if}
+							</td>
+							<td data-label="Seed" class="num hidden text-xs lg:table-cell">
+								{#if job.experiment_seed != null}{job.experiment_seed}{:else}<span class="text-muted-foreground">—</span>{/if}
+							</td>
 						</tr>
 					{/each}
 				</tbody>

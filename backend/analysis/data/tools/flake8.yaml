@@ -1,0 +1,25 @@
+slug: flake8
+name: Flake8
+description: >-
+  The classic Python linter (pyflakes + pycodestyle + mccabe). Catches
+  undefined names, unused imports, syntax errors and style violations.
+category: lint
+kind: container
+target_language: python
+icon: snowflake
+version: "7"
+docs_url: https://flake8.pycqa.org/
+install_cmd: "pip install --user --upgrade 'flake8==7.*'"
+verify_cmd: "flake8 --version"
+uninstall_cmd: "pip uninstall -y flake8"
+run_cmd: "flake8 {target} --exit-zero --max-line-length 120 --exclude node_modules,.venv,venv 2>/dev/null"
+parser_key: flake8
+run_timeout: 120
+install_timeout: 180
+display_order: 25
+sample_code: |
+  import os
+
+
+  def greet(name):
+      print("hello " + nme)

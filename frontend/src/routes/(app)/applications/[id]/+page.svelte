@@ -60,6 +60,8 @@ import ApplicationAnalyses from '$lib/components/applications/ApplicationAnalyse
 import ApplicationLogs from '$lib/components/applications/ApplicationLogs.svelte';
 import AgentRunSummary from '$lib/components/applications/AgentRunSummary.svelte';
 import JobProvenance from '$lib/components/applications/JobProvenance.svelte';
+import GitHubExportDialog from '$lib/components/integrations/GitHubExportDialog.svelte';
+import { jobDescription } from '$lib/components/applications/utils';
 import {
 	type CodeFootprint,
 	type VirtualFile,
@@ -68,6 +70,7 @@ import {
 const LIVE_POLL_MS = 15_000;
 
 const jobId = $derived(page.params.id ?? '');
+let githubExportOpen = $state(false);
 let loading = $state(true);
 let notFound = $state(false);
 let loadError = $state('');
@@ -413,6 +416,7 @@ async function handleClone(kind: 'replay' | 'rerun') {
 			onExport={handleExport}
 			onDownloadCode={downloadCode}
 			onDelete={() => (deleteOpen = true)}
+			onExportGithub={() => (githubExportOpen = true)}
 		/>
 
 		<Tabs.Root bind:value={activeSection}>
@@ -466,4 +470,6 @@ async function handleClone(kind: 'replay' | 'rerun') {
 		busy={deleting}
 		onConfirm={confirmDelete}
 	/>
+
+	<GitHubExportDialog bind:open={githubExportOpen} applicationId={job.id} defaultName={jobDescription(job)} />
 {/if}

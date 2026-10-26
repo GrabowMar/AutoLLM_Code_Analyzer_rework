@@ -130,9 +130,13 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             build_path = Path(tmpdir)
             if job is not None:
+                from backend.runtime.services.scaffolding import HealingReport
                 from backend.runtime.services.scaffolding import prepare_build_dir
 
-                prepare_build_dir(job, build_path)
+                healing = HealingReport()
+                prepare_build_dir(job, build_path, report=healing)
+                container.metadata = {**(container.metadata or {}), "healing": healing.to_dict()}
+                container.save(update_fields=["metadata"])
             else:
                 _write_minimal_dockerfile(build_path)
 

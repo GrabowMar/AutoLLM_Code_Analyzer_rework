@@ -261,6 +261,13 @@ class RunPreset(models.Model):
         return f"{self.kind}/{self.slug} v{self.version}"
 
 
+BUILD_HEALING_CHOICES = [
+    ("full", _("Full: infer dependencies and patch runtime issues")),
+    ("no_deps", _("Patches only: no dependency inference")),
+    ("none", _("None: build the model output as written")),
+]
+
+
 class Experiment(models.Model):
     """A designed run: apps x conditions x repeats, with a reproducibility seed."""
 
@@ -331,6 +338,14 @@ class Experiment(models.Model):
     )
     continuation_limit = models.PositiveSmallIntegerField(_("continuation limit"), default=1)
     enable_repair = models.BooleanField(_("enable repair round"), default=True)
+    # Copied onto every job at launch (runtime.services.scaffolding.HealingMode).
+    build_healing = models.CharField(
+        _("build healing"),
+        max_length=10,
+        choices=BUILD_HEALING_CHOICES,
+        default="full",
+        help_text="How much the build repairs model output before deploying it",
+    )
     llm_defaults = models.JSONField(
         _("LLM defaults"),
         default=dict,
@@ -401,6 +416,11 @@ class Experiment(models.Model):
     # Keys: evaluate (bool), analysis (enabled, tool_slugs, only_passing),
     # report (enabled, exclude_truncated). Spec §B.3.
     post_run = models.JSONField(_("post-run steps"), default=dict, blank=True)
+    # Pre-registered analysis plan (services/analysis_plan.py): editable while
+    # draft, frozen with its hash at launch.
+    analysis_plan = models.JSONField(_("analysis plan"), default=dict, blank=True)
+    analysis_plan_hash = models.CharField(_("analysis plan hash"), max_length=64, blank=True, default="")
+    analysis_plan_frozen_at = models.DateTimeField(_("analysis plan frozen at"), null=True, blank=True)
     pause_reason = models.CharField(
         _("pause reason"),
         max_length=32,
@@ -867,6 +887,15 @@ class GenerationJob(models.Model):
     # of agent_config on purpose: that one is merged into the fingerprinted
     # snapshot ``agent`` section, options only shape the ``harness`` section.
     harness_options = models.JSONField(_("harness options"), default=dict, blank=True)
+    # Build-time repair of the output (runtime.services.scaffolding.HealingMode).
+    # Not part of the snapshot: it changes how the output is built, not what
+    # the model was asked, so healed and raw builds share a fingerprint.
+    build_healing = models.CharField(
+        _("build healing"),
+        max_length=10,
+        choices=BUILD_HEALING_CHOICES,
+        default="full",
+    )
     # Provenance only: preset values were applied into llm_params /
     # agent_config / harness_options at creation, so retries and replays
     # reproduce the configuration without reading these.

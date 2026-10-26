@@ -14,6 +14,7 @@
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import { ScoreCell, rowLink, tableFrame, shortModelName, modelNamePrefix } from '$lib/components/table';
 	import {
 		getStatisticsDashboard,
 		getStatisticsTrends,
@@ -71,17 +72,28 @@
 		info: 'bg-muted-foreground',
 	};
 
-	function scoreColor(val: number, max: number = 10): string {
-		const pct = max === 100 ? val : (val / max) * 100;
-		if (pct >= 80) return 'text-success-fg';
-		if (pct >= 60) return 'text-warning-fg';
-		return 'text-danger-fg';
-	}
-
-	function pct01(v: number | null | undefined): string {
-		if (v == null) return '—';
-		return (v * 100).toFixed(1);
-	}
+	// Column leaders get the primary color only when held by at most two models.
+	type ScoreKey = 'success' | 'smoke' | 'empirical' | 'mss' | 'composite';
+	const leaders = $derived.by(() => {
+		const models = data?.models ?? [];
+		const out: Partial<Record<ScoreKey, number>> = {};
+		if (models.length < 2) return out;
+		const cols: [ScoreKey, (m: (typeof models)[number]) => number | null | undefined][] = [
+			['success', (m) => m.success_rate],
+			['smoke', (m) => m.smoke_pass_rate],
+			['empirical', (m) => m.empirical_quality],
+			['mss', (m) => m.mss],
+			['composite', (m) => m.composite],
+		];
+		for (const [key, get] of cols) {
+			const vals = models.map(get).filter((v): v is number => v != null);
+			if (!vals.length) continue;
+			const max = Math.max(...vals);
+			if (max > 0 && vals.filter((v) => v === max).length <= 2) out[key] = max;
+		}
+		return out;
+	});
+	const isBest = (key: ScoreKey, v: number | null | undefined) => v != null && leaders[key] === v;
 
 	function fmtDuration(seconds: number): string {
 		if (!seconds) return '—';
@@ -248,53 +260,48 @@
 		</div>
 
 		<!-- Model Comparison -->
-		<Card.Root>
-			<Card.Header>
+		<Card.Root class="gap-0 overflow-clip py-0">
+			<Card.Header class="border-b border-border py-3">
 				<Card.Title>Model Comparison</Card.Title>
 			</Card.Header>
 			<Card.Content class="p-0">
 				{#if data.models.length === 0}
 					<EmptyState compact title="No model data yet" description="Model metrics appear once applications are generated and analyzed." />
 				{:else}
-					<div class="table-scroll-wrapper">
-						<table class="w-full text-sm">
+					<div class="table-frame" {@attach tableFrame}>
+						<table>
 							<thead>
-								<tr class="border-b bg-muted/40 sticky top-0 z-10">
-									<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Model</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Apps</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Success %</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Smoke pass</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Empirical (measured)</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">MSS (meta)</th>
-									<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Composite</th>
+								<tr>
+									<th class="whitespace-nowrap">Model</th>
+									<th class="num">Apps</th>
+									<th class="num" title="Share of generated apps that completed">Success %</th>
+									<th class="num">Smoke pass</th>
+									<th class="num" title="Measured quality over n trials">Empirical (measured)</th>
+									<th class="num">MSS (meta)</th>
+									<th class="num">Composite</th>
 								</tr>
 							</thead>
 							<tbody>
-								{#each data.models as m, i}
-									<tr class="border-b transition-colors hover:bg-muted/50 group {i % 2 === 0 ? '' : 'bg-muted/15'}">
-										<td class="px-3 py-2 align-top">
-											<div>
-												<a
-													href="/models/{m.model_id ?? ''}"
-													class="font-medium text-sm hover:text-primary hover:underline underline-offset-2 transition-colors"
-													onclick={(e) => { if (!m.model_id) e.preventDefault(); }}
-												>{m.name}</a>
-												<div class="text-[11px] text-muted-foreground">{m.provider}</div>
-											</div>
+								{#each data.models as m}
+									{@const href = m.model_id ? `/models/${m.model_id}` : null}
+									{@const provider = modelNamePrefix(m.name) || m.provider}
+									<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
+									<tr class={href ? 'row-link' : ''} onclick={href ? rowLink(href) : undefined}>
+										<td class="max-w-0 w-[30%]">
+											<a
+												href="/models/{m.model_id ?? ''}"
+												class="block truncate font-medium hover:text-primary"
+												title={m.name}
+												onclick={(e) => { if (!m.model_id) e.preventDefault(); }}
+											>{shortModelName(m.name)}</a>
+											{#if provider}<span class="cell-sub block truncate text-[11px] text-muted-foreground">{provider}</span>{/if}
 										</td>
-										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs">{m.apps}</td>
-										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor(m.success_rate, 100)}">{m.success_rate.toFixed(0)}</td>
-										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {m.smoke_pass_rate != null ? scoreColor(m.smoke_pass_rate, 1) : ''}">{pct01(m.smoke_pass_rate)}</td>
-										<td class="px-3 py-2 text-right align-top">
-											{#if m.empirical_quality != null}
-												<span class="font-mono tabular-nums text-xs font-bold {scoreColor(m.empirical_quality, 1)}">{pct01(m.empirical_quality)}</span>
-												<span class="ml-1 text-[11px] text-muted-foreground">n={m.n_trials}</span>
-											{:else}
-												<span class="text-xs text-muted-foreground">—</span>
-											{/if}
-										</td>
-										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor(m.mss, 1)}">{pct01(m.mss)}</td>
-										<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs {scoreColor(m.composite, 1)}">{pct01(m.composite)}</td>
+										<td class="num text-xs">{m.apps}</td>
+										<ScoreCell value={m.success_rate / 100} best={isBest('success', m.success_rate)} />
+										<ScoreCell value={m.smoke_pass_rate} best={isBest('smoke', m.smoke_pass_rate)} />
+										<ScoreCell value={m.empirical_quality} strong best={isBest('empirical', m.empirical_quality)} sub={m.empirical_quality != null ? `n=${m.n_trials}` : undefined} />
+										<ScoreCell value={m.mss} best={isBest('mss', m.mss)} />
+										<ScoreCell value={m.composite} best={isBest('composite', m.composite)} />
 									</tr>
 								{/each}
 							</tbody>
@@ -307,39 +314,37 @@
 		<!-- Tool Effectiveness + Top Findings -->
 		<div class="grid gap-4 lg:grid-cols-3">
 			<div class="lg:col-span-2">
-				<Card.Root>
-					<Card.Header>
+				<Card.Root class="gap-0 overflow-clip py-0">
+					<Card.Header class="border-b border-border py-3">
 						<Card.Title>Tool Effectiveness</Card.Title>
 					</Card.Header>
 					<Card.Content class="p-0">
 						{#if data.tools.length === 0}
 							<EmptyState compact title="No analyzer runs yet" description="Tool metrics appear after the first analysis completes." />
 						{:else}
-							<div class="table-scroll-wrapper">
-								<table class="w-full text-sm">
+							<div class="table-frame" {@attach tableFrame}>
+								<table>
 									<thead>
-										<tr class="border-b bg-muted/40 sticky top-0 z-10">
-											<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Tool</th>
-											<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Type</th>
-											<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Scans</th>
-											<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Findings</th>
-											<th class="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Avg/Scan</th>
-											<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Top Rule</th>
+										<tr>
+											<th>Tool</th>
+											<th>Type</th>
+											<th class="num">Scans</th>
+											<th class="num">Findings</th>
+											<th class="num">Avg/Scan</th>
+											<th>Top Rule</th>
 										</tr>
 									</thead>
 									<tbody>
-										{#each data.tools as t, i}
-											<tr class="border-b transition-colors hover:bg-muted/50 group {i % 2 === 0 ? '' : 'bg-muted/15'}">
-												<td class="px-3 py-2 align-top text-xs font-medium">{t.name}</td>
-												<td class="px-3 py-2 align-top">
+										{#each data.tools as t}
+											<tr>
+												<td class="font-medium">{t.name}</td>
+												<td>
 													<Badge variant="secondary" class="text-[11px] capitalize">{t.type}</Badge>
 												</td>
-												<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs">{t.scans}</td>
-												<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs">{t.findings}</td>
-												<td class="px-3 py-2 text-right align-top font-mono tabular-nums text-xs">{t.avg_per_scan.toFixed(1)}</td>
-												<td class="px-3 py-2 align-top font-mono text-[11px] text-muted-foreground">
-													{t.top_rule || '—'}
-												</td>
+												<td class="num text-xs">{t.scans}</td>
+												<td class="num text-xs">{t.findings}</td>
+												<td class="num text-xs">{t.avg_per_scan.toFixed(1)}</td>
+												<td class="font-mono text-[11px] text-muted-foreground">{t.top_rule || '—'}</td>
 											</tr>
 										{/each}
 									</tbody>
@@ -394,7 +399,7 @@
 							{#each [{ label: 'Total Apps Generated', value: fmtNumber(cg.total_apps) }, { label: 'Success Rate', value: `${cg.success_rate}%` }, { label: 'Avg Gen Time', value: fmtDuration(cg.avg_duration_seconds) }, { label: 'Lines of Code', value: fmtNumber(cg.total_lines_of_code) }, { label: 'Total Tokens', value: fmtNumber(cg.total_tokens) }, { label: 'Total Cost', value: fmtCost(cg.total_cost_usd) }] as stat}
 								<div class="kpi-card">
 									<div class="kpi-label">{stat.label}</div>
-									<div class="font-display text-2xl font-semibold tabular-nums">{stat.value}</div>
+									<div class="font-mono text-2xl font-medium tabular-nums">{stat.value}</div>
 								</div>
 							{/each}
 						</div>

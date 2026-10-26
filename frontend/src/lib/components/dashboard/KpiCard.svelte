@@ -21,9 +21,9 @@
 
 	const accentVar: Record<Accent, string> = {
 		green: 'var(--primary)',
-		cyan: 'var(--accent-2)',
-		violet: 'var(--accent-3)',
-		amber: 'var(--warning)',
+		cyan: 'var(--accent-3)',
+		violet: 'var(--chart-5)',
+		amber: 'var(--accent-2)',
 	};
 
 	// Count-up: animate only between real values; first value and
@@ -45,28 +45,24 @@
 </script>
 
 <a {href} class="group block h-full">
-	<div class="kpi-card h-full">
+	<div class="kpi-card h-full" style:--kpi-accent={accentVar[accent]}>
 		<div class="flex items-start justify-between gap-2">
 			<span class="kpi-label">{title}</span>
-			<span
-				class="flex h-7 w-7 items-center justify-center rounded-lg sm:h-8 sm:w-8"
-				style="color: {accentVar[accent]}; background: color-mix(in oklab, {accentVar[
-					accent
-				]} 12%, transparent);"
-			>
-				<Icon class="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-			</span>
+			<Icon class="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" aria-hidden="true" />
 		</div>
 		<div class="kpi-value">{display}</div>
-		<p class="text-[11px] text-muted-foreground sm:text-xs">{subtitle}</p>
+		<p class="text-xs text-muted-foreground">{subtitle}</p>
 		{#if change}
-			<p class="text-[11px] sm:text-xs" style="color: {accentVar[accent]};">{change}</p>
+			<p class="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+				<span class="h-1.5 w-1.5 rounded-full" style:background={accentVar[accent]} aria-hidden="true"></span>
+				{change}
+			</p>
 		{/if}
 		<span
 			class="absolute bottom-3 right-4 opacity-0 transition-opacity group-hover:opacity-100"
 			aria-hidden="true"
 		>
-			<ArrowRight class="h-4 w-4 text-muted-foreground" />
+			<ArrowRight class="h-4 w-4 text-primary" />
 		</span>
 	</div>
 </a>

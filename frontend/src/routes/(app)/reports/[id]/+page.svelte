@@ -13,7 +13,16 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import FileDown from '@lucide/svelte/icons/file-down';
 	import { getReport, deleteReport, type ReportDetail } from '$lib/api/client';
+	import { reportExportUrl, type ReportExportFormat } from '$lib/api/reports';
+
+	const exportFormats: { format: ReportExportFormat; label: string }[] = [
+		{ format: 'md', label: 'Markdown' },
+		{ format: 'tex', label: 'LaTeX' },
+		{ format: 'json', label: 'JSON' }
+	];
+	import { tableFrame } from '$lib/components/table';
 
 	let report = $state<ReportDetail | null>(null);
 	let loading = $state(true);
@@ -117,26 +126,33 @@
 
 {#snippet objectTable(rows: Record<string, unknown>[])}
 	{@const cols = Object.keys(rows[0])}
-	<div class="overflow-auto">
-		<table class="min-w-full text-xs">
+	{@const numCols = new Set(cols.filter((c) => rows.some((r) => typeof r[c] === 'number') && rows.every((r) => r[c] == null || typeof r[c] === 'number')))}
+	<div class="table-frame rounded-md border border-border" {@attach tableFrame}>
+		<table>
 			<thead>
-				<tr class="border-b bg-muted/40 sticky top-0 z-10">
+				<tr>
 					{#each cols as c (c)}
-						<th class="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap capitalize">{c.replace(/_/g, ' ')}</th>
+						<th class="whitespace-nowrap" class:num={numCols.has(c)}>{c.replace(/_/g, ' ')}</th>
 					{/each}
 				</tr>
 			</thead>
 			<tbody>
 				{#each rows as row, i (i)}
-					<tr class="border-b transition-colors hover:bg-muted/50 {i % 2 === 0 ? '' : 'bg-muted/15'}">
+					<tr class="align-top">
 						{#each cols as c (c)}
-							<td class="px-3 py-2 align-top text-xs {typeof row[c] === 'number' ? 'font-mono tabular-nums' : ''}">{fmtCompact(row[c])}</td>
+							<td class:num={numCols.has(c)}>
+								{#if row[c] == null}<span class="text-muted-foreground">—</span>{:else}{fmtCompact(row[c])}{/if}
+							</td>
 						{/each}
 					</tr>
 				{/each}
 			</tbody>
 		</table>
 	</div>
+{/snippet}
+
+{#snippet statValue(v: unknown)}
+	{#if v == null}<span class="text-muted-foreground">—</span>{:else}{fmtValue(v)}{/if}
 {/snippet}
 
 {#snippet metricsByTool(metrics: Record<string, unknown>)}
@@ -153,24 +169,24 @@
 					{/if}
 				</div>
 				{#if numeric.length > 0}
-					<div class="overflow-auto">
-						<table class="text-xs">
+					<div class="overflow-x-auto rounded-md border border-border">
+						<table>
 							<thead>
-								<tr class="border-b bg-muted/40">
-									<th class="px-3 py-2 text-left font-medium text-muted-foreground">Metric</th>
-									<th class="px-3 py-2 text-right font-medium text-muted-foreground">Avg</th>
-									<th class="px-3 py-2 text-right font-medium text-muted-foreground">Min</th>
-									<th class="px-3 py-2 text-right font-medium text-muted-foreground">Max</th>
+								<tr>
+									<th>Metric</th>
+									<th class="num">Avg</th>
+									<th class="num">Min</th>
+									<th class="num">Max</th>
 								</tr>
 							</thead>
 							<tbody>
 								{#each numeric as [k, stat] (k)}
 									{@const s = isObject(stat) ? stat : {}}
-									<tr class="border-b">
-										<td class="px-3 py-1.5 capitalize">{k.replace(/_/g, ' ')}</td>
-										<td class="px-3 py-1.5 text-right font-mono tabular-nums">{fmtValue(s['avg'])}</td>
-										<td class="px-3 py-1.5 text-right font-mono tabular-nums text-muted-foreground">{fmtValue(s['min'])}</td>
-										<td class="px-3 py-1.5 text-right font-mono tabular-nums text-muted-foreground">{fmtValue(s['max'])}</td>
+									<tr>
+										<td class="capitalize">{k.replace(/_/g, ' ')}</td>
+										<td class="num">{@render statValue(s['avg'])}</td>
+										<td class="num text-muted-foreground">{@render statValue(s['min'])}</td>
+										<td class="num text-muted-foreground">{@render statValue(s['max'])}</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -200,6 +216,13 @@
 			{#if report}<StatusBadge status={report.status} />{/if}
 		{/snippet}
 		{#snippet actions()}
+			{#if report?.status === 'completed'}
+				{#each exportFormats as f (f.format)}
+					<Button variant="outline" size="sm" href={reportExportUrl(report.report_id, f.format)} download>
+						<FileDown class="mr-1 h-4 w-4" />{f.label}
+					</Button>
+				{/each}
+			{/if}
 			<Button variant="outline" size="sm" onclick={load}>
 				<RefreshCw class="mr-1 h-4 w-4" />Refresh
 			</Button>

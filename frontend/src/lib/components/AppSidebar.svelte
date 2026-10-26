@@ -1,10 +1,10 @@
 <script lang="ts">
-	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import ChevronsLeft from '@lucide/svelte/icons/chevrons-left';
 	import ChevronsRight from '@lucide/svelte/icons/chevrons-right';
 	import { cn } from '$lib/utils';
 	import { getPreferences } from '$lib/stores/preferences.svelte';
 	import SidebarNav from './SidebarNav.svelte';
+	import BrandMark from './BrandMark.svelte';
 
 	const prefs = getPreferences();
 </script>
@@ -16,13 +16,8 @@
 	)}
 >
 	<div class={cn('flex h-12 items-center border-b border-sidebar-border', prefs.sidebarCollapsed ? 'justify-center' : 'px-3')}>
-		<a href="/" class="flex min-w-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring" aria-label="LLM Lab — Home">
-			<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-				<FlaskConical class="h-3.5 w-3.5" />
-			</span>
-			{#if !prefs.sidebarCollapsed}
-				<span class="truncate text-sm font-semibold text-sidebar-foreground font-display">LLM<span class="text-sidebar-primary">_</span>Lab</span>
-			{/if}
+		<a href="/" class="flex min-w-0 items-center rounded-md text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring" aria-label="LLM Lab — Home">
+			<BrandMark compact={prefs.sidebarCollapsed} tagline />
 		</a>
 	</div>
 

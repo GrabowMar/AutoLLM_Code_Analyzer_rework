@@ -1,0 +1,32 @@
+slug: pip-audit
+name: pip-audit
+description: >-
+  Audits Python dependencies in requirements files against the PyPA advisory
+  database (OSV) and reports packages with known vulnerabilities, with the
+  versions that fix them. Needs network access.
+category: dependencies
+kind: container
+target_language: python
+icon: package-search
+version: "2"
+docs_url: https://github.com/pypa/pip-audit
+install_cmd: "pip install --user --upgrade 'pip-audit==2.*'"
+verify_cmd: "pip-audit --version"
+uninstall_cmd: "pip uninstall -y pip-audit"
+# One "### <file>" section per requirements file; pip-audit resolves
+# transitive dependencies in a throwaway venv, so unpinned files work too.
+run_cmd: |
+  cd {target} && find . -name 'requirements*.txt' -not -path '*/node_modules/*' -not -path '*/.venv/*' | sort | while IFS= read -r f; do
+    echo "### ${f#./}"
+    pip-audit -r "$f" -f json --progress-spinner off 2>/dev/null
+    echo
+  done
+parser_key: pip_audit
+run_timeout: 300
+install_timeout: 300
+display_order: 10
+sample_filename: requirements.txt
+sample_code: |
+  Flask==2.2.0
+  Werkzeug==2.2.2
+  PyJWT==2.3.0

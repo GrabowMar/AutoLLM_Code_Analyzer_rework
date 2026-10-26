@@ -3,7 +3,6 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import PanelLeft from '@lucide/svelte/icons/panel-left';
-	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import User from '@lucide/svelte/icons/user';
 	import UserCog from '@lucide/svelte/icons/user-cog';
 	import Palette from '@lucide/svelte/icons/palette';
@@ -12,6 +11,7 @@
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import X from '@lucide/svelte/icons/x';
 	import SidebarNav from './SidebarNav.svelte';
+	import BrandMark from './BrandMark.svelte';
 	import { routeLabels } from '$lib/nav';
 	import { Separator } from '$lib/components/ui/separator';
 	import * as Sheet from '$lib/components/ui/sheet';
@@ -67,6 +67,10 @@
 		return segments;
 	});
 
+	// A lone breadcrumb repeats the page's <h1>: show it only once the title has scrolled away.
+	let scrollY = $state(0);
+	let breadcrumbVisible = $derived(breadcrumbSegments.length > 1 || scrollY > 120);
+
 	let avatarBgClass = $derived(avatarColorClasses[preferences.avatarColor] ?? 'bg-blue-500');
 
 	let userInitial = $derived.by(() => {
@@ -108,10 +112,10 @@
 	}
 </script>
 
-<svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} />
+<svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} bind:scrollY />
 
 <header
-	class="fixed inset-x-0 top-0 z-30 flex h-12 items-center gap-3 border-b border-border bg-background/90 px-3 backdrop-blur-md transition-[padding] duration-200 ease-out motion-reduce:transition-none sm:px-4 md:gap-4 md:px-5 md:pl-[calc(var(--app-sidebar-offset,0px)+1.25rem)]"
+	class="fixed inset-x-0 top-0 z-30 flex h-12 items-center gap-3 border-b border-border bg-background/85 px-3 backdrop-blur-md transition-[padding] duration-200 ease-out motion-reduce:transition-none sm:px-4 md:gap-4 md:px-5 md:pl-[calc(var(--app-sidebar-offset,0px)+1.25rem)]"
 >
 	<Sheet.Root bind:open={mobileMenuOpen}>
 		<Sheet.Trigger
@@ -122,11 +126,8 @@
 		</Sheet.Trigger>
 		<Sheet.Content side="left" class="w-72 gap-0 border-sidebar-border bg-sidebar p-0 text-sidebar-foreground" showClose={false}>
 			<div class="flex h-12 items-center justify-between border-b border-sidebar-border px-3">
-				<a href="/" class="flex items-center gap-2" onclick={() => (mobileMenuOpen = false)}>
-					<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-						<FlaskConical class="h-3.5 w-3.5" />
-					</span>
-					<span class="text-sm font-semibold font-display">LLM<span class="text-sidebar-primary">_</span>Lab</span>
+				<a href="/" class="flex min-w-0 items-center" onclick={() => (mobileMenuOpen = false)}>
+					<BrandMark tagline />
 				</a>
 				<button
 					class="inline-flex h-9 w-9 items-center justify-center rounded-md text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
@@ -145,17 +146,22 @@
 		</Sheet.Content>
 	</Sheet.Root>
 
-	<a href="/" class="flex min-w-0 items-center gap-2 text-sm font-semibold font-display md:hidden">
-		<FlaskConical class="h-4 w-4 shrink-0 text-primary" />
-		<span class="truncate">LLM<span class="text-primary">_</span>Lab</span>
+	<a href="/" class="flex min-w-0 items-center md:hidden" aria-label="LLM Lab — Home">
+		<BrandMark />
 	</a>
 
 	{#if breadcrumbSegments.length > 0}
-		<nav aria-label="Breadcrumb" class="hidden min-w-0 md:block">
+		<nav
+			aria-label="Breadcrumb"
+			class={cn(
+				'hidden min-w-0 transition-[opacity,visibility] duration-200 motion-reduce:transition-none md:block',
+				!breadcrumbVisible && 'invisible opacity-0'
+			)}
+		>
 			<ol class="flex items-center gap-1.5 text-sm text-muted-foreground">
 				{#each breadcrumbSegments as segment, i (segment.href)}
 					{#if i > 0}
-						<li aria-hidden="true" class="text-muted-foreground/50">/</li>
+						<li aria-hidden="true" class="font-mono text-muted-foreground/50">/</li>
 					{/if}
 					<li class="min-w-0 truncate">
 						{#if i === breadcrumbSegments.length - 1}
