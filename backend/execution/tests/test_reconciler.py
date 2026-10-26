@@ -212,25 +212,27 @@ def test_completion_sweep(user, system_ep):
 
 def test_schedules_are_fast_forwarded_without_burst(user):
     experiment = running_experiment(user)
+    # Pin "now" to the half hour so the hourly cron boundary never falls between due and now.
+    now = timezone.now().replace(minute=30, second=0, microsecond=0)
     stale = ExperimentSchedule.objects.create(
         experiment=experiment,
         action="top_up",
         cron="0 * * * *",
         created_by=user,
-        next_run_at=timezone.now() - timedelta(hours=5),
+        next_run_at=now - timedelta(hours=5),
     )
     due = ExperimentSchedule.objects.create(
         experiment=experiment,
         action="top_up",
         cron="0 * * * *",
         created_by=user,
-        next_run_at=timezone.now() - timedelta(minutes=10),
+        next_run_at=now - timedelta(minutes=10),
     )
-    assert reconciler.fast_forward_schedules() == 1
+    assert reconciler.fast_forward_schedules(now) == 1
     stale.refresh_from_db()
     due.refresh_from_db()
-    assert stale.next_run_at > timezone.now()
-    assert due.next_run_at < timezone.now()  # within one period: fires normally
+    assert stale.next_run_at > now
+    assert due.next_run_at < now  # within one period: fires normally
 
 
 def test_reconcile_runs_every_step_even_when_one_fails(user, system_ep, monkeypatch):

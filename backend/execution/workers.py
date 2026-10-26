@@ -50,7 +50,7 @@ def run_job(ctx: WorkerContext, claimed: Claimed) -> None:
     """Run one claimed job's stage: generation (sandbox / llm lane) or evaluation (eval lane)."""
     from backend.generation.services.orchestrator import GenerationService
 
-    ctx.registry.add(claimed.job_id, claimed.attempt, claimed.lane)
+    entry = ctx.registry.add(claimed.job_id, claimed.attempt, claimed.lane)
     try:
         job = _load(claimed, ctx.executor_id)
         if job is None:
@@ -68,7 +68,7 @@ def run_job(ctx: WorkerContext, claimed: Claimed) -> None:
         # The lease stays: the lost-job check requeues the job (executor_lost) once we leave the registry.
         logger.exception("Worker for job %s (%s) crashed", claimed.job_id, claimed.lane)
     finally:
-        ctx.registry.remove(claimed.job_id)
+        ctx.registry.remove(claimed.job_id, entry)  # never another stage's registration of this job
         close_db()
 
 

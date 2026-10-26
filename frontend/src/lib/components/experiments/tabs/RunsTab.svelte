@@ -5,7 +5,11 @@
 	 * (default) or retried runs only; paged on the server. "Retry failed" tops
 	 * up failed and cancelled cells; the launch history lists every batch.
 	 *
-	 * Props: `experiment`, `appName(id)`, `onlaunched()` (after a top-up).
+	 * Props: `experiment`, `appName(id)`, `onlaunched()` (after a top-up),
+	 * `counts` (live rollups, so "Retry failed" follows the run), and
+	 * `refreshSignal` / `tickSignal` (bumped by the page on `state` / `tick`):
+	 * the table refetches silently on `state`, and on `tick` at most every
+	 * 10 s while the experiment is not terminal.
 	 */
 	import { untrack } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -24,6 +28,7 @@
 	import BatchProgress from '$lib/components/generator/batches/BatchProgress.svelte';
 	import { batchCounts, finishedCount } from '$lib/components/generator/batches/batch-utils';
 	import { getGenerationJobs, type GenerationBatchSummary, type PaginatedJobs } from '$lib/api/generation';
+	import type { ProgressCounts } from '$lib/api/types/experiments';
 	import {
 		experimentErrorBody,
 		launchExperiment,
@@ -33,16 +38,23 @@
 	import { formatApiError } from '$lib/api/core';
 	import { formatDateTime } from '$lib/utils/formatters';
 	import ListFilter from '@lucide/svelte/icons/list-filter';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
-	import { isTerminal } from '../format';
+	import { conditionName, isTerminal } from '../format';
 
 	interface Props {
 		experiment: ExperimentDetail;
 		appName: (id: number | null) => string;
 		onlaunched?: () => void;
+		counts?: ProgressCounts | null;
+		refreshSignal?: number;
+		tickSignal?: number;
 	}
 
-	let { experiment, appName, onlaunched }: Props = $props();
+	let { experiment, appName, onlaunched, counts = null, refreshSignal = 0, tickSignal = 0 }: Props = $props();
+
+	const TICK_REFRESH_MS = 10_000;
+	let lastFetch = 0;
 
 	const PER_PAGE = 100;
 	const ALL = 'all';
@@ -73,6 +85,7 @@
 	async function load() {
 		const mine = ++seq;
 		loading = true;
+		lastFetch = Date.now();
 		try {
 			const res = await getGenerationJobs({
 				experiment_id: experiment.id,
@@ -85,7 +98,8 @@
 				status: statusFilter === ALL || statusFilter === 'eval' ? undefined : statusFilter,
 				phase: statusFilter === 'eval' ? 'eval_queued,evaluating' : undefined,
 				current: currentOnly,
-				attempt_gt: retriedOnly ? 1 : undefined,
+				// `attempt` is 0-based: the first retry is attempt 1.
+				attempt_gt: retriedOnly ? 0 : undefined,
 			});
 			if (mine !== seq) return;
 			data = res;
@@ -100,6 +114,21 @@
 	$effect(() => {
 		void [conditionFilter, endpointFilter, appFilter, statusFilter, currentOnly, retriedOnly, pageNum];
 		untrack(() => void load());
+	});
+
+	// Live refresh: keeps the previous table on screen while refetching.
+	$effect(() => {
+		void refreshSignal;
+		untrack(() => {
+			if (data) void load();
+		});
+	});
+	$effect(() => {
+		void tickSignal;
+		untrack(() => {
+			if (!data || isTerminal(experiment.status)) return;
+			if (Date.now() - lastFetch >= TICK_REFRESH_MS) void load();
+		});
 	});
 
 	function setFilter(apply: () => void) {
@@ -124,7 +153,10 @@
 	// ── retry failed ────────────────────────────────────────────────
 	let retryOpen = $state(false);
 	let retrying = $state(false);
-	const failedCells = $derived(experiment.progress.failed + experiment.progress.cancelled);
+	const failedCells = $derived.by(() => {
+		const c = counts ?? experiment.progress;
+		return c.failed + c.cancelled;
+	});
 
 	async function retryFailed() {
 		retrying = true;
@@ -146,7 +178,7 @@
 
 	const conditionItems = $derived([
 		{ value: ALL, label: 'All conditions' },
-		...experiment.conditions.map((c) => ({ value: String(c.id), label: c.label })),
+		...experiment.conditions.map((c) => ({ value: String(c.id), label: conditionName(c) })),
 	]);
 	const endpointItems = $derived([
 		{ value: ALL, label: 'All endpoints' },
@@ -166,11 +198,16 @@
 				<Card.Title>Runs</Card.Title>
 				<Card.Description>Every run in launch order. Open one for its logs, code, evaluation and retry options.</Card.Description>
 			</div>
-			{#if experiment.status !== 'draft' && experiment.status !== 'archived'}
-				<Button variant="outline" size="sm" disabled={failedCells === 0} onclick={() => (retryOpen = true)}>
-					<RotateCcw />Retry failed{failedCells ? ` (${failedCells})` : ''}
+			<div class="flex flex-wrap items-center gap-2">
+				<Button variant="ghost" size="sm" disabled={loading} onclick={() => void load()} aria-label="Refresh runs">
+					<RefreshCw class={loading ? 'animate-spin' : ''} />Refresh
 				</Button>
-			{/if}
+				{#if experiment.status !== 'draft' && experiment.status !== 'archived'}
+					<Button variant="outline" size="sm" disabled={failedCells === 0} onclick={() => (retryOpen = true)}>
+						<RotateCcw />Retry failed{failedCells ? ` (${failedCells})` : ''}
+					</Button>
+				{/if}
+			</div>
 		</Card.Header>
 		<Card.Content class="space-y-3">
 			<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -196,7 +233,7 @@
 					<Switch size="sm" checked={currentOnly} label="Current attempts only" onCheckedChange={(v) => setFilter(() => (currentOnly = v))} />
 					Current attempts only
 				</label>
-				<label class="flex items-center gap-2" title="Only runs that needed more than one attempt">
+				<label class="flex items-center gap-2" title="Only retry attempts (runs after the first attempt of a cell)">
 					<Switch size="sm" checked={retriedOnly} label="Retried only" onCheckedChange={(v) => setFilter(() => (retriedOnly = v))} />
 					Retried only
 				</label>

@@ -83,8 +83,9 @@ token lives in `/etc/llmlab/relay-token` (0600).
 Exit codes: `0` ok, `1` failure (or `--check` found a problem), `2` usage,
 `3` the token was rejected (systemd: `RestartPreventExitStatus=3`).
 
-Signals: `SIGTERM` finishes in-flight requests (up to 30 s), says goodbye and
-exits 0. `SIGHUP` re-reads the token file (use it after rotating the token;
+Signals: `SIGTERM` finishes in-flight requests (up to 30 s), aborts whatever is
+still running (the server requeues it), says goodbye and exits 0; a second
+`SIGTERM`/Ctrl-C aborts in-flight requests at once. `SIGHUP` re-reads the token file (use it after rotating the token;
 the old token keeps working for its grace period, 24 h by default).
 
 ## What the server sees

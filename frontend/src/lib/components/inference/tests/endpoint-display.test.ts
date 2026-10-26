@@ -10,6 +10,7 @@ import {
   formatCtx,
   newSessionHosts,
   probeSummary,
+  relayServerUrlProblem,
   shortDigest,
   slugError,
 } from "../endpoint-display";
@@ -209,6 +210,24 @@ describe("applyEndpointEvent", () => {
     expect(after.last_error).toBeNull();
   });
 
+  it("normalizes bare-name and duplicate loaded entries", () => {
+    const after = applyEndpointEvent(endpoint(), {
+      type: "endpoint",
+      loaded: [
+        "a:1b",
+        "b:2b",
+        "a:1b",
+        { name: "c:3b", size_vram: 5, cpu_spill: true },
+        {},
+      ],
+    });
+    expect(after.live.loaded).toEqual([
+      { name: "a:1b", size_vram: null, cpu_spill: false },
+      { name: "b:2b", size_vram: null, cpu_spill: false },
+      { name: "c:3b", size_vram: 5, cpu_spill: true },
+    ]);
+  });
+
   it("ignores other event types", () => {
     const before = endpoint();
     expect(
@@ -283,5 +302,20 @@ describe("probeSummary", () => {
     expect(probeSummary({ status: "expired", latency_ms: null }).text).toBe(
       "Test expired",
     );
+  });
+});
+
+describe("relayServerUrlProblem", () => {
+  it("accepts a public https origin", () => {
+    expect(relayServerUrlProblem("https://dev1.grabowmar.ovh")).toBeNull();
+  });
+  it("flags internal, plain-http and local URLs", () => {
+    expect(relayServerUrlProblem("http://django:8000")).toMatch(/https/);
+    expect(relayServerUrlProblem("https://django:8000")).toMatch(/internal/);
+    expect(relayServerUrlProblem("http://localhost:8000")).toMatch(
+      /only reachable/,
+    );
+    expect(relayServerUrlProblem("")).not.toBeNull();
+    expect(relayServerUrlProblem("not a url")).not.toBeNull();
   });
 });

@@ -89,6 +89,31 @@ class TestCreation:
         with pytest.raises(ExperimentError, match="already"):
             automation.create_manual_post_run(experiment)
 
+    def test_manual_post_run_supersedes_one_left_running_by_a_dead_executor(self, user):
+        from datetime import timedelta
+
+        experiment, _ = _completed_experiment(user, post_run={"report": {"enabled": True}})
+        now = timezone.now()
+        stale = ExperimentPostRun.objects.create(
+            experiment=experiment,
+            trigger="completed",
+            config={},
+            status=ExperimentPostRun.Status.RUNNING,
+            lease_owner="dead",
+            lease_expires_at=now - timedelta(seconds=5),
+        )
+        live = automation.create_manual_post_run(experiment)
+        stale.refresh_from_db()
+        assert stale.status == ExperimentPostRun.Status.CANCELLED
+        assert "restart" in stale.error
+        assert live.status == ExperimentPostRun.Status.PENDING
+        # A running post-run with a live lease still blocks a second one.
+        live.status = ExperimentPostRun.Status.RUNNING
+        live.lease_expires_at = now + timedelta(minutes=5)
+        live.save(update_fields=["status", "lease_expires_at"])
+        with pytest.raises(ExperimentError, match="already"):
+            automation.create_manual_post_run(experiment)
+
     def test_unknown_analyzer_is_refused(self):
         with pytest.raises(ExperimentError, match="Unknown analyzer"):
             normalize_post_run({"analysis": {"enabled": True, "tool_slugs": ["nope"]}}, "agent")

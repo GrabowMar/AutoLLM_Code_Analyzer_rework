@@ -10,15 +10,41 @@ commits. Code lives in `backend/execution/`.
 
 | Part | What it does |
 |---|---|
-| Leader lock | `pg_try_advisory_lock(EXECUTOR_LEADER_LOCK_KEY)` on a dedicated connection at start; a second instance exits with code 1. The lock is re-checked in `pg_locks` every tick; if it is gone (Postgres restart, dropped connection) the executor stops claiming, expires its own leases and exits (docker restarts it). It is a guard, not high availability: exactly one executor runs. |
+| Leader lock | `pg_try_advisory_lock(EXECUTOR_LEADER_LOCK_KEY)` on a dedicated connection at start; a second instance exits with code 1. The lock is re-checked in `pg_locks` every tick; if it is gone (Postgres restart, dropped connection) the executor stops claiming, expires its own leases and exits with code 1; the compose service has `restart: unless-stopped`, so Docker starts it again. It is a guard, not high availability: exactly one executor runs. |
 | Main loop | `BLPOP executor:wake` for at most `EXECUTOR_TICK_SECONDS` (2 s), then: lost-job check → `Scheduler.tick` → submit claims to pools. `reconcile()` every 15 s, schedules and post-runs every 30 s, LLM request purge daily. `ExecutorSettings` is re-read every tick. A Redis error sleeps one tick (never busy-spins); Postgres stays the only source of truth. |
 | Heartbeat | Every `EXECUTOR_HEARTBEAT_SECONDS` (20 s): `ExecutorInstance.last_seen_at` + status blob (`config`: effective slots, open circuits, blocked reasons). Renews `lease_expires_at` (+`EXECUTOR_LEASE_SECONDS`, 90 s) **only for jobs in the in-process registry**, and leases of running post-runs. |
 | Pools | `sandbox` (agent runs), `eval` (evaluations), `llm` (scaffolding / custom), `post` (post-runs and schedule actions). Admission uses `min(slots − used in DB, really free threads)`. |
 | Live events | Every 2 s at most, only when changed: `tick` per active experiment, `endpoint:<id>` state per local endpoint (owner payload plus the redacted `:public` copy). `capacity` at most every 5 s; its `executor.code_stale` is true once the code on disk differs from what this executor started with. |
-| LLM proxy, direct pumps | `inference.proxy_server.serve` and `inference.pump.run_direct_pumps` threads, started after leadership is won (see `docs/LOCAL_MODELS.md`). |
+| LLM proxy, direct pumps | `inference.proxy_server.serve` and `inference.pump.run_direct_pumps` threads, started after leadership is won (see `docs/LOCAL_MODELS.md`). The proxy is required: if it cannot bind `LLM_PROXY_BIND` or stops, the executor exits with code 1 (a restart loop in `docker compose ps`/logs, not a silently "online" executor whose local agent runs all fail). The pumps supervise their own threads. |
 
 The executor runs with `CONN_MAX_AGE=0`; every worker closes its DB connection
 when it finishes, so idle threads hold none.
+
+### Restart policy and exits
+
+The `executor` service (both compose files) has `restart: unless-stopped`. It
+exits with code 1, and Docker restarts it, when: a second instance holds the
+leader lock; the lock is lost (Postgres restart, dropped lock connection); the
+LLM proxy cannot bind; or `wait_for_migrations` gives up after 600 s (the
+executor never migrates: locally django's `/start` does, which on dev1 only runs
+once VS Code attaches; production `/start` does not migrate at all, so run
+`manage.py migrate` after a deploy). Nothing is lost while it is down: jobs stay
+`PENDING` and its leases are requeued as `executor_lost` on the next start.
+
+### Compose commands
+
+Commands below use bare `docker compose`. There is no default compose file in
+the repo: run them through `just` (which exports
+`COMPOSE_FILE=docker-compose.local.yml`), set `COMPOSE_FILE` yourself, or pass
+the same `-f` files the stack was started with (dev1: the local file plus the
+devcontainer overlays). Mixing a different file set recreates containers.
+
+Locally the executor runs `/app/compose/local/django/start-executor` from the
+bind-mounted repo, so it starts on an existing `llmlab/django:local` image. The
+image's baked-in `/start` (django) picks up changes such as
+`--timeout-graceful-shutdown 5` only after a rebuild (`just build`, or
+`docker compose build django`); a rebuild marks django, celeryworker,
+celerybeat and flower for recreation on the next `up`.
 
 ### Drain and restart
 
@@ -151,6 +177,26 @@ request deadline = timeout × 3 + 600 s; gateway socket timeout = timeout + 300 
 proxy non-stream wait = gateway − 60 s (then 504, the gateway retries and
 re-attaches by dedupe key); harness client timeout = gateway × 5 + 60 s.
 
+## Network settings
+
+The compose files derive the executor's `LLM_PROXY_BIND`
+(`${LLM_PROXY_ADDR}:8090`), `LLM_PROXY_UPSTREAM` and `LLM_GATEWAY_EGRESS_SUBNET`
+from the same variables apps-dind's firewall uses. To move the networks (e.g.
+a subnet collision on the host), set them together in the shell or `.env`
+used by compose: `LLMPROXY_SUBNET`, `LLM_PROXY_ADDR` and
+`APPS_DIND_LLMPROXY_ADDR` (both inside that subnet), and optionally
+`LLM_GATEWAY_EGRESS_SUBNET`. Recreate apps-dind and the executor afterwards.
+
+## Production compose
+
+`docker-compose.production.yml` has no apps-dind: sandboxes and gateways run on
+the host daemon, which cannot reach the internal `llmproxy` network. Local-model
+**agent** runs are therefore refused there (`LLM_LOCAL_AGENT_RUNS`, default
+on only when `APPS_DOCKER_HOST` is set; the job fails at once with a
+non-retryable error). OpenRouter agent runs and local-model scaffolding runs
+(the executor calls the relay/endpoint itself) work. Traefik routes `/api/`
+straight to django, so the adapter-node `BODY_SIZE_LIMIT` does not apply there.
+
 ## apps-dind firewall exception
 
 Gateways of local-model agent runs join the nested network `llmlab-gw-egress`
@@ -192,7 +238,9 @@ apps-dind's own `llmproxy` address are rejected (`compose/local/apps-dind/entryp
 
 ## Manual smoke (dev1; needs the user's go-ahead to recreate apps-dind and start `executor`)
 
-1. `docker compose up -d executor`; `manage.py executor status` shows
+1. `docker compose up -d executor` (see "Compose commands" for the file set;
+   the executor starts on the existing image, no `--build` needed);
+   `manage.py executor status` shows
    `online: true`; `/api/execution/capacity/` shows the leader and no stale code.
 2. Launch a 1-model × 1-app OpenRouter agent experiment: the job goes
    pending → running → eval_queued → evaluating → completed; the sandbox slot

@@ -76,7 +76,7 @@ Environment="OLLAMA_KEEP_ALIVE=30m"
 Slots and K describe one machine, so create one endpoint per GPU box. A
 second relay on the same endpoint (different `relay_id`, e.g. a second box
 by mistake, or a replacement) connects as **standby**: it gets no work and
-takes over when the active relay disconnects or times out (60 s). To spread
+takes over when the active relay disconnects or times out (120 s). To spread
 30 models over several boxes, create an endpoint per box and use "Balance
 across endpoints" in the composer.
 
@@ -160,7 +160,8 @@ unchanged.
 | Relay restarts mid-request | The request returns to the queue (attempt +1) and runs again; the run records a relay interruption. |
 | A poll response is lost (proxy restart) | Claims carry a 60 s ack lease; unacknowledged claims return to the queue within a minute without using an attempt. |
 | Cancel | The relay is told within one poll and closes the upstream socket; Ollama stops generating. |
-| Endpoint disabled | Relays stay connected and idle; nothing is claimed. |
+| Network blip (< ~2 min) | The relay retries every few seconds while requests run; its session (120 s TTL) survives and running generations finish. |
+| Endpoint disabled | Relays stay connected and idle (polling every 15 s); nothing is claimed. |
 
 ## 6. Tokens and sessions
 
@@ -170,7 +171,8 @@ unchanged.
   period (default 24 h, up to 7 days). Replace the token file and send the
   relay `SIGHUP` (`systemctl reload llmlab-relay`), or just restart it.
 - **Revoke** takes effect immediately: its sessions end, their requests
-  return to the queue and the relay exits with code 3 (systemd will not
+  return to the queue and the relay aborts its running generations and exits
+  with code 3 (systemd will not
   restart it; Docker with `--on-unauthorized wait` idles).
 - The endpoint page lists sessions with hostname, version, client IP,
   capacity and last-seen time. A new IP or hostname for a token is worth a

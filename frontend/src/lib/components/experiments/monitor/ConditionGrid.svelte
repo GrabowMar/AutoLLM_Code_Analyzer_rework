@@ -94,7 +94,8 @@
 		return [
 			`${condition.label} · ${app.name} · repeat ${r + 1}`,
 			state + (rate != null && (code === 'c' || code === 'f') ? ` (${formatPercent(rate)})` : ''),
-			attempt > 1 ? `attempt ${attempt}` : '',
+			// `attempt` is 0-based (0 = first try); label retries 1-based.
+			attempt > 0 ? `attempt ${attempt + 1}` : '',
 		]
 			.filter(Boolean)
 			.join(' — ');

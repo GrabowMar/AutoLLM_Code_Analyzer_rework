@@ -305,6 +305,8 @@ export interface ExperimentConditionV2 extends ExperimentCondition {
   served_model_name?: string;
   digest?: string;
   pinned_digest?: string;
+  /** `label`, or "model / method" when the label is blank (older conditions). */
+  display_label?: string;
 }
 
 export interface ExperimentBatchRef {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from datetime import timedelta
 from unittest import mock
@@ -96,6 +97,34 @@ class TestLeadership:
         assert leader.stop_event.is_set()
         assert leader.exit_code == 1
         assert GenerationJob.objects.filter(status=S.RUNNING).count() == 0
+
+    def test_a_proxy_that_cannot_bind_stops_the_executor(self, settings):
+        # TEST-NET-3 address: not on any interface here -> EADDRNOTAVAIL, like a
+        # misconfigured LLM_PROXY_BIND or a container without the llmproxy network.
+        settings.LLM_PROXY_BIND = "203.0.113.77:8090"
+        executor = _executor(start_proxy=True)
+        assert executor.acquire_leadership()
+        try:
+            executor.startup()
+            assert executor.stop_event.wait(10)
+            assert executor.exit_code == 1
+            assert executor.stop_reason == "llm-proxy stopped"
+        finally:
+            executor.shutdown()
+
+    def test_a_non_fatal_service_crash_keeps_the_executor_running(self, leader):
+        done = threading.Event()
+        leader._start_service("boom", "backend.execution.tests.test_executor_loop", "_crash_service", done)
+        assert done.wait(5)
+        time.sleep(0.1)
+        assert not leader.stop_event.is_set()
+        assert leader.exit_code == 0
+
+
+def _crash_service(done):
+    done.set()
+    msg = "boom"
+    raise RuntimeError(msg)
 
 
 class TestLoop:
@@ -261,6 +290,75 @@ class TestHeartbeatAndShutdown:
         assert executor.lock_conn is None
 
 
+class TestAutomation:
+    def _post_run(self, user, **kw):
+        from backend.generation.models import ExperimentPostRun
+
+        return ExperimentPostRun.objects.create(experiment=running_experiment(user), trigger="manual", config={}, **kw)
+
+    def test_a_post_run_interrupted_by_a_restart_is_resumed(self, leader, user, system_ep):
+        from backend.generation.models import ExperimentPostRun
+
+        self._post_run(
+            user,
+            status=ExperimentPostRun.Status.RUNNING,
+            lease_owner="previous-executor",
+            lease_expires_at=timezone.now() - timedelta(seconds=1),
+        )
+        with mock.patch.object(leader.pools["post"], "submit") as submit:
+            leader._automation()
+        assert [c.args[0] for c in submit.call_args_list] == [leader_workers().run_post_run]
+
+    def test_a_live_post_run_is_not_resubmitted(self, leader, user, system_ep):
+        from backend.generation.models import ExperimentPostRun
+
+        self._post_run(
+            user,
+            status=ExperimentPostRun.Status.RUNNING,
+            lease_owner="other",
+            lease_expires_at=timezone.now() + timedelta(minutes=1),
+        )
+        with mock.patch.object(leader.pools["post"], "submit") as submit:
+            leader._automation()
+        submit.assert_not_called()
+
+    def test_schedule_actions_never_queue_behind_a_post_run(self, leader, monkeypatch):
+        fired = []
+
+        def due(now, submit):
+            submit(None, 42)
+            return [42]
+
+        monkeypatch.setattr("backend.generation.services.experiment_automation.run_due_schedules", due)
+        with (
+            mock.patch.object(leader.pools["post"], "submit") as post_submit,
+            mock.patch.object(leader.pools["schedule"], "submit", side_effect=lambda *a, **k: fired.append(a)),
+        ):
+            leader._automation()
+        assert fired == [(leader_workers().run_schedule_action, 42)]
+        post_submit.assert_not_called()
+
+
+def leader_workers():
+    from backend.execution import workers
+
+    return workers
+
+
+class TestRegistry:
+    def test_a_finishing_stage_never_drops_the_next_stage_of_the_same_job(self):
+        from backend.execution.registry import JobRegistry
+
+        registry = JobRegistry()
+        generation = registry.add("job-1", 0, "sandbox")
+        evaluation = registry.add("job-1", 0, "eval")  # claimed while generation still unwinds
+        registry.remove("job-1", generation)
+        assert "job-1" in registry
+        assert registry.entries()[0] is evaluation
+        registry.remove("job-1", evaluation)
+        assert "job-1" not in registry
+
+
 class TestLiveEvents:
     def test_endpoint_state_is_published_only_when_it_changes(self, leader, user, system_ep):
         endpoint = make_endpoint(user)
@@ -271,11 +369,36 @@ class TestLiveEvents:
             owner, public = publish.call_args.args[1:]
             assert (owner["type"], owner["status"], public["session_count"]) == ("endpoint", "online", 1)
             assert "sessions" not in public
-            endpoint.loaded_models = [{"name": "qwen"}]
+            endpoint.loaded_models = [{"name": "qwen", "size": 10, "size_vram": 8}, {"name": "llama"}]
             endpoint.save(update_fields=["loaded_models"])
             leader._publish_endpoints()
         assert publish.call_count == 2
-        assert publish.call_args.args[1]["loaded"] == ["qwen"]
+        # Same object shape as REST ``live.loaded`` (the UI keys chips by name).
+        assert publish.call_args.args[1]["loaded"] == [
+            {"name": "qwen", "size_vram": 8, "cpu_spill": True},
+            {"name": "llama", "size_vram": None, "cpu_spill": False},
+        ]
+        assert publish.call_args.args[2]["loaded_count"] == 2
+
+    def test_tick_carries_current_attempt_rollups(self, leader, user, system_ep):
+        from backend.generation.tests.factories import AppRequirementTemplateFactory
+        from backend.generation.tests.factories import ExperimentConditionFactory
+
+        x = running_experiment(user, repeats=2)
+        app = AppRequirementTemplateFactory()
+        x.app_requirements.add(app)
+        first, _second = ExperimentConditionFactory(experiment=x), ExperimentConditionFactory(experiment=x)
+        cell = {"experiment": x, "condition": first, "app_requirement": app, "repeat_index": 0}
+        make_job(user, first.model, status=S.FAILED, phase="", queued_at=None, **cell)
+        make_job(user, first.model, status=S.COMPLETED, phase="", queued_at=None, **cell)  # the top-up retry
+        result = leader.scheduler.tick(leader.slots, {name: p.free() for name, p in leader.pools.items()})
+        with mock.patch("backend.realtime.events.publish_experiment_event") as publish:
+            leader._publish_ticks(result)
+        event = publish.call_args.args[1]
+        assert event["type"] == "tick"
+        # Current attempt per cell, like REST status: the superseded FAILED row is not counted.
+        assert (event["counts"]["completed"], event["counts"]["failed"]) == (1, 0)
+        assert event["cells"] == {"total": 4, "done": 1, "failed_final": 0, "in_flight": 0}
 
     def test_capacity_event_reports_stale_code(self, leader, monkeypatch):
         result = leader.scheduler.tick(leader.slots, {name: p.free() for name, p in leader.pools.items()})

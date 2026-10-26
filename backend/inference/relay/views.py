@@ -10,8 +10,10 @@ work. Rules for every view here:
   connection at the end, so a waiting poll holds no Postgres connection;
 - responses are never compressed (Caddy compresses the internet leg; the
   SvelteKit proxy must not forward a stale ``Content-Encoding``);
-- request bodies are capped at ``RELAY_MAX_BODY_BYTES`` on the wire and 32 MB
-  after gunzip, read manually (bypassing ``DATA_UPLOAD_MAX_MEMORY_SIZE``);
+- request bodies are capped at ``RELAY_MAX_BODY_BYTES`` on the wire and, after
+  gunzip, 32 MB for results and 2 MB for everything else; read manually
+  (bypassing ``DATA_UPLOAD_MAX_MEMORY_SIZE``), parsed off the event loop with a
+  cap on JSON containers, large bodies serialized by a semaphore;
 - per-token rate limit ``RELAY_RATE_LIMIT_PER_S`` (429, fails open without
   Redis).
 """
@@ -53,7 +55,11 @@ from backend.inference.relay.redis import get_async_redis
 
 logger = logging.getLogger(__name__)
 
-DECOMPRESSED_LIMIT = 32 * 1024 * 1024
+DECOMPRESSED_LIMIT = 32 * 1024 * 1024  # result bodies only
+SMALL_BODY_LIMIT = 2 * 1024 * 1024  # hello / inventory / poll / bye
+MAX_JSON_CONTAINERS = 500_000  # caps the parsed size of a result body (see parse_json)
+SMALL_MAX_JSON_CONTAINERS = 50_000  # the same for the small endpoints
+LARGE_BODY_CONCURRENCY = 2
 SESSION_TOUCH_S = 10
 INVENTORY_INTERVAL_S = 60
 DOORBELL_SLICE_S = 5
@@ -123,8 +129,8 @@ def client_ip(request) -> str | None:
     return parsed[0] if parsed else None
 
 
-def read_json(request) -> Any:
-    """The JSON body (gzip accepted), enforcing the wire and decompression caps."""
+def read_body(request, *, decompressed_limit: int = DECOMPRESSED_LIMIT) -> bytes:
+    """The raw (gunzipped) request body, enforcing the wire and decompression caps."""
     limit = int(settings.RELAY_MAX_BODY_BYTES)
     try:
         declared = int(request.headers.get("content-length") or 0)
@@ -138,17 +144,47 @@ def read_json(request) -> Any:
     if (request.headers.get("content-encoding") or "").lower() == "gzip":
         inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
         try:
-            raw = inflater.decompress(raw, DECOMPRESSED_LIMIT + 1)
+            raw = inflater.decompress(raw, decompressed_limit + 1)
         except zlib.error as exc:
             raise RelayHTTPError(400, {"error": "bad_gzip"}) from exc
-        if len(raw) > DECOMPRESSED_LIMIT or inflater.unconsumed_tail:
+        if len(raw) > decompressed_limit or inflater.unconsumed_tail:
             raise RelayHTTPError(413, {"error": "too_large"})
+    elif len(raw) > decompressed_limit:
+        raise RelayHTTPError(413, {"error": "too_large"})
+    return raw
+
+
+def parse_json(raw: bytes, max_containers: int = MAX_JSON_CONTAINERS) -> Any:
+    """Parse a relay body, refusing container-heavy documents before they reach ``json.loads``.
+
+    Parsed JSON can cost ~30x its byte size (``[{},{},…]`` is 64 B per two
+    bytes), so the number of ``{``/``[`` characters is capped; real relay bodies
+    are dominated by strings.  Deep nesting (``RecursionError``) is a 400.
+    """
     if not raw:
         return {}
+    if raw.count(b"{") + raw.count(b"[") > max_containers:
+        raise RelayHTTPError(413, {"error": "too_complex"})
     try:
         return json.loads(raw)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
         raise RelayHTTPError(400, {"error": "bad_json"}) from exc
+
+
+def read_json(request, *, decompressed_limit: int = DECOMPRESSED_LIMIT) -> Any:
+    """The JSON body (gzip accepted), enforcing the wire and decompression caps."""
+    return parse_json(read_body(request, decompressed_limit=decompressed_limit))
+
+
+_large_body_semaphores: dict[int, asyncio.Semaphore] = {}
+
+
+def _large_body_semaphore() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    sem = _large_body_semaphores.get(id(loop))
+    if sem is None:
+        sem = _large_body_semaphores[id(loop)] = asyncio.Semaphore(LARGE_BODY_CONCURRENCY)
+    return sem
 
 
 async def _rate_limited(token_id: int) -> bool:
@@ -165,8 +201,16 @@ async def _rate_limited(token_id: int) -> bool:
     return int(count) > limit
 
 
-def relay_view(view):
-    """Decorate an authenticated relay POST view ``view(request, token, data, ...)``."""
+def relay_view(view=None, *, decompressed_limit: int = SMALL_BODY_LIMIT):
+    """Decorate an authenticated relay POST view ``view(request, token, data, ...)``.
+
+    Only ``result`` needs large bodies; every other endpoint uses the small
+    ``SMALL_BODY_LIMIT`` cap.  JSON parsing runs off the event loop, and bodies
+    larger than ``SMALL_BODY_LIMIT`` are parsed and handled under a process-wide
+    semaphore so a burst of big bodies cannot pile parsed documents up in memory.
+    """
+    if view is None:
+        return functools.partial(relay_view, decompressed_limit=decompressed_limit)
 
     @functools.wraps(view)
     async def wrapper(request, *args, **kwargs):
@@ -179,10 +223,18 @@ def relay_view(view):
         if await _rate_limited(token.pk):
             return _json({"error": "rate_limited"}, status=429, headers={"Retry-After": "1"})
         try:
-            data = read_json(request)
-            if not isinstance(data, dict):
-                raise RelayHTTPError(400, {"error": "bad_json"})
-            return await view(request, token, data, *args, **kwargs)
+            raw = read_body(request, decompressed_limit=decompressed_limit)
+            if len(raw) <= SMALL_BODY_LIMIT:
+                data = await sync_to_async(parse_json, thread_sensitive=False)(raw, SMALL_MAX_JSON_CONTAINERS)
+                if not isinstance(data, dict):
+                    raise RelayHTTPError(400, {"error": "bad_json"})
+                return await view(request, token, data, *args, **kwargs)
+            async with _large_body_semaphore():
+                data = await sync_to_async(parse_json, thread_sensitive=False)(raw)
+                del raw
+                if not isinstance(data, dict):
+                    raise RelayHTTPError(400, {"error": "bad_json"})
+                return await view(request, token, data, *args, **kwargs)
         except RelayHTTPError as exc:
             return _json(exc.payload, status=exc.status, headers=exc.headers)
 
@@ -464,7 +516,7 @@ def _result(token: RelayToken, request, rid: str, data: dict[str, Any]) -> dict[
     return doc
 
 
-@relay_view
+@relay_view(decompressed_limit=DECOMPRESSED_LIMIT)
 async def result(request, token, data, rid):
     return _json(await db(_result, token, request, str(rid), data))
 

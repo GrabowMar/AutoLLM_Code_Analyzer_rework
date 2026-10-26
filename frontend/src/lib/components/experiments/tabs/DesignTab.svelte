@@ -36,7 +36,7 @@
 	import ComparabilityTable from '../ComparabilityTable.svelte';
 	import ExperimentDesignSummary from '../ExperimentDesignSummary.svelte';
 	import { MAX_REPEATS } from '../composer';
-	import { isTerminal, policyLabel, priorityBucket } from '../format';
+	import { conditionName, isTerminal, policyLabel, priorityBucket } from '../format';
 
 	interface Props {
 		experiment: ExperimentDetail;
@@ -88,16 +88,24 @@
 	let repeats = $state<number | null>(null);
 	let warmup = $state(true);
 
-	// (Re)seed the form from the saved experiment (first render and after a save).
+	/** The values last seeded into (or saved from) the form. */
+	let seeded: string | null = null;
+	const formKey = () => JSON.stringify([priority, maxConcurrency, infraRetries, repeats, warmup]);
+
+	// (Re)seed the form from the saved experiment: on first render, after a
+	// save, and on silent detail reloads (state events, lifecycle actions) —
+	// but only while the form is unedited, so a reload never drops pending edits.
 	$effect(() => {
 		const e = experiment;
 		void e.updated_at;
 		untrack(() => {
+			if (seeded !== null && formKey() !== seeded) return;
 			priority = String(priorityBucket(e.priority));
 			maxConcurrency = e.max_concurrency;
 			infraRetries = e.infra_retries;
 			repeats = e.repeats;
 			warmup = e.execution_options?.warmup ?? true;
+			seeded = formKey();
 		});
 	});
 	let invalid = $state({ conc: false, retries: false, repeats: false });
@@ -123,6 +131,7 @@
 		saving = true;
 		try {
 			const detail = await updateExperiment(experiment.id, patch);
+			seeded = formKey();
 			toast.success(patch.repeats ? 'Saved. New repeats run at the next top-up.' : 'Saved');
 			onupdated(detail);
 		} catch (e) {
@@ -171,7 +180,7 @@
 						{#each conditions as c (c.id)}
 							{@const overrides = summarizeLLMParams(c.param_overrides)}
 							<li class="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
-								<span class="min-w-0 font-medium">{c.label}</span>
+								<span class="min-w-0 font-medium">{conditionName(c)}</span>
 								{#if c.id === experiment.baseline_condition_id}
 									<span class="rounded-full border border-primary/40 bg-primary/10 px-1.5 text-[11px] text-success-fg">baseline</span>
 								{/if}

@@ -626,6 +626,16 @@ class TestReadModels:
             (c2.id, apps[1]): "b",
         }
 
+    def test_an_offline_endpoint_is_its_own_bottleneck(self, api, user):
+        endpoint = _local_endpoint(user)  # no relay session: offline
+        experiment, (condition,) = _scaffolding_experiment(user, n_conditions=1, n_apps=2)
+        condition.model = _local_model(endpoint)
+        condition.save(update_fields=["model"])
+        _launch(experiment, user)
+        status = api.get(f"{API}/experiments/{experiment.id}/status/").json()
+        assert status["bottleneck"] == f"endpoint_offline:{endpoint.slug}"
+        assert status["eta_seconds"] is None
+
     def test_export_json_and_csv(self, api, user):
         experiment, _ = _scaffolding_experiment(user)
         _launch(experiment, user)
@@ -807,6 +817,33 @@ class TestResults:
         loose = compute(experiment, None, ResultFilters(common_cells=False, exclude_truncated=False), user)
         assert {r["condition_id"]: r["n_graded"] for r in loose["leaderboard"]} == {a.id: 4, b.id: 2}
         assert results_svc.NOTE_ONE_SIDED in loose["notes"]
+
+    def test_a_condition_without_usable_cells_does_not_blank_the_others(self, user):
+        experiment, (a, b, c), apps = _design(user, n_apps=6, repeats=1, n_conditions=3)
+        for app in apps:
+            _graded(experiment, a, app, 0, 0.5)
+            _graded(experiment, b, app, 0, 1.0)
+            _graded(experiment, c, app, 0, None, status=S.FAILED)  # a dead model
+        res = compute(experiment, None, ResultFilters(), user)
+        board = {row["condition_id"]: row for row in res["leaderboard"]}
+        assert (board[a.id]["n_graded"], board[a.id]["pass_rate_mean"]) == (6, 0.5)
+        assert (board[b.id]["n_graded"], board[b.id]["pass_rate_mean"]) == (6, 1.0)
+        assert (board[c.id]["n_graded"], board[c.id]["pass_rate_mean"]) == (0, None)
+        rows = {r["condition_id"]: r for r in res["paired"]["rows"]}
+        assert (rows[b.id]["n_pairs"], rows[b.id]["mean_delta"]) == (6, 0.5)
+        assert rows[c.id]["n_pairs"] == 0
+        (note,) = [n for n in res["notes"] if n.startswith(results_svc.NOTE_NO_USABLE_PREFIX)]
+        assert note.endswith(svc.condition_label(c))
+
+    def test_conditions_with_some_cells_still_restrict_the_common_cells(self, user):
+        experiment, (a, b, c), apps = _design(user, n_apps=6, repeats=1, n_conditions=3)
+        for app in apps:
+            _graded(experiment, a, app, 0, 0.5)
+            _graded(experiment, b, app, 0, 1.0)
+        _graded(experiment, c, apps[0], 0, 1.0)
+        res = compute(experiment, None, ResultFilters(), user)
+        assert {r["condition_id"]: r["n_graded"] for r in res["leaderboard"]} == {a.id: 1, b.id: 1, c.id: 1}
+        assert not [n for n in res["notes"] if n.startswith(results_svc.NOTE_NO_USABLE_PREFIX)]
 
     def test_exclude_invalid_is_symmetric(self, user):
         experiment, (a, b), apps = _design(user, n_apps=1, repeats=2)

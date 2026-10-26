@@ -4,7 +4,10 @@
 	 * when (in words), next run, last result (incl. digest-drift errors), Run
 	 * now, edit (ScheduleEditor in a dialog) and delete.
 	 *
-	 * Props: `experimentId`, `schedules`, `onchange()` (refetch after a write).
+	 * Props: `experimentId`, `schedules`, `onchange()` (refetch after a write),
+	 * `onlaunched()` (a "Run now" queued runs on this experiment: the page
+	 * reloads it and resumes live updates, since a top-up reopens a finished
+	 * experiment), `readonly` (archived: no new schedules, edits or runs).
 	 */
 	import { toast } from 'svelte-sonner';
 	import * as Card from '$lib/components/ui/card';
@@ -37,9 +40,11 @@
 		experimentId: string;
 		schedules: ScheduleOut[];
 		onchange: () => void;
+		onlaunched?: () => void;
+		readonly?: boolean;
 	}
 
-	let { experimentId, schedules, onchange }: Props = $props();
+	let { experimentId, schedules, onchange, onlaunched, readonly = false }: Props = $props();
 
 	let busy = $state<number | 'new' | null>(null);
 	let editorOpen = $state(false);
@@ -104,6 +109,9 @@
 			else if (r.outcome === 'skipped') toast.info('Skipped: the experiment still has queued or running cells.');
 			else toast.success(`Started: ${r.jobs_created} run${r.jobs_created === 1 ? '' : 's'} queued`);
 			onchange();
+			// A clone runs elsewhere; a top-up / replicates run here (and may reopen it).
+			const here = !r.experiment_id || r.experiment_id === experimentId;
+			if (r.outcome !== 'error' && r.outcome !== 'skipped' && r.jobs_created > 0 && here) onlaunched?.();
 		} catch (e) {
 			toast.error(formatApiError(e, 'Could not run the schedule.'));
 		} finally {
@@ -146,9 +154,14 @@
 			<Card.Title>Schedules</Card.Title>
 			<Card.Description>Top up failed cells, add replicates or launch a fresh clone on a cron schedule.</Card.Description>
 		</div>
-		<Button variant="outline" size="sm" onclick={() => openEditor()}><Plus />Add schedule</Button>
+		{#if !readonly}
+			<Button variant="outline" size="sm" onclick={() => openEditor()}><Plus />Add schedule</Button>
+		{/if}
 	</Card.Header>
-	<Card.Content>
+	<Card.Content class="space-y-3">
+		{#if readonly}
+			<p class="text-xs text-muted-foreground">This experiment is archived: its schedules no longer run and cannot be changed. Clone it to schedule again.</p>
+		{/if}
 		{#if schedules.length === 0}
 			<EmptyState compact icon={CalendarClock} title="No schedules" description="Add one to re-run failed cells nightly or replicate weekly." />
 		{:else}
@@ -169,7 +182,7 @@
 							{@const result = resultText(s)}
 							<tr>
 								<td data-label="On">
-									<Switch size="sm" checked={s.enabled} disabled={busy === s.id} label="Enabled" onCheckedChange={(v) => toggle(s, v)} />
+									<Switch size="sm" checked={s.enabled} disabled={readonly || busy === s.id} label="Enabled" onCheckedChange={(v) => toggle(s, v)} />
 								</td>
 								<td data-label="Action">
 									{SCHEDULE_ACTION_LABELS[s.action]}
@@ -195,10 +208,12 @@
 								</td>
 								<td data-label="">
 									<span class="flex justify-end gap-1">
-										<Button variant="outline" size="sm" disabled={busy === s.id} onclick={() => runNow(s)}>
-											{#if busy === s.id}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Play />{/if}Run now
-										</Button>
-										<Button variant="ghost" size="icon" class="size-8" aria-label="Edit schedule" onclick={() => openEditor(s)}><Pencil class="size-3.5" /></Button>
+										{#if !readonly}
+											<Button variant="outline" size="sm" disabled={busy === s.id} onclick={() => runNow(s)}>
+												{#if busy === s.id}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Play />{/if}Run now
+											</Button>
+											<Button variant="ghost" size="icon" class="size-8" aria-label="Edit schedule" onclick={() => openEditor(s)}><Pencil class="size-3.5" /></Button>
+										{/if}
 										<Button
 											variant="ghost"
 											size="icon"

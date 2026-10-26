@@ -142,8 +142,10 @@
 			endpoint = await getEndpoint(endpointId);
 			error = '';
 		} catch (e) {
-			if (apiErrorStatus(e) === 404) notFound = true;
-			else if (endpoint === null) error = formatApiError(e, 'Could not load the endpoint.');
+			if (apiErrorStatus(e) === 404) {
+				notFound = true;
+				stopLive();
+			} else if (endpoint === null) error = formatApiError(e, 'Could not load the endpoint.');
 		}
 	}
 
@@ -175,24 +177,30 @@
 
 	function refreshAll() {
 		void loadEndpoint().then(() => {
+			if (notFound) return;
 			void loadSessions();
+			void loadModels();
 		});
-		void loadModels();
 		refreshKey += 1;
 	}
 
-	onMount(() => {
-		void loadEndpoint().then(() => {
-			void loadSessions();
-			if (canEdit && isRelay) void loadTokens();
-		});
-		void loadModels();
-		getMe()
-			.then((me) => (isStaff = me.is_staff ?? false))
-			.catch(() => (isStaff = false));
-		const poll = setInterval(refreshAll, POLL_MS);
-		const clock = setInterval(() => (now = Date.now()), 5_000);
-		const stop = subscribe([endpointChannel(endpointId)], (event) => {
+	// Polling and the SSE stream run only for an endpoint that exists: a
+	// missing (or since deleted) one would answer 404 / 403 forever.
+	let poll: ReturnType<typeof setInterval> | null = null;
+	let stopStream: (() => void) | null = null;
+	let unmounted = false;
+
+	function stopLive() {
+		if (poll) clearInterval(poll);
+		poll = null;
+		stopStream?.();
+		stopStream = null;
+	}
+
+	function startLive() {
+		if (unmounted || notFound || poll) return;
+		poll = setInterval(refreshAll, POLL_MS);
+		stopStream = subscribe([endpointChannel(endpointId)], (event) => {
 			if (event.type === 'session') {
 				void loadEndpoint();
 				void loadSessions();
@@ -204,10 +212,25 @@
 				if (endpoint.live.loaded.map((m) => m.name).join('|') !== before) void loadModels();
 			}
 		});
+	}
+
+	onMount(() => {
+		void loadEndpoint().then(() => {
+			if (notFound) return;
+			// A transient error still starts live updates (polling retries the load).
+			startLive();
+			void loadSessions();
+			void loadModels();
+			if (canEdit && isRelay) void loadTokens();
+		});
+		getMe()
+			.then((me) => (isStaff = me.is_staff ?? false))
+			.catch(() => (isStaff = false));
+		const clock = setInterval(() => (now = Date.now()), 5_000);
 		return () => {
-			clearInterval(poll);
+			unmounted = true;
 			clearInterval(clock);
-			stop();
+			stopLive();
 		};
 	});
 

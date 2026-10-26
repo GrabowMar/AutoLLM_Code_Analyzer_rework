@@ -22,6 +22,11 @@ from backend.inference.timeouts import chain
 pytestmark = pytest.mark.django_db
 
 
+@pytest.fixture(autouse=True)
+def _local_agent_runs_supported(settings):
+    settings.LLM_LOCAL_AGENT_RUNS = True
+
+
 def test_openrouter_wiring_is_todays(owner):
     job = GenerationJobFactory(created_by=owner)
     with mock.patch("backend.credentials.services.resolver.get_openrouter_key", return_value="sk-or"):
@@ -52,6 +57,41 @@ def test_local_wiring(owner, endpoint, local_model, settings):
     with pytest.raises(LLMAccessError) as exc:
         for_job(job, {"endpoint": endpoint_section(local_model)})
     assert exc.value.code == "endpoint_disabled"
+
+
+def test_local_wiring_refused_without_apps_dind(owner, endpoint, local_model, settings):
+    # Production compose (host daemon, no apps-dind): the gateway cannot reach the
+    # internal LLM proxy, so the run fails fast instead of burning infra retries.
+    settings.LLM_LOCAL_AGENT_RUNS = False
+    job = GenerationJobFactory(created_by=owner, model=local_model)
+    with pytest.raises(LLMAccessError) as exc:
+        for_job(job, {"endpoint": endpoint_section(local_model)})
+    assert exc.value.retryable is False
+    assert "not supported" in str(exc.value)
+    # OpenRouter agent runs are unaffected.
+    with mock.patch("backend.credentials.services.resolver.get_openrouter_key", return_value="sk-or"):
+        assert for_job(job, {"mode": "agent"}).network == "bridge"
+
+
+def test_local_wiring_rechecks_endpoint_access(owner, endpoint, local_model):
+    from backend.inference.models import LLMEndpoint
+    from backend.users.tests.factories import UserFactory
+
+    other = UserFactory()
+    endpoint.visibility = LLMEndpoint.Visibility.SHARED
+    endpoint.save()
+    job = GenerationJobFactory(created_by=other, model=local_model)
+    section = endpoint_section(local_model)
+    assert for_job(job, {"endpoint": section}).image_local
+    # The owner makes the endpoint private: queued / replayed jobs of other users stop.
+    endpoint.visibility = LLMEndpoint.Visibility.PRIVATE
+    endpoint.save()
+    with pytest.raises(LLMAccessError) as exc:
+        for_job(job, {"endpoint": section})
+    assert exc.value.code == "endpoint_forbidden"
+    assert exc.value.retryable is False
+    # The owner's own jobs are unaffected.
+    assert for_job(GenerationJobFactory(created_by=owner, model=local_model), {"endpoint": section}).image_local
 
 
 def test_proxy_token_is_signed_and_salted(owner):

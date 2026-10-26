@@ -70,6 +70,16 @@ def for_job(job, snapshot: dict) -> GatewayWiring:
     from backend.inference.models import LLMEndpoint
     from backend.inference.timeouts import chain
 
+    if not settings.LLM_LOCAL_AGENT_RUNS:
+        raise LLMAccessError(
+            code="unavailable",
+            message="Agent runs on local models are not supported on this deployment",
+            retryable=False,
+            remediation=(
+                "Local-model agent runs need the apps-dind sandbox daemon (local compose), whose "
+                "gateways reach the executor's LLM proxy. Use scaffolding mode or an OpenRouter model."
+            ),
+        )
     section = snapshot["endpoint"]
     endpoint = LLMEndpoint.objects.filter(pk=section.get("id")).first()
     if endpoint is None:
@@ -83,6 +93,17 @@ def for_job(job, snapshot: dict) -> GatewayWiring:
             code="endpoint_disabled",
             message=f"Endpoint {endpoint.slug} is disabled",
             retryable=False,
+        )
+    from backend.inference.access import can_use_endpoint
+
+    # Re-authorize at run time like the scaffolding path (resolve_access): queued,
+    # replayed or rerun jobs must not keep using an endpoint the owner lost access to.
+    if not can_use_endpoint(job.created_by, endpoint):
+        raise LLMAccessError(
+            code="endpoint_forbidden",
+            message=f"You cannot use endpoint {endpoint.slug}",
+            retryable=False,
+            status_code=403,
         )
     return GatewayWiring(
         image_local=True,

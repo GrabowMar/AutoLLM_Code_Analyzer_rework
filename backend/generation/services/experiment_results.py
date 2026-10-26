@@ -62,6 +62,7 @@ NOTE_POST_HOC = "Baseline chosen post hoc; p-values exploratory"
 NOTE_NO_PREREGISTERED = "No pre-registered baseline; the first condition is used (exploratory)"
 NOTE_FEW_APPS = "Too few apps for inference (fewer than 6): treat p-values as descriptive"
 NOTE_ONE_SIDED = "Common cells off: exclusions may select on the outcome"
+NOTE_NO_USABLE_PREFIX = "Left out of the common cells (no graded cells yet): "
 NOTE_TIMINGS = "Timings are not comparable across endpoints (machine and load differ)"
 _TERMINAL = (Experiment.Status.COMPLETED, Experiment.Status.CANCELLED, Experiment.Status.ARCHIVED)
 
@@ -412,7 +413,15 @@ def compute(
     }
     key_sets = list(usable_keys.values())
     balanced = bool(key_sets) and all(ks == key_sets[0] for ks in key_sets)
-    common = set.intersection(*key_sets) if key_sets else set()
+    # A condition with no usable cell at all (a dead model, or one that has not
+    # started yet) would empty the intersection and blank every other
+    # condition; it is left out of the common cells and named in a note.
+    empty_conditions = [c for c in conditions if not usable_keys[c.id]]
+    populated = [usable_keys[c.id] for c in conditions if usable_keys[c.id]]
+    common = set.intersection(*populated) if populated else set()
+    if filters.common_cells and empty_conditions and populated:
+        names = ", ".join(condition_label(c) for c in empty_conditions)
+        notes.append(f"{NOTE_NO_USABLE_PREFIX}{names}")
     if not filters.common_cells:
         notes.append(NOTE_ONE_SIDED)
 

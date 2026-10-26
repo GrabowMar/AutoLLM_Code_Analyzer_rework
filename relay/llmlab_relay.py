@@ -41,6 +41,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
@@ -70,8 +71,15 @@ ALLOWED_PATHS = frozenset(
 GZIP_THRESHOLD = 64 * 1024
 DEFAULT_MAX_RESULT = 8 * 1024 * 1024
 SHUTDOWN_GRACE_S = 30
-DISABLED_POLL_S = 60
+DISABLED_POLL_S = 15  # well under the server's session TTL, so an idle session is never reaped
 UNAUTHORIZED_WAIT_S = 60
+MAX_BACKOFF_S = 60.0
+# While requests are running, retry the server quickly: a session that misses
+# its TTL is ended and its in-flight work requeued (and cancelled here).
+MAX_BACKOFF_INFLIGHT_S = 5.0
+# Errors raised while reading a response that are not OSError subclasses
+# (truncated bodies, bad status lines, corrupt gzip); converted to OSError.
+TRANSPORT_ERRORS = (http.client.HTTPException, EOFError, zlib.error)
 
 
 def path_allowed(method: str, path: str, body) -> bool:
@@ -171,6 +179,13 @@ def relay_id(state_dir: str) -> str:
 # ── Server client ───────────────────────────────────────────────────────
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect: following one would resend the bearer token, possibly over http or to another host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, f"redirect to {newurl} refused", headers, fp)
+
+
 class Server:
     def __init__(self, args: argparse.Namespace, token: str) -> None:
         self.base = args.server + "/api/relay/v1/"
@@ -179,6 +194,7 @@ class Server:
         self.context = (
             ssl.create_default_context(cafile=args.ca_file) if args.ca_file else ssl.create_default_context()
         )
+        self.opener = urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(context=self.context))
         self.timeout = 45.0
 
     def post(self, path: str, payload: dict, *, timeout: float | None = None) -> dict:
@@ -197,15 +213,18 @@ class Server:
             headers["X-Relay-Session"] = self.session_id
         request = urllib.request.Request(self.base + path, data=data, headers=headers, method="POST")  # noqa: S310
         try:
-            with urllib.request.urlopen(request, timeout=timeout or self.timeout, context=self.context) as resp:  # noqa: S310
+            with self.opener.open(request, timeout=timeout or self.timeout) as resp:
                 raw = resp.read()
                 if (resp.headers.get("Content-Encoding") or "").lower() == "gzip":
                     raw = gzip.decompress(raw)
                 return json.loads(raw or b"{}")
         except urllib.error.HTTPError as exc:
-            body = exc.read()
-            if (exc.headers.get("Content-Encoding") or "").lower() == "gzip":
-                body = gzip.decompress(body)
+            try:
+                body = exc.read() or b""
+                if (exc.headers.get("Content-Encoding") or "").lower() == "gzip":
+                    body = gzip.decompress(body)
+            except (OSError, *TRANSPORT_ERRORS):
+                body = b""
             try:
                 payload = json.loads(body or b"{}")
             except ValueError:
@@ -213,6 +232,9 @@ class Server:
             if exc.code == 401:
                 raise Unauthorized from exc
             raise ServerError(exc.code, payload) from exc
+        except TRANSPORT_ERRORS as exc:
+            msg = f"{path}: {type(exc).__name__}: {exc}"
+            raise OSError(msg) from exc
 
 
 # ── Upstream ────────────────────────────────────────────────────────────
@@ -258,6 +280,9 @@ class Upstream:
             conn.request(method, self.base_path + path, body=data, headers=headers)
             resp = conn.getresponse()
             raw = resp.read()
+        except TRANSPORT_ERRORS as exc:
+            msg = f"{method} {path}: {type(exc).__name__}: {exc}"
+            raise OSError(msg) from exc
         finally:
             conn.close()
         try:
@@ -439,21 +464,43 @@ class Relay:
     def push_inventory(self) -> None:
         payload = self.collect_inventory()
         digests = {m["name"]: m.get("digest", "") for m in payload["models"]}
+        failed: set[str] = set()
         for _ in range(20):
             doc = self.server.post("inventory", payload)
-            need = [n for n in doc.get("need_show") or [] if n in digests]
+            need = [n for n in doc.get("need_show") or [] if n in digests and n not in failed]
             if not need or self.args.kind != "ollama":
                 log.info("inventory: %s models", doc.get("accepted_models"))
                 return
+            added = 0
             for name in need:
-                try:
-                    info = self.upstream.call("POST", "/api/show", {"model": name}, timeout=30)[1] or {}
-                except OSError as exc:
-                    log.warning("show %s failed: %s", name, exc)
-                    info = {}
-                entry = show_entry(info)
+                entry = self.show(name)
+                if entry is None:
+                    # Never report (or cache) a failed show as "no capabilities":
+                    # the server keeps asking for it on the next push.
+                    failed.add(name)
+                    continue
                 self.show_cache[digests[name]] = entry
                 payload["show"][name] = entry
+                added += 1
+            if not added:
+                log.info("inventory: %s models (%d without show details yet)", doc.get("accepted_models"), len(failed))
+                return
+
+    def show(self, name: str) -> dict | None:
+        """The ``show_entry`` for ``name``, or None when ``/api/show`` failed."""
+        try:
+            status, info, raw = self.upstream.call("POST", "/api/show", {"model": name}, timeout=30)
+        except OSError as exc:
+            log.warning("show %s failed: %s", name, exc)
+            return None
+        if status != 200 or not isinstance(info, dict):
+            log.warning("show %s answered %s: %r", name, status, raw[:200])
+            return None
+        try:
+            return show_entry(info)
+        except (AttributeError, TypeError, ValueError) as exc:
+            log.warning("show %s returned an unexpected document: %s", name, exc)
+            return None
 
     def inventory_loop(self) -> None:
         last = 0.0
@@ -470,7 +517,7 @@ class Relay:
                             ),
                         )
                         changed = current != self.last_tags
-                    except OSError:
+                    except (OSError, AttributeError, TypeError):
                         changed = False
                 if not changed:
                     continue
@@ -485,10 +532,23 @@ class Relay:
             except (OSError, ServerError, ValueError) as exc:
                 log.warning("inventory push failed: %s", exc)
                 last = time.monotonic() - self.inventory_interval + 15
+            except Exception:
+                log.exception("inventory push failed unexpectedly")
+                last = time.monotonic() - self.inventory_interval + 15
 
     # -- execution ---------------------------------------------------------------
 
     def execute(self, job: Inflight, request: dict) -> None:
+        try:
+            self._execute(job, request)
+        except Exception:
+            log.exception("request %s failed unexpectedly", job.rid[:8])
+        finally:
+            # Always free the slot, or the relay would echo this job forever.
+            with self.lock:
+                self.inflight.pop((job.rid, job.claim), None)
+
+    def _execute(self, job: Inflight, request: dict) -> None:
         upstream = request.get("upstream") or {}
         method = str(upstream.get("method") or "POST").upper()
         path = str(upstream.get("path") or "")
@@ -499,8 +559,6 @@ class Relay:
         clamped = None
         if job.cancelled:
             # Cancelled while it waited for a free upstream slot: never start it.
-            with self.lock:
-                self.inflight.pop((job.rid, job.claim), None)
             return
         try:
             if not path_allowed(method, path, body):
@@ -555,8 +613,6 @@ class Relay:
         )
         if not job.cancelled:
             self.post_result(job, result)
-        with self.lock:
-            self.inflight.pop((job.rid, job.claim), None)
 
     def post_result(self, job: Inflight, result: dict) -> None:
         delay = 1.0
@@ -567,9 +623,14 @@ class Relay:
                     log.info("result %s not accepted: %s", job.rid[:8], doc.get("reason"))
                 return
             except Unauthorized:
+                if self.stop.is_set():
+                    log.warning("giving up on result %s: token rejected while stopping", job.rid[:8])
+                    return
                 self.reload_token.set()
             except (OSError, ServerError, ValueError) as exc:
                 log.warning("posting result %s failed: %s", job.rid[:8], exc)
+            if job.cancelled:
+                return
             if time.time() > job.deadline or (self.stop.is_set() and delay > 8):
                 log.warning("giving up on result %s", job.rid[:8])
                 return
@@ -587,7 +648,7 @@ class Relay:
             try:
                 payload["loaded"] = ps_entries(self.upstream.get_json("/api/ps", timeout=5).get("models"))
                 self.last_ps_at = time.monotonic()
-            except OSError:
+            except (OSError, AttributeError):
                 pass
         doc = self.server.post("poll", payload, timeout=self.poll_timeout + 20)
         if not doc.get("session_valid", True):
@@ -617,6 +678,18 @@ class Relay:
             log.info("endpoint disabled on the server; idling")
             self.stop.wait(DISABLED_POLL_S)
 
+    def cancel_all(self) -> None:
+        """Abort every running upstream call (its result is never posted)."""
+        with self.lock:
+            jobs = list(self.inflight.values())
+        for job in jobs:
+            job.cancel()
+
+    def max_backoff(self) -> float:
+        with self.lock:
+            busy = bool(self.inflight)
+        return MAX_BACKOFF_INFLIGHT_S if busy else MAX_BACKOFF_S
+
     def handle_unauthorized(self) -> None:
         if self.reread_token():
             log.info("token file changed; reconnecting")
@@ -628,6 +701,11 @@ class Relay:
                     return
             return
         log.error("the server rejected the token (revoked or wrong); exiting")
+        # The server already requeued this session's work: stop the GPU now
+        # instead of finishing generations whose results would be rejected.
+        self.stop.set()
+        self.cancel_all()
+        self.pool.shutdown(wait=False, cancel_futures=True)
         raise SystemExit(EXIT_UNAUTHORIZED)
 
     def run(self) -> int:
@@ -658,14 +736,16 @@ class Relay:
                 if exc.status == 409:
                     log.error("configuration mismatch: %s", exc.payload)
                     return EXIT_FAILURE
+                backoff = min(backoff, self.max_backoff())
                 log.warning("%s; retrying in %.0fs", exc, backoff)
                 connected = connected and exc.status not in (404, 410)
                 self.stop.wait(backoff)
-                backoff = min(backoff * 2, 60)
+                backoff = backoff * 2
             except (OSError, ValueError) as exc:
+                backoff = min(backoff, self.max_backoff())
                 log.warning("server unreachable (%s); retrying in %.0fs", exc, backoff)
                 self.stop.wait(backoff)
-                backoff = min(backoff * 2, 60)
+                backoff = backoff * 2
         return self.shutdown()
 
     def shutdown(self) -> int:
@@ -677,6 +757,10 @@ class Relay:
             time.sleep(0.5)
         with self.lock:
             inflight = [{"id": j.rid, "claim_token": j.claim} for j in self.inflight.values()]
+        # Past the grace period: abort what is still running (the server
+        # requeues it on bye), so the process exits instead of waiting for
+        # the generations and the GPU stops working on them.
+        self.cancel_all()
         if self.server.session_id:
             try:
                 self.server.post("bye", {"inflight": inflight}, timeout=10)
@@ -743,7 +827,11 @@ def main(argv=None) -> int:
         log.warning("--parallel %s exceeds OLLAMA_NUM_PARALLEL=%s", args.parallel, parallel_env)
 
     def on_term(_signum, _frame):
-        log.info("stopping (finishing in-flight requests, up to %ss)", SHUTDOWN_GRACE_S)
+        if relay.stop.is_set():
+            log.info("stopping now (aborting in-flight requests)")
+            relay.cancel_all()
+            return
+        log.info("stopping (finishing in-flight requests, up to %ss; repeat to abort them)", SHUTDOWN_GRACE_S)
         relay.stop.set()
 
     def on_hup(_signum, _frame):

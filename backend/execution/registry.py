@@ -31,13 +31,27 @@ class JobRegistry:
         self._lock = threading.Lock()
         self._entries: dict[str, Entry] = {}
 
-    def add(self, job_id, attempt: int, lane: str) -> None:
+    def add(self, job_id, attempt: int, lane: str) -> Entry:
+        """Register a stage of ``job_id``; returns the entry, the worker's token for :meth:`remove`."""
+        entry = Entry(str(job_id), int(attempt), lane)
         with self._lock:
-            self._entries[str(job_id)] = Entry(str(job_id), int(attempt), lane)
+            self._entries[str(job_id)] = entry
+        return entry
 
-    def remove(self, job_id) -> None:
+    def remove(self, job_id, entry: Entry | None = None) -> None:
+        """Drop ``job_id``; with ``entry``, only if it is still that worker's own registration.
+
+        The generation stage of a job may still be unwinding (batch refresh,
+        events) after it committed ``eval_queued``, while the evaluation stage
+        of the same job was already claimed and registered: the generation
+        worker's ``finally`` must not drop the live evaluation, or its lease
+        stops being renewed and the lost-job check requeues it.
+        """
         with self._lock:
-            self._entries.pop(str(job_id), None)
+            key = str(job_id)
+            if entry is not None and self._entries.get(key) is not entry:
+                return
+            self._entries.pop(key, None)
 
     def __contains__(self, job_id) -> bool:
         with self._lock:

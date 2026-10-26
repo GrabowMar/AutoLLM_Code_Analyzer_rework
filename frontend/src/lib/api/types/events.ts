@@ -34,35 +34,44 @@ export interface JobEvent extends EventEnvelope {
   ts: string;
 }
 
+/**
+ * The executor's per-lane tick payload. Only `id` is guaranteed: the executor
+ * sends what it computes cheaply every tick, so a client merges the keys present.
+ */
 export interface TickEndpoint {
   id: number;
-  slots_used: number;
-  active: number;
-  queued: number;
-  tokens_per_s: number | null;
-  loaded: number;
-  blocked_reason: string | null;
-  circuit: "closed" | "open";
+  slots_used?: number;
+  active?: number;
+  queued?: number;
+  tokens_per_s?: number | null;
+  loaded?: number;
+  blocked_reason?: string | null;
+  circuit?: "closed" | "open";
 }
 
+/**
+ * `tick` on `experiment:<id>`: current-attempt-per-cell rollups (same meaning as
+ * REST status). `throughput`, `eta_seconds` and `cells.retried` may be absent:
+ * keep the last REST values for them.
+ */
 export interface TickEvent extends EventEnvelope {
   type: "tick";
   counts: ProgressCounts;
-  cells: {
+  cells?: Partial<{
     total: number;
     done: number;
     failed_final: number;
     in_flight: number;
     retried: number;
-  };
-  throughput: {
+  }>;
+  throughput?: {
     completed_last_15m: number;
     completed_last_60m: number;
     per_hour_ewma: number;
   };
-  eta_seconds: number | null;
-  bottleneck: string | null;
-  endpoints: TickEndpoint[];
+  eta_seconds?: number | null;
+  bottleneck?: string | null;
+  endpoints?: TickEndpoint[];
 }
 
 export interface StateEvent extends EventEnvelope {

@@ -299,3 +299,48 @@ class TestModelsCatalogVisibility:
         client = _client(owner)
         assert client.get("/api/models/?endpoint=local").json()["total"] == 0
         assert client.get("/api/models/?endpoint=local&include_unavailable=true").json()["total"] == 1
+
+
+class TestAbuseCaps:
+    def test_non_staff_endpoint_cap(self, owner, settings):
+        settings.RELAY_MAX_ENDPOINTS_PER_USER = 2
+        client = _client(owner)
+        for i in range(2):
+            assert _post(client, API, {"name": f"box {i}", "kind": "ollama"}).status_code == 201
+        assert _post(client, API, {"name": "box 3", "kind": "ollama"}).status_code == 400
+
+    def test_staff_is_exempt_from_the_endpoint_cap(self, staff, settings):
+        settings.RELAY_MAX_ENDPOINTS_PER_USER = 1
+        client = _client(staff)
+        for i in range(2):
+            assert _post(client, API, {"name": f"box {i}", "kind": "ollama"}).status_code == 201
+
+    def test_non_staff_live_token_cap(self, owner, endpoint, settings):
+        settings.RELAY_MAX_TOKENS_PER_ENDPOINT = 2
+        client = _client(owner)
+        live = RelayToken.objects.filter(endpoint=endpoint, revoked_at__isnull=True).count()
+        created = []
+        for i in range(max(0, 2 - live)):
+            resp = _post(client, f"{API}{endpoint.pk}/tokens/", {"label": f"t{i}"})
+            assert resp.status_code == 201
+            created.append(resp.json()["id"])
+        assert _post(client, f"{API}{endpoint.pk}/tokens/", {"label": "over"}).status_code == 400
+        # Revoked tokens do not count against the cap.
+        token_id = created[0] if created else RelayToken.objects.filter(endpoint=endpoint).first().pk
+        assert _post(client, f"{API}{endpoint.pk}/tokens/{token_id}/revoke/").status_code == 200
+        assert _post(client, f"{API}{endpoint.pk}/tokens/", {"label": "again"}).status_code == 201
+
+
+class TestServerUrl:
+    def test_falls_back_to_the_public_frontend_origin(self, owner, endpoint, settings):
+        settings.LLMLAB_PUBLIC_URL = ""
+        settings.FRONTEND_PUBLIC_ORIGIN = "https://lab.example.org"
+        data = _client(owner).get(f"{API}{endpoint.pk}/install/").json()
+        assert data["server_url"] == "https://lab.example.org"
+        assert "testserver" not in json.dumps(data["commands"])
+
+    def test_explicit_public_url_wins(self, owner, endpoint, settings):
+        settings.LLMLAB_PUBLIC_URL = "https://relay.example.org/"
+        settings.FRONTEND_PUBLIC_ORIGIN = "https://lab.example.org"
+        data = _client(owner).get(f"{API}{endpoint.pk}/install/").json()
+        assert data["server_url"] == "https://relay.example.org"

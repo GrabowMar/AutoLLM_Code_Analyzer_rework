@@ -57,6 +57,7 @@ from backend.inference.api.schemas import TokenRotate
 from backend.inference.api.schemas import TokenRotateResult
 from backend.inference.api.schemas import TokenSecret
 from backend.inference.api.schemas import UnloadBody
+from backend.inference.events import loaded_summary
 from backend.inference.live import endpoint_status
 from backend.inference.live import live_sessions
 from backend.inference.models import ENDPOINT_SLUG_RE
@@ -130,19 +131,7 @@ def _active_job_counts(endpoints: list[LLMEndpoint]) -> dict[int, int]:
 
 
 def _loaded(endpoint: LLMEndpoint) -> list[dict[str, Any]]:
-    out = []
-    for item in endpoint.loaded_models or []:
-        if not isinstance(item, dict) or not item.get("name"):
-            continue
-        size, vram = item.get("size"), item.get("size_vram")
-        out.append(
-            {
-                "name": item["name"],
-                "size_vram": vram,
-                "cpu_spill": bool(size and vram is not None and vram < size),
-            },
-        )
-    return out
+    return loaded_summary(endpoint)
 
 
 def _session_dict(session: RelaySession, *, inflight: int = 0, token_prefix: str = "") -> dict[str, Any]:
@@ -395,6 +384,10 @@ def create_endpoint(request, data: EndpointCreate):
         raise HttpError(403, "Only staff can create direct endpoints; use a relay instead.")
     if data.visibility == "shared" and not staff:
         raise HttpError(400, "Only staff can share an endpoint.")
+    if not staff and (
+        LLMEndpoint.objects.filter(owner=user, is_system=False).count() >= int(settings.RELAY_MAX_ENDPOINTS_PER_USER)
+    ):
+        raise HttpError(400, "You have reached the maximum number of endpoints; delete one first.")
     if data.slug:
         if data.slug in RESERVED_ENDPOINT_SLUGS or not re.match(ENDPOINT_SLUG_RE, data.slug):
             raise HttpError(400, "This slug is reserved or invalid.")
@@ -675,6 +668,14 @@ def list_tokens(request, endpoint_id: int):
 @router.post("/endpoints/{endpoint_id}/tokens/", response={201: TokenSecret})
 def create_token(request, endpoint_id: int, data: TokenCreate):
     endpoint = _relay_endpoint(request, endpoint_id)
+    if not _is_staff(request):
+        live = (
+            RelayToken.objects.filter(endpoint=endpoint, revoked_at__isnull=True)
+            .exclude(expires_at__lte=timezone.now())
+            .count()
+        )
+        if live >= int(settings.RELAY_MAX_TOKENS_PER_ENDPOINT):
+            raise HttpError(400, "This endpoint has too many live tokens; revoke one first.")
     raw, token = relay_tokens.generate_token(endpoint, label=data.label, created_by=request.auth)
     return Status(201, {"id": token.pk, "prefix": token.prefix, "secret_once": raw})
 
@@ -775,9 +776,16 @@ def endpoint_metrics(request, endpoint_id: int, minutes: int = Query(60, ge=5, l
 
 
 def server_url(request) -> str:
-    configured = getattr(settings, "LLMLAB_PUBLIC_URL", "") or ""
-    if configured:
-        return configured.rstrip("/")
+    """The public base URL a remote relay dials.
+
+    ``LLMLAB_PUBLIC_URL`` wins, then the browser-facing ``FRONTEND_PUBLIC_ORIGIN``
+    (the request host is often an internal name such as ``django:8000`` behind
+    the Vite dev proxy), and only then the request's own scheme and host.
+    """
+    for name in ("LLMLAB_PUBLIC_URL", "FRONTEND_PUBLIC_ORIGIN"):
+        configured = str(getattr(settings, name, "") or "").strip()
+        if configured:
+            return configured.rstrip("/")
     return f"{request.scheme}://{request.get_host()}"
 
 

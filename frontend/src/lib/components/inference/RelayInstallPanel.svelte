@@ -20,6 +20,7 @@
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import CopyBlock from './CopyBlock.svelte';
+	import { relayServerUrlProblem } from './endpoint-display';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
@@ -67,6 +68,8 @@
 		].join('\n');
 	});
 
+	const serverProblem = $derived(install ? relayServerUrlProblem(install.server_url) : null);
+
 	/** Commands that download the script must pin it; an unpinned one is never shown as copyable. */
 	function pinned(command: string): boolean {
 		return !!install && !!install.script_sha256 && command.includes(install.script_sha256);
@@ -96,6 +99,17 @@
 				<span class="w-full sm:w-auto">Dockerfile sha256 <code class="mono-tag break-all">{install.dockerfile_sha256}</code></span>
 			{/if}
 		</div>
+
+		{#if serverProblem}
+			<div class="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning-fg" role="alert">
+				<TriangleAlert class="mt-px size-3.5 shrink-0" aria-hidden="true" />
+				<span>
+					These commands use <code class="mono-tag break-all">{install.server_url}</code>, which a model machine on
+					another network cannot use: {serverProblem} Set <code class="mono-tag">LLMLAB_PUBLIC_URL</code> (or
+					<code class="mono-tag">FRONTEND_PUBLIC_ORIGIN</code>) to the public https address of this site.
+				</span>
+			</div>
+		{/if}
 
 		<Tabs.Root bind:value={tab}>
 			<Tabs.List>
