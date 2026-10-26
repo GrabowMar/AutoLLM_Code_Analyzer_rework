@@ -7,10 +7,14 @@ from typing import Any
 from django.shortcuts import get_object_or_404
 
 from backend.analysis.api.schema import AnalyzerToolSchema
+from backend.analysis.api.schema import AppCoverageSchema
+from backend.analysis.api.schema import CatalogMetaSchema
 from backend.analysis.api.views._router import analyzers_router
 from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import AnalyzerWorkspace
 from backend.analysis.models import InstalledTool
+from backend.analysis.seeding import load_catalog_meta
+from backend.analysis.services.coverage import app_coverage
 
 
 def install_state_for(user) -> dict[str, InstalledTool]:
@@ -30,6 +34,8 @@ def serialize_tool(tool: AnalyzerTool, installs: dict[str, InstalledTool]) -> di
         "category": tool.category,
         "kind": tool.kind,
         "target_language": tool.target_language,
+        "analysis_mode": tool.analysis_mode,
+        "technologies": tool.technologies or [],
         "icon": tool.icon,
         "version": tool.version,
         "docs_url": tool.docs_url,
@@ -51,6 +57,19 @@ def list_tools(request):
     installs = install_state_for(request.auth)
     tools = AnalyzerTool.objects.filter(is_enabled=True)
     return [serialize_tool(t, installs) for t in tools]
+
+
+@analyzers_router.get("/catalog/", response=CatalogMetaSchema)
+def catalog_meta(request):
+    """Shop vocabulary: categories, static/dynamic modes and scanned technologies."""
+    meta = load_catalog_meta()
+    return {key: meta.get(key) or [] for key in ("categories", "modes", "technology_groups", "technologies")}
+
+
+@analyzers_router.get("/coverage/", response=AppCoverageSchema)
+def coverage(request):
+    """Technologies in the caller's recent generated apps and how many apps each tool fits."""
+    return app_coverage(request.auth)
 
 
 @analyzers_router.get("/tools/{slug}/", response=AnalyzerToolSchema)

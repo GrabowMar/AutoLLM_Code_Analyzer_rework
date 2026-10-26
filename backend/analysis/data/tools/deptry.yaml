@@ -7,6 +7,8 @@ description: >-
 category: dependencies
 kind: container
 target_language: python
+analysis_mode: static
+technologies: [python, pypi]
 icon: boxes
 version: "0.23"
 docs_url: https://deptry.com/
@@ -23,6 +25,7 @@ run_cmd: |
     echo
   done
 parser_key: deptry
+file_patterns: ["requirements*.txt"]
 run_timeout: 120
 install_timeout: 180
 display_order: 30

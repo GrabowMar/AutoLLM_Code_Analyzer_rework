@@ -789,7 +789,7 @@ class GenerationJob(models.Model):
         max_length=100,
         blank=True,
         default="",
-        help_text="Canonical or alias slug from runtime/scaffolding/manifest.json",
+        help_text="Canonical or alias slug of a runtime.Stack row (blank = the default stack)",
     )
     app_requirement = models.ForeignKey(
         AppRequirementTemplate,
@@ -836,7 +836,10 @@ class GenerationJob(models.Model):
         blank=True,
         default="",
         db_index=True,
-        help_text='Denormalized "profile-slug@version" slicing key',
+        help_text=(
+            'Denormalized slicing key: "profile-slug@version" for template modes; for agent mode the method key '
+            '"[profile@v/]agent:<harness>@<version>" plus "+opts:/+llm:/+budget:<sha8>" suffixes for non-defaults'
+        ),
     )
 
     # Experiment membership (a job is one run/cell of a designed experiment)

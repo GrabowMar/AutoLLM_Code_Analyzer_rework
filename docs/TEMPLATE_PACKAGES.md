@@ -1,6 +1,6 @@
 # Template packages
 
-A template package is a portable JSON or YAML file of Generation Library content: app specs, content blocks, generation profiles, user-authored stacks and run presets. Packages move that content between installs and users. Starter packages, shipped with the app, use the same format. In the UI it is Library → Packages; the code is `backend/generation/services/packages/`.
+A template package is a portable JSON or YAML file of Generation Library content: app specs, content blocks, generation profiles, user-authored stacks and run presets. Packages move that content between installs and users. Starter packages, shipped with the app, use the same format. In the UI it is the **Packages** dialog of the Generation Library (`/templates`), with Starter packages, Export and Import tabs. The code is in `backend/generation/services/packages/`.
 
 ## The format (v3)
 
@@ -47,8 +47,9 @@ Each section is a list; a missing section counts as empty.
 - Only assets you can see are exported (system rows and your own; for stacks, approved stacks and your own).
 - A profile exports at its latest version and brings along the blocks it references and the **user stack it targets**, so the package imports elsewhere without a dangling stack. Builtin stacks are never exported.
 - A referenced block you cannot see (another user's private block, or one that no longer exists) is left out, and the package lists it in a top-level `omitted_blocks: [{profile, type, slug, version, reason}]` (present only when something was left out; bundle packages carry it too). The profile keeps the reference, so importing it elsewhere needs that block to exist there. The Library's Packages dialog warns before the export. Creating or editing a profile refuses such refs (400 `Unknown block <slug> v<version>`).
-- Presets export at their latest visible version.
-- An export with nothing in it is a 400.
+- Presets export at their latest visible version. A block ref without a `version` exports version 1. Unknown slugs and refs are skipped silently.
+- An export with nothing in it is a 400 (`Select at least one asset to export.`).
+- The response is a file download (`generation-template-package.json` or `.yaml`).
 
 ## Import
 
@@ -56,10 +57,12 @@ Each section is a list; a missing section counts as empty.
 
 The response names the rows the package resolved to, created or reused, per section: `{"app_specs": [slug], "blocks": ["slug:version"], "profiles": [slug], "stacks": [slug], "presets": ["kind/slug:version"]}`. Any problem is a `400 {detail}` and nothing is written, because the whole import is one transaction.
 
-Assets import in dependency order: app specs → blocks → stacks → profiles → presets. Everything is validated as if it were created through the API:
+Accepted schema versions are 1, 2 and 3; anything else is refused. Assets import in dependency order: app specs → blocks → stacks → profiles → presets. Each entry is validated:
 
-- **Profiles.** `llm_config` follows the same rules as `POST /profiles/`. Every block ref must resolve to a block in the package or a block you can see. A ref without a `version` takes the package's own block of that slug, else the latest system version, else your latest own version. A ref without a `type` takes the block's type. A missing `scaffolding_slug` means `GENERATION_DEFAULT_STACK`.
-- **Stacks** are re-validated against this install's base-image allowlist and file rules, always use a generated Dockerfile, and go through the approval queue like locally created ones.
+- **App specs** must be valid against `data/requirements/schema.json` (name, category, description, at least one backend and frontend requirement and API endpoint, a data model with fields), except that the slug need not be snake_case (older specs and renamed imports use hyphens). `difficulty`, when present, must be `""`, `basic`, `standard` or `advanced`. App spec slugs are unique across all owners. `POST /app-specs/` checks the same schema, slug pattern included, and `PUT` checks it without the slug; both answer `400 {detail, errors}`.
+- **Blocks** need a `slug`, `name` and `content`. A missing `block_type` defaults to `prompt_tone`, and a missing `version` to 1; any other `block_type` must be one of `ContentBlock.BlockType`.
+- **Profiles.** `llm_config` follows the same rules as `POST /profiles/`. Every block ref must resolve to a block in the package or a block you can see. A ref without a `version` takes the package's own block of that slug, else the latest system version, else your latest own version. A ref without a `type` takes the block's type. A missing `scaffolding_slug` means `GENERATION_DEFAULT_STACK`; any other must be a known stack (or alias) after the remapping below, a stack in the same package included.
+- **Stacks** are re-validated against this install's base-image allowlist (`STACK_ALLOWED_BASE_IMAGES`) and file rules, and always use a generated Dockerfile. An unknown `patch_profile` becomes `none`, and an unknown `server_kind` becomes `python`. They go through the approval queue like locally created ones: an import is approved at once when the importer is staff or `STACK_REQUIRE_APPROVAL` is off.
 - **Presets** are normalized and validated like `POST /presets/`. For example, a sampling preset may not set `provider`, `stop` or `response_format`, and options must be ones the harness offers.
 
 ### Conflicts
@@ -68,9 +71,9 @@ One rule holds for every asset: content you can already see that is **identical*
 
 | Asset | `rename` | `overwrite` (your own item) | `error` |
 | --- | --- | --- | --- |
-| App spec (one mutable row per slug) | new slug `slug-2` | updated in place | refused |
-| Block (`slug` + `version`) | new slug, same version | **new version** of the slug; the package's profiles follow it | refused |
-| Profile | new slug, version 1 | **new version** | refused |
+| App spec (one mutable row per slug, slugs global) | new slug `slug-2` | updated in place | refused |
+| Block (`slug` + `version`) | new slug `slug-2`, same version | **new version** of the slug; the package's profiles follow it | refused |
+| Profile | new slug `slug-2`, version 1 | **new version** | refused |
 | Stack | new slug `slug-2` | renamed too (stack versions are immutable) | refused |
 | Preset | new slug `slug-2` | **new version**; a name/description difference alone updates the metadata | refused (`slug already in use`) |
 

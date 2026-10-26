@@ -40,7 +40,6 @@ from typing import Any
 
 from django.utils import timezone
 
-from backend.analysis.models import AnalysisRun
 from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import ToolResult
 from backend.generation.models import Experiment
@@ -65,8 +64,6 @@ from backend.statistics.services.study import study_jobs
 REPORT_VERSION = 1
 SMALL_N_MODELS = 10
 MIN_APPS_PER_MODEL = 5
-_BACKEND_EXT = (".py",)
-_FRONTEND_EXT = (".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".css", ".html")
 
 DEFINITIONS = {
     "generated": "The generation job completed and returned code (not a measure of quality).",
@@ -84,21 +81,8 @@ DEFINITIONS = {
 
 
 def _split_loc(job: GenerationJob) -> tuple[int, int, int]:
-    data = job.result_data if isinstance(job.result_data, dict) else {}
-    files = data.get("files") if isinstance(data.get("files"), dict) else {}
-    if not files:
-        loc = loc_from_job(job)
-        return loc["backend_loc"], loc["frontend_loc"], 0
-    backend = frontend = 0
-    for path, text in files.items():
-        if not isinstance(text, str):
-            continue
-        lines = sum(1 for line in text.splitlines() if line.strip())
-        if path.startswith("frontend/") or path.endswith(_FRONTEND_EXT):
-            frontend += lines
-        elif path.endswith(_BACKEND_EXT):
-            backend += lines
-    return backend, frontend, len(files)
+    loc = loc_from_job(job)
+    return loc["backend_loc"], loc["frontend_loc"], loc["source_files"]
 
 
 def app_table(
@@ -110,9 +94,9 @@ def app_table(
     """One row per job with every per-app quantity the report aggregates; plus the issue breakdowns."""
     issues = issue_breakdowns(jobs, include_ai=include_ai, line_tolerance=line_tolerance)
     by_job = {a["job_id"]: a for a in issues["per_app"]}
-    run_ids = AnalysisRun.latest_ids_per_job([j.id for j in jobs])
+    result_ids = ToolResult.latest_ids_per_job([j.id for j in jobs])
     complexity: dict[str, dict[str, Any]] = {}
-    for job_id, metrics in ToolResult.objects.filter(run_id__in=run_ids, tool_slug="radon").values_list(
+    for job_id, metrics in ToolResult.objects.filter(id__in=result_ids, tool_slug="radon").values_list(
         "run__generation_job_id",
         "metrics",
     ):
@@ -152,7 +136,7 @@ def app_table(
                 "evaluated": evaluated,
                 "deployed": status in ("passed", "failed") if evaluated else None,
                 "functional_passed": status == "passed" if evaluated else None,
-                "pass_rate": float(summary.get("pass_rate", 0.0)) if evaluated else None,
+                "pass_rate": float(summary.get("pass_rate") or 0.0) if evaluated else None,
                 "analyzed": analyzed is not None,
                 "raw_findings": analyzed["raw_findings"] if analyzed else None,
                 "unique_issues": analyzed["unique_issues"] if analyzed else None,
@@ -436,10 +420,22 @@ def _resampler(rows_by_model):
 
 
 def planned_comparisons_section(rows, experiment: Experiment | None, plan: dict[str, Any]) -> dict[str, Any] | None:
-    """Every plan metric, each condition vs the pre-registered baseline, blocked on the app."""
+    """Every declared plan metric, each condition vs the pre-registered baseline, blocked on the app.
+
+    The family covers the primary, secondary and research-question metrics
+    (``declared_metrics``). A condition with fewer analyzable apps than the
+    plan's ``min_apps_per_condition`` is listed but not tested
+    (``skipped: "below_min_apps"``) and is left out of the correction.
+    """
     if experiment is None or not plan or experiment.baseline_condition_id is None:
         return None
-    metrics = [plan["primary_metric"], *plan.get("secondary_metrics", [])]
+    primary = plan["primary_metric"]
+    secondary = plan.get("secondary_metrics", [])
+    questions_by_metric: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for q in plan.get("research_questions", []):
+        questions_by_metric[q["metric"]].append(q)
+    metrics = list(dict.fromkeys([primary, *secondary, *questions_by_metric]))
+    min_apps = int(plan.get("min_apps_per_condition") or 0)
     by_condition = _group([r for r in rows if r["condition_id"] is not None], "condition_id")
     base_rows = by_condition.get(experiment.baseline_condition_id, [])
     alpha = plan.get("alpha", 0.05)
@@ -464,6 +460,20 @@ def planned_comparisons_section(rows, experiment: Experiment | None, plan: dict[
             if cid == experiment.baseline_condition_id:
                 continue
             other = per_app(items, metric)
+            if min_apps and (len(other) < min_apps or len(base) < min_apps):
+                comparisons.append(
+                    {
+                        "condition_id": cid,
+                        "condition": labels.get(cid, str(cid)),
+                        "n_apps": len(other),
+                        "n_apps_baseline": len(base),
+                        "n_pairs": len(set(base) & set(other)),
+                        "skipped": "below_min_apps",
+                        "p_adjusted": None,
+                        "significant": None,
+                    },
+                )
+                continue
             common = sorted(set(base) & set(other))
             deltas = [other[a] - base[a] for a in common]
             wins = sum(1 for d in deltas if d > 0)
@@ -481,16 +491,21 @@ def planned_comparisons_section(rows, experiment: Experiment | None, plan: dict[
                     "p_wilcoxon": round(wilcoxon_p(deltas), 4) if wilcoxon_p(deltas) is not None else None,
                 },
             )
-        ps = [c["p_wilcoxon"] for c in comparisons]
+        tested = [c for c in comparisons if not c.get("skipped")]
+        ps = [c["p_wilcoxon"] for c in tested]
         adjusted = inf.holm(ps) if correction == "holm" else inf.benjamini_hochberg(ps) if correction == "bh" else ps
-        for c, adj in zip(comparisons, adjusted, strict=True):
+        for c, adj in zip(tested, adjusted, strict=True):
             c["p_adjusted"] = adj
             c["significant"] = adj is not None and adj < alpha
+        role = "primary" if metric == primary else "secondary" if metric in secondary else "research_question"
         families.append(
             {
                 "metric": metric,
-                "role": "primary" if metric == plan["primary_metric"] else "secondary",
+                "role": role,
                 "status": "confirmatory",
+                "research_questions": [
+                    {"id": q["id"], "direction": q["direction"]} for q in questions_by_metric.get(metric, [])
+                ],
                 "comparisons": comparisons,
             },
         )
@@ -498,6 +513,7 @@ def planned_comparisons_section(rows, experiment: Experiment | None, plan: dict[
         "baseline_condition_id": experiment.baseline_condition_id,
         "alpha": alpha,
         "correction": correction,
+        "min_apps_per_condition": min_apps,
         "interim": experiment.status
         not in (Experiment.Status.COMPLETED, Experiment.Status.CANCELLED, Experiment.Status.ARCHIVED),
         "families": families,
@@ -513,8 +529,18 @@ def _fingerprint(rows) -> str:
 
 
 def protocol_section(jobs, rows, experiment: Experiment | None, config: dict[str, Any]) -> dict[str, Any]:
-    run_ids = AnalysisRun.latest_ids_per_job([j.id for j in jobs])
-    tools_used = sorted(set(ToolResult.objects.filter(run_id__in=run_ids).values_list("tool_slug", flat=True)))
+    result_ids = ToolResult.latest_ids_per_job([j.id for j in jobs])
+    # The builds and options the counted results were actually produced with
+    # (recorded per result), not the catalog's current pins.
+    observed: dict[str, dict[str, Counter]] = defaultdict(lambda: {"versions": Counter(), "configs": Counter()})
+    for slug, raw_summary in ToolResult.objects.filter(id__in=result_ids).values_list("tool_slug", "summary"):
+        summary = raw_summary if isinstance(raw_summary, dict) else {}
+        entry = observed[slug]
+        if summary.get("tool_version"):
+            entry["versions"][str(summary["tool_version"])] += 1
+        if summary.get("config"):
+            entry["configs"][json.dumps(summary["config"], sort_keys=True)] += 1
+    tools_used = sorted(observed)
     versions = dict(AnalyzerTool.objects.filter(slug__in=tools_used).values_list("slug", "version"))
     evaluators = Counter()
     for job in jobs:
@@ -556,7 +582,15 @@ def protocol_section(jobs, rows, experiment: Experiment | None, config: dict[str
         "prompt_versions": len({r["prompt_hash"] for r in rows if r["prompt_hash"]}),
         "apps_per_model": dict(repeats),
         "trials_per_cell": dict(Counter(cells.values())),
-        "tools": [{"slug": t, "version": versions.get(t, "")} for t in tools_used],
+        "tools": [
+            {
+                "slug": t,
+                "version": versions.get(t, ""),
+                "installed_versions": dict(observed[t]["versions"]),
+                "configs": [json.loads(c) for c in observed[t]["configs"]],
+            }
+            for t in tools_used
+        ],
         "evaluators": dict(evaluators),
         "settings": {
             "include_ai": bool(config.get("include_ai")),
@@ -579,6 +613,7 @@ def validity_section(
     security,
     plan,
     config,
+    planned=None,
 ) -> list[dict[str, Any]]:
     """Threats to validity detected in this data (``level``: warning | info)."""
     out = []
@@ -713,6 +748,29 @@ def validity_section(
         )
     if not plan:
         add("no_plan", "info", "all", "No pre-registered analysis plan: every analysis here is exploratory.")
+    if config.get("_exclusions_overridden"):
+        add(
+            "plan_exclusions",
+            "info",
+            "all",
+            "The report's exclude_truncated setting differs from the analysis plan's exclusions; the plan's applies.",
+        )
+    below = sorted(
+        {
+            c["condition"]
+            for family in (planned or {}).get("families", [])
+            for c in family["comparisons"]
+            if c.get("skipped") == "below_min_apps"
+        },
+    )
+    if below:
+        add(
+            "below_min_apps",
+            "warning",
+            "planned_comparisons",
+            f"Fewer than {planned['min_apps_per_condition']} apps (the plan's min_apps_per_condition) for: "
+            f"{', '.join(below)}; those comparisons are not tested.",
+        )
     return out
 
 
@@ -740,11 +798,19 @@ def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any
     jobs_qs = study_jobs(user, experiment_id=config.get("experiment_id"), batch_id=config.get("batch_id"))
     jobs = list(jobs_qs)
     total_jobs = len(jobs)
+    plan = (experiment.analysis_plan if experiment else None) or {}
+    if plan:
+        # A pre-registered plan's exclusions govern (the report setting would
+        # let a confirmatory analysis change its sample after the fact).
+        # Infra errors are always excluded: they never count as evaluated.
+        exclusions = plan.get("exclusions") or {}
+        requested = config.get("exclude_truncated")
+        config = {**config, "exclude_truncated": bool(exclusions.get("truncated", True))}
+        config["_exclusions_overridden"] = requested is not None and bool(requested) != config["exclude_truncated"]
     if config.get("exclude_truncated", True):
         # Truncated output measures the token ceiling, not the model.
         jobs = [j for j in jobs if not _is_truncated(j)]
         jobs_qs = jobs_qs.filter(id__in=[j.id for j in jobs])
-    plan = (experiment.analysis_plan if experiment else None) or {}
 
     rows, issues = app_table(jobs, include_ai=include_ai, line_tolerance=line_tolerance)
 
@@ -768,6 +834,10 @@ def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any
     accounting = run_accounting(jobs_qs)
     protocol = protocol_section(jobs, rows, experiment, config)
     protocol["truncated_excluded"] = total_jobs - len(jobs)
+    protocol["settings"]["exclusions_source"] = "analysis_plan" if plan else "report_config"
+    planned = planned_comparisons_section(rows, experiment, plan)
+    # Which tools' findings the issue counts include (measured on every app) and which were left out.
+    protocol["instrument_coverage"] = issues.get("coverage")
 
     issues_out = {k: v for k, v in issues.items() if k not in ("issues", "per_app")}
     return {
@@ -784,7 +854,7 @@ def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any
         "code_metrics": code_metrics_section(rows, seed),
         "correlations": correlations,
         "ranking": ranking,
-        "planned_comparisons": planned_comparisons_section(rows, experiment, plan),
+        "planned_comparisons": planned,
         "healing": {
             k: healing[k]
             for k in ("baseline", "modes", "not_applicable", "totals", "by_model", "added_requirements", "patches")
@@ -802,5 +872,6 @@ def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any
             security=security,
             plan=plan,
             config=config,
+            planned=planned,
         ),
     }

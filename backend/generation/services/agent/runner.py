@@ -429,7 +429,7 @@ class AgentRunner:
     def _remediation(calls: list[dict]) -> str:
         statuses = {c.get("status") for c in calls}
         if 401 in statuses or 403 in statuses:
-            return "Check the OpenRouter API key in Settings → API Access."
+            return "Check the OpenRouter API key in Settings → API keys."
         if 404 in statuses:
             return "No provider serves this model under the run's routing policy; relax llm_params.provider."
         if 402 in statuses:

@@ -1,11 +1,11 @@
 <script lang="ts">
 	/**
 	 * SimpleSummaryPanel — Run summary for template scaffolding and single
-	 * prompt: a checklist until the form is complete, then the client tally
-	 * (`children`), the effective sampling params from `/jobs/llm-preview/`,
+	 * prompt: the run formula on top (empty factors link to their step), the
+	 * client details once the form is complete (`children`), the effective sampling params from `/jobs/llm-preview/`,
 	 * client-side issues and the Start button (two-column layout only).
 	 *
-	 * Props: `checklist`, `ready`, `llm` (tracker), `llmNote` (copy under the
+	 * Props: `factors` + `total` (RunFormula), `ready`, `llm` (tracker), `llmNote` (copy under the
 	 * params), `issues` + `actions`, Start state (`canStart`, `blockedReason`,
 	 * `submitting`, `submitError`, `startLabel`, `onstart`), `children` (tally).
 	 */
@@ -15,15 +15,16 @@
 	import { Button } from '$lib/components/ui/button';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import EffectiveParams from './EffectiveParams.svelte';
-	import SummaryChecklist from './SummaryChecklist.svelte';
+	import RunFormula, { type RunFactor } from './RunFormula.svelte';
 	import SummaryIssues from './SummaryIssues.svelte';
-	import { type ChecklistItem, type IssueAction, type SummaryIssue } from './issues';
+	import { type IssueAction, type SummaryIssue } from './issues';
 	import type { LLMPreviewTracker } from './llm-preview.svelte';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Play from '@lucide/svelte/icons/play';
 
 	interface Props {
-		checklist: ChecklistItem[];
+		factors: RunFactor[];
+		total: number | null;
 		ready: boolean;
 		llm: LLMPreviewTracker;
 		llmNote?: string;
@@ -39,7 +40,8 @@
 	}
 
 	let {
-		checklist,
+		factors,
+		total,
 		ready,
 		llm,
 		llmNote = '',
@@ -60,11 +62,8 @@
 		<Card.Title><h2 id="run-summary-title">Run summary</h2></Card.Title>
 	</Card.Header>
 	<Card.Content class="space-y-4">
-		{#if !ready}
-			<SummaryChecklist items={checklist} />
-		{:else}
-			{@render children?.()}
-		{/if}
+		<RunFormula {factors} {total} />
+		{#if ready}{@render children?.()}{/if}
 
 		<div class="space-y-1.5">
 			<div class="flex items-center justify-between gap-2">

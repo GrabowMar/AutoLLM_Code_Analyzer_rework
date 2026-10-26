@@ -16,8 +16,10 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 from typing import Any
 
+from backend.analysis.services.base import SEVERITIES
 from backend.analysis.services.base import AnalyzerOutput
 from backend.analysis.services.base import FindingData
+from backend.analysis.services.parsers import _label
 
 if TYPE_CHECKING:
     from backend.analysis.models import AnalyzerTool
@@ -26,7 +28,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Default to the latest Claude model for the built-in reviewer.
-DEFAULT_MODEL = "anthropic/claude-opus-4-8"
+DEFAULT_MODEL = "anthropic/claude-opus-5.5"
 # Upper bound for a local-model call made inside a web request (tool "test").
 INLINE_LOCAL_TIMEOUT_S = 180
 
@@ -55,7 +57,7 @@ def run(
     config = config or {}
     model = config.get("model") or tool.default_config.get("model") or DEFAULT_MODEL
 
-    code_blob = _format_code(code)
+    code_blob, omitted = _format_code(code)
     max_tokens = int(config.get("max_tokens") or tool.default_config.get("max_tokens") or 4000)
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
@@ -90,7 +92,13 @@ def run(
     return AnalyzerOutput(
         findings=findings,
         raw_output={"model": model, "truncated": truncated, "response": content[:8000]},
-        summary={"model": model, "finding_count": len(findings), "truncated": truncated},
+        summary={
+            "model": model,
+            "finding_count": len(findings),
+            "truncated": truncated,
+            **({"files_not_reviewed": omitted} if omitted else {}),
+        },
+        warnings=[f"Not reviewed (prompt size limit): {', '.join(omitted)}"] if omitted else [],
     )
 
 
@@ -182,12 +190,41 @@ def _chat(access, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, 
         return pool.submit(call).result()
 
 
-def _format_code(code: dict[str, str]) -> str:
+# Prompt budget for the code bundle (characters).
+MAX_CODE_CHARS = 60000
+# Generated, not written by the model: hashes and resolved versions only.
+_LOCKFILES = frozenset({"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "pipfile.lock"})
+
+
+def _review_order(name: str) -> tuple[int, str]:
+    from backend.reports.services.loc import is_source_file
+
+    # Source first, then manifests/config/docs: when the budget runs out it
+    # is the least informative files that are left out, never the app code.
+    return (0 if is_source_file(name) else 1, name)
+
+
+def _format_code(code: dict[str, str]) -> tuple[str, list[str]]:
+    """The review prompt's code bundle and the files that did not fit in it.
+
+    Whole files only: a file cut mid-way would make the model report the
+    cut as a syntax error.
+    """
     parts: list[str] = []
-    for name, content in code.items():
-        if content and content.strip():
-            parts.append(f"# ===== {name} =====\n{content}")
-    return "\n\n".join(parts)[:60000]
+    omitted: list[str] = []
+    used = 0
+    for name in sorted(code, key=_review_order):
+        content = code[name]
+        base = name.rsplit("/", 1)[-1].lower()
+        if not content or not content.strip() or base in _LOCKFILES or ".min." in base:
+            continue
+        block = f"# ===== {name} =====\n{content}"
+        if used + len(block) > MAX_CODE_CHARS:
+            omitted.append(name)
+            continue
+        parts.append(block)
+        used += len(block) + 2
+    return "\n\n".join(parts), omitted
 
 
 def _parse_findings(content: str) -> list[FindingData]:
@@ -198,10 +235,15 @@ def _parse_findings(content: str) -> list[FindingData]:
     for item in payload:
         if not isinstance(item, dict):
             continue
+        severity = str(item.get("severity", "info")).strip().lower()
+        category = str(item.get("category", "quality")).lower()
+        tool_confidence = _label(item.get("confidence"))
         findings.append(
             FindingData(
-                severity=str(item.get("severity", "info")).lower(),
-                category=str(item.get("category", "quality")),
+                # Models drift off the requested vocabulary ("moderate",
+                # "Security "); keep severities/categories comparable.
+                severity=_SEVERITY_ALIASES.get(severity, severity if severity in SEVERITIES else "info"),
+                category=category.strip() if category.strip() in _CATEGORIES else "quality",
                 title=str(item.get("title", "AI finding"))[:500],
                 description=str(item.get("description", "")),
                 suggestion=str(item.get("suggestion", "")),
@@ -209,9 +251,17 @@ def _parse_findings(content: str) -> list[FindingData]:
                 line_number=_as_int(item.get("line_number")),
                 rule_id=str(item.get("rule_id", "")),
                 confidence="medium",
+                # The label exactly as the model wrote it ("Moderate"); empty
+                # when it gave none.
+                tool_severity=_label(item.get("severity")),
+                tool_specific_data={"tool_confidence": tool_confidence} if tool_confidence else {},
             ),
         )
     return findings
+
+
+_SEVERITY_ALIASES = {"moderate": "medium", "warning": "medium", "error": "high", "minor": "low", "major": "high"}
+_CATEGORIES = frozenset({"security", "quality", "performance", "style", "best_practice"})
 
 
 def _extract_json_array(content: str) -> list | None:

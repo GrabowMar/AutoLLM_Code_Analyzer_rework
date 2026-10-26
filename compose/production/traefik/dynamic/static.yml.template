@@ -1,7 +1,10 @@
 http:
   routers:
+    # API, allauth, Django static files (admin CSS/JS via WhiteNoise) and the
+    # admin itself (its path prefix, DJANGO_ADMIN_PATH, is derived from DJANGO_ADMIN_URL by
+    # entrypoint.sh). Everything else on the domain goes to the frontend.
     web-secure-router:
-      rule: '(Host(`${DJANGO_DOMAIN}`) || Host(`www.${DJANGO_DOMAIN}`)) && (PathPrefix(`/api/`) || PathPrefix(`/_allauth/`) || PathPrefix(`/admin/`))'
+      rule: '(Host(`${DJANGO_DOMAIN}`) || Host(`www.${DJANGO_DOMAIN}`)) && (PathPrefix(`/api/`) || PathPrefix(`/_allauth/`) || PathPrefix(`/static/`) || PathPrefix(`${DJANGO_ADMIN_PATH}`))'
       entryPoints:
         - web-secure
       middlewares:

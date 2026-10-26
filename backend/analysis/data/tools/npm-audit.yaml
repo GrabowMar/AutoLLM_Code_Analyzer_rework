@@ -7,6 +7,8 @@ description: >-
 category: dependencies
 kind: container
 target_language: javascript
+analysis_mode: static
+technologies: [javascript, npm]
 icon: package-x
 version: "10"
 docs_url: https://docs.npmjs.com/cli/commands/npm-audit
@@ -14,19 +16,37 @@ docs_url: https://docs.npmjs.com/cli/commands/npm-audit
 install_cmd: ""
 verify_cmd: "npm --version"
 run_cmd: |
+  omit="$( [ {config:production_only} = true ] && echo --omit=dev )"
   cd {target} && find . -name package.json -not -path '*/node_modules/*' | sort | while IFS= read -r f; do
     rm -rf /tmp/npm-audit && mkdir -p /tmp/npm-audit
     cp "$f" /tmp/npm-audit/
     lock="$(dirname "$f")/package-lock.json"
     [ -f "$lock" ] && cp "$lock" /tmp/npm-audit/
     echo "### ${f#./}"
-    (cd /tmp/npm-audit && { [ -f package-lock.json ] || npm install --package-lock-only --ignore-scripts --no-audit --no-fund >/dev/null 2>&1; } && npm audit --json 2>/dev/null)
+    (cd /tmp/npm-audit && if [ ! -f package-lock.json ] && ! npm install --package-lock-only --ignore-scripts --no-audit --no-fund >/tmp/npm-install.log 2>&1; then
+      grep -E 'not in this registry|No matching version|npm error code' /tmp/npm-install.log | head -n 20 | sed 's/^/!! /'
+    else
+      npm audit --json $omit 2>/dev/null
+    fi)
     echo
   done
 parser_key: npm_audit
+file_patterns: ["package.json"]
 run_timeout: 300
 install_timeout: 60
 display_order: 20
+# production_only: dev-only packages (vite, eslint, …) never ship with the
+# built app, so their advisories (mostly dev-server issues) are left out by
+# default. A failed lockfile resolution (a hallucinated package or version) is
+# echoed as "!! " lines and reported as nonexistent-package/-version findings.
+config_schema:
+  - name: production_only
+    type: boolean
+    label: Production dependencies only
+    description: Skip advisories that only affect devDependencies.
+    default: true
+default_config:
+  production_only: true
 sample_filename: package.json
 sample_code: |
   {

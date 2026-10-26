@@ -61,7 +61,8 @@
 		'motion-reduce:transition-none',
 		disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
 		sizes[size].track,
-		checked ? 'bg-primary' : 'bg-muted',
+		// Off track: ≥ 3:1 against cards in both themes (bg-muted was ~1.1:1 in dark mode).
+		checked ? 'bg-primary' : 'bg-[color-mix(in_srgb,var(--muted-foreground)_70%,var(--card))]',
 		className,
 	)}
 >

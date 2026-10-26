@@ -210,11 +210,12 @@
 		{/snippet}
 	</EmptyState>
 {:else}
-	<div class="space-y-5">
+	<!-- Flush inside the pane card: each harness is a tinted heading band over its rows. -->
+	<div>
 		{#each groups as group (group.key)}
-			<section class="space-y-2" aria-label={group.harness ? `${group.harness.label} presets` : undefined}>
+			<section class="border-b border-border last:border-b-0" aria-label={group.harness ? `${group.harness.label} presets` : undefined}>
 				{#if group.harness}
-					<div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+					<div class="flex flex-col gap-2 border-b border-border/60 bg-muted/40 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between">
 						<div class="min-w-0">
 							<p class="flex flex-wrap items-center gap-2 text-sm font-medium">
 								{group.harness.label}
@@ -236,10 +237,10 @@
 						{/if}
 					</div>
 				{:else if group.key === 'other'}
-					<p class="section-label">Other harnesses (not available in this deployment)</p>
+					<p class="section-label border-b border-border/60 bg-muted/40 px-4 py-2.5">Other harnesses (not available in this deployment)</p>
 				{/if}
 				{#if group.presets.length === 0}
-					<p class="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">No presets for this harness.</p>
+					<p class="px-4 py-3 text-xs text-muted-foreground">No presets for this harness.</p>
 				{:else}
 					<div class="data-list">
 						{#each group.presets as preset (preset.id)}

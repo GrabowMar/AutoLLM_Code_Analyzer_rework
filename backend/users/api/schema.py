@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from django.urls import reverse
 from ninja import ModelSchema
 from ninja import Schema
@@ -38,3 +40,27 @@ class BootstrapAdminCreateSchema(Schema):
     password: str
     remember: bool = True
     email: str | None = None
+
+
+class ActivityCountsSchema(Schema):
+    applications: int
+    applications_completed: int
+    analyses: int
+    experiments: int
+    reports: int
+
+
+class ActivityItemSchema(Schema):
+    kind: str
+    id: str
+    title: str
+    status: str
+    created_at: datetime
+    href: str
+
+
+class UserActivitySchema(Schema):
+    date_joined: datetime
+    last_login: datetime | None
+    counts: ActivityCountsSchema
+    recent: list[ActivityItemSchema]

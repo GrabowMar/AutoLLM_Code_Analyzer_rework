@@ -168,7 +168,7 @@
 	</div>
 {/snippet}
 
-<div class="space-y-6">
+<div class="space-y-4">
 	<PageHeader
 		title="Batches"
 		description="Every generation batch with its progress, pass rate and cost. Open one for the results matrix."
@@ -182,139 +182,140 @@
 		{/snippet}
 	</PageHeader>
 
-	<div class="flex flex-wrap items-center gap-2">
-		<Segmented
-			aria-label="Mode"
-			size="sm"
-			items={modeItems}
-			value={modeFilter || 'all'}
-			onValueChange={(v) => setParams({ mode: v === 'all' ? null : v, page: null })}
-		/>
-		<Segmented
-			aria-label="Source"
-			size="sm"
-			items={sourceItems}
-			value={sourceFilter || 'all'}
-			onValueChange={(v) => setParams({ source: v === 'all' ? null : v, page: null })}
-		/>
-		{#if updatedAt}
-			<span class="text-[11px] text-muted-foreground sm:ml-auto" aria-live="polite">
-				{#if refreshError}
-					<span class="text-warning-fg">Couldn't refresh: {refreshError}</span>
-				{:else}
-					Updated {updatedAt.toLocaleTimeString()}{anyActive ? ' · refreshing every 10 s while runs are in flight' : ''}
-				{/if}
-			</span>
-		{/if}
-	</div>
-
 	{#if error}
 		<ErrorAlert message={error} onretry={() => load()} />
 	{/if}
 
-	{#if loading}
-		<LoadingState label="loading batches" />
-	{:else if data && items.length === 0}
-		{#if filtered}
-			<EmptyState icon={Layers} title="No batches match these filters" description="Try another mode or source.">
-				{#snippet action()}
-					<Button variant="outline" size="sm" onclick={() => setParams({ mode: null, source: null, page: null })}>Clear filters</Button>
-				{/snippet}
-			</EmptyState>
-		{:else}
-			<EmptyState
-				icon={Layers}
-				title="No batches yet"
-				description="Start a batch in the Sample Generator: pick tasks, models and harness presets, and every combination runs here."
-			>
-				{#snippet action()}
-					<Button size="sm" href="/sample-generator"><WandSparkles class="h-3.5 w-3.5" />Open Sample Generator</Button>
-				{/snippet}
-			</EmptyState>
-		{/if}
-	{:else if data}
-		<div class="space-y-3 transition-opacity duration-200 {busy ? 'opacity-60' : ''}" aria-busy={busy}>
-			<!-- Table (md and up) -->
-			<Card.Root class="hidden gap-0 overflow-clip py-0 md:block">
-				<Card.Content class="p-0">
-					<div class="table-frame" {@attach tableFrame}>
-						<table>
-							<thead>
-								<tr>
-									<th scope="col">Batch</th>
-									<th scope="col">Status</th>
-									<th scope="col">Progress</th>
-									<th scope="col">Design</th>
-									<th scope="col" class="num">Pass rate</th>
-									<th scope="col" class="num">Cost</th>
-									<th scope="col" class="num">Created</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each items as batch (batch.id)}
-									<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the title link is the keyboard path) -->
-									<tr class="row-link" onclick={rowLink(batchHref(batch.id))}>
-										<td class="max-w-72">{@render batchTitle(batch)}</td>
-										<td><StatusBadge status={batch.status} /></td>
-										<td>{@render progress(batch)}</td>
-										<td class="max-w-64">
-											<span class="block truncate text-xs text-muted-foreground" title={batchDesign(batch)}>{batchDesign(batch) || '—'}</span>
-											{#if batch.stack_slug}<span class="font-mono text-[11px] text-muted-foreground">{batch.stack_slug}</span>{/if}
-										</td>
-										<td class="text-right text-sm">{@render passRate(batch)}</td>
-										<td class="text-right font-mono text-sm tabular-nums">{formatUsd(batch.cost_usd)}</td>
-										<td class="whitespace-nowrap text-right text-xs text-muted-foreground" title={formatDateTime(batch.created_at)}>
-											{timeAgo(batch.created_at)}
-										</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-				</Card.Content>
-			</Card.Root>
-
-			<!-- Cards (below md) -->
-			<ul class="space-y-2 md:hidden">
-				{#each items as batch (batch.id)}
-					<li>
-						<Card.Root>
-							<Card.Content class="space-y-2.5 p-3">
-								<div class="flex items-start justify-between gap-2">
-									<div class="min-w-0">{@render batchTitle(batch)}</div>
-									<StatusBadge status={batch.status} />
-								</div>
-								{@render progress(batch)}
-								{#if batchDesign(batch)}
-									<p class="text-xs text-muted-foreground">{batchDesign(batch)}</p>
-								{/if}
-								<dl class="grid grid-cols-3 gap-2 text-xs">
-									<div>
-										<dt class="text-[11px] text-muted-foreground">Pass rate</dt>
-										<dd>{@render passRate(batch)}</dd>
-									</div>
-									<div>
-										<dt class="text-[11px] text-muted-foreground">Cost</dt>
-										<dd class="font-mono tabular-nums">{formatUsd(batch.cost_usd)}</dd>
-									</div>
-									<div>
-										<dt class="text-[11px] text-muted-foreground">Created</dt>
-										<dd title={formatDateTime(batch.created_at)}>{timeAgo(batch.created_at)}</dd>
-									</div>
-								</dl>
-							</Card.Content>
-						</Card.Root>
-					</li>
-				{/each}
-			</ul>
-
-			<PaginationBar
-				{resultsText}
-				page={data.page}
-				pages={data.pages}
-				onGoToPage={(p) => setParams({ page: p > 1 ? String(p) : null })}
-				class="rounded-md border border-border"
-			/>
+	<!-- One card: filters + refresh status in the toolbar strip, then table / list / empty state. -->
+	<Card.Root class="gap-0 overflow-clip py-0">
+		<div class="table-toolbar">
+			<div class="flex min-w-0 flex-wrap items-center gap-2">
+				<Segmented
+					aria-label="Mode"
+					size="sm"
+					items={modeItems}
+					value={modeFilter || 'all'}
+					onValueChange={(v) => setParams({ mode: v === 'all' ? null : v, page: null })}
+				/>
+				<Segmented
+					aria-label="Source"
+					size="sm"
+					items={sourceItems}
+					value={sourceFilter || 'all'}
+					onValueChange={(v) => setParams({ source: v === 'all' ? null : v, page: null })}
+				/>
+			</div>
+			{#if updatedAt}
+				<span class="text-[11px] text-muted-foreground" aria-live="polite">
+					{#if refreshError}
+						<span class="text-warning-fg">Couldn't refresh: {refreshError}</span>
+					{:else}
+						<span title={anyActive ? 'Refreshing every 10 s while runs are in flight' : undefined}>
+							Updated {updatedAt.toLocaleTimeString()}{anyActive ? ' · live' : ''}
+						</span>
+					{/if}
+				</span>
+			{/if}
 		</div>
-	{/if}
+
+		{#if loading}
+			<LoadingState label="loading batches" />
+		{:else if data && items.length === 0}
+			{#if filtered}
+				<EmptyState compact icon={Layers} title="No batches match these filters" description="Try another mode or source.">
+					{#snippet action()}
+						<Button variant="outline" size="sm" onclick={() => setParams({ mode: null, source: null, page: null })}>Clear filters</Button>
+					{/snippet}
+				</EmptyState>
+			{:else}
+				<EmptyState
+					compact
+					icon={Layers}
+					title="No batches yet"
+					description="Start a batch in the Sample Generator: pick tasks, models and harness presets, and every combination runs here."
+				>
+					{#snippet action()}
+						<Button size="sm" href="/sample-generator"><WandSparkles class="h-3.5 w-3.5" />Open Sample Generator</Button>
+					{/snippet}
+				</EmptyState>
+			{/if}
+		{:else if data}
+			<div class="transition-opacity duration-200 {busy ? 'opacity-60' : ''}" aria-busy={busy}>
+				<!-- Table (md and up) -->
+				<div class="table-frame hidden md:block" {@attach tableFrame}>
+					<table>
+						<thead>
+							<tr>
+								<th scope="col">Batch</th>
+								<th scope="col">Status</th>
+								<th scope="col">Progress</th>
+								<th scope="col">Design</th>
+								<th scope="col" class="num">Pass rate</th>
+								<th scope="col" class="num">Cost</th>
+								<th scope="col" class="num">Created</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each items as batch (batch.id)}
+								<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the title link is the keyboard path) -->
+								<tr class="row-link" onclick={rowLink(batchHref(batch.id))}>
+									<td class="max-w-72">{@render batchTitle(batch)}</td>
+									<td><StatusBadge status={batch.status} /></td>
+									<td>{@render progress(batch)}</td>
+									<td class="max-w-64">
+										<span class="block truncate text-xs text-muted-foreground" title={batchDesign(batch)}>{batchDesign(batch) || '—'}</span>
+										{#if batch.stack_slug}<span class="font-mono text-[11px] text-muted-foreground">{batch.stack_slug}</span>{/if}
+									</td>
+									<td class="text-right text-sm">{@render passRate(batch)}</td>
+									<td class="text-right font-mono text-sm tabular-nums">{formatUsd(batch.cost_usd)}</td>
+									<td class="whitespace-nowrap text-right text-xs text-muted-foreground" title={formatDateTime(batch.created_at)}>
+										{timeAgo(batch.created_at)}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+
+				<!-- Rows (below md) -->
+				<ul class="divide-y divide-border md:hidden">
+					{#each items as batch (batch.id)}
+						<li class="space-y-2.5 p-3">
+							<div class="flex items-start justify-between gap-2">
+								<div class="min-w-0">{@render batchTitle(batch)}</div>
+								<StatusBadge status={batch.status} />
+							</div>
+							{@render progress(batch)}
+							{#if batchDesign(batch)}
+								<p class="text-xs text-muted-foreground">{batchDesign(batch)}</p>
+							{/if}
+							<dl class="grid grid-cols-3 gap-2 text-xs">
+								<div>
+									<dt class="text-[11px] text-muted-foreground">Pass rate</dt>
+									<dd>{@render passRate(batch)}</dd>
+								</div>
+								<div>
+									<dt class="text-[11px] text-muted-foreground">Cost</dt>
+									<dd class="font-mono tabular-nums">{formatUsd(batch.cost_usd)}</dd>
+								</div>
+								<div>
+									<dt class="text-[11px] text-muted-foreground">Created</dt>
+									<dd title={formatDateTime(batch.created_at)}>{timeAgo(batch.created_at)}</dd>
+								</div>
+							</dl>
+						</li>
+					{/each}
+				</ul>
+
+				<PaginationBar
+					{resultsText}
+					page={data.page}
+					pages={data.pages}
+					onGoToPage={(p) => setParams({ page: p > 1 ? String(p) : null })}
+					class="border-t border-border"
+					scrollToCard
+				/>
+			</div>
+		{/if}
+	</Card.Root>
 </div>

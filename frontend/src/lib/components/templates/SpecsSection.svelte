@@ -81,10 +81,16 @@
 	editing={current !== null}
 	onCloseEditor={close}
 >
+	{#snippet summary()}
+		{#if !data.specs.loading && (search.trim() || category)}
+			<span class="font-mono tabular-nums">{shown.length}</span> of <span class="font-mono tabular-nums">{data.specs.items.length}</span>
+		{/if}
+	{/snippet}
+
 	{#snippet toolbar()}
 		<div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
 			<div class="relative w-full sm:w-64">
-				<Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+				<Search class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
 				<Input bind:value={search} placeholder="Search app specs…" aria-label="Search app specs" class="h-9 pl-9" />
 			</div>
 			{#if categories.length > 1}

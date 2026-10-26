@@ -70,7 +70,6 @@
 	onCloseEditor={close}
 >
 	{#snippet toolbar()}
-		<span></span>
 		<Button size="sm" class="w-full sm:w-auto" onclick={() => open(null)}><Plus /> New profile</Button>
 	{/snippet}
 

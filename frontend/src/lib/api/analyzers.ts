@@ -20,6 +20,10 @@ export interface AnalyzerTool {
   category: string;
   kind: "container" | "ai";
   target_language: string;
+  /** "dynamic" tools probe the app's running container (DAST); "static" ones read the source. */
+  analysis_mode: "static" | "dynamic";
+  /** Technology slugs the tool scans; labels come from `getCatalogMeta()`. */
+  technologies: string[];
   icon: string;
   version: string;
   docs_url: string;
@@ -32,6 +36,33 @@ export interface AnalyzerTool {
   installed_version: string;
   update_available: boolean;
   output_kind?: string;
+}
+
+export interface CatalogEntry {
+  slug: string;
+  label: string;
+  description: string;
+  /** Technologies only: the `technology_groups` slug it belongs to. */
+  group: string;
+}
+
+/** Shop vocabulary from `data/tools/catalog.yaml`. */
+export interface CatalogMeta {
+  categories: CatalogEntry[];
+  modes: CatalogEntry[];
+  technology_groups: CatalogEntry[];
+  technologies: CatalogEntry[];
+}
+
+/** How the caller's recent generated apps map onto the catalog. */
+export interface AppCoverage {
+  /** Generated apps with recognizable code (most recent `apps_considered`). */
+  apps_total: number;
+  apps_considered: number;
+  /** Technology slug → number of apps containing it. */
+  technologies: Record<string, number>;
+  /** Tool slug → number of apps containing something the tool scans. */
+  tools: Record<string, number>;
 }
 
 export interface Workspace {
@@ -86,6 +117,17 @@ export async function getToolCatalog(): Promise<AnalyzerTool[]> {
 
 export async function getTool(slug: string): Promise<AnalyzerTool> {
   const res = await apiFetch(`/analyzers/tools/${slug}/`);
+  return res.json();
+}
+
+export async function getAppCoverage(): Promise<AppCoverage> {
+  const res = await apiFetch("/analyzers/coverage/");
+  return res.json();
+}
+
+/** Categories, static/dynamic modes and the scanned-technology vocabulary. */
+export async function getCatalogMeta(): Promise<CatalogMeta> {
+  const res = await apiFetch("/analyzers/catalog/");
   return res.json();
 }
 

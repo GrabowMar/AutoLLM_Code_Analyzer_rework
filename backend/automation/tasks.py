@@ -1,10 +1,11 @@
-"""Celery tasks for the automation execution engine.
+"""Celery tasks of the retired automation pipelines (legacy, kept for existing data).
 
-Workers are configured in ``docker-compose.local.yml``.
-Verify a worker is running: ``docker ps | grep celery``.
-
-If the Celery broker is unreachable, ``trigger_run`` in ``services.py``
-falls back to a daemon thread automatically.
+The automation API router is unmounted and nothing enqueues or schedules these
+tasks any more: experiment schedules and post-run steps now run inside the
+executor (see docs/BACKGROUND_SERVICES.md). They remain registered with the
+legacy models. ``trigger_run`` in
+``services.py`` (no longer reachable from the API) still falls back to a
+daemon thread when the broker is unreachable.
 """
 
 from __future__ import annotations

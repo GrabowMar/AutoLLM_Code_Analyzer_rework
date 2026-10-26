@@ -47,6 +47,8 @@
 	let { experiment: exp, busy = false, onaction }: Props = $props();
 
 	const done = $derived(finishedCells(exp.progress));
+	const failed = $derived(exp.progress?.failed ?? 0);
+	const cancelled = $derived(exp.progress?.cancelled ?? 0);
 	const terminal = $derived(isTerminal(exp.status));
 	const launched = $derived(exp.status !== 'draft');
 	const design = $derived(
@@ -78,6 +80,8 @@
 				<BatchProgress counts={toBatchCounts(exp.progress)} total={exp.total_cells} />
 				<p class="flex flex-wrap gap-x-3 text-[11px] text-muted-foreground tabular-nums">
 					<span><span class="font-mono text-foreground">{done}/{exp.total_cells}</span> done</span>
+					{#if failed > 0}<span class="text-danger-fg"><span class="font-mono">{failed}</span> failed</span>{/if}
+					{#if cancelled > 0}<span><span class="font-mono">{cancelled}</span> cancelled</span>{/if}
 					{#if !terminal && exp.eta_seconds != null}<span>ETA {formatEta(exp.eta_seconds)}</span>{/if}
 					{#if exp.cost_usd > 0}<span class="font-mono">{formatUsd(exp.cost_usd)}</span>{/if}
 				</p>
@@ -116,7 +120,7 @@
 					<Button
 						variant="ghost"
 						size="sm"
-						class="size-8 p-0 text-muted-foreground hover:text-foreground"
+						class="size-9 p-0 text-muted-foreground hover:text-foreground lg:size-8"
 						href="/experiments/new?from={exp.id}"
 						title="Clone: new draft with this design"
 						aria-label="Clone: new draft with this design"><Copy class="size-4" /></Button
@@ -124,11 +128,11 @@
 				{/if}
 			</div>
 			{#if exp.status === 'running'}
-				<Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs" disabled={busy} onclick={() => onaction('pause')}><Pause class="size-3" />Pause</Button>
+				<Button variant="ghost" size="sm" class="h-9 gap-1 px-3 text-xs lg:h-7 lg:px-2" disabled={busy} onclick={() => onaction('pause')}><Pause class="size-3" />Pause</Button>
 			{:else if exp.status === 'paused'}
-				<Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs" disabled={busy} onclick={() => onaction('resume')}><Play class="size-3" />Resume</Button>
+				<Button variant="ghost" size="sm" class="h-9 gap-1 px-3 text-xs lg:h-7 lg:px-2" disabled={busy} onclick={() => onaction('resume')}><Play class="size-3" />Resume</Button>
 			{:else}
-				<Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs" href="/experiments/new?from={exp.id}" title="New draft with this design"><Copy class="size-3" />Clone</Button>
+				<Button variant="ghost" size="sm" class="h-9 gap-1 px-3 text-xs lg:h-7 lg:px-2" href="/experiments/new?from={exp.id}" title="New draft with this design"><Copy class="size-3" />Clone</Button>
 			{/if}
 		</div>
 	</div>
@@ -138,7 +142,7 @@
 	<Button
 		variant="ghost"
 		size="sm"
-		class="size-8 p-0 text-muted-foreground {danger ? 'hover:bg-destructive/10 hover:text-danger-fg' : 'hover:text-foreground'}"
+		class="size-9 p-0 text-muted-foreground lg:size-8 {danger ? 'hover:bg-destructive/10 hover:text-danger-fg' : 'hover:text-foreground'}"
 		title={label}
 		aria-label={label}
 		disabled={busy}

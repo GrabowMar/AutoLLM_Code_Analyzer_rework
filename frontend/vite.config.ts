@@ -1,11 +1,60 @@
+import { request } from "node:http";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 
 const apiTarget = process.env.API_TARGET ?? "http://localhost:8000";
+// Sample-app subdomains (<name>.<APPS_DOMAIN>), served by Django when
+// APPS_SUBDOMAIN_PROXY is on. Empty disables the passthrough below.
+const appsDomain = (process.env.APPS_DOMAIN ?? "").trim().toLowerCase();
+
+// Generated apps are named llm-<hex> (backend/runtime/middleware.py); only a
+// single such label under APPS_DOMAIN is an app host.
+function isAppHost(host: string | undefined): boolean {
+  if (!appsDomain || !host) return false;
+  const name = host.split(":")[0].toLowerCase();
+  if (!name.endsWith(`.${appsDomain}`)) return false;
+  const label = name.slice(0, -(appsDomain.length + 1));
+  return label.startsWith("llm-") && !label.includes(".");
+}
+
+// Hand every request for an app subdomain to Django untouched (Host kept, so
+// AppSubdomainProxyMiddleware routes it). Registered before Vite's own
+// middleware, so the app's /, /assets, /src and /api never reach the platform.
+function appSubdomainPassthrough(): Plugin {
+  return {
+    name: "app-subdomain-passthrough",
+    apply: "serve",
+    configureServer(server) {
+      if (!appsDomain) return;
+      const target = new URL(apiTarget);
+      server.middlewares.use((req, res, next) => {
+        if (!isAppHost(req.headers.host)) return next();
+        const upstream = request(
+          {
+            hostname: target.hostname,
+            port: target.port || 80,
+            method: req.method,
+            path: req.url,
+            headers: req.headers,
+          },
+          (upstreamRes) => {
+            res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
+            upstreamRes.pipe(res);
+          },
+        );
+        upstream.on("error", () => {
+          if (!res.headersSent) res.writeHead(502);
+          res.end("Bad gateway");
+        });
+        req.pipe(upstream);
+      });
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [tailwindcss(), sveltekit()],
+  plugins: [appSubdomainPassthrough(), tailwindcss(), sveltekit()],
   ssr: {
     // layerchart ships raw .svelte files; Node can't load them when the
     // package is externalized during dev SSR.
@@ -129,9 +178,13 @@ export default defineConfig({
   },
   server: {
     allowedHosts: process.env.VITE_ALLOWED_HOSTS
-      ? process.env.VITE_ALLOWED_HOSTS.split(",")
-          .map((h) => h.trim())
-          .filter(Boolean)
+      ? [
+          ...process.env.VITE_ALLOWED_HOSTS.split(",")
+            .map((h) => h.trim())
+            .filter(Boolean),
+          // Vite checks the Host before any plugin middleware runs.
+          ...(appsDomain ? [`.${appsDomain}`] : []),
+        ]
       : true,
     hmr: {
       overlay: false,

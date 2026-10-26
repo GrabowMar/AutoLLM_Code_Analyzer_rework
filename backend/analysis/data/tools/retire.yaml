@@ -1,0 +1,28 @@
+slug: retire
+name: Retire.js
+description: >-
+  Finds JavaScript libraries with known vulnerabilities, including copies
+  vendored or bundled into static files (old jQuery, Angular, Bootstrap…)
+  that package-manifest audits miss.
+category: dependencies
+kind: container
+target_language: javascript
+analysis_mode: static
+technologies: [javascript, html, npm]
+icon: history
+version: "5"
+docs_url: https://retirejs.github.io/retire.js/
+install_cmd: "npm install -g retire@5"
+verify_cmd: "retire --version"
+uninstall_cmd: "npm uninstall -g retire"
+run_cmd: "retire --path {target} --outputformat json --exitwith 0 --ignore node_modules 2>/dev/null"
+parser_key: retire
+file_patterns: ["*.js", "*.html", "package.json"]
+run_timeout: 180
+install_timeout: 300
+display_order: 30
+config_schema: []
+default_config: {}
+sample_filename: index.html
+sample_code: |
+  <script src="https://code.jquery.com/jquery-1.8.3.min.js"></script>

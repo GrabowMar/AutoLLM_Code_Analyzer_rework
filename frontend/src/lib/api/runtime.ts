@@ -153,6 +153,8 @@ export async function getContainers(
     per_page?: number;
     status?: ContainerStatus;
     job_id?: string;
+    /** OpenRouter model id: containers of that model's jobs. */
+    model_id?: string;
   } = {},
 ): Promise<PaginatedContainers> {
   const q = new URLSearchParams();
@@ -160,6 +162,7 @@ export async function getContainers(
   if (params.per_page) q.set("per_page", String(params.per_page));
   if (params.status) q.set("status", params.status);
   if (params.job_id) q.set("job_id", params.job_id);
+  if (params.model_id) q.set("model_id", params.model_id);
   const qs = q.toString();
   const res = await apiFetch(`/runtime/containers/${qs ? "?" + qs : ""}`);
   return res.json();

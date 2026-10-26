@@ -10,8 +10,18 @@ DJANGO_DOMAIN=example.com
 # Secrets
 # ------------------------------------------------------------------------------
 DJANGO_SECRET_KEY=
-DJANGO_ADMIN_URL=
+# Path of the Django admin, with a trailing slash. Any value works — Traefik's
+# django router follows it — so pick something non-obvious. Empty = admin/.
+DJANGO_ADMIN_URL=admin/
 DJANGO_ALLOWED_HOSTS=example.com,www.example.com
+
+# DJANGO_SETTINGS_MODULE is set to config.settings.production by
+# docker-compose.production.yml — do not override it here.
+
+# CORS / CSRF — comma-separated full origins (scheme + host). The SvelteKit app
+# is served from the same origin as the API, so this is normally just the site.
+DJANGO_CORS_ALLOWED_ORIGINS=https://example.com,https://www.example.com
+DJANGO_CSRF_TRUSTED_ORIGINS=https://example.com,https://www.example.com
 
 # Security
 # ------------------------------------------------------------------------------
@@ -19,15 +29,29 @@ DJANGO_SECURE_SSL_REDIRECT=False
 
 # Email
 # ------------------------------------------------------------------------------
+# From address; defaults to "LLM Eval Lab <noreply@DJANGO_DOMAIN>".
+# DJANGO_DEFAULT_FROM_EMAIL=LLM Eval Lab <noreply@example.com>
+# DJANGO_SERVER_EMAIL=
+# Option A — Mailgun (django-anymail). Used whenever MAILGUN_API_KEY is set.
 MAILGUN_API_KEY=
-DJANGO_SERVER_EMAIL=
+# Sending domain; defaults to DJANGO_DOMAIN.
 MAILGUN_DOMAIN=
+# EU-region accounts: https://api.eu.mailgun.net/v3
+# MAILGUN_API_URL=https://api.mailgun.net/v3
+# Option B — SMTP (used when MAILGUN_API_KEY is empty). Unset = localhost:25,
+# no auth, no TLS. Uncomment and fill in for a real relay:
+# EMAIL_HOST=smtp.example.com
+# EMAIL_PORT=587
+# EMAIL_HOST_USER=
+# EMAIL_HOST_PASSWORD=
+# EMAIL_USE_TLS=True
+# EMAIL_USE_SSL=False
 
-# AWS
+# Sentry (optional) — error reporting is enabled only when SENTRY_DSN is set.
 # ------------------------------------------------------------------------------
-DJANGO_AWS_ACCESS_KEY_ID=
-DJANGO_AWS_SECRET_ACCESS_KEY=
-DJANGO_AWS_STORAGE_BUCKET_NAME=
+SENTRY_DSN=
+# SENTRY_ENVIRONMENT=production
+# SENTRY_TRACES_SAMPLE_RATE=0.0
 
 # django-allauth
 # ------------------------------------------------------------------------------
@@ -75,7 +99,7 @@ CELERY_FLOWER_PASSWORD=
 # OpenRouter — get a key at https://openrouter.ai/keys
 # ------------------------------------------------------------------------------
 # Optional global fallback key. In production we recommend leaving this empty
-# and requiring every user to add their own key via Settings → API Access
+# and requiring every user to add their own key via Settings → API keys
 # (stored encrypted in the DB). Set OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK=False
 # to enforce per-user keys.
 OPENROUTER_API_KEY=

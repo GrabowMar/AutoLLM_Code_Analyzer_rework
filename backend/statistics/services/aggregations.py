@@ -233,7 +233,8 @@ def get_tool_effectiveness(
 
     # Bulk fetch top rules for all tools in one grouped query!
     rules_data = (
-        Finding.objects.filter(result__tool_slug__in=tool_names)
+        _scoped(Finding.objects.all(), user, "result__run__created_by")
+        .filter(result__tool_slug__in=tool_names)
         .exclude(rule_id="")
         .values("result__tool_slug", "rule_id")
         .annotate(c=Count("id"))

@@ -1,0 +1,46 @@
+slug: trivy
+name: Trivy
+description: >-
+  All-in-one scanner from Aqua Security: vulnerable packages in Python and
+  JavaScript manifests and lockfiles, misconfigurations in Dockerfiles,
+  Kubernetes manifests and Terraform, and hardcoded secrets.
+category: security
+kind: container
+target_language: any
+analysis_mode: static
+technologies: [pypi, npm, docker, kubernetes, terraform]
+icon: shield-half
+version: "0.75"
+docs_url: https://trivy.dev/latest/docs/
+# Checksum-pinned release; the vulnerability DB (~1.5 GB on disk) is fetched
+# at install time so runs don't pay for it.
+install_cmd: >-
+  set -e;
+  mkdir -p /home/analyzer/.local/bin && cd /tmp;
+  curl -sSfL -o trivy.tgz https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_Linux-64bit.tar.gz;
+  echo "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f  trivy.tgz" | sha256sum -c -;
+  tar -xzf trivy.tgz -C /home/analyzer/.local/bin trivy && rm -f trivy.tgz;
+  trivy fs --quiet --download-db-only
+verify_cmd: "trivy --version | head -1"
+uninstall_cmd: "rm -rf /home/analyzer/.local/bin/trivy /home/analyzer/.cache/trivy"
+run_cmd: "trivy fs --quiet --format json --scanners {config:scanners} --skip-dirs '**/node_modules' --exit-code 0 {target} 2>/dev/null"
+parser_key: trivy
+run_timeout: 300
+install_timeout: 900
+display_order: 15
+config_schema:
+  - name: scanners
+    type: select
+    label: Scanners
+    description: What to look for. Misconfig and secret scanning work offline.
+    default: "vuln,misconfig,secret"
+    options:
+      - { value: "vuln,misconfig,secret", label: "Vulnerabilities, misconfigurations, secrets" }
+      - { value: "vuln", label: "Vulnerable packages only" }
+      - { value: "misconfig,secret", label: "Misconfigurations and secrets" }
+default_config:
+  scanners: "vuln,misconfig,secret"
+sample_filename: requirements.txt
+sample_code: |
+  flask==0.12.2
+  Jinja2==2.10

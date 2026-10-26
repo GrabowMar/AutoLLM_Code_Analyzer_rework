@@ -336,6 +336,8 @@ def build_review_sample(
                     "line": f.line_number,
                     "end_line": (f.tool_specific_data or {}).get("end_line"),
                     "cwe": (f.tool_specific_data or {}).get("cwe") or "",
+                    "package": (f.tool_specific_data or {}).get("package") or "",
+                    "issue_key": (f.tool_specific_data or {}).get("issue_key") or "",
                     "title": f.title,
                 }
                 for f in findings

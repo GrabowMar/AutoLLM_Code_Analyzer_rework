@@ -100,14 +100,19 @@ def get_study_breakdowns(
     include_ai: bool = False,
     line_tolerance: int = Query(2, ge=0, le=20),
     include_issues: bool = False,
+    common_tools_only: bool = True,
 ):
-    """Raw vs cross-tool-deduplicated issues per app, model, template and tool, plus tool overlap."""
+    """Raw vs cross-tool-deduplicated issues per app, model, template and tool, plus tool overlap.
+
+    By default only tools that measured every app in scope are counted (see ``coverage``).
+    """
     from backend.statistics.services.study import issue_breakdowns
 
     data = issue_breakdowns(
         _study_scope(request, experiment_id, batch_id),
         include_ai=include_ai,
         line_tolerance=line_tolerance,
+        common_tools_only=common_tools_only,
     )
     if not include_issues:
         data.pop("issues")

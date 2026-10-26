@@ -59,7 +59,7 @@ def _build_auth_error(status_code: int, body: str) -> OpenRouterError:
         f"API error {status_code}: {body[:500]}",
         status_code=status_code,
         user_facing_message=("OpenRouter rejected the API key used for this request."),
-        remediation=("Update or rotate your OpenRouter API key in Settings → API Access."),
+        remediation=("Update or rotate your OpenRouter API key in Settings → API keys."),
     )
 
 

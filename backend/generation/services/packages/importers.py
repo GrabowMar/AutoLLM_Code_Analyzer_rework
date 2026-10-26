@@ -432,6 +432,12 @@ def _import_bundle(
     payload = _validate_bundle_payload(raw_bundle)
     # A stack renamed on import keeps its profiles pointing at it.
     payload["scaffolding_slug"] = (stack_slug_map or {}).get(payload["scaffolding_slug"], payload["scaffolding_slug"])
+    # An unknown stack would silently fall back to the default one at run time.
+    from backend.runtime.services.scaffolding import is_known_stack_slug
+
+    if not is_known_stack_slug(payload["scaffolding_slug"]):
+        msg = f"Bundle {payload['slug']} references unknown stack {payload['scaffolding_slug']!r}"
+        raise ValueError(msg)
     normalized_refs = []
     for raw_ref in payload["block_refs"]:
         ref = _validate_block_ref(raw_ref)
@@ -689,6 +695,14 @@ def _validate_app_template_payload(raw_template: Any) -> dict[str, Any]:
             msg = f"App template {slug}: difficulty must be one of basic, standard, advanced"
             raise ValueError(msg)
         payload["difficulty"] = difficulty
+    # The same contract the seeder's specs and POST /app-specs/ meet (the
+    # slug pattern aside: older specs and import renames use hyphens).
+    from backend.generation.services.data_lint import app_spec_errors
+
+    errors = app_spec_errors(payload, label=f"App template {slug}", check_slug=False)
+    if errors:
+        msg = "; ".join(errors[:5]) + (f" (+{len(errors) - 5} more)" if len(errors) > 5 else "")
+        raise ValueError(msg)
     return payload
 
 
@@ -708,8 +722,12 @@ def _validate_block_payload(raw_block: Any) -> dict[str, Any]:
     if not content:
         msg = f"Block {slug} is missing content"
         raise ValueError(msg)
+    block_type = str(raw_block.get("block_type", "")).strip() or ContentBlock.BlockType.PROMPT_TONE
+    if block_type not in ContentBlock.BlockType.values:
+        msg = f"Block {slug} has unknown block_type {block_type!r} (one of {', '.join(ContentBlock.BlockType.values)})"
+        raise ValueError(msg)
     return {
-        "block_type": str(raw_block.get("block_type", "")).strip() or ContentBlock.BlockType.PROMPT_TONE,
+        "block_type": block_type,
         "slug": slug,
         "version": int(raw_block.get("version", 1)),
         "name": name,

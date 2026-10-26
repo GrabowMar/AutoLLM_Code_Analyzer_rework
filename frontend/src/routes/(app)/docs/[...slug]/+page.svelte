@@ -19,6 +19,7 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import Link from '@lucide/svelte/icons/link';
 	import { toast } from 'svelte-sonner';
+	import { pageTitle } from '$lib/stores/page-title.svelte';
 
 	let doc = $state<DocPage | null>(null);
 	let tree = $state<DocNode[]>([]);
@@ -50,6 +51,11 @@
 	});
 
 	$effect(() => {
+		pageTitle.current = doc?.title ?? '';
+		return () => (pageTitle.current = '');
+	});
+
+	$effect(() => {
 		loadDoc($page.params.slug ?? '');
 	});
 
@@ -71,13 +77,9 @@
 	}
 </script>
 
-<svelte:head>
-	<title>{doc?.title ?? 'Docs'} · LLM Lab</title>
-</svelte:head>
-
-<div class="mx-auto flex w-full max-w-6xl gap-8 px-4 py-6 sm:px-6 sm:py-8 lg:gap-12 lg:px-10">
-	<!-- Article -->
-	<article class="min-w-0 flex-1">
+<div class="flex gap-6">
+	<!-- Article: prose sits on a paper surface, never directly on the graph-paper canvas. -->
+	<article class="min-w-0 flex-1 rounded-md border border-border bg-card px-4 py-5 shadow-[var(--shadow-card)] sm:px-8 sm:py-7 lg:px-10">
 		{#if loading}
 			<LoadingState label="loading page" />
 		{:else if notFound}
@@ -128,8 +130,8 @@
 
 	<!-- TOC rail -->
 	{#if doc && headings.length > 0}
-		<aside class="hidden w-56 shrink-0 xl:block" aria-label="On this page">
-			<div class="sticky top-[calc(3rem+1.5rem)] max-h-[calc(100dvh-3rem-3rem)] overflow-y-auto pr-2">
+		<aside class="hidden w-56 shrink-0 2xl:block" aria-label="On this page">
+			<div class="sticky top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto rounded-md border border-border bg-card p-3 shadow-[var(--shadow-card)]">
 				<TocRail {headings} />
 			</div>
 		</aside>

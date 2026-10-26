@@ -19,6 +19,7 @@ from backend.generation.tests.factories import GenerationJobFactory
 from backend.inference.models import LLMEndpoint
 from backend.realtime import authz
 from backend.realtime.subscribers import event_stream
+from backend.runtime.tests.factories import ContainerInstanceFactory
 from backend.users.tests.factories import UserFactory
 
 STREAM = "/api/realtime/stream"
@@ -72,10 +73,21 @@ class TestResolveChannel:
         ):
             assert authz.resolve_channel(stranger, channel) is None, channel
 
+    def test_runtime_channel_follows_container_visibility(self):
+        builder, job_owner, stranger = UserFactory(), UserFactory(), UserFactory()
+        job = GenerationJobFactory(created_by=job_owner)
+        container = ContainerInstanceFactory(created_by=builder, generation_job=job)
+        channel = f"runtime:{container.id}"
+        assert authz.resolve_channel(builder, channel) == channel
+        assert authz.resolve_channel(job_owner, channel) == channel
+        assert authz.resolve_channel(UserFactory(is_staff=True), channel) == channel
+        assert authz.resolve_channel(stranger, channel) is None
+
     def test_aggregate_channels_need_only_a_login(self):
         user = UserFactory()
         assert authz.resolve_channel(user, "capacity") == "capacity"
-        assert authz.resolve_channel(user, "dashboard") == "dashboard"
+        # Nothing publishes a "dashboard" channel, so it is refused like any unknown name.
+        assert authz.resolve_channel(user, "dashboard") is None
         assert authz.resolve_channel(None, "capacity") is None
 
     def test_endpoint_non_owners_are_mapped_to_the_public_variant(self):

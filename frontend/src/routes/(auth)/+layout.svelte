@@ -35,7 +35,7 @@
 		</div>
 
 		<p class="font-mono text-[11px] uppercase tracking-[0.14em] text-sidebar-foreground/50">
-			LLM Eval Lab · {new Date().getFullYear()}
+			LLM Lab · {new Date().getFullYear()}
 		</p>
 	</aside>
 

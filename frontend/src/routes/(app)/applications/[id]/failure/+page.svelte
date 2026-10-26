@@ -68,7 +68,7 @@ onMount(fetchData);
 {#if loading}
 <LoadingState label="loading failure details" />
 {:else if !job}
-<div class="space-y-6">
+<div class="space-y-4">
 <PageHeader title="Failure Details" back={{ href: '/applications', label: 'Applications' }} />
 <EmptyState icon={AlertTriangle} title="Job not found" description="It may have been deleted, or the link is wrong.">
 {#snippet action()}
@@ -77,7 +77,7 @@ onMount(fetchData);
 </EmptyState>
 </div>
 {:else}
-<div class="space-y-6">
+<div class="space-y-4">
 <PageHeader
 title="Failure Details"
 description="{job.model_name ?? 'Job'} — generation failed"

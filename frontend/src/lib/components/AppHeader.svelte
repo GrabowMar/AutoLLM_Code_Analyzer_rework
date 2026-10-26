@@ -6,19 +6,20 @@
 	import User from '@lucide/svelte/icons/user';
 	import UserCog from '@lucide/svelte/icons/user-cog';
 	import Palette from '@lucide/svelte/icons/palette';
-	import Cookie from '@lucide/svelte/icons/cookie';
+	import Plug from '@lucide/svelte/icons/plug';
 	import Key from '@lucide/svelte/icons/key';
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import X from '@lucide/svelte/icons/x';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import SidebarNav from './SidebarNav.svelte';
 	import BrandMark from './BrandMark.svelte';
-	import { routeLabels } from '$lib/nav';
+	import { navSectionFor, routeLabels } from '$lib/nav';
+	import { pageTitle } from '$lib/stores/page-title.svelte';
 	import { Separator } from '$lib/components/ui/separator';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { getAuth } from '$lib/stores/auth.svelte';
 	import { getPreferences } from '$lib/stores/preferences.svelte';
-	import { cn } from '$lib/utils';
 
 	interface AuthState {
 		isAuthenticated: boolean;
@@ -64,12 +65,17 @@
 			segments.push({ label: parts[parts.length - 1], href: pathname });
 		}
 
+		// Detail pages (/applications/<id>) end on the record's own name, published by PageHeader.
+		const last = segments[segments.length - 1];
+		if (pageTitle.current && last.href !== pathname && last.label !== pageTitle.current) {
+			segments.push({ label: pageTitle.current, href: pathname });
+		}
+
 		return segments;
 	});
 
-	// A lone breadcrumb repeats the page's <h1>: show it only once the title has scrolled away.
-	let scrollY = $state(0);
-	let breadcrumbVisible = $derived(breadcrumbSegments.length > 1 || scrollY > 120);
+	// Workflow section ("Generate") as a non-link root crumb, so the page itself needs no eyebrow.
+	let breadcrumbSection = $derived(navSectionFor(page.url?.pathname ?? '/')?.section.title ?? null);
 
 	let avatarBgClass = $derived(avatarColorClasses[preferences.avatarColor] ?? 'bg-blue-500');
 
@@ -112,7 +118,7 @@
 	}
 </script>
 
-<svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} bind:scrollY />
+<svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} />
 
 <header
 	class="fixed inset-x-0 top-0 z-30 flex h-12 items-center gap-3 border-b border-border bg-background/85 px-3 backdrop-blur-md transition-[padding] duration-200 ease-out motion-reduce:transition-none sm:px-4 md:gap-4 md:px-5 md:pl-[calc(var(--app-sidebar-offset,0px)+1.25rem)]"
@@ -151,17 +157,16 @@
 	</a>
 
 	{#if breadcrumbSegments.length > 0}
-		<nav
-			aria-label="Breadcrumb"
-			class={cn(
-				'hidden min-w-0 transition-[opacity,visibility] duration-200 motion-reduce:transition-none md:block',
-				!breadcrumbVisible && 'invisible opacity-0'
-			)}
-		>
-			<ol class="flex items-center gap-1.5 text-sm text-muted-foreground">
+		<nav aria-label="Breadcrumb" class="hidden min-w-0 md:block">
+			<ol class="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+				{#if breadcrumbSection}
+					<li class="shrink-0">{breadcrumbSection}</li>
+				{/if}
 				{#each breadcrumbSegments as segment, i (segment.href)}
-					{#if i > 0}
-						<li aria-hidden="true" class="font-mono text-muted-foreground/50">/</li>
+					{#if i > 0 || breadcrumbSection}
+						<li aria-hidden="true" class="shrink-0 text-muted-foreground/40">
+							<ChevronRight class="size-3.5" />
+						</li>
 					{/if}
 					<li class="min-w-0 truncate">
 						{#if i === breadcrumbSegments.length - 1}
@@ -244,7 +249,7 @@
 
 							<div role="separator" class="my-1 h-px bg-border/60"></div>
 							<p class="px-2 pt-0.5 pb-1 text-[11px] uppercase tracking-[0.14em] text-muted-foreground/70">
-								Preferences
+								Settings
 							</p>
 							<a
 								href="/users/settings#appearance"
@@ -256,22 +261,22 @@
 								Appearance
 							</a>
 							<a
-								href="/users/settings#privacy"
-								class="flex cursor-pointer items-center gap-2 rounded px-2.5 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
-								role="menuitem"
-								onclick={closeDropdown}
-							>
-								<Cookie class="h-3.5 w-3.5" />
-								Privacy &amp; cookies
-							</a>
-							<a
 								href="/users/settings#credentials"
 								class="flex cursor-pointer items-center gap-2 rounded px-2.5 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
 								role="menuitem"
 								onclick={closeDropdown}
 							>
 								<Key class="h-3.5 w-3.5" />
-								API credentials
+								API keys
+							</a>
+							<a
+								href="/users/settings#mcp"
+								class="flex cursor-pointer items-center gap-2 rounded px-2.5 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+								role="menuitem"
+								onclick={closeDropdown}
+							>
+								<Plug class="h-3.5 w-3.5" />
+								Integrations
 							</a>
 
 							<div role="separator" class="my-1 h-px bg-border/60"></div>

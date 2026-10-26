@@ -10,7 +10,7 @@
 	 * Props: `checklist`, `ready`, `preview` (latest successful, maybe `stale`),
 	 * `loading`, `error` + `onretry`, `localInvalid`, client-side tallies
 	 * (`conditions`, `apps`, `repeats`), `issues` + `actions`, submit state
-	 * (`canLaunch`, `canSave`, `blockedReason`, `submitting`, `submitError`,
+	 * (`canLaunch`, `canSave`, `blockedReason` + `blockedHref`, `submitting`, `submitError`,
 	 * `onsave`, `onlaunch`, `saveLabel`), `experimentStack`.
 	 */
 	import { cn } from '$lib/utils';
@@ -50,6 +50,8 @@
 		canLaunch: boolean;
 		canSave: boolean;
 		blockedReason: string;
+		/** Anchor of the section that clears `blockedReason`. */
+		blockedHref?: string;
 		submitting: 'save' | 'launch' | null;
 		submitError: string;
 		saveLabel?: string;
@@ -75,6 +77,7 @@
 		canLaunch,
 		canSave,
 		blockedReason,
+		blockedHref = '',
 		submitting,
 		submitError,
 		saveLabel = 'Save draft',
@@ -218,7 +221,13 @@
 		{/if}
 		<div class="hidden space-y-2 border-t border-border pt-3 @4xl/composer:block">
 			{#if blockedReason && !canLaunch}
-				<p class="text-[11px] text-muted-foreground">{blockedReason}</p>
+				<p class="text-[11px] text-muted-foreground">
+					{#if blockedHref}
+						<a href={blockedHref} class="underline decoration-dotted underline-offset-2 hover:text-foreground">{blockedReason}</a>
+					{:else}
+						{blockedReason}
+					{/if}
+				</p>
 			{/if}
 			<div class="flex gap-2">
 				<Button variant="outline" size="sm" class="flex-1" disabled={!canSave || submitting !== null} onclick={onsave}>

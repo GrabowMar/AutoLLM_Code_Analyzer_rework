@@ -153,7 +153,8 @@ def _experiment_stats(jobs_qs, *, exclude_truncated: bool = True) -> dict[str, A
         if metrics.get("total_tokens"):
             tokens.append(float(metrics["total_tokens"]))
         functional = metrics.get("functional")
-        if isinstance(functional, dict) and "pass_rate" in functional:
+        # null pass_rate = ungraded (infra_error): excluded, not scored 0.
+        if isinstance(functional, dict) and functional.get("pass_rate") is not None:
             functional_rates.append(float(functional["pass_rate"]))
             functional_passed += 1 if functional.get("passed") else 0
 

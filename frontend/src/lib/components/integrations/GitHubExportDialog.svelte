@@ -6,7 +6,7 @@
 	 * Props: `open` (bindable), `applicationId` (GenerationJob UUID),
 	 * `defaultName` (suggested repository name; slugified).
 	 * Checks `/integrations/github/status/` on open and points to the
-	 * Integrations page when no working token is stored.
+	 * Settings → GitHub when no working token is stored.
 	 */
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -138,7 +138,7 @@
 							? status.message || 'GitHub rejected the stored token.'
 							: 'No GitHub token is stored yet.'}
 					</p>
-					<Button size="sm" variant="outline" href="/integrations?tab=github">Set up GitHub</Button>
+					<Button size="sm" variant="outline" href="/users/settings#github">Set up GitHub</Button>
 				</div>
 			{/if}
 

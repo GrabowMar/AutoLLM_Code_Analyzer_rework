@@ -11,7 +11,6 @@ export { default as PostRunEditor } from "./PostRunEditor.svelte";
 export { default as CapacityStrip } from "./CapacityStrip.svelte";
 export { default as ExperimentRow } from "./ExperimentRow.svelte";
 export { default as ComparabilityTable } from "./ComparabilityTable.svelte";
-export { default as ExperimentDesignSummary } from "./ExperimentDesignSummary.svelte";
 export { default as Leaderboard } from "./Leaderboard.svelte";
 export { default as PairedDeltas } from "./PairedDeltas.svelte";
 export { default as SchedulesCard } from "./SchedulesCard.svelte";

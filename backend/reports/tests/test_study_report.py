@@ -250,3 +250,64 @@ def test_bad_ranking_criteria_rejected_up_front(client, study):
         content_type="application/json",
     )
     assert res.status_code == 400
+
+
+def _set_plan(experiment, **plan):
+    experiment.analysis_plan = normalize_analysis_plan({"primary_metric": "deploy_rate", **plan})
+    experiment.save(update_fields=["analysis_plan"])
+
+
+def test_planned_comparisons_include_research_question_metrics(study):
+    user, experiment = study
+    _set_plan(
+        experiment,
+        secondary_metrics=["pass_rate"],
+        research_questions=[
+            {"id": "RQ1", "question": "Fewer issues?", "metric": "issues_per_kloc", "direction": "less"},
+        ],
+    )
+    data = study_report.generate_study_report({"experiment_id": str(experiment.id)}, user=user)
+    families = {f["metric"]: f for f in data["planned_comparisons"]["families"]}
+    assert list(families) == ["deploy_rate", "pass_rate", "issues_per_kloc"]
+    rq = families["issues_per_kloc"]
+    assert (rq["role"], rq["status"]) == ("research_question", "confirmatory")
+    assert rq["research_questions"] == [{"id": "RQ1", "direction": "less"}]
+    assert all("p_adjusted" in c for c in rq["comparisons"])
+
+
+def test_conditions_below_min_apps_are_not_tested(study):
+    user, experiment = study
+    _set_plan(experiment, min_apps_per_condition=4)  # every condition has 3 apps
+    data = study_report.generate_study_report({"experiment_id": str(experiment.id)}, user=user)
+    planned = data["planned_comparisons"]
+    assert planned["min_apps_per_condition"] == 4
+    comparisons = planned["families"][0]["comparisons"]
+    assert len(comparisons) == 3
+    assert all(c["skipped"] == "below_min_apps" and c["p_adjusted"] is None for c in comparisons)
+    assert "below_min_apps" in {v["code"] for v in data["validity"]}
+    report = Report(report_type=Report.Type.STUDY_REPORT, title="t", report_data=data, status="completed")
+    assert "Not tested (fewer than 4 apps)" in renderers.render_markdown(report)
+
+    _set_plan(experiment, min_apps_per_condition=3)
+    data = study_report.generate_study_report({"experiment_id": str(experiment.id)}, user=user)
+    assert not any(c.get("skipped") for c in data["planned_comparisons"]["families"][0]["comparisons"])
+
+
+def test_plan_exclusions_govern_truncation(study):
+    user, experiment = study
+    job = GenerationJob.objects.filter(experiment=experiment).first()
+    job.result_data = {**job.result_data, "backend_truncated": True}
+    job.save(update_fields=["result_data"])
+    config = {"experiment_id": str(experiment.id), "exclude_truncated": True}
+
+    _set_plan(experiment, exclusions={"truncated": False})
+    data = study_report.generate_study_report(config, user=user)
+    assert data["funnel"]["overall"]["jobs"] == 12
+    assert data["protocol"]["settings"]["exclude_truncated"] is False
+    assert data["protocol"]["settings"]["exclusions_source"] == "analysis_plan"
+    assert "plan_exclusions" in {v["code"] for v in data["validity"]}
+
+    _set_plan(experiment)  # default plan exclusions: truncated excluded
+    data = study_report.generate_study_report({"experiment_id": str(experiment.id)}, user=user)
+    assert data["funnel"]["overall"]["jobs"] == 11
+    assert "plan_exclusions" not in {v["code"] for v in data["validity"]}

@@ -6,6 +6,8 @@ description: >-
 category: lint
 kind: container
 target_language: any
+analysis_mode: static
+technologies: [generic]
 icon: copy
 version: "4"
 docs_url: https://github.com/kucherenko/jscpd
@@ -17,8 +19,9 @@ uninstall_cmd: "npm uninstall -g jscpd"
 # long-lived workspace container, so remove it first — otherwise a failed run
 # would serve the previous run's report as this run's result. jscpd's default
 # --max-lines of 1000 silently skips whole generated apps, so raise both size
-# gates well past realistic generated-file sizes.
-run_cmd: "rm -rf /tmp/jscpd; jscpd {target} --min-tokens 35 --max-lines 50000 --max-size 2mb --reporters json --output /tmp/jscpd --silent >/dev/null 2>&1; cat /tmp/jscpd/jscpd-report.json"
+# gates well past realistic generated-file sizes. Lockfiles repeat package.json
+# by construction, so they are not scanned.
+run_cmd: "rm -rf /tmp/jscpd; jscpd {target} --ignore '**/package-lock.json,**/*.lock,**/node_modules/**,**/*.min.js' --min-tokens 35 --max-lines 50000 --max-size 2mb --reporters json --output /tmp/jscpd --silent >/dev/null 2>&1; cat /tmp/jscpd/jscpd-report.json"
 parser_key: jscpd
 output_kind: mixed
 run_timeout: 120

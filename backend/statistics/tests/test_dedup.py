@@ -85,3 +85,115 @@ def test_tool_overlap_counts_and_agreement():
     # ruff shares no issue class with bandit here: no pair row.
     assert not any("ruff" in (p["tool_a"], p["tool_b"]) for p in overlap["pairs"])
     assert overlap["multi_tool_issues"] == 1
+
+
+def test_flake8_and_ruff_unused_import_is_one_issue():
+    findings = [
+        {
+            "id": 1,
+            "run_id": "r",
+            "tool": "ruff",
+            "rule_id": "F401",
+            "severity": "low",
+            "file_path": "app.py",
+            "line": 3,
+        },
+        {
+            "id": 2,
+            "run_id": "r",
+            "tool": "flake8",
+            "rule_id": "F401",
+            "severity": "low",
+            "file_path": "app.py",
+            "line": 3,
+        },
+    ]
+    assert len(cluster_findings(findings)) == 1
+
+
+def test_vulnerable_package_from_several_scanners_is_one_issue():
+    """pip-audit (PYSEC id), osv-scanner (GHSA) and trivy (CVE) name one advisory differently."""
+    base = {"run_id": "r", "severity": "medium", "category": "dependency", "line": None, "package": "Jinja2"}
+    findings = [
+        {**base, "id": 1, "tool": "pip-audit", "rule_id": "PYSEC-2024-1", "file_path": "requirements.txt"},
+        {**base, "id": 2, "tool": "osv-scanner", "rule_id": "GHSA-xxxx", "file_path": "requirements.txt"},
+        {**base, "id": 3, "tool": "trivy", "rule_id": "CVE-2024-1", "file_path": "requirements.txt"},
+        {
+            **base,
+            "id": 4,
+            "tool": "npm-audit",
+            "rule_id": "GHSA-a",
+            "file_path": "frontend/package.json",
+            "package": "vite",
+        },
+        {
+            **base,
+            "id": 5,
+            "tool": "osv-scanner",
+            "rule_id": "GHSA-a",
+            "file_path": "frontend/package-lock.json",
+            "package": "vite",
+        },
+    ]
+    clusters = cluster_findings(findings)
+    assert sorted(len(c.members) for c in clusters) == [2, 3]
+
+
+def test_dast_scanners_reporting_one_missing_header_is_one_issue():
+    base = {"run_id": "r", "severity": "low", "category": "security", "line": None, "file_path": "/"}
+    findings = [
+        {**base, "id": 1, "tool": "zap", "rule_id": "10038", "issue_key": "missing-header:content-security-policy"},
+        {**base, "id": 2, "tool": "wapiti", "rule_id": "csp", "issue_key": "missing-header:content-security-policy"},
+        {
+            **base,
+            "id": 3,
+            "tool": "nuclei",
+            "rule_id": "http-missing-security-headers",
+            "issue_key": "missing-header:content-security-policy",
+        },
+        # Same Nuclei template, another header: a separate issue.
+        {
+            **base,
+            "id": 4,
+            "tool": "nuclei",
+            "rule_id": "http-missing-security-headers",
+            "issue_key": "missing-header:x-frame-options",
+        },
+    ]
+    assert sorted(len(c.members) for c in cluster_findings(findings)) == [1, 3]
+
+
+def test_eslint_plugin_rules_map_under_their_reporting_tool_slug():
+    # react/no-danger is reported by the eslint-react tool, security/* by eslint-security.
+    assert issue_class("eslint-react", "react/no-danger") == "xss-dangerous-html"
+    assert (
+        issue_class("semgrep", "javascript.react.security.audit.react-dangerouslysetinnerhtml") == "xss-dangerous-html"
+    )
+    assert (
+        issue_class("eslint-security", "security/detect-eval-with-expression", cwe="CWE-95")
+        == issue_class("semgrep", "javascript.browser.security.eval-detected.eval-detected")
+        == "eval-used"
+    )
+    assert (
+        issue_class("eslint-security", "security/detect-child-process", cwe="CWE-78")
+        == issue_class("semgrep", "javascript.lang.security.detect-child-process.detect-child-process")
+        == "shell-injection"
+    )
+    assert (
+        issue_class("eslint-security", "security/detect-non-literal-regexp", cwe="CWE-1333")
+        == issue_class("semgrep", "javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp")
+        == "redos"
+    )
+    assert issue_class("eslint-security", "security/detect-pseudoRandomBytes") == "insecure-random"
+    assert issue_class("eslint-security", "security/detect-non-literal-fs-filename") == "path-traversal"
+
+
+def test_eslint_security_and_semgrep_eval_is_one_issue():
+    clusters = cluster_findings(
+        [
+            _f("eslint-security", "security/detect-eval-with-expression", 4, path="server.js", cwe="CWE-95"),
+            _f("semgrep", "javascript.browser.security.eval-detected.eval-detected", 4, path="server.js"),
+        ],
+    )
+    assert len(clusters) == 1
+    assert clusters[0].tools == ["eslint-security", "semgrep"]

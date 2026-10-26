@@ -14,6 +14,7 @@
 	} from '$lib/api/generation';
 	import { harnessOptionChips, summarizeBudget, summarizeLLMParams } from '$lib/components/generator';
 	import { batchHref } from '$lib/components/generator/batches';
+	import SectionHeading from '$lib/components/SectionHeading.svelte';
 	import { copyText } from './utils';
 	import Copy from '@lucide/svelte/icons/copy';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
@@ -200,8 +201,8 @@
 			</div>
 		</dl>
 
-		<div class="space-y-2 border-t border-border pt-3">
-			<p class="section-label">Reproduce</p>
+		<div class="space-y-2 pt-1">
+			<SectionHeading size="sm" level={3} title="Reproduce" />
 			<div class="grid gap-2 sm:grid-cols-3">
 				<div class="space-y-1">
 					<Button variant="outline" size="sm" class="w-full sm:w-auto" disabled={!canClone || !!busy} onclick={onReplay}>

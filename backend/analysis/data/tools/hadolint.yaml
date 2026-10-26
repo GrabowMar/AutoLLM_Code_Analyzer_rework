@@ -6,13 +6,17 @@ description: >-
 category: lint
 kind: container
 target_language: any
+analysis_mode: static
+technologies: [docker]
 icon: container
 version: "2.12"
 docs_url: https://github.com/hadolint/hadolint
+# sha256 from the release's hadolint-Linux-x86_64.sha256.
 install_cmd: >-
-  mkdir -p /home/analyzer/.local/bin &&
-  curl -sSfL -o /home/analyzer/.local/bin/hadolint
-  https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64 &&
+  set -e;
+  mkdir -p /home/analyzer/.local/bin;
+  curl -sSfL -o /home/analyzer/.local/bin/hadolint https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64;
+  echo "56de6d5e5ec427e17b74fa48d51271c7fc0d61244bf5c90e828aab8362d55010  /home/analyzer/.local/bin/hadolint" | sha256sum -c - || { rm -f /home/analyzer/.local/bin/hadolint; exit 1; };
   chmod +x /home/analyzer/.local/bin/hadolint
 verify_cmd: "hadolint --version"
 uninstall_cmd: "rm -f /home/analyzer/.local/bin/hadolint"
@@ -20,6 +24,7 @@ uninstall_cmd: "rm -f /home/analyzer/.local/bin/hadolint"
 # keeps the exit code at 0 and -r makes xargs a no-op when none exist.
 run_cmd: "find {target} -type f \\( -name Dockerfile -o -name 'Dockerfile.*' -o -name '*.dockerfile' \\) -print0 | xargs -0 -r hadolint -f json --no-fail"
 parser_key: hadolint
+file_patterns: ["Dockerfile", "Dockerfile.*", "*.dockerfile"]
 run_timeout: 60
 install_timeout: 120
 display_order: 90

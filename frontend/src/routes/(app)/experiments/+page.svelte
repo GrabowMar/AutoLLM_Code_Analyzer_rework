@@ -13,6 +13,8 @@
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
+	import PaginationBar from '$lib/components/PaginationBar.svelte';
+	import * as Card from '$lib/components/ui/card';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
@@ -277,84 +279,91 @@
 	}
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4">
 	<PageHeader title="Experiments" description="Designed model comparisons, run in parallel across your endpoints.">
 		{#snippet actions()}
 			<Button variant="outline" size="sm" href="/endpoints"><Server />Endpoints</Button>
 			<Button size="sm" href="/experiments/new"><Plus />New experiment</Button>
 		{/snippet}
+		{#if capacity}
+			<CapacityStrip {capacity} class="rounded-none border-0 bg-transparent p-0" />
+		{/if}
 	</PageHeader>
 
-	{#if capacity}
-		<CapacityStrip {capacity} />
-	{/if}
-
-	<FilterBar
-		searchPlaceholder="Search experiments…"
-		bind:searchValue={searchInput}
-		onSearchInput={onSearch}
-		{activeTags}
-		onClearAll={() => {
-			searchInput = '';
-			setParams({ q: null, status: null, mode: null, endpoint: null });
-		}}
-		{resultsText}
-		page={data?.page}
-		pages={data?.pages}
-		onGoToPage={(p) => setParams({ page: String(p) })}
-	>
-		{#snippet filters()}
-			<div class="grid gap-3 sm:grid-cols-3">
-				<div class="space-y-1">
-					<Label class="text-xs" for="exp-filter-status">Status</Label>
-					<Select.Simple id="exp-filter-status" size="sm" value={statusFilter} items={STATUS_ITEMS} onValueChange={(v) => setParams({ status: v })} />
+	<Card.Root class="gap-0 overflow-clip py-0">
+		<FilterBar
+			embedded
+			searchPlaceholder="Search experiments…"
+			bind:searchValue={searchInput}
+			onSearchInput={onSearch}
+			{activeTags}
+			onClearAll={() => {
+				searchInput = '';
+				setParams({ q: null, status: null, mode: null, endpoint: null });
+			}}
+		>
+			{#snippet filters()}
+				<div class="grid gap-3 sm:grid-cols-3">
+					<div class="space-y-1">
+						<Label class="text-xs" for="exp-filter-status">Status</Label>
+						<Select.Simple id="exp-filter-status" size="sm" value={statusFilter} items={STATUS_ITEMS} onValueChange={(v) => setParams({ status: v })} />
+					</div>
+					<div class="space-y-1">
+						<Label class="text-xs" for="exp-filter-mode">Method</Label>
+						<Select.Simple id="exp-filter-mode" size="sm" value={modeFilter} items={MODE_ITEMS} onValueChange={(v) => setParams({ mode: v })} />
+					</div>
+					<div class="space-y-1">
+						<Label class="text-xs" for="exp-filter-endpoint">Endpoint</Label>
+						<Select.Simple id="exp-filter-endpoint" size="sm" value={endpointFilter} items={endpointItems} onValueChange={(v) => setParams({ endpoint: v })} />
+					</div>
 				</div>
-				<div class="space-y-1">
-					<Label class="text-xs" for="exp-filter-mode">Method</Label>
-					<Select.Simple id="exp-filter-mode" size="sm" value={modeFilter} items={MODE_ITEMS} onValueChange={(v) => setParams({ mode: v })} />
-				</div>
-				<div class="space-y-1">
-					<Label class="text-xs" for="exp-filter-endpoint">Endpoint</Label>
-					<Select.Simple id="exp-filter-endpoint" size="sm" value={endpointFilter} items={endpointItems} onValueChange={(v) => setParams({ endpoint: v })} />
-				</div>
-			</div>
-		{/snippet}
-	</FilterBar>
+			{/snippet}
+		</FilterBar>
 
-	{#if error}
-		<ErrorAlert message={error} onretry={() => load()} />
-	{:else if refreshError}
-		<ErrorAlert message={`Showing the last list: ${refreshError}`} onretry={() => load()} />
-	{/if}
-
-	{#if loading && !data}
-		<LoadingState label="loading experiments" />
-	{:else if data && items.length === 0}
-		{#if filtered}
-			<EmptyState icon={FlaskConical} title="No experiments match" description="Try another search or clear the filters." />
-		{:else}
-			<EmptyState
-				icon={FlaskConical}
-				title="Create your first experiment"
-				description="Pick models, harness presets or prompt profiles and apps; every condition runs on every app, several times, with shared seeds."
-			>
-				{#snippet action()}
-					<Button size="sm" href="/experiments/new"><Plus />New experiment</Button>
-					{#if endpoints && endpoints.filter((e) => !e.is_system).length === 0}
-						<Button variant="outline" size="sm" href="/endpoints/new"><Server />Add a local endpoint</Button>
-					{/if}
-				{/snippet}
-			</EmptyState>
+		{#if error}
+			<div class="p-3"><ErrorAlert message={error} onretry={() => load()} /></div>
+		{:else if refreshError}
+			<div class="p-3"><ErrorAlert message={`Showing the last list: ${refreshError}`} onretry={() => load()} /></div>
 		{/if}
-	{:else if data}
-		<ul class="data-list">
-			{#each items as exp, i (exp.id)}
-				<li class="rise-in" style="--stagger-i: {Math.min(i, 8)}">
-					<ExperimentRow experiment={exp} busy={busyId === exp.id} onaction={(action) => act(exp, action)} />
-				</li>
-			{/each}
-		</ul>
-	{/if}
+
+		{#if loading && !data}
+			<LoadingState label="loading experiments" />
+		{:else if data && items.length === 0}
+			{#if filtered}
+				<EmptyState compact icon={FlaskConical} title="No experiments match" description="Try another search or clear the filters." />
+			{:else}
+				<EmptyState
+					compact
+					icon={FlaskConical}
+					title="Create your first experiment"
+					description="Pick models, harness presets or prompt profiles and apps; every condition runs on every app, several times, with shared seeds."
+				>
+					{#snippet action()}
+						<Button size="sm" href="/experiments/new"><Plus />New experiment</Button>
+						{#if endpoints && endpoints.filter((e) => !e.is_system).length === 0}
+							<Button variant="outline" size="sm" href="/endpoints/new"><Server />Add a local endpoint</Button>
+						{/if}
+					{/snippet}
+				</EmptyState>
+			{/if}
+		{:else if data}
+			<ul class="data-list rounded-none border-0 shadow-none">
+				{#each items as exp, i (exp.id)}
+					<li class="rise-in" style="--stagger-i: {Math.min(i, 8)}">
+						<ExperimentRow experiment={exp} busy={busyId === exp.id} onaction={(action) => act(exp, action)} />
+					</li>
+				{/each}
+			</ul>
+			<PaginationBar
+				{resultsText}
+				page={data.page}
+				pages={data.pages}
+				onGoToPage={(p) => setParams({ page: String(p) })}
+				class="border-t border-border"
+				scrollToCard
+			/>
+		{/if}
+	</Card.Root>
 </div>
 
 <ConfirmDialog

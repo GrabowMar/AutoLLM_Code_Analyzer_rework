@@ -34,17 +34,20 @@ from backend.generation.services.openrouter_client import OpenRouterClient
 from backend.generation.services.openrouter_client import OpenRouterError
 from backend.generation.services.output_guard import call_with_continuations
 from backend.generation.services.output_guard import clamped_max_tokens
+from backend.generation.services.profile_resolver import DEFAULT_CONTINUATION_LIMIT
+from backend.generation.services.profile_resolver import DEFAULT_ENABLE_REPAIR
+from backend.generation.services.profile_resolver import generation_options
 from backend.generation.services.prompt_renderer import PromptRenderer
 from backend.runtime.services.scaffolding import get_stack_config
 from backend.runtime.services.scaffolding import resolve_stack_slug
 
 logger = logging.getLogger(__name__)
 
-# Continuation/repair are per-experiment config in the planned Experiment
-# entity (not yet implemented); these are the defaults every job gets until
-# that config exists.
-DEFAULT_CONTINUATION_LIMIT = 1
-DEFAULT_ENABLE_REPAIR = True
+# Continuation/repair (template modes): an experiment's continuation_limit
+# and enable_repair are frozen into each job's snapshot (``generation``,
+# only when non-default) and read back in ``_run_scaffolding``; every other
+# job runs with the service defaults (DEFAULT_CONTINUATION_LIMIT /
+# DEFAULT_ENABLE_REPAIR, overridable on the instance).
 
 
 def _is_cancelled(job: GenerationJob) -> bool:
@@ -337,6 +340,11 @@ class GenerationService:
             return self._call_llm(job, model_id, messages, stage=stage_name)
 
         bundle = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
+        continuation_limit, enable_repair = generation_options(
+            bundle,
+            continuation_limit=self.continuation_limit,
+            enable_repair=self.enable_repair,
+        )
         backend_messages = self.renderer.render_backend_messages(
             app_requirement=app_req,
             resolved_bundle=bundle if bundle else None,
@@ -346,7 +354,7 @@ class GenerationService:
             _call,
             backend_messages,
             stage="backend",
-            limit=self.continuation_limit,
+            limit=continuation_limit,
         )
         backend_elapsed = time.time() - start
         for k in total_usage:
@@ -371,7 +379,7 @@ class GenerationService:
             _call,
             frontend_messages,
             stage="frontend",
-            limit=self.continuation_limit,
+            limit=continuation_limit,
         )
         frontend_elapsed = time.time() - start2
         for k in total_usage:
@@ -383,7 +391,7 @@ class GenerationService:
         py_validation = validate_python_files(files)
         fe_validation = validate_frontend_files(files)
         repair_used = False
-        if self.enable_repair and not (py_validation.passed and fe_validation.passed):
+        if enable_repair and not (py_validation.passed and fe_validation.passed):
             files, repair_used = self._run_repair_round(job, model_id, files, py_validation, fe_validation)
             py_validation = validate_python_files(files)
             fe_validation = validate_frontend_files(files)

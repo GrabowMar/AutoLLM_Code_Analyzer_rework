@@ -16,12 +16,10 @@
 
 <Card.Root class="h-full">
 	<Card.Header>
-		<div class="flex items-center gap-2">
-			<ShieldAlert class="h-4 w-4 text-muted-foreground" />
-			<div>
-				<Card.Title>Finding Severity</Card.Title>
-				<Card.Description>Distribution across all analyses</Card.Description>
-			</div>
+		<div class="flex min-w-0 items-center gap-2">
+			<ShieldAlert class="h-4 w-4 shrink-0 text-muted-foreground" />
+			<Card.Title>Finding Severity</Card.Title>
+			<span class="truncate text-xs text-muted-foreground">all analyses</span>
 		</div>
 	</Card.Header>
 	<Card.Content>
@@ -30,7 +28,7 @@
 		{:else if severity && severity.total > 0}
 			<SeverityDonut {severity} />
 		{:else}
-			<ChartEmpty message="No findings recorded yet." />
+			<ChartEmpty height={56} message="No findings recorded yet." />
 		{/if}
 	</Card.Content>
 </Card.Root>

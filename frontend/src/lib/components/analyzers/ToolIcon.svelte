@@ -6,10 +6,13 @@
 	import Boxes from '@lucide/svelte/icons/boxes';
 	import Braces from '@lucide/svelte/icons/braces';
 	import CheckCheck from '@lucide/svelte/icons/check-check';
+	import Bug from '@lucide/svelte/icons/bug';
 	import Container from '@lucide/svelte/icons/container';
 	import Copy from '@lucide/svelte/icons/copy';
 	import FileCode from '@lucide/svelte/icons/file-code';
 	import Gauge from '@lucide/svelte/icons/gauge';
+	import Globe from '@lucide/svelte/icons/globe';
+	import History from '@lucide/svelte/icons/history';
 	import Key from '@lucide/svelte/icons/key';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import ListChecks from '@lucide/svelte/icons/list-checks';
@@ -20,8 +23,10 @@
 	import Palette from '@lucide/svelte/icons/palette';
 	import Puzzle from '@lucide/svelte/icons/puzzle';
 	import Radar from '@lucide/svelte/icons/radar';
+	import ScanSearch from '@lucide/svelte/icons/scan-search';
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
+	import ShieldHalf from '@lucide/svelte/icons/shield-half';
 	import Skull from '@lucide/svelte/icons/skull';
 	import Snowflake from '@lucide/svelte/icons/snowflake';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
@@ -39,11 +44,14 @@
 		bot: Bot,
 		boxes: Boxes,
 		braces: Braces,
+		bug: Bug,
 		'check-check': CheckCheck,
 		container: Container,
 		copy: Copy,
 		'file-code': FileCode,
 		gauge: Gauge,
+		globe: Globe,
+		history: History,
 		key: Key,
 		'key-round': KeyRound,
 		'package-check': PackageCheck,
@@ -51,8 +59,10 @@
 		'package-x': PackageX,
 		palette: Palette,
 		radar: Radar,
+		'scan-search': ScanSearch,
 		'shield-alert': ShieldAlert,
 		'shield-check': ShieldCheck,
+		'shield-half': ShieldHalf,
 		skull: Skull,
 		snowflake: Snowflake,
 		sparkles: Sparkles,
@@ -78,7 +88,7 @@
 
 	interface Props {
 		tool: { slug: string; icon?: string; category?: string; name?: string };
-		size?: 'sm' | 'md' | 'lg';
+		size?: 'xs' | 'sm' | 'md' | 'lg';
 		class?: string;
 	}
 
@@ -87,8 +97,8 @@
 	const logo = $derived(toolLogos[tool.slug]);
 	const IconComponent = $derived(icons[tool.icon ?? ''] ?? categoryIcons[tool.category ?? ''] ?? Puzzle);
 
-	const tile = { sm: 'size-7 rounded', md: 'size-9 rounded-md', lg: 'size-11 rounded-md' };
-	const glyph = { sm: 'size-4', md: 'size-5', lg: 'size-6' };
+	const tile = { xs: 'size-5 rounded-sm', sm: 'size-7 rounded', md: 'size-9 rounded-md', lg: 'size-11 rounded-md' };
+	const glyph = { xs: 'size-3.5', sm: 'size-4', md: 'size-5', lg: 'size-6' };
 </script>
 
 {#if logo}

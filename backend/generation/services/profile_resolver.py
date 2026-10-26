@@ -535,9 +535,57 @@ def snapshot_for_scaffolding_job(job: GenerationJob) -> dict[str, Any]:
     return snapshot
 
 
-def apply_snapshot_to_job(job: GenerationJob, *, save: bool = True) -> GenerationJob:
+# Template-mode generation options (an experiment's ``continuation_limit`` /
+# ``enable_repair``). The defaults are what every job ran with before they
+# were configurable, and they are never written to the snapshot, so a
+# default job's snapshot and fingerprint stay byte-identical.
+DEFAULT_CONTINUATION_LIMIT = 1
+DEFAULT_ENABLE_REPAIR = True
+
+
+def attach_generation_options(
+    snapshot: dict[str, Any],
+    *,
+    continuation_limit: int = DEFAULT_CONTINUATION_LIMIT,
+    enable_repair: bool = DEFAULT_ENABLE_REPAIR,
+) -> dict[str, Any]:
+    """Record non-default continuation/repair options in ``snapshot["generation"]`` (and re-fingerprint)."""
+    options: dict[str, Any] = {}
+    if int(continuation_limit) != DEFAULT_CONTINUATION_LIMIT:
+        options["continuation_limit"] = int(continuation_limit)
+    if bool(enable_repair) != DEFAULT_ENABLE_REPAIR:
+        options["enable_repair"] = bool(enable_repair)
+    if options:
+        snapshot["generation"] = options
+        snapshot["run_fingerprint"] = run_fingerprint(snapshot)
+    return snapshot
+
+
+def generation_options(
+    snapshot: dict[str, Any] | None,
+    *,
+    continuation_limit: int = DEFAULT_CONTINUATION_LIMIT,
+    enable_repair: bool = DEFAULT_ENABLE_REPAIR,
+) -> tuple[int, bool]:
+    """``(continuation_limit, enable_repair)`` a template-mode job runs with (the given defaults when unset)."""
+    options = snapshot.get("generation") if isinstance(snapshot, dict) else None
+    options = options if isinstance(options, dict) else {}
+    return (
+        int(options.get("continuation_limit", continuation_limit)),
+        bool(options.get("enable_repair", enable_repair)),
+    )
+
+
+def apply_snapshot_to_job(
+    job: GenerationJob,
+    *,
+    save: bool = True,
+    continuation_limit: int = DEFAULT_CONTINUATION_LIMIT,
+    enable_repair: bool = DEFAULT_ENABLE_REPAIR,
+) -> GenerationJob:
     """Build snapshot; set seed, ``resolved_bundle``, and slicing keys on job."""
     snapshot = snapshot_for_scaffolding_job(job)
+    attach_generation_options(snapshot, continuation_limit=continuation_limit, enable_repair=enable_repair)
     job.experiment_seed = snapshot.get("seed")
     job.resolved_bundle = snapshot
     job.prompt_hash = snapshot.get("prompt_hash") or ""
@@ -597,6 +645,9 @@ def run_fingerprint(snapshot: dict[str, Any]) -> str:
         },
         "scaffolding_slug": snapshot.get("scaffolding_slug"),
     }
+    # Non-default continuation/repair options only (absent for default runs).
+    if snapshot.get("generation"):
+        payload["generation"] = snapshot["generation"]
     # Skeleton content identity: two runs on different stack versions are
     # not exact replays of each other.
     stack = snapshot.get("stack") or {}

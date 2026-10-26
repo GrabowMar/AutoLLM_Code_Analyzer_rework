@@ -88,3 +88,36 @@ class TestRun:
         assert not output.has_error
         assert len(output.findings) == 1
         assert output.summary["truncated"] is True
+
+
+def test_review_bundle_skips_lockfiles_and_puts_source_first(monkeypatch):
+    monkeypatch.setattr(ai_runner, "MAX_CODE_CHARS", 200)
+    code = {
+        "README.md": "r" * 150,
+        "frontend/package-lock.json": "{" * 10_000,
+        "frontend/src/App.jsx": "export default 1;",
+        "app.py": "print(1)",
+    }
+    blob, omitted = ai_runner._format_code(code)
+    assert "package-lock" not in blob
+    assert blob.index("app.py") < blob.index("App.jsx")
+    # Whole files only; what does not fit is reported, never silently cut.
+    assert omitted == ["README.md"]
+
+
+def test_off_vocabulary_severity_and_category_are_normalized():
+    findings = ai_runner._parse_findings(
+        '[{"severity": "Moderate", "category": "Security", "title": "x"}, {"severity": "urgent", "category": "ux"}]',
+    )
+    assert [(f.severity, f.category) for f in findings] == [("medium", "security"), ("info", "quality")]
+
+
+def test_model_severity_label_is_kept_verbatim():
+    findings = ai_runner._parse_findings(
+        '[{"severity": "Moderate", "confidence": " High ", "title": "x"}, {"title": "no rating"}]',
+    )
+    rated, unrated = findings
+    assert (rated.severity, rated.tool_severity) == ("medium", "Moderate")
+    assert rated.tool_specific_data == {"tool_confidence": "High"}
+    # A finding the model did not rate shows no severity of its own.
+    assert (unrated.severity, unrated.tool_severity, unrated.tool_specific_data) == ("info", "", {})

@@ -7,6 +7,8 @@ description: >-
 category: dependencies
 kind: container
 target_language: python
+analysis_mode: static
+technologies: [python, pypi]
 icon: package-search
 version: "2"
 docs_url: https://github.com/pypa/pip-audit
@@ -15,13 +17,22 @@ verify_cmd: "pip-audit --version"
 uninstall_cmd: "pip uninstall -y pip-audit"
 # One "### <file>" section per requirements file; pip-audit resolves
 # transitive dependencies in a throwaway venv, so unpinned files work too.
+# When resolution fails (a hallucinated package or version) pip-audit audits
+# nothing: its errors are echoed as "!! " lines, which the parser turns into
+# nonexistent-package/-version findings and a "not analyzed" coverage gap.
 run_cmd: |
   cd {target} && find . -name 'requirements*.txt' -not -path '*/node_modules/*' -not -path '*/.venv/*' | sort | while IFS= read -r f; do
     echo "### ${f#./}"
-    pip-audit -r "$f" -f json --progress-spinner off 2>/dev/null
+    out="$(pip-audit -r "$f" -f json --progress-spinner off 2>/tmp/pip-audit.err)"
+    if [ -n "$out" ]; then
+      printf '%s\n' "$out"
+    else
+      grep -E 'ERROR|from versions' /tmp/pip-audit.err | cut -c1-400 | head -n 20 | sed 's/^/!! /'
+    fi
     echo
   done
 parser_key: pip_audit
+file_patterns: ["requirements*.txt"]
 run_timeout: 300
 install_timeout: 300
 display_order: 10

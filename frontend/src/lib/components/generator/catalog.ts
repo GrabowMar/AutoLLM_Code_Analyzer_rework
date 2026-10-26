@@ -307,6 +307,10 @@ export function filterByEndpointScope(
  * vendor as before. Models inside a group are sorted by name. Inputs are not
  * mutated.
  */
+/** Group of OpenRouter "~vendor/model-latest" aliases (they point at whatever version is newest). */
+export const ALIAS_GROUP_KEY = "provider:~aliases";
+export const ALIAS_GROUP_LABEL = "Latest aliases (version can change)";
+
 export function groupModels(
   models: LLMModelSummary[],
   groupBy: ModelGroupBy,
@@ -315,7 +319,13 @@ export function groupModels(
   const map = new Map<string, ModelGroup>();
   for (const m of models) {
     const local = groupBy === "endpoint" && isLocalModel(m) && m.endpoint;
-    const key = local ? `endpoint:${m.endpoint!.id}` : `provider:${m.provider}`;
+    // OpenRouter's floating "~vendor/…-latest" aliases share one group.
+    const alias = !local && m.provider.startsWith("~");
+    const key = local
+      ? `endpoint:${m.endpoint!.id}`
+      : alias
+        ? ALIAS_GROUP_KEY
+        : `provider:${m.provider}`;
     let group = map.get(key);
     if (!group) {
       group = local
@@ -330,10 +340,10 @@ export function groupModels(
           }
         : {
             key,
-            label: m.provider,
+            label: alias ? ALIAS_GROUP_LABEL : m.provider,
             type: "provider",
             endpoint: null,
-            provider: m.provider,
+            provider: alias ? "openrouter" : m.provider,
             models: [],
             selectedCount: 0,
           };
@@ -348,6 +358,9 @@ export function groupModels(
   }
   return groups.sort((a, b) => {
     if (a.type !== b.type) return a.type === "endpoint" ? -1 : 1;
+    // Aliases last: their weights can change, so they are a deliberate pick.
+    if ((a.key === ALIAS_GROUP_KEY) !== (b.key === ALIAS_GROUP_KEY))
+      return a.key === ALIAS_GROUP_KEY ? 1 : -1;
     return a.label.localeCompare(b.label);
   });
 }

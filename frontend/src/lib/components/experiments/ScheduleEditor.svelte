@@ -139,7 +139,7 @@
 				{disabled}
 				onValueChange={(v) => patch({ action: v as ScheduleAction })}
 			/>
-			<p class="text-[11px] text-muted-foreground">{SCHEDULE_ACTION_DESCRIPTIONS[value.action]}</p>
+			<p class="text-xs text-muted-foreground">{SCHEDULE_ACTION_DESCRIPTIONS[value.action]}</p>
 		</div>
 		{#if value.action === 'add_replicates'}
 			<NumberField
@@ -163,7 +163,7 @@
 					{disabled}
 					oninput={(e: Event) => patch({ params: { ...(value.params ?? {}), name_template: (e.currentTarget as HTMLInputElement).value } })}
 				/>
-				<p class="text-[11px] text-muted-foreground">Placeholders: <span class="font-mono">{'{name}'}</span>, <span class="font-mono">{'{date}'}</span>.</p>
+				<p class="text-xs text-muted-foreground">Placeholders: <span class="font-mono">{'{name}'}</span>, <span class="font-mono">{'{date}'}</span>.</p>
 			</div>
 		{/if}
 	</div>
@@ -198,7 +198,7 @@
 				{disabled}
 				oninput={(e: Event) => patch({ cron: (e.currentTarget as HTMLInputElement).value })}
 			/>
-			<p id="{idPrefix}-cron-note" class="text-[11px] {invalid ? 'text-danger-fg' : 'text-muted-foreground'}">
+			<p id="{idPrefix}-cron-note" class="text-xs {invalid ? 'text-danger-fg' : 'text-muted-foreground'}">
 				{#if !shapeOk}
 					Five fields: minute hour day-of-month month day-of-week.
 				{:else if current && !current.valid}
@@ -220,7 +220,7 @@
 		{#if previewError}
 			<p class="text-danger-fg">{previewError}</p>
 		{:else if current?.valid}
-			<ul class="mt-1 grid gap-0.5 font-mono text-[11px] tabular-nums sm:grid-cols-2">
+			<ul class="mt-1 grid gap-0.5 font-mono text-xs tabular-nums sm:grid-cols-2">
 				{#each current.next as run (run)}<li>{when(run)}</li>{/each}
 			</ul>
 		{:else if shapeOk && !current}

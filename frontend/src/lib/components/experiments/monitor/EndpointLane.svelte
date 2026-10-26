@@ -49,14 +49,14 @@
 	const SHOWN_JOBS = 6;
 </script>
 
-<Card.Root class="gap-3 py-4" aria-labelledby="lane-{experimentId}-{endpoint.id}">
+<Card.Root class="min-w-0 gap-3 py-4" aria-labelledby="lane-{experimentId}-{endpoint.id}">
 	<Card.Header class="gap-1 px-4">
 		<div class="flex items-start justify-between gap-2">
 			<div class="min-w-0">
 				<Card.Title class="flex items-center gap-1.5 text-sm">
 					<span id="lane-{experimentId}-{endpoint.id}" class="truncate font-mono">{endpoint.name || endpoint.slug}</span>
 				</Card.Title>
-				<p class="text-[11px] text-muted-foreground">
+				<p class="text-xs text-muted-foreground">
 					{[kindLabel(endpoint.kind), isOpenRouter ? '' : endpoint.connection, endpoint.sessions > 1 ? `${endpoint.sessions} relays` : '']
 						.filter(Boolean)
 						.join(' · ')}
@@ -83,7 +83,7 @@
 				/>
 			</div>
 			{#if endpoint.jobs.held_by_others > 0}
-				<p class="text-[11px] text-muted-foreground tabular-nums">
+				<p class="text-xs text-muted-foreground tabular-nums">
 					{endpoint.jobs.held_by_others} held by other experiments (hatched)
 				</p>
 			{/if}
@@ -96,7 +96,7 @@
 					{#each endpoint.loaded as model (model.name)}
 						<span
 							class={cn(
-								'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px]',
+								'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-xs',
 								model.cpu_spill ? toneClasses.warning : 'border-border',
 								ownModels.has(model.name) && 'font-semibold'
 							)}
@@ -112,11 +112,11 @@
 						</span>
 					{:else}
 						{#if endpoint.loaded_others === 0}
-							<span class="text-[11px] text-muted-foreground">No model loaded</span>
+							<span class="text-xs text-muted-foreground">No model loaded</span>
 						{/if}
 					{/each}
 					{#if endpoint.loaded_others > 0}
-						<span class="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground" title="Loaded for other users">
+						<span class="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground" title="Loaded for other users">
 							+{endpoint.loaded_others}
 						</span>
 					{/if}
@@ -127,7 +127,7 @@
 		<div class="space-y-1">
 			<p class="section-label">Running for this experiment · {activeJobs.length}</p>
 			{#if activeJobs.length === 0}
-				<p class="text-[11px] text-muted-foreground">Nothing running here right now.</p>
+				<p class="text-xs text-muted-foreground">Nothing running here right now.</p>
 			{:else}
 				<ul class="space-y-0.5">
 					{#each activeJobs.slice(0, SHOWN_JOBS) as job (job.jobId)}
@@ -135,17 +135,17 @@
 							<a href="/applications/{job.jobId}" class="min-w-0 flex-1 truncate hover:underline" title="{job.label} · {job.app} · repeat {job.repeat + 1}">
 								{job.label} <span class="text-muted-foreground">· {job.app} · #{job.repeat + 1}</span>
 							</a>
-							<span class="shrink-0 text-[11px] text-muted-foreground">{job.phase}</span>
+							<span class="shrink-0 text-xs text-muted-foreground">{job.phase}</span>
 						</li>
 					{/each}
 				</ul>
 				{#if activeJobs.length > SHOWN_JOBS}
-					<p class="text-[11px] text-muted-foreground">+{activeJobs.length - SHOWN_JOBS} more</p>
+					<p class="text-xs text-muted-foreground">+{activeJobs.length - SHOWN_JOBS} more</p>
 				{/if}
 			{/if}
 		</div>
 
-		<dl class="grid grid-cols-3 gap-2 border-t border-border/60 pt-2 text-[11px]">
+		<dl class="grid grid-cols-3 gap-2 border-t border-border/60 pt-2 text-xs">
 			<div>
 				<dt class="text-muted-foreground">Queued here</dt>
 				<dd class="font-mono tabular-nums">{endpoint.queued_jobs_this_experiment}</dd>
@@ -161,12 +161,12 @@
 		</dl>
 
 		{#if endpoint.circuit === 'open'}
-			<p class="rounded-md border px-2 py-1 text-[11px] {toneClasses.danger}">
+			<p class="rounded-md border px-2 py-1 text-xs {toneClasses.danger}">
 				Paused after repeated errors; the executor retries shortly.
 			</p>
 		{/if}
 		{#if endpoint.blocked_reason && endpoint.queued_jobs_this_experiment > 0}
-			<p class="rounded-md border px-2 py-1 text-[11px] {toneClasses.warning}">
+			<p class="rounded-md border px-2 py-1 text-xs {toneClasses.warning}">
 				Queued runs: {blockedReasonText(endpoint.blocked_reason)}
 			</p>
 		{/if}
@@ -174,7 +174,7 @@
 			<div>
 				<button
 					type="button"
-					class="flex cursor-pointer items-center gap-1 text-[11px] font-medium text-danger-fg"
+					class="flex cursor-pointer items-center gap-1 text-xs font-medium text-danger-fg"
 					aria-expanded={errorOpen}
 					onclick={() => (errorOpen = !errorOpen)}
 				>
@@ -182,7 +182,7 @@
 					Last error
 				</button>
 				{#if errorOpen}
-					<p class="mt-1 break-words font-mono text-[11px] text-muted-foreground">{endpoint.last_error}</p>
+					<p class="mt-1 break-words font-mono text-xs text-muted-foreground">{endpoint.last_error}</p>
 				{/if}
 			</div>
 		{/if}

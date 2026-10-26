@@ -468,4 +468,25 @@ class TestRunScaffoldingMultiFile:
 
         assert "broken(:" in job.result_data["files"]["app.py"]
         assert job.result_data["validation"]["passed"] is False
+
+    def test_snapshot_generation_options_override_service_defaults(self, _no_docker, monkeypatch):
+        """An experiment's continuation_limit/enable_repair, frozen in the snapshot, take effect."""
+        job = self._make_job()
+        job.resolved_bundle = {"generation": {"continuation_limit": 0, "enable_repair": False}}
+        service = self._service(
+            monkeypatch,
+            [
+                _api_response("```python:app.py\ndef broken(:\n", finish_reason="length"),
+                _api_response("```jsx:App.jsx\nexport default function App() {}\n```"),
+            ],
+        )
+        service.enable_repair = True
+        service.continuation_limit = 1
+
+        service._run_scaffolding(job)
+
+        # No continuation call and no repair call: only the two stage calls ran.
+        assert job.metrics["continuations_used"] == 0
+        assert job.result_data["backend_truncated"] is True
+        assert job.metrics["repair_used"] is False
         assert job.metrics["repair_used"] is False

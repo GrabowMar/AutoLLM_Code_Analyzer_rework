@@ -1077,3 +1077,22 @@ class TestBuildHealing:
         body = _create_body(_models(1), _apps(), build_healing="sometimes")
         res = api.post(f"{API}/experiments/", data=json.dumps(body), content_type="application/json")
         assert res.status_code == 422
+
+
+def test_executor_state_flags_a_leader_on_older_code():
+    from backend.execution import capacity
+    from backend.execution.models import ExecutorInstance
+
+    assert svc.executor_state() == {"online": False, "draining": False, "code_stale": False}
+    leader = ExecutorInstance.objects.create(
+        id="exec:1",
+        hostname="h",
+        pid=1,
+        code_version="old",
+        is_leader=True,
+        last_seen_at=timezone.now(),
+    )
+    assert svc.executor_state() == {"online": True, "draining": False, "code_stale": True}
+    leader.code_version = capacity.code_version()
+    leader.save()
+    assert svc.executor_state()["code_stale"] is False

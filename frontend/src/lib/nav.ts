@@ -15,7 +15,6 @@ import ChartColumn from "@lucide/svelte/icons/chart-column";
 import FileText from "@lucide/svelte/icons/file-text";
 import BookOpen from "@lucide/svelte/icons/book-open";
 import Activity from "@lucide/svelte/icons/activity";
-import Plug from "@lucide/svelte/icons/plug";
 
 export interface NavItem {
   label: string;
@@ -67,10 +66,6 @@ export const navSections: NavSection[] = [
     ],
   },
   {
-    title: "Connect",
-    items: [{ label: "Integrations", href: "/integrations", icon: Plug }],
-  },
-  {
     title: "Help",
     items: [{ label: "Docs", href: "/docs", icon: BookOpen }],
   },
@@ -84,8 +79,7 @@ export const navSections: NavSection[] = [
 // Breadcrumb labels for routes that are not nav items.
 const extraLabels: Record<string, string> = {
   "/about": "About",
-  "/privacy": "Privacy Policy",
-  "/users": "Users",
+  "/privacy": "Privacy & data",
   "/users/settings": "Settings",
   "/models/compare": "Compare",
   "/models/import": "Import",

@@ -6,6 +6,8 @@ description: >-
 category: lint
 kind: container
 target_language: python
+analysis_mode: static
+technologies: [python]
 icon: snowflake
 version: "7"
 docs_url: https://flake8.pycqa.org/
@@ -14,6 +16,7 @@ verify_cmd: "flake8 --version"
 uninstall_cmd: "pip uninstall -y flake8"
 run_cmd: "flake8 {target} --exit-zero --max-line-length 120 --exclude node_modules,.venv,venv 2>/dev/null"
 parser_key: flake8
+file_patterns: ["*.py"]
 run_timeout: 120
 install_timeout: 180
 display_order: 25

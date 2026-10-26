@@ -78,6 +78,35 @@ def test_maintenance_requires_staff_non_staff(regular_client):
     assert resp.status_code == HTTPStatus.FORBIDDEN
 
 
+def _bearer_client(*, is_staff: bool) -> Client:
+    from backend.tokens.services import generate_token
+
+    raw, _ = generate_token(user=UserFactory(is_staff=is_staff), name="t")
+    return Client(headers={"authorization": f"Bearer {raw}"})
+
+
+@pytest.mark.django_db
+def test_staff_bearer_token_is_allowed():
+    with patch("backend.system.services.db_stats", return_value={"ok": True}):
+        resp = _bearer_client(is_staff=True).get("/api/system/db")
+    assert resp.status_code == HTTPStatus.OK
+    assert resp.json() == {"ok": True}
+
+
+@pytest.mark.django_db
+def test_non_staff_bearer_token_is_forbidden():
+    resp = _bearer_client(is_staff=False).get("/api/system/db")
+    assert resp.status_code == HTTPStatus.FORBIDDEN
+
+
+@pytest.mark.django_db
+def test_staff_bearer_token_can_run_maintenance():
+    with patch("backend.system.services.clear_caches", return_value={"cleared": True}) as clear:
+        resp = _bearer_client(is_staff=True).post("/api/system/maintenance/clear-caches")
+    assert resp.status_code == HTTPStatus.OK
+    clear.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # Service layer tests (mocked)
 # ---------------------------------------------------------------------------
@@ -94,7 +123,12 @@ def test_host_metrics_staff_ok(staff_client):
         percent=_FIFTY_PERCENT,
     )
     mock_load = (0.5, 0.4, 0.3)
-    mock_partitions = [MagicMock(mountpoint="/", device="/dev/sda1", fstype="ext4")]
+    # Bind mounts of one device (as a container sees them) collapse to one row.
+    mock_partitions = [
+        MagicMock(mountpoint="/etc/hosts", device="/dev/sda1", fstype="ext4"),
+        MagicMock(mountpoint="/", device="/dev/sda1", fstype="ext4"),
+        MagicMock(mountpoint="/app", device="/dev/sda1", fstype="ext4"),
+    ]
     mock_disk_usage = MagicMock(
         total=100_000_000_000,
         used=50_000_000_000,
@@ -117,7 +151,7 @@ def test_host_metrics_staff_ok(staff_client):
     data = resp.json()
     assert data["cpu_percent"] == mock_cpu
     assert data["memory"]["percent"] == _FIFTY_PERCENT
-    assert len(data["disks"]) == 1
+    assert [d["mountpoint"] for d in data["disks"]] == ["/"]
 
 
 @pytest.mark.django_db

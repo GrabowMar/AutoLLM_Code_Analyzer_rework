@@ -15,6 +15,7 @@
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { ScoreCell, rowLink, tableFrame, shortModelName, modelNamePrefix } from '$lib/components/table';
+	import { modelPathSegment } from '$lib/api/models';
 	import {
 		getStatisticsDashboard,
 		getStatisticsTrends,
@@ -121,42 +122,34 @@
 	let trendMax = $derived(
 		Math.max(1, ...(trendsData?.series ?? data?.trends.series ?? []).map((p) => p.total)),
 	);
-	let kpis = $derived(
-		data
-			? [
-					{
-						title: 'Total Analyses',
-						value: fmtNumber(data.overview.total_analyses),
-						delta: `${data.overview.analyses_completed} completed`,
-					},
-					{
-						title: 'Success Rate',
-						value: `${data.overview.analyses_success_rate}%`,
-						delta: `Apps: ${data.overview.apps_success_rate}%`,
-					},
-					{
-						title: 'Avg. Duration',
-						value: fmtDuration(data.overview.avg_analysis_duration_seconds),
-						delta: 'per analysis',
-					},
-					{
-						title: 'Active Models',
-						value: fmtNumber(data.overview.models_in_use),
-						delta: `${new Set(data.models.map((m) => m.provider)).size} providers`,
-					},
-				]
-			: [],
-	);
 </script>
 
-<div class="space-y-6">
-	<PageHeader title="Statistics" description="Platform-wide analytics and performance metrics.">
+{#snippet headerStats()}
+	{#if data}
+		{@const o = data.overview}
+		<div class="header-stats">
+			<span class="header-stat"><b>{fmtNumber(o.total_analyses)}</b> analyses</span>
+			<span class="header-stat"><b>{fmtNumber(o.analyses_completed)}</b> completed</span>
+			<span class="header-stat" title="Apps: {o.apps_success_rate}% success"><b>{o.analyses_success_rate}%</b> success</span>
+			<span class="header-stat"><b>{fmtDuration(o.avg_analysis_duration_seconds)}</b> avg per analysis</span>
+			<span class="header-stat" title="{new Set(data.models.map((m) => m.provider)).size} providers"><b>{fmtNumber(o.models_in_use)}</b> active models</span>
+			<span class="header-stat"><b>{data.analyzer_health.online}/{data.analyzer_health.total}</b> analyzers online</span>
+		</div>
+	{/if}
+{/snippet}
+
+<div class="space-y-4">
+	<PageHeader
+		title="Statistics"
+		description="Platform-wide analytics and performance metrics."
+		children={data ? headerStats : undefined}
+	>
 		{#snippet meta()}
 			{#if data}
 				{@const health = data.analyzer_health}
 				<StatusBadge
 					status={health.offline === 0 ? 'healthy' : 'degraded'}
-					label="{health.offline === 0 ? 'System healthy' : 'Degraded'} · {health.online}/{health.total} analyzers online"
+					label={health.offline === 0 ? 'System healthy' : 'Degraded'}
 				/>
 			{/if}
 		{/snippet}
@@ -167,17 +160,6 @@
 	{:else if error}
 		<ErrorAlert message={error} onretry={load} />
 	{:else if data}
-		<!-- KPIs -->
-		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-			{#each kpis as kpi}
-				<div class="kpi-card">
-					<div class="kpi-label">{kpi.title}</div>
-					<div class="kpi-value">{kpi.value}</div>
-					<div class="text-xs text-muted-foreground">{kpi.delta}</div>
-				</div>
-			{/each}
-		</div>
-
 		<!-- Charts Row -->
 		<div class="grid gap-4 lg:grid-cols-2">
 			<Card.Root>
@@ -283,13 +265,13 @@
 							</thead>
 							<tbody>
 								{#each data.models as m}
-									{@const href = m.model_id ? `/models/${m.model_id}` : null}
+									{@const href = m.model_id ? `/models/${modelPathSegment(m.model_id)}` : null}
 									{@const provider = modelNamePrefix(m.name) || m.provider}
 									<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the name link is the keyboard path) -->
 									<tr class={href ? 'row-link' : ''} onclick={href ? rowLink(href) : undefined}>
 										<td class="max-w-0 w-[30%]">
 											<a
-												href="/models/{m.model_id ?? ''}"
+												href={href ?? '/models'}
 												class="block truncate font-medium hover:text-primary"
 												title={m.name}
 												onclick={(e) => { if (!m.model_id) e.preventDefault(); }}
@@ -386,23 +368,23 @@
 		<!-- Code Generation + Recent Activity -->
 		<div class="grid gap-4 lg:grid-cols-3">
 			<div class="lg:col-span-2">
-				<Card.Root>
-					<Card.Header>
+				<Card.Root class="gap-0 py-0">
+					<Card.Header class="border-b border-border py-3">
 						<div class="flex items-center gap-2">
 							<Code class="h-4 w-4 text-muted-foreground" />
 							<Card.Title>Code Generation Stats</Card.Title>
 						</div>
 					</Card.Header>
-					<Card.Content>
+					<Card.Content class="p-0">
 						{@const cg = data.code_generation}
-						<div class="grid gap-4 sm:grid-cols-3">
-							{#each [{ label: 'Total Apps Generated', value: fmtNumber(cg.total_apps) }, { label: 'Success Rate', value: `${cg.success_rate}%` }, { label: 'Avg Gen Time', value: fmtDuration(cg.avg_duration_seconds) }, { label: 'Lines of Code', value: fmtNumber(cg.total_lines_of_code) }, { label: 'Total Tokens', value: fmtNumber(cg.total_tokens) }, { label: 'Total Cost', value: fmtCost(cg.total_cost_usd) }] as stat}
-								<div class="kpi-card">
-									<div class="kpi-label">{stat.label}</div>
-									<div class="font-mono text-2xl font-medium tabular-nums">{stat.value}</div>
+						<dl class="grid grid-cols-2 gap-x-4 gap-y-2 px-4 py-3 sm:grid-cols-3">
+							{#each [{ label: 'Apps generated', value: fmtNumber(cg.total_apps) }, { label: 'Success rate', value: `${cg.success_rate}%` }, { label: 'Avg gen time', value: fmtDuration(cg.avg_duration_seconds) }, { label: 'Lines of code', value: fmtNumber(cg.total_lines_of_code) }, { label: 'Tokens', value: fmtNumber(cg.total_tokens) }, { label: 'Cost', value: fmtCost(cg.total_cost_usd) }] as stat}
+								<div>
+									<dt class="kpi-label">{stat.label}</dt>
+									<dd class="font-mono text-base font-medium tabular-nums">{stat.value}</dd>
 								</div>
 							{/each}
-						</div>
+						</dl>
 					</Card.Content>
 				</Card.Root>
 			</div>

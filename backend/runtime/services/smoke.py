@@ -130,8 +130,12 @@ def _persist(job: GenerationJob | None, container: ContainerInstance, result: di
     container.save(update_fields=["metadata", "updated_at"])
     if job is not None:
         # Keep the job copy lean — reports only need the summary numbers.
-        job.metrics = {
-            **(job.metrics or {}),
-            "functional": {k: v for k, v in result.items() if k != "checks"},
-        }
+        summary = {k: v for k, v in result.items() if k != "checks"}
+        metrics = {**(job.metrics or {}), "smoke": summary}
+        # The conformance suite is the graded verdict; a later smoke probe
+        # (container start) must never replace it.
+        functional = metrics.get("functional")
+        if not (isinstance(functional, dict) and functional.get("source") == "conformance"):
+            metrics["functional"] = summary
+        job.metrics = metrics
         job.save(update_fields=["metrics", "updated_at"])

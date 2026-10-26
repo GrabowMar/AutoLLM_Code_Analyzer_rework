@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
@@ -33,14 +32,12 @@
 		loading = true;
 		error = '';
 		try {
-			const jobsRes = await getGenerationJobs({ model_id: modelId, per_page: 100 });
+			const [jobsRes, containersRes] = await Promise.all([
+				getGenerationJobs({ model_id: modelId, per_page: 1 }),
+				getContainers({ model_id: modelId, per_page: 100 }),
+			]);
 			totalApps = jobsRes.total;
-			const results = await Promise.all(
-				jobsRes.items.map((j) =>
-					getContainers({ job_id: j.id, per_page: 5 }).then((r) => r.containers).catch(() => []),
-				),
-			);
-			containers = results.flat();
+			containers = containersRes.containers;
 		} catch (e) {
 			error = `Failed to load usage: ${(e as Error).message}`;
 		} finally {
@@ -65,31 +62,16 @@
 			{:else if error}
 				<ErrorAlert message={error} onretry={load} />
 			{:else}
-				<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-					<div class="rounded-md border bg-card p-3">
-						<div class="flex items-center gap-2 text-xs text-muted-foreground">
-							<PlayCircle class="h-3.5 w-3.5 text-success-fg" />Running
-						</div>
-						<div class="mt-1 text-2xl font-semibold text-success-fg">{running}</div>
-					</div>
-					<div class="rounded-md border bg-card p-3">
-						<div class="flex items-center gap-2 text-xs text-muted-foreground">
-							<StopCircle class="h-3.5 w-3.5 text-muted-foreground" />Stopped
-						</div>
-						<div class="mt-1 text-2xl font-semibold">{stopped}</div>
-					</div>
-					<div class="rounded-md border bg-card p-3">
-						<div class="flex items-center gap-2 text-xs text-muted-foreground">
-							<CircleDashed class="h-3.5 w-3.5 text-warning-fg" />Other
-						</div>
-						<div class="mt-1 text-2xl font-semibold">{other}</div>
-					</div>
-					<div class="rounded-md border bg-card p-3">
-						<div class="text-xs text-muted-foreground">Container Coverage</div>
-						<div class="mt-1 text-2xl font-semibold">{coverage}%</div>
-						<div class="text-[11px] text-muted-foreground">{containers.length} / {totalApps} apps</div>
-					</div>
-				</div>
+				{#if totalApps === 0}
+					<p class="text-sm text-muted-foreground">No containers: no applications have been generated with this model.</p>
+				{:else}
+					<p class="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs tabular-nums text-muted-foreground">
+						<span class="flex items-center gap-1.5"><PlayCircle class="h-3.5 w-3.5 text-success-fg" /><span class="text-foreground">{running}</span> running</span>
+						<span class="flex items-center gap-1.5"><StopCircle class="h-3.5 w-3.5" /><span class="text-foreground">{stopped}</span> stopped</span>
+						<span class="flex items-center gap-1.5"><CircleDashed class="h-3.5 w-3.5 text-warning-fg" /><span class="text-foreground">{other}</span> other</span>
+						<span>coverage <span class="text-foreground">{coverage}%</span> ({containers.length}/{totalApps} apps)</span>
+					</p>
+				{/if}
 
 				{#if containers.length > 0}
 					<div class="mt-4">

@@ -191,7 +191,8 @@ services:
     environment:
       <<: *django-env
       # Prefork defaults to the host's CPU count (12 children, ~1.1 GB idle);
-      # 2 is plenty for the remaining automation/users tasks and fits 1g.
+      # 2 is plenty for the remaining users / model-sync / integrations tasks and fits 1g
+      # (the legacy automation tasks are still registered but nothing enqueues them).
       CELERY_WORKER_CONCURRENCY: "2"
     # Was 2g; job execution and automation moved to the executor.
     mem_limit: 1g

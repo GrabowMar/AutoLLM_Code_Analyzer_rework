@@ -2,13 +2,14 @@
 
 Usage:
     python manage.py export_study_tables --out results/ [--experiment <uuid>] [--batch <uuid>]
-        [--include-ai] [--line-tolerance 2]
+        [--include-ai] [--line-tolerance 2] [--all-tools]
 
 Files (one row per entity, deduplicated issues next to raw findings):
     issues_per_app.csv, issues_by_model.csv, issues_by_template.csv,
     issues_by_model_template.csv, issues_by_tool.csv, issues_by_tool_rule.csv,
     tool_overlap.csv, issue_clusters.csv, healing_by_model.csv,
-    healing_per_app.csv, tool_inventory.csv, tool_executions.csv,
+    healing_by_template.csv, healing_per_app.csv, tool_inventory.csv,
+    tool_executions.csv,
     study_summary.json (totals, healing, inventory counts, accounting)
 """
 
@@ -48,13 +49,23 @@ class Command(BaseCommand):
         parser.add_argument("--batch", default=None, help="Generation batch id to scope to")
         parser.add_argument("--include-ai", action="store_true", help="Count AI-reviewer findings too")
         parser.add_argument("--line-tolerance", type=int, default=2, help="Line distance for cross-tool merges")
+        parser.add_argument(
+            "--all-tools",
+            action="store_true",
+            help="Count every tool's findings, not only tools that measured every app in scope",
+        )
 
     def handle(self, *args, **opts):
         out = Path(opts["out"])
         out.mkdir(parents=True, exist_ok=True)
         jobs = study_jobs(experiment_id=opts["experiment"], batch_id=opts["batch"])
 
-        issues = issue_breakdowns(jobs, include_ai=opts["include_ai"], line_tolerance=opts["line_tolerance"])
+        issues = issue_breakdowns(
+            jobs,
+            include_ai=opts["include_ai"],
+            line_tolerance=opts["line_tolerance"],
+            common_tools_only=not opts["all_tools"],
+        )
         for key, name in (
             ("per_app", "issues_per_app"),
             ("by_model", "issues_by_model"),
