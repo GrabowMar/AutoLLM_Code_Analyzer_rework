@@ -18,6 +18,7 @@ from backend.generation.services.profile_resolver import batch_cell_seed
 from backend.generation.services.profile_resolver import build_custom_snapshot
 from backend.generation.services.profile_resolver import bundle_key_from_snapshot
 from backend.generation.services.profile_resolver import experiment_cell_seed
+from backend.generation.services.profile_resolver import generation_options
 from backend.generation.services.profile_resolver import run_fingerprint
 
 if TYPE_CHECKING:
@@ -248,7 +249,9 @@ def clone_job(
             if original.mode == GenerationJob.Mode.AGENT:
                 apply_agent_snapshot_to_job(new_job)
             elif original.mode == GenerationJob.Mode.SCAFFOLDING and original.app_requirement:
-                apply_snapshot_to_job(new_job)
+                # Keep the original's continuation/repair options (an experiment's).
+                limit, repair = generation_options(original.resolved_bundle)
+                apply_snapshot_to_job(new_job, continuation_limit=limit, enable_repair=repair)
             elif original.mode == GenerationJob.Mode.CUSTOM:
                 # Execution reads the frozen llm section; without it a retry
                 # would fall back to the legacy columns and drop llm_params.

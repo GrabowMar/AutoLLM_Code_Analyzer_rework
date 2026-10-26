@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tableFrame } from '$lib/components/table';
 	import { onMount, onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
@@ -26,6 +27,7 @@
 	import SearchX from '@lucide/svelte/icons/search-x';
 	import Store from '@lucide/svelte/icons/store';
 	import PackageOpen from '@lucide/svelte/icons/package-open';
+	import Globe from '@lucide/svelte/icons/globe';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
@@ -34,10 +36,13 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ToolConfigDialog from '$lib/components/analyzers/ToolConfigDialog.svelte';
 	import ToolIcon from '$lib/components/analyzers/ToolIcon.svelte';
+	import CoveragePanel from '$lib/components/analyzers/CoveragePanel.svelte';
 	import { formatDateTime } from '$lib/utils/formatters';
 	import type { Tone } from '$lib/constants/colors';
 	import {
 		getToolCatalog,
+		getCatalogMeta,
+		getAppCoverage,
 		getWorkspace,
 		getInstalledTools,
 		installTool,
@@ -49,6 +54,8 @@
 		stopWorkspace,
 		deleteWorkspace,
 		type AnalyzerTool,
+		type CatalogMeta,
+		type AppCoverage,
 		type Workspace,
 		type InstalledTool,
 	} from '$lib/api/analyzers';
@@ -62,8 +69,8 @@
 		stopped: 'warning',
 	};
 
-	// Also the shop's category order.
-	const categoryLabels: Record<string, string> = {
+	// Fallback labels and order when the catalog vocabulary can't be loaded.
+	const fallbackCategoryLabels: Record<string, string> = {
 		security: 'Security',
 		dependencies: 'Dependencies',
 		lint: 'Lint & quality',
@@ -72,18 +79,58 @@
 		ai: 'AI review',
 	};
 
-	const languageLabels: Record<string, string> = {
-		python: 'Python',
-		javascript: 'JavaScript / TS',
-		html: 'HTML',
-		css: 'CSS',
-		shell: 'Shell',
-		any: 'Any language',
-	};
+	// Shop vocabulary (categories, modes, technologies) from data/tools/catalog.yaml.
+	let meta = $state<CatalogMeta | null>(null);
 
-	function languageOf(tool: AnalyzerTool): string {
-		return tool.kind === 'ai' ? 'AI' : (languageLabels[tool.target_language] ?? tool.target_language);
+	// Category labels in shop order: the catalog's, else the fallback.
+	const categoryLabels = $derived<Record<string, string>>(
+		meta?.categories.length ? Object.fromEntries(meta.categories.map((c) => [c.slug, c.label])) : fallbackCategoryLabels
+	);
+	const techLabels = $derived(new Map((meta?.technologies ?? []).map((t) => [t.slug, t.label])));
+
+	function techLabel(slug: string): string {
+		return techLabels.get(slug) ?? slug;
 	}
+
+	// What the user's generated apps contain; null until loaded (or if it failed).
+	let coverage = $state<AppCoverage | null>(null);
+	const appsTotal = $derived(coverage?.apps_total ?? 0);
+
+	// Tools that scan *slug* specifically; for a technology no tool targets
+	// (e.g. Vue), the language-agnostic tools are the only ones that read it.
+	function toolsFor(slug: string): AnalyzerTool[] {
+		const specific = catalog.filter((t) => t.technologies?.includes(slug));
+		return specific.length > 0 ? specific : catalog.filter((t) => t.technologies?.includes('generic'));
+	}
+
+	// Technology filter: every technology some tool scans or the user's apps contain, by group.
+	const techItems = $derived([
+		{ value: '', label: 'All technologies' },
+		...(meta?.technology_groups ?? []).flatMap((g) =>
+			(meta?.technologies ?? [])
+				.filter((t) => t.group === g.slug)
+				.map((t) => ({ t, count: catalog.filter((tool) => tool.technologies?.includes(t.slug)).length }))
+				.filter(({ t, count }) => count > 0 || (coverage?.technologies[t.slug] ?? 0) > 0)
+				.map(({ t, count }) => ({ value: t.slug, label: count > 0 ? `${t.label} (${count})` : `${t.label} (no specific tool)` }))
+		),
+	]);
+
+
+	/** Apps (of `appsTotal`) containing something *tool* scans; null when unknown. */
+	function fitOf(tool: AnalyzerTool): number | null {
+		if (!coverage || appsTotal === 0) return null;
+		return coverage.tools[tool.slug] ?? 0;
+	}
+
+
+	const modeDescriptions = $derived(new Map((meta?.modes ?? []).map((m) => [m.slug, m.description])));
+
+	function isDynamic(tool: AnalyzerTool): boolean {
+		return tool.analysis_mode === 'dynamic';
+	}
+
+	// Reports keep AI-reviewer findings apart from measured ones.
+	const aiNote = 'An LLM\'s opinion, not a measurement: reports and rankings list its findings separately from measured ones.';
 
 	const outputKindLabels: Record<string, string> = {
 		findings: 'Findings',
@@ -91,18 +138,55 @@
 		mixed: 'Findings + metrics',
 	};
 
-	// Generic confirmation dialog for destructive actions (uninstall / teardown).
+	// Generic confirmation dialog: uninstall / teardown, and version updates.
 	let confirmState = $state<{
 		open: boolean;
 		title: string;
 		description: string;
 		confirmLabel: string;
+		destructive: boolean;
 		busy: boolean;
 		action: () => Promise<void>;
-	}>({ open: false, title: '', description: '', confirmLabel: 'Confirm', busy: false, action: async () => {} });
+	}>({ open: false, title: '', description: '', confirmLabel: 'Confirm', destructive: true, busy: false, action: async () => {} });
 
-	function askConfirm(opts: { title: string; description: string; confirmLabel: string; action: () => Promise<void> }) {
-		confirmState = { ...confirmState, ...opts, open: true, busy: false };
+	function askConfirm(opts: {
+		title: string;
+		description: string;
+		confirmLabel: string;
+		destructive?: boolean;
+		action: () => Promise<void>;
+	}) {
+		confirmState = { ...confirmState, destructive: true, ...opts, open: true, busy: false };
+	}
+
+	// A new tool version can change what it reports, so findings from runs
+	// before and after the update are not directly comparable (each result
+	// records the tool version it ran with).
+	const comparabilityNote =
+		'A new version can find more, fewer or different issues. Runs analyzed before and after the update are not directly comparable, so finish a study on one version first. Each result records the tool version it ran with.';
+
+	function confirmUpdate(it: InstalledTool) {
+		if (!it.update_available) {
+			void handleUpdate(it);
+			return;
+		}
+		askConfirm({
+			title: `Update ${it.tool_name} to v${it.latest_version}?`,
+			description: comparabilityNote,
+			confirmLabel: 'Update',
+			destructive: false,
+			action: () => handleUpdate(it),
+		});
+	}
+
+	function confirmUpdateAll() {
+		askConfirm({
+			title: `Update ${outdated.length} tool${outdated.length === 1 ? '' : 's'}?`,
+			description: `${outdated.map((it) => it.tool_name).join(', ')}. ${comparabilityNote}`,
+			confirmLabel: 'Update all',
+			destructive: false,
+			action: () => handleUpdateAll(true),
+		});
 	}
 
 	async function runConfirm() {
@@ -117,6 +201,8 @@
 
 	type Tab = 'shop' | 'installed' | 'workspace';
 	type StateFilter = 'all' | 'installed' | 'available' | 'updates';
+	type ModeFilter = 'all' | 'static' | 'dynamic';
+	type FitFilter = 'all' | 'fits';
 
 	let activeTab = $state<Tab>('shop');
 	let catalog = $state<AnalyzerTool[]>([]);
@@ -128,6 +214,10 @@
 	let busy = $state<Record<string, boolean>>({});
 	let stateFilter = $state<StateFilter>('all');
 	let categoryFilter = $state('all');
+	let modeFilter = $state<ModeFilter>('all');
+	let techFilter = $state('');
+	let fitFilter = $state<FitFilter>('all');
+	const techMatches = $derived(new Set(techFilter ? toolsFor(techFilter).map((t) => t.slug) : []));
 	let searchQuery = $state('');
 
 	// Dialogs
@@ -141,6 +231,7 @@
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	const installedBySlug = $derived(new Map(installed.map((it) => [it.tool_slug, it])));
+	const readySlugs = $derived(new Set(installed.filter((it) => it.status === 'installed').map((it) => it.tool_slug)));
 	const toolBySlug = $derived(new Map(catalog.map((t) => [t.slug, t])));
 	const outdated = $derived(installed.filter((it) => it.update_available));
 	const inFlight = $derived(installed.filter((it) => isWorking(it)));
@@ -153,6 +244,23 @@
 			value: c,
 			label: `${categoryLabels[c] ?? c} (${catalog.filter((t) => t.category === c).length})`,
 		})),
+	]);
+
+	const dynamicCount = $derived(catalog.filter(isDynamic).length);
+	const modeItems = $derived([
+		{ value: 'all', label: 'All' },
+		{ value: 'static', label: 'Static', title: modeDescriptions.get('static') },
+		{ value: 'dynamic', label: `Dynamic (${dynamicCount})`, title: modeDescriptions.get('dynamic') },
+	]);
+
+	const fittingCount = $derived(catalog.filter((t) => (fitOf(t) ?? 0) > 0).length);
+	const fitItems = $derived([
+		{ value: 'all', label: 'All tools' },
+		{
+			value: 'fits',
+			label: `Fits my apps (${fittingCount})`,
+			title: 'Tools that scan something your generated apps contain',
+		},
 	]);
 
 	const stateItems = $derived([
@@ -180,10 +288,13 @@
 			return (
 				stateOk &&
 				(categoryFilter === 'all' || t.category === categoryFilter) &&
+				(modeFilter === 'all' || (t.analysis_mode ?? 'static') === modeFilter) &&
+				(!techFilter || techMatches.has(t.slug)) &&
+				(fitFilter === 'all' || (fitOf(t) ?? 1) > 0) &&
 				(!q ||
 					t.name.toLowerCase().includes(q) ||
 					t.description.toLowerCase().includes(q) ||
-					languageOf(t).toLowerCase().includes(q))
+					(t.technologies ?? []).some((slug) => techLabel(slug).toLowerCase().includes(q)))
 			);
 		});
 		return matches
@@ -193,6 +304,15 @@
 	});
 
 	const installableVisible = $derived(visibleCatalog.filter((t) => !installedBySlug.has(t.slug)));
+
+	function clearFilters() {
+		searchQuery = '';
+		categoryFilter = 'all';
+		stateFilter = 'all';
+		modeFilter = 'all';
+		techFilter = '';
+		fitFilter = 'all';
+	}
 
 	function isWorking(it: InstalledTool | undefined | null): boolean {
 		return it?.status === 'installing' || it?.status === 'updating';
@@ -228,8 +348,19 @@
 		loading = true;
 		loadError = '';
 		try {
-			const [c, w, i] = await Promise.all([getToolCatalog(), getWorkspace(), getInstalledTools()]);
+			const [c, w, i, m] = await Promise.all([
+				getToolCatalog(),
+				getWorkspace(),
+				getInstalledTools(),
+				// Labels only: the shop still works with fallbacks if this fails.
+				getCatalogMeta().catch(() => null),
+			]);
 			catalog = c;
+			meta = m;
+			// Optional context; the shop works without it.
+			getAppCoverage()
+				.then((cov) => (coverage = cov))
+				.catch(() => (coverage = null));
 			workspace = w;
 			installed = i;
 			ensurePolling();
@@ -420,6 +551,64 @@
 	onDestroy(stopPolling);
 </script>
 
+{#snippet shopToolbar()}
+	<!-- Filters, count and bulk install in one strip at the top of the catalogue. -->
+	<div class="table-toolbar">
+		<div class="flex min-w-0 flex-wrap items-center gap-2">
+			{#if appsTotal > 0}
+				<Segmented aria-label="Filter by fit to your apps" size="sm" value={fitFilter} onValueChange={(v) => (fitFilter = v as FitFilter)} items={fitItems} />
+			{/if}
+			<Segmented aria-label="Filter by install state" size="sm" value={stateFilter} onValueChange={(v) => (stateFilter = v as StateFilter)} items={stateItems} />
+			{#if dynamicCount > 0}
+				<Segmented aria-label="Filter by analysis mode" size="sm" value={modeFilter} onValueChange={(v) => (modeFilter = v as ModeFilter)} items={modeItems} />
+			{/if}
+			<Select.Simple aria-label="Filter by category" size="sm" class="w-44" bind:value={categoryFilter} items={categoryItems} />
+			{#if techItems.length > 1}
+				<Select.Simple aria-label="Filter by technology" size="sm" class="w-48" bind:value={techFilter} items={techItems} />
+			{/if}
+			<div class="relative w-full sm:w-56">
+				<Search class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+				<Input type="search" placeholder="Search tools…" aria-label="Search tools" class="h-8 pl-8 text-xs" bind:value={searchQuery} />
+			</div>
+		</div>
+		<div class="flex items-center gap-3">
+			<span class="tabular-nums">{visibleCatalog.length} shown · {installableVisible.length} not installed</span>
+			{#if installableVisible.length > 1}
+				<Button size="sm" variant="outline" class="h-7 text-xs" disabled={busy.bulk} onclick={handleInstallVisible}>
+					{#if busy.bulk}<Loader class="size-3.5 animate-spin motion-reduce:animate-none" />{:else}<Download class="size-3.5" />{/if}
+					Install {installableVisible.length} shown
+				</Button>
+			{/if}
+		</div>
+	</div>
+{/snippet}
+
+{#snippet fitCell(tool: AnalyzerTool)}
+	{@const fit = fitOf(tool) ?? 0}
+	{#if fit === 0}
+		<span class="text-[11px] text-warning-fg" title="None of your generated apps contain anything this tool scans; it would report 0 findings">Fits none of your apps</span>
+	{:else}
+		<span class="flex items-center gap-2 text-[11px]" title="{fit} of {appsTotal} generated apps contain something this tool scans">
+			<span class="h-1.5 w-14 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+				<span class="block h-full rounded-full bg-primary/70" style:width="{Math.round((fit / appsTotal) * 100)}%"></span>
+			</span>
+			<span class="tabular-nums text-muted-foreground">fits {fit}/{appsTotal} apps</span>
+		</span>
+	{/if}
+{/snippet}
+
+{#snippet techChips(tool: AnalyzerTool, max: number)}
+	{@const techs = tool.technologies ?? []}
+	<div class="flex flex-wrap gap-1">
+		{#each techs.slice(0, max) as slug (slug)}
+			<span class="rounded-full border border-border px-1.5 text-[11px] font-medium leading-4 text-muted-foreground">{techLabel(slug)}</span>
+		{/each}
+		{#if techs.length > max}
+			<span class="text-[11px] leading-4 text-muted-foreground" title={techs.slice(max).map(techLabel).join(', ')}>+{techs.length - max}</span>
+		{/if}
+	</div>
+{/snippet}
+
 {#snippet toolActions(tool: AnalyzerTool, it: InstalledTool | undefined)}
 	{#if !it}
 		<Button size="sm" disabled={busy[tool.slug]} onclick={() => handleInstall(tool)}>
@@ -435,7 +624,7 @@
 		<Button size="sm" variant="ghost" onclick={() => openLog(it)}>
 			<ScrollText class="size-4" /> Log
 		</Button>
-		<Button size="sm" disabled={busy[tool.slug]} onclick={() => handleUpdate(it)}>
+		<Button size="sm" disabled={busy[tool.slug]} onclick={() => confirmUpdate(it)}>
 			{#if busy[tool.slug]}<Loader class="size-4 animate-spin motion-reduce:animate-none" />{:else}<RotateCcw class="size-4" />{/if}
 			Retry
 		</Button>
@@ -443,7 +632,7 @@
 		<Button size="sm" variant="outline" onclick={() => openConfig(it)}>
 			<Settings2 class="size-4" /> Configure
 		</Button>
-		<Button size="sm" disabled={busy[tool.slug]} onclick={() => handleUpdate(it)}>
+		<Button size="sm" disabled={busy[tool.slug]} onclick={() => confirmUpdate(it)}>
 			{#if busy[tool.slug]}<Loader class="size-4 animate-spin motion-reduce:animate-none" />{:else}<ArrowUpCircle class="size-4" />{/if}
 			Update
 		</Button>
@@ -454,73 +643,57 @@
 	{/if}
 {/snippet}
 
-<div class="space-y-6">
+<Tabs.Root bind:value={activeTab} class="space-y-4">
 	<PageHeader
 		title="Analyzers"
-		description="Browse the tool shop, install and update tools in your analyzer workspace, configure and test them."
+		description="Choose the tools that measure your generated apps. Their findings are what analysis runs, experiments, reports and rankings compare across models."
 	>
 		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={loadAll} disabled={loading}>
 				<RefreshCw class="size-4" /> Refresh
 			</Button>
 			{#if outdated.length > 0}
-				<Button size="sm" disabled={busy['update-all']} onclick={() => handleUpdateAll(true)}>
+				<Button size="sm" disabled={busy['update-all']} onclick={confirmUpdateAll}>
 					{#if busy['update-all']}<Loader class="size-4 animate-spin motion-reduce:animate-none" />{:else}<ArrowUpCircle class="size-4" />{/if}
 					Update all ({outdated.length})
 				</Button>
+			{/if}
+		{/snippet}
+		{#snippet nav()}
+			<Tabs.List aria-label="Analyzer sections">
+				<Tabs.Trigger value="shop">Shop</Tabs.Trigger>
+				<Tabs.Trigger value="installed">
+					Installed ({installed.length}){#if outdated.length > 0}<span class="ml-1.5 text-info-fg">· {outdated.length} update{outdated.length === 1 ? '' : 's'}</span>{/if}
+				</Tabs.Trigger>
+				<Tabs.Trigger value="workspace">Workspace</Tabs.Trigger>
+			</Tabs.List>
+			{#if workspace && workspace.status !== 'ready' && workspace.status !== 'provisioning'}
+				<span class="ml-auto flex items-center gap-1.5 px-2 text-xs text-muted-foreground">
+					<Info class="size-3.5 shrink-0" />
+					{workspace.status === 'absent' ? 'No analyzer workspace is running yet' : `Analyzer workspace ${workspace.status}`} — installing a container tool starts it.
+				</span>
 			{/if}
 		{/snippet}
 	</PageHeader>
 
 	{#if loadError}<ErrorAlert message={loadError} onretry={loadAll} />{/if}
 
-	<Tabs.Root bind:value={activeTab} class="space-y-6">
-		<Tabs.List aria-label="Analyzer sections">
-			<Tabs.Trigger value="shop">Shop</Tabs.Trigger>
-			<Tabs.Trigger value="installed">
-				Installed ({installed.length}){#if outdated.length > 0}<span class="ml-1.5 text-info-fg">· {outdated.length} update{outdated.length === 1 ? '' : 's'}</span>{/if}
-			</Tabs.Trigger>
-			<Tabs.Trigger value="workspace">Workspace</Tabs.Trigger>
-		</Tabs.List>
-
 		{#if loading}
 			<LoadingState label="loading analyzers" />
 		{:else}
 			<Tabs.Content value="shop" class="space-y-4">
-				{#if workspace && workspace.status !== 'ready' && workspace.status !== 'provisioning'}
-					<p class="flex items-center gap-2 text-sm text-muted-foreground">
-						<Info class="size-4 shrink-0" />
-						Your workspace is {workspace.status}. Installing a container tool starts it automatically.
-					</p>
-				{/if}
-
-				<!-- State / category filter + search -->
-				<div class="flex flex-wrap items-center gap-3">
-					<Segmented aria-label="Filter by install state" size="sm" value={stateFilter} onValueChange={(v) => (stateFilter = v as StateFilter)} items={stateItems} />
-					<Select.Simple
-						aria-label="Filter by category"
-						size="sm"
-						class="w-48"
-						bind:value={categoryFilter}
-						items={categoryItems}
+				{#if coverage}
+					<CoveragePanel
+						{coverage}
+						{meta}
+						{catalog}
+						installedSlugs={readySlugs}
+						selected={techFilter}
+						onselect={(slug) => (techFilter = slug)}
 					/>
-					<div class="relative w-full sm:ml-auto sm:w-60">
-						<Search class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-						<Input type="search" placeholder="Search tools…" aria-label="Search tools" class="pl-8" bind:value={searchQuery} />
-					</div>
-				</div>
-
-				{#if installableVisible.length > 1}
-					<div class="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-						<span>{visibleCatalog.length} tool(s) shown · {installableVisible.length} not installed</span>
-						<Button size="sm" variant="outline" disabled={busy.bulk} onclick={handleInstallVisible}>
-							{#if busy.bulk}<Loader class="size-4 animate-spin motion-reduce:animate-none" />{:else}<Download class="size-4" />{/if}
-							Install {installableVisible.length} shown
-						</Button>
-					</div>
 				{/if}
-
 				{#if visibleCatalog.length === 0}
+					<Card.Root class="gap-0 overflow-clip py-0">{@render shopToolbar()}</Card.Root>
 					{#if catalog.length === 0}
 						<EmptyState icon={Store} title="The tool catalog is empty" />
 					{:else}
@@ -529,11 +702,7 @@
 								<Button
 									variant="outline"
 									size="sm"
-									onclick={() => {
-										searchQuery = '';
-										categoryFilter = 'all';
-										stateFilter = 'all';
-									}}
+									onclick={clearFilters}
 								>
 									Clear filters
 								</Button>
@@ -542,51 +711,75 @@
 					{/if}
 				{/if}
 
-				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-					{#each visibleCatalog as tool (tool.slug)}
-						{@const it = installedBySlug.get(tool.slug)}
-						<Card.Root class="flex flex-col">
-							<Card.Header>
-								<div class="flex items-start gap-3">
-									<ToolIcon {tool} />
-									<div class="min-w-0 flex-1">
-										<div class="flex items-start justify-between gap-2">
-											<Card.Title class="text-base">{tool.name}</Card.Title>
-											<Badge variant="outline">{categoryLabels[tool.category] ?? tool.category}</Badge>
-										</div>
-										<p class="text-xs text-muted-foreground">
-											{languageOf(tool)}{tool.version ? ` · v${tool.version}` : ''}
-										</p>
-									</div>
-								</div>
-								<Card.Description class="line-clamp-3">{tool.description}</Card.Description>
-							</Card.Header>
-							<Card.Content class="mt-auto space-y-3">
-								{#if it}
-									<StatusBadge
-										status={it.update_available ? 'update available' : it.status}
-										tone={it.update_available ? 'info' : undefined}
-										tones={analyzerTones}
-									/>
-								{/if}
-								<div class="flex items-center justify-between gap-2">
-									<Button
-										variant="ghost"
-										size="sm"
-										class="-ml-2"
-										aria-label="{tool.name} details"
-										onclick={() => openDetails(tool.slug)}
-									>
-										<Info class="size-4" /> Details
-									</Button>
-									<div class="flex gap-2">
-										{@render toolActions(tool, it)}
-									</div>
-								</div>
-							</Card.Content>
-						</Card.Root>
-					{/each}
-				</div>
+				{#if visibleCatalog.length > 0}
+					<!-- One row per tool: the catalogue is scanned and compared, not browsed. -->
+					<Card.Root class="gap-0 overflow-clip py-0">
+						{@render shopToolbar()}
+						<div class="table-frame" {@attach tableFrame}>
+							<table>
+								<thead>
+									<tr>
+										<th>Tool</th>
+										<th>Category</th>
+										<th>Scans</th>
+										<th>Status</th>
+										<th class="text-right">Actions</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each visibleCatalog as tool (tool.slug)}
+										{@const it = installedBySlug.get(tool.slug)}
+										<tr>
+											<td class="max-w-[30rem]">
+												<div class="flex items-center gap-2.5">
+													<ToolIcon {tool} size="sm" />
+													<div class="min-w-0">
+														<button
+															class="font-medium hover:text-primary hover:underline"
+															aria-label="{tool.name} details"
+															onclick={() => openDetails(tool.slug)}
+														>{tool.name}</button>
+														{#if tool.version}<span class="ml-1 font-mono text-[11px] text-muted-foreground">v{tool.version}</span>{/if}
+														{#if isDynamic(tool)}
+															<Badge variant="outline" class="ml-1.5 gap-1 align-middle text-[11px]" title={modeDescriptions.get('dynamic') || 'Scans the running app'}>
+																<Globe class="size-3" /> Dynamic
+															</Badge>
+														{/if}
+														{#if tool.kind === 'ai'}
+															<Badge variant="outline" class="ml-1.5 align-middle text-[11px]" title={aiNote}>Opinion</Badge>
+														{/if}
+														<p class="cell-sub truncate text-xs text-muted-foreground" title={tool.description}>{tool.description}</p>
+													</div>
+												</div>
+											</td>
+											<td class="whitespace-nowrap"><Badge variant="outline">{categoryLabels[tool.category] ?? tool.category}</Badge></td>
+											<td class="min-w-36 max-w-56">
+												{@render techChips(tool, 3)}
+												{#if appsTotal > 0}<div class="mt-1">{@render fitCell(tool)}</div>{/if}
+											</td>
+											<td class="whitespace-nowrap">
+												{#if it}
+													<StatusBadge
+														status={it.update_available ? 'update available' : it.status}
+														tone={it.update_available ? 'info' : undefined}
+														tones={analyzerTones}
+													/>
+												{:else}
+													<span class="text-xs text-muted-foreground">Not installed</span>
+												{/if}
+											</td>
+											<td>
+												<div class="flex justify-end gap-1.5">
+													{@render toolActions(tool, it)}
+												</div>
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					</Card.Root>
+				{/if}
 			</Tabs.Content>
 
 			<Tabs.Content value="installed" class="space-y-4">
@@ -616,7 +809,7 @@
 								{#if busy['reinstall-all']}<Loader class="size-4 animate-spin motion-reduce:animate-none" />{:else}<RotateCcw class="size-4" />{/if}
 								Reinstall all
 							</Button>
-							<Button size="sm" disabled={outdated.length === 0 || busy['update-all']} onclick={() => handleUpdateAll(true)}>
+							<Button size="sm" disabled={outdated.length === 0 || busy['update-all']} onclick={confirmUpdateAll}>
 								{#if busy['update-all']}<Loader class="size-4 animate-spin motion-reduce:animate-none" />{:else}<ArrowUpCircle class="size-4" />{/if}
 								Update all{outdated.length > 0 ? ` (${outdated.length})` : ''}
 							</Button>
@@ -655,7 +848,7 @@
 											variant={it.update_available || it.status === 'failed' ? 'default' : 'outline'}
 											size="sm"
 											disabled={working || busy[it.tool_slug]}
-											onclick={() => handleUpdate(it)}
+											onclick={() => confirmUpdate(it)}
 										>
 											{#if working || busy[it.tool_slug]}
 												<Loader class="size-4 animate-spin motion-reduce:animate-none" />
@@ -764,9 +957,8 @@
 					</Card.Content>
 				</Card.Root>
 			</Tabs.Content>
-		{/if}
-	</Tabs.Root>
-</div>
+	{/if}
+</Tabs.Root>
 
 <ToolConfigDialog
 	bind:open={configOpen}
@@ -809,10 +1001,27 @@
 			<dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 border-t pt-4 text-sm">
 				<dt class="text-muted-foreground">Category</dt>
 				<dd>{categoryLabels[detailTool.category] ?? detailTool.category}</dd>
-				<dt class="text-muted-foreground">Language</dt>
-				<dd>{detailTool.kind === 'ai' ? 'Any (AI review)' : languageOf(detailTool)}</dd>
+				<dt class="text-muted-foreground">Mode</dt>
+				<dd>
+					{isDynamic(detailTool) ? 'Dynamic — scans the running app' : 'Static — reads the source'}
+					{#if isDynamic(detailTool)}
+						<p class="text-xs text-muted-foreground">
+							Start the app's container before the analysis run; otherwise this tool is skipped. Experiment post-run
+							analysis can't use it yet, since apps aren't kept running after evaluation.
+						</p>
+					{/if}
+				</dd>
+				<dt class="text-muted-foreground">Scans</dt>
+				<dd>{@render techChips(detailTool, 99)}</dd>
+				{#if appsTotal > 0}
+					<dt class="text-muted-foreground">Fits your apps</dt>
+					<dd>{@render fitCell(detailTool)}</dd>
+				{/if}
 				<dt class="text-muted-foreground">Output</dt>
-				<dd>{outputKindLabels[detailTool.output_kind ?? 'findings'] ?? detailTool.output_kind}</dd>
+				<dd>
+					{outputKindLabels[detailTool.output_kind ?? 'findings'] ?? detailTool.output_kind}
+					{#if detailTool.kind === 'ai'}<p class="text-xs text-muted-foreground">{aiNote}</p>{/if}
+				</dd>
 				<dt class="text-muted-foreground">Catalog version</dt>
 				<dd>{detailTool.version ? `v${detailTool.version}` : '—'}</dd>
 				{#if detailInstall}
@@ -892,7 +1101,7 @@
 	title={confirmState.title}
 	description={confirmState.description}
 	confirmLabel={confirmState.confirmLabel}
-	destructive
+	destructive={confirmState.destructive}
 	busy={confirmState.busy}
 	onConfirm={runConfirm}
 />

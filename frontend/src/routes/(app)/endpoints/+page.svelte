@@ -104,7 +104,7 @@
 	});
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4">
 	<PageHeader title="Endpoints" description="Where models run: OpenRouter and your own Ollama / OpenAI-compatible servers.">
 		{#snippet actions()}
 			<Button href="/endpoints/new" size="sm"><Plus />Add endpoint</Button>
@@ -120,6 +120,7 @@
 	{:else}
 		{#if local.length === 0}
 			<EmptyState
+				compact
 				icon={Server}
 				title="No local endpoints yet"
 				description="Run open models on your own GPU machine: add an Ollama or OpenAI-compatible server and connect it with the relay."

@@ -1,330 +1,283 @@
 <script lang="ts">
-	import { listApiTokens, createApiToken, revokeApiToken } from '$lib/api/client';
-	import type { ApiTokenSummary, ApiTokenCreatedResponse, CreateApiTokenPayload } from '$lib/api/client';
-	import * as Card from '$lib/components/ui/card';
+	/**
+	 * TokenSection — personal bearer tokens: list, create (shown once), revoke.
+	 * Scopes only matter to the MCP server (`mcp`, `read`); on the REST API a
+	 * token acts with the full rights of its owner.
+	 */
+	import { listApiTokens, createApiToken, revokeApiToken } from '$lib/api/tokens';
+	import type { ApiTokenSummary, ApiTokenCreatedResponse } from '$lib/api/tokens';
+	import SettingsBlock from './SettingsBlock.svelte';
+	import CopyField from './CopyField.svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Button } from '$lib/components/ui/button';
-	import { Separator } from '$lib/components/ui/separator';
-	import { Alert, AlertDescription } from '$lib/components/ui/alert';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { Segmented } from '$lib/components/ui/segmented';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import CopyBlock from '$lib/components/inference/CopyBlock.svelte';
+	import { useSectionStatus } from './section-status.svelte';
+	import { formatApiError } from '$lib/api/core';
+	import { formatAgo } from '$lib/components/inference/endpoint-display';
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import Copy from '@lucide/svelte/icons/copy';
-	import Key from '@lucide/svelte/icons/key';
-	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import Terminal from '@lucide/svelte/icons/terminal';
 	import Plus from '@lucide/svelte/icons/plus';
-	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
+	import X from '@lucide/svelte/icons/x';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
-	interface Props {}
-
-	let {}: Props = $props();
+	const SCOPES = [
+		{ value: 'mcp', label: 'mcp', help: 'Allows the token inside an MCP connector URL (claude.ai, ChatGPT).' },
+		{ value: 'read', label: 'read', help: 'MCP clients see only tools that do not change data.' },
+	];
+	const EXPIRY = [
+		{ value: '30', label: '30 days' },
+		{ value: '90', label: '90 days' },
+		{ value: '365', label: '1 year' },
+		{ value: 'never', label: 'Never' },
+	];
 
 	let tokens = $state<ApiTokenSummary[]>([]);
-	let newlyCreatedToken = $state<ApiTokenCreatedResponse | null>(null);
-	let tokensLoading = $state(true);
-	let tokenActionLoading = $state(false);
-	let showCreateDialog = $state(false);
-	let newTokenName = $state('');
-	let newTokenScopes = $state<string[]>([]);
-	let newTokenExpiry = $state('');
+	let loading = $state(true);
+	let error = $state('');
+	let created = $state<ApiTokenCreatedResponse | null>(null);
+	let showRevoked = $state(false);
 
-	onMount(() => {
-		listApiTokens()
-			.then((list) => {
-				tokens = list;
-			})
-			.catch(() => {})
-			.finally(() => {
-				tokensLoading = false;
-			});
+	let createOpen = $state(false);
+	let creating = $state(false);
+	let name = $state('');
+	let scopes = $state<string[]>([]);
+	let expiry = $state('90');
+
+	let revoking = $state<ApiTokenSummary | null>(null);
+	let revokeOpen = $state(false);
+	let revokeBusy = $state(false);
+
+	const now = Date.now();
+	const isExpired = (t: ApiTokenSummary) => t.expires_at != null && Date.parse(t.expires_at) < now;
+	const active = $derived(tokens.filter((t) => !t.revoked_at));
+	const revoked = $derived(tokens.filter((t) => t.revoked_at));
+	const visible = $derived(showRevoked ? tokens : active);
+	const origin = typeof window === 'undefined' ? '' : window.location.origin;
+
+	const report = useSectionStatus('tokens');
+	$effect(() => {
+		if (loading || error) return;
+		const n = active.filter((t) => !isExpired(t)).length;
+		report(n ? { tone: 'neutral', label: `${n} active` } : null);
 	});
 
-	async function handleCreateToken() {
-		if (!newTokenName.trim()) {
-			toast.error('Token name is required');
-			return;
-		}
-		tokenActionLoading = true;
+	async function load() {
+		error = '';
 		try {
-			const payload: CreateApiTokenPayload = {
-				name: newTokenName.trim(),
-				scopes: newTokenScopes,
-				expires_at: newTokenExpiry || null,
-			};
-			const created = await createApiToken(payload);
-			newlyCreatedToken = created;
-			tokens = [created, ...tokens];
-			showCreateDialog = false;
-			newTokenName = '';
-			newTokenScopes = [];
-			newTokenExpiry = '';
-			toast.success('API token created');
-		} catch {
-			toast.error('Failed to create token');
+			tokens = await listApiTokens();
+		} catch (e) {
+			error = formatApiError(e, 'Could not load your tokens.');
 		} finally {
-			tokenActionLoading = false;
+			loading = false;
 		}
 	}
 
-	async function handleRevokeToken(id: string) {
-		tokenActionLoading = true;
+	function openCreate() {
+		name = '';
+		scopes = [];
+		expiry = '90';
+		createOpen = true;
+	}
+
+	function expiresAt(): string | null {
+		if (expiry === 'never') return null;
+		return new Date(Date.now() + Number(expiry) * 86_400_000).toISOString();
+	}
+
+	async function create(e: Event) {
+		e.preventDefault();
+		if (!name.trim()) return;
+		creating = true;
+		try {
+			const res = await createApiToken({ name: name.trim(), scopes, expires_at: expiresAt() });
+			created = res;
+			tokens = [res, ...tokens];
+			createOpen = false;
+		} catch (err) {
+			toast.error(formatApiError(err, 'Could not create the token.'));
+		} finally {
+			creating = false;
+		}
+	}
+
+	function askRevoke(t: ApiTokenSummary) {
+		revoking = t;
+		revokeOpen = true;
+	}
+
+	async function revoke() {
+		if (!revoking) return;
+		const id = revoking.id;
+		revokeBusy = true;
 		try {
 			await revokeApiToken(id);
-			tokens = tokens.map((t) =>
-				t.id === id ? { ...t, revoked_at: new Date().toISOString() } : t
-			);
-			if (newlyCreatedToken?.id === id) newlyCreatedToken = null;
-			toast.success('API token revoked');
-		} catch {
-			toast.error('Failed to revoke token');
+			tokens = tokens.map((t) => (t.id === id ? { ...t, revoked_at: new Date().toISOString() } : t));
+			if (created?.id === id) created = null;
+			revokeOpen = false;
+			toast.success('Token revoked.');
+		} catch (err) {
+			toast.error(formatApiError(err, 'Could not revoke the token.'));
 		} finally {
-			tokenActionLoading = false;
+			revokeBusy = false;
 		}
 	}
 
-	async function copyToken(token: string) {
-		try {
-			await navigator.clipboard.writeText(token);
-			toast.success('Token copied to clipboard');
-		} catch {
-			toast.error('Failed to copy token');
-		}
+	function toggleScope(scope: string, on: boolean) {
+		scopes = on ? [...scopes, scope] : scopes.filter((s) => s !== scope);
 	}
+
+	onMount(load);
 </script>
 
-<!-- New token banner (shown once after creation) -->
-{#if newlyCreatedToken}
-	<Alert class="border-warning/40 bg-warning/10">
-		<AlertTriangle class="h-4 w-4 text-warning-fg" />
-		<AlertDescription class="space-y-3">
-			<p class="font-semibold text-warning-fg">
-				Save this token — it will not be shown again.
-			</p>
-			<div class="flex items-center gap-2 rounded-lg border border-warning/40 bg-background p-3">
-				<code class="flex-1 break-all text-sm font-mono">{newlyCreatedToken.token}</code>
-				<Button
-					size="icon"
-					variant="ghost"
-					onclick={() => copyToken(newlyCreatedToken!.token)}
-					title="Copy token"
-					aria-label="Copy token"
-				>
-					<Copy class="h-4 w-4" />
-				</Button>
-			</div>
-			<Button
-				variant="ghost"
-				size="sm"
-				onclick={() => (newlyCreatedToken = null)}
-			>
-				Dismiss
-			</Button>
-		</AlertDescription>
-	</Alert>
-{/if}
-
-<!-- API Tokens list -->
-<Card.Root>
-	<Card.Header class="flex flex-row items-center justify-between space-y-0">
-		<div>
-			<Card.Title class="flex items-center gap-2">
-				<Key class="h-5 w-5" />
-				API Tokens
-			</Card.Title>
-			<Card.Description>Personal access tokens for programmatic API access.</Card.Description>
+{#if created}
+	<div class="settings-row space-y-3 bg-warning/10">
+		<p class="flex items-start gap-2 text-sm text-warning-fg">
+			<TriangleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+			<span>Copy <span class="font-medium">{created.name}</span> now. It is shown only once.</span>
+		</p>
+		<CopyField value={created.token} label="new API token" class="bg-card" />
+		<div class="flex justify-end">
+			<Button variant="ghost" size="sm" onclick={() => (created = null)}><X />Done, I've copied it</Button>
 		</div>
-		<Button onclick={() => (showCreateDialog = true)} size="sm">
-			<Plus class="h-4 w-4" />
-			New Token
-		</Button>
-	</Card.Header>
-	<Card.Content class="space-y-3">
-		{#if tokensLoading}
-			<LoadingState label="loading tokens" class="py-8" />
-		{:else if tokens.length === 0}
-			<EmptyState compact icon={Key} title="No API tokens yet" description="Create one to get started.">
-				{#snippet action()}
-					<Button onclick={() => (showCreateDialog = true)} size="sm" variant="outline">
-						<Plus class="h-4 w-4" />
-						New Token
-					</Button>
-				{/snippet}
-			</EmptyState>
-		{:else}
-			{#each tokens as token (token.id)}
-				<div class="flex flex-col gap-2 rounded-lg border border-border p-3 sm:flex-row sm:items-center sm:justify-between {token.revoked_at ? 'opacity-50' : ''}">
-					<div class="min-w-0 space-y-0.5">
-						<div class="flex items-center gap-2 flex-wrap">
-							<p class="text-sm font-medium truncate">{token.name}</p>
-							{#if token.revoked_at}
-								<StatusBadge status="revoked" tone="danger" />
-							{:else if token.expires_at && new Date(token.expires_at) < new Date()}
-								<StatusBadge status="expired" tone="warning" />
-							{:else}
-								<StatusBadge status="active" />
-							{/if}
-							{#each token.scopes as scope}
-								<span class="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{scope}</span>
-							{/each}
-						</div>
-						<div class="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-							<span class="font-mono">{token.prefix}…</span>
-							<span>Created {new Date(token.created_at).toLocaleDateString()}</span>
-							{#if token.last_used_at}
-								<span>Last used {new Date(token.last_used_at).toLocaleDateString()}</span>
-							{/if}
-							{#if token.expires_at}
-								<span>Expires {new Date(token.expires_at).toLocaleDateString()}</span>
-							{/if}
-						</div>
-					</div>
-					{#if !token.revoked_at}
-						<Button
-							variant="destructive"
-							size="sm"
-							disabled={tokenActionLoading}
-							onclick={() => handleRevokeToken(token.id)}
-						>
-							<Trash2 class="h-4 w-4" />
-							Revoke
-						</Button>
-					{/if}
-				</div>
-			{/each}
-		{/if}
-	</Card.Content>
-</Card.Root>
-
-<!-- Create Token Dialog (inline) -->
-{#if showCreateDialog}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-		role="dialog"
-		aria-modal="true"
-	>
-		<Card.Root class="w-full max-w-md shadow-xl">
-			<Card.Header>
-				<Card.Title>Create API Token</Card.Title>
-				<Card.Description>Generate a token for programmatic access to the API.</Card.Description>
-			</Card.Header>
-			<Card.Content class="space-y-4">
-				<div class="space-y-2">
-					<Label for="token-name">Token Name *</Label>
-					<Input
-						id="token-name"
-						placeholder="e.g. CI/CD pipeline"
-						bind:value={newTokenName}
-						autofocus
-					/>
-				</div>
-				<div class="space-y-2">
-					<Label>Scopes (optional)</Label>
-					<div class="flex flex-wrap gap-2">
-						{#each ['read', 'write', 'admin'] as scope}
-							<label class="flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm hover:bg-muted {newTokenScopes.includes(scope) ? 'border-primary bg-primary/5' : ''}">
-								<input
-									type="checkbox"
-									class="sr-only"
-									checked={newTokenScopes.includes(scope)}
-									onchange={(e) => {
-										if (e.currentTarget.checked) {
-											newTokenScopes = [...newTokenScopes, scope];
-										} else {
-											newTokenScopes = newTokenScopes.filter((s) => s !== scope);
-										}
-									}}
-								/>
-								{scope}
-							</label>
-						{/each}
-					</div>
-				</div>
-				<div class="space-y-2">
-					<Label for="token-expiry">Expiry Date (optional)</Label>
-					<Input
-						id="token-expiry"
-						type="date"
-						bind:value={newTokenExpiry}
-						min={new Date().toISOString().slice(0, 10)}
-					/>
-				</div>
-			</Card.Content>
-			<div class="flex justify-end gap-2 border-t border-border p-4">
-				<Button
-					variant="outline"
-					onclick={() => {
-						showCreateDialog = false;
-						newTokenName = '';
-						newTokenScopes = [];
-						newTokenExpiry = '';
-					}}
-				>
-					Cancel
-				</Button>
-				<Button
-					disabled={tokenActionLoading || !newTokenName.trim()}
-					onclick={handleCreateToken}
-				>
-					{tokenActionLoading ? 'Creating…' : 'Create Token'}
-				</Button>
-			</div>
-		</Card.Root>
 	</div>
 {/if}
 
-<!-- Usage Guide -->
-<Card.Root>
-	<Card.Header>
-		<Card.Title>Usage Guide</Card.Title>
-		<Card.Description>How to use the API with your token.</Card.Description>
-	</Card.Header>
-	<Card.Content class="space-y-4">
-		<div class="space-y-2">
-			<Label>Example Request</Label>
-			<pre class="overflow-x-auto rounded-lg border border-border bg-muted/50 p-3 text-xs sm:text-sm font-mono">curl -H "Authorization: Bearer YOUR_TOKEN" \
-  https://your-domain.com/api/models/</pre>
-		</div>
+<SettingsBlock title="Tokens">
+	{#snippet description()}
+		<span class="tabular-nums">{active.length}</span> active{#if revoked.length}
+			· <span class="tabular-nums">{revoked.length}</span> revoked{/if}
+	{/snippet}
+	{#snippet actions()}
+		{#if revoked.length}
+			<Button variant="ghost" size="sm" onclick={() => (showRevoked = !showRevoked)} aria-pressed={showRevoked}>
+				{showRevoked ? 'Hide revoked' : 'Show revoked'}
+			</Button>
+		{/if}
+		<Button size="sm" onclick={openCreate}><Plus />New token</Button>
+	{/snippet}
 
-		<Separator />
-
-		<div class="space-y-2">
-			<Label>Available Endpoints</Label>
-			<div class="overflow-x-auto rounded-md border border-border">
-				<table class="[&_tbody_tr:last-child_td]:border-b-0">
-					<thead>
-						<tr>
-							<th>Method</th>
-							<th>Endpoint</th>
-							<th>Description</th>
-						</tr>
-					</thead>
-					<tbody>
-						<tr>
-							<td class="w-px"><code class="rounded bg-muted px-1 text-xs">GET</code></td>
-							<td class="font-mono text-xs">/api/models/</td>
-							<td class="text-muted-foreground">List all AI models</td>
-						</tr>
-						<tr>
-							<td class="w-px"><code class="rounded bg-muted px-1 text-xs">GET</code></td>
-							<td class="font-mono text-xs">/api/models/stats/</td>
-							<td class="text-muted-foreground">Model statistics</td>
-						</tr>
-						<tr>
-							<td class="w-px"><code class="rounded bg-muted px-1 text-xs">POST</code></td>
-							<td class="font-mono text-xs">/api/models/sync/</td>
-							<td class="text-muted-foreground">Sync from OpenRouter</td>
-						</tr>
-						<tr>
-							<td class="w-px"><code class="rounded bg-muted px-1 text-xs">GET</code></td>
-							<td class="font-mono text-xs">/api/users/me/</td>
-							<td class="text-muted-foreground">Current user profile</td>
-						</tr>
-					</tbody>
-				</table>
+	{#if error}
+		<div class="settings-row"><ErrorAlert message={error} onretry={load} /></div>
+	{:else if loading}
+		<LoadingState label="loading tokens" />
+	{:else if visible.length === 0}
+		<EmptyState
+			compact
+			icon={Terminal}
+			title="No active tokens"
+			description="Create one for a script, CI job or MCP client, and revoke it when it is no longer needed."
+		/>
+	{:else}
+		{#each visible as t (t.id)}
+			<div class="settings-row flex items-center justify-between gap-4 {t.revoked_at ? 'opacity-60' : ''}">
+				<div class="min-w-0 space-y-1">
+					<p class="flex flex-wrap items-center gap-2 text-sm">
+						<span class="truncate font-medium">{t.name}</span>
+						{#if t.revoked_at}
+							<StatusBadge status="revoked" tone="neutral" />
+						{:else if isExpired(t)}
+							<StatusBadge status="expired" tone="warning" />
+						{/if}
+						{#each t.scopes as scope (scope)}<code class="mono-tag">{scope}</code>{/each}
+					</p>
+					<p class="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+						<code class="font-mono">{t.prefix}…</code>
+						<span aria-hidden="true">·</span>
+						<span>created {formatAgo(t.created_at)}</span>
+						<span aria-hidden="true">·</span>
+						<span>{t.last_used_at ? `used ${formatAgo(t.last_used_at)}` : 'never used'}</span>
+						{#if t.expires_at && !t.revoked_at}
+							<span aria-hidden="true">·</span>
+							<span>{isExpired(t) ? 'expired' : 'expires'} {new Date(t.expires_at).toLocaleDateString()}</span>
+						{/if}
+					</p>
+				</div>
+				{#if !t.revoked_at}
+					<Button
+						variant="ghost"
+						size="sm"
+						class="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-danger-fg"
+						onclick={() => askRevoke(t)}
+					>
+						Revoke
+					</Button>
+				{/if}
 			</div>
-		</div>
-	</Card.Content>
-</Card.Root>
+		{/each}
+	{/if}
+</SettingsBlock>
+
+<SettingsBlock title="Using a token" description="Send it as a bearer token. It has your full access on the REST API, so keep it secret.">
+	<div class="settings-row space-y-3">
+		<CopyBlock text={`curl -H "Authorization: Bearer <TOKEN>" \\\n  ${origin}/api/users/me/`} label="example request" />
+		<p class="text-[13px] leading-5 text-muted-foreground">
+			Every endpoint is in the <a href="/docs/api-reference" class="settings-link">API reference</a>. For AI
+			assistants, use the <a href="#mcp" class="settings-link">MCP server</a> instead.
+		</p>
+	</div>
+</SettingsBlock>
+
+<Dialog.Root bind:open={createOpen}>
+	<Dialog.Content class="max-w-md">
+		<form onsubmit={create} class="space-y-5">
+			<Dialog.Header>
+				<Dialog.Title>New personal token</Dialog.Title>
+				<Dialog.Description>The token is shown once after you create it.</Dialog.Description>
+			</Dialog.Header>
+			<div class="space-y-1.5">
+				<Label for="token-name">Name</Label>
+				<Input id="token-name" placeholder="e.g. CI pipeline" bind:value={name} maxlength={100} autocomplete="off" />
+			</div>
+			<div class="space-y-1.5">
+				<span class="text-sm font-medium" id="token-expiry-label">Expires</span>
+				<Segmented aria-labelledby="token-expiry-label" bind:value={expiry} items={EXPIRY} fullWidth size="sm" />
+			</div>
+			<fieldset class="space-y-2">
+				<legend class="text-sm font-medium">MCP scopes <span class="font-normal text-muted-foreground">(optional)</span></legend>
+				{#each SCOPES as s (s.value)}
+					<label class="flex items-start gap-2.5 text-sm">
+						<Checkbox
+							class="mt-0.5"
+							checked={scopes.includes(s.value)}
+							onCheckedChange={(v) => toggleScope(s.value, v === true)}
+						/>
+						<span>
+							<code class="mono-tag">{s.label}</code>
+							<span class="mt-0.5 block text-xs text-muted-foreground">{s.help}</span>
+						</span>
+					</label>
+				{/each}
+			</fieldset>
+			<Dialog.Footer>
+				<Button type="button" variant="outline" size="sm" onclick={() => (createOpen = false)} disabled={creating}>
+					Cancel
+				</Button>
+				<Button type="submit" size="sm" disabled={creating || !name.trim()} aria-busy={creating}>
+					{#if creating}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{/if}
+					Create token
+				</Button>
+			</Dialog.Footer>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>
+
+<ConfirmDialog
+	bind:open={revokeOpen}
+	title="Revoke {revoking?.name ?? 'token'}?"
+	description="Anything using this token stops working immediately. This cannot be undone."
+	confirmLabel="Revoke"
+	destructive
+	busy={revokeBusy}
+	onConfirm={revoke}
+/>

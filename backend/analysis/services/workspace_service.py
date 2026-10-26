@@ -31,6 +31,8 @@ _IMAGE_DIR = Path(__file__).resolve().parent.parent / "images" / "analyzer-base"
 BUILD_TIMEOUT_SECONDS = 600
 START_POLL_TIMEOUT = 60
 WORK_DIR = "/work"
+# uid of the non-root ``analyzer`` user in the analyzer-base image.
+WORKSPACE_UID = 1000
 
 
 def ensure_base_image() -> tuple[bool, str]:

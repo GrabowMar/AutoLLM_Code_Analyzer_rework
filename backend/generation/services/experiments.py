@@ -961,16 +961,21 @@ def executor_state() -> dict[str, bool]:
 
 
 def _code_stale() -> bool:
-    """Whether the executor runs older code than this process (Track A exposes the comparison)."""
+    """Whether the live leader executor runs older code than this process."""
+    from backend.execution import capacity
+    from backend.execution.models import ExecutorInstance
+
     try:
-        from backend.execution import capacity
-    except ImportError:
-        return False
-    check = getattr(capacity, "code_stale", None)
-    if check is None:
-        return False
-    try:
-        return bool(check())
+        leader = (
+            ExecutorInstance.objects.filter(
+                is_leader=True,
+                stopped_at__isnull=True,
+                last_seen_at__gt=timezone.now() - timedelta(seconds=_EXECUTOR_STALE_SECONDS),
+            )
+            .order_by("-last_seen_at")
+            .first()
+        )
+        return bool(leader is not None and leader.code_version and leader.code_version != capacity.code_version())
     except Exception:  # noqa: BLE001 — a rollup must not fail on an advisory flag
         logger.debug("code_stale check failed", exc_info=True)
         return False
@@ -1499,7 +1504,14 @@ def _new_job(
         if is_agent:
             apply_agent_snapshot_to_job(job, save=False)
         else:
-            apply_snapshot_to_job(job, save=False)
+            # Template mode only: the agent harness has its own budget and
+            # retry loop, so continuation/repair do not apply to agent cells.
+            apply_snapshot_to_job(
+                job,
+                save=False,
+                continuation_limit=experiment.continuation_limit,
+                enable_repair=experiment.enable_repair,
+            )
     except Exception as exc:  # noqa: BLE001 — isolate one bad cell from the launch
         logger.warning("Snapshot build failed for experiment job %s: %s", job.id, exc)
         job.status = GenerationJob.Status.FAILED
@@ -1819,10 +1831,21 @@ def normalize_post_run(spec: dict | None, mode: str) -> dict[str, Any]:
     report = spec.get("report") or {}
     slugs = list(dict.fromkeys(str(s) for s in analysis.get("tool_slugs") or []))
     if slugs:
-        known = set(AnalyzerTool.objects.filter(slug__in=slugs).values_list("slug", flat=True))
-        unknown = [s for s in slugs if s not in known]
+        from backend.analysis.models import AnalysisMode
+
+        modes = dict(AnalyzerTool.objects.filter(slug__in=slugs).values_list("slug", "analysis_mode"))
+        unknown = [s for s in slugs if s not in modes]
         if unknown:
             raise ExperimentError(400, f"Unknown analyzer {', '.join(unknown)}", "unknown_analyzer")
+        # Post-run analysis runs on the generated source; dynamic analyzers
+        # need a deployed, running app, which post-run never starts.
+        dynamic = [s for s in slugs if modes[s] == AnalysisMode.DYNAMIC]
+        if dynamic:
+            raise ExperimentError(
+                400,
+                f"Dynamic analyzer(s) {', '.join(dynamic)} need a running app; post-run analysis is static only.",
+                "dynamic_analyzer",
+            )
     enabled = bool(analysis.get("enabled", False))
     if enabled and not slugs:
         raise ExperimentError(400, "Post-run analysis needs at least one analyzer (tool_slugs).", "no_analyzers")
@@ -2516,7 +2539,11 @@ def _refreeze_drifted(experiment: Experiment, user: AbstractUser, conditions: li
             if job.mode == GenerationJob.Mode.AGENT:
                 apply_agent_snapshot_to_job(job)
             else:
-                apply_snapshot_to_job(job)
+                apply_snapshot_to_job(
+                    job,
+                    continuation_limit=experiment.continuation_limit,
+                    enable_repair=experiment.enable_repair,
+                )
         _append_history(
             experiment,
             {

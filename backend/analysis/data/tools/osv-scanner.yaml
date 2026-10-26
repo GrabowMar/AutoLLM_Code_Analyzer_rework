@@ -1,0 +1,38 @@
+slug: osv-scanner
+name: OSV-Scanner
+description: >-
+  Google's scanner for known vulnerabilities in dependencies, backed by the
+  OSV.dev database. Reads requirements.txt, package.json and lockfiles and
+  resolves transitive packages. Needs network access.
+category: dependencies
+kind: container
+target_language: any
+analysis_mode: static
+technologies: [pypi, npm]
+icon: package-search
+version: "2.6"
+docs_url: https://google.github.io/osv-scanner/
+install_cmd: >-
+  set -e;
+  mkdir -p /home/analyzer/.local/bin;
+  curl -sSfL -o /home/analyzer/.local/bin/osv-scanner https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_linux_amd64;
+  echo "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108  /home/analyzer/.local/bin/osv-scanner" | sha256sum -c -;
+  chmod +x /home/analyzer/.local/bin/osv-scanner
+verify_cmd: "osv-scanner --version | head -1"
+uninstall_cmd: "rm -f /home/analyzer/.local/bin/osv-scanner"
+# Exits 1 when it finds vulnerabilities; the JSON on stdout is what counts.
+# --no-resolve: osv-scanner's own transitive resolution of requirements.txt
+# (via deps.dev) picks implausibly old versions (ecdsa 0.9.0 under a pinned
+# python-jose), inventing critical CVEs. Scan only declared versions and real
+# lockfiles; pip-audit covers Python transitive dependencies with pip itself.
+run_cmd: "osv-scanner scan source -r --no-resolve --format json {target} 2>/dev/null"
+parser_key: osv_scanner
+file_patterns: ["requirements*.txt", "package.json", "package-lock.json", "poetry.lock", "Pipfile.lock", "yarn.lock", "pnpm-lock.yaml"]
+run_timeout: 300
+install_timeout: 120
+display_order: 25
+config_schema: []
+default_config: {}
+sample_filename: requirements.txt
+sample_code: |
+  Jinja2==2.10

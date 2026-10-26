@@ -87,14 +87,23 @@ export interface SyncResult {
   upserted: number;
 }
 
+/**
+ * Path-safe model identifier. Proxies decode `%2F`, so an OpenRouter id like
+ * `deepseek/deepseek-v4.1-flash` would split the route; the backend resolves
+ * the `provider_model` form back to the model.
+ */
+export function modelPathSegment(id: string): string {
+  return encodeURIComponent(id.replaceAll("/", "_"));
+}
+
 export async function deleteModel(slug: string): Promise<void> {
-  await apiFetch(`/models/detail/${encodeURIComponent(slug)}/`, {
+  await apiFetch(`/models/detail/${modelPathSegment(slug)}/`, {
     method: "DELETE",
   });
 }
 
 export async function getModel(slug: string): Promise<LLMModelDetail> {
-  const res = await apiFetch(`/models/detail/${encodeURIComponent(slug)}/`);
+  const res = await apiFetch(`/models/detail/${modelPathSegment(slug)}/`);
   return res.json();
 }
 
@@ -164,7 +173,7 @@ export async function getRelatedModels(
   limit = 10,
 ): Promise<LLMModelSummary[]> {
   const res = await apiFetch(
-    `/models/detail/${encodeURIComponent(slug)}/related/?limit=${limit}`,
+    `/models/detail/${modelPathSegment(slug)}/related/?limit=${limit}`,
   );
   return res.json();
 }
@@ -183,7 +192,7 @@ export async function refreshModelFromOpenRouter(
   slug: string,
 ): Promise<LLMModelDetail> {
   const res = await apiFetch(
-    `/models/detail/${encodeURIComponent(slug)}/refresh/`,
+    `/models/detail/${modelPathSegment(slug)}/refresh/`,
     { method: "POST" },
   );
   return res.json();
@@ -191,5 +200,194 @@ export async function refreshModelFromOpenRouter(
 
 export async function syncModelsFromOpenRouter(): Promise<SyncResult> {
   const res = await apiFetch("/models/sync/", { method: "POST" });
+  return res.json();
+}
+
+// ── Model page: platform measurements, catalog context, providers ─────────
+
+/** A proportion with its Wilson 95% interval (`rate`/`ci_*` null when n = 0). */
+export interface RateWithCI {
+  successes: number;
+  n: number;
+  rate: number | null;
+  ci_low: number | null;
+  ci_high: number | null;
+}
+
+export type SeverityCounts = Record<
+  "critical" | "high" | "medium" | "low" | "info",
+  number
+>;
+
+export interface RankPosition {
+  rank: number;
+  of: number;
+  score: number;
+}
+
+export interface CatalogPercentile {
+  value: number | null;
+  /** Share of the catalog below this value (ties count half), 0–1. */
+  percentile: number | null;
+  n: number;
+  median: number | null;
+}
+
+export interface ModelInsights {
+  generation: {
+    jobs_total: number;
+    by_status: Record<string, number>;
+    by_mode: Record<string, number>;
+    completed: number;
+    success: RateWithCI;
+    functional: RateWithCI & {
+      mean_pass_rate: number | null;
+      by_status: Record<string, number>;
+    };
+    resources: {
+      total_cost: number;
+      mean_cost: number | null;
+      cost_per_kloc: number | null;
+      mean_duration: number | null;
+      median_duration: number | null;
+      mean_prompt_tokens: number | null;
+      mean_completion_tokens: number | null;
+      mean_reasoning_tokens: number | null;
+      mean_total_tokens: number | null;
+      cache_hit_ratio: number | null;
+      mean_llm_calls: number | null;
+      mean_lines_of_code: number | null;
+      median_output_tps: number | null;
+    };
+    repair_rate: number | null;
+    continuations_used: number;
+    engines: Record<string, number>;
+    providers: Record<string, number>;
+    terminations: Record<string, number>;
+    first_job_at: string | null;
+    last_job_at: string | null;
+  };
+  templates: {
+    slug: string;
+    name: string;
+    jobs: number;
+    completed: number;
+    functional: RateWithCI;
+  }[];
+  experiments: {
+    id: string;
+    name: string;
+    status: string;
+    jobs: number;
+    created_at: string;
+  }[];
+  analysis: {
+    analyzed_jobs: number;
+    findings_static: SeverityCounts;
+    findings_ai: SeverityCounts;
+    by_tool: ({ tool: string; ai: boolean; total: number } & SeverityCounts)[];
+    top_rules: {
+      tool: string;
+      rule_id: string;
+      title: string;
+      severity: string;
+      count: number;
+    }[];
+  };
+  ranking: {
+    scores: Record<
+      | "composite_score"
+      | "mss_score"
+      | "empirical_quality_score"
+      | "benchmark_score"
+      | "cost_efficiency_score"
+      | "accessibility_score"
+      | "adoption_score",
+      number | null
+    >;
+    positions: Record<
+      "composite" | "mss" | "empirical" | "benchmark",
+      RankPosition | null
+    >;
+    variance: {
+      n_jobs: number;
+      density_per_kloc_mean: number | null;
+      density_per_kloc_stdev: number | null;
+      smoke_pass_rate_stdev: number | null;
+    } | null;
+    local_loc: number;
+    n_trials: number;
+    models_exercised: number;
+  } | null;
+  catalog: {
+    input_price: CatalogPercentile;
+    output_price: CatalogPercentile;
+    context_window: CatalogPercentile;
+    max_output_tokens: CatalogPercentile;
+    artificial_analysis: Record<
+      "intelligence_index" | "coding_index" | "agentic_index",
+      CatalogPercentile
+    >;
+    catalog_size: number;
+    provider_models: number;
+  };
+  benchmarks: {
+    benchmark: string;
+    score: number;
+    source: string;
+    fetched_at: string;
+    percentile: number | null;
+    n: number;
+  }[];
+}
+
+export interface ProviderEndpoint {
+  provider_name: string;
+  tag: string;
+  quantization: string;
+  context_length: number | null;
+  max_completion_tokens: number | null;
+  max_prompt_tokens: number | null;
+  input_price_per_million: number;
+  output_price_per_million: number;
+  cache_read_per_million: number | null;
+  discount: number;
+  /** OpenRouter endpoint status; 0 = OK, negative = degraded / down. */
+  status: number | null;
+  uptime_last_5m: number | null;
+  uptime_last_30m: number | null;
+  uptime_last_1d: number | null;
+  /** p50 latency (ms) — OpenRouter returns a number or a percentile object. */
+  latency_last_30m: number | Record<string, number> | null;
+  throughput_last_30m: number | Record<string, number> | null;
+  supported_parameters: string[];
+  supports_implicit_caching: boolean;
+  native_tools: string[];
+  service_tier: string | null;
+}
+
+export interface ProviderEndpoints {
+  available: boolean;
+  fetched_at: string | null;
+  endpoints: ProviderEndpoint[];
+}
+
+/** Platform measurements (caller's jobs), ranking position and catalog percentiles for one model. */
+export async function getModelInsights(slug: string): Promise<ModelInsights> {
+  const res = await apiFetch(
+    `/models/detail/${modelPathSegment(slug)}/insights/`,
+  );
+  return res.json();
+}
+
+/** Providers serving the model on OpenRouter (live; cached 10 min server-side). */
+export async function getModelEndpoints(
+  slug: string,
+  refresh = false,
+): Promise<ProviderEndpoints> {
+  const q = refresh ? "?refresh=true" : "";
+  const res = await apiFetch(
+    `/models/detail/${modelPathSegment(slug)}/endpoints/${q}`,
+  );
   return res.json();
 }

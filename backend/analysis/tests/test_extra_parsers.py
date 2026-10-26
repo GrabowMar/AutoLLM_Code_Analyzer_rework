@@ -38,7 +38,8 @@ def test_new_tools_seeded_with_parsers():
         assert parsers.has_parser(tool.parser_key), slug
         assert tool.icon, slug
         assert tool.sample_code, slug
-    assert AnalyzerTool.objects.filter(category="dependencies").count() == 4
+    dependency_tools = set(AnalyzerTool.objects.filter(category="dependencies").values_list("slug", flat=True))
+    assert {"pip-audit", "npm-audit", "deptry", "depcheck", "osv-scanner", "retire"} <= dependency_tools
 
 
 def test_pip_audit_dedupes_repeated_vulns_per_section():
@@ -127,7 +128,7 @@ def test_flake8_severity_by_code():
         "garbage line\n"
     )
     sev = {f.rule_id: f.severity for f in parsers.parse("flake8", raw).findings}
-    assert sev == {"F401": "medium", "E402": "low", "F821": "high"}
+    assert sev == {"F401": "low", "E402": "low", "F821": "high"}
 
 
 def test_lizard_metrics_and_complex_functions():
@@ -248,3 +249,287 @@ def test_empty_output_yields_nothing():
         out = parsers.parse(key, "")
         assert out.findings == [], key
         assert out.metrics == {}, key
+
+
+def test_failed_manifest_is_a_coverage_gap_not_a_clean_result():
+    ok = '{"dependencies": [{"name": "flask", "version": "3.1.0", "vulns": []}]}'
+    raw = f"### requirements.txt\n{ok}\n### backend/requirements.txt\n!! ERROR: network unreachable\n"
+    parsed = parsers.parse("pip_audit", raw)
+    assert parsed.error is None
+    assert parsed.warnings == ["Not analyzed: backend/requirements.txt: ERROR: network unreachable"]
+
+    parsed = parsers.parse("pip_audit", "### requirements.txt\n\n")
+    assert parsed.error.startswith("No manifest could be analyzed")
+
+
+def test_pip_audit_reports_hallucinated_packages_and_versions():
+    raw = (
+        "### requirements.txt\n"
+        "!! ERROR: Could not find a version that satisfies the requirement flask-magic-auth==1.0 "
+        "(from versions: none)\n"
+        "!! ERROR: No matching distribution found for flask-magic-auth==1.0\n"
+        "### api/requirements.txt\n"
+        "!! ERROR: No matching distribution found for flask==99.0.0\n"
+    )
+    parsed = parsers.parse("pip_audit", raw)
+    by_rule = {f.rule_id: f for f in parsed.findings}
+    assert by_rule["nonexistent-package"].tool_specific_data["package"] == "flask-magic-auth"
+    assert by_rule["nonexistent-package"].severity == "high"
+    assert by_rule["nonexistent-version"].file_path == "api/requirements.txt"
+    # Neither manifest was audited for vulnerabilities: the result is failed
+    # (not a measurement), but the hallucinated dependencies are kept and the
+    # gap is recorded as a warning (the runner stores both on the result).
+    assert parsed.error.startswith("No manifest could be analyzed")
+    assert parsed.warnings[0].startswith("Not analyzed: requirements.txt")
+
+
+def test_npm_audit_reports_hallucinated_packages():
+    raw = (
+        "### frontend/package.json\n"
+        "!! npm error code E404\n"
+        "!! npm error 404  'react-super-grid-zz@^1.0.0' is not in this registry.\n"
+    )
+    findings = parsers.parse("npm_audit", raw).findings
+    assert [(f.rule_id, f.tool_specific_data["package"]) for f in findings] == [
+        ("nonexistent-package", "react-super-grid-zz"),
+    ]
+
+
+def test_parser_crash_is_an_error(monkeypatch):
+    monkeypatch.setitem(parsers._PARSERS, "boom", lambda raw: 1 / 0)
+    assert "ZeroDivisionError" in parsers.parse("boom", "x").error
+
+
+def test_ruff_and_flake8_rate_codes_alike():
+    ruff = json.dumps(
+        [
+            {"code": "F401", "message": "unused", "filename": "a.py", "location": {"row": 1}},
+            {"code": "F821", "message": "undefined", "filename": "a.py", "location": {"row": 2}},
+        ],
+    )
+    assert [f.severity for f in parsers.parse("ruff", ruff).findings] == ["low", "high"]
+
+
+def test_semgrep_category_comes_from_rule_metadata():
+    raw = json.dumps(
+        {
+            "results": [
+                {
+                    "check_id": "a.sec",
+                    "path": "a.py",
+                    "start": {"line": 1},
+                    "extra": {"metadata": {"category": "security"}},
+                },
+                {
+                    "check_id": "a.bp",
+                    "path": "a.py",
+                    "start": {"line": 2},
+                    "extra": {"metadata": {"category": "best-practice"}},
+                },
+            ],
+        },
+    )
+    assert [f.category for f in parsers.parse("semgrep", raw).findings] == ["security", "best_practice"]
+
+
+# --- Tool's own severity and enriched tool_specific_data ---------------------
+
+
+def test_npm_audit_keeps_its_label_and_drops_unscored_cvss():
+    report = {
+        "auditReportVersion": 2,
+        "vulnerabilities": {
+            "react-router": {
+                "severity": "moderate",
+                "isDirect": False,
+                "via": [
+                    {
+                        "source": 1124268,
+                        "title": "Open redirect",
+                        "url": "https://github.com/advisories/GHSA-wrjc-x8rr-h8h6",
+                        "severity": "moderate",
+                        "cwe": ["CWE-601"],
+                        "cvss": {"score": 0, "vectorString": None},
+                        "range": ">=6.0.0 <7.18.0",
+                    },
+                    {
+                        "source": 1124272,
+                        "title": "Constructor injection",
+                        "url": "https://github.com/advisories/GHSA-337j-9hxr-rhxg",
+                        "severity": "high",
+                        "cwe": ["CWE-470"],
+                        "cvss": {"score": 6.1, "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"},
+                        "range": ">=6.4.0 <7.18.0",
+                    },
+                ],
+                "fixAvailable": False,
+            },
+        },
+    }
+    raw = f"### frontend/package.json\n{json.dumps(report)}\n"
+    unscored, scored = parsers.parse("npm_audit", raw).findings
+    assert (unscored.tool_severity, scored.tool_severity) == ("moderate", "high")
+    # The advisory URL is a link, not a description.
+    assert unscored.description == ""
+    assert unscored.tool_specific_data == {
+        "package": "react-router",
+        "direct": False,
+        "vuln_id": "GHSA-wrjc-x8rr-h8h6",
+        "docs_url": "https://github.com/advisories/GHSA-wrjc-x8rr-h8h6",
+        "manifest": "frontend/package.json",
+        "cwe": "CWE-601",
+    }
+    assert scored.tool_specific_data["cvss_score"] == 6.1
+    assert scored.tool_specific_data["cvss_vector"].startswith("CVSS:3.1/")
+    assert scored.tool_specific_data["cvss"] == 6.1  # legacy key
+
+
+def test_pip_audit_has_no_severity_and_standard_dependency_keys():
+    vuln = {"id": "PYSEC-2026-2151", "fix_versions": ["3.1.3"], "aliases": ["CVE-2026-27205"], "description": "d"}
+    nofix = {"id": "PYSEC-2024-271", "fix_versions": [], "aliases": [], "description": "e"}
+    report = {"dependencies": [{"name": "flask", "version": "3.0.0", "vulns": [vuln, nofix]}]}
+    fixed, unfixed = parsers.parse("pip_audit", f"### requirements.txt\n{json.dumps(report)}\n").findings
+    assert fixed.tool_severity == ""  # pip-audit's JSON rates nothing
+    assert fixed.tool_specific_data == {
+        "package": "flask",
+        "installed_version": "3.0.0",
+        "fixed_versions": ["3.1.3"],
+        "vuln_id": "PYSEC-2026-2151",
+        "aliases": ["CVE-2026-27205"],
+        "manifest": "requirements.txt",
+        "version": "3.0.0",
+        "fix_versions": ["3.1.3"],
+    }
+    assert unfixed.suggestion == ""  # no invented "no fixed release" text
+    assert "fixed_versions" not in unfixed.tool_specific_data
+
+
+def test_lint_tools_report_their_levels_and_docs():
+    shell = json.dumps(
+        [
+            {
+                "file": "/work/x.sh",
+                "line": 2,
+                "endLine": 2,
+                "column": 8,
+                "endColumn": 12,
+                "level": "style",
+                "code": 2006,
+                "message": "Use $(...)",
+                "fix": None,
+            },
+        ],
+    )
+    [sh] = parsers.parse("shellcheck", shell).findings
+    assert sh.tool_severity == "style"
+    assert sh.suggestion == ""
+    assert sh.tool_specific_data == {
+        "docs_url": "https://www.shellcheck.net/wiki/SC2006",
+        "end_line": 2,
+        "end_column": 12,
+    }
+
+    css = json.dumps(
+        [
+            {
+                "source": "/work/x.css",
+                "warnings": [
+                    {
+                        "line": 1,
+                        "column": 5,
+                        "endLine": 1,
+                        "endColumn": 9,
+                        "rule": "property-no-unknown",
+                        "severity": "error",
+                        "text": 'Unexpected unknown property "colr" (property-no-unknown)',
+                    },
+                    {"line": 3, "column": 1, "rule": "CssSyntaxError", "severity": "error", "text": "Unclosed block"},
+                ],
+            },
+        ],
+    )
+    known, syntax = parsers.parse("stylelint", css).findings
+    assert known.tool_severity == "error"
+    assert known.tool_specific_data["docs_url"] == "https://stylelint.io/user-guide/rules/property-no-unknown"
+    assert "docs_url" not in syntax.tool_specific_data
+
+    html = json.dumps(
+        [
+            {
+                "file": "/work/index.html",
+                "messages": [
+                    {
+                        "type": "warning",
+                        "message": "The id value [ a ] must be unique.",
+                        "line": 1,
+                        "col": 52,
+                        "rule": {
+                            "id": "id-unique",
+                            "description": "The value of id attributes must be unique.",
+                            "link": "https://htmlhint.com/rules/id-unique",
+                        },
+                    },
+                ],
+            },
+        ],
+    )
+    [h] = parsers.parse("htmlhint", html).findings
+    assert h.tool_severity == "warning"
+    assert h.tool_specific_data == {"docs_url": "https://htmlhint.com/rules/id-unique"}
+
+
+def test_unrated_dependency_and_complexity_tools():
+    deptry = [
+        {"error": {"code": "DEP001", "message": "'yaml' imported but missing"}, "module": "yaml", "location": {}},
+    ]
+    [dep] = parsers.parse("deptry", f"### .\n{json.dumps(deptry)}\n").findings
+    assert (dep.tool_severity, dep.suggestion) == ("", "")
+
+    depcheck = {"dependencies": ["uuid"], "devDependencies": [], "missing": {"axios": ["/work/src/App.jsx"]}}
+    found = parsers.parse("depcheck", f"### frontend/package.json\n{json.dumps(depcheck)}\n").findings
+    assert {f.tool_severity for f in found} == {""}
+    assert {f.suggestion for f in found} == {""}
+    assert all(f.tool_specific_data["manifest"] == "frontend/package.json" for f in found)
+
+    lizard = '30,26,300,4,60,"route@10-70@/work/app.py","/work/app.py","route","route( a, b, c, d )",10,70\n'
+    [cx] = parsers.parse("lizard", lizard).findings
+    assert (cx.tool_severity, cx.suggestion) == ("", "")
+    assert cx.tool_specific_data == {"complexity": 26, "function": "route", "nloc": 30, "end_line": 70, "ccn": 26}
+
+
+def test_perflint_keeps_pylint_level_without_core_docs_link():
+    raw = json.dumps(
+        [
+            {
+                "type": "warning",
+                "line": 307,
+                "column": 4,
+                "endLine": 308,
+                "endColumn": 60,
+                "path": "app.py",
+                "symbol": "use-list-copy",
+                "message": "Use a list copy instead of a for-loop",
+                "message-id": "W8402",
+                "obj": "board_view",
+            },
+        ],
+    )
+    [f] = parsers.parse("perflint", raw).findings
+    assert f.tool_severity == "warning"
+    assert f.tool_specific_data == {"obj": "board_view", "message_id": "W8402", "end_line": 308, "end_column": 60}
+
+
+def test_eslint_security_plugin_rules_keep_level_and_cwe():
+    raw = json.dumps(
+        [
+            {
+                "filePath": "/work/x.jsx",
+                "messages": [
+                    {"ruleId": "security/detect-child-process", "severity": 1, "message": "child", "line": 2},
+                ],
+            },
+        ],
+    )
+    [f] = parsers.parse("eslint_security", raw).findings
+    assert f.tool_severity == "warning"
+    assert f.tool_specific_data == {"cwe": "CWE-78"}

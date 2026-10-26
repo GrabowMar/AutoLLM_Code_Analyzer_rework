@@ -23,6 +23,7 @@ from backend.rankings.services.scoring import compute_composite
 from backend.rankings.services.scoring import compute_cost_efficiency_score
 from backend.rankings.services.scoring import compute_empirical_quality
 from backend.rankings.services.scoring import compute_mss
+from backend.reports.services.loc import loc_from_result_data
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractBaseUser
@@ -88,35 +89,55 @@ def _local_app_stats(
             "functional_pass_rate": None,
         }
 
-    # LOC + smoke results live in job metrics; roll both up so the empirical
-    # quality score can normalize findings by code volume, and keep per-job
-    # values for the variance stats.
+    # Only each job's latest result per tool — otherwise re-analyzing a job
+    # double-counts its findings in the rollup (and re-running a single tool
+    # would drop the others).
+    from backend.analysis.models import ToolResult
+
+    latest_result_ids = ToolResult.latest_ids_per_job()
+    analyzed_job_ids = set(
+        ToolResult.objects.filter(id__in=latest_result_ids).values_list(
+            "run__generation_job_id",
+            flat=True,
+        ),
+    )
+
+    # Source LOC (result_data) + smoke results (metrics); roll both up so the
+    # empirical quality score can normalize findings by code volume, and keep
+    # per-job values for the variance stats. LOC is summed over analyzed jobs
+    # only: findings exist only for those, so the density's numerator and
+    # denominator describe the same apps.
     functional_rates: dict[str, list[float]] = {}
     job_loc: dict[Any, int] = {}
     job_model: dict[Any, str] = {}
-    for job_id, model_id, metrics in jobs.filter(status="completed").values_list(
+    for job_id, model_id, metrics, result_data in jobs.filter(status="completed").values_list(
         "id",
         "model__model_id",
         "metrics",
+        "result_data",
     ):
         if model_id not in out or not isinstance(metrics, dict):
             continue
-        loc = int(metrics.get("lines_of_code") or 0)
-        out[model_id]["local_loc"] += loc
+        # Jobs without stored code (legacy rows) fall back to the generation-time count.
+        loc = loc_from_result_data(result_data)["total_loc"] or int(metrics.get("lines_of_code") or 0)
+        if job_id in analyzed_job_ids:
+            out[model_id]["local_loc"] += loc
         job_loc[job_id] = loc
         job_model[job_id] = model_id
         functional = metrics.get("functional")
-        if isinstance(functional, dict) and "pass_rate" in functional:
-            functional_rates.setdefault(model_id, []).append(float(functional["pass_rate"]))
+        # ``pass_rate`` is null when the suite never ran (infra_error): that
+        # job is ungraded, so it is left out of the mean rather than scored 0.
+        if isinstance(functional, dict) and functional.get("pass_rate") is not None:
+            try:
+                rate = float(functional["pass_rate"])
+            except (TypeError, ValueError):
+                rate = None
+            if rate is not None:
+                functional_rates.setdefault(model_id, []).append(rate)
     for model_id, rates in functional_rates.items():
         out[model_id]["functional_pass_rate"] = round(sum(rates) / len(rates), 4)
 
-    # Only each job's latest finished run — otherwise re-analyzing a job
-    # double-counts its findings in the rollup.
-    from backend.analysis.models import AnalysisRun
-
-    latest_run_ids = AnalysisRun.latest_ids_per_job()
-    base = Finding.objects.filter(result__run_id__in=latest_run_ids).exclude(
+    base = Finding.objects.filter(result_id__in=latest_result_ids).exclude(
         result__run__generation_job__model__model_id__isnull=True,
     )
     if user is not None and getattr(user, "is_authenticated", False):
@@ -160,12 +181,6 @@ def _local_app_stats(
     # Per-trial variance over analyzed jobs: weighted findings density per
     # KLOC and smoke pass rate. Jobs never analyzed are excluded — a missing
     # analysis is not a clean bill of health.
-    analyzed_job_ids = set(
-        AnalysisRun.objects.filter(id__in=latest_run_ids).values_list(
-            "generation_job_id",
-            flat=True,
-        ),
-    )
     densities: dict[str, list[float]] = {}
     for job_id in analyzed_job_ids:
         model_id = job_model.get(job_id)

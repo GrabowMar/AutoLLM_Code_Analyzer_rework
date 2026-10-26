@@ -3,7 +3,6 @@
 	import { page } from '$app/stores';
 	import { getModelComparison, type LLMModelDetail, type ModelComparisonResult } from '$lib/api/client';
 	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { toast } from 'svelte-sonner';
 	import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
@@ -14,7 +13,6 @@
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
-	import Settings from '@lucide/svelte/icons/settings';
 	import X from '@lucide/svelte/icons/x';
 	import { tableFrame, shortModelName, modelNamePrefix } from '$lib/components/table';
 
@@ -150,11 +148,43 @@
 	});
 </script>
 
-<div class="space-y-6">
+<!-- Baseline / highlight and missing models: the header's footer strip, not a card. -->
+{#snippet settingsStrip()}
+	<div class="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+		{#if comparedModels.length > 0}
+			<span class="header-stat text-muted-foreground"><b>{comparedModels.length}</b> models</span>
+			<div class="flex items-center gap-1.5">
+				<label class="text-muted-foreground" for="baseline">Baseline</label>
+				<select id="baseline" class="h-7 cursor-pointer rounded-md border border-input bg-surface-1 px-2 text-xs hover:border-primary/40 focus-visible:outline-none" bind:value={baseline}>
+					<option value="first">First Selected</option>
+					<option value="average">Average</option>
+					<option value="median">Median</option>
+				</select>
+			</div>
+			<div class="flex items-center gap-1.5">
+				<label class="text-muted-foreground" for="highlight">Highlight</label>
+				<select id="highlight" class="h-7 cursor-pointer rounded-md border border-input bg-surface-1 px-2 text-xs hover:border-primary/40 focus-visible:outline-none" bind:value={highlightSlug}>
+					{#each comparedModels as model}
+						<option value={model.canonical_slug}>{model.model_name}</option>
+					{/each}
+				</select>
+			</div>
+		{/if}
+		{#if missingModels.length > 0}
+			<span class="inline-flex min-w-0 items-center gap-1.5 text-warning-fg" role="status">
+				<AlertTriangle class="size-3.5 shrink-0" aria-hidden="true" />
+				<span class="truncate" title={missingModels.join(', ')}>Not found: {missingModels.join(', ')}</span>
+			</span>
+		{/if}
+	</div>
+{/snippet}
+
+<div class="space-y-4">
 	<PageHeader
 		title="Model Comparison"
 		description="Side-by-side comparison for the models selected in the models list or detail view."
 		back={{ href: '/models', label: 'Models' }}
+		children={!loading && (comparedModels.length > 0 || missingModels.length > 0) ? settingsStrip : undefined}
 	>
 		{#snippet actions()}
 			{#if comparedModels.length > 0}
@@ -183,56 +213,7 @@
 			<ErrorAlert message={error} onretry={loadComparison} />
 		{/if}
 
-		{#if missingModels.length > 0}
-			<div class="rounded-md border border-warning/30 bg-warning/10 p-4 text-sm text-warning-fg">
-				<div class="flex items-start gap-2">
-					<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
-					<div>
-						<p class="font-medium">Some requested models were not found.</p>
-						<p class="mt-1">Missing: {missingModels.join(', ')}</p>
-					</div>
-				</div>
-			</div>
-		{/if}
-
 		{#if comparedModels.length > 0}
-			<Card.Root>
-				<Card.Header>
-					<div class="flex items-center gap-2">
-						<Settings class="h-4 w-4 text-muted-foreground" />
-						<Card.Title>Comparison Settings</Card.Title>
-					</div>
-				</Card.Header>
-				<Card.Content class="space-y-3">
-					<div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
-						<div class="flex items-center gap-2">
-							<label class="text-sm font-medium" for="baseline">Baseline:</label>
-							<select id="baseline" class="h-8 rounded-md border border-input bg-surface-1 px-2 text-sm hover:border-primary/40 focus-visible:outline-none cursor-pointer" bind:value={baseline}>
-								<option value="first">First Selected</option>
-								<option value="average">Average</option>
-								<option value="median">Median</option>
-							</select>
-						</div>
-						<div class="flex items-center gap-2">
-							<label class="text-sm font-medium" for="highlight">Highlight:</label>
-							<select id="highlight" class="h-8 rounded-md border border-input bg-surface-1 px-2 text-sm hover:border-primary/40 focus-visible:outline-none cursor-pointer" bind:value={highlightSlug}>
-								{#each comparedModels as model}
-									<option value={model.canonical_slug}>{model.model_name}</option>
-								{/each}
-							</select>
-						</div>
-					</div>
-					<div class="flex flex-wrap gap-1.5">
-						{#each comparedModels as model (model.canonical_slug)}
-							<Badge variant="secondary" class="gap-1.5 {highlightSlug === model.canonical_slug ? 'border border-primary/30 bg-primary/10 text-primary' : ''}">
-								<Cpu class="h-3 w-3" />
-								{model.model_name}
-							</Badge>
-						{/each}
-					</div>
-				</Card.Content>
-			</Card.Root>
-
 			<Card.Root class="gap-0 overflow-clip py-0">
 				<Card.Header class="border-b border-border py-3">
 					<Card.Title>Core Metrics</Card.Title>

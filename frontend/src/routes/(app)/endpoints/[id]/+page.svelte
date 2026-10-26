@@ -381,7 +381,7 @@
 	}
 </script>
 
-<div class="space-y-6">
+<Tabs.Root value={activeTab} onValueChange={setTab} class="space-y-4">
 	<PageHeader
 		title={endpoint?.name ?? 'Endpoint'}
 		description={endpoint
@@ -403,6 +403,20 @@
 				</Button>
 			{/if}
 		{/snippet}
+		{#snippet nav()}
+			{#if endpoint && !notFound && !error}
+				<Tabs.List aria-label="Endpoint sections">
+					{#each visibleTabs as t (t)}
+						<Tabs.Trigger value={t} class="capitalize">{t}</Tabs.Trigger>
+					{/each}
+				</Tabs.List>
+				{#if !endpoint.enabled}
+					<span class="ml-auto px-2 text-xs text-warning-fg" role="status">
+						Disabled: no new runs or requests are sent to this endpoint. Relays stay connected.
+					</span>
+				{/if}
+			{/if}
+		{/snippet}
 	</PageHeader>
 
 	{#if notFound}
@@ -414,278 +428,264 @@
 	{:else if !endpoint}
 		<LoadingState label="loading endpoint" />
 	{:else}
-		{#if !endpoint.enabled}
-			<div class="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning-fg" role="status">
-				Disabled: no new runs or requests are sent to this endpoint. Relays stay connected.
-			</div>
-		{/if}
-
-		<Tabs.Root value={activeTab} onValueChange={setTab}>
-			<Tabs.List>
-				{#each visibleTabs as t (t)}
-					<Tabs.Trigger value={t} class="capitalize">{t}</Tabs.Trigger>
-				{/each}
-			</Tabs.List>
-
-			<!-- ── Overview ─────────────────────────────────────────── -->
-			<Tabs.Content value="overview" class="space-y-6">
-				<div class="grid gap-4 lg:grid-cols-3">
-					<Card.Root>
-						<Card.Header class="pb-3"><Card.Title class="text-base">Now</Card.Title></Card.Header>
-						<Card.Content class="space-y-3 text-sm">
-							<SlotMeter label="Request slots" used={endpoint.live.inflight_requests} total={endpoint.max_concurrency} />
-							<dl class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
-								<dt class="text-muted-foreground">Active jobs</dt>
+		<!-- ── Overview ─────────────────────────────────────────── -->
+		<Tabs.Content value="overview" class="space-y-6 pt-0">
+			<div class="grid gap-4 lg:grid-cols-3">
+				<Card.Root>
+					<Card.Header class="pb-3"><Card.Title class="text-base">Now</Card.Title></Card.Header>
+					<Card.Content class="space-y-3 text-sm">
+						<SlotMeter label="Request slots" used={endpoint.live.inflight_requests} total={endpoint.max_concurrency} />
+						<dl class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+							<dt class="text-muted-foreground">Active jobs</dt>
+							<dd class="text-right tabular-nums">
+								{endpoint.live.active_jobs} / {endpoint.max_active_jobs_effective.sandbox} agent · {endpoint.max_active_jobs_effective.llm} LLM
+							</dd>
+							<dt class="text-muted-foreground">Queued requests</dt>
+							<dd class="text-right tabular-nums">{endpoint.live.queued_requests}</dd>
+							<dt class="text-muted-foreground">Tokens/s (5 min)</dt>
+							<dd class="text-right tabular-nums">{endpoint.live.tokens_per_s_5m?.toFixed(1) ?? '—'}</dd>
+							{#if !endpoint.is_system}
+								<dt class="text-muted-foreground">Max resident models</dt>
+								<dd class="text-right tabular-nums">{endpoint.max_resident_models ?? 'unlimited'}</dd>
+								<dt class="text-muted-foreground">Models</dt>
 								<dd class="text-right tabular-nums">
-									{endpoint.live.active_jobs} / {endpoint.max_active_jobs_effective.sandbox} agent · {endpoint.max_active_jobs_effective.llm} LLM
+									{endpoint.models.available}/{endpoint.models.total} · {endpoint.models.tools} tools
 								</dd>
-								<dt class="text-muted-foreground">Queued requests</dt>
-								<dd class="text-right tabular-nums">{endpoint.live.queued_requests}</dd>
-								<dt class="text-muted-foreground">Tokens/s (5 min)</dt>
-								<dd class="text-right tabular-nums">{endpoint.live.tokens_per_s_5m?.toFixed(1) ?? '—'}</dd>
-								{#if !endpoint.is_system}
-									<dt class="text-muted-foreground">Max resident models</dt>
-									<dd class="text-right tabular-nums">{endpoint.max_resident_models ?? 'unlimited'}</dd>
-									<dt class="text-muted-foreground">Models</dt>
-									<dd class="text-right tabular-nums">
-										{endpoint.models.available}/{endpoint.models.total} · {endpoint.models.tools} tools
-									</dd>
-									<dt class="text-muted-foreground">Last scan</dt>
-									<dd class="text-right">{formatAgo(endpoint.last_inventory_at, now)}</dd>
-								{/if}
-							</dl>
-						</Card.Content>
-					</Card.Root>
-
-					{#if !endpoint.is_system}
-						<Card.Root class="lg:col-span-2">
-							<Card.Header class="pb-3">
-								<Card.Title class="text-base">Last hour</Card.Title>
-							</Card.Header>
-							<Card.Content>
-								<EndpointMetricsChart {endpointId} {refreshKey} capacity={endpoint.max_concurrency} />
-							</Card.Content>
-						</Card.Root>
-					{/if}
-				</div>
+								<dt class="text-muted-foreground">Last scan</dt>
+								<dd class="text-right">{formatAgo(endpoint.last_inventory_at, now)}</dd>
+							{/if}
+						</dl>
+					</Card.Content>
+				</Card.Root>
 
 				{#if !endpoint.is_system}
-					<Card.Root>
+					<Card.Root class="lg:col-span-2">
 						<Card.Header class="pb-3">
-							<Card.Title class="text-base">Loaded models</Card.Title>
-							<Card.Description>Resident in the server's memory right now.</Card.Description>
+							<Card.Title class="text-base">Last hour</Card.Title>
 						</Card.Header>
 						<Card.Content>
-							{#if endpoint.live.loaded.length === 0}
-								<p class="text-sm text-muted-foreground">No model is loaded.</p>
-							{:else}
-								<ul class="divide-y divide-border/60">
-									{#each endpoint.live.loaded as m (m.name)}
-										<li class="flex flex-wrap items-center gap-3 py-2 text-sm">
-											<span class="min-w-0 flex-1 truncate font-mono text-xs">{m.name}</span>
-											<span class="text-xs tabular-nums text-muted-foreground">VRAM {formatBytes(m.size_vram)}</span>
-											{#if m.cpu_spill}
-												<span
-													class="rounded-full border border-warning/30 bg-warning/10 px-1.5 text-[11px] text-warning-fg"
-													title="Part of the model runs on the CPU: much slower. Lower num_ctx or max resident models."
-												>CPU spill</span>
-											{/if}
-											{#if canEdit && modelByServed.has(m.name)}
-												<Button variant="outline" size="sm" class="h-7 px-2" onclick={() => unload(m.name)}>Unload</Button>
-											{/if}
-										</li>
-									{/each}
-								</ul>
-							{/if}
+							<EndpointMetricsChart {endpointId} {refreshKey} capacity={endpoint.max_concurrency} />
 						</Card.Content>
 					</Card.Root>
 				{/if}
+			</div>
 
-				{#if canEdit && isRelay}
-					<Card.Root class="gap-0 overflow-clip py-0">
-						<Card.Header class="border-b border-border py-3">
-							<Card.Title class="text-base">Relay sessions</Card.Title>
+			{#if !endpoint.is_system}
+				<Card.Root>
+					<Card.Header class="pb-3">
+						<Card.Title class="text-base">Loaded models</Card.Title>
+						<Card.Description>Resident in the server's memory right now.</Card.Description>
+					</Card.Header>
+					<Card.Content>
+						{#if endpoint.live.loaded.length === 0}
+							<p class="text-sm text-muted-foreground">No model is loaded.</p>
+						{:else}
+							<ul class="divide-y divide-border/60">
+								{#each endpoint.live.loaded as m (m.name)}
+									<li class="flex flex-wrap items-center gap-3 py-2 text-sm">
+										<span class="min-w-0 flex-1 truncate font-mono text-xs">{m.name}</span>
+										<span class="text-xs tabular-nums text-muted-foreground">VRAM {formatBytes(m.size_vram)}</span>
+										{#if m.cpu_spill}
+											<span
+												class="rounded-full border border-warning/30 bg-warning/10 px-1.5 text-[11px] text-warning-fg"
+												title="Part of the model runs on the CPU: much slower. Lower num_ctx or max resident models."
+											>CPU spill</span>
+										{/if}
+										{#if canEdit && modelByServed.has(m.name)}
+											<Button variant="outline" size="sm" class="h-7 px-2" onclick={() => unload(m.name)}>Unload</Button>
+										{/if}
+									</li>
+								{/each}
+							</ul>
+						{/if}
+					</Card.Content>
+				</Card.Root>
+			{/if}
+
+			{#if canEdit && isRelay}
+				<Card.Root class="gap-0 overflow-clip py-0">
+					<Card.Header class="border-b border-border py-3">
+						<Card.Title class="text-base">Relay sessions</Card.Title>
+						<Card.Description>
+							One relay is active; others wait as standby and take over if it disappears.
+						</Card.Description>
+					</Card.Header>
+					<Card.Content class="p-0">
+						<SessionsTable {sessions} {now} newHosts={flaggedHosts} />
+					</Card.Content>
+				</Card.Root>
+			{/if}
+
+			{#if canEdit && (endpoint.recent_errors?.length || endpoint.last_error)}
+				<Card.Root>
+					<Card.Header class="pb-3"><Card.Title class="text-base">Recent errors</Card.Title></Card.Header>
+					<Card.Content>
+						{#if endpoint.recent_errors?.length}
+							<ul class="space-y-2 text-xs">
+								{#each endpoint.recent_errors as err, i (i)}
+									<li class="flex flex-wrap gap-x-3">
+										<span class="tabular-nums text-muted-foreground" title={formatDateTime(err.at)}>{formatAgo(err.at, now)}</span>
+										<span class="font-mono text-muted-foreground">{err.kind}</span>
+										<span class="min-w-0 flex-1 break-words text-danger-fg">{err.message}</span>
+									</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="break-words text-xs text-danger-fg">{endpoint.last_error}</p>
+						{/if}
+					</Card.Content>
+				</Card.Root>
+			{/if}
+		</Tabs.Content>
+
+		<!-- ── Models ───────────────────────────────────────────── -->
+		{#if !endpoint.is_system}
+			<Tabs.Content value="models" class="space-y-3 pt-0">
+				<div class="flex flex-wrap items-center justify-between gap-2">
+					<p class="text-sm text-muted-foreground">
+						Hidden models stay out of the model pickers. Overrides apply to new runs only.
+					</p>
+					<Button size="sm" onclick={useInExperiment} disabled={selectedModels.size === 0}>
+						<FlaskConical />Use {selectedModels.size || ''} in new experiment
+					</Button>
+				</div>
+				<DiscoveredModelsTable
+					{endpointId}
+					{canEdit}
+					{refreshKey}
+					bind:selectedIds={selectedModels}
+					onloaded={(list) => (models = list.filter((m) => !m.is_hidden))}
+				/>
+			</Tabs.Content>
+		{/if}
+
+		<!-- ── Tokens ───────────────────────────────────────────── -->
+		{#if canEdit && isRelay}
+			<Tabs.Content value="tokens" class="space-y-6 pt-0">
+				<Card.Root class="gap-0 overflow-clip py-0">
+					<Card.Header class="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0 border-b border-border py-3">
+						<div class="space-y-1">
+							<Card.Title class="text-base">Relay tokens</Card.Title>
+							<Card.Description>Each relay authenticates with a token scoped to this endpoint.</Card.Description>
+						</div>
+						<Button size="sm" onclick={() => (newTokenOpen = true)}><Plus />New token</Button>
+					</Card.Header>
+					<Card.Content class="p-0">
+						{#if tokensError}
+							<div class="p-4"><ErrorAlert message={tokensError} onretry={loadTokens} /></div>
+						{:else if tokens === null}
+							<LoadingState label="loading tokens" class="py-6" />
+						{:else if tokens.length === 0}
+							<div class="p-4"><EmptyState compact icon={KeyRound} title="No tokens" description="Create one for the relay." /></div>
+						{:else}
+							<div class="table-frame max-md:p-3" {@attach tableFrame}>
+								<table class="table-card-mobile">
+									<thead>
+										<tr>
+											<th scope="col">Token</th>
+											<th scope="col">Created</th>
+											<th scope="col">Last used</th>
+											<th scope="col">State</th>
+											<th scope="col" class="num">Sessions</th>
+											<th scope="col" class="text-right"><span class="sr-only">Actions</span></th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each tokens as t (t.id)}
+											{@const expired = !!t.expires_at && Date.parse(t.expires_at) <= now}
+											<tr class={cn((t.revoked_at || expired) && 'text-muted-foreground')}>
+												<td data-label="Token">
+													<code class="mono-tag">{t.prefix}…</code>
+													{#if t.label}<span class="ml-1 text-xs">{t.label}</span>{/if}
+												</td>
+												<td data-label="Created" class="whitespace-nowrap text-xs" title={formatDateTime(t.created_at)}>{formatAgo(t.created_at, now)}</td>
+												<td data-label="Last used" class="whitespace-nowrap text-xs" title={formatDateTime(t.last_used_at)}>{formatAgo(t.last_used_at, now)}</td>
+												<td data-label="State" class="text-xs">
+													{#if t.revoked_at}
+														<StatusBadge status="revoked" tone="neutral" />
+													{:else if expired}
+														<StatusBadge status="expired" tone="neutral" />
+													{:else if t.expires_at}
+														<span title={formatDateTime(t.expires_at)}><StatusBadge status="expiring" tone="warning" label="expires {formatDateTime(t.expires_at)}" /></span>
+													{:else}
+														<StatusBadge status="active" />
+													{/if}
+												</td>
+												<td data-label="Sessions" class="num">{t.active_sessions}</td>
+												<td data-label="" class="w-px whitespace-nowrap text-right">
+													{#if !t.revoked_at && !expired}
+														<span class="inline-flex gap-0.5">
+															<span class="row-actions-more">
+																<Button variant="ghost" size="sm" class="h-7 px-2 text-xs text-danger-fg hover:bg-destructive/10 hover:text-danger-fg" title="Revoke token {t.prefix}…" onclick={() => (revokeTarget = t)}>Revoke</Button>
+															</span>
+															<Button variant="ghost" size="sm" class="h-7 px-2 text-xs" title="Rotate token {t.prefix}…" onclick={() => { rotateGrace = 24 * 60; rotateTarget = t; }}>Rotate</Button>
+														</span>
+													{/if}
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+							{#if liveTokens.length === 0}
+								<p class="border-t border-border px-4 py-2 text-xs text-warning-fg">No usable token: relays cannot connect until you create one.</p>
+							{/if}
+						{/if}
+					</Card.Content>
+				</Card.Root>
+
+				<Card.Root>
+					<Card.Header class="pb-3">
+						<Card.Title class="text-base">Install the relay</Card.Title>
+						<Card.Description>Run it on the machine with the model server.</Card.Description>
+					</Card.Header>
+					<Card.Content>
+						<RelayInstallPanel {endpointId} />
+					</Card.Content>
+				</Card.Root>
+			</Tabs.Content>
+		{/if}
+
+		<!-- ── Settings ─────────────────────────────────────────── -->
+		{#if canEdit}
+			<Tabs.Content value="settings" class="space-y-6 pt-0">
+				<Card.Root>
+					<Card.Content class="pt-6">
+						{#key formKey}
+							<EndpointForm
+								mode="edit"
+								initial={endpoint}
+								{isStaff}
+								errors={settingsErrors}
+								busy={settingsBusy}
+								onsubmit={saveSettings}
+							/>
+						{/key}
+					</Card.Content>
+				</Card.Root>
+
+				{#if !endpoint.is_system}
+					<Card.Root class="border-destructive/30">
+						<Card.Header class="pb-3">
+							<Card.Title class="text-base">Disable or delete</Card.Title>
 							<Card.Description>
-								One relay is active; others wait as standby and take over if it disappears.
+								Disabling stops new runs and requests but keeps the history and lets relays stay connected. An
+								endpoint with runs cannot be deleted.
 							</Card.Description>
 						</Card.Header>
-						<Card.Content class="p-0">
-							<SessionsTable {sessions} {now} newHosts={flaggedHosts} />
-						</Card.Content>
-					</Card.Root>
-				{/if}
-
-				{#if canEdit && (endpoint.recent_errors?.length || endpoint.last_error)}
-					<Card.Root>
-						<Card.Header class="pb-3"><Card.Title class="text-base">Recent errors</Card.Title></Card.Header>
-						<Card.Content>
-							{#if endpoint.recent_errors?.length}
-								<ul class="space-y-2 text-xs">
-									{#each endpoint.recent_errors as err, i (i)}
-										<li class="flex flex-wrap gap-x-3">
-											<span class="tabular-nums text-muted-foreground" title={formatDateTime(err.at)}>{formatAgo(err.at, now)}</span>
-											<span class="font-mono text-muted-foreground">{err.kind}</span>
-											<span class="min-w-0 flex-1 break-words text-danger-fg">{err.message}</span>
-										</li>
-									{/each}
-								</ul>
-							{:else}
-								<p class="break-words text-xs text-danger-fg">{endpoint.last_error}</p>
-							{/if}
+						<Card.Content class="flex flex-wrap gap-2">
+							<Button variant="outline" size="sm" disabled={toggleBusy} onclick={() => setEnabled(!endpoint!.enabled)}>
+								{#if toggleBusy}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{/if}
+								{endpoint.enabled ? 'Disable' : 'Enable'}
+							</Button>
+							<Button variant="destructive" size="sm" onclick={() => (deleteOpen = true)}>Delete</Button>
 						</Card.Content>
 					</Card.Root>
 				{/if}
 			</Tabs.Content>
-
-			<!-- ── Models ───────────────────────────────────────────── -->
-			{#if !endpoint.is_system}
-				<Tabs.Content value="models" class="space-y-3">
-					<div class="flex flex-wrap items-center justify-between gap-2">
-						<p class="text-sm text-muted-foreground">
-							Hidden models stay out of the model pickers. Overrides apply to new runs only.
-						</p>
-						<Button size="sm" onclick={useInExperiment} disabled={selectedModels.size === 0}>
-							<FlaskConical />Use {selectedModels.size || ''} in new experiment
-						</Button>
-					</div>
-					<DiscoveredModelsTable
-						{endpointId}
-						{canEdit}
-						{refreshKey}
-						bind:selectedIds={selectedModels}
-						onloaded={(list) => (models = list.filter((m) => !m.is_hidden))}
-					/>
-				</Tabs.Content>
-			{/if}
-
-			<!-- ── Tokens ───────────────────────────────────────────── -->
-			{#if canEdit && isRelay}
-				<Tabs.Content value="tokens" class="space-y-6">
-					<Card.Root class="gap-0 overflow-clip py-0">
-						<Card.Header class="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0 border-b border-border py-3">
-							<div class="space-y-1">
-								<Card.Title class="text-base">Relay tokens</Card.Title>
-								<Card.Description>Each relay authenticates with a token scoped to this endpoint.</Card.Description>
-							</div>
-							<Button size="sm" onclick={() => (newTokenOpen = true)}><Plus />New token</Button>
-						</Card.Header>
-						<Card.Content class="p-0">
-							{#if tokensError}
-								<div class="p-4"><ErrorAlert message={tokensError} onretry={loadTokens} /></div>
-							{:else if tokens === null}
-								<LoadingState label="loading tokens" class="py-6" />
-							{:else if tokens.length === 0}
-								<div class="p-4"><EmptyState compact icon={KeyRound} title="No tokens" description="Create one for the relay." /></div>
-							{:else}
-								<div class="table-frame max-md:p-3" {@attach tableFrame}>
-									<table class="table-card-mobile">
-										<thead>
-											<tr>
-												<th scope="col">Token</th>
-												<th scope="col">Created</th>
-												<th scope="col">Last used</th>
-												<th scope="col">State</th>
-												<th scope="col" class="num">Sessions</th>
-												<th scope="col" class="text-right"><span class="sr-only">Actions</span></th>
-											</tr>
-										</thead>
-										<tbody>
-											{#each tokens as t (t.id)}
-												{@const expired = !!t.expires_at && Date.parse(t.expires_at) <= now}
-												<tr class={cn((t.revoked_at || expired) && 'text-muted-foreground')}>
-													<td data-label="Token">
-														<code class="mono-tag">{t.prefix}…</code>
-														{#if t.label}<span class="ml-1 text-xs">{t.label}</span>{/if}
-													</td>
-													<td data-label="Created" class="whitespace-nowrap text-xs" title={formatDateTime(t.created_at)}>{formatAgo(t.created_at, now)}</td>
-													<td data-label="Last used" class="whitespace-nowrap text-xs" title={formatDateTime(t.last_used_at)}>{formatAgo(t.last_used_at, now)}</td>
-													<td data-label="State" class="text-xs">
-														{#if t.revoked_at}
-															<StatusBadge status="revoked" tone="neutral" />
-														{:else if expired}
-															<StatusBadge status="expired" tone="neutral" />
-														{:else if t.expires_at}
-															<span title={formatDateTime(t.expires_at)}><StatusBadge status="expiring" tone="warning" label="expires {formatDateTime(t.expires_at)}" /></span>
-														{:else}
-															<StatusBadge status="active" />
-														{/if}
-													</td>
-													<td data-label="Sessions" class="num">{t.active_sessions}</td>
-													<td data-label="" class="w-px whitespace-nowrap text-right">
-														{#if !t.revoked_at && !expired}
-															<span class="inline-flex gap-0.5">
-																<span class="row-actions-more">
-																	<Button variant="ghost" size="sm" class="h-7 px-2 text-xs text-danger-fg hover:bg-destructive/10 hover:text-danger-fg" title="Revoke token {t.prefix}…" onclick={() => (revokeTarget = t)}>Revoke</Button>
-																</span>
-																<Button variant="ghost" size="sm" class="h-7 px-2 text-xs" title="Rotate token {t.prefix}…" onclick={() => { rotateGrace = 24 * 60; rotateTarget = t; }}>Rotate</Button>
-															</span>
-														{/if}
-													</td>
-												</tr>
-											{/each}
-										</tbody>
-									</table>
-								</div>
-								{#if liveTokens.length === 0}
-									<p class="border-t border-border px-4 py-2 text-xs text-warning-fg">No usable token: relays cannot connect until you create one.</p>
-								{/if}
-							{/if}
-						</Card.Content>
-					</Card.Root>
-
-					<Card.Root>
-						<Card.Header class="pb-3">
-							<Card.Title class="text-base">Install the relay</Card.Title>
-							<Card.Description>Run it on the machine with the model server.</Card.Description>
-						</Card.Header>
-						<Card.Content>
-							<RelayInstallPanel {endpointId} />
-						</Card.Content>
-					</Card.Root>
-				</Tabs.Content>
-			{/if}
-
-			<!-- ── Settings ─────────────────────────────────────────── -->
-			{#if canEdit}
-				<Tabs.Content value="settings" class="space-y-6">
-					<Card.Root>
-						<Card.Content class="pt-6">
-							{#key formKey}
-								<EndpointForm
-									mode="edit"
-									initial={endpoint}
-									{isStaff}
-									errors={settingsErrors}
-									busy={settingsBusy}
-									onsubmit={saveSettings}
-								/>
-							{/key}
-						</Card.Content>
-					</Card.Root>
-
-					{#if !endpoint.is_system}
-						<Card.Root class="border-destructive/30">
-							<Card.Header class="pb-3">
-								<Card.Title class="text-base">Disable or delete</Card.Title>
-								<Card.Description>
-									Disabling stops new runs and requests but keeps the history and lets relays stay connected. An
-									endpoint with runs cannot be deleted.
-								</Card.Description>
-							</Card.Header>
-							<Card.Content class="flex flex-wrap gap-2">
-								<Button variant="outline" size="sm" disabled={toggleBusy} onclick={() => setEnabled(!endpoint!.enabled)}>
-									{#if toggleBusy}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{/if}
-									{endpoint.enabled ? 'Disable' : 'Enable'}
-								</Button>
-								<Button variant="destructive" size="sm" onclick={() => (deleteOpen = true)}>Delete</Button>
-							</Card.Content>
-						</Card.Root>
-					{/if}
-				</Tabs.Content>
-			{/if}
-		</Tabs.Root>
+		{/if}
 	{/if}
-</div>
+</Tabs.Root>
 
 <TokenRevealDialog
 	bind:open={revealOpen}

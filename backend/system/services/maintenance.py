@@ -16,8 +16,12 @@ from backend.runtime.services import docker_manager
 
 
 def clear_stuck_analysis_tasks(older_than_minutes: int = 60) -> int:
+    from backend.analysis.services.runner import reap_stale_runs
+
+    # Runs whose executing thread is gone (stale heartbeat), regardless of age.
+    reaped = reap_stale_runs()
     threshold = timezone.now() - timedelta(minutes=older_than_minutes)
-    return AnalysisRun.objects.filter(
+    return reaped + AnalysisRun.objects.filter(
         status__in=[AnalysisRun.Status.PENDING, AnalysisRun.Status.RUNNING],
         updated_at__lt=threshold,
     ).update(

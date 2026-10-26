@@ -13,6 +13,7 @@
 	 * - `rowLabel(row)`: override the condition label.
 	 */
 	import { cn } from '$lib/utils';
+	import { scrollHint } from '$lib/utils/scroll-hint';
 	import { toneClasses } from '$lib/constants/colors';
 	import type { ExperimentComparability, ExperimentComparabilityRow } from '$lib/api/experiments';
 
@@ -46,6 +47,12 @@
 	}
 
 	const rows = $derived(comparability.conditions as CompRow[]);
+
+	/** The API sends a slug; older payloads sent `{slug, kind}`. */
+	function endpointSlug(row: CompRow): string {
+		const ep = row.endpoint;
+		return (typeof ep === 'string' ? ep : ep?.slug) || 'openrouter';
+	}
 	const differsOn = $derived(new Set(comparability.differs_on));
 
 	const columns = $derived.by((): CompColumn[] => {
@@ -56,7 +63,7 @@
 				id: 'endpoint',
 				label: 'Endpoint',
 				keys: ['endpoint', 'max_concurrency'],
-				cell: (r) => (r.endpoint ? r.endpoint.slug : 'openrouter'),
+				cell: endpointSlug,
 			});
 		}
 		list.push(
@@ -86,7 +93,7 @@
 				cell: (r) => (r.output_cap != null ? r.output_cap.toLocaleString() : '—'),
 			});
 		}
-		if (has('context_window') && (differsOn.has('context_window') || rows.some((r) => r.endpoint))) {
+		if (has('context_window') && (differsOn.has('context_window') || rows.some((r) => endpointSlug(r) !== 'openrouter'))) {
 			list.push({
 				id: 'ctx',
 				label: 'Context',
@@ -152,7 +159,7 @@
 		{/if}
 	{/if}
 	<!-- Plain scroll frame (no fit attachment): this table also renders inside a Sheet. -->
-	<div class="table-frame rounded-md border border-border bg-card">
+	<div class="table-frame rounded-md border border-border bg-card" {@attach scrollHint()}>
 		<table class="min-w-[40rem]">
 			<thead>
 				<tr>
@@ -169,7 +176,7 @@
 				{#each rows as row (row.condition_id)}
 					<tr class="group">
 						<th scope="row" class="col-sticky top-auto z-[1] min-w-44 max-w-56 border-b-border/60 bg-card group-hover:bg-[color-mix(in_oklab,var(--primary)_5%,var(--card))] text-xs font-medium normal-case tracking-normal text-foreground backdrop-blur-none">
-							<span class="block truncate" title={label(row)}>{label(row)}</span>
+							<span class="line-clamp-2 break-words" title={label(row)}>{label(row)}</span>
 						</th>
 						{#each columns as column (column.id)}
 							<td class={cn('font-mono text-xs', NUMERIC.has(column.id) && 'num', differs(column) && 'bg-warning/5')}>

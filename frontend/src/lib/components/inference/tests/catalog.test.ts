@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LLMModelSummary } from "$lib/api/models";
 import {
+  ALIAS_GROUP_LABEL,
   filterByEndpointScope,
   groupModels,
   isLocalModel,
@@ -107,6 +108,24 @@ describe("groupModels", () => {
     expect(groups[3].models.map((m) => m.model_name)).toEqual([
       "GPT a",
       "GPT b",
+    ]);
+  });
+
+  it("collects ~vendor aliases into one group after the vendors", () => {
+    const alias1 = model({
+      provider: "~anthropic",
+      model_name: "Claude Opus Latest",
+    });
+    const alias2 = model({ provider: "~openai", model_name: "GPT Latest" });
+    const groups = groupModels([alias1, a, alias2, b], "endpoint");
+    expect(groups.map((g) => g.label)).toEqual([
+      "anthropic",
+      "openai",
+      ALIAS_GROUP_LABEL,
+    ]);
+    expect(groups[2].models.map((m) => m.model_name)).toEqual([
+      "Claude Opus Latest",
+      "GPT Latest",
     ]);
   });
 

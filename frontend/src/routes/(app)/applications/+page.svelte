@@ -6,6 +6,8 @@
 	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
+	import * as Card from '$lib/components/ui/card';
+	import { TableToolbar } from '$lib/components/table';
 	import {
 		getGenerationJobs,
 		getGenerationJobsStats,
@@ -363,6 +365,12 @@
 
 	const hasActiveFilters = $derived(activeFilters.length > 0);
 
+	const resultsText = $derived(
+		data && data.total > 0
+			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} applications`
+			: ''
+	);
+
 	function selectStatusTab(status: string) {
 		statusFilter = status;
 		applyFilters();
@@ -377,7 +385,7 @@
 	});
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4">
 	<PageHeader title="Applications" description="Browse and manage generated web applications.">
 		{#snippet actions()}
 			<Button id="btn-refresh" variant="outline" size="sm" onclick={refresh} disabled={refreshing}>
@@ -393,222 +401,205 @@
 				Generate New
 			</Button>
 		{/snippet}
+		{#if stats}
+			<div class="header-stats">
+				<span class="header-stat"><b>{stats.total}</b> total</span>
+				<span class="header-stat"><b>{stats.completed}</b> completed</span>
+				<span class="header-stat"><b>{stats.running}</b> running{#if stats.queued}<span class="ml-1">({stats.queued} queued for a sandbox)</span>{/if}</span>
+				<span class="header-stat"><b>{stats.failed}</b> failed</span>
+				<span class="header-stat"><b>{stats.pending}</b> pending</span>
+			</div>
+		{/if}
 	</PageHeader>
 
-	{#if stats}
-		<div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
-			{#each [
-				{ label: 'Total', value: stats.total, note: '' },
-				{ label: 'Completed', value: stats.completed, note: '' },
-				{ label: 'Running', value: stats.running, note: stats.queued ? `${stats.queued} queued for a sandbox` : '' },
-				{ label: 'Failed', value: stats.failed, note: '' },
-				{ label: 'Pending', value: stats.pending, note: '' }
-			] as kpi (kpi.label)}
-				<div class="kpi-card">
-					<span class="kpi-label">{kpi.label}</span>
-					<span class="kpi-value">{kpi.value}</span>
-					{#if kpi.note}<span class="text-[11px] text-muted-foreground">{kpi.note}</span>{/if}
+	<Card.Root class="gap-0 overflow-clip py-0">
+		<FilterBar
+			embedded
+			searchPlaceholder="Search applications..."
+			bind:searchValue={searchQuery}
+			onSearchInput={() => { currentPage = 1; debouncedLoad(); }}
+			activeTags={activeFilters}
+			onClearAll={clearFilters}
+		>
+			{#snippet filters()}
+				<!-- Row 1: Status -->
+				<div class="fb-group">
+					<span class="fb-group-label">Status</span>
+					<button
+						class="fb-chip {statusFilter === '' ? 'fb-chip-on' : ''}"
+						onclick={() => selectStatusTab('')}
+					>
+						<AppWindow class="h-3 w-3" /> All
+						{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.total}</span>{/if}
+					</button>
+					<button
+						class="fb-chip {statusFilter === 'completed' ? 'fb-chip-on' : ''}"
+						onclick={() => selectStatusTab('completed')}
+					>
+						<CircleCheck class="h-3 w-3" /> Completed
+						{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.completed}</span>{/if}
+					</button>
+					<button
+						class="fb-chip {statusFilter === 'running' ? 'fb-chip-on' : ''}"
+						onclick={() => selectStatusTab('running')}
+					>
+						<span class="status-dot status-dot-live h-1.5 w-1.5 text-info" aria-hidden="true"></span>
+						Running
+						{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.running}</span>{/if}
+					</button>
+					<button
+						class="fb-chip {statusFilter === 'failed' ? 'fb-chip-on' : ''}"
+						onclick={() => selectStatusTab('failed')}
+					>
+						<CircleX class="h-3 w-3" /> Failed
+						{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.failed}</span>{/if}
+					</button>
+					<button
+						class="fb-chip {statusFilter === 'pending' ? 'fb-chip-on' : ''}"
+						onclick={() => selectStatusTab('pending')}
+					>
+						<Clock class="h-3 w-3" /> Pending
+						{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.pending}</span>{/if}
+					</button>
 				</div>
-			{/each}
-		</div>
-	{/if}
 
-	<FilterBar
-		searchPlaceholder="Search applications..."
-		bind:searchValue={searchQuery}
-		onSearchInput={() => { currentPage = 1; debouncedLoad(); }}
-		activeTags={activeFilters}
-		resultsText={data && !loading
-			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} applications`
-			: ''}
-		onClearAll={clearFilters}
-	>
-		{#snippet filters()}
-			<!-- Row 1: Status -->
-			<div class="fb-group">
-				<span class="fb-group-label">Status</span>
-				<button
-					class="fb-chip {statusFilter === '' ? 'fb-chip-on' : ''}"
-					onclick={() => selectStatusTab('')}
-				>
-					<AppWindow class="h-3 w-3" /> All
-					{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.total}</span>{/if}
-				</button>
-				<button
-					class="fb-chip {statusFilter === 'completed' ? 'fb-chip-on' : ''}"
-					onclick={() => selectStatusTab('completed')}
-				>
-					<CircleCheck class="h-3 w-3" /> Completed
-					{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.completed}</span>{/if}
-				</button>
-				<button
-					class="fb-chip {statusFilter === 'running' ? 'fb-chip-on' : ''}"
-					onclick={() => selectStatusTab('running')}
-				>
-					<span class="status-dot status-dot-live h-1.5 w-1.5 text-info" aria-hidden="true"></span>
-					Running
-					{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.running}</span>{/if}
-				</button>
-				<button
-					class="fb-chip {statusFilter === 'failed' ? 'fb-chip-on' : ''}"
-					onclick={() => selectStatusTab('failed')}
-				>
-					<CircleX class="h-3 w-3" /> Failed
-					{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.failed}</span>{/if}
-				</button>
-				<button
-					class="fb-chip {statusFilter === 'pending' ? 'fb-chip-on' : ''}"
-					onclick={() => selectStatusTab('pending')}
-				>
-					<Clock class="h-3 w-3" /> Pending
-					{#if stats}<span class="ml-1 font-mono text-[11px]">{stats.pending}</span>{/if}
-				</button>
-			</div>
+				<!-- Row 2: Mode -->
+				<div class="fb-group">
+					<span class="fb-group-label">Mode</span>
+					<button class="fb-chip {modeFilter === '' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = ''; applyFilters(); }}>All</button>
+					<button class="fb-chip {modeFilter === 'agent' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'agent'; applyFilters(); }}>Agent</button>
+					<button class="fb-chip {modeFilter === 'custom' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'custom'; applyFilters(); }}>Custom</button>
+					<button class="fb-chip {modeFilter === 'scaffolding' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'scaffolding'; applyFilters(); }}>Scaffolding</button>
+					<button class="fb-chip {modeFilter === 'copilot' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'copilot'; applyFilters(); }}>Copilot (legacy)</button>
+				</div>
 
-			<!-- Row 2: Mode -->
-			<div class="fb-group">
-				<span class="fb-group-label">Mode</span>
-				<button class="fb-chip {modeFilter === '' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = ''; applyFilters(); }}>All</button>
-				<button class="fb-chip {modeFilter === 'agent' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'agent'; applyFilters(); }}>Agent</button>
-				<button class="fb-chip {modeFilter === 'custom' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'custom'; applyFilters(); }}>Custom</button>
-				<button class="fb-chip {modeFilter === 'scaffolding' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'scaffolding'; applyFilters(); }}>Scaffolding</button>
-				<button class="fb-chip {modeFilter === 'copilot' ? 'fb-chip-on' : ''}" onclick={() => { modeFilter = 'copilot'; applyFilters(); }}>Copilot (legacy)</button>
-			</div>
+				<!-- Row 3: Container -->
+				<div class="fb-group">
+					<span class="fb-group-label">Container</span>
+					<button class="fb-chip {containerFilter === '' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = ''; applyFilters(); }}>All</button>
+					<button class="fb-chip {containerFilter === 'running' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'running'; applyFilters(); }}>Running</button>
+					<button class="fb-chip {containerFilter === 'stopped' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'stopped'; applyFilters(); }}>Stopped</button>
+					<button class="fb-chip {containerFilter === 'building' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'building'; applyFilters(); }}>Building</button>
+					<button class="fb-chip {containerFilter === 'none' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'none'; applyFilters(); }}>None</button>
+				</div>
 
-			<!-- Row 3: Container -->
-			<div class="fb-group">
-				<span class="fb-group-label">Container</span>
-				<button class="fb-chip {containerFilter === '' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = ''; applyFilters(); }}>All</button>
-				<button class="fb-chip {containerFilter === 'running' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'running'; applyFilters(); }}>Running</button>
-				<button class="fb-chip {containerFilter === 'stopped' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'stopped'; applyFilters(); }}>Stopped</button>
-				<button class="fb-chip {containerFilter === 'building' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'building'; applyFilters(); }}>Building</button>
-				<button class="fb-chip {containerFilter === 'none' ? 'fb-chip-on' : ''}" onclick={() => { containerFilter = 'none'; applyFilters(); }}>None</button>
-			</div>
+				<!-- Row 4: Model + Sort -->
+				<div class="fb-group flex-wrap">
+					<span class="fb-group-label">Model</span>
+					<select
+						class="fb-select"
+						bind:value={modelFilter}
+						onchange={applyFilters}
+					>
+						<option value="">All Models</option>
+						{#each uniqueModels as model}
+							<option value={model.id}>{model.name}</option>
+						{/each}
+					</select>
+					<span class="fb-group-label ml-2">Sort</span>
+					<button
+						class="fb-chip {sortBy === 'created_at' && sortDir === 'desc' ? 'fb-chip-on' : ''}"
+						onclick={() => { sortBy = 'created_at'; sortDir = 'desc'; currentPage = 1; fetchJobs(); }}
+					>Newest</button>
+					<button
+						class="fb-chip {sortBy === 'created_at' && sortDir === 'asc' ? 'fb-chip-on' : ''}"
+						onclick={() => { sortBy = 'created_at'; sortDir = 'asc'; currentPage = 1; fetchJobs(); }}
+					>Oldest</button>
+					<button
+						class="fb-chip {sortBy === 'duration_seconds' ? 'fb-chip-on' : ''}"
+						onclick={() => { sortBy = 'duration_seconds'; sortDir = 'desc'; currentPage = 1; fetchJobs(); }}
+					>Longest</button>
+					<button
+						class="fb-chip {sortBy === 'model_name' ? 'fb-chip-on' : ''}"
+						onclick={() => { sortBy = 'model_name'; sortDir = 'asc'; currentPage = 1; fetchJobs(); }}
+					>A–Z Model</button>
+				</div>
+			{/snippet}
 
-			<!-- Row 4: Model + Sort -->
-			<div class="fb-group flex-wrap">
-				<span class="fb-group-label">Model</span>
+			{#snippet actions()}
 				<select
 					class="fb-select"
-					bind:value={modelFilter}
-					onchange={applyFilters}
+					bind:value={perPage}
+					onchange={() => { currentPage = 1; fetchJobs(); }}
 				>
-					<option value="">All Models</option>
-					{#each uniqueModels as model}
-						<option value={model.id}>{model.name}</option>
-					{/each}
+					<option value={10}>10/pg</option>
+					<option value={25}>25/pg</option>
+					<option value={50}>50/pg</option>
+					<option value={100}>100/pg</option>
 				</select>
-				<span class="fb-group-label ml-2">Sort</span>
-				<button
-					class="fb-chip {sortBy === 'created_at' && sortDir === 'desc' ? 'fb-chip-on' : ''}"
-					onclick={() => { sortBy = 'created_at'; sortDir = 'desc'; currentPage = 1; fetchJobs(); }}
-				>Newest</button>
-				<button
-					class="fb-chip {sortBy === 'created_at' && sortDir === 'asc' ? 'fb-chip-on' : ''}"
-					onclick={() => { sortBy = 'created_at'; sortDir = 'asc'; currentPage = 1; fetchJobs(); }}
-				>Oldest</button>
-				<button
-					class="fb-chip {sortBy === 'duration_seconds' ? 'fb-chip-on' : ''}"
-					onclick={() => { sortBy = 'duration_seconds'; sortDir = 'desc'; currentPage = 1; fetchJobs(); }}
-				>Longest</button>
-				<button
-					class="fb-chip {sortBy === 'model_name' ? 'fb-chip-on' : ''}"
-					onclick={() => { sortBy = 'model_name'; sortDir = 'asc'; currentPage = 1; fetchJobs(); }}
-				>A–Z Model</button>
-			</div>
-		{/snippet}
-
-		{#snippet actions()}
-			<select
-				class="fb-select"
-				bind:value={perPage}
-				onchange={() => { currentPage = 1; fetchJobs(); }}
-			>
-				<option value={10}>10/pg</option>
-				<option value={25}>25/pg</option>
-				<option value={50}>50/pg</option>
-				<option value={100}>100/pg</option>
-			</select>
-		{/snippet}
-	</FilterBar>
-
-	<!-- Results List -->
-	{#if loading}
-		<LoadingState label="loading applications" />
-	{:else if filteredItems.length === 0}
-		<EmptyState
-			icon={AppWindow}
-			title="No applications found"
-			description={hasActiveFilters
-				? 'No applications match your filters. Try clearing them or searching for another term.'
-				: 'No code generation jobs yet. Get started by generating your first application.'}
-		>
-			{#snippet action()}
-				{#if hasActiveFilters}
-					<Button id="btn-empty-clear" variant="outline" size="sm" onclick={clearFilters}>Clear Filters</Button>
-				{:else}
-					<Button id="btn-empty-create" size="sm" href="/sample-generator">Go to Sample Generator</Button>
-				{/if}
 			{/snippet}
-		</EmptyState>
-	{:else}
-		<!-- Table (desktop) -->
-		<div class="hidden md:block">
-			<JobsTable
-				jobs={filteredItems}
-				{containersByJobId}
-				{containerBusy}
-				{sortBy}
-				{sortDir}
-				onToggleSort={toggleSort}
-				onBuild={handleBuildContainer}
-				onStart={handleStartContainer}
-				onStop={handleStopContainer}
-				onRemoveContainer={handleRemoveContainer}
-				onCancel={handleCancel}
-				onDelete={handleDelete}
-				onRetry={handleRetry}
-				onCopyId={copyId}
+		</FilterBar>
+
+		{#if loading}
+			<LoadingState label="loading applications" />
+		{:else if filteredItems.length === 0}
+			<EmptyState
+				compact
+				icon={AppWindow}
+				title="No applications found"
+				description={hasActiveFilters
+					? 'No applications match your filters. Try clearing them or searching for another term.'
+					: 'No code generation jobs yet. Get started by generating your first application.'}
 			>
-				{#snippet footer()}{@render pager('border-t border-border')}{/snippet}
-			</JobsTable>
-		</div>
+				{#snippet action()}
+					{#if hasActiveFilters}
+						<Button id="btn-empty-clear" variant="outline" size="sm" onclick={clearFilters}>Clear Filters</Button>
+					{:else}
+						<Button id="btn-empty-create" size="sm" href="/sample-generator">Go to Sample Generator</Button>
+					{/if}
+				{/snippet}
+			</EmptyState>
+		{:else}
+			<TableToolbar>
+				{#snippet summary()}{resultsText} · click a row to open{/snippet}
+			</TableToolbar>
+			<!-- Table (desktop) -->
+			<div class="hidden md:block">
+				<JobsTable
+					jobs={filteredItems}
+					{containersByJobId}
+					{containerBusy}
+					{sortBy}
+					{sortDir}
+					onToggleSort={toggleSort}
+					onBuild={handleBuildContainer}
+					onStart={handleStartContainer}
+					onStop={handleStopContainer}
+					onRemoveContainer={handleRemoveContainer}
+					onCancel={handleCancel}
+					onDelete={handleDelete}
+					onRetry={handleRetry}
+					onCopyId={copyId}
+				/>
+			</div>
 
-		<!-- Cards (mobile) -->
-		<div class="md:hidden">
-			<JobCards
-				jobs={filteredItems}
-				{containersByJobId}
-				{containerBusy}
-				onBuild={handleBuildContainer}
-				onStart={handleStartContainer}
-				onStop={handleStopContainer}
-				onRemoveContainer={handleRemoveContainer}
-				onCancel={handleCancel}
-				onDelete={handleDelete}
-				onRetry={handleRetry}
-				onCopyId={copyId}
+			<!-- Cards (mobile) -->
+			<div class="md:hidden">
+				<JobCards
+					jobs={filteredItems}
+					{containersByJobId}
+					{containerBusy}
+					onBuild={handleBuildContainer}
+					onStart={handleStartContainer}
+					onStop={handleStopContainer}
+					onRemoveContainer={handleRemoveContainer}
+					onCancel={handleCancel}
+					onDelete={handleDelete}
+					onRetry={handleRetry}
+					onCopyId={copyId}
+				/>
+			</div>
+
+			<PaginationBar
+				page={data?.page}
+				pages={data?.pages}
+				onGoToPage={goToPage}
+				class="border-t border-border"
+				scrollToCard
 			/>
-		</div>
-	{/if}
-
-	{#if !loading && filteredItems.length > 0}
-		<div class="md:hidden">{@render pager('rounded-md border border-border')}</div>
-	{/if}
+		{/if}
+	</Card.Root>
 </div>
-
-{#snippet pager(cls: string)}
-	<PaginationBar
-		resultsText={data && !loading
-			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} applications`
-			: ''}
-		page={data?.page}
-		pages={data?.pages}
-		onGoToPage={goToPage}
-		class={cls}
-		scrollToCard
-	/>
-{/snippet}
 
 <ConfirmDialog
 	bind:open={confirmOpen}

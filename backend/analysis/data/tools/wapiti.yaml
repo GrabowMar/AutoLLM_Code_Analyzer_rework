@@ -1,0 +1,51 @@
+slug: wapiti
+name: Wapiti
+description: >-
+  Black-box web vulnerability scanner. Crawls the running app and fuzzes its
+  forms and parameters for XSS, SQL and command injection, path traversal,
+  open redirects, CRLF and CSRF, and checks cookie flags and security
+  headers. Requires the app's container to be running.
+category: security
+kind: container
+target_language: any
+analysis_mode: dynamic
+technologies: [http, rest-api]
+icon: bug
+version: "3.2"
+docs_url: https://wapiti-scanner.github.io/
+# Own virtualenv so its pinned dependencies never clash with other pip tools.
+install_cmd: >-
+  set -e;
+  python3 -m venv /home/analyzer/.local/opt/wapiti;
+  /home/analyzer/.local/opt/wapiti/bin/pip install --upgrade 'wapiti3==3.2.*';
+  mkdir -p /home/analyzer/.local/bin;
+  ln -sf /home/analyzer/.local/opt/wapiti/bin/wapiti /home/analyzer/.local/bin/wapiti
+verify_cmd: 'v=$(wapiti --version 2>/dev/null | tail -1) && [ -n "$v" ] && echo "wapiti $v"'
+uninstall_cmd: "rm -rf /home/analyzer/.local/opt/wapiti /home/analyzer/.local/bin/wapiti"
+run_cmd: >-
+  rm -rf /tmp/wapiti && mkdir -p /tmp/wapiti &&
+  wapiti -u {url}/ --scope folder -m {config:modules}
+  --max-scan-time {config:max_scan_seconds} --max-attack-time 60
+  -f json -o /tmp/wapiti/report.json --store-session /tmp/wapiti/session
+  --flush-session --no-bugreport >/tmp/wapiti/wapiti.log 2>&1;
+  cat /tmp/wapiti/report.json
+parser_key: wapiti
+run_timeout: 900
+install_timeout: 600
+display_order: 7
+config_schema:
+  - name: modules
+    type: string
+    label: Attack modules
+    description: Comma-separated Wapiti modules (modules that call out to external servers are left out).
+    default: "backup,cookieflags,crlf,csp,csrf,exec,file,http_headers,methods,permanentxss,redirect,sql,xss"
+  - name: max_scan_seconds
+    type: number
+    label: Max scan time (seconds)
+    description: Upper bound for the whole scan.
+    default: 300
+    min: 60
+    max: 840
+default_config:
+  modules: "backup,cookieflags,crlf,csp,csrf,exec,file,http_headers,methods,permanentxss,redirect,sql,xss"
+  max_scan_seconds: 300

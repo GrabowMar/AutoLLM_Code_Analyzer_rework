@@ -40,11 +40,11 @@ class TestPublish:
         mock_redis = MagicMock()
         mock_get_redis.return_value = mock_redis
 
-        publish("dashboard", {"type": "update"})
+        publish("capacity", {"type": "update"})
 
         _, payload_arg = mock_redis.publish.call_args[0]
         parsed = json.loads(payload_arg)
-        assert parsed["channel"] == "dashboard"
+        assert parsed["channel"] == "capacity"
         assert "published_at" in parsed
 
     @patch("backend.realtime.events._get_redis")

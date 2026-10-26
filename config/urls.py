@@ -10,6 +10,7 @@ from backend.integrations.mcp.views import mcp_endpoint
 from backend.integrations.mcp.views import mcp_endpoint_url_token
 from backend.realtime.api.views import sse_stream
 from backend.runtime.proxy import app_proxy
+from backend.runtime.proxy import app_tls_check
 
 from .api import api
 
@@ -41,6 +42,8 @@ urlpatterns += [
     path("api/mcp", mcp_endpoint),
     path("api/mcp/", mcp_endpoint),
     path("api/mcp/t/<str:token>", mcp_endpoint_url_token),
+    # Edge on-demand TLS ask hook for app subdomains (plain Django view); before "api/".
+    path("api/runtime/app-tls-check/", app_tls_check),
     # API base url
     path("api/", api.urls),
     # Realtime SSE stream (plain Django view — Ninja doesn't support streaming)

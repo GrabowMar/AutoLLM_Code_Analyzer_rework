@@ -20,6 +20,7 @@ them can detect.
 
 from __future__ import annotations
 
+import posixpath
 import re
 from collections import Counter
 from collections import defaultdict
@@ -61,6 +62,11 @@ _BANDIT_CLASSES: dict[str, str] = {
 # Lint rules several quality tools share (Ruff / Pylint / Vulture / Mypy / ESLint).
 _LINT_CLASSES: dict[str, str] = {
     "ruff:F401": "unused-import",
+    "flake8:F401": "unused-import",
+    "flake8:F841": "unused-variable",
+    "flake8:F821": "undefined-name",
+    "flake8:E722": "bare-except",
+    "flake8:F811": "redefined-name",
     "pylint:unused-import": "unused-import",
     "pylint:W0611": "unused-import",
     "vulture:unused-import": "unused-import",
@@ -84,7 +90,15 @@ _LINT_CLASSES: dict[str, str] = {
     "eslint:no-unused-vars": "unused-variable",
     "eslint:no-undef": "undefined-name",
     "eslint:no-eval": "eval-used",
-    "eslint:react/no-danger": "xss-dangerous-html",
+    # Keys are the reporting tool's slug: react/no-danger comes from eslint-react
+    # (the base eslint tool does not enable it), security/* from eslint-security.
+    "eslint-react:react/no-danger": "xss-dangerous-html",
+    "eslint-security:security/detect-eval-with-expression": "eval-used",
+    "eslint-security:security/detect-child-process": "shell-injection",
+    "eslint-security:security/detect-pseudoRandomBytes": "insecure-random",
+    "eslint-security:security/detect-non-literal-regexp": "redos",
+    "eslint-security:security/detect-unsafe-regex": "redos",
+    "eslint-security:security/detect-non-literal-fs-filename": "path-traversal",
 }
 
 # Semgrep check ids are dotted paths; the last segments name the rule.
@@ -103,6 +117,7 @@ _SEMGREP_KEYWORDS: tuple[tuple[str, str], ...] = (
     ("cert-validation", "tls-verification-disabled"),
     ("verify-false", "tls-verification-disabled"),
     ("subprocess-shell", "shell-injection"),
+    ("child-process", "shell-injection"),
     ("shell-true", "shell-injection"),
     ("system-call", "shell-injection"),
     ("eval", "eval-used"),
@@ -113,11 +128,15 @@ _SEMGREP_KEYWORDS: tuple[tuple[str, str], ...] = (
     ("dangerouslysetinnerhtml", "xss-dangerous-html"),
     ("innerhtml", "xss-dangerous-html"),
     ("insecure-random", "insecure-random"),
+    ("non-literal-regexp", "redos"),
+    ("path-traversal", "path-traversal"),
 )
 
 _CWE_CLASSES: dict[str, str] = {
+    "CWE-22": "path-traversal",
     "CWE-78": "shell-injection",
     "CWE-89": "sql-injection",
+    "CWE-95": "eval-used",
     "CWE-259": "hardcoded-secret",
     "CWE-295": "tls-verification-disabled",
     "CWE-327": "weak-hash",
@@ -128,15 +147,38 @@ _CWE_CLASSES: dict[str, str] = {
     "CWE-502": "unsafe-deserialization",
     "CWE-605": "bind-all-interfaces",
     "CWE-798": "hardcoded-secret",
+    "CWE-1333": "redos",
 }
 
 _SECRET_TOOLS = frozenset({"detect-secrets", "detect_secrets", "gitleaks"})
+# Known-vulnerability scanners. They name one advisory differently (PYSEC /
+# GHSA / CVE ids) and point at different manifests of one project
+# (requirements.txt, package.json vs package-lock.json), so their findings
+# match on the vulnerable package within the project directory instead.
+_VULN_TOOLS = frozenset({"pip-audit", "npm-audit", "osv-scanner", "trivy", "retire"})
+_VULN_PREFIX = "vulnerable-dependency:"
 _RUFF_BANDIT_RE = re.compile(r"^S(\d{3})$")
 
 
-def issue_class(tool: str, rule_id: str, *, cwe: str = "", category: str = "") -> str:  # noqa: PLR0911
-    """The canonical class a finding belongs to; findings of one class may be one issue."""
+def issue_class(  # noqa: PLR0911
+    tool: str,
+    rule_id: str,
+    *,
+    cwe: str = "",
+    category: str = "",
+    package: str = "",
+    issue_key: str = "",
+) -> str:
+    """The canonical class a finding belongs to; findings of one class may be one issue.
+
+    *issue_key* is a class a parser already knows (``tool_specific_data``),
+    e.g. ``missing-header:x-frame-options`` from the DAST scanners.
+    """
+    if issue_key:
+        return issue_key
     rule = (rule_id or "").strip()
+    if tool in _VULN_TOOLS and category == "dependency" and package and not rule.startswith("nonexistent-"):
+        return _VULN_PREFIX + package.strip().lower()
     if tool == "bandit" and rule in _BANDIT_CLASSES:
         return _BANDIT_CLASSES[rule]
     if tool == "ruff":
@@ -233,8 +275,19 @@ def cluster_findings(
     """
     buckets: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for f in findings:
-        cls = issue_class(f["tool"], f.get("rule_id") or "", cwe=f.get("cwe") or "", category=f.get("category") or "")
-        buckets[(str(f["run_id"]), f.get("file_path") or "", cls)].append(f)
+        cls = issue_class(
+            f["tool"],
+            f.get("rule_id") or "",
+            cwe=f.get("cwe") or "",
+            category=f.get("category") or "",
+            package=f.get("package") or "",
+            issue_key=f.get("issue_key") or "",
+        )
+        path = f.get("file_path") or ""
+        if cls.startswith(_VULN_PREFIX):
+            # One project, several manifests: match within the directory.
+            path = posixpath.dirname(path)
+        buckets[(str(f["run_id"]), path, cls)].append(f)
 
     clusters: list[IssueCluster] = []
     for (run_id, path, cls), items in buckets.items():

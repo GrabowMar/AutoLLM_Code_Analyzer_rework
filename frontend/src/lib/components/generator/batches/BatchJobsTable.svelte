@@ -121,8 +121,11 @@
 							</td>
 							<td data-label="Model" class="md:max-w-44">
 								{#if job.model_name}
-									<span class="block min-w-0 break-words md:truncate" title={job.model_id_str ?? job.model_name}>{shortModelName(job.model_name)}</span>
-									{#if provider}<span class="cell-sub block truncate text-[11px] text-muted-foreground">{provider}</span>{/if}
+									<!-- One block so the phone card stacks name over provider instead of squeezing them side by side. -->
+									<span class="block min-w-0">
+										<span class="block break-words md:truncate" title={job.model_id_str ?? job.model_name}>{shortModelName(job.model_name)}</span>
+										{#if provider}<span class="cell-sub block break-words text-xs text-muted-foreground md:truncate">{provider}</span>{/if}
+									</span>
 								{:else}
 									<span class="text-muted-foreground">—</span>
 								{/if}
@@ -165,10 +168,10 @@
 							<td data-label="Cost" class="num text-xs max-md:text-left">
 								{#if job.cost_usd != null}{formatUsd(job.cost_usd)}{:else}<span class="text-muted-foreground">—</span>{/if}
 							</td>
-							<td data-label="Duration" class="num hidden text-xs lg:table-cell">
+							<td data-label="Duration" class="num hidden text-xs max-md:flex max-md:text-left lg:table-cell">
 								{#if job.duration_seconds != null}{formatDuration(job.duration_seconds)}{:else}<span class="text-muted-foreground">—</span>{/if}
 							</td>
-							<td data-label="Seed" class="num hidden text-xs lg:table-cell">
+							<td data-label="Seed" class="num hidden text-xs max-md:flex max-md:text-left lg:table-cell">
 								{#if job.experiment_seed != null}{job.experiment_seed}{:else}<span class="text-muted-foreground">—</span>{/if}
 							</td>
 						</tr>

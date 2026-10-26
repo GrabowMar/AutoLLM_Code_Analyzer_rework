@@ -7,6 +7,8 @@ description: >-
 category: lint
 kind: container
 target_language: javascript
+analysis_mode: static
+technologies: [javascript, react]
 icon: atom
 version: "7"
 docs_url: https://github.com/jsx-eslint/eslint-plugin-react
@@ -17,6 +19,7 @@ run_cmd: |
   printf '%s' '{"root":true,"env":{"browser":true,"node":true,"es2022":true},"parserOptions":{"ecmaVersion":"latest","sourceType":"module","ecmaFeatures":{"jsx":true}},"settings":{"react":{"version":"18.2"}},"extends":["plugin:react/recommended","plugin:react/jsx-runtime","plugin:react-hooks/recommended"],"rules":{"react/prop-types":"off","react/no-danger":"warn"}}' > /tmp/eslint-react.json
   eslint {target} --ext .js,.jsx,.cjs,.mjs -f json --no-eslintrc -c /tmp/eslint-react.json --resolve-plugins-relative-to "$(npm root -g)" --ignore-pattern node_modules 2>/dev/null
 parser_key: eslint
+file_patterns: ["*.js", "*.jsx", "*.cjs", "*.mjs"]
 run_timeout: 120
 install_timeout: 300
 display_order: 35

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from django.db import connection
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from backend.common.threading import dispatch_in_thread
@@ -27,6 +28,22 @@ if TYPE_CHECKING:
     from backend.users.models import User
 
 logger = logging.getLogger(__name__)
+
+
+def visible_containers(user):
+    """ContainerInstance rows *user* may see/control through the API or proxy.
+
+    A container belongs to whoever built it (``created_by``) and to the owner
+    of its generation job; staff see every container. Internal callers
+    (analysis runner, executor, evaluation) query the model directly and are
+    not scoped.
+    """
+    qs = ContainerInstance.objects.all()
+    if getattr(user, "is_staff", False):
+        return qs
+    if user is None or not getattr(user, "is_authenticated", False):
+        return qs.none()
+    return qs.filter(Q(created_by=user) | Q(generation_job__created_by=user))
 
 
 def publish_container_status(container: ContainerInstance) -> None:

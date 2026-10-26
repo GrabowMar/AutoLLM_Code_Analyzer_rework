@@ -31,6 +31,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import Switch from '$lib/components/ui/switch/switch.svelte';
 	import NumberField from '$lib/components/generator/composer/NumberField.svelte';
+	import SectionHeading from '$lib/components/SectionHeading.svelte';
 	import { endpointSlugFromName, slugError, SLUG_MAX_LENGTH } from './endpoint-display';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Lock from '@lucide/svelte/icons/lock';
@@ -208,7 +209,7 @@
 <form class="space-y-6" onsubmit={submit} novalidate>
 	{#if showConnection && !systemRow}
 		<section class="space-y-4" aria-labelledby="endpoint-form-connection">
-			<h2 id="endpoint-form-connection" class="section-label">Server and connection</h2>
+			<SectionHeading id="endpoint-form-connection" size="sm" title="Server and connection" />
 			{#if mode === 'create'}
 				<div class="space-y-1.5">
 					<Label id="endpoint-kind-label">Server kind</Label>
@@ -282,7 +283,7 @@
 	{#if showDetails}
 		{#if !systemRow}
 			<section class="space-y-4" aria-labelledby="endpoint-form-identity">
-				<h2 id="endpoint-form-identity" class="section-label">Name</h2>
+				<SectionHeading id="endpoint-form-identity" size="sm" title="Name" />
 				<div class="grid gap-4 md:grid-cols-2">
 					<div class="space-y-1.5">
 						<Label for="endpoint-name">Name</Label>
@@ -327,7 +328,7 @@
 		{/if}
 
 		<section class="space-y-4" aria-labelledby="endpoint-form-capacity">
-			<h2 id="endpoint-form-capacity" class="section-label">Capacity</h2>
+			<SectionHeading id="endpoint-form-capacity" size="sm" title="Capacity" />
 			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 				<NumberField
 					id="endpoint-slots"
@@ -373,7 +374,7 @@
 
 		{#if !systemRow}
 			<section class="space-y-4" aria-labelledby="endpoint-form-requests">
-				<h2 id="endpoint-form-requests" class="section-label">Requests</h2>
+				<SectionHeading id="endpoint-form-requests" size="sm" title="Requests" />
 				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 					<NumberField
 						id="endpoint-timeout"
@@ -432,7 +433,7 @@
 
 			{#if isStaff}
 				<section class="space-y-4" aria-labelledby="endpoint-form-sharing">
-					<h2 id="endpoint-form-sharing" class="section-label">Sharing</h2>
+					<SectionHeading id="endpoint-form-sharing" size="sm" title="Sharing" />
 					<div class="max-w-sm space-y-1.5">
 						<Label for="endpoint-visibility">Visibility</Label>
 						<Select.Simple id="endpoint-visibility" bind:value={() => visibility, (v) => (visibility = v as 'private' | 'shared')} items={visibilityItems} />

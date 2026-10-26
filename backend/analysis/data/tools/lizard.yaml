@@ -7,6 +7,8 @@ description: >-
 category: performance
 kind: container
 target_language: any
+analysis_mode: static
+technologies: [python, javascript]
 icon: activity
 version: "1.17"
 docs_url: https://github.com/terryyin/lizard
@@ -15,6 +17,7 @@ verify_cmd: "lizard --version"
 uninstall_cmd: "pip uninstall -y lizard"
 run_cmd: "lizard {target} --csv -l python -l javascript -l typescript -x '*/node_modules/*' 2>/dev/null"
 parser_key: lizard
+file_patterns: ["*.py", "*.js", "*.jsx", "*.ts", "*.tsx"]
 output_kind: mixed
 run_timeout: 120
 install_timeout: 120

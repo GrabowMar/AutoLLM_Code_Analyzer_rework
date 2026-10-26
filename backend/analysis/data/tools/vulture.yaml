@@ -6,14 +6,20 @@ description: >-
 category: lint
 kind: container
 target_language: python
+analysis_mode: static
+technologies: [python]
 icon: skull
 version: "2"
 docs_url: https://github.com/jendrikseipp/vulture
 install_cmd: "pip install --user --upgrade 'vulture==2.*'"
 verify_cmd: "vulture --version"
 uninstall_cmd: "pip uninstall -y vulture"
-run_cmd: "vulture {target} --min-confidence 60"
+# Route handlers, validators and hooks are reached through their decorators, and
+# `cls`/`request` are signature-mandated: without these ignores ~90% of the
+# findings on a generated web app are false positives.
+run_cmd: "vulture {target} --min-confidence 60 --ignore-decorators '@app.*,@*.route,@*.get,@*.post,@*.put,@*.patch,@*.delete,@*.websocket,@*.on_event,@*.exception_handler,@*.middleware,@*.errorhandler,@*.before_request,@*.after_request,@*.teardown_appcontext,@*.context_processor,@*.cli.command,@*.user_loader,@*.listens_for,@*validator,@*.hybrid_property,@*.setter,@*.expression,@lru_cache,@*.fixture' --ignore-names 'cls,request,exc,model_config,__tablename__,Config,orm_mode,from_attributes'"
 parser_key: vulture
+file_patterns: ["*.py"]
 run_timeout: 90
 install_timeout: 180
 display_order: 60

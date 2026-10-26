@@ -56,7 +56,8 @@
 	}: Props = $props();
 </script>
 
-<div class="data-list">
+<!-- Inside the page's table card: the card supplies the border. -->
+<div class="data-list rounded-none border-0 shadow-none">
 	{#each jobs as job (job.id)}
 		{@const container = containersByJobId[job.id]}
 		{@const isBusy = containerBusy[job.id]}
@@ -85,7 +86,7 @@
 				{#if container}<StatusBadge status={container.status} tones={containerTones} />{/if}
 				<span class="font-mono tabular-nums text-muted-foreground">{formatDuration(job.duration_seconds)}</span>
 				{#if job.cost_usd != null && job.cost_usd > 0}<span class="font-mono tabular-nums text-muted-foreground">${job.cost_usd.toFixed(job.cost_usd < 0.1 ? 3 : 2)}</span>{/if}
-				{#if job.pass_rate != null}<span class="font-mono tabular-nums text-muted-foreground" title="Smoke-test pass rate">smoke {(job.pass_rate * 100).toFixed(0)}%</span>{/if}
+				{#if job.pass_rate != null}<span class="font-mono tabular-nums text-muted-foreground" title="Share of checks passed: the conformance suite when the run was graded, otherwise the runtime smoke test">pass {(job.pass_rate * 100).toFixed(0)}%</span>{/if}
 			</div>
 			{#if job.error_message}
 				<p class="flex items-center gap-1 pl-11 text-[11px] text-danger-fg" title={job.error_message}>

@@ -2,7 +2,7 @@
 	/**
 	 * CapacityStrip — one line of where runs can execute right now: executor
 	 * state, lane usage (sandboxes · eval · LLM jobs) and one chip per visible
-	 * endpoint, plus capacity warnings. Other users' models appear as "+N".
+	 * endpoint, plus capacity warnings behind a disclosure chip. Other users' models appear as "+N".
 	 *
 	 * Props: `capacity` (`GET /execution/capacity/`, patched by SSE `capacity`).
 	 */
@@ -74,15 +74,24 @@
 			{/each}
 		</span>
 	{/if}
-	<!-- Warnings are sentences: their own wrapped row, never truncated pills. -->
+	<!-- Warnings are sentences: a chip that discloses them, so the strip stays one line. -->
 	{#if warnings.length > 0}
-		<ul class="basis-full space-y-1 border-t border-border pt-2 text-warning-fg">
-			{#each warnings as warning (warning)}
-				<li class="flex items-start gap-1.5">
-					<TriangleAlert class="mt-px size-3.5 shrink-0" aria-hidden="true" />
-					<span>{warning}</span>
-				</li>
-			{/each}
-		</ul>
+		<details class="open:basis-full">
+			<summary
+				class={cn('inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium', toneClasses.warning)}
+				title={warnings.join('\n')}
+			>
+				<TriangleAlert class="size-3 shrink-0" aria-hidden="true" />
+				{warnings.length} capacity warning{warnings.length === 1 ? '' : 's'}
+			</summary>
+			<ul class="mt-1.5 space-y-1 text-warning-fg">
+				{#each warnings as warning (warning)}
+					<li class="flex items-start gap-1.5">
+						<TriangleAlert class="mt-px size-3.5 shrink-0" aria-hidden="true" />
+						<span>{warning}</span>
+					</li>
+				{/each}
+			</ul>
+		</details>
 	{/if}
 </div>

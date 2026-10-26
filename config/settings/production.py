@@ -19,6 +19,10 @@ SECRET_KEY = env("DJANGO_SECRET_KEY")
 # https://docs.djangoproject.com/en/dev/ref/settings/#allowed-hosts
 # DJANGO_DOMAIN is set in base.py and used as the default host here.
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[DJANGO_DOMAIN])  # noqa: F405
+# App subdomains (<name>.<APPS_DOMAIN>) are served by AppSubdomainProxyMiddleware,
+# which calls request.get_host(); without this every app request is a 400.
+if APPS_SUBDOMAIN_PROXY and APPS_DOMAIN:  # noqa: F405
+    ALLOWED_HOSTS = [*ALLOWED_HOSTS, f".{APPS_DOMAIN}"]  # noqa: F405
 
 # DATABASES
 # ------------------------------------------------------------------------------
@@ -86,12 +90,11 @@ STORAGES = {
 # EMAIL
 # ------------------------------------------------------------------------------
 # https://docs.djangoproject.com/en/dev/ref/settings/#default-from-email
-DEFAULT_FROM_EMAIL = env(
-    "DJANGO_DEFAULT_FROM_EMAIL",
-    default=f"LLM Eval Lab <noreply@{DJANGO_DOMAIN}>",  # noqa: F405
+DEFAULT_FROM_EMAIL = (
+    env("DJANGO_DEFAULT_FROM_EMAIL", default="") or f"LLM Eval Lab <noreply@{DJANGO_DOMAIN}>"  # noqa: F405
 )
 # https://docs.djangoproject.com/en/dev/ref/settings/#server-email
-SERVER_EMAIL = env("DJANGO_SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
+SERVER_EMAIL = env("DJANGO_SERVER_EMAIL", default="") or DEFAULT_FROM_EMAIL
 # https://docs.djangoproject.com/en/dev/ref/settings/#email-subject-prefix
 EMAIL_SUBJECT_PREFIX = env(
     "DJANGO_EMAIL_SUBJECT_PREFIX",
@@ -101,18 +104,38 @@ ACCOUNT_EMAIL_SUBJECT_PREFIX = EMAIL_SUBJECT_PREFIX
 
 # ADMIN
 # ------------------------------------------------------------------------------
-# Django Admin URL regex.
-ADMIN_URL = env("DJANGO_ADMIN_URL")
+# Django admin path (e.g. "admin/" or "my-secret-admin/"). Traefik's django
+# router derives its PathPrefix from the same variable (see
+# compose/production/traefik/entrypoint.sh), so any value works.
+ADMIN_URL = (env("DJANGO_ADMIN_URL", default="").strip("/") or "admin") + "/"
 
-# Anymail
+# Email delivery
 # ------------------------------------------------------------------------------
-# https://anymail.readthedocs.io/en/stable/installation/#installing-anymail
-INSTALLED_APPS += ["anymail"]
-# https://docs.djangoproject.com/en/dev/ref/settings/#email-backend
-# https://anymail.readthedocs.io/en/stable/installation/#anymail-settings-reference
-# https://anymail.readthedocs.io/en/stable/esps
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-ANYMAIL = {}
+# Mailgun (via django-anymail) when MAILGUN_API_KEY is set; otherwise plain SMTP
+# configured by EMAIL_HOST / EMAIL_PORT / EMAIL_HOST_USER / EMAIL_HOST_PASSWORD /
+# EMAIL_USE_TLS / EMAIL_USE_SSL (default: localhost:25, no auth).
+# https://anymail.readthedocs.io/en/stable/esps/mailgun/
+MAILGUN_API_KEY = env("MAILGUN_API_KEY", default="")
+if MAILGUN_API_KEY:
+    INSTALLED_APPS += ["anymail"]
+    EMAIL_BACKEND = "anymail.backends.mailgun.EmailBackend"
+    ANYMAIL = {
+        "MAILGUN_API_KEY": MAILGUN_API_KEY,
+        "MAILGUN_SENDER_DOMAIN": env("MAILGUN_DOMAIN", default="") or DJANGO_DOMAIN,  # noqa: F405
+        # EU-region accounts: https://api.eu.mailgun.net/v3
+        "MAILGUN_API_URL": env("MAILGUN_API_URL", default="https://api.mailgun.net/v3"),
+    }
+else:
+    EMAIL_BACKEND = env(
+        "DJANGO_EMAIL_BACKEND",
+        default="django.core.mail.backends.smtp.EmailBackend",
+    )
+    EMAIL_HOST = env("EMAIL_HOST", default="") or "localhost"
+    EMAIL_PORT = env.int("EMAIL_PORT", default=25)
+    EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+    EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+    EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=False)
+    EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
 
 
 # LOGGING
@@ -155,25 +178,26 @@ LOGGING = {
 
 # Sentry
 # ------------------------------------------------------------------------------
-SENTRY_DSN = env("SENTRY_DSN")
+# Optional: Sentry is only initialised when SENTRY_DSN is set.
+SENTRY_DSN = env("SENTRY_DSN", default="")
 SENTRY_LOG_LEVEL = env.int("DJANGO_SENTRY_LOG_LEVEL", logging.INFO)
 
-sentry_logging = LoggingIntegration(
-    level=SENTRY_LOG_LEVEL,  # Capture info and above as breadcrumbs
-    event_level=logging.ERROR,  # Send errors as events
-)
-integrations = [
-    sentry_logging,
-    DjangoIntegration(),
-    CeleryIntegration(),
-    RedisIntegration(),
-]
-sentry_sdk.init(
-    dsn=SENTRY_DSN,
-    integrations=integrations,
-    environment=env("SENTRY_ENVIRONMENT", default="production"),
-    traces_sample_rate=env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.0),
-)
+if SENTRY_DSN:
+    sentry_logging = LoggingIntegration(
+        level=SENTRY_LOG_LEVEL,  # Capture info and above as breadcrumbs
+        event_level=logging.ERROR,  # Send errors as events
+    )
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[
+            sentry_logging,
+            DjangoIntegration(),
+            CeleryIntegration(),
+            RedisIntegration(),
+        ],
+        environment=env("SENTRY_ENVIRONMENT", default="production"),
+        traces_sample_rate=env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.0),
+    )
 
 
 # CORS

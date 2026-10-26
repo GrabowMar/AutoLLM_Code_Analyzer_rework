@@ -27,6 +27,7 @@
 	import { lookupBatchProfileVersion } from './prepare';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import ComposerSectionNav, { type ComposerNavSection } from '$lib/components/experiments/ComposerSectionNav.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import AppSpecPicker from '../AppSpecPicker.svelte';
 	import ModelPicker from '../ModelPicker.svelte';
@@ -48,7 +49,9 @@
 		type PresetPins,
 		type ScaffoldingDraft,
 	} from './draft';
-	import { presetLookupIssue, type ChecklistItem, type IssueAction, type SummaryIssue } from './issues';
+	import { presetLookupIssue, type IssueAction, type SummaryIssue } from './issues';
+	import type { RunFactor } from './RunFormula.svelte';
+	import { llmOverrideCount, overridesLabel, presetLabel } from './section-summary';
 	import { trackLLMPreview } from './llm-preview.svelte';
 	import { trackPresets } from './preset-lookup.svelte';
 
@@ -78,6 +81,8 @@
 	let trials = $state<number | null>(init.trials);
 	let llmInvalid = $state(false);
 	let trialsInvalid = $state(false);
+	// Optional step: folded unless the draft already overrides something.
+	let samplingOpen = $state(llmOverrideCount(init.llmParams) > 0);
 
 	// ── supporting data ─────────────────────────────────────────────────
 	let defaultStack = $state<string | undefined>(undefined);
@@ -320,11 +325,22 @@
 		)
 	);
 
-	const checklist = $derived<ChecklistItem[]>([
-		{ label: 'Pick at least one app spec', done: appIds.size > 0, detail: `${appIds.size} selected`, href: '#scaffolding-task' },
-		{ label: 'Choose a stack', done: !!stackSlug, detail: stackSlug, href: '#scaffolding-task' },
-		{ label: 'Pick at least one model', done: modelIds.size > 0, detail: `${modelIds.size} selected`, href: '#scaffolding-models' },
+	const factors = $derived<RunFactor[]>([
+		{ label: 'app specs', singular: 'app spec', count: appIds.size, href: '#scaffolding-task' },
+		{ label: 'models', singular: 'model', count: modelIds.size, href: '#scaffolding-models' },
+		{ label: 'trials', singular: 'trial', count: trialsInvalid ? null : trials, href: '#scaffolding-repeats' },
 	]);
+	const samplingInvalid = $derived(llmInvalid || Object.keys(llmErrors).length > 0);
+	const trialsSectionInvalid = $derived(trialsInvalid || trials == null || !!serverFieldErrors.trials);
+	const navSections = $derived<ComposerNavSection[]>([
+		{ id: 'scaffolding-task', step: 1, label: 'Task & prompts', done: appIds.size > 0 && !!stackSlug },
+		{ id: 'scaffolding-models', step: 2, label: 'Models', done: modelIds.size > 0 },
+		{ id: 'scaffolding-sampling', step: 3, label: 'Model settings', invalid: samplingInvalid },
+		{ id: 'scaffolding-repeats', step: 4, label: 'Repeats', invalid: trialsSectionInvalid },
+	]);
+	const samplingSummary = $derived(
+		[presetLabel(samplingPreset, 'Mode default (temperature 0.3)'), overridesLabel(llmOverrideCount(llmParams))].join(' · ')
+	);
 
 	$effect(() => {
 		saveDraft('scaffolding', {
@@ -347,6 +363,8 @@
 				step={1}
 				id="scaffolding-task"
 				title="Task & prompts"
+				done={appIds.size > 0 && !!stackSlug}
+				meta={appIds.size > 0 ? `${appIds.size} selected` : undefined}
 				description="App specs to build, the stack template, and the prompt profile that fills it."
 			>
 				<AppSpecPicker bind:selectedIds={appIds} idPrefix="scaffolding-apps" />
@@ -378,6 +396,8 @@
 				step={2}
 				id="scaffolding-models"
 				title="Models"
+				done={modelIds.size > 0}
+				meta={modelIds.size > 0 ? `${modelIds.size} selected` : undefined}
 				description="Every selected model scaffolds every app spec."
 			>
 				<ModelPicker mode="multi" bind:selectedIds={modelIds} idPrefix="scaffolding-models" label="" aria-label="Models" maxHeight="max-h-96" />
@@ -387,6 +407,10 @@
 				step={3}
 				id="scaffolding-sampling"
 				title="Model settings"
+				collapsible
+				bind:open={samplingOpen}
+				summary={samplingSummary}
+				invalid={samplingInvalid}
 				description="Sampling settings apply identically to every model."
 			>
 				<SamplingSettings
@@ -401,7 +425,13 @@
 				/>
 			</ComposerSection>
 
-			<ComposerSection step={4} id="scaffolding-repeats" title="Repeats" description="How often every app spec × model cell runs.">
+			<ComposerSection
+				step={4}
+				id="scaffolding-repeats"
+				title="Repeats"
+				description="How often every app spec × model cell runs."
+				invalid={trialsSectionInvalid}
+			>
 				<NumberField
 					id="scaffolding-trials"
 					label="Trials per cell"
@@ -421,8 +451,12 @@
 			class="min-w-0 @4xl/composer:sticky @4xl/composer:top-[4.5rem] @4xl/composer:max-h-[calc(100dvh-5.5rem)] @4xl/composer:overflow-y-auto @4xl/composer:overscroll-contain"
 			aria-label="Run summary"
 		>
+			<div class="hidden @4xl/composer:mb-3 @4xl/composer:block">
+				<ComposerSectionNav sections={navSections} />
+			</div>
 			<SimpleSummaryPanel
-				{checklist}
+				{factors}
+				total={trialsInvalid || trials == null ? null : runCount}
 				{ready}
 				{llm}
 				llmNote="Base layer: the mode default (temperature 0.3, output cap 32,000), then the profile, the sampling preset and your overrides."
@@ -435,16 +469,8 @@
 				{startLabel}
 				onstart={requestStart}
 			>
-				<div class="rounded-md border border-border bg-surface-2 p-3" aria-live="polite">
-					<p class="flex items-baseline gap-2">
-						<span class="font-mono text-2xl font-medium tabular-nums">{runCount}</span>
-						<span class="text-sm text-muted-foreground">run{runCount === 1 ? '' : 's'}</span>
-					</p>
-					<p class="text-xs text-muted-foreground tabular-nums">
-						{appIds.size} app spec{appIds.size === 1 ? '' : 's'} × {modelIds.size} model{modelIds.size === 1 ? '' : 's'} ×
-						{trials ?? '—'} trial{trials === 1 ? '' : 's'}
-					</p>
-					<dl class="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+				<div class="rounded-md border border-border bg-surface-2 px-3 py-2">
+					<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
 						<dt class="text-muted-foreground">Stack</dt>
 						<dd class="font-mono">{stackSlug || '—'}</dd>
 						<dt class="text-muted-foreground">Profile</dt>

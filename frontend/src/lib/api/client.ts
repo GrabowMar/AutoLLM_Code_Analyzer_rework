@@ -2,7 +2,6 @@
 // Existing route imports (`import { fooBar } from '$lib/api/client'`) keep
 // working unchanged. New code should import from the domain module directly.
 
-export * from "./analysis";
 export * from "./applications";
 export * from "./credentials";
 export * from "./generation";

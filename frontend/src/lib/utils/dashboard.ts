@@ -12,14 +12,6 @@ export function timeAgo(dateStr: string): string {
   return `${d} day${d > 1 ? "s" : ""} ago`;
 }
 
-export function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 5) return "Good night";
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  return "Good evening";
-}
-
 export const validStatuses = [
   "completed",
   "running",

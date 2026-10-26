@@ -147,7 +147,7 @@
 	}
 </script>
 
-<div class="max-w-3xl space-y-6">
+<div class="max-w-3xl space-y-4">
 	<PageHeader
 		title="New report"
 		description="Pick a report type, then configure and generate it."
@@ -160,7 +160,6 @@
 		<Card.Root>
 			<Card.Header>
 				<Card.Title>1. Report type</Card.Title>
-				<Card.Description>What should the report cover?</Card.Description>
 			</Card.Header>
 			<Card.Content>
 		<div class="grid gap-3 sm:grid-cols-2">
@@ -186,18 +185,15 @@
 		<Card.Root>
 			<Card.Header>
 				<Card.Title>2. Configure · {reportTypes.find((r) => r.key === selectedType)?.label}</Card.Title>
-				<Card.Description>Configure the report and generate.</Card.Description>
 			</Card.Header>
 			<Card.Content class="space-y-4">
 				<div class="space-y-2">
 					<label for="rep-title" class="text-sm font-medium">Title (optional)</label>
 					<Input id="rep-title" bind:value={title} placeholder="Auto-generated if blank" />
-					<p class="text-xs text-muted-foreground">Auto-generated if blank</p>
 				</div>
 				<div class="space-y-2">
 					<label for="rep-desc" class="text-sm font-medium">Description (optional)</label>
 					<Input id="rep-desc" bind:value={description} />
-					<p class="text-xs text-muted-foreground">Optional description</p>
 				</div>
 
 				{#if selectedType === 'model_analysis'}

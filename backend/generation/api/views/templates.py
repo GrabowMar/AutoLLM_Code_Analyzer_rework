@@ -13,6 +13,7 @@ from backend.generation.api.schema import StackSchema
 from backend.generation.api.schema import StackWriteSchema
 from backend.generation.api.views._router import router
 from backend.generation.models import AppRequirementTemplate
+from backend.generation.services.data_lint import app_spec_errors
 from backend.generation.services.packages import visible_app_templates_for
 from backend.generation.services.versioning import content_hash
 from backend.runtime.services.dockerfile_gen import generate_dockerfile
@@ -274,6 +275,8 @@ def create_app_template(request, payload: AppRequirementCreateSchema):
     # Slugs are unique across every owner; don't say whose it is.
     if AppRequirementTemplate.objects.filter(slug=payload.slug).exists():
         return 400, {"detail": f"App spec slug {payload.slug!r} is already in use."}
+    if errors := app_spec_errors(payload.dict(), label="App spec"):
+        return 400, {"detail": "; ".join(errors), "errors": errors}
     return 200, AppRequirementTemplate.objects.create(
         **payload.dict(),
         created_by=request.auth,
@@ -285,13 +288,17 @@ def get_app_template(request, slug: str):
     return get_object_or_404(visible_app_templates_for(request.auth), slug=slug)
 
 
-@router.put("/app-specs/{slug}/", response=AppRequirementTemplateSchema)
+@router.put("/app-specs/{slug}/", response={200: AppRequirementTemplateSchema, 400: dict})
 def update_app_template(request, slug: str, payload: AppRequirementCreateSchema):
     template = _mutable_template_or_403(request.auth, slug=slug)
+    # The slug never changes (and may predate the snake_case rule).
+    body = {**payload.dict(), "slug": template.slug}
+    if errors := app_spec_errors(body, label="App spec", check_slug=False):
+        return 400, {"detail": "; ".join(errors), "errors": errors}
     for attr, value in payload.dict(exclude={"slug"}).items():
         setattr(template, attr, value)
     template.save()
-    return template
+    return 200, template
 
 
 @router.delete("/app-specs/{slug}/")

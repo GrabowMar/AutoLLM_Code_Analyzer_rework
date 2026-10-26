@@ -45,3 +45,50 @@ def test_output_kind_seeded_from_yaml():
 def test_performance_category_has_an_enabled_tool():
     call_command("seed_analysis_tools")
     assert AnalyzerTool.objects.filter(category="performance", is_enabled=True).exists()
+
+
+def test_tool_technologies_come_from_the_catalog_vocabulary():
+    from backend.analysis.seeding import load_catalog_meta
+
+    call_command("seed_analysis_tools")
+    meta = load_catalog_meta()
+    known = {t["slug"] for t in meta["technologies"]}
+    groups = {g["slug"] for g in meta["technology_groups"]}
+    assert all(t["group"] in groups for t in meta["technologies"])
+    for tool in AnalyzerTool.objects.all():
+        assert tool.technologies, f"{tool.slug} lists no technologies"
+        assert set(tool.technologies) <= known, tool.slug
+
+
+def test_dynamic_tools_seeded_with_url_placeholder():
+    call_command("seed_analysis_tools")
+    dynamic = AnalyzerTool.objects.filter(analysis_mode="dynamic")
+    assert {"zap", "nuclei", "wapiti"} <= set(dynamic.values_list("slug", flat=True))
+    for tool in dynamic:
+        assert "{url}" in tool.run_cmd, tool.slug
+        assert "{target}" not in tool.run_cmd, tool.slug
+    assert AnalyzerTool.objects.get(slug="trivy").analysis_mode == "static"
+
+
+def test_config_placeholders_have_defaults():
+    import re
+
+    call_command("seed_analysis_tools")
+    for tool in AnalyzerTool.objects.filter(kind="container"):
+        names = set(re.findall(r"\{config:([A-Za-z0-9_]+)\}", tool.run_cmd))
+        schema_names = {f["name"] for f in tool.config_schema or []}
+        assert names <= set(tool.default_config or {}), tool.slug
+        assert names <= schema_names, tool.slug
+
+
+def test_release_binary_downloads_are_checksummed():
+    """Every tool that downloads a release binary verifies its published sha256."""
+    import yaml
+
+    from backend.analysis.seeding import DATA_DIR
+
+    for path in sorted(DATA_DIR.glob("*.yaml")):
+        data = yaml.safe_load(path.read_text())
+        install = (data.get("install_cmd") if isinstance(data, dict) else "") or ""
+        if "/releases/download/" in install:
+            assert "sha256sum -c" in install, path.name

@@ -69,7 +69,8 @@ def scope():
 
 def test_breakdowns_dedupe_and_group(scope):
     user, j1, _j2 = scope
-    data = study.issue_breakdowns(study.study_jobs(user))
+    # ruff ran on j1 only: count it anyway to exercise cross-tool dedup.
+    data = study.issue_breakdowns(study.study_jobs(user), common_tools_only=False)
 
     assert data["totals"]["raw_findings"] == 6
     assert data["totals"]["unique_issues"] == 4  # flask-debug x3 tools -> 1
@@ -86,11 +87,23 @@ def test_breakdowns_dedupe_and_group(scope):
     assert rules[("ruff", "S201")]["issue_class"] == "flask-debug"
 
 
-def test_breakdowns_count_only_the_latest_run(scope):
+def test_breakdowns_count_each_tools_latest_result(scope):
     user, j1, _ = scope
+    # Re-running bandit replaces bandit's findings only; semgrep's and ruff's
+    # earlier results for the same (unchanged) code still count.
     _run(j1, {"bandit": [("B105", 10, "low")]})
-    data = study.issue_breakdowns(study.study_jobs(user))
-    assert {a["job_id"]: a["unique_issues"] for a in data["per_app"]}[str(j1.id)] == 1
+    data = study.issue_breakdowns(study.study_jobs(user), common_tools_only=False)
+    a1 = {a["job_id"]: a for a in data["per_app"]}[str(j1.id)]
+    assert a1["raw_findings"] == 4  # bandit 1 (new run) + semgrep 1 + ruff 2
+    assert {t["tool"]: t["raw_findings"] for t in data["by_tool"]}["bandit"] == 2  # j1 1 + j2 1
+
+
+def test_failed_rerun_does_not_replace_a_measurement(scope):
+    user, j1, _ = scope
+    run = _run(j1, {})
+    ToolResultFactory(run=run, tool_slug="bandit", status=ToolResult.Status.FAILED)
+    data = study.issue_breakdowns(study.study_jobs(user), common_tools_only=False)
+    assert {a["job_id"]: a for a in data["per_app"]}[str(j1.id)]["raw_findings"] == 5
 
 
 def test_breakdowns_exclude_ai_findings_by_default(scope):
@@ -99,8 +112,8 @@ def test_breakdowns_exclude_ai_findings_by_default(scope):
     run = AnalysisRun.objects.get(generation_job=j1)
     FindingFactory(result=ToolResultFactory(run=run, tool_slug="llm_review"), rule_id="x", line_number=3)
     jobs = study.study_jobs(user)
-    assert study.issue_breakdowns(jobs)["totals"]["raw_findings"] == 6
-    assert study.issue_breakdowns(jobs, include_ai=True)["totals"]["raw_findings"] == 7
+    assert study.issue_breakdowns(jobs, common_tools_only=False)["totals"]["raw_findings"] == 6
+    assert study.issue_breakdowns(jobs, include_ai=True, common_tools_only=False)["totals"]["raw_findings"] == 7
 
 
 def _evaluated(user, model, app, healed_status, raw_status, *, patches=()):
@@ -211,10 +224,40 @@ def test_study_endpoints(client, scope):
     for path in ("breakdowns", "healing", "tools", "accounting"):
         res = client.get(f"/api/statistics/study/{path}/")
         assert res.status_code == 200, (path, res.content)
-    res = client.get("/api/statistics/study/breakdowns/?include_issues=true")
+    res = client.get("/api/statistics/study/breakdowns/?include_issues=true&common_tools_only=false")
     assert len(res.json()["issues"]) == 4
 
 
 def test_study_scope_is_owner_only(client, scope):
     client.force_login(UserFactory())
     assert client.get("/api/statistics/study/breakdowns/").json()["totals"]["apps"] == 0
+
+
+def test_breakdowns_count_only_tools_that_measured_every_app(scope):
+    """An app a tool never measured must not look cleaner than one it did."""
+    user, _j1, _j2 = scope
+    data = study.issue_breakdowns(study.study_jobs(user))
+    assert data["coverage"]["tools_common"] == ["bandit", "semgrep"]
+    assert data["coverage"]["tools_partial"]["ruff"]["apps_missing"] == 1
+    assert {r["tool"] for r in data["by_tool"]} <= {"bandit", "semgrep"}
+    assert data["totals"]["raw_findings"] == 4
+
+
+def test_not_applicable_skip_counts_as_measured(scope):
+    user, _j1, j2 = scope
+    run = AnalysisRun.objects.get(generation_job=j2)
+    ToolResultFactory(
+        run=run,
+        tool_slug="ruff",
+        status=ToolResult.Status.SKIPPED,
+        summary={"skip_reason": "not_applicable"},
+    )
+    assert "ruff" in study.issue_breakdowns(study.study_jobs(user))["coverage"]["tools_common"]
+
+
+def test_failed_tool_is_not_measured(scope):
+    user, _j1, j2 = scope
+    run = AnalysisRun.objects.get(generation_job=j2)
+    ToolResultFactory(run=run, tool_slug="ruff", status=ToolResult.Status.FAILED)
+    coverage = study.issue_breakdowns(study.study_jobs(user))["coverage"]
+    assert coverage["tools_partial"]["ruff"] == {"apps_measured": 1, "apps_missing": 1, "failed": 1}

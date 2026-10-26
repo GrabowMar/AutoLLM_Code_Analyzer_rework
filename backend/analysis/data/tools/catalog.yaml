@@ -1,22 +1,71 @@
 # Display metadata for the analyzer "shop". Tool definitions live in the
 # sibling *.yaml files (one per tool) and are seeded by `seed_analysis_tools`.
-catalog_schema_version: 1
+# Served to the frontend by GET /api/analyzers/catalog/.
+catalog_schema_version: 2
 categories:
   - slug: security
     label: Security
     description: Find vulnerabilities and insecure patterns.
-  - slug: lint
-    label: Lint & quality
-    description: Catch bugs, style issues, and dead code.
-  - slug: performance
-    label: Performance
-    description: Surface performance problems.
-  - slug: secrets
-    label: Secrets
-    description: Detect leaked credentials and secrets.
   - slug: dependencies
     label: Dependencies
     description: Vulnerable, missing and unused packages.
+  - slug: lint
+    label: Lint & quality
+    description: Catch bugs, style issues, and dead code.
+  - slug: secrets
+    label: Secrets
+    description: Detect leaked credentials and secrets.
+  - slug: performance
+    label: Performance
+    description: Surface performance problems.
   - slug: ai
     label: AI review
     description: LLM-assisted code review.
+
+# How a tool looks at the app: its source, or the app's running container.
+modes:
+  - slug: static
+    label: Static
+    description: Reads the source code; works on any generated app.
+  - slug: dynamic
+    label: Dynamic
+    description: >-
+      Probes the running app over HTTP (DAST). Start the app's container
+      first; the scan is skipped otherwise.
+
+# What a tool scans. A tool lists every technology it understands in its
+# `technologies:` field; the seed warns about slugs missing from this list.
+# A technology may have no tool yet (e.g. Vue): the shop's coverage panel
+# then reports it as a gap when generated apps contain it.
+technology_groups:
+  - slug: language
+    label: Languages
+  - slug: framework
+    label: Frameworks & templates
+  - slug: ecosystem
+    label: Package ecosystems
+  - slug: infrastructure
+    label: Containers & IaC
+  - slug: runtime
+    label: Running app
+technologies:
+  - { slug: python, label: Python, group: language }
+  - { slug: javascript, label: JavaScript, group: language }
+  - { slug: html, label: HTML, group: language }
+  - { slug: css, label: CSS, group: language }
+  - { slug: shell, label: Shell, group: language }
+  - { slug: generic, label: Any source, group: language }
+  - { slug: flask, label: Flask, group: framework }
+  - { slug: fastapi, label: FastAPI, group: framework }
+  - { slug: django, label: Django, group: framework }
+  - { slug: express, label: Express / Node.js, group: framework }
+  - { slug: react, label: React, group: framework }
+  - { slug: vue, label: Vue, group: framework }
+  - { slug: jinja, label: Jinja / Django templates, group: framework }
+  - { slug: pypi, label: pip / PyPI, group: ecosystem }
+  - { slug: npm, label: npm, group: ecosystem }
+  - { slug: docker, label: Docker, group: infrastructure }
+  - { slug: kubernetes, label: Kubernetes, group: infrastructure }
+  - { slug: terraform, label: Terraform, group: infrastructure }
+  - { slug: http, label: Web app (HTTP), group: runtime }
+  - { slug: rest-api, label: REST API, group: runtime }

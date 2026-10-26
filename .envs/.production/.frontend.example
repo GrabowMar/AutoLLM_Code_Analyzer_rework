@@ -1,7 +1,8 @@
 # Production frontend (SvelteKit) environment.
 # ------------------------------------------------------------------------------
 NODE_ENV=production
-PORT=8080
+# Must stay 3000: the image EXPOSEs it and Traefik routes to frontend:3000.
+PORT=3000
 HOST=0.0.0.0
 API_TARGET=http://django:8000
 

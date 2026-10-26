@@ -167,13 +167,13 @@
 
 {#snippet axisLabel(axis: Axis, header: boolean)}
 	{#if axis.kind === 'task'}
-		<span class={cn('block truncate', header ? 'text-xs font-semibold text-foreground' : '')} title={axis.item.slug ?? axis.item.label}>{axis.item.label}</span>
+		<span class={cn('line-clamp-2 break-words hyphens-auto', header ? 'text-xs font-semibold text-foreground' : '')} title={axis.item.slug ?? axis.item.label}>{axis.item.label}</span>
 		{#if axis.item.slug === null}
 			<span class="block text-[11px] font-normal text-muted-foreground">free-form</span>
 		{/if}
 	{:else}
 		{@const col = axis.item}
-		<span class="block truncate text-xs font-semibold text-foreground" title="{col.model}{col.modelId ? ` (${col.modelId})` : ''}">{shortModelName(col.model)}</span>
+		<span class="line-clamp-2 break-words text-xs font-semibold text-foreground" title="{col.model}{col.modelId ? ` (${col.modelId})` : ''}">{shortModelName(col.model)}</span>
 		{#if col.variant}
 			<span class="block truncate font-mono text-[11px] font-normal text-muted-foreground" title="{columnLabel}: {col.variant}">{col.variant}</span>
 		{/if}

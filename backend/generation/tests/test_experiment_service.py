@@ -106,6 +106,29 @@ class TestLaunchExperiment:
         assert GenerationJob.objects.filter(experiment=experiment).count() == 4
         assert _enqueued(dispatch) == 4
 
+    def test_default_generation_options_leave_snapshot_unchanged(self, experiment, condition, user):
+        with mock.patch("backend.generation.services.experiments.enqueue_jobs"):
+            experiments_svc.launch_experiment(experiment, user)
+        for job in GenerationJob.objects.filter(experiment=experiment):
+            assert "generation" not in job.resolved_bundle
+
+    def test_continuation_limit_and_repair_are_frozen_into_jobs(self, experiment, condition, user):
+        from backend.generation.services.profile_resolver import generation_options
+        from backend.generation.services.profile_resolver import run_fingerprint
+
+        experiment.continuation_limit = 3
+        experiment.enable_repair = False
+        experiment.save(update_fields=["continuation_limit", "enable_repair"])
+        with mock.patch("backend.generation.services.experiments.enqueue_jobs"):
+            experiments_svc.launch_experiment(experiment, user)
+        job = GenerationJob.objects.filter(experiment=experiment).first()
+        assert job.resolved_bundle["generation"] == {"continuation_limit": 3, "enable_repair": False}
+        assert generation_options(job.resolved_bundle) == (3, False)
+        # The options are part of the run identity.
+        assert job.resolved_bundle["run_fingerprint"] == run_fingerprint(job.resolved_bundle)
+        bare = {k: v for k, v in job.resolved_bundle.items() if k != "generation"}
+        assert run_fingerprint(bare) != job.resolved_bundle["run_fingerprint"]
+
     def test_launch_sets_stack_slug_from_bundle(self, experiment, condition, user):
         """resolve_stack_slug() reads job.stack_slug — must not be blank."""
         with mock.patch("backend.generation.services.experiments.enqueue_jobs"):

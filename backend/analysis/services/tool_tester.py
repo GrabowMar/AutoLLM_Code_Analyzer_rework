@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.analysis.services import ai_runner
 from backend.analysis.services import parsers
+from backend.analysis.services import runner
 from backend.analysis.services import tool_installer
 from backend.analysis.services import workspace_service
 from backend.runtime.services import docker_manager
@@ -53,6 +54,17 @@ def test_tool(
             "raw_output": {},
         }
 
+    if tool.analysis_mode == "dynamic":
+        # No sample to scan: a dynamic tool needs a running app, which only a
+        # real analysis run of a generated app provides.
+        return {
+            "available": True,
+            "message": f"{message or 'Tool available'} — dynamic tool: it scans a running app during analysis runs.",
+            "findings": [],
+            "metrics": {},
+            "raw_output": {},
+        }
+
     findings: list[dict[str, Any]] = []
     metrics: dict[str, Any] = {}
     raw: dict[str, Any] = {}
@@ -61,12 +73,15 @@ def test_tool(
             container_name = workspace_service.require_ready_container(workspace)
             ext = ".py" if tool.target_language == "python" else ".js"
             filename = tool.sample_filename or f"sample{ext}"
+            # Fresh dir per test: a previous tool's sample must not be scanned too.
+            docker_manager.exec_in(container_name, "rm -rf /tmp/analyzer-test", timeout_s=30)
             docker_manager.copy_files_in(
                 container_name,
                 {filename: sample},
                 dest="/tmp/analyzer-test",
+                owner=workspace_service.WORKSPACE_UID,
             )
-            cmd = tool.run_cmd.replace("{target}", "/tmp/analyzer-test")
+            cmd = runner.render_command(tool, target="/tmp/analyzer-test", config=config)
             result = docker_manager.exec_in(
                 container_name,
                 cmd,

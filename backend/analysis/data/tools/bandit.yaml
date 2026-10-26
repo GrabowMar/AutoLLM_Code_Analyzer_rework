@@ -6,14 +6,19 @@ description: >-
 category: security
 kind: container
 target_language: python
+analysis_mode: static
+technologies: [python, flask, django]
 icon: shield-alert
 version: "1.7"
 docs_url: https://bandit.readthedocs.io/
 install_cmd: "pip install --user --upgrade 'bandit==1.7.*'"
 verify_cmd: "bandit --version"
 uninstall_cmd: "pip uninstall -y bandit"
-run_cmd: "bandit -r {target} -f json -q"
+# B104 (bind 0.0.0.0) is skipped by default: the generation template requires it for
+# the container, so it would add one identical finding to every app.
+run_cmd: "skip={config:skip}; bandit -r {target} -f json -q --confidence-level {config:confidence} ${skip:+--skip \"$skip\"}"
 parser_key: bandit
+file_patterns: ["*.py"]
 run_timeout: 120
 install_timeout: 300
 display_order: 10
@@ -27,8 +32,15 @@ config_schema:
       - { value: low, label: Low }
       - { value: medium, label: Medium }
       - { value: high, label: High }
+  - name: skip
+    type: string
+    label: Skipped tests
+    description: Comma-separated Bandit test ids to skip.
+    default: B104
+    placeholder: B104,B101
 default_config:
   confidence: low
+  skip: B104
 sample_code: |
   import hashlib
 

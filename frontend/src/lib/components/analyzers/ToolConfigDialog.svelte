@@ -2,7 +2,6 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
@@ -14,7 +13,7 @@
 	import CheckCircle2 from '@lucide/svelte/icons/check-circle-2';
 	import XCircle from '@lucide/svelte/icons/circle-x';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
-	import { severityColors } from '$lib/constants/analysis';
+	import LevelBadge from '$lib/components/analysis/LevelBadge.svelte';
 	import { numberInputValue } from '$lib/components/generator/llm-params';
 	import {
 		testTool,
@@ -219,9 +218,7 @@
 						<ul class="mt-1 space-y-1">
 							{#each testResult.findings.slice(0, 5) as f, i (i)}
 								<li class="flex items-center gap-2 text-xs">
-									<Badge class={severityColors[(f.severity as string) ?? 'info'] ?? ''}>
-										{f.severity}
-									</Badge>
+									<LevelBadge label={f.tool_severity as string} />
 									<span class="truncate">{f.title}</span>
 								</li>
 							{/each}

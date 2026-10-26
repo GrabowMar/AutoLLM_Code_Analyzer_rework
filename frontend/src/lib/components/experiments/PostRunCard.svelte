@@ -15,6 +15,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import SectionHeading from '$lib/components/SectionHeading.svelte';
 	import { putPostRun, runPostRun, type PostRunConfig, type PostRunSpec } from '$lib/api/experiments';
 	import { formatApiError } from '$lib/api/core';
 	import { formatDateTime } from '$lib/utils/formatters';
@@ -111,8 +112,8 @@
 		{/if}
 		<PostRunEditor bind:value {mode} disabled={readonly} idPrefix="post-run-card" />
 
-		<div class="space-y-2 border-t border-border/60 pt-4">
-			<p class="section-label">History</p>
+		<div class="space-y-2 pt-2">
+			<SectionHeading size="sm" level={3} title="History" />
 			{#if data.runs.length === 0}
 				<EmptyState compact icon={History} title="No post-runs yet" />
 			{:else}
@@ -135,7 +136,7 @@
 									<td data-label="Trigger">{TRIGGERS[run.trigger] ?? run.trigger}</td>
 									<td data-label="Status">
 										<StatusBadge status={run.status} />
-										{#if run.error}<span class="cell-sub mt-0.5 block max-w-60 truncate text-[11px] text-danger-fg" title={run.error}>{run.error}</span>{/if}
+										{#if run.error}<span class="cell-sub mt-0.5 block max-w-60 truncate text-xs text-danger-fg" title={run.error}>{run.error}</span>{/if}
 									</td>
 									<td data-label="Analyses" class="num text-xs max-md:text-left">
 										{#if p.analysis_total}

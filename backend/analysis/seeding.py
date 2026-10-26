@@ -20,6 +20,15 @@ from django.db import DEFAULT_DB_ALIAS
 logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parent / "data" / "tools"
+CATALOG_FILE = DATA_DIR / "catalog.yaml"
+
+
+def load_catalog_meta() -> dict:
+    """Display metadata from ``catalog.yaml``: categories, modes, technologies."""
+    if not CATALOG_FILE.exists():
+        return {}
+    return yaml.safe_load(CATALOG_FILE.read_text()) or {}
+
 
 # Fields copied verbatim from YAML into the model (when present).
 _FIELDS = (
@@ -28,11 +37,14 @@ _FIELDS = (
     "category",
     "kind",
     "target_language",
+    "analysis_mode",
+    "technologies",
     "icon",
     "version",
     "docs_url",
     "install_cmd",
     "verify_cmd",
+    "file_patterns",
     "uninstall_cmd",
     "run_cmd",
     "parser_key",
@@ -66,9 +78,10 @@ def seed_tools(
         emit(f"No data dir at {DATA_DIR}")
         return 0, 0
 
+    known_techs = {t["slug"] for t in load_catalog_meta().get("technologies", [])}
     created = updated = 0
     for path in sorted(DATA_DIR.glob("*.yaml")):
-        if path.name == "catalog.yaml":
+        if path == CATALOG_FILE:
             continue
         data = yaml.safe_load(path.read_text()) or {}
         slug = data.get("slug") or path.stem
@@ -84,6 +97,9 @@ def seed_tools(
         else:
             updated += 1
             emit(f"Updated tool: {slug}")
+        unknown = set(obj.technologies or []) - known_techs
+        if unknown:
+            logger.warning("Tool %r lists technologies missing from catalog.yaml: %s", slug, sorted(unknown))
         if obj.kind == "container" and obj.parser_key and not parsers.has_parser(obj.parser_key):
             logger.warning(
                 "Tool %r declares parser_key %r but no such parser is registered",

@@ -262,8 +262,9 @@ def test_detect_secrets_parser():
     assert f.category == "secrets"
     assert f.rule_id == "AWS Access Key"
     assert f.line_number == 2
-    assert f.tool_specific_data == {"hashed_secret": "abc123", "is_verified": False}
+    assert f.tool_specific_data == {"secret_type": "AWS Access Key", "hashed_secret": "abc123", "is_verified": False}
     assert f.code_snippet == ""
+    assert f.tool_severity == ""  # detect-secrets rates nothing
 
 
 def test_jscpd_parser_truncates_fragment():
@@ -400,3 +401,322 @@ def test_bandit_and_semgrep_record_cwe():
     assert semgrep.findings[0].tool_specific_data["cwe"] == "CWE-89"
     no_cwe = parse("bandit", json.dumps({"results": [{"test_id": "B101"}]}))
     assert "cwe" not in no_cwe.findings[0].tool_specific_data
+
+
+# --- Tool's own severity / confidence and enriched tool_specific_data --------
+#
+# ``tool_severity`` is the label exactly as the tool printed it, "" for tools
+# that rate nothing; ``severity`` stays our normalization for statistics.
+
+
+def test_bandit_keeps_its_own_labels_and_rule_docs():
+    raw = json.dumps(
+        {
+            "results": [
+                {
+                    "filename": "/work/app.py",
+                    "issue_severity": "MEDIUM",
+                    "issue_confidence": "LOW",
+                    "issue_text": "Possible SQL injection vector through string-based query construction.",
+                    "issue_cwe": {"id": 89, "link": "https://cwe.mitre.org/data/definitions/89.html"},
+                    "test_id": "B608",
+                    "test_name": "hardcoded_sql_expressions",
+                    "line_number": 407,
+                    "line_range": [406, 407, 408],
+                    "more_info": "https://bandit.readthedocs.io/en/1.7.10/plugins/b608_hardcoded_sql_expressions.html",
+                    "code": "db.execute(f'...')",
+                },
+            ],
+        },
+    )
+    [f] = parsers.parse("bandit", raw).findings
+    assert (f.severity, f.confidence) == ("medium", "low")  # normalization unchanged
+    assert f.tool_severity == "MEDIUM"
+    data = f.tool_specific_data
+    assert data["tool_confidence"] == "LOW"
+    assert data["rule_name"] == "hardcoded_sql_expressions"
+    assert data["docs_url"].endswith("b608_hardcoded_sql_expressions.html")
+    assert (data["end_line"], data["cwe"]) == (408, "CWE-89")
+
+
+def test_ruff_rates_nothing_but_reports_docs_and_fix():
+    raw = json.dumps(
+        [
+            {
+                "code": "F401",
+                "message": "`typing.List` imported but unused",
+                "filename": "/work/app.py",
+                "location": {"row": 8, "column": 20},
+                "end_location": {"row": 8, "column": 24},
+                "fix": {"applicability": "safe", "edits": [], "message": "Remove unused import: `typing.List`"},
+                "url": "https://docs.astral.sh/ruff/rules/unused-import",
+            },
+        ],
+    )
+    [f] = parsers.parse("ruff", raw).findings
+    assert f.severity == "low"  # heuristic normalization, kept for statistics
+    assert f.tool_severity == ""  # ruff prints no level
+    assert "tool_confidence" not in f.tool_specific_data
+    assert f.tool_specific_data == {
+        "rule_name": "unused-import",
+        "docs_url": "https://docs.astral.sh/ruff/rules/unused-import",
+        "fix": "Remove unused import: `typing.List`",
+        "end_line": 8,
+        "end_column": 24,
+    }
+
+
+def test_flake8_and_vulture_labels():
+    [flake] = parsers.parse("flake8", "/work/app.py:8:1: F401 'typing.List' imported but unused\n").findings
+    assert flake.tool_severity == ""
+    [dead] = parsers.parse("vulture", "schemas.py:25: unused variable 'items' (60% confidence)\n").findings
+    assert dead.tool_severity == ""
+    assert dead.tool_specific_data["tool_confidence"] == "60%"
+
+
+def test_eslint_levels_core_rule_docs_and_suggestions():
+    raw = json.dumps(
+        [
+            {
+                "filePath": "/work/x.js",
+                "messages": [
+                    {
+                        "ruleId": "no-empty",
+                        "severity": 2,
+                        "message": "Empty block statement.",
+                        "line": 3,
+                        "column": 8,
+                        "endLine": 3,
+                        "endColumn": 10,
+                        "suggestions": [
+                            {
+                                "desc": "Add comment inside empty block statement.",
+                                "fix": {"range": [1, 1], "text": ""},
+                            },
+                        ],
+                    },
+                    {"ruleId": "react-hooks/exhaustive-deps", "severity": 1, "message": "deps", "line": 9},
+                    {"ruleId": None, "fatal": True, "severity": 2, "message": "Parsing error: x", "line": 1},
+                ],
+            },
+        ],
+    )
+    core, plugin, fatal = parsers.parse("eslint", raw).findings
+    assert [f.tool_severity for f in (core, plugin, fatal)] == ["error", "warning", "error"]
+    assert core.tool_specific_data == {
+        "docs_url": "https://eslint.org/docs/latest/rules/no-empty",
+        "fix": "Add comment inside empty block statement.",
+        "end_line": 3,
+        "end_column": 10,
+    }
+    # Plugin rules get no guessed documentation link.
+    assert "docs_url" not in plugin.tool_specific_data
+    assert fatal.tool_specific_data == {}
+
+
+def test_semgrep_labels_metadata_and_login_placeholder():
+    raw = json.dumps(
+        {
+            "results": [
+                {
+                    "check_id": "python.flask.security.audit.app-run-param-config.avoid_app_run_with_bad_host",
+                    "path": "/work/app.py",
+                    "start": {"line": 484, "col": 5},
+                    "end": {"line": 484, "col": 52},
+                    "extra": {
+                        "message": "Running flask app with host 0.0.0.0 could expose the server publicly.",
+                        "metadata": {
+                            "cwe": ["CWE-668: Exposure of Resource to Wrong Sphere"],
+                            "owasp": ["A01:2021 - Broken Access Control"],
+                            "category": "security",
+                            "references": ["https://owasp.org/Top10/A01_2021-Broken_Access_Control"],
+                            "likelihood": "HIGH",
+                            "impact": "MEDIUM",
+                            "confidence": "LOW",
+                            "source": "https://semgrep.dev/r/python.flask.security.audit.app-run-param-config",
+                            "shortlink": "https://sg.run/eLby",
+                        },
+                        "severity": "WARNING",
+                        "fingerprint": "requires login",
+                        "lines": "requires login",
+                    },
+                },
+            ],
+        },
+    )
+    [f] = parsers.parse("semgrep", raw).findings
+    assert (f.severity, f.tool_severity) == ("medium", "WARNING")
+    assert f.code_snippet == ""  # semgrep OSS placeholder, not code
+    data = f.tool_specific_data
+    assert data["tool_confidence"] == "LOW"
+    assert data["rule_name"] == "avoid_app_run_with_bad_host"
+    assert data["docs_url"] == "https://semgrep.dev/r/python.flask.security.audit.app-run-param-config"
+    assert data["references"] == ["https://owasp.org/Top10/A01_2021-Broken_Access_Control"]
+    assert data["owasp"] == ["A01:2021 - Broken Access Control"]
+    assert (data["likelihood"], data["impact"]) == ("HIGH", "MEDIUM")
+    assert (data["end_line"], data["end_column"], data["cwe"]) == (484, 52, "CWE-668")
+
+
+def test_pylint_message_type_and_docs_url():
+    raw = json.dumps(
+        [
+            {
+                "type": "convention",
+                "obj": "",
+                "line": 251,
+                "column": 0,
+                "endLine": None,
+                "endColumn": None,
+                "path": "app.py",
+                "symbol": "line-too-long",
+                "message": "Line too long (102/100)",
+                "message-id": "C0301",
+            },
+            {
+                "type": "info",
+                "obj": "f",
+                "line": 3,
+                "column": 0,
+                "path": "app.py",
+                "symbol": "locally-disabled",
+                "message": "Locally disabling x",
+                "message-id": "I0011",
+            },
+        ],
+    )
+    conv, info = parsers.parse("pylint", raw).findings
+    assert (conv.tool_severity, info.tool_severity) == ("convention", "info")
+    assert conv.tool_specific_data == {
+        "message_id": "C0301",
+        "docs_url": "https://pylint.readthedocs.io/en/stable/user_guide/messages/convention/line-too-long.html",
+    }
+    # Pylint's "info" messages live under "information" in its docs.
+    assert info.tool_specific_data["docs_url"].endswith("/messages/information/locally-disabled.html")
+
+
+def test_mypy_attaches_notes_to_their_error():
+    raw = (
+        'app.py:50: error: Variable "app.Base" is not valid as a type  [valid-type]\n'
+        "app.py:50: note: See https://mypy.readthedocs.io/en/stable/common_issues.html#variables-vs-type-aliases\n"
+        'app.py:60: error: No overload variant of "get" matches argument types "int"  [call-overload]\n'
+        "app.py:60: note: Possible overload variants:\n"
+        "app.py:99: note: Revealed type is 'int'\n"
+    )
+    first, second = parsers.parse("mypy", raw).findings
+    assert first.tool_severity == "error"
+    assert first.tool_specific_data["docs_url"].endswith("#variables-vs-type-aliases")
+    assert second.description.endswith("\nPossible overload variants:")
+    assert "docs_url" not in second.tool_specific_data
+
+
+def test_hadolint_levels_and_rule_docs():
+    raw = json.dumps(
+        [
+            {"file": "Dockerfile", "line": 1, "code": "DL3007", "level": "warning", "message": "latest"},
+            {"file": "Dockerfile", "line": 3, "code": "SC2164", "level": "style", "message": "cd || exit"},
+        ],
+    )
+    dl, sc = parsers.parse("hadolint", raw).findings
+    assert (dl.tool_severity, sc.tool_severity) == ("warning", "style")
+    assert dl.tool_specific_data["docs_url"] == "https://github.com/hadolint/hadolint/wiki/DL3007"
+    assert sc.tool_specific_data["docs_url"] == "https://www.shellcheck.net/wiki/SC2164"
+
+
+def test_codespell_fix_and_jscpd_duplicate_location():
+    [typo] = parsers.parse("codespell", "/work/App.jsx:1353: floatIn ==> floating, float in\n").findings
+    assert typo.tool_specific_data == {"fix": "floating, float in"}
+    raw = json.dumps(
+        {
+            "duplicates": [
+                {
+                    "lines": 15,
+                    "tokens": 124,
+                    "fragment": "x",
+                    "firstFile": {"name": "src/App.jsx", "start": 2023, "end": 2037},
+                    "secondFile": {"name": "src/App.jsx", "start": 1818, "end": 1829},
+                },
+            ],
+        },
+    )
+    [dup] = parsers.parse("jscpd", raw).findings
+    assert dup.tool_severity == ""
+    data = dup.tool_specific_data
+    assert data["duplicate_of"] == {"file": "src/App.jsx", "start_line": 1818, "end_line": 1829}
+    assert (data["lines"], data["tokens"], data["end_line"]) == (15, 124, 2037)
+    assert (data["second_file"], data["second_start"]) == ("src/App.jsx", 1818)  # legacy keys kept
+
+
+def test_radon_complexity_data():
+    raw = json.dumps(
+        {
+            "app.py": [
+                {
+                    "type": "class",
+                    "name": "Task",
+                    "rank": "A",
+                    "complexity": 3,
+                    "lineno": 1,
+                    "endline": 90,
+                    "methods": [
+                        {
+                            "type": "method",
+                            "name": "to_dict",
+                            "classname": "Task",
+                            "rank": "F",
+                            "complexity": 44,
+                            "lineno": 5,
+                            "endline": 80,
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+    [f] = parsers.parse("radon", raw).findings
+    assert f.tool_severity == ""  # a complexity rank, not a severity
+    assert f.tool_specific_data == {
+        "complexity": 44,
+        "rank": "F",
+        "function": "Task.to_dict",
+        "end_line": 80,
+        "endline": 80,
+    }
+
+
+def test_gitleaks_never_stores_the_secret_value():
+    secret = "ghp_1234567890abcdefghijklmnopqrstuvwxyz"  # noqa: S105 - a fake token  gitleaks:allow
+    item = {
+        "RuleID": "github-pat",
+        "Description": "Uncovered a GitHub Personal Access Token",
+        "File": "config.py",
+        "StartLine": 2,
+        "EndLine": 2,
+        "StartColumn": 16,
+        "EndColumn": 57,
+        "Entropy": 5.17,
+    }
+    # As the run command asks for it (--redact) ...
+    [redacted] = parsers.parse(
+        "gitleaks",
+        json.dumps([{**item, "Match": 'TOKEN = "REDACTED"', "Secret": "REDACTED"}]),
+    ).findings
+    assert redacted.code_snippet == 'TOKEN = "REDACTED"'
+    assert redacted.tool_specific_data == {
+        "secret_type": "github-pat",
+        "entropy": 5.17,
+        "end_line": 2,
+        "end_column": 57,
+    }
+    # ... and a report that arrives unredacted: the value is masked anyway.
+    leaky = [
+        {**item, "Match": f'GITHUB_TOKEN = "{secret}"', "Secret": secret},
+        {**item, "Match": "", "Secret": secret},
+        {**item, "Match": "token\n<cut>", "Secret": "token\n<cut>\nrest"},
+    ]
+    findings = parsers.parse("gitleaks", json.dumps(leaky)).findings
+    assert findings[0].code_snippet == 'GITHUB_TOKEN = "REDACTED"'
+    assert findings[1].code_snippet == ""
+    assert findings[2].code_snippet == ""  # only part of the secret: nothing to mask it with
+    for f in findings:
+        assert secret not in repr(f)
+        assert "rest" not in f.code_snippet

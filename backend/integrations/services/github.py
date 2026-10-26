@@ -91,7 +91,7 @@ _NOT_FOUND = "Application not found."
 def _token_for(user: User) -> str:
     cred = get_user_credential_for(user, Provider.GITHUB)
     if cred is None:
-        msg = "No GitHub token connected. Add one in Settings → API Access (provider 'github')."
+        msg = "No GitHub token connected. Add one in Settings → GitHub."
         raise GitHubError(msg, status_code=400)
     try:
         token = cred.get_secret()

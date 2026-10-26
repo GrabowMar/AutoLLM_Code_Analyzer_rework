@@ -384,10 +384,20 @@ async function handleClone(kind: 'replay' | 'rerun') {
 }
 </script>
 
+<!-- Section tabs for the header's nav strip (inside the page's Tabs.Root). -->
+{#snippet sectionTabs()}
+	<Tabs.List aria-label="Application sections">
+		{#each sections as sec (sec.id)}
+			{@const SecIcon = sec.icon}
+			<Tabs.Trigger value={sec.id}><SecIcon />{sec.label}</Tabs.Trigger>
+		{/each}
+	</Tabs.List>
+{/snippet}
+
 {#if loading}
 	<LoadingState label="loading application" />
 {:else if !job && !notFound}
-	<div class="space-y-6">
+	<div class="space-y-4">
 		<PageHeader title="Application" back={{ href: '/applications', label: 'Applications' }} />
 		<ErrorAlert message={loadError || 'Failed to load job details.'} onretry={() => {
 				loading = true;
@@ -395,7 +405,7 @@ async function handleClone(kind: 'replay' | 'rerun') {
 			}} />
 	</div>
 {:else if !job}
-	<div class="space-y-6">
+	<div class="space-y-4">
 		<PageHeader title="Application" back={{ href: '/applications', label: 'Applications' }} />
 		<EmptyState icon={AlertTriangle} title="Job not found" description="It may have been deleted, or the link is wrong.">
 			{#snippet action()}
@@ -404,7 +414,7 @@ async function handleClone(kind: 'replay' | 'rerun') {
 		</EmptyState>
 	</div>
 {:else}
-	<div class="space-y-6">
+	<Tabs.Root bind:value={activeSection} class="space-y-4">
 		<ApplicationHeader
 			{job}
 			{provider}
@@ -417,49 +427,41 @@ async function handleClone(kind: 'replay' | 'rerun') {
 			onDownloadCode={downloadCode}
 			onDelete={() => (deleteOpen = true)}
 			onExportGithub={() => (githubExportOpen = true)}
+			nav={sectionTabs}
 		/>
 
-		<Tabs.Root bind:value={activeSection}>
-			<Tabs.List aria-label="Application sections">
-				{#each sections as sec (sec.id)}
-					{@const SecIcon = sec.icon}
-					<Tabs.Trigger value={sec.id}><SecIcon />{sec.label}</Tabs.Trigger>
-				{/each}
-			</Tabs.List>
-
-			<Tabs.Content value="overview">
-				<div class="space-y-4">
-					<ApplicationOverview {job} {provider} {codeFootprint} {fixesData} />
-					<JobProvenance
-						{job}
-						busy={cloneBusy}
-						onReplay={() => handleClone('replay')}
-						onRerun={() => handleClone('rerun')}
-					/>
-				</div>
-			</Tabs.Content>
-			{#if job.mode === 'agent'}
-				<Tabs.Content value="agent"><AgentRunSummary {job} /></Tabs.Content>
-			{/if}
-			<Tabs.Content value="prompts"><ApplicationPrompts {job} {artifacts} /></Tabs.Content>
-			<Tabs.Content value="files"><ApplicationFiles files={virtualFiles} /></Tabs.Content>
-			<Tabs.Content value="container"><ApplicationContainer jobId={job.id} jobStatus={job.status} /></Tabs.Content>
-			<Tabs.Content value="tools"><ApplicationTools jobId={job.id} /></Tabs.Content>
-			<Tabs.Content value="analyses"><ApplicationAnalyses jobId={job.id} /></Tabs.Content>
-			<Tabs.Content value="logs"><ApplicationLogs jobId={job.id} /></Tabs.Content>
-			{#if backendScan}
-				<Tabs.Content value="scan"><ApplicationApiScan scan={backendScan} /></Tabs.Content>
-			{/if}
-			<Tabs.Content value="dependencies"><ApplicationDependencies deps={backendDeps} mode={job.mode} /></Tabs.Content>
-			<Tabs.Content value="artifacts"><ApplicationArtifacts {artifacts} /></Tabs.Content>
-			{#if job.mode === 'copilot'}
-				<Tabs.Content value="iterations"><ApplicationIterations {iterations} /></Tabs.Content>
-			{/if}
-			<Tabs.Content value="metrics">
-				<ApplicationMetrics {job} {costData} artifactCount={artifacts.length} iterationCount={iterations.length} />
-			</Tabs.Content>
-		</Tabs.Root>
-	</div>
+		<Tabs.Content value="overview" class="pt-0">
+			<div class="space-y-4">
+				<ApplicationOverview {job} {provider} {codeFootprint} {fixesData} />
+				<JobProvenance
+					{job}
+					busy={cloneBusy}
+					onReplay={() => handleClone('replay')}
+					onRerun={() => handleClone('rerun')}
+				/>
+			</div>
+		</Tabs.Content>
+		{#if job.mode === 'agent'}
+			<Tabs.Content value="agent" class="pt-0"><AgentRunSummary {job} /></Tabs.Content>
+		{/if}
+		<Tabs.Content value="prompts" class="pt-0"><ApplicationPrompts {job} {artifacts} /></Tabs.Content>
+		<Tabs.Content value="files" class="pt-0"><ApplicationFiles files={virtualFiles} /></Tabs.Content>
+		<Tabs.Content value="container" class="pt-0"><ApplicationContainer jobId={job.id} jobStatus={job.status} /></Tabs.Content>
+		<Tabs.Content value="tools" class="pt-0"><ApplicationTools jobId={job.id} /></Tabs.Content>
+		<Tabs.Content value="analyses" class="pt-0"><ApplicationAnalyses jobId={job.id} /></Tabs.Content>
+		<Tabs.Content value="logs" class="pt-0"><ApplicationLogs jobId={job.id} /></Tabs.Content>
+		{#if backendScan}
+			<Tabs.Content value="scan" class="pt-0"><ApplicationApiScan scan={backendScan} /></Tabs.Content>
+		{/if}
+		<Tabs.Content value="dependencies" class="pt-0"><ApplicationDependencies deps={backendDeps} mode={job.mode} /></Tabs.Content>
+		<Tabs.Content value="artifacts" class="pt-0"><ApplicationArtifacts {artifacts} /></Tabs.Content>
+		{#if job.mode === 'copilot'}
+			<Tabs.Content value="iterations" class="pt-0"><ApplicationIterations {iterations} /></Tabs.Content>
+		{/if}
+		<Tabs.Content value="metrics" class="pt-0">
+			<ApplicationMetrics {job} {costData} artifactCount={artifacts.length} iterationCount={iterations.length} />
+		</Tabs.Content>
+	</Tabs.Root>
 
 	<ConfirmDialog
 		bind:open={deleteOpen}

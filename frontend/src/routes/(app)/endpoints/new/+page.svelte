@@ -132,31 +132,33 @@
 	}
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4">
 	<PageHeader
 		title="New endpoint"
 		description="Connect an Ollama or OpenAI-compatible server so experiments can run its models."
 		back={{ href: '/endpoints', label: 'Endpoints' }}
-	/>
-
-	<ol class="flex flex-wrap items-center gap-2 text-xs" aria-label="Steps">
-		{#each steps as s, i (s.key)}
-			<li class="flex items-center gap-2" aria-current={i === stepIndex ? 'step' : undefined}>
-				<span
-					class={cn(
-						'flex size-6 items-center justify-center rounded-full border text-[11px] font-semibold tabular-nums',
-						i < stepIndex && 'border-primary bg-primary text-primary-foreground',
-						i === stepIndex && 'border-primary text-success-fg',
-						i > stepIndex && 'border-border text-muted-foreground'
-					)}
-				>
-					{i + 1}
-				</span>
-				<span class={i === stepIndex ? 'font-medium text-foreground' : 'text-muted-foreground'}>{s.label}</span>
-				{#if i < steps.length - 1}<span class="h-px w-6 bg-border" aria-hidden="true"></span>{/if}
-			</li>
-		{/each}
-	</ol>
+	>
+		{#snippet nav()}
+			<ol class="flex flex-wrap items-center gap-2 px-2 py-1.5 text-xs" aria-label="Steps">
+				{#each steps as s, i (s.key)}
+					<li class="flex items-center gap-2" aria-current={i === stepIndex ? 'step' : undefined}>
+						<span
+							class={cn(
+								'flex size-5 items-center justify-center rounded-full border text-[11px] font-semibold tabular-nums',
+								i < stepIndex && 'border-primary bg-primary text-primary-foreground',
+								i === stepIndex && 'border-primary text-success-fg',
+								i > stepIndex && 'border-border text-muted-foreground'
+							)}
+						>
+							{i + 1}
+						</span>
+						<span class={i === stepIndex ? 'font-medium text-foreground' : 'text-muted-foreground'}>{s.label}</span>
+						{#if i < steps.length - 1}<span class="h-px w-6 bg-border" aria-hidden="true"></span>{/if}
+					</li>
+				{/each}
+			</ol>
+		{/snippet}
+	</PageHeader>
 
 	{#if step !== 'connect'}
 		<Card.Root>

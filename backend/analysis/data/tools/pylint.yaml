@@ -6,19 +6,34 @@ description: >-
 category: lint
 kind: container
 target_language: python
+analysis_mode: static
+technologies: [python]
 icon: badge-check
 version: "3"
 docs_url: https://pylint.readthedocs.io/
 install_cmd: "pip install --user --upgrade pylint"
 verify_cmd: "pylint --version"
 uninstall_cmd: "pip uninstall -y pylint"
-run_cmd: "pylint {target} -f json --exit-zero --disable=import-error"
+run_cmd: "pylint {target} -f json --exit-zero --disable={config:disable}"
 parser_key: pylint
+file_patterns: ["*.py"]
 run_timeout: 180
 install_timeout: 300
 display_order: 40
-config_schema: []
-default_config: {}
+# Docstring and too-few-public-methods conventions are disabled by default: on
+# generated web apps (one-method data classes, many small route handlers) they
+# outnumber every other message and drown real defects in per-app counts.
+# unused-argument is disabled too: framework dependency injection
+# (`user = Depends(require_admin)`, handler `request` args) makes nearly every
+# hit on a web app a false positive.
+config_schema:
+  - name: disable
+    type: string
+    label: Disabled messages
+    description: Comma-separated pylint message names or ids to disable.
+    default: import-error,missing-module-docstring,missing-class-docstring,missing-function-docstring,too-few-public-methods,unused-argument
+default_config:
+  disable: import-error,missing-module-docstring,missing-class-docstring,missing-function-docstring,too-few-public-methods,unused-argument
 sample_code: |
   import os
 

@@ -40,8 +40,10 @@
 	let health = $state('');
 	let loading = $state(true);
 	let error = $state('');
-	let activeTab = $state('overview');
+	let activeTab = $state('logs');
 	let actionLoading = $state(false);
+	// The header's `actions` snippet shadows `actions` inside its sibling snippets.
+	const actionCount = $derived(actions.length);
 
 	async function load() {
 		loading = true;
@@ -101,11 +103,11 @@
 
 	$effect(() => {
 		if (activeTab === 'logs') loadLogs();
-		if (activeTab === 'overview') loadHealth();
 	});
 
 	onMount(() => {
 		load();
+		loadHealth();
 
 		// SSE: subscribe for live container status updates; fall back if SSE fails
 		const cleanupSse = subscribe([`runtime:${containerId}`], async () => {
@@ -125,7 +127,7 @@
 	});
 </script>
 
-<div class="space-y-6">
+<Tabs.Root bind:value={activeTab} class="space-y-4">
 	<PageHeader
 		title={container?.name ?? 'Container'}
 		description="Container lifecycle, logs and action history."
@@ -157,6 +159,37 @@
 				</Button>
 			{/if}
 		{/snippet}
+		{#if container && !loading && !error}
+			<div class="header-stats">
+				<span class="header-stat" title={container.id}>ID <b>{container.id.slice(0, 8)}…</b></span>
+				<span class="header-stat min-w-0 max-w-full">image <b class="min-w-0 truncate">{container.image || '—'}</b></span>
+				<span class="header-stat">
+					port
+					{#if container.app_port}
+						<a href={container.app_url ?? '#'} target="_blank" rel="noopener noreferrer" class="font-mono text-sm text-primary hover:underline">
+							{container.app_port}
+						</a>
+					{:else}
+						<b>—</b>
+					{/if}
+				</span>
+				<span class="header-stat">health <b class="font-sans capitalize">{health || '—'}</b></span>
+				<span class="header-stat">created {formatDate(container.created_at)}</span>
+			</div>
+		{/if}
+		{#snippet nav()}
+			{#if container && !loading && !error}
+				<Tabs.List aria-label="Container sections">
+					<Tabs.Trigger value="logs">Logs</Tabs.Trigger>
+					<Tabs.Trigger value="actions">
+						Actions
+						{#if actionCount > 0}
+							<span class="text-xs text-muted-foreground">({actionCount})</span>
+						{/if}
+					</Tabs.Trigger>
+				</Tabs.List>
+			{/if}
+		{/snippet}
 	</PageHeader>
 
 	{#if loading}
@@ -171,101 +204,52 @@
 			/>
 		{/if}
 
-		<Tabs.Root bind:value={activeTab}>
-			<Tabs.List>
-				<Tabs.Trigger value="overview">Overview</Tabs.Trigger>
-				<Tabs.Trigger value="logs">Logs</Tabs.Trigger>
-				<Tabs.Trigger value="actions">
-					Actions
-					{#if actions.length > 0}
-						<span class="text-xs text-muted-foreground">({actions.length})</span>
-					{/if}
-				</Tabs.Trigger>
-			</Tabs.List>
+		<Tabs.Content value="logs" class="pt-0">
+			<Card.Root>
+				<Card.Header class="flex flex-row items-center justify-between">
+					<Card.Title class="text-sm">Container logs</Card.Title>
+					<Button size="sm" variant="outline" onclick={loadLogs} aria-label="Refresh logs">
+						<RefreshCw class="h-3 w-3" />
+					</Button>
+				</Card.Header>
+				<Card.Content>
+					<pre class="bg-background rounded p-3 text-xs font-mono overflow-auto max-h-[500px] whitespace-pre-wrap break-all">{logs || 'No logs available'}</pre>
+				</Card.Content>
+			</Card.Root>
+		</Tabs.Content>
 
-			<Tabs.Content value="overview">
-				<Card.Root class="max-w-2xl">
-					<Card.Header><Card.Title class="text-sm">Container info</Card.Title></Card.Header>
-					<Card.Content class="text-sm space-y-2">
-						<div class="flex justify-between gap-4">
-							<span class="text-muted-foreground">ID</span>
-							<span class="font-mono text-xs">{container.id.slice(0, 8)}…</span>
-						</div>
-						<div class="flex justify-between gap-4">
-							<span class="text-muted-foreground">Image</span>
-							<span class="font-mono text-xs truncate">{container.image || '—'}</span>
-						</div>
-						<div class="flex justify-between gap-4">
-							<span class="text-muted-foreground">App port</span>
-							<span>
-								{#if container.app_port}
-									<a href={container.app_url ?? '#'} target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">
-										{container.app_port}
-									</a>
-								{:else}
-									—
-								{/if}
-							</span>
-						</div>
-						<div class="flex justify-between gap-4">
-							<span class="text-muted-foreground">Health</span>
-							<span class="capitalize">{health || '—'}</span>
-						</div>
-						<div class="flex justify-between gap-4">
-							<span class="text-muted-foreground">Created</span>
-							<span class="text-xs">{formatDate(container.created_at)}</span>
-						</div>
-					</Card.Content>
-				</Card.Root>
-			</Tabs.Content>
-
-			<Tabs.Content value="logs">
-				<Card.Root>
-					<Card.Header class="flex flex-row items-center justify-between">
-						<Card.Title class="text-sm">Container logs</Card.Title>
-						<Button size="sm" variant="outline" onclick={loadLogs} aria-label="Refresh logs">
-							<RefreshCw class="h-3 w-3" />
-						</Button>
-					</Card.Header>
-					<Card.Content>
-						<pre class="bg-background rounded p-3 text-xs font-mono overflow-auto max-h-[500px] whitespace-pre-wrap break-all">{logs || 'No logs available'}</pre>
-					</Card.Content>
-				</Card.Root>
-			</Tabs.Content>
-
-			<Tabs.Content value="actions">
-				{#if actions.length === 0}
-					<EmptyState title="No actions recorded" description="Container lifecycle actions will appear here." />
-				{:else}
-					<div class="space-y-3">
-						{#each actions as a (a.id)}
-							<Card.Root>
-								<Card.Content class="p-4">
-									<div class="flex items-center justify-between gap-2 mb-2">
-										<div class="flex items-center gap-2">
-											<span class="font-medium text-sm capitalize">{a.action_type}</span>
-											<StatusBadge status={a.status} />
-										</div>
-										<span class="text-xs text-muted-foreground">{formatDate(a.created_at)}</span>
+		<Tabs.Content value="actions" class="pt-0">
+			{#if actions.length === 0}
+				<EmptyState title="No actions recorded" description="Container lifecycle actions will appear here." />
+			{:else}
+				<div class="space-y-3">
+					{#each actions as a (a.id)}
+						<Card.Root>
+							<Card.Content class="p-4">
+								<div class="flex items-center justify-between gap-2 mb-2">
+									<div class="flex items-center gap-2">
+										<span class="font-medium text-sm capitalize">{a.action_type}</span>
+										<StatusBadge status={a.status} />
 									</div>
-									{#if a.status === 'running'}
-										<div class="text-xs text-muted-foreground mb-1">{a.progress_percent}%</div>
-										<div class="w-full bg-muted rounded-full h-1.5">
-											<div class="bg-primary h-1.5 rounded-full transition-all" style="width: {a.progress_percent}%"></div>
-										</div>
-									{/if}
-									{#if a.error_message}
-										<p class="text-xs text-danger-fg mt-2">{a.error_message}</p>
-									{/if}
-									{#if a.log_output}
-										<pre class="mt-2 text-xs font-mono bg-muted/40 rounded p-2 overflow-auto max-h-32 whitespace-pre-wrap">{a.log_output}</pre>
-									{/if}
-								</Card.Content>
-							</Card.Root>
-						{/each}
-					</div>
-				{/if}
-			</Tabs.Content>
-		</Tabs.Root>
+									<span class="text-xs text-muted-foreground">{formatDate(a.created_at)}</span>
+								</div>
+								{#if a.status === 'running'}
+									<div class="text-xs text-muted-foreground mb-1">{a.progress_percent}%</div>
+									<div class="w-full bg-muted rounded-full h-1.5">
+										<div class="bg-primary h-1.5 rounded-full transition-all" style="width: {a.progress_percent}%"></div>
+									</div>
+								{/if}
+								{#if a.error_message}
+									<p class="text-xs text-danger-fg mt-2">{a.error_message}</p>
+								{/if}
+								{#if a.log_output}
+									<pre class="mt-2 text-xs font-mono bg-muted/40 rounded p-2 overflow-auto max-h-32 whitespace-pre-wrap">{a.log_output}</pre>
+								{/if}
+							</Card.Content>
+						</Card.Root>
+					{/each}
+				</div>
+			{/if}
+		</Tabs.Content>
 	{/if}
-</div>
+</Tabs.Root>

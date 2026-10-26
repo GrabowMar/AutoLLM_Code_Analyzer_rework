@@ -652,3 +652,19 @@ def test_list_reports_filters_by_user():
     qs, total = services.list_reports(user=u1)
     assert total == 1
     assert next(iter(qs)).title == "A"
+
+
+def test_source_loc_ignores_lockfiles_manifests_and_docs():
+    from backend.reports.services.loc import loc_from_files
+
+    files = {
+        "app.py": "import os\n\n# comment\nprint(1)\n",
+        "requirements.txt": "flask\n",
+        "README.md": "# App\ntext\n",
+        "frontend/package.json": '{\n "name": "x"\n}\n',
+        "frontend/package-lock.json": "{\n" * 5000,
+        "frontend/src/App.jsx": "export default 1;\n// c\n",
+        "static/app.js": "let a = 1;\n",
+        "frontend/dist/vendor.min.js": "x\n" * 100,
+    }
+    assert loc_from_files(files) == {"backend_loc": 2, "frontend_loc": 2, "total_loc": 4, "source_files": 3}

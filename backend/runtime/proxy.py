@@ -9,7 +9,8 @@ Two modes share one proxy core:
   Public (a different origin from the main app), matching the Traefik design.
 
 * **Path** (``APPS_PROXY_PATH``): ``<origin>/apps/<name>/`` on the main domain.
-  Auth-gated; kept for environments without per-app subdomains.  NOTE: SPAs with
+  Auth-gated and owner-scoped (the container's builder or job owner, or
+  staff; anyone else gets 404); kept for environments without per-app subdomains.  NOTE: SPAs with
   root-absolute ``/assets``/``/api`` break here because those collide with the
   main platform — prefer subdomain mode.
 
@@ -29,6 +30,7 @@ from django.http import StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from backend.runtime.models import ContainerInstance
+from backend.runtime.services.container_service import visible_containers
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +67,20 @@ def _running_container(name: str) -> ContainerInstance | None:
     return c
 
 
-def _proxy(request, container: ContainerInstance, upstream_path: str, *, location_prefix: str = ""):
-    """Stream *request* to the app container; return the proxied response."""
+def _proxy(
+    request,
+    container: ContainerInstance,
+    upstream_path: str,
+    *,
+    location_prefix: str = "",
+    forward_cookies: bool = False,
+):
+    """Stream *request* to the app container; return the proxied response.
+
+    Cookies are dropped unless *forward_cookies*: on the shared platform origin
+    (path mode) they are the platform's session/CSRF cookies; on an app's own
+    subdomain they belong to the app.
+    """
     base = _upstream_base(container)
     if base is None:
         return HttpResponse("App routing not configured", status=502)
@@ -76,7 +90,11 @@ def _proxy(request, container: ContainerInstance, upstream_path: str, *, locatio
     if query:
         url = f"{url}?{query}"
 
-    fwd_headers = {k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP and k.lower() != "cookie"}
+    fwd_headers = {
+        k: v
+        for k, v in request.headers.items()
+        if k.lower() not in _HOP_BY_HOP and (forward_cookies or k.lower() != "cookie")
+    }
 
     try:
         upstream = requests.request(
@@ -113,7 +131,23 @@ def proxy_app_subdomain(request, name: str):
     container = _running_container(name)
     if container is None:
         return HttpResponse("App is not running", status=502)
-    return _proxy(request, container, request.path.lstrip("/"))
+    return _proxy(request, container, request.path.lstrip("/"), forward_cookies=True)
+
+
+def app_tls_check(request):
+    """Caddy ``on_demand_tls`` ask hook: 200 only for a running app's subdomain.
+
+    The edge issues a certificate per ``<name>.<APPS_DOMAIN>`` on first visit;
+    this keeps it from requesting certificates for arbitrary hostnames.
+    """
+    from backend.runtime.middleware import _app_subdomain_label
+
+    if not getattr(settings, "APPS_SUBDOMAIN_PROXY", False):
+        return HttpResponse(status=404)
+    name = _app_subdomain_label(request.GET.get("domain", ""))
+    if name is None or _running_container(name) is None:
+        return HttpResponse(status=404)
+    return HttpResponse("ok")
 
 
 @csrf_exempt
@@ -123,7 +157,8 @@ def app_proxy(request, name: str, path: str = ""):
     if user is None or not user.is_authenticated:
         return HttpResponse("Authentication required", status=403)
 
-    container = ContainerInstance.objects.filter(name=name).first()
+    # Owner-scoped like the runtime API: someone else's app answers 404.
+    container = visible_containers(user).filter(name=name).first()
     if container is None:
         return HttpResponse("Unknown app", status=404)
     if container.status != ContainerInstance.Status.RUNNING:

@@ -61,7 +61,6 @@
 	onCloseEditor={close}
 >
 	{#snippet toolbar()}
-		<span></span>
 		<Button size="sm" class="w-full sm:w-auto" onclick={() => { error = ''; current = { block: null }; }}><Plus /> New block</Button>
 	{/snippet}
 

@@ -206,7 +206,7 @@
 	</div>
 {/snippet}
 
-<div class="max-w-5xl space-y-6">
+<div class="max-w-5xl space-y-4">
 	<PageHeader
 		title={report?.title ?? 'Report'}
 		description={report?.description || undefined}
@@ -230,6 +230,14 @@
 				<Trash2 class="mr-1 h-4 w-4" />Delete
 			</Button>
 		{/snippet}
+		{#if report && !loading && !error}
+			<div class="header-stats">
+				<span class="header-stat"><b class="font-sans capitalize">{report.report_type.replace(/_/g, ' ')}</b></span>
+				<span>created {formatDate(report.created_at)}</span>
+				<span>completed {formatDate(report.completed_at)}</span>
+				<span>expires {formatDate(report.expires_at)}</span>
+			</div>
+		{/if}
 	</PageHeader>
 
 	{#if loading}
@@ -237,27 +245,6 @@
 	{:else if error}
 		<ErrorAlert message={error} onretry={load} />
 	{:else if report}
-		<Card.Root>
-			<Card.Content class="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
-				<div>
-					<div class="section-label">Type</div>
-					<div class="font-medium">{report.report_type.replace(/_/g, ' ')}</div>
-				</div>
-				<div>
-					<div class="section-label">Created</div>
-					<div class="font-medium">{formatDate(report.created_at)}</div>
-				</div>
-				<div>
-					<div class="section-label">Completed</div>
-					<div class="font-medium">{formatDate(report.completed_at)}</div>
-				</div>
-				<div>
-					<div class="section-label">Expires</div>
-					<div class="font-medium">{formatDate(report.expires_at)}</div>
-				</div>
-			</Card.Content>
-		</Card.Root>
-
 		{#if report.status === 'generating' || report.status === 'pending'}
 			<LoadingState label="generating report… {report.progress_percent}%" />
 		{:else if report.status === 'failed'}

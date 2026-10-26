@@ -190,17 +190,17 @@
 								</td>
 								<td data-label="When">
 									<span title="{s.cron} ({s.timezone})">{describeCron(s.cron)}</span>
-									<span class="cell-sub block text-[11px] text-muted-foreground">{s.timezone}{s.skip_if_active ? ' · skips while running' : ''}</span>
+									<span class="cell-sub block text-xs text-muted-foreground">{s.timezone}{s.skip_if_active ? ' · skips while running' : ''}</span>
 								</td>
 								<td data-label="Next run" class="whitespace-nowrap tabular-nums" title={s.next_run_at ? new Date(s.next_run_at).toLocaleString() : ''}>
 									{#if s.enabled}{timeUntil(s.next_run_at)}{:else}<span class="text-muted-foreground">paused</span>{/if}
 								</td>
 								<td data-label="Last result">
 									{#if result}
-										<span class="inline-block rounded-full border px-2 py-0.5 text-[11px] {toneClasses[result.tone]}">{result.text}</span>
-										<span class="cell-sub mt-0.5 block text-[11px] text-muted-foreground">{timeAgo(s.last_run_at)}</span>
+										<span class="inline-block rounded-full border px-2 py-0.5 text-xs {toneClasses[result.tone]}">{result.text}</span>
+										<span class="cell-sub mt-0.5 block text-xs text-muted-foreground">{timeAgo(s.last_run_at)}</span>
 										{#if s.last_result.experiment_id && s.last_result.experiment_id !== experimentId}
-											<a href="/experiments/{s.last_result.experiment_id}" class="text-[11px] text-success-fg hover:underline">Open the clone</a>
+											<a href="/experiments/{s.last_result.experiment_id}" class="text-xs text-success-fg hover:underline">Open the clone</a>
 										{/if}
 									{:else}
 										<span class="text-muted-foreground">never ran</span>

@@ -17,7 +17,7 @@
 	let { title, description, icon: Icon = Inbox, action, compact = false, class: className }: Props = $props();
 </script>
 
-<div class={cn('empty-state', compact && 'py-6 sm:py-8', className)}>
+<div class={cn('empty-state', compact && 'py-4 sm:py-5', className)}>
 	<div class="empty-state-icon" aria-hidden="true"><Icon class="h-5 w-5" /></div>
 	<p class="text-sm font-medium">{title}</p>
 	{#if description}

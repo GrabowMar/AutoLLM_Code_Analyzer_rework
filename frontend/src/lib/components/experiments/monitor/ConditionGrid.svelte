@@ -11,8 +11,10 @@
 	 * - `grid`: the live cell grid (`ExperimentLive.grid`).
 	 * - `groupBy`: 'endpoint' | 'none'. `sort`: 'sequence' | 'label' | 'progress' | 'pass'.
 	 * - `baselineId`: condition marked "baseline".
+	 * - `framed` (default true): own border; false inside a frame that has one (a StudyFigure).
 	 */
 	import { cn } from '$lib/utils';
+	import { scrollHint } from '$lib/utils/scroll-hint';
 	import BatchProgress from '$lib/components/generator/batches/BatchProgress.svelte';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import {
@@ -33,9 +35,10 @@
 		groupBy?: GridGroupBy;
 		sort?: GridSort;
 		baselineId?: number | null;
+		framed?: boolean;
 	}
 
-	let { grid, groupBy = 'endpoint', sort = 'sequence', baselineId = null }: Props = $props();
+	let { grid, groupBy = 'endpoint', sort = 'sequence', baselineId = null, framed = true }: Props = $props();
 
 	let collapsed = $state(new Set<string>());
 
@@ -116,7 +119,7 @@
 		>
 			<span class="min-w-0 truncate font-medium" title={condition.label}>{condition.label}</span>
 			{#if condition.id === baselineId}
-				<span class="shrink-0 rounded-full border border-primary/40 bg-primary/10 px-1.5 text-[11px] text-success-fg">baseline</span>
+				<span class="shrink-0 rounded-full border border-primary/40 bg-primary/10 px-1.5 text-xs text-primary">baseline</span>
 			{/if}
 		</div>
 		{#each grid.apps as app, ai (app.id)}
@@ -146,7 +149,7 @@
 			</div>
 		{/each}
 		<div role="cell" class="flex min-w-0 flex-col justify-center gap-1 border-b border-border/50 py-1 pl-2">
-			<span class="flex items-baseline gap-1.5 font-mono text-[11px] tabular-nums">
+			<span class="flex items-baseline gap-1.5 font-mono text-xs tabular-nums">
 				{#if summary.graded > 0}
 					<span class="font-semibold text-foreground" title="Passed every check / graded">{summary.passed}/{summary.graded}</span>
 					<span class="text-muted-foreground">{formatPercent(summary.passRate)}</span>
@@ -159,28 +162,30 @@
 	</div>
 {/snippet}
 
-<div class="space-y-3">
-	<div class="relative overflow-x-auto rounded-md border border-border" role="region" aria-label="Condition by app grid">
+<div class={cn('space-y-3', !framed && 'pb-3')}>
+	<div class={cn('relative overflow-x-auto', framed && 'rounded-md border border-border')} role="region" aria-label="Condition by app grid" {@attach scrollHint()}>
+		<!-- Phones: two columns (label, progress) that fit the width; no sideways scroll. -->
 		<div
-			class="grid w-max min-w-full items-stretch px-2 max-md:!grid-cols-[minmax(0,1fr)_auto]"
+			class="grid w-max min-w-full items-stretch px-2 max-md:!w-full max-md:!grid-cols-[minmax(0,1fr)_auto]"
 			style="grid-template-columns: {gridTemplate}"
 			role="table"
 			aria-label="Runs per condition and app; one square per repeat"
 		>
 			<div class="contents" role="row">
-				<div role="columnheader" class="sticky left-0 z-20 border-b border-border bg-card py-1.5 pr-2 section-label">
+				<div role="columnheader" class="sticky left-0 z-20 flex items-end border-b border-border bg-card py-1.5 pr-2 section-label">
 					Condition
 				</div>
 				{#each grid.apps as app (app.id)}
+					<!-- App columns are only as wide as their squares: the name runs vertically. -->
 					<div
 						role="columnheader"
-						class="hidden min-w-0 border-b border-border px-1 py-1.5 text-[11px] text-muted-foreground md:block"
+						class="hidden min-w-0 items-end justify-center border-b border-border px-1 py-1.5 text-xs text-muted-foreground md:flex"
 						title={app.name}
 					>
-						<span class="block truncate">{app.slug || app.name}</span>
+						<span class="block max-h-28 truncate [writing-mode:vertical-rl] rotate-180">{app.name}</span>
 					</div>
 				{/each}
-				<div role="columnheader" class="border-b border-border py-1.5 pl-2 section-label">Done</div>
+				<div role="columnheader" class="flex items-end border-b border-border py-1.5 pl-2 section-label">Done</div>
 			</div>
 
 			{#each groups as group (group.key)}
@@ -219,7 +224,7 @@
 	</div>
 
 	{#if legend.length > 0}
-		<ul class="hidden flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground md:flex" aria-label="Square legend">
+		<ul class={cn('hidden flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground md:flex', !framed && 'px-4')} aria-label="Square legend">
 			{#each legend as code (code)}
 				<li class="inline-flex items-center gap-1.5">
 					<span class={cn('inline-block size-2.5 rounded-[2px]', CELL_STATES[code].square, 'animate-none')} aria-hidden="true"></span>

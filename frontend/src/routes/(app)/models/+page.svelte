@@ -1,5 +1,4 @@
 <script lang="ts">
-import { Badge } from '$lib/components/ui/badge';
 import { Button } from '$lib/components/ui/button';
 import {
 	getModelsExportUrl,
@@ -13,10 +12,8 @@ import {
 import { formatApiError } from '$lib/api/core';
 import { onMount } from 'svelte';
 import { toast } from 'svelte-sonner';
-import Cpu from '@lucide/svelte/icons/cpu';
 import Upload from '@lucide/svelte/icons/upload';
 import Trophy from '@lucide/svelte/icons/trophy';
-import Gift from '@lucide/svelte/icons/gift';
 import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 import ModelsFiltersBar from '$lib/components/models/ModelsFiltersBar.svelte';
 import type { FilterTag } from '$lib/components/FilterBar.svelte';
@@ -245,7 +242,7 @@ onMount(() => {
 });
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4">
 	<PageHeader title="Models" description="Browse and manage AI models available for research.">
 		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={openComparison} disabled={selectedModelSlugs.size === 0}>
@@ -261,25 +258,17 @@ onMount(() => {
 				<span class="hidden sm:inline">Import</span>
 			</Button>
 		{/snippet}
+		{#if stats}
+			<div class="header-stats">
+				<span class="header-stat"><b>{stats.total}</b> models</span>
+				<span class="header-stat"><b>{stats.free}</b> free</span>
+				<span class="header-stat"><b>{stats.providers}</b> providers</span>
+				{#if stats.avg_input_price > 0}
+					<span class="header-stat"><b>${stats.avg_input_price.toFixed(2)}</b> avg /1M input</span>
+				{/if}
+			</div>
+		{/if}
 	</PageHeader>
-
-	<!-- Stats Bar -->
-	{#if stats}
-		<div class="flex flex-wrap items-center gap-2 text-xs">
-			<Badge variant="secondary" class="gap-1.5">
-				<Cpu class="h-3 w-3" />
-				{stats.total} models
-			</Badge>
-			<Badge variant="secondary" class="gap-1.5 text-success-fg">
-				<Gift class="h-3 w-3" />
-				{stats.free} free
-			</Badge>
-			<Badge variant="outline">{stats.providers} providers</Badge>
-			{#if stats.avg_input_price > 0}
-				<Badge variant="outline">Avg ${stats.avg_input_price.toFixed(2)}/1M input</Badge>
-			{/if}
-		</div>
-	{/if}
 
 	<ModelsFiltersBar
 		bind:searchQuery
@@ -293,9 +282,6 @@ onMount(() => {
 		{providers}
 		{syncing}
 		{activeFilters}
-		resultsText={data && !loading
-			? `Showing ${(data.page - 1) * data.per_page + 1}–${Math.min(data.page * data.per_page, data.total)} of ${data.total} models`
-			: ''}
 		onSearchInput={debouncedLoad}
 		onProviderChange={applyFilterAndReload}
 		onApplyQuickFilter={applyQuickFilter}

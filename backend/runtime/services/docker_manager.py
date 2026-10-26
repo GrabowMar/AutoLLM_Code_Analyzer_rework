@@ -311,11 +311,19 @@ def exec_in(
     return {"exit_code": int(result.exit_code or 0), "output": out or ""}
 
 
-def copy_files_in(name: str, files: dict[str, str], dest: str = "/work") -> dict[str, Any]:
+def copy_files_in(
+    name: str,
+    files: dict[str, str],
+    dest: str = "/work",
+    owner: int | None = None,
+) -> dict[str, Any]:
     """Write a mapping of ``{relative_path: content}`` into *dest* in a container.
 
     Uses ``put_archive`` (the SDK equivalent of ``docker cp``). Returns
-    ``{"status": "ok"}`` or ``{"error": ...}``.
+    ``{"status": "ok"}`` or ``{"error": ...}``. Entries are root-owned unless
+    *owner* (a uid, also used as gid) is given — pass the container user's uid
+    when that user must later delete the files (a non-root user cannot empty
+    the root-owned directories ``put_archive`` would otherwise create).
     """
     import io
     import tarfile
@@ -330,12 +338,29 @@ def copy_files_in(name: str, files: dict[str, str], dest: str = "/work") -> dict
 
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w") as tar:
+            dirs_added: set[str] = set()
             for rel_path, content in files.items():
                 safe = rel_path.lstrip("/").replace("..", "_")
+                if owner is not None:
+                    # Explicit parent entries, so the directories get the
+                    # owner too instead of being implicitly created as root.
+                    parts = safe.split("/")[:-1]
+                    for i in range(1, len(parts) + 1):
+                        dir_name = "/".join(parts[:i])
+                        if dir_name in dirs_added:
+                            continue
+                        dirs_added.add(dir_name)
+                        dir_info = tarfile.TarInfo(name=dir_name)
+                        dir_info.type = tarfile.DIRTYPE
+                        dir_info.mode = 0o755
+                        dir_info.uid = dir_info.gid = owner
+                        tar.addfile(dir_info)
                 data = (content or "").encode("utf-8")
                 info = tarfile.TarInfo(name=safe)
                 info.size = len(data)
                 info.mode = 0o644
+                if owner is not None:
+                    info.uid = info.gid = owner
                 tar.addfile(info, io.BytesIO(data))
         buf.seek(0)
         container.put_archive(dest, buf.getvalue())

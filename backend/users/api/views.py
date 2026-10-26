@@ -5,9 +5,11 @@ from django.shortcuts import get_object_or_404
 from ninja import Router
 from ninja.errors import HttpError
 
+from backend.users.activity import user_activity
 from backend.users.api.schema import BootstrapAdminCreateSchema
 from backend.users.api.schema import BootstrapStatusSchema
 from backend.users.api.schema import UpdateUserSchema
+from backend.users.api.schema import UserActivitySchema
 from backend.users.api.schema import UserSchema
 from backend.users.bootstrap import default_bootstrap_admin_email
 from backend.users.bootstrap import requires_bootstrap_admin
@@ -56,6 +58,12 @@ def list_users(request):
 @router.get("/me/", response=UserSchema)
 def retrieve_current_user(request):
     return request.auth
+
+
+@router.get("/me/activity/", response=UserActivitySchema)
+def current_user_activity(request):
+    """Counts and the most recent applications, analyses, experiments and reports of the current user."""
+    return user_activity(request.auth)
 
 
 @router.get("/{pk}/", response=UserSchema)

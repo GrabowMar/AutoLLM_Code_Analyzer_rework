@@ -2,7 +2,7 @@
  * SSE subscription utility for realtime task progress.
  *
  * Usage:
- *   const cleanup = subscribe(['generation:42', 'dashboard'], (e) => {
+ *   const cleanup = subscribe(['generation:42', 'capacity'], (e) => {
  *     console.log(e.type, e.data);
  *   }, { onState: (s) => (live = s === 'open') });
  *   // later…

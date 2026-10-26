@@ -7,6 +7,8 @@ description: >-
 category: performance
 kind: container
 target_language: python
+analysis_mode: static
+technologies: [python]
 icon: zap
 version: "0.8"
 docs_url: https://github.com/tonybaloney/perflint
@@ -20,6 +22,7 @@ verify_cmd: "perflint --version"
 uninstall_cmd: "rm -rf /home/analyzer/.venvs/perflint /home/analyzer/.local/bin/perflint"
 run_cmd: "perflint {target} --output-format=json --exit-zero --ignore=node_modules,.venv 2>/dev/null"
 parser_key: perflint
+file_patterns: ["*.py"]
 run_timeout: 180
 install_timeout: 300
 display_order: 30

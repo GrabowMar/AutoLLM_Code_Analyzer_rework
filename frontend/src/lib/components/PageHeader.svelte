@@ -1,13 +1,14 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { Popover } from 'bits-ui';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
-	import { page } from '$app/state';
-	import { navSectionFor } from '$lib/nav';
+	import CircleHelp from '@lucide/svelte/icons/circle-help';
+	import { pageTitle } from '$lib/stores/page-title.svelte';
 
 	interface Props {
 		title: string;
 		description?: string;
-		/** Parent page link shown above the title on detail/create pages. */
+		/** Parent page; rendered as a back button before the title on detail/create pages. */
 		back?: { href: string; label: string };
 		/** Browser tab title; defaults to `title`. */
 		documentTitle?: string;
@@ -15,13 +16,27 @@
 		meta?: Snippet;
 		/** Right-aligned page actions (primary action last). */
 		actions?: Snippet;
-		/** Extra content under the description (chips, stats line). */
+		/** Reference text (glossary, how-it-works) in a popover behind a `?` next to the title. */
+		help?: Snippet;
+		/** A short line under the description (stats chips, IDs); rendered as the card's footer strip. */
 		children?: Snippet;
+		/** Visual before the title (avatar, entity icon). */
+		leading?: Snippet;
+		/**
+		 * Page-level navigation or mode switch (a `Tabs.List`, a `Segmented`), flush along the card's
+		 * bottom edge. Wrap the page in `Tabs.Root` so the list and its panels share state.
+		 */
+		nav?: Snippet;
 	}
 
-	let { title, description, back, documentTitle, meta, actions, children }: Props = $props();
+	let { title, description, back, documentTitle, meta, actions, help, children, leading, nav }: Props = $props();
 
-	const owner = $derived(navSectionFor(page.url?.pathname ?? '/'));
+	$effect(() => {
+		pageTitle.current = title;
+		return () => {
+			if (pageTitle.current === title) pageTitle.current = '';
+		};
+	});
 </script>
 
 <svelte:head>
@@ -29,31 +44,42 @@
 </svelte:head>
 
 <header class="page-header">
-	{#if back}
-		<a href={back.href} class="back-link">
-			<ArrowLeft class="h-3.5 w-3.5" aria-hidden="true" />
-			{back.label}
-		</a>
-	{:else if owner}
-		<p class="page-eyebrow">
-			<span class="tabular-nums text-primary">{String(owner.index).padStart(2, '0')}</span>
-			<span aria-hidden="true">·</span>
-			{owner.section.title}
-		</p>
-	{/if}
-	<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-		<div class="min-w-0 space-y-1">
-			<div class="flex min-w-0 flex-wrap items-center gap-2">
-				<h1 class="min-w-0 break-words">{title}</h1>
+	<div class="page-header-main">
+		{#if back}
+			<a href={back.href} class="page-header-back" aria-label="Back to {back.label}" title="Back to {back.label}">
+				<ArrowLeft class="size-4" aria-hidden="true" />
+			</a>
+		{/if}
+		{@render leading?.()}
+		<div class="page-header-body">
+			<div class="page-header-titlebar">
+				<h1>{title}</h1>
+				{#if help}
+					<Popover.Root>
+						<Popover.Trigger class="page-header-help-trigger" aria-label="About this page">
+							<CircleHelp class="size-4" aria-hidden="true" />
+						</Popover.Trigger>
+						<Popover.Portal>
+							<Popover.Content side="bottom" align="start" sideOffset={6} collisionPadding={12} class="page-header-help">
+								{@render help()}
+							</Popover.Content>
+						</Popover.Portal>
+					</Popover.Root>
+				{/if}
 				{@render meta?.()}
 			</div>
 			{#if description}
-				<p class="max-w-3xl">{description}</p>
+				<p class="page-header-desc">{description}</p>
 			{/if}
-			{@render children?.()}
 		</div>
 		{#if actions}
-			<div class="flex shrink-0 flex-wrap items-center gap-2">{@render actions()}</div>
+			<div class="page-header-actions">{@render actions()}</div>
 		{/if}
 	</div>
+	{#if children}
+		<div class="page-header-extra">{@render children()}</div>
+	{/if}
+	{#if nav}
+		<div class="page-header-nav">{@render nav()}</div>
+	{/if}
 </header>

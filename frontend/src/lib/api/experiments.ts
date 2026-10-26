@@ -133,8 +133,11 @@ export interface ExperimentComparabilityRow {
   /** "slug@v" or null. */
   profile: string | null;
   param_overrides: Record<string, unknown>;
-  /** Local endpoints: where the condition runs. */
-  endpoint?: { slug: string; kind: string; max_concurrency?: number } | null;
+  /** Where the condition runs: an endpoint slug ("openrouter" for the system endpoint). */
+  endpoint?:
+    | string
+    | { slug: string; kind: string; max_concurrency?: number }
+    | null;
   /** Every problem, blocking or not. */
   problems: string[];
   /** The blocking subset of `problems`. */

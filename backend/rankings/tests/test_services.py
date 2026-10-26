@@ -522,3 +522,21 @@ def test_aggregate_rankings_variance_none_below_two_trials():
     # completed but never analyzed: no density samples at all
     assert row["variance"]["n_jobs"] == 0
     assert row["variance"]["density_per_kloc_stdev"] is None
+
+
+def test_aggregate_rankings_skips_ungraded_pass_rate():
+    """An infra_error evaluation stores ``pass_rate: None``: excluded from the mean, not counted as 0."""
+    user = UserFactory()
+    model = LLMModelFactory(model_id="infra/model")
+    for functional in (
+        {"status": "passed", "passed": True, "pass_rate": 0.8},
+        {"status": "infra_error", "passed": False, "pass_rate": None},
+    ):
+        GenerationJobFactory(
+            created_by=user,
+            model=model,
+            status=GenerationJob.Status.COMPLETED,
+            metrics={"lines_of_code": 100, "functional": functional},
+        )
+    row = next(r for r in services.aggregate_rankings() if r["model_id"] == model.model_id)
+    assert row["functional_pass_rate"] == 0.8

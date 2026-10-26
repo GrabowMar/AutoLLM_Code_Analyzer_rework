@@ -184,11 +184,11 @@ fn: () => clearCaches() as Promise<Record<string, unknown>>,
 ];
 </script>
 
-<div class="space-y-6">
+<div class="space-y-4">
 <PageHeader title="System Monitor" description="Real-time metrics and maintenance tools.">
-{#snippet actions()}
+{#snippet meta()}
 {#if snapshot}
-<span class="text-xs text-muted-foreground">Auto-refreshing every 10s</span>
+<span title="Auto-refreshing every 10s"><StatusBadge status="running" tone="info" label="Live" /></span>
 {/if}
 {/snippet}
 </PageHeader>
@@ -331,30 +331,19 @@ fn: () => clearCaches() as Promise<Record<string, unknown>>,
 </div>
 
 <!-- DB STATS -->
-<Card.Root>
-<Card.Header class="pb-2"><Card.Title>Database</Card.Title></Card.Header>
-<Card.Content class="space-y-3">
-<div class="grid grid-cols-2 gap-3 sm:grid-cols-4 text-sm">
-<div class="kpi-card">
-<div class="kpi-label">Backends</div>
-<div class="kpi-value">{dbStats().numbackends}</div>
+<Card.Root class="gap-0 py-0">
+<Card.Header class="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border py-3">
+<Card.Title>Database</Card.Title>
+<div class="header-stats">
+<span class="header-stat"><b>{dbStats().numbackends}</b> backends</span>
+<span class="header-stat"><b>{dbStats().xact_commit?.toLocaleString()}</b> commits</span>
+<span class="header-stat"><b>{dbStats().xact_rollback}</b> rollbacks</span>
+<span class="header-stat"><b class={dbStats().deadlocks > 0 ? 'text-danger-fg' : ''}>{dbStats().deadlocks}</b> deadlocks</span>
 </div>
-<div class="kpi-card">
-<div class="kpi-label">Commits</div>
-<div class="kpi-value">{dbStats().xact_commit?.toLocaleString()}</div>
-</div>
-<div class="kpi-card">
-<div class="kpi-label">Rollbacks</div>
-<div class="kpi-value">{dbStats().xact_rollback}</div>
-</div>
-<div class="kpi-card">
-<div class="kpi-label">Deadlocks</div>
-<div class="kpi-value {dbStats().deadlocks > 0 ? 'text-danger-fg' : ''}">{dbStats().deadlocks}</div>
-</div>
-</div>
+</Card.Header>
 {#if topTables().length > 0}
-<div>
-<p class="section-label mb-2">Top Tables by Size</p>
+<Card.Content class="px-4 py-3">
+<p class="section-label mb-1">Top Tables by Size</p>
 <div class="divide-y">
 {#each topTables() as t}
 <div class="flex items-center justify-between py-1.5 text-sm">
@@ -363,33 +352,41 @@ fn: () => clearCaches() as Promise<Record<string, unknown>>,
 </div>
 {/each}
 </div>
-</div>
-{/if}
 </Card.Content>
+{/if}
 </Card.Root>
 
-<!-- APP STATS -->
-<Card.Root>
-<Card.Header class="pb-2"><Card.Title>Application Stats</Card.Title></Card.Header>
-<Card.Content class="space-y-3">
-<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+<!-- APP STATS: one row per model instead of a tile each -->
+<Card.Root class="gap-0 overflow-clip py-0">
+<Card.Header class="border-b border-border py-3"><Card.Title>Application Stats</Card.Title></Card.Header>
+<Card.Content class="p-0">
+<div class="table-frame" {@attach tableFrame}>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th class="num">Last 24h</th>
+<th>By status</th>
+</tr>
+</thead>
+<tbody>
 {#each modelSections as model}
-<div class="rounded-md border p-3 space-y-2">
-<p class="text-xs font-medium text-muted-foreground">{model.label}</p>
-<p class="text-sm">
-<span class="font-semibold">{modelStat(model.key).last_24h}</span>
-<span class="text-muted-foreground text-xs"> in last 24h</span>
-</p>
-<div class="space-y-0.5">
+<tr>
+<td class="text-sm font-medium">{model.label}</td>
+<td class="num font-mono text-sm">{modelStat(model.key).last_24h}</td>
+<td class="text-xs text-muted-foreground">
+<span class="flex flex-wrap gap-x-3 gap-y-0.5">
 {#each byStatus(model.key) as [status, count]}
-<div class="flex justify-between text-xs">
-<span class="capitalize text-muted-foreground">{status}</span>
-<span class="font-medium">{count}</span>
-</div>
+<span class="whitespace-nowrap"><span class="capitalize">{status}</span> <b class="font-mono font-medium text-foreground tabular-nums">{count}</b></span>
+{:else}
+—
 {/each}
-</div>
-</div>
+</span>
+</td>
+</tr>
 {/each}
+</tbody>
+</table>
 </div>
 </Card.Content>
 </Card.Root>

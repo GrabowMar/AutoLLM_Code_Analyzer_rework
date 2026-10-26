@@ -17,25 +17,92 @@ from typing import Any
 
 from backend.analysis.services.base import FindingData
 from backend.analysis.services.base import ParsedOutput
+from backend.analysis.services.parsers import _compact
+from backend.analysis.services.parsers import _float
+from backend.analysis.services.parsers import _label
 from backend.analysis.services.parsers import _loads
+from backend.analysis.services.parsers import _pyflakes_severity
+from backend.analysis.services.parsers import failure_lines
 from backend.analysis.services.parsers import parse_eslint
 from backend.analysis.services.parsers import parse_pylint
 from backend.analysis.services.parsers import register
+from backend.analysis.services.parsers import section_bodies
 
-_SECTION_RE = re.compile(r"^### (.+)$", re.MULTILINE)
 _CWE_RE = re.compile(r"CWE-(\d+)", re.IGNORECASE)
 
 
 def _sections(raw: str) -> list[tuple[str, Any]]:
-    """``[(path, parsed_json)]`` for ``### path`` sections; unparsable bodies are dropped."""
-    parts = _SECTION_RE.split(raw or "")
+    """``[(path, parsed_json)]`` for ``### path`` sections; unparsable bodies are dropped
+    (``parsers.parse`` reports them as manifests that were not analyzed)."""
     out: list[tuple[str, Any]] = []
-    # split() yields [preamble, path1, body1, path2, body2, ...]
-    for path, body in zip(parts[1::2], parts[2::2], strict=False):
+    for path, body in section_bodies(raw):
         data = _loads(body)
         if data is not None:
-            out.append((path.strip(), data))
+            out.append((path, data))
     return out
+
+
+# pip / npm resolution errors the audit commands echo as "!! " lines.
+_PIP_NO_DIST_RE = re.compile(r"No matching distribution found for (\S+)")
+_PIP_NO_VERSIONS_RE = re.compile(r"satisfies the requirement (\S+) \(from versions: none\)")
+_NPM_NOT_IN_REGISTRY_RE = re.compile(r"'(\S+?)' is not in this registry")
+_NPM_NO_VERSION_RE = re.compile(r"No matching version found for (\S+?)\.?$")
+_REQ_NAME_RE = re.compile(r"^(@?[A-Za-z0-9_.\-/]+?)(?:\[.*\])?(?:[=<>!~@^].*)?$")
+
+
+def _unresolvable(path: str, spec: str, *, exists: bool, ecosystem: str) -> FindingData:
+    """A declared dependency the package index cannot satisfy: the app cannot be installed.
+
+    A package missing from the registry is the hallucinated-dependency
+    ("slopsquatting") pattern: anyone may later publish that name.
+    """
+    m = _REQ_NAME_RE.match(spec)
+    name = m.group(1) if m else spec
+    if exists:
+        title = f"{spec}: no such version on {ecosystem}"
+        rule, severity = "nonexistent-version", "medium"
+        suggestion = f"Pin {name} to a released version"
+    else:
+        title = f"{name}: package does not exist on {ecosystem}"
+        rule, severity = "nonexistent-package", "high"
+        suggestion = f"Remove {name} or replace it with the intended, existing package"
+    return FindingData(
+        severity=severity,
+        category="dependency",
+        title=title,
+        description="The dependency cannot be resolved, so installing the app fails. "
+        + ("" if exists else "An unregistered package name can be claimed by anyone (hallucinated dependency)."),
+        suggestion=suggestion,
+        file_path=path,
+        rule_id=rule,
+        confidence="high",
+        tool_specific_data={"package": name, "requirement": spec, "ecosystem": ecosystem},
+    )
+
+
+def _resolution_findings(raw: str, ecosystem: str) -> list[FindingData]:
+    findings: list[FindingData] = []
+    for path, body in section_bodies(raw):
+        lines = failure_lines(body)
+        text = "\n".join(lines)
+        seen: set[str] = set()
+        if ecosystem == "PyPI":
+            missing = set(_PIP_NO_VERSIONS_RE.findall(text))
+            for spec in _PIP_NO_DIST_RE.findall(text):
+                if spec not in seen:
+                    seen.add(spec)
+                    findings.append(_unresolvable(path, spec, exists=spec not in missing, ecosystem=ecosystem))
+        else:
+            for spec in _NPM_NOT_IN_REGISTRY_RE.findall(text):
+                if spec not in seen:
+                    seen.add(spec)
+                    findings.append(_unresolvable(path, spec, exists=False, ecosystem=ecosystem))
+            for line in lines:
+                hit = _NPM_NO_VERSION_RE.search(line)
+                if hit and hit.group(1) not in seen:
+                    seen.add(hit.group(1))
+                    findings.append(_unresolvable(path, hit.group(1), exists=True, ecosystem=ecosystem))
+    return findings
 
 
 def _json_docs(raw: str) -> list[Any]:
@@ -67,10 +134,10 @@ def _cwe(value: Any) -> dict[str, str]:
 # --- Dependency vulnerabilities ---------------------------------------------
 
 
-@register("pip_audit")
+@register("pip_audit", sectioned=True)
 def parse_pip_audit(raw: str) -> list[FindingData]:
     """``pip-audit -f json``: ``{"dependencies": [{name, version, vulns: [...]}]}``."""
-    findings: list[FindingData] = []
+    findings: list[FindingData] = _resolution_findings(raw, "PyPI")
     for path, data in _sections(raw):
         if not isinstance(data, dict):
             continue
@@ -89,21 +156,29 @@ def parse_pip_audit(raw: str) -> list[FindingData]:
                 description = vuln.get("description") or ""
                 findings.append(
                     FindingData(
-                        # The OSV records pip-audit returns carry no CVSS score.
+                        # The OSV records pip-audit returns carry no severity
+                        # or CVSS score: ``tool_severity`` stays empty.
                         severity="medium",
                         category="dependency",
                         title=f"{name} {version}: {cve or vid}",
                         description=description,
-                        suggestion=f"Upgrade {name} to {' or '.join(fixes)}" if fixes else "No fixed release yet",
+                        suggestion=f"Upgrade {name} to {' or '.join(fixes)}" if fixes else "",
                         file_path=path,
                         rule_id=vid,
                         confidence="high",
-                        tool_specific_data={
-                            "package": name,
-                            "version": version,
-                            "aliases": aliases,
-                            "fix_versions": fixes,
-                        },
+                        tool_specific_data=_compact(
+                            {
+                                "package": name,
+                                "installed_version": version,
+                                "fixed_versions": fixes,
+                                "vuln_id": vid,
+                                "aliases": aliases,
+                                "manifest": path,
+                                # Legacy keys.
+                                "version": version,
+                                "fix_versions": fixes,
+                            },
+                        ),
                     ),
                 )
     return findings
@@ -112,14 +187,14 @@ def parse_pip_audit(raw: str) -> list[FindingData]:
 _NPM_SEVERITY = {"critical": "critical", "high": "high", "moderate": "medium", "low": "low", "info": "info"}
 
 
-@register("npm_audit")
+@register("npm_audit", sectioned=True)
 def parse_npm_audit(raw: str) -> list[FindingData]:
     """``npm audit --json`` (report v2): one finding per advisory.
 
     Entries whose ``via`` holds only package names are inherited from another
     vulnerable package and are already reported through that package.
     """
-    findings: list[FindingData] = []
+    findings: list[FindingData] = _resolution_findings(raw, "npm")
     for path, data in _sections(raw):
         if not isinstance(data, dict):
             continue
@@ -140,22 +215,36 @@ def parse_npm_audit(raw: str) -> list[FindingData]:
                 if key in seen:
                     continue
                 seen.add(key)
+                cvss = via.get("cvss") or {}
+                # npm prints score 0 / vectorString null for an unscored advisory.
+                score = _float(cvss.get("score")) or None
+                url = str(via.get("url") or "")
+                advisory_id = url.rsplit("/", 1)[-1] if url else ""
                 findings.append(
                     FindingData(
                         severity=_NPM_SEVERITY.get(str(via.get("severity") or entry.get("severity")), "medium"),
                         category="dependency",
                         title=f"{pkg} {via.get('range', '')}: {via.get('title', 'Vulnerable dependency')}".strip(),
-                        description=via.get("url", ""),
+                        # npm audit's report has no advisory text, only its URL (in docs_url).
+                        description="",
                         suggestion=suggestion,
                         file_path=path,
-                        rule_id=str(via.get("url", "")).rsplit("/", 1)[-1] or str(via.get("source", "")),
+                        rule_id=advisory_id or str(via.get("source", "")),
                         confidence="high",
-                        tool_specific_data={
-                            "package": pkg,
-                            "direct": bool(entry.get("isDirect")),
-                            "cvss": (via.get("cvss") or {}).get("score"),
-                            **_cwe(via.get("cwe")),
-                        },
+                        tool_severity=_label(via.get("severity") or entry.get("severity")),
+                        tool_specific_data=_compact(
+                            {
+                                "package": pkg,
+                                "direct": bool(entry.get("isDirect")),
+                                "vuln_id": advisory_id,
+                                "docs_url": url,
+                                "cvss_score": score,
+                                "cvss_vector": cvss.get("vectorString") if score else None,
+                                "manifest": path,
+                                "cvss": score,  # legacy key
+                                **_cwe(via.get("cwe")),
+                            },
+                        ),
                     ),
                 )
     return findings
@@ -172,7 +261,7 @@ _DEPTRY_SEVERITY = {
 }
 
 
-@register("deptry")
+@register("deptry", sectioned=True)
 def parse_deptry(raw: str) -> list[FindingData]:
     """``deptry --json-output``: ``[{error: {code, message}, module, location}]``."""
     findings: list[FindingData] = []
@@ -187,13 +276,11 @@ def parse_deptry(raw: str) -> list[FindingData]:
             message = error.get("message", "")
             findings.append(
                 FindingData(
+                    # deptry rates nothing: ``tool_severity`` stays empty.
                     severity=_DEPTRY_SEVERITY.get(code, "low"),
                     category="dependency",
                     title=message or f"{code} {item.get('module', '')}",
                     description=message,
-                    suggestion=(
-                        f"Add the package providing '{item.get('module')}' to requirements" if code == "DEP001" else ""
-                    ),
                     file_path=prefix + str(loc.get("file") or ""),
                     line_number=loc.get("line"),
                     column_number=loc.get("column"),
@@ -205,7 +292,7 @@ def parse_deptry(raw: str) -> list[FindingData]:
     return findings
 
 
-@register("depcheck")
+@register("depcheck", sectioned=True)
 def parse_depcheck(raw: str) -> list[FindingData]:
     """``depcheck --json``: unused ``dependencies``/``devDependencies`` and ``missing``."""
     findings: list[FindingData] = []
@@ -221,7 +308,6 @@ def parse_depcheck(raw: str) -> list[FindingData]:
                     category="dependency",
                     title=f"'{pkg}' is imported but missing from package.json",
                     description=f"Used in {len(files or [])} file(s); the build fails until it is declared.",
-                    suggestion=f"npm install {pkg}",
                     file_path=first,
                     rule_id="missing-dependency",
                     confidence="high",
@@ -235,11 +321,10 @@ def parse_depcheck(raw: str) -> list[FindingData]:
                         severity=severity,
                         category="dependency",
                         title=f"'{pkg}' is declared in {key} but never imported",
-                        suggestion=f"Remove {pkg} from package.json if it is not needed",
                         file_path=root + "package.json" if root else manifest,
                         rule_id=f"unused-{key}",
                         confidence="medium",
-                        tool_specific_data={"package": pkg},
+                        tool_specific_data={"package": pkg, "manifest": manifest},
                     ),
                 )
     return findings
@@ -248,16 +333,6 @@ def parse_depcheck(raw: str) -> list[FindingData]:
 # --- Python lint / performance ----------------------------------------------
 
 _FLAKE8_LINE_RE = re.compile(r"^(?P<file>.+?):(?P<line>\d+):(?P<col>\d+): (?P<code>[A-Z]+\d+) (?P<msg>.*)$")
-
-
-def _flake8_severity(code: str) -> str:
-    # E9: syntax/IO errors; F63/F7/F82: invalid comparisons, misplaced
-    # statements, undefined names: all crash or misbehave at runtime.
-    if code.startswith(("E9", "F63", "F7", "F82")):
-        return "high"
-    if code.startswith("F"):
-        return "medium"
-    return "low"
 
 
 @register("flake8")
@@ -271,7 +346,7 @@ def parse_flake8(raw: str) -> list[FindingData]:
         code = m.group("code")
         findings.append(
             FindingData(
-                severity=_flake8_severity(code),
+                severity=_pyflakes_severity(code),
                 category="quality" if code.startswith(("F", "E9", "C9")) else "style",
                 title=m.group("msg"),
                 description=m.group("msg"),
@@ -292,6 +367,8 @@ def parse_perflint(raw: str) -> list[FindingData]:
     for f in findings:
         f.category = "performance"
         f.severity = "low"
+        # Perflint's checks (W8xxx) are a plugin's: pylint's message pages do not cover them.
+        f.tool_specific_data.pop("docs_url", None)
     return findings
 
 
@@ -329,18 +406,26 @@ def parse_lizard(raw: str) -> ParsedOutput:
         functions.append({"file": rec["file"], "name": rec["function"], "line": start, "ccn": ccn, "nloc": nloc})
         severity = next((sev for limit, sev in _LIZARD_THRESHOLDS if ccn > limit), None)
         if severity:
+            end_line = int(rec["end"]) if rec["end"].isdigit() else start
             findings.append(
                 FindingData(
+                    # Lizard rates nothing (only a CCN warning threshold):
+                    # ``tool_severity`` stays empty.
                     severity=severity,
                     category="performance",
                     title=f"Function '{rec['function']}' has cyclomatic complexity {ccn}",
                     description=f"{nloc} lines of code, {params} parameter(s), {length} lines long.",
-                    suggestion="Split it into smaller functions or simplify the branching",
                     file_path=rec["file"],
                     line_number=start,
                     rule_id="CCN",
                     confidence="high",
-                    tool_specific_data={"ccn": ccn, "nloc": nloc, "end_line": int(rec["end"] or start)},
+                    tool_specific_data={
+                        "complexity": ccn,
+                        "function": rec["function"],
+                        "nloc": nloc,
+                        "end_line": end_line,
+                        "ccn": ccn,  # legacy key
+                    },
                 ),
             )
     if not functions:
@@ -420,9 +505,19 @@ def parse_htmlhint(raw: str) -> list[FindingData]:
                         code_snippet=str(msg.get("evidence") or "")[:300],
                         rule_id=rule.get("id", ""),
                         confidence="high",
+                        tool_severity=_label(msg.get("type")),
+                        # htmlhint links each rule's page in its report.
+                        tool_specific_data=_compact({"docs_url": rule.get("link")}),
                     ),
                 )
     return findings
+
+
+def _stylelint_docs_url(rule: str) -> str:
+    """The page of a core stylelint rule; plugin rules (``plugin/rule``) and syntax errors have none."""
+    if re.fullmatch(r"[a-z][a-z0-9-]*", rule or ""):
+        return f"https://stylelint.io/user-guide/rules/{rule}"
+    return ""
 
 
 @register("stylelint")
@@ -433,6 +528,7 @@ def parse_stylelint(raw: str) -> list[FindingData]:
         for entry in doc if isinstance(doc, list) else []:
             for warning in (entry.get("warnings") or []) + (entry.get("parseErrors") or []):
                 text = warning.get("text", "CSS issue")
+                rule = warning.get("rule", "parse-error")
                 findings.append(
                     FindingData(
                         severity="medium" if warning.get("severity") == "error" else "low",
@@ -443,8 +539,16 @@ def parse_stylelint(raw: str) -> list[FindingData]:
                         file_path=entry.get("source", ""),
                         line_number=warning.get("line"),
                         column_number=warning.get("column"),
-                        rule_id=warning.get("rule", "parse-error"),
+                        rule_id=rule,
                         confidence="high",
+                        tool_severity=_label(warning.get("severity")),
+                        tool_specific_data=_compact(
+                            {
+                                "docs_url": _stylelint_docs_url(rule) if rule != "parse-error" else "",
+                                "end_line": warning.get("endLine"),
+                                "end_column": warning.get("endColumn"),
+                            },
+                        ),
                     ),
                 )
     return findings
@@ -466,12 +570,19 @@ def parse_shellcheck(raw: str) -> list[FindingData]:
                     category="quality",
                     title=item.get("message", "Shell issue"),
                     description=item.get("message", ""),
-                    suggestion=f"See https://www.shellcheck.net/wiki/SC{code}" if code else "",
                     file_path=item.get("file", ""),
                     line_number=item.get("line"),
                     column_number=item.get("column"),
                     rule_id=f"SC{code}" if code else "",
                     confidence="high",
+                    tool_severity=_label(item.get("level")),
+                    tool_specific_data=_compact(
+                        {
+                            "docs_url": f"https://www.shellcheck.net/wiki/SC{code}" if code else None,
+                            "end_line": item.get("endLine"),
+                            "end_column": item.get("endColumn"),
+                        },
+                    ),
                 ),
             )
     return findings

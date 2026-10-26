@@ -1,21 +1,21 @@
 <script lang="ts">
-	// One experiment: header with lifecycle actions, state banners (digest
-	// drift, executor, offline endpoints, legacy rows) and five tabs —
-	// Overview (live monitor), Results, Runs, Design, Automation. `?tab=` keeps
-	// the tab in the URL. Live data comes from one ExperimentLive per launched
-	// experiment (SSE with a polling fallback).
+	// One experiment, laid out like a study record: the masthead (accession
+	// id, hypothesis, design spec, data-collection progress, lifecycle
+	// actions), state banners (digest drift, executor, offline endpoints,
+	// legacy rows) and five numbered sections — 1 Abstract, 2 Method,
+	// 3 Results, 4 Data, 5 Operations. `?tab=` keeps the section in the URL
+	// (older names still resolve). Live data comes from one ExperimentLive per
+	// launched experiment (SSE with a polling fallback).
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import PageHeader from '$lib/components/PageHeader.svelte';
-	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import {
@@ -37,23 +37,27 @@
 	import { loadAppSpecCatalog } from '$lib/components/generator';
 	import type { AppRequirementTemplate } from '$lib/api/generation';
 	import { ExperimentLive } from '$lib/components/experiments/live.svelte';
+	import LiveStrip from '$lib/components/experiments/monitor/LiveStrip.svelte';
+	import { formatUsd } from '$lib/components/generator/batches/batch-utils';
+	import { scrollHint } from '$lib/utils/scroll-hint';
 	import {
-		MODE_LABELS,
 		activeCells,
+		bottleneckLabel,
 		downloadBlob,
-		effectivePolicyLabel,
-		experimentTones,
+		formatEta,
 		formatHours,
 		isActive,
 		isTerminal,
 		pauseReasonLabel,
 		plural,
 	} from '$lib/components/experiments/format';
-	import OverviewTab from '$lib/components/experiments/tabs/OverviewTab.svelte';
+	import StudyMasthead from '$lib/components/experiments/study/StudyMasthead.svelte';
+	import { EXPERIMENT_TABS, type ExperimentTab } from '$lib/components/experiments/study/tabs';
+	import SummaryTab from '$lib/components/experiments/tabs/SummaryTab.svelte';
+	import MethodTab from '$lib/components/experiments/tabs/MethodTab.svelte';
 	import ResultsTab from '$lib/components/experiments/tabs/ResultsTab.svelte';
-	import RunsTab from '$lib/components/experiments/tabs/RunsTab.svelte';
-	import DesignTab from '$lib/components/experiments/tabs/DesignTab.svelte';
-	import AutomationTab from '$lib/components/experiments/tabs/AutomationTab.svelte';
+	import DataTab from '$lib/components/experiments/tabs/DataTab.svelte';
+	import OperationsTab from '$lib/components/experiments/tabs/OperationsTab.svelte';
 	import Archive from '@lucide/svelte/icons/archive';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import Copy from '@lucide/svelte/icons/copy';
@@ -69,7 +73,6 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { PageData } from './$types';
-	import type { ExperimentTab } from './+page';
 
 	let { data }: { data: PageData } = $props();
 
@@ -154,13 +157,16 @@
 	});
 	onDestroy(() => live?.destroy());
 
-	// ── tabs ────────────────────────────────────────────────────────
-	const defaultTab = $derived<ExperimentTab>(experiment?.status === 'draft' ? 'design' : 'overview');
-	const tab = $derived<ExperimentTab>(data.tab ?? defaultTab);
+	// ── sections ────────────────────────────────────────────────────
+	const DEFAULT_TAB: ExperimentTab = 'summary';
+	const tab = $derived<ExperimentTab>(data.tab ?? DEFAULT_TAB);
+	const isDraft = $derived(experiment?.status === 'draft');
+	/** Drafts have no runs and no results yet. */
+	const disabledTabs = $derived(new Set<ExperimentTab>(isDraft ? ['results', 'data'] : []));
 
 	function setTab(next: string) {
 		const url = new URL(page.url);
-		if (next === defaultTab) url.searchParams.delete('tab');
+		if (next === DEFAULT_TAB) url.searchParams.delete('tab');
 		else url.searchParams.set('tab', next);
 		goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
 	}
@@ -269,6 +275,12 @@
 		experiment && isActive(experiment.status) ? (status?.endpoints ?? []).filter((e) => !e.online && e.kind !== 'openrouter') : []
 	);
 	const legacyPending = $derived(status?.legacy_pending ?? 0);
+	// Throughput, ETA and the bottleneck only mean something while it runs.
+	const finished = $derived(!!experiment && isTerminal(live?.status?.status ?? experiment.status));
+	const bottleneck = $derived(bottleneckLabel(status?.bottleneck));
+	const tokensPerS = $derived((status?.endpoints ?? []).reduce((sum, e) => sum + (e.tokens_per_s_5m ?? 0), 0));
+	const liveCost = $derived((status?.conditions ?? []).reduce((sum, c) => sum + (c.cost_usd ?? 0), 0));
+	const costUsd = $derived(status ? liveCost : (experiment?.cost_usd ?? 0));
 
 	const confirmCopy = $derived.by((): { title: string; description: string; label: string; destructive?: boolean } => {
 		const exp = experiment;
@@ -280,7 +292,7 @@
 					title: `Launch ${plural(p?.total_jobs ?? exp?.total_cells ?? 0, 'cell')}?`,
 					description: `${p ? `${p.conditions} conditions × ${p.apps} apps × ${p.repeats} repeats` : ''}${eps ? ` on ${eps}` : ''}${
 						p ? ` · estimated ${formatHours(p.estimate.total_hours)}` : ''
-					}. The design is frozen once it launches.`,
+					}. The design, baseline and seeds are frozen once it launches.`,
 					label: 'Launch',
 				};
 			}
@@ -314,65 +326,117 @@
 	});
 </script>
 
-<div class="space-y-6">
-	<PageHeader title={experiment?.name ?? 'Experiment'} back={{ href: '/experiments', label: 'Experiments' }}>
-		{#snippet meta()}
-			{#if experiment}
-				<StatusBadge status={live?.status?.status ?? experiment.status} tones={experimentTones} />
-				<Badge variant="outline">{MODE_LABELS[experiment.mode] ?? experiment.mode}</Badge>
-				<Badge variant="outline" title="Run order">
-					{effectivePolicyLabel(status?.policy_effective ?? null, experiment.scheduling_policy)}
-				</Badge>
+{#snippet actions()}
+	{#if experiment}
+		{@const s = experiment.status}
+		{#if s !== 'draft'}
+			<span class="inline-flex" role="group" aria-label="Download the dataset">
+				<Button variant="outline" size="sm" class="rounded-r-none" disabled={pending === 'export'} onclick={() => doExport('json')} title="Research export (JSON)">
+					{#if pending === 'export'}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Download />{/if}JSON
+				</Button>
+				<Button variant="outline" size="sm" class="-ml-px rounded-l-none" disabled={pending === 'export'} onclick={() => doExport('csv')} title="Runs as CSV">CSV</Button>
+			</span>
+		{/if}
+		{#if s === 'draft'}
+			<Button variant="outline" size="sm" onclick={() => ask('delete')}><Trash2 />Delete</Button>
+			<Button variant="outline" size="sm" href="/experiments/new?edit={experiment.id}"><Pencil />Edit</Button>
+			<Button size="sm" disabled={pending === 'launch'} onclick={() => askLaunch('launch')}>
+				{#if pending === 'launch'}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Rocket />{/if}Launch
+			</Button>
+		{:else if s === 'running'}
+			<Button variant="outline" size="sm" onclick={() => ask('cancel')}><Square />Cancel</Button>
+			<Button size="sm" disabled={pending === 'pause'} onclick={() => run('pause', () => pauseExperiment(experiment!.id), 'Experiment paused')}>
+				{#if pending === 'pause'}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Pause />{/if}Pause
+			</Button>
+		{:else if s === 'paused'}
+			<Button variant="outline" size="sm" onclick={() => ask('cancel')}><Square />Cancel</Button>
+			{#if !drift}
+				<Button size="sm" disabled={pending === 'resume'} onclick={() => run('resume', () => resumeExperiment(experiment!.id), 'Experiment resumed')}>
+					{#if pending === 'resume'}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Play />{/if}Resume
+				</Button>
 			{/if}
-		{/snippet}
-		{#snippet actions()}
-			{#if experiment}
-				{@const s = experiment.status}
-				<span class="inline-flex">
-					<Button variant="outline" size="sm" class="rounded-r-none" disabled={pending === 'export'} onclick={() => doExport('json')} title="Export as JSON">
-						{#if pending === 'export'}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Download />{/if}JSON
-					</Button>
-					<Button variant="outline" size="sm" class="-ml-px rounded-l-none" disabled={pending === 'export'} onclick={() => doExport('csv')} title="Export the runs as CSV">CSV</Button>
+		{:else if s === 'completed' || s === 'cancelled'}
+			<Button variant="outline" size="sm" onclick={() => ask('archive')}><Archive />Archive</Button>
+			<Button variant={failedCells > 0 ? 'outline' : 'default'} size="sm" href="/experiments/new?from={experiment.id}" title="Replicate: a new draft with the same design">
+				<Copy />Clone
+			</Button>
+			{#if failedCells > 0}
+				<Button size="sm" disabled={pending === 'topup'} onclick={() => askLaunch('topup')}>
+					{#if pending === 'topup'}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<RotateCcw />{/if}Top up failed
+				</Button>
+			{/if}
+		{:else}
+			<Button variant="outline" size="sm" href="/experiments/new?from={experiment.id}"><Copy />Clone</Button>
+		{/if}
+	{/if}
+{/snippet}
+
+{#snippet progress()}
+	{#if live && status}
+		<div class="space-y-1.5">
+			<div class="header-stats">
+				<span class="header-stat" title={status.cells.retried ? `${status.cells.retried} retried` : undefined}>
+					<b>{(status.cells.done + status.cells.failed_final).toLocaleString()}/{status.cells.total.toLocaleString()}</b> cells collected
 				</span>
-				{#if s === 'draft'}
-					<Button variant="outline" size="sm" onclick={() => ask('delete')}><Trash2 />Delete</Button>
-					<Button variant="outline" size="sm" href="/experiments/new?edit={experiment.id}"><Pencil />Edit</Button>
-					<Button size="sm" disabled={pending === 'launch'} onclick={() => askLaunch('launch')}>
-						{#if pending === 'launch'}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Rocket />{/if}Launch
-					</Button>
-				{:else if s === 'running'}
-					<Button variant="outline" size="sm" onclick={() => ask('cancel')}><Square />Cancel</Button>
-					<Button size="sm" disabled={pending === 'pause'} onclick={() => run('pause', () => pauseExperiment(experiment!.id), 'Experiment paused')}>
-						{#if pending === 'pause'}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Pause />{/if}Pause
-					</Button>
-				{:else if s === 'paused'}
-					<Button variant="outline" size="sm" onclick={() => ask('cancel')}><Square />Cancel</Button>
-					{#if !drift}
-						<Button size="sm" disabled={pending === 'resume'} onclick={() => run('resume', () => resumeExperiment(experiment!.id), 'Experiment resumed')}>
-							{#if pending === 'resume'}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Play />{/if}Resume
-						</Button>
-					{/if}
-				{:else if s === 'completed' || s === 'cancelled'}
-					<Button variant="outline" size="sm" onclick={() => ask('archive')}><Archive />Archive</Button>
-					<Button variant="outline" size="sm" href="/experiments/new?from={experiment.id}"><Copy />Clone</Button>
-					<Button size="sm" disabled={failedCells === 0 || pending === 'topup'} onclick={() => askLaunch('topup')}>
-						{#if pending === 'topup'}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<RotateCcw />{/if}Top up failed
-					</Button>
-				{:else}
-					<Button variant="outline" size="sm" href="/experiments/new?from={experiment.id}"><Copy />Clone</Button>
+				{#if !finished}<span class="header-stat"><b>{status.cells.in_flight}</b> in flight</span>{/if}
+				{#if status.counts.failed}<span class="header-stat text-danger-fg"><b>{status.counts.failed}</b> failed</span>{/if}
+				{#if status.counts.cancelled}<span class="header-stat"><b>{status.counts.cancelled}</b> cancelled</span>{/if}
+				{#if !finished && status.throughput.per_hour_ewma > 0}
+					<span class="header-stat" title="{status.throughput.completed_last_15m} completed in the last 15 min">
+						<b>{status.throughput.per_hour_ewma.toFixed(1)}</b> cells/h
+					</span>
 				{/if}
-			{/if}
-		{/snippet}
-		{#if experiment?.hypothesis}
-			<p class="text-sm italic text-muted-foreground">“{experiment.hypothesis}”</p>
-		{/if}
-		{#if experiment?.launched_at}
-			<p class="text-[11px] text-muted-foreground">
-				Launched {new Date(experiment.launched_at).toLocaleString()}{experiment.cloned_from ? ' · ' : ''}
-				{#if experiment.cloned_from}clone of <a class="underline" href="/experiments/{experiment.cloned_from.id}">{experiment.cloned_from.name}</a>{/if}
-			</p>
-		{/if}
-	</PageHeader>
+				{#if !finished && status.eta_seconds != null}
+					<span class="header-stat" title="Slowest endpoint + evaluation"><b>{formatEta(status.eta_seconds)}</b> left</span>
+				{/if}
+				{#if !finished && tokensPerS > 0}
+					<span class="header-stat" title="All endpoints, last 5 min"><b>{tokensPerS.toFixed(0)}</b> tok/s</span>
+				{/if}
+				{#if costUsd > 0}
+					<span class="header-stat" title="OpenRouter only"><b>{formatUsd(costUsd)}</b> spent</span>
+				{/if}
+				{#if !finished && bottleneck}
+					<span class="header-stat" title={bottleneck.title}>bottleneck <b class="font-sans">{bottleneck.label}</b></span>
+				{/if}
+			</div>
+			<LiveStrip {live} {finished} />
+		</div>
+	{/if}
+{/snippet}
+
+{#snippet nav()}
+	<!-- Phones: the section row scrolls; the edge fades and the active section is kept in view. -->
+	<div
+		class="scroll-hint no-scrollbar min-w-0 flex-1 overflow-x-auto"
+		{@attach scrollHint({ edges: 'both', focusable: false, follow: '[role="tab"][data-state="active"]' })}
+	>
+		<Tabs.List aria-label="Experiment sections" class="w-max min-w-full overflow-x-visible">
+			{#each EXPERIMENT_TABS as section, i (section.value)}
+				<Tabs.Trigger value={section.value} disabled={disabledTabs.has(section.value)} class="group gap-2">
+					<span class="font-mono text-xs text-muted-foreground tabular-nums group-data-[state=active]:text-primary" aria-hidden="true">{i + 1}</span>
+					{section.label}
+					{#if section.value === 'data' && counts && activeCells(counts) > 0}
+						<span class="font-mono text-xs text-muted-foreground" title="Runs queued or in flight">{activeCells(counts)}</span>
+					{/if}
+				</Tabs.Trigger>
+			{/each}
+		</Tabs.List>
+	</div>
+{/snippet}
+
+<Tabs.Root value={tab} onValueChange={(v) => setTab(v)} class="space-y-4">
+	{#if experiment}
+		<StudyMasthead
+			{experiment}
+			{status}
+			policyEffective={status?.policy_effective ?? null}
+			{actions}
+			progress={live && status && experiment.status !== 'draft' ? progress : undefined}
+			{nav}
+		/>
+	{:else}
+		<PageHeader title="Experiment" back={{ href: '/experiments', label: 'Experiments' }} />
+	{/if}
 
 	{#if loading && !experiment}
 		<LoadingState label="loading experiment" />
@@ -439,7 +503,7 @@
 				<CircleAlert />
 				<div class="flex flex-wrap items-center justify-between gap-2">
 					<AlertDescription>
-						{plural(legacyPending, 'run')} from before the executor never started. Requeue them to let the executor run them.
+						{plural(legacyPending, 'run')} {legacyPending === 1 ? 'was' : 'were'} queued before the executor existed and won't start on their own. Requeue them to hand them to the executor.
 					</AlertDescription>
 					<Button
 						variant="outline"
@@ -453,51 +517,58 @@
 			</Alert>
 		{/if}
 
-		<Tabs.Root value={tab} onValueChange={(v) => setTab(v)}>
-			<Tabs.List class="w-full justify-start overflow-x-auto sm:w-auto">
-				<Tabs.Trigger value="overview" disabled={experiment.status === 'draft'}>Overview</Tabs.Trigger>
-				<Tabs.Trigger value="results" disabled={experiment.status === 'draft'}>Results</Tabs.Trigger>
-				<Tabs.Trigger value="runs" disabled={experiment.status === 'draft'}>
-					Runs{#if counts && activeCells(counts) > 0}<span class="ml-1 font-mono text-[11px] text-muted-foreground">{activeCells(counts)}</span>{/if}
-				</Tabs.Trigger>
-				<Tabs.Trigger value="design">Design</Tabs.Trigger>
-				<Tabs.Trigger value="automation">Automation</Tabs.Trigger>
-			</Tabs.List>
-			<Tabs.Content value="overview" class="pt-4">
-				{#if live}
-					<OverviewTab {experiment} {live} {appName} />
+		<Tabs.Content value="summary" class="pt-0">
+			{#if tab === 'summary'}
+				<SummaryTab {experiment} {live} {finished} {costUsd} {refreshSignal} {tickSignal} />
+			{/if}
+		</Tabs.Content>
+		<Tabs.Content value="method" class="pt-0">
+			{#if tab === 'method'}
+				<MethodTab {experiment} appName={(id) => appName(id)} policyEffective={status?.policy_effective ?? null} />
+			{/if}
+		</Tabs.Content>
+		<Tabs.Content value="results" class="pt-0">
+			{#if tab === 'results'}
+				{#if isDraft}
+					<EmptyState title="No results before launch" description="Launch the experiment to collect and grade runs." />
 				{:else}
-					<EmptyState title="Not launched yet" description="Launch the experiment to watch it run here." />
-				{/if}
-			</Tabs.Content>
-			<Tabs.Content value="results" class="pt-4">
-				{#if tab === 'results'}
 					<ResultsTab {experiment} {refreshSignal} {tickSignal} />
 				{/if}
-			</Tabs.Content>
-			<Tabs.Content value="runs" class="pt-4">
-				{#if tab === 'runs'}
-					<RunsTab {experiment} {appName} {counts} {refreshSignal} {tickSignal} onlaunched={relaunched} />
-				{/if}
-			</Tabs.Content>
-			<Tabs.Content value="design" class="pt-4">
-				{#if tab === 'design'}
-					<DesignTab
+			{/if}
+		</Tabs.Content>
+		<Tabs.Content value="data" class="pt-0">
+			{#if tab === 'data'}
+				{#if isDraft}
+					<EmptyState title="No data before launch" description="Runs appear here once the experiment is launched." />
+				{:else}
+					<DataTab
 						{experiment}
-						appName={(id) => appName(id)}
-						policyEffective={status?.policy_effective ?? null}
-						onupdated={(detail) => (experiment = detail)}
+						{appName}
+						{counts}
+						{refreshSignal}
+						{tickSignal}
+						exporting={pending === 'export'}
+						onexport={doExport}
+						onlaunched={relaunched}
 					/>
 				{/if}
-			</Tabs.Content>
-			<Tabs.Content value="automation" class="pt-4">
-				{#if tab === 'automation'}
-					<AutomationTab {experiment} {postRunSignal} onlaunched={relaunched} />
-				{/if}
-			</Tabs.Content>
-		</Tabs.Root>
+			{/if}
+		</Tabs.Content>
+		<Tabs.Content value="operations" class="pt-0">
+			{#if tab === 'operations'}
+				<OperationsTab
+					{experiment}
+					{live}
+					{appName}
+					{finished}
+					{postRunSignal}
+					onlaunched={relaunched}
+					onupdated={(detail) => (experiment = detail)}
+				/>
+			{/if}
+		</Tabs.Content>
 	{/if}
-</div>
+</Tabs.Root>
 
 <ConfirmDialog
 	bind:open={confirmOpen}

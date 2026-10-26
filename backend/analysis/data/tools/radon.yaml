@@ -7,6 +7,8 @@ description: >-
 category: performance
 kind: container
 target_language: python
+analysis_mode: static
+technologies: [python]
 icon: gauge
 version: "6"
 docs_url: https://radon.readthedocs.io/
@@ -17,6 +19,7 @@ uninstall_cmd: "pip uninstall -y radon"
 # compute complexity metrics; only E/F blocks become findings.
 run_cmd: "radon cc {target} -j"
 parser_key: radon
+file_patterns: ["*.py"]
 output_kind: mixed
 run_timeout: 90
 install_timeout: 180
