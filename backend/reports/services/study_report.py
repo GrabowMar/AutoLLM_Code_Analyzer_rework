@@ -410,8 +410,10 @@ def correlations_section(params, criteria_by_model, seed: int) -> dict[str, Any]
         "notes": [
             "Observational, model-level (n = number of models): association, not cause.",
             "Predictors are not independent (larger, newer models tend to have larger windows and prices).",
-            "p_holm controls the familywise error across all predictor x outcome tests; "
-            "q_bh the false discovery rate.",
+            (
+                "p_holm controls the familywise error across all predictor x outcome tests; "
+                "q_bh the false discovery rate."
+            ),
             "leave_one_out.sign_flips marks a correlation that rests on a single model.",
         ],
     }

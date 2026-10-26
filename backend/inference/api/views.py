@@ -828,9 +828,11 @@ def install(request, endpoint_id: int):
             f"curl -fsSL {dockerfile_url} -o Dockerfile",
             f'echo "{dockerfile_sha}  Dockerfile" | sha256sum -c -',
             f"docker build -t llmlab-relay:{version} .",
-            "docker run --rm -i -v llmlab-relay:/state alpine sh -c "
             # The relay runs as 65534 and keeps its relay id in /state, so it owns the volume too.
-            "'umask 077; cat > /state/token; chown 65534 /state /state/token'   # paste the token, then Ctrl-D",
+            (
+                "docker run --rm -i -v llmlab-relay:/state alpine sh -c "
+                "'umask 077; cat > /state/token; chown 65534 /state /state/token'   # paste the token, then Ctrl-D"
+            ),
             "docker run -d --name llmlab-relay --restart unless-stopped --read-only --network host "
             f"-v llmlab-relay:/state -e LLMLAB_SERVER={server} -e LLMLAB_TOKEN_FILE=/state/token "
             f"-e LLMLAB_STATE_DIR=/state llmlab-relay:{version} --parallel {slots}{kind_args} --on-unauthorized wait",
