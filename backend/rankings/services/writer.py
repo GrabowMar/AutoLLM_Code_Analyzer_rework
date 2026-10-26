@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.rankings.services.aggregator import aggregate_rankings
+from backend.rankings.services.constants import DEFAULT_SORT_KEY
 from backend.rankings.services.constants import SORT_KEY_MAP
 
 
@@ -37,8 +38,8 @@ def filter_rankings(
             if (entry.get("provider") or "").lower() not in provs:
                 continue
         if min_composite is not None:
-            mss = entry.get("mss_score")
-            if mss is None or mss < min_composite:
+            composite = entry.get("composite_score")
+            if composite is None or composite < min_composite:
                 continue
         if has_benchmarks and not (entry.get("benchmark_score") or 0) > 0:
             continue
@@ -62,24 +63,39 @@ def sort_rankings(
     sort_by: str = "mss",
     sort_dir: str = "desc",
 ) -> list[dict[str, Any]]:
-    key = SORT_KEY_MAP.get(sort_by, sort_by) or "mss_score"
+    """Sort by a public key (see SORT_KEY_MAP); missing values always sort last.
+
+    Ties (and the None tail) are broken by ``model_id`` so the order is
+    deterministic. An unknown key sorts by MSS rather than leaving the list
+    in arbitrary order.
+    """
+    key = SORT_KEY_MAP.get(sort_by) or (sort_by if sort_by in SORT_KEY_MAP.values() else DEFAULT_SORT_KEY)
     reverse = sort_dir == "desc"
-
-    def get_val(item: dict[str, Any]) -> Any:
-        v = item.get(key)
-        if v is None:
-            return float("-inf") if reverse else float("inf")
-        return v
-
-    return sorted(rankings, key=get_val, reverse=reverse)
+    present = [r for r in rankings if r.get(key) is not None]
+    missing = [r for r in rankings if r.get(key) is None]
+    # Two stable passes: model_id ascending first, then the key in the
+    # requested direction, so equal keys keep the model_id order.
+    present.sort(key=lambda r: str(r.get("model_id") or ""))
+    present.sort(key=lambda r: r[key], reverse=reverse)
+    missing.sort(key=lambda r: str(r.get("model_id") or ""))
+    return present + missing
 
 
 def get_top_models(
     count: int = 10,
     weights: dict[str, float] | None = None,
+    *,
+    user: Any = None,
+    rows: list[dict[str, Any]] | None = None,
     **filter_kwargs: Any,
 ) -> list[dict[str, Any]]:
-    rankings = filter_rankings(aggregate_rankings(), **filter_kwargs)
+    """The top *count* ranking rows (by MSS, or by a custom *weights* composite).
+
+    *rows* reuses rows already built (``build_rankings(user)["rows"]``), so a
+    caller can report the same rows' ``comparability``.
+    """
+    source = rows if rows is not None else aggregate_rankings(user)
+    rankings = filter_rankings([dict(r) for r in source], **filter_kwargs)
     if weights:
         for entry in rankings:
             total, total_weight = 0.0, 0.0
@@ -89,10 +105,7 @@ def get_top_models(
                     total += float(v) * w
                     total_weight += w
             entry["composite_score"] = round(total / total_weight, 4) if total_weight else None
-        rankings.sort(
-            key=lambda x: x.get("composite_score") or 0.0,
-            reverse=True,
-        )
+        rankings = sort_rankings(rankings, sort_by="composite", sort_dir="desc")
     else:
         rankings = sort_rankings(rankings, sort_by="mss", sort_dir="desc")
     return rankings[: max(1, min(count, 100))]

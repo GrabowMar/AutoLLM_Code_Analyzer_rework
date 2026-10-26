@@ -66,12 +66,18 @@ DOCS_SCORES = {
     "missing": 0.0,
 }
 
-# Empirical quality (from this platform's own measurements): a weighted
-# findings-per-KLOC density is squashed to 0..1, then blended with the
-# functional smoke-test pass rate. EMPIRICAL_DENSITY_CAP is the density that
-# scores zero — our 4-model URL-shortener experiment measured ~48-132/KLOC
-# with the full 7-tool set, so 150 spreads observed models across the scale.
+# Empirical quality (from this platform's own measurements): the
+# severity-weighted density of counted static *issues* (findings deduplicated
+# across tools, measured scope only) per KLOC of measured SLOC is squashed to
+# 0..1, then blended with the functional (conformance) pass rate. Numerator
+# and denominator come from the same canonical runs of one frozen plan (see
+# services/measured.py). EMPIRICAL_DENSITY_CAP is the density that scores
+# zero. It was calibrated on the v1 7-tool set (~48-132 findings/KLOC); the
+# v2 measurement (issues, model-written lines only) is a different scale, so
+# the cap is provisional until recalibrated on v2 data: every row carries
+# SCORING_VERSION so scores from different calibrations are never compared.
 SEVERITY_WEIGHTS = {"critical": 10, "high": 5, "medium": 2, "low": 1, "info": 0}
+SCORING_VERSION = "empirical-v2"
 
 # Alternative severity weightings for the rank-stability sensitivity analysis:
 # the empirical ranking is recomputed under each scheme and compared to the
@@ -92,16 +98,24 @@ EMPIRICAL_FUNCTIONAL_WEIGHT = 0.4  # rest goes to findings density
 COMPOSITE_MSS_WEIGHT = 0.6
 COMPOSITE_EMPIRICAL_WEIGHT = 0.4
 
+# Public sort keys -> row keys. Both the short and the long spelling of the
+# component scores are accepted (the UI sends ``cost_efficiency`` and
+# ``accessibility``); unknown keys fall back to MSS instead of silently
+# leaving the list unsorted.
 SORT_KEY_MAP = {
     "mss": "mss_score",
     "composite": "composite_score",
     "adoption": "adoption_score",
     "benchmark": "benchmark_score",
     "cost": "cost_efficiency_score",
+    "cost_efficiency": "cost_efficiency_score",
     "access": "accessibility_score",
+    "accessibility": "accessibility_score",
     "context": "context_length",
     "price": "price_per_million_input",
     "name": "model_name",
     "apps": "apps",
     "empirical": "empirical_quality_score",
+    "n_trials": "n_trials",
 }
+DEFAULT_SORT_KEY = "mss_score"

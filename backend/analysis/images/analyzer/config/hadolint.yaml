@@ -1,0 +1,9 @@
+# Baked hadolint configuration of the llmlab analyzer (hadolint 2.15), passed
+# with --config so an analysed app's .hadolint.yaml is never read.
+failure-threshold: none
+no-color: true
+no-fail: true
+disable-ignore-pragma: true
+strict-labels: false
+ignored: []
+trustedRegistries: []

@@ -1,0 +1,34 @@
+# System profile (seeded by backend/analysis/seeding.py; edits create a new
+# profile version). The default research instrument: every static tool of
+# the catalog plus the AI reviewer, single-shot, k=3 replicates with
+# consensus. Scope and outcome rules are the engine defaults.
+slug: research-default
+name: Research default
+description: >-
+  All static analyzers and metrics tools plus the AI reviewer (single-shot, 3 replicates,
+  consensus). Required tools must succeed (or have nothing in scope) for a run to be complete;
+  codespell (style) and hadolint (platform-owned Dockerfiles) are informative only.
+config:
+  tools:
+    - {slug: ruff, required: true}
+    - {slug: bandit, required: true}
+    - {slug: semgrep, required: true}
+    - {slug: pylint, required: true}
+    - {slug: mypy, required: true}
+    - {slug: vulture, required: true}
+    - {slug: eslint, required: true}
+    - {slug: gitleaks, required: true}
+    - {slug: detect-secrets, required: true}
+    - {slug: codespell, required: false}
+    - {slug: hadolint, required: false}
+    - {slug: jscpd, required: true}
+    - {slug: radon, required: true}
+    - {slug: lizard, required: true}
+  reviewer:
+    enabled: true
+    required: true
+    engine: single_shot
+    samples: 3
+    # Reasoning plus answer: DeepSeek V4.1 Flash reasons even at effort low and a
+    # live review truncated at 16k output tokens (a truncated replicate fails).
+    max_output_tokens: 32000

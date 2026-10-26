@@ -1,30 +1,53 @@
+# Semgrep CE: multi-language SAST with a pinned, vendored rule snapshot.
 slug: semgrep
 name: Semgrep
-description: >-
-  Fast multi-language static analysis (SAST). Finds security vulnerabilities,
-  bugs, and anti-patterns in Python, JavaScript, TypeScript and more using
-  community rulesets.
+kind: static
 category: security
-kind: container
-target_language: any
-icon: radar
-version: "1"
+version: "1.180.0"
+adapter_version: 1
+languages: [python, javascript, jsx, typescript, tsx, vue, html]
+file_kinds: [source, config]
+output_kind: findings
+description: >-
+  Semantic grep for security (SAST) across Python, JavaScript/TypeScript
+  (incl. React/JSX), Vue templates and HTML, using a curated snapshot of the
+  semgrep-rules security rules (Flask, FastAPI, SQLAlchemy, JWT, crypto,
+  browser/DOM, Express, React, Vue) baked into the image.
 docs_url: https://semgrep.dev/docs/
-install_cmd: "pip install --user 'semgrep==1.*'"
-verify_cmd: "semgrep --version"
-# Explicit rule packs (py + js/jsx) instead of `--config auto`, which semgrep
-# refuses when metrics are disabled. Packs are fetched from the registry once.
-run_cmd: "semgrep --config p/python --config p/javascript --json --quiet --metrics off --disable-version-check {target}"
-parser_key: semgrep
-run_timeout: 300
-install_timeout: 600
+icon: radar
 display_order: 20
-config_schema: []
-default_config: {}
-sample_code: |
-  import subprocess
-
-
-  def run(user_input):
-      # Dangerous: shell=True with untrusted input
-      subprocess.run("echo " + user_input, shell=True)
+mem_limit: 1g
+timeout_s: 600
+notes: >-
+  Rules come from semgrep-rules at a pinned commit, verified by content hash
+  at build time; no registry access at scan time (--metrics off, offline).
+  --disable-nosem: an app's "nosemgrep" comment cannot hide a finding. Files
+  and rules semgrep could not handle are reported as coverage / errors.
+config_schema:
+  - name: rulesets
+    type: multiselect
+    label: Rule packs
+    description: >-
+      Vendored rule packs (--config). "audit" packs hold pattern-based rules
+      with lower confidence (e.g. any eval, any shell=True, debug=True).
+    default: [python, python-audit, javascript, javascript-audit, html]
+    min_items: 1
+    options:
+      - {value: python, label: Python security}
+      - {value: python-audit, label: Python security (audit)}
+      - {value: javascript, label: JavaScript/TypeScript security}
+      - {value: javascript-audit, label: JavaScript/TypeScript security (audit)}
+      - {value: html, label: HTML security}
+  - name: exclude_rules
+    type: string
+    label: Excluded rules
+    description: Comma-separated rule ids to skip (--exclude-rule).
+    default: ""
+    pattern: '^([A-Za-z0-9_.-]+(,[A-Za-z0-9_.-]+)*)?$'
+  - name: per_file_timeout
+    type: integer
+    label: Per-file rule timeout (s)
+    description: Seconds a rule may spend on one file (--timeout); a timeout is reported as an error.
+    default: 30
+    min: 5
+    max: 300

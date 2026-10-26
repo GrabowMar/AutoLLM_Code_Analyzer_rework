@@ -52,8 +52,8 @@ class ContainerInstanceSchema(ModelSchema):
         from backend.runtime.middleware import APP_NAME_PREFIX
 
         # Only sample-app containers are routable (the subdomain middleware and
-        # Traefik routes are keyed on the llm-* name); analyzer containers etc.
-        # must not advertise a URL.
+        # Traefik routes are keyed on the llm-* name); any other container
+        # (legacy analyzer workspaces, validators) must not advertise a URL.
         if not obj.name.startswith(APP_NAME_PREFIX):
             return None
 

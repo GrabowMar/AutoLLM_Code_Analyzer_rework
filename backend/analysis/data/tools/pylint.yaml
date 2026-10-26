@@ -1,27 +1,53 @@
+# Pylint: Python static checker (errors, fatals and warnings by default).
 slug: pylint
 name: Pylint
-description: >-
-  Comprehensive static analyzer for Python. Checks for errors, enforces a coding
-  standard, and looks for code smells and refactoring opportunities.
+kind: static
 category: lint
-kind: container
-target_language: python
-icon: badge-check
-version: "3"
+version: "4.1.2"
+adapter_version: 2
+languages: [python]
+file_kinds: [source, config]
+output_kind: findings
+description: >-
+  Comprehensive Python static checker. The research configuration reports
+  errors and warnings (likely bugs, unused/unreachable code, eval/exec)
+  and leaves convention/refactoring/docstring messages out; duplication is
+  measured by jscpd instead of pylint's duplicate-code check.
 docs_url: https://pylint.readthedocs.io/
-install_cmd: "pip install --user pylint"
-verify_cmd: "pylint --version"
-run_cmd: "pylint {target} -f json --exit-zero --disable=import-error"
-parser_key: pylint
-run_timeout: 180
-install_timeout: 300
-display_order: 40
-config_schema: []
-default_config: {}
-sample_code: |
-  import os
-
-
-  def add(a, b):
-      unused = 1
-      return a + b
+icon: badge-check
+display_order: 50
+mem_limit: 768m
+timeout_s: 300
+notes: >-
+  Baked rcfile (--rcfile), so the app's pylintrc/pyproject/setup.cfg is never
+  read. Messages an app disables inline (# pylint: disable=...) are recovered
+  from pylint's suppressed-message report and kept as findings marked
+  suppressed_inline. A whole-file pragma (# pylint: skip-file,
+  disable-all, disable=all) is neutralized in staged copies so the file is
+  linted anyway (its messages marked suppressed_inline); with
+  report_suppressed off such a file is a coverage gap (I0013), never
+  "scanned, clean". Usage errors (exit status bit 32) fail the tool.
+config_schema:
+  - name: include_refactor
+    type: boolean
+    label: Refactoring messages
+    description: Also report the R category (design checks such as too-many-branches).
+    default: false
+  - name: include_convention
+    type: boolean
+    label: Convention messages
+    description: Also report the C category (naming, docstrings, formatting).
+    default: false
+  - name: report_suppressed
+    type: boolean
+    label: Report inline-suppressed messages
+    description: >-
+      Keep messages the app disabled with "# pylint: disable" comments (as
+      suppressed_inline findings).
+    default: true
+  - name: extra_disable
+    type: string
+    label: Disabled messages
+    description: Comma-separated message ids or symbols to disable (--disable).
+    default: ""
+    pattern: '^([A-Za-z0-9-]+(,[A-Za-z0-9-]+)*)?$'

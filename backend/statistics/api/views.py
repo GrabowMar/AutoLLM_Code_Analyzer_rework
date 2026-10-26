@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
+
 from ninja import Query
 from ninja import Router
+from ninja.errors import HttpError
 
 from backend.statistics import services
 from backend.statistics.api.schema import ActivityItemSchema
@@ -48,13 +51,22 @@ def get_models(
     prompt_hash: str | None = None,
     bundle_key: str | None = None,
     experiment_id: str | None = None,
+    plan_hash: str | None = None,
 ):
+    if experiment_id:
+        # An experiment id is a UUID; a malformed one is a client error (422),
+        # not a server crash when the ORM lookup is built.
+        try:
+            experiment_id = str(uuid.UUID(str(experiment_id)))
+        except ValueError as exc:
+            raise HttpError(422, "experiment_id must be a UUID") from exc
     return services.get_model_comparison(
         request.auth,
         limit=limit,
         prompt_hash=prompt_hash,
         bundle_key=bundle_key,
-        experiment_id=experiment_id,
+        experiment_id=experiment_id or None,
+        plan_hash=plan_hash,
     )
 
 

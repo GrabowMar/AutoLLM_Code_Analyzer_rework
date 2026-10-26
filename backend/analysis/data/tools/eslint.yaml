@@ -1,28 +1,43 @@
+# ESLint 10 with typescript-eslint, eslint-plugin-vue and security plugins.
 slug: eslint
 name: ESLint
-description: >-
-  The pluggable linter for JavaScript and TypeScript. Reports problematic
-  patterns and style violations in JS/TS code.
+kind: static
 category: lint
-kind: container
-target_language: javascript
-icon: braces
-version: "8"
+version: "10.12.0"
+adapter_version: 1
+languages: [javascript, jsx, typescript, tsx, vue]
+file_kinds: [source, config]
+output_kind: findings
+description: >-
+  The JavaScript/TypeScript linter: @eslint/js recommended for every
+  language, the TypeScript-only rules of typescript-eslint recommended,
+  eslint-plugin-vue essential, React hooks rules and the
+  eslint-plugin-security / no-unsanitized security rules. Rule semantics do
+  not depend on the file's language: identical code gets the same findings
+  in .js, .jsx, .ts, .tsx and Vue files (with or without lang="ts"). JSX
+  usage is tracked, so components used only as elements are not unused.
 docs_url: https://eslint.org/docs/latest/
-install_cmd: "npm install -g eslint@8"
-verify_cmd: "eslint --version"
-# es2022 is needed alongside browser/node: without it Promise, Set, etc. are
-# "not defined" and no-undef floods the results with false positives.
-run_cmd: "eslint {target} --ext .js,.jsx,.cjs,.mjs -f json --no-eslintrc --env browser,node,es2022 --parser-options=ecmaVersion:latest,sourceType:module,ecmaFeatures:{jsx:true} --rule '{\"no-undef\":\"error\",\"no-unused-vars\":\"warn\"}'"
-parser_key: eslint
-run_timeout: 120
-install_timeout: 300
+icon: braces
 display_order: 30
-config_schema: []
-default_config: {}
-sample_code: |
-  var unused = 42;
-
-  function greet(name) {
-    console.log("hi " + missingVar);
-  }
+mem_limit: 1g
+timeout_s: 300
+notes: >-
+  Baked flat config (--no-config-lookup -c), --no-inline-config and
+  vue/comment-directive off, so the app can neither replace the config nor
+  disable rules with comments. Parse failures (fatal messages) are coverage
+  gaps, not findings. TypeScript (incl. Vue <script lang="ts">) swaps
+  no-unused-vars for @typescript-eslint/no-unused-vars and switches off
+  no-undef, no-redeclare and no-dupe-class-members (TypeScript syntax makes
+  them misfire); no JSX pragma (automatic runtime), so `import React` used
+  only by JSX is unused in .jsx and .tsx alike.
+config_schema:
+  - name: opt_in_rules
+    type: multiselect
+    label: Noisy rules to enable
+    description: >-
+      Security rules that are off by default because they flag most idiomatic
+      code (object[key] access, fs calls with variables); enabled with --rule.
+    default: []
+    options:
+      - {value: security/detect-object-injection, label: detect-object-injection}
+      - {value: security/detect-non-literal-fs-filename, label: detect-non-literal-fs-filename}

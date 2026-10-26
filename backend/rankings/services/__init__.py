@@ -1,11 +1,14 @@
 """Rankings service layer (split into constants, scoring, aggregator, writer)."""
 
 from backend.rankings.services.aggregator import aggregate_rankings
+from backend.rankings.services.aggregator import build_rankings
+from backend.rankings.services.aggregator import empirical_inputs
 from backend.rankings.services.aggregator import get_status
 from backend.rankings.services.constants import BENCHMARK_RANGES
 from backend.rankings.services.constants import BENCHMARK_WEIGHTS
 from backend.rankings.services.constants import DOCS_SCORES
 from backend.rankings.services.constants import LICENSE_SCORES
+from backend.rankings.services.constants import SCORING_VERSION
 from backend.rankings.services.constants import SEVERITY_WEIGHT_SCHEMES
 from backend.rankings.services.constants import SEVERITY_WEIGHTS
 from backend.rankings.services.constants import SORT_KEY_MAP
@@ -16,6 +19,7 @@ from backend.rankings.services.scoring import compute_benchmark_score
 from backend.rankings.services.scoring import compute_cost_efficiency_score
 from backend.rankings.services.scoring import compute_empirical_quality
 from backend.rankings.services.scoring import compute_mss
+from backend.rankings.services.scoring import empirical_density
 from backend.rankings.services.scoring import normalize_benchmark_score
 from backend.rankings.services.sensitivity import compute_weight_sensitivity
 from backend.rankings.services.sensitivity import kendall_tau
@@ -28,11 +32,13 @@ __all__ = [
     "BENCHMARK_WEIGHTS",
     "DOCS_SCORES",
     "LICENSE_SCORES",
+    "SCORING_VERSION",
     "SEVERITY_WEIGHTS",
     "SEVERITY_WEIGHT_SCHEMES",
     "SORT_KEY_MAP",
     "STABILITY_SCORES",
     "aggregate_rankings",
+    "build_rankings",
     "compute_accessibility_score",
     "compute_adoption_score",
     "compute_benchmark_score",
@@ -40,6 +46,8 @@ __all__ = [
     "compute_empirical_quality",
     "compute_mss",
     "compute_weight_sensitivity",
+    "empirical_density",
+    "empirical_inputs",
     "filter_rankings",
     "get_status",
     "get_top_models",

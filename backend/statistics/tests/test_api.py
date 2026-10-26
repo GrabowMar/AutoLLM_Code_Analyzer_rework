@@ -52,3 +52,13 @@ def test_trends_endpoint_validates_days(auth_client):
 def test_unauthenticated_blocked(client):
     res = client.get("/api/statistics/dashboard/")
     assert res.status_code == 401
+
+
+def test_models_malformed_experiment_id_is_a_422_not_a_500(auth_client):
+    client, _ = auth_client
+    client.raise_request_exception = False
+
+    assert client.get("/api/statistics/models/?experiment_id=abc").status_code == 422
+    ok = client.get("/api/statistics/models/?experiment_id=00000000-0000-0000-0000-000000000000")
+    assert ok.status_code == 200
+    assert ok.json() == []

@@ -1,0 +1,64 @@
+{
+ "amended": "argv amended 2026-10-22 (adapters fix): the recorded outcome was captured with the previous argv; the added flags do not change the output for these files (verified with the pinned tool outside the image). Re-capture after the analyzer image is rebuilt.",
+ "captured_at": "2026-10-22T14:45:05+00:00",
+ "case": "syntax",
+ "config": {
+  "extra_disable": "",
+  "include_convention": false,
+  "include_refactor": false,
+  "report_suppressed": true
+ },
+ "files": [
+  {
+   "content": "def handler(request:\n    return request\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/broken.py",
+   "sha256": "a213cda8977aafa87b15bec45ead948580c06c66386ac6bd1e94e459981963e4"
+  },
+  {
+   "content": "import os\n\n\ndef read_setting(name):\n    return os.environ.get(name, \"\")\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/ok.py",
+   "sha256": "377ef7025dd733242011513a97f32da3f320aa58e5463dfb383708e0a03215b7"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/pylint",
+   "--rcfile=/opt/analyzer/config/pylintrc",
+   "--output-format=json2:/out/pylint.json",
+   "--persistent=n",
+   "--jobs=1",
+   "--enable=suppressed-message",
+   "--enable=file-ignored",
+   "--",
+   "/src/svc/broken.py",
+   "/src/svc/ok.py"
+  ],
+  "env": {},
+  "mem_limit": "768m",
+  "report_files": [
+   "pylint.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "pylint.json": "{\n    \"messages\": [\n        {\n            \"type\": \"error\",\n            \"symbol\": \"syntax-error\",\n            \"message\": \"Parsing failed: ''(' was never closed (broken, line 1)'\",\n            \"messageId\": \"E0001\",\n            \"confidence\": \"HIGH\",\n            \"module\": \"broken\",\n            \"obj\": \"\",\n            \"line\": 1,\n            \"column\": 12,\n            \"endLine\": null,\n            \"endColumn\": null,\n            \"path\": \"/src/svc/broken.py\",\n            \"absolutePath\": \"/src/svc/broken.py\"\n        }\n    ],\n    \"statistics\": {\n        \"messageTypeCount\": {\n            \"fatal\": 0,\n            \"error\": 1,\n            \"warning\": 0,\n            \"refactor\": 0,\n            \"convention\": 0,\n            \"info\": 0\n        },\n        \"modulesLinted\": 5,\n        \"score\": 0\n    }\n}\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.679
+ },
+ "schema": 1,
+ "tool": "pylint",
+ "tool_version": "4.1.2"
+}

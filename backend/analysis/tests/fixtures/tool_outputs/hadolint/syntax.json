@@ -1,0 +1,56 @@
+{
+ "captured_at": "2026-10-22T14:45:37+00:00",
+ "case": "syntax",
+ "config": {
+  "ignore_rules": ""
+ },
+ "files": [
+  {
+   "content": "FROM python:3.12-slim\nRUN pip install flask\n",
+   "kind": "config",
+   "language": "dockerfile",
+   "path": "Dockerfile",
+   "sha256": "f78032c9ec838ccf4ac6cb0a42bb79a77e8304c1fbc3ae4ede783678ef6ce3c3"
+  },
+  {
+   "content": "FROM\nRUN \n",
+   "kind": "config",
+   "language": "dockerfile",
+   "path": "docker/Dockerfile",
+   "sha256": "55eb7554d3665d014d71191c4f262205841d66a6d73af02199c0d7983c115c10"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/hadolint",
+   "--config",
+   "/opt/analyzer/config/hadolint.yaml",
+   "--format",
+   "json",
+   "--no-fail",
+   "--no-color",
+   "--disable-ignore-pragma",
+   "/src/Dockerfile",
+   "/src/docker/Dockerfile"
+  ],
+  "env": {},
+  "mem_limit": "256m",
+  "report_files": [],
+  "timeout_s": 120
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "[{\"code\":\"DL3013\",\"column\":1,\"file\":\"/src/Dockerfile\",\"level\":\"warning\",\"line\":2,\"message\":\"Pin versions in pip. Instead of `pip install <package>` use `pip install <package>==<version>` or `pip install --requirement <requirements file>`\"},{\"code\":\"DL3042\",\"column\":1,\"file\":\"/src/Dockerfile\",\"level\":\"warning\",\"line\":2,\"message\":\"Avoid use of cache directory with pip. Use `pip install --no-cache-dir <package>`\"},{\"code\":\"DL1000\",\"column\":5,\"file\":\"/src/docker/Dockerfile\",\"level\":\"error\",\"line\":1,\"message\":\"missing whitespace\"}]",
+  "timed_out": false,
+  "wall_seconds": 0.123
+ },
+ "schema": 1,
+ "tool": "hadolint",
+ "tool_version": "2.15.1"
+}

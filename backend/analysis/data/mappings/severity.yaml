@@ -1,0 +1,438 @@
+# Normalized severity per tool (normalizer norm-v1).
+#
+# Severity is an impact level, never a tool's configuration level: ESLint's
+# "2"/"1" only says how a rule was configured, so ESLint maps by rule id.
+# Lookup order inside a tool table: `message_rules` (per rule id: the first
+# {pattern, severity} whose case-insensitive regex matches the tool's
+# message, i.e. the context the tool itself evaluated) -> `rules` (exact rule
+# id) -> `prefixes` (longest matching prefix) -> `native` (the tool's own
+# token, see CONTRACT §4.6) -> `default`. The file's sha256 is frozen into
+# every plan (normalize.mapping_hashes), so editing it makes runs incomparable.
+version: 1
+severities: [critical, high, medium, low, info]
+
+# Fallback for a tool with no table of its own.
+generic:
+  native: {critical: critical, high: high, error: high, medium: medium, warning: medium, low: low, note: low, info: info, style: info}
+  default: medium
+
+tools:
+  bandit:
+    native: {HIGH: high, MEDIUM: medium, LOW: low}
+    default: medium
+
+  semgrep:
+    # Newer semgrep emits CRITICAL|HIGH|MEDIUM|LOW, older ERROR|WARNING|INFO.
+    native: {CRITICAL: critical, ERROR: high, HIGH: high, WARNING: medium, MEDIUM: medium, INFO: low, LOW: low}
+    # When a rule declares both metadata.impact and metadata.likelihood, the
+    # risk matrix below wins over the rule's coarse severity token.
+    impact_likelihood:
+      HIGH: {HIGH: high, MEDIUM: high, LOW: medium}
+      MEDIUM: {HIGH: medium, MEDIUM: medium, LOW: low}
+      LOW: {HIGH: low, MEDIUM: low, LOW: low}
+    default: medium
+
+  ruff:
+    # S### rules are bandit's checks re-implemented: they take the default
+    # severity of the equivalent bandit test (bandit_rules below), except
+    # where bandit's own severity depends on context that ruff states in its
+    # message (message_rules) or cannot see (rules, the lower value: a
+    # merged bandit finding then supplies the context-aware one in dedup).
+    message_rules:
+      # bandit B602/B605: LOW for a literal command ("seems safe, but may be
+      # changed in the future"), HIGH for a built one ("identified" /
+      # "possible injection detected"); ruff words its message the same way.
+      S602:
+        - {pattern: 'seems safe', severity: low}
+        - {pattern: 'identified|injection', severity: high}
+      S605:
+        - {pattern: 'seems safe', severity: low}
+        - {pattern: 'identified|injection', severity: high}
+      # bandit B103: HIGH when the mask is world-writable (S_IWOTH), else
+      # MEDIUM; ruff quotes the mask ("permissive mask `0o777`").
+      S103:
+        - {pattern: 'mask\W+0o[0-7]*[2367]\b', severity: high}
+        - {pattern: 'mask', severity: medium}
+    rules:
+      S505: medium    # bandit B505: HIGH below 1024 bits, MEDIUM below 2048; ruff does not say which
+      F821: high      # undefined name
+      F822: high      # undefined name in __all__
+      F823: high      # local variable referenced before assignment
+      F701: high      # break outside loop
+      F702: high      # continue outside loop
+      F704: high      # yield outside function
+      F706: high      # return outside function
+      F707: high      # except: not last
+      F722: high      # syntax error in forward annotation
+      F811: medium    # redefinition of unused name
+      F632: medium    # is-literal comparison
+      F601: medium    # dict key repeated
+      F602: medium    # dict key variable repeated
+      F401: low       # unused import
+      F841: low       # unused local variable
+      F402: low
+      F403: low       # star import
+      F405: low       # name may be undefined (star import)
+      F541: info      # f-string without placeholders
+      E721: low       # type comparison
+      E722: low       # bare except
+      B006: medium    # mutable default argument
+      B008: medium    # function call in default argument
+      B007: low       # unused loop variable
+      B018: low       # useless expression
+      B904: low       # raise without from inside except
+      B905: low       # zip without strict
+      ERA001: info    # commented-out code
+    prefixes:
+      S: bandit_equivalent
+      F: medium
+      B: medium
+      PLE: high
+      PLW: low
+      PLR: low
+      PLC: info
+      ASYNC: medium
+      BLE: low
+      DTZ: low
+      YTT: low
+      LOG: low
+      ARG: low
+      ERA: info
+      C90: low
+      T10: low
+      DJ: medium
+      E: info
+      W: info
+      I: info
+      UP: info
+      N: info
+      D: info
+    default: info
+
+  pylint:
+    # Pylint message type (json2 "type"); overrides by message id or symbol.
+    native: {fatal: high, error: high, warning: medium, refactor: low, convention: info, info: info}
+    rules:
+      W0611: low
+      unused-import: low
+      W0612: low
+      unused-variable: low
+      W0613: low
+      unused-argument: low
+      W0614: low
+      unused-wildcard-import: low
+      W0101: low
+      unreachable: low
+      W0123: medium
+      eval-used: medium
+      W0122: medium
+      exec-used: medium
+      R0801: info
+      duplicate-code: info
+    default: medium
+
+  mypy:
+    native: {error: medium, note: info}
+    default: medium
+
+  vulture:
+    # extra["confidence"] (int percent): vulture's own certainty that the
+    # code is dead. 60% hits are mostly framework entry points (Flask routes).
+    confidence_bands:
+      - {min: 90, severity: low}
+      - {min: 0, severity: info}
+    default: info
+
+  codespell:
+    default: info
+
+  hadolint:
+    native: {error: medium, warning: low, info: info, style: info}
+    default: low
+
+  radon:
+    # Cyclomatic-complexity rank letters (A 1-5, B 6-10, C 11-20, D 21-30,
+    # E 31-40, F 41+): bands aligned with lizard's below.
+    native: {A: info, B: info, C: info, D: low, E: low, F: medium}
+    default: info
+
+  lizard:
+    # extra["ccn"]: cyclomatic complexity of the function.
+    ccn_bands:
+      - {min: 41, severity: medium}
+      - {min: 21, severity: low}
+      - {min: 0, severity: info}
+    default: info
+
+  jscpd:
+    # extra["lines"]: length of the duplicated fragment.
+    lines_bands:
+      - {min: 50, severity: medium}
+      - {min: 20, severity: low}
+      - {min: 0, severity: info}
+    default: info
+
+  eslint:
+    rules:
+      no-undef: high
+      no-dupe-keys: high
+      no-dupe-args: high
+      no-const-assign: high
+      no-func-assign: high
+      no-import-assign: high
+      no-class-assign: high
+      no-invalid-regexp: high
+      no-obj-calls: high
+      no-new-native-nonconstructor: high
+      constructor-super: high
+      no-this-before-super: high
+      getter-return: high
+      no-eval: high
+      no-implied-eval: high
+      react/jsx-no-undef: high
+      react-hooks/rules-of-hooks: high
+      security/detect-eval-with-expression: high
+      no-unreachable: medium
+      no-duplicate-case: medium
+      no-dupe-else-if: medium
+      no-dupe-class-members: medium
+      no-self-assign: medium
+      no-self-compare: medium
+      no-unsafe-negation: medium
+      no-unsafe-finally: medium
+      no-unsafe-optional-chaining: medium
+      no-cond-assign: medium
+      no-constant-binary-expression: medium
+      no-compare-neg-zero: medium
+      use-isnan: medium
+      valid-typeof: medium
+      no-setter-return: medium
+      no-ex-assign: medium
+      no-loss-of-precision: medium
+      no-fallthrough: medium
+      no-async-promise-executor: medium
+      no-promise-executor-return: medium
+      no-unexpected-multiline: medium
+      no-global-assign: medium
+      no-shadow-restricted-names: medium
+      no-redeclare: medium
+      no-with: medium
+      no-unassigned-vars: medium
+      for-direction: medium
+      no-new-func: medium
+      no-script-url: medium
+      no-delete-var: medium
+      no-misleading-character-class: medium
+      no-empty-character-class: medium
+      react/no-danger: medium
+      react/no-danger-with-children: medium
+      react/jsx-no-target-blank: medium
+      react/no-direct-mutation-state: medium
+      react/jsx-no-duplicate-props: medium
+      vue/no-v-html: medium
+      svelte/no-at-html-tags: medium
+      security/detect-child-process: medium
+      security/detect-non-literal-require: medium
+      security/detect-pseudoRandomBytes: medium
+      security/detect-unsafe-regex: medium
+      security/detect-buffer-noassert: medium
+      security/detect-disable-mustache-escape: medium
+      security/detect-no-csrf-before-method-override: medium
+      security/detect-bidi-characters: medium
+      security/detect-non-literal-fs-filename: low
+      security/detect-non-literal-regexp: low
+      security/detect-object-injection: low
+      security/detect-possible-timing-attacks: low
+      security/detect-new-buffer: low
+      no-unused-vars: low
+      no-unused-private-class-members: low
+      no-unused-labels: low
+      no-empty: low
+      no-constant-condition: low
+      no-sparse-arrays: low
+      no-case-declarations: low
+      no-prototype-builtins: low
+      no-useless-catch: low
+      no-useless-assignment: low
+      preserve-caught-error: low
+      no-control-regex: low
+      no-useless-backreference: low
+      require-yield: low
+      no-empty-pattern: low
+      no-empty-static-block: low
+      no-octal: low
+      no-nonoctal-decimal-escape: low
+      no-debugger: low
+      react-hooks/exhaustive-deps: low
+      react/jsx-key: low
+      react/no-unknown-property: low
+      "@typescript-eslint/no-unused-vars": low
+      no-irregular-whitespace: info
+      no-extra-boolean-cast: info
+      no-useless-escape: info
+      no-regex-spaces: info
+      no-console: info
+      react/prop-types: info
+      react/react-in-jsx-scope: info
+      react/display-name: info
+      react/no-unescaped-entities: info
+      "@typescript-eslint/no-explicit-any": info
+      "@typescript-eslint/ban-ts-comment": info
+      "@typescript-eslint/no-empty-function": info
+      "@typescript-eslint/no-inferrable-types": info
+    prefixes:
+      "security/": medium
+      "no-unsanitized/": medium
+      "react-hooks/": low
+      "react/": low
+      "@typescript-eslint/": low
+      "vue/": low
+      "svelte/": low
+      "import/": low
+      "jsx-a11y/": info
+    default: low
+
+  gitleaks:
+    rules:
+      generic-api-key: medium
+    default: high
+
+  detect-secrets:
+    rules:
+      Secret Keyword: medium
+      Basic Auth Credentials: medium
+      Base64 High Entropy String: low
+      Hex High Entropy String: low
+    default: high
+
+  ai_review:
+    # The model's own label, validated by the findings schema.
+    native: {critical: critical, high: high, medium: medium, low: low, info: info}
+    default: info
+
+# Default severity of each bandit test (bandit 1.9 docs), used for ruff's
+# re-implementations (S### -> B###); bandit's own findings carry their token.
+bandit_rules:
+  B101: low
+  B102: medium
+  B103: medium
+  B104: medium
+  B105: low
+  B106: low
+  B107: low
+  B108: medium
+  B110: low
+  B112: low
+  B113: medium
+  B201: high
+  B202: high
+  B301: medium
+  B302: medium
+  B303: medium
+  B304: high
+  B305: medium
+  B306: medium
+  B307: medium
+  B308: medium
+  B310: medium
+  B311: low
+  B312: high
+  B313: medium
+  B314: medium
+  B315: medium
+  B316: medium
+  B317: medium
+  B318: medium
+  B319: medium
+  B320: medium
+  B321: high
+  B323: medium
+  B324: high
+  B401: high
+  B402: high
+  B403: low
+  B404: low
+  B405: low
+  B406: low
+  B407: low
+  B408: low
+  B409: low
+  B410: low
+  B411: low
+  B412: high
+  B413: high
+  B415: high
+  B501: high
+  B502: high
+  B503: medium
+  B504: low
+  B505: high
+  B506: medium
+  B507: high
+  B508: medium
+  B509: medium
+  B601: medium
+  B602: high
+  B603: low
+  B604: medium
+  B605: high
+  B606: low
+  B607: low
+  B608: medium
+  B609: high
+  B610: medium
+  B611: medium
+  B612: medium
+  B613: high
+  B614: medium
+  B615: medium
+  B701: high
+  B702: medium
+  B703: medium
+  B704: medium
+
+# Static findings of category `secrets` (gitleaks, detect-secrets, the
+# hardcoded-password checks of bandit/ruff, semgrep secret rules) on an
+# example/test file or with a placeholder value are downgraded: they are
+# documentation, not leaked credentials. AI findings keep the model's label.
+secrets:
+  category: secrets
+  downgrade_to: low
+  example_path_globs:
+    - "**/*.example"
+    - "**/*.example.*"
+    - "**/.env.example"
+    - "**/.env.sample"
+    - "**/.env.template"
+    - "**/*.sample"
+    - "**/*.template"
+    - "**/*.dist"
+    - "**/test/**"
+    - "**/tests/**"
+    - "**/__tests__/**"
+    - "**/__mocks__/**"
+    - "**/fixtures/**"
+    - "**/examples/**"
+    - "**/docs/**"
+    - "**/*.test.*"
+    - "**/*.spec.*"
+    - "**/test_*.py"
+    - "**/*_test.py"
+    - "**/conftest.py"
+    - "**/*.md"
+  # Case-insensitive regexes over the flagged source line.
+  placeholder_patterns:
+    - 'change[-_ ]?(this|me|it)'
+    - 'changeme'
+    - 'replace[-_ ]?(this|me)'
+    - 'your[-_ ]?[a-z_-]*(key|secret|token|password|pass|pwd)'
+    - 'placeholder'
+    - 'example'
+    - 'dummy'
+    - 'not[-_ ]?a[-_ ]?real'
+    - 'fake[-_ ]?(key|secret|token|password)'
+    - 'x{6,}'
+    - '\*{6,}'
+    - '<[a-z0-9_ -]*(key|secret|token|password)[a-z0-9_ -]*>'
+    - '\$\{[^}]+\}'
+    - '\{\{[^}]+\}\}'

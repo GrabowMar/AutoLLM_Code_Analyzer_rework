@@ -1,0 +1,67 @@
+{
+ "captured_at": "2026-10-22T14:44:59+00:00",
+ "case": "hostile",
+ "config": {
+  "ignore": "",
+  "select": "E9,F,B,S,PLE",
+  "target_version": "py312"
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/app.py",
+   "sha256": "b7512ab0181ead6473277204f7f5cb79c467ccfe5c0458c8989e9d4c3facde98"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/utils.py",
+   "sha256": "faebfaee33659a5f1b2fc249ad25d65194e23e53034e86aa04fd23190c569c13"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/ruff",
+   "check",
+   "--isolated",
+   "--no-cache",
+   "--ignore-noqa",
+   "--no-fix",
+   "--output-format",
+   "json",
+   "--output-file",
+   "/out/ruff.json",
+   "--target-version",
+   "py312",
+   "--select",
+   "E9,F,B,S,PLE",
+   "--",
+   "/src/vulnerable/backend/app.py",
+   "/src/vulnerable/backend/utils.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "ruff.json"
+  ],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "ruff.json": "[\n  {\n    \"cell\": null,\n    \"code\": \"F401\",\n    \"end_location\": {\n      \"column\": 12,\n      \"row\": 9\n    },\n    \"filename\": \"/src/vulnerable/backend/app.py\",\n    \"fix\": {\n      \"applicability\": \"safe\",\n      \"edits\": [\n        {\n          \"content\": \"\",\n          \"end_location\": {\n            \"column\": 1,\n            \"row\": 10\n          },\n          \"location\": {\n            \"column\": 1,\n            \"row\": 9\n          }\n        }\n      ],\n      \"message\": \"Remove unused import: `json`\"\n    },\n    \"location\": {\n      \"column\": 8,\n      \"row\": 9\n    },\n    \"message\": \"`json` imported but unused\",\n    \"name\": \"unused-import\",\n    \"noqa_row\": 9,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/unused-import\"\n  },\n  {\n    \"cell\": null,\n    \"code\": \"S105\",\n    \"end_location\": {\n      \"column\": 59,\n      \"row\": 23\n    },\n    \"filename\": \"/src/vulnerable/backend/app.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 28,\n      \"row\": 23\n    },\n    \"message\": \"Possible hardcoded password assigned to: \\\"SECRET_KEY\\\"\",\n    \"name\": \"hardcoded-password-string\",\n    \"noqa_row\": 23,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/hardcoded-password-string\"\n  },\n  {\n    \"cell\": null,\n    \"code\": \"S105\",\n    \"end_location\": {\n      \"column\": 35,\n      \"row\": 24\n    },\n    \"filename\": \"/src/vulnerable/backend/app.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 15,\n      \"row\": 24\n    },\n    \"message\": \"Possible hardcoded password assigned to: \\\"DB_PASSWORD\\\"\",\n    \"name\": \"hardcoded-password-string\",\n    \"noqa_row\": 24,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/hardcoded-password-string\"\n  },\n  {\n    \"cell\": null,\n    \"code\": \"S608\",\n    \"end_location\": {\n      \"column\": 78,\n      \"row\": 38\n    },\n    \"filename\": \"/src/vulnerable/backend/app.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 20,\n      \"row\": 38\n    },\n    \"message\": \"Possible SQL injection vector through string-based query construction\",\n    \"name\": \"hardcoded-sql-expression\",\n    \"noqa_row\": 38,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/hardcoded-sql-expression\"\n  },\n  {\n    \"cell\": null,\n    \"code\": \"S602\",\n    \"end_location\": {\n      \"column\": 37,\n      \"row\": 45\n    },\n    \"filename\": \"/src/vulnerable/backend/app.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 14,\n      \"row\": 45\n    },\n    \"message\": \"`subprocess` call with `shell=True` identified, security issue\",\n    \"name\": \"subprocess-popen-with-shell-equals-true\",\n    \"noqa_row\": 45,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/subprocess-popen-with-shell-equals-true\"\n  },\n  {\n    \"cell\": null,\n    \"code\": \"S301\",\n    \"end_location\": {\n      \"column\": 41,\n      \"row\": 51\n    },\n    \"filename\": \"/src/vulnerable/backend/app.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 15,\n      \"row\": 51\n    },\n    \"message\": \"`pickle` and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue\",\n    \"name\": \"suspicious-pickle-usage\",\n    \"noqa_row\": 51,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/suspicious-pickle-usage\"\n  },\n  {\n    \"cell\": null,\n    \"code\": \"S506\",\n    \"end_location\": {\n      \"column\": 25,\n      \"row\": 57\n    },\n    \"filename\": \"/src/vulnerable/backend/app.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 16,\n      \"row\": 57\n    },\n    \"message\": \"Probable use of unsafe `yaml.load`. Allows instantiation of arbitrary objects. Consider `yaml.safe_load`.\",\n    \"name\": \"unsafe-yaml-load\",\n    \"noqa_row\": 57,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/unsafe-yaml-load\"\n  },\n  {\n    \"cell\": null,\n    \"code\": \"S307\",\n    \"end_location\": {\n      \"column\": 32,\n      \"row\": 64\n    },\n    \"filename\": \"/src/vulnerable/backend/app.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 16,\n      \"row\": 64\n    },\n    \"message\": \"Use of possibly insecure function; consider using `ast.literal_eval`\",\n    \"name\": \"suspicious-eval-usage\",\n    \"noqa_row\": 64,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/suspicious-eval-usage\"\n  },\n  {\n    \"cell\": null,\n    \"code\": \"S324\",\n    \"end_location\": {\n      \"column\": 23,\n      \"row\": 68\n    },\n    \"filename\": \"/src/vulnerable/backend/app.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 12,\n      \"row\": 68\n    },\n    \"message\": \"Probable use of insecure hash functions in `hashlib`: `md5`\",\n    \"name\": \"hashlib-insecure-hash-function\",\n    \"noqa_row\": 68,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/hashlib-insecure-hash-function\"\n  },\n  {\n    \"cell\": null,\n    \"code\": \"F841\",\n    \"end_location\": {\n      \"column\": 17,\n      \"row\": 72\n    },\n    \"filename\": \"/src/vulnerable/backend/app.py\",\n    \"fix\": {\n      \"applicability\": \"unsafe\",\n      \"edits\": [\n        {\n          \"content\": \"\",\n          \"end_location\": {\n            \"column\": 1,\n            \"row\": 73\n          },\n          \"location\": {\n            \"column\": 1,\n            \"row\": 72\n          }\n        }\n      ],\n      \"message\": \"Remove assignment to unused variable `unused_total`\"\n    },\n    \"location\": {\n      \"column\": 5,\n      \"row\": 72\n    },\n    \"message\": \"Local variable `unused_total` is assigned to but never used\",\n    \"name\": \"unused-variable\",\n    \"noqa_row\": 72,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/unused-variable\"\n  },\n  {\n    \"cell\": null,\n    \"code\": \"S104\",\n    \"end_location\": {\n      \"column\": 27,\n      \"row\": 156\n    },\n    \"filename\": \"/src/vulnerable/backend/app.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 18,\n      \"row\": 156\n    },\n    \"message\": \"Possible binding to all interfaces\",\n    \"name\": \"hardcoded-bind-all-interfaces\",\n    \"noqa_row\": 156,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/hardcoded-bind-all-interfaces\"\n  },\n  {\n    \"cell\": null,\n    \"code\": \"S201\",\n    \"end_location\": {\n      \"column\": 50,\n      \"row\": 156\n    },\n    \"filename\": \"/src/vulnerable/backend/app.py\",\n    \"fix\": null,\n    \"location\": {\n      \"column\": 40,\n      \"row\": 156\n    },\n    \"message\": \"Use of `debug=True` in Flask app detected\",\n    \"name\": \"flask-debug-true\",\n    \"noqa_row\": 156,\n    \"severity\": \"error\",\n    \"url\": \"https://docs.astral.sh/ruff/rules/flask-debug-true\"\n  }\n]"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.104
+ },
+ "schema": 1,
+ "tool": "ruff",
+ "tool_version": "0.16.10"
+}

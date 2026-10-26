@@ -1,30 +1,35 @@
+# Vulture: dead-code finder for Python.
 slug: vulture
 name: Vulture
+kind: static
+category: dead_code
+version: "2.16"
+adapter_version: 2
+languages: [python]
+file_kinds: [source, config]
+output_kind: findings
 description: >-
-  Dead-code finder for Python. Detects unused functions, classes, variables
-  and imports, plus unreachable code.
-category: lint
-kind: container
-target_language: python
-icon: skull
-version: "2"
+  Finds unused imports, unreachable code and (at lower confidence) unused
+  functions, classes and variables in Python code.
 docs_url: https://github.com/jendrikseipp/vulture
-install_cmd: "pip install --user 'vulture==2.*'"
-verify_cmd: "vulture --version"
-run_cmd: "vulture {target} --min-confidence 60"
-parser_key: vulture
-run_timeout: 90
-install_timeout: 180
-display_order: 60
-config_schema: []
-default_config: {}
-sample_code: |
-  import os
-
-
-  def never_called():
-      unused_local = 42
-      return "dead"
-
-
-  print("hello")
+icon: skull
+display_order: 70
+mem_limit: 512m
+timeout_s: 180
+notes: >-
+  Baked pyproject (--config) with framework entry points (Flask/FastAPI
+  routes, error handlers, validators...) ignored by decorator. At the
+  default confidence of 80 only unused imports (90%) and unreachable code /
+  unused arguments (100%) are reported; 60 adds unused functions, classes,
+  variables and attributes, which in web apps are mostly framework entry
+  points. Files vulture cannot parse or read are coverage gaps. A wrapper
+  replaces vulture's "# noqa" parser, so an app's noqa comments cannot hide
+  its dead code (vulture has no switch for that).
+config_schema:
+  - name: min_confidence
+    type: integer
+    label: Minimum confidence (%)
+    description: Report only dead code at or above this confidence (--min-confidence).
+    default: 80
+    min: 0
+    max: 100

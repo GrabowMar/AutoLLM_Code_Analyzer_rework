@@ -1,0 +1,87 @@
+{
+ "captured_at": "2026-10-22T14:45:19+00:00",
+ "case": "clean",
+ "config": {},
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "3ecb375bb493dd403274b2197f98bb4b38d226ff186646d66f312c341336381f"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/App.jsx",
+   "sha256": "50b34bd78e3cd0936b45a21d06065bf3a2816bdc18afdb09f9876378beeb279c"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "clean/frontend/src/TagBadge.vue",
+   "sha256": "47812dbf621a248a8411ee2aa9b0f7cdaaf1fee1d4d2b4e37569ad17d79351f5"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "clean/frontend/src/bookmarks.ts",
+   "sha256": "3872ba6ae0c99822ddbea2b5f454f11d68733ee860e6c078cd659fa4553c0e04"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/components/BookmarkList.jsx",
+   "sha256": "efd7854d492966cc76c2341a178b636bbf4567e6073ee63f1c4b44d1c29f1635"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "clean/frontend/src/components/Panel.tsx",
+   "sha256": "63a402046cdf7b1158644a4a595bf0b5bcd49eb4fb974ff2973f91d97e67f23b"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "sh",
+   "-c",
+   "set -eu; mkdir /tmp/scan; cd /src; cp --parents -- \"$@\" /tmp/scan/; cd /tmp; exec /opt/analyzer/bin/gitleaks dir /tmp/scan --config /opt/analyzer/config/gitleaks.toml --gitleaks-ignore-path /opt/analyzer/config --ignore-gitleaks-allow --report-format json --report-path /out/gitleaks.json --exit-code 0 --redact --no-banner --no-color --log-level warn",
+   "gitleaks",
+   "./clean/backend/app.py",
+   "./clean/backend/bookmarks.py",
+   "./clean/frontend/src/App.jsx",
+   "./clean/frontend/src/TagBadge.vue",
+   "./clean/frontend/src/bookmarks.ts",
+   "./clean/frontend/src/components/BookmarkList.jsx",
+   "./clean/frontend/src/components/Panel.tsx"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "gitleaks.json"
+  ],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "gitleaks.json": "[]\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.716
+ },
+ "schema": 1,
+ "tool": "gitleaks",
+ "tool_version": "8.30.1"
+}

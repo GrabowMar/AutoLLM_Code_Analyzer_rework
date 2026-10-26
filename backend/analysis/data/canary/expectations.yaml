@@ -1,0 +1,155 @@
+# Canary expectations (analyzer self-test), read by engine/canary.evaluate.
+#
+# Derived from real runs of llmlab/analyzer:ae319d878c1b over vulnerable/ +
+# clean/ with every tool's default config (the golden outputs in
+# tests/fixtures/tool_outputs/<tool>/findings.json and clean.json). Re-derive
+# them whenever the image, a baked config or these fixtures change.
+#
+# * must_find: every entry must match >= 1 finding of the tool (rule = glob on
+#   rule_id, path = glob on the file path). They are the planted defects.
+# * clean_categories: no COUNTED finding of these normalized categories may
+#   appear under clean/ (the negative control). Each list is every category
+#   the tool can emit (data/mappings/categories.yaml "emits"); in the real
+#   run every tool reported nothing at all under clean/.
+# * min_findings: findings under vulnerable/ in the real run; fewer means the
+#   tool lost rules or files (e.g. a rule pack did not load).
+#
+# Not expected at the default configuration: vulnerable/backend/app.py's
+# unused function _legacy_export (vulture reports unused functions at 60%
+# confidence; the default is 80, which keeps Flask/FastAPI entry points out)
+# and the React dangerouslySetInnerHTML from ESLint (no core/plugin rule in
+# the baked config; semgrep reports it).
+version: 1
+fixture_dirs: {positive: vulnerable, negative: clean}
+
+tools:
+  bandit:
+    must_find:
+      - {rule: B608, path: vulnerable/backend/app.py}  # SQL built with an f-string
+      - {rule: B602, path: vulnerable/backend/app.py}  # subprocess with shell=True
+      - {rule: B301, path: vulnerable/backend/app.py}  # pickle.loads on request data
+      - {rule: B506, path: vulnerable/backend/app.py}  # yaml.load without a safe loader
+      - {rule: B307, path: vulnerable/backend/app.py}  # eval
+      - {rule: B324, path: vulnerable/backend/app.py}  # md5 for passwords
+      - {rule: B105, path: vulnerable/backend/app.py}  # hard-coded secret key / password
+      - {rule: B201, path: vulnerable/backend/app.py}  # app.run(debug=True)
+    clean_categories: [security, secrets]
+    min_findings: 12
+
+  semgrep:
+    must_find:
+      - {rule: "python.flask.security.injection.tainted-sql-string.*", path: vulnerable/backend/app.py}
+      - {rule: "python.lang.security.audit.subprocess-shell-true.*", path: vulnerable/backend/app.py}
+      - {rule: "python.lang.security.deserialization.pickle.avoid-pickle", path: vulnerable/backend/app.py}
+      - {rule: "python.flask.security.insecure-deserialization.*", path: vulnerable/backend/app.py}
+      - {rule: "python.lang.security.audit.eval-detected.*", path: vulnerable/backend/app.py}
+      - {rule: "python.lang.security.insecure-hash-algorithms-md5.*", path: vulnerable/backend/app.py}
+      - {rule: "python.flask.security.audit.debug-enabled.*", path: vulnerable/backend/app.py}
+      - {rule: "python.flask.security.audit.hardcoded-config.*", path: vulnerable/backend/app.py}
+      - {rule: "javascript.browser.security.eval-detected.*", path: vulnerable/frontend/src/App.jsx}
+      - {rule: "javascript.browser.security.insecure-innerhtml.*", path: vulnerable/frontend/src/App.jsx}
+      - {rule: "typescript.react.security.audit.react-dangerouslysetinnerhtml.*", path: vulnerable/frontend/src/App.jsx}
+      - {rule: "javascript.browser.security.eval-detected.*", path: vulnerable/frontend/src/api.ts}
+      - {rule: "javascript.vue.security.audit.xss.templates.avoid-v-html.*", path: vulnerable/frontend/src/Card.vue}
+      - {rule: "typescript.react.security.audit.react-dangerouslysetinnerhtml.*", path: vulnerable/frontend/src/Banner.tsx}
+    clean_categories: [security, secrets, bug, maintainability]
+    min_findings: 24
+
+  eslint:
+    must_find:
+      - {rule: no-eval, path: vulnerable/frontend/src/App.jsx}
+      - {rule: security/detect-eval-with-expression, path: vulnerable/frontend/src/App.jsx}
+      - {rule: no-unsanitized/property, path: vulnerable/frontend/src/App.jsx}
+      - {rule: no-unused-vars, path: vulnerable/frontend/src/App.jsx}  # unusedCounter (not the JSX-only components)
+      - {rule: no-eval, path: vulnerable/frontend/src/api.ts}
+      - {rule: "@typescript-eslint/no-unused-vars", path: vulnerable/frontend/src/api.ts}
+      - {rule: vue/no-v-html, path: vulnerable/frontend/src/Card.vue}
+      - {rule: "@typescript-eslint/no-unused-vars", path: vulnerable/frontend/src/Banner.tsx}  # not the JSX-only Icon
+    # clean/ uses components only as JSX elements (.jsx and .tsx): a dead_code
+    # finding there would be the v1 JSX false positive.
+    clean_categories: [bug, security, dead_code, maintainability, style]
+    min_findings: 9
+
+  ruff:
+    must_find:
+      - {rule: S608, path: vulnerable/backend/app.py}
+      - {rule: S602, path: vulnerable/backend/app.py}
+      - {rule: S301, path: vulnerable/backend/app.py}
+      - {rule: S506, path: vulnerable/backend/app.py}
+      - {rule: S307, path: vulnerable/backend/app.py}
+      - {rule: S324, path: vulnerable/backend/app.py}
+      - {rule: S105, path: vulnerable/backend/app.py}
+      - {rule: S201, path: vulnerable/backend/app.py}
+      - {rule: F401, path: vulnerable/backend/app.py}  # unused import json
+      - {rule: F841, path: vulnerable/backend/app.py}  # unused local variable
+    clean_categories: [bug, security, secrets, dead_code, maintainability, style, complexity]
+    min_findings: 12
+
+  pylint:
+    must_find:
+      - {rule: eval-used, path: vulnerable/backend/app.py}
+      - {rule: unused-import, path: vulnerable/backend/app.py}
+      - {rule: unreachable, path: vulnerable/backend/app.py}
+    clean_categories: [bug, security, dead_code, maintainability, style, duplication, complexity]
+    min_findings: 3
+
+  mypy:
+    must_find:
+      - {rule: return-value, path: vulnerable/backend/app.py}  # total_price returns str, declared int
+    clean_categories: [type]
+    min_findings: 1
+
+  vulture:
+    must_find:
+      - {rule: unused-import, path: vulnerable/backend/app.py}
+      - {rule: unreachable-code, path: vulnerable/backend/app.py}
+    clean_categories: [dead_code]
+    min_findings: 2
+
+  gitleaks:
+    must_find:
+      - {rule: aws-access-token, path: vulnerable/backend/app.py}
+      - {rule: generic-api-key, path: vulnerable/backend/app.py}
+    clean_categories: [secrets]
+    min_findings: 2
+
+  detect-secrets:
+    must_find:
+      - {rule: AWS Access Key, path: vulnerable/backend/app.py}
+      - {rule: Secret Keyword, path: vulnerable/backend/app.py}
+      - {rule: Base64 High Entropy String, path: vulnerable/backend/app.py}
+    clean_categories: [secrets]
+    min_findings: 5
+
+  radon:
+    must_find:
+      - {rule: cyclomatic-complexity, path: vulnerable/backend/app.py}  # classify_order, CC 36 (rank E)
+    clean_categories: [complexity]
+    min_findings: 1
+
+  lizard:
+    must_find:
+      - {rule: cyclomatic-complexity, path: vulnerable/backend/app.py}  # classify_order, CCN 36
+    clean_categories: [complexity]
+    min_findings: 1
+
+  jscpd:
+    must_find:
+      - {rule: duplicate-code, path: vulnerable/backend/utils.py}  # summarize_orders / summarize_refunds
+    clean_categories: [duplication]
+    min_findings: 1
+
+  codespell:
+    must_find:
+      - {rule: misspelling, path: vulnerable/backend/app.py}  # recieve, seperate
+    clean_categories: [style]
+    min_findings: 2
+
+  hadolint:
+    must_find:
+      - {rule: DL3007, path: vulnerable/Dockerfile}  # FROM python:latest
+      - {rule: DL3008, path: vulnerable/Dockerfile}  # unpinned apt packages
+      - {rule: DL3020, path: vulnerable/Dockerfile}  # ADD instead of COPY
+      - {rule: DL3025, path: vulnerable/Dockerfile}  # shell-form CMD
+    clean_categories: [container]
+    min_findings: 6

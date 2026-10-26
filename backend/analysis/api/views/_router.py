@@ -1,16 +1,14 @@
-"""Shared Ninja routers for the analysis app.
+"""Shared Ninja router for the analysis app (mounted at ``/analysis/``).
 
-Two routers are exposed:
-
-* ``analyzers_router`` (mounted at ``/analyzers/``) — the tool catalog/shop,
-  the per-user workspace, and installed-tool management.
-* ``router`` (mounted at ``/analysis/``) — analysis runs and their findings.
-
-Submodules import these routers and register endpoints onto them; route order
-within a router follows the import order in ``views/__init__.py``.
+Submodules import ``router`` and register endpoints onto it; route order
+follows the import order in ``views/__init__.py`` (static path segments
+before dynamic ``{...}`` ones).
 """
 
 from ninja import Router
 
-analyzers_router = Router(tags=["analyzers"])
+from backend.analysis.api.common import reject_unstorable_query
+
 router = Router(tags=["analysis"])
+# Before parameter validation: NUL in a query string is a 422 for every endpoint.
+router.add_decorator(reject_unstorable_query, mode="view")

@@ -1,0 +1,69 @@
+{
+ "amended": "argv amended 2026-10-22 (adapters fix): the recorded outcome was captured with the previous argv; the added flags do not change the output for these files (verified with the pinned tool outside the image). Re-capture after the analyzer image is rebuilt.",
+ "captured_at": "2026-10-22T14:44:10+00:00",
+ "case": "syntax",
+ "config": {
+  "confidence": "all",
+  "severity": "all",
+  "skip": ""
+ },
+ "files": [
+  {
+   "content": "def handler(request:\n    return request\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/broken.py",
+   "sha256": "a213cda8977aafa87b15bec45ead948580c06c66386ac6bd1e94e459981963e4"
+  },
+  {
+   "content": "import os\n\n\ndef read_setting(name):\n    return os.environ.get(name, \"\")\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/ok.py",
+   "sha256": "377ef7025dd733242011513a97f32da3f320aa58e5463dfb383708e0a03215b7"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/bandit",
+   "--format",
+   "json",
+   "--output",
+   "/out/bandit.json",
+   "--quiet",
+   "--ignore-nosec",
+   "--severity-level",
+   "all",
+   "--confidence-level",
+   "all",
+   "--exclude",
+   "",
+   "--",
+   "/src/svc/broken.py",
+   "/src/svc/ok.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "bandit.json"
+  ],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "bandit.json": "{\n  \"errors\": [\n    {\n      \"filename\": \"/src/svc/broken.py\",\n      \"reason\": \"syntax error while parsing AST from file\"\n    }\n  ],\n  \"generated_at\": \"2026-10-22T14:44:10Z\",\n  \"metrics\": {\n    \"/src/svc/broken.py\": {\n      \"loc\": 2,\n      \"nosec\": 0,\n      \"skipped_tests\": 0\n    },\n    \"/src/svc/ok.py\": {\n      \"CONFIDENCE.HIGH\": 0,\n      \"CONFIDENCE.LOW\": 0,\n      \"CONFIDENCE.MEDIUM\": 0,\n      \"CONFIDENCE.UNDEFINED\": 0,\n      \"SEVERITY.HIGH\": 0,\n      \"SEVERITY.LOW\": 0,\n      \"SEVERITY.MEDIUM\": 0,\n      \"SEVERITY.UNDEFINED\": 0,\n      \"loc\": 3,\n      \"nosec\": 0,\n      \"skipped_tests\": 0\n    },\n    \"_totals\": {\n      \"CONFIDENCE.HIGH\": 0,\n      \"CONFIDENCE.LOW\": 0,\n      \"CONFIDENCE.MEDIUM\": 0,\n      \"CONFIDENCE.UNDEFINED\": 0,\n      \"SEVERITY.HIGH\": 0,\n      \"SEVERITY.LOW\": 0,\n      \"SEVERITY.MEDIUM\": 0,\n      \"SEVERITY.UNDEFINED\": 0,\n      \"loc\": 5,\n      \"nosec\": 0,\n      \"skipped_tests\": 0\n    }\n  },\n  \"results\": []\n}"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.299
+ },
+ "schema": 1,
+ "tool": "bandit",
+ "tool_version": "1.9.4"
+}

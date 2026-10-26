@@ -1,0 +1,237 @@
+{
+ "captured_at": "2026-10-22T14:45:20+00:00",
+ "case": "hostile",
+ "config": {},
+ "files": [
+  {
+   "content": "[bandit]\nskips: B105,B201,B301,B307,B324,B403,B404,B506,B602,B608\n",
+   "kind": "other",
+   "language": "other",
+   "path": ".bandit",
+   "sha256": "09952ec983b92f4c99021fed576a39ee3243e06058330780e4ef292b929af649"
+  },
+  {
+   "content": "[codespell]\nskip = *\nignore-words-list = recieve,seperate\n",
+   "kind": "other",
+   "language": "other",
+   "path": ".codespellrc",
+   "sha256": "6b900c83236bc167e094916cc0c9a3e1f540c1f806cf939538de3cdb59f069cf"
+  },
+  {
+   "content": "*\n",
+   "kind": "other",
+   "language": "other",
+   "path": ".eslintignore",
+   "sha256": "cdbcae15105d6b781e620813c79c7e868740d4e9cc53ce6f5fcbbc12387adf4b"
+  },
+  {
+   "content": "{\"root\": true, \"rules\": {\"no-eval\": \"off\", \"no-unused-vars\": \"off\"}}\n",
+   "kind": "config",
+   "language": "json",
+   "path": ".eslintrc.json",
+   "sha256": "022eb79ed0df7068a8279f32c11134964e4eb2ca78b29f83c7420bf2a6caa3f7"
+  },
+  {
+   "content": "*\n",
+   "kind": "config",
+   "language": "text",
+   "path": ".gitignore",
+   "sha256": "cdbcae15105d6b781e620813c79c7e868740d4e9cc53ce6f5fcbbc12387adf4b"
+  },
+  {
+   "content": "ignored: [DL3007, DL3008, DL3009, DL3015, DL3020, DL3025]\n",
+   "kind": "config",
+   "language": "yaml",
+   "path": ".hadolint.yaml",
+   "sha256": "7f4af3bd8c84b1e36f7d3b75f395ab6332cc5cbdafe74e9b600f532e4486a8e0"
+  },
+  {
+   "content": "{\"ignore\": [\"**/*\"], \"minTokens\": 100000}\n",
+   "kind": "config",
+   "language": "json",
+   "path": ".jscpd.json",
+   "sha256": "b84c8c28dbe665a4cdafa0dd33d6fd75cf2d6b79f050a9c687ccc7e2df8b4ac5"
+  },
+  {
+   "content": "[MESSAGES CONTROL]\ndisable=all\n",
+   "kind": "config",
+   "language": "text",
+   "path": ".pylintrc",
+   "sha256": "e56e98b7612a917006e12051c38ea6ce04621c49933a036226f2bd96344df4a3"
+  },
+  {
+   "content": "{\"version\": \"1.5.0\", \"plugins_used\": [], \"filters_used\": [], \"results\": {}}\n",
+   "kind": "other",
+   "language": "other",
+   "path": ".secrets.baseline",
+   "sha256": "12cccf901b15bf71a713ab928785be082d45a6833a3d0c50ce68acf712111494"
+  },
+  {
+   "content": "*\n",
+   "kind": "other",
+   "language": "other",
+   "path": ".semgrepignore",
+   "sha256": "cdbcae15105d6b781e620813c79c7e868740d4e9cc53ce6f5fcbbc12387adf4b"
+  },
+  {
+   "content": "export default [{ ignores: ['**/*'] }, { rules: { 'no-eval': 'off' } }];\n",
+   "kind": "config",
+   "language": "javascript",
+   "path": "eslint.config.js",
+   "sha256": "7c1672280d5107e62bcd7caf8118e73bea33d51dd6f5f565c17aaeea2b7b5c68"
+  },
+  {
+   "content": "[mypy]\nignore_errors = True\n",
+   "kind": "config",
+   "language": "other",
+   "path": "mypy.ini",
+   "sha256": "0d32f379cafcb3d017a32fc04cb65ce8f2a849c3b76b02dbccaf7087687855d5"
+  },
+  {
+   "content": "[project]\nname = \"inventory\"\nversion = \"1.0.0\"\n\n[tool.ruff]\nexclude = [\"*\"]\n[tool.ruff.lint]\nignore = [\"ALL\"]\n\n[tool.mypy]\nignore_errors = true\n\n[tool.pylint.\"messages control\"]\ndisable = [\"all\"]\n\n[tool.bandit]\nskips = [\"B105\", \"B201\", \"B301\", \"B307\", \"B324\", \"B403\", \"B404\", \"B506\", \"B602\", \"B608\"]\n\n[tool.vulture]\nmin_confidence = 100\n\n[tool.codespell]\nignore-words-list = \"recieve,seperate\"\nskip = \"*\"\n",
+   "kind": "manifest",
+   "language": "toml",
+   "path": "pyproject.toml",
+   "sha256": "4703187edf9216eddbe9953c3156ed214afc0030b211be7297dc4890c9215185"
+  },
+  {
+   "content": "exclude = [\"*\"]\n[lint]\nignore = [\"ALL\"]\n",
+   "kind": "config",
+   "language": "toml",
+   "path": "ruff.toml",
+   "sha256": "a9389e90a19f5099dc33d983dce780a92f4e8aa10a417e8ac0f34038d419bee8"
+  },
+  {
+   "content": "[mypy]\nignore_errors = True\n\n[codespell]\nskip = *\n\n[radon]\nexclude = *\n",
+   "kind": "manifest",
+   "language": "other",
+   "path": "setup.cfg",
+   "sha256": "3a05a9399d4c244bc1cbdde08b41cd470eb407ec8c33a0538fb55b9b4a8f6f9c"
+  },
+  {
+   "content": "ignored: [DL3007, DL3008, DL3009, DL3015, DL3020, DL3025]\n",
+   "kind": "config",
+   "language": "yaml",
+   "path": "vulnerable/.hadolint.yaml",
+   "sha256": "7f4af3bd8c84b1e36f7d3b75f395ab6332cc5cbdafe74e9b600f532e4486a8e0"
+  },
+  {
+   "kind": "config",
+   "language": "dockerfile",
+   "path": "vulnerable/Dockerfile",
+   "sha256": "d652169744de5618ba7d78ce6db3264d17e98f1a9e08da6aedaa7b6dad97e017"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/app.py",
+   "sha256": "b7512ab0181ead6473277204f7f5cb79c467ccfe5c0458c8989e9d4c3facde98"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/utils.py",
+   "sha256": "faebfaee33659a5f1b2fc249ad25d65194e23e53034e86aa04fd23190c569c13"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/App.jsx",
+   "sha256": "47a0a1ef7463a2fbdda619183d5a06fc98df96b885fc9ac423f2eb804450cbde"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "vulnerable/frontend/src/Banner.tsx",
+   "sha256": "fde9db28f3a89cc5d70d85571aeef23ae06527ed313e492889de7af3628dd5f2"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "vulnerable/frontend/src/Card.vue",
+   "sha256": "e3f1ac7af90e4290877fa1d335a8ee2ca2e6f6e07d5b18134bc8194d8cb4f5d1"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "vulnerable/frontend/src/api.ts",
+   "sha256": "10db8abdf7e86d4d1fcad8b1032fe585d8de4a9ed01057dc2cca191e1a4dad73"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Footer.jsx",
+   "sha256": "4d21c89dae359815df375738352440af702a72157da2815d9ec744590f4a94b9"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Header.jsx",
+   "sha256": "48f798d3de206f47a4d7edb0baf12379cfc62304952aa884b5117e3c967a9bdc"
+  },
+  {
+   "content": "classify_order\n",
+   "kind": "doc",
+   "language": "text",
+   "path": "whitelizard.txt",
+   "sha256": "3872ff9b5255e4744f0bc627eee82c90f473a65b82de7acdab0b2f21e7e1001d"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "sh",
+   "-c",
+   "set -eu; mkdir /tmp/scan; cd /src; cp --parents -- \"$@\" /tmp/scan/; cd /tmp; exec /opt/analyzer/bin/gitleaks dir /tmp/scan --config /opt/analyzer/config/gitleaks.toml --gitleaks-ignore-path /opt/analyzer/config --ignore-gitleaks-allow --report-format json --report-path /out/gitleaks.json --exit-code 0 --redact --no-banner --no-color --log-level warn",
+   "gitleaks",
+   "./.bandit",
+   "./.codespellrc",
+   "./.eslintignore",
+   "./.eslintrc.json",
+   "./.gitignore",
+   "./.hadolint.yaml",
+   "./.jscpd.json",
+   "./.pylintrc",
+   "./.secrets.baseline",
+   "./.semgrepignore",
+   "./eslint.config.js",
+   "./mypy.ini",
+   "./pyproject.toml",
+   "./ruff.toml",
+   "./setup.cfg",
+   "./vulnerable/.hadolint.yaml",
+   "./vulnerable/Dockerfile",
+   "./vulnerable/backend/app.py",
+   "./vulnerable/backend/utils.py",
+   "./vulnerable/frontend/src/App.jsx",
+   "./vulnerable/frontend/src/Banner.tsx",
+   "./vulnerable/frontend/src/Card.vue",
+   "./vulnerable/frontend/src/api.ts",
+   "./vulnerable/frontend/src/components/Footer.jsx",
+   "./vulnerable/frontend/src/components/Header.jsx",
+   "./whitelizard.txt"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "gitleaks.json"
+  ],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "gitleaks.json": "[\n {\n  \"RuleID\": \"generic-api-key\",\n  \"Description\": \"Detected a Generic API Key, potentially exposing access to various services and sensitive operations.\",\n  \"StartLine\": 26,\n  \"EndLine\": 26,\n  \"StartColumn\": 2,\n  \"EndColumn\": 62,\n  \"Match\": \"SERVICE_API_KEY = \\\"REDACTED\\\"\",\n  \"Secret\": \"REDACTED\",\n  \"File\": \"/tmp/scan/vulnerable/backend/app.py\",\n  \"SymlinkFile\": \"\",\n  \"Commit\": \"\",\n  \"Entropy\": 5.2112107,\n  \"Author\": \"\",\n  \"Email\": \"\",\n  \"Date\": \"\",\n  \"Message\": \"\",\n  \"Tags\": [],\n  \"Fingerprint\": \"/tmp/scan/vulnerable/backend/app.py:generic-api-key:26\"\n },\n {\n  \"RuleID\": \"aws-access-token\",\n  \"Description\": \"Identified a pattern that may indicate AWS credentials, risking unauthorized cloud resource access and data breaches on AWS platforms.\",\n  \"StartLine\": 25,\n  \"EndLine\": 25,\n  \"StartColumn\": 23,\n  \"EndColumn\": 42,\n  \"Match\": \"REDACTED\",\n  \"Secret\": \"REDACTED\",\n  \"File\": \"/tmp/scan/vulnerable/backend/app.py\",\n  \"SymlinkFile\": \"\",\n  \"Commit\": \"\",\n  \"Entropy\": 4.121928,\n  \"Author\": \"\",\n  \"Email\": \"\",\n  \"Date\": \"\",\n  \"Message\": \"\",\n  \"Tags\": [],\n  \"Fingerprint\": \"/tmp/scan/vulnerable/backend/app.py:aws-access-token:25\"\n }\n]\n"
+  },
+  "stderr": "2:45PM WRN leaks found: 2\n",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.75
+ },
+ "schema": 1,
+ "tool": "gitleaks",
+ "tool_version": "8.30.1"
+}

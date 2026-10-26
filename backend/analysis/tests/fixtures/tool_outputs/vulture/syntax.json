@@ -1,0 +1,57 @@
+{
+ "amended": "argv amended 2026-10-22 (adapters fix): the recorded outcome was captured with the previous argv; the added flags do not change the output for these files (verified with the pinned tool outside the image). Re-capture after the analyzer image is rebuilt.",
+ "captured_at": "2026-10-22T14:45:17+00:00",
+ "case": "syntax",
+ "config": {
+  "min_confidence": 80
+ },
+ "files": [
+  {
+   "content": "def handler(request:\n    return request\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/broken.py",
+   "sha256": "a213cda8977aafa87b15bec45ead948580c06c66386ac6bd1e94e459981963e4"
+  },
+  {
+   "content": "import os\n\n\ndef read_setting(name):\n    return os.environ.get(name, \"\")\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/ok.py",
+   "sha256": "377ef7025dd733242011513a97f32da3f320aa58e5463dfb383708e0a03215b7"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/venvs/vulture/bin/python",
+   "-I",
+   "/opt/analyzer/scripts/vulture_isolated.py",
+   "--config",
+   "/opt/analyzer/config/vulture.toml",
+   "--min-confidence",
+   "80",
+   "--",
+   "/src/svc/broken.py",
+   "/src/svc/ok.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "/src/svc/broken.py:1: '(' was never closed at \"def handler(request:\"\n",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.181
+ },
+ "schema": 1,
+ "tool": "vulture",
+ "tool_version": "2.16"
+}

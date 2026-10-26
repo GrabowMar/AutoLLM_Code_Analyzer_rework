@@ -1,0 +1,67 @@
+{
+ "amended": "argv amended 2026-10-22 (adapters fix): the recorded outcome was captured with the previous argv; the added flags do not change the output for these files (verified with the pinned tool outside the image). Re-capture after the analyzer image is rebuilt.",
+ "captured_at": "2026-10-22T14:44:09+00:00",
+ "case": "hostile",
+ "config": {
+  "confidence": "all",
+  "severity": "all",
+  "skip": ""
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/app.py",
+   "sha256": "b7512ab0181ead6473277204f7f5cb79c467ccfe5c0458c8989e9d4c3facde98"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/utils.py",
+   "sha256": "faebfaee33659a5f1b2fc249ad25d65194e23e53034e86aa04fd23190c569c13"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/bandit",
+   "--format",
+   "json",
+   "--output",
+   "/out/bandit.json",
+   "--quiet",
+   "--ignore-nosec",
+   "--severity-level",
+   "all",
+   "--confidence-level",
+   "all",
+   "--exclude",
+   "",
+   "--",
+   "/src/vulnerable/backend/app.py",
+   "/src/vulnerable/backend/utils.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "bandit.json"
+  ],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "bandit.json": "{\n  \"errors\": [],\n  \"generated_at\": \"2026-10-22T14:44:09Z\",\n  \"metrics\": {\n    \"/src/vulnerable/backend/app.py\": {\n      \"CONFIDENCE.HIGH\": 7,\n      \"CONFIDENCE.LOW\": 0,\n      \"CONFIDENCE.MEDIUM\": 5,\n      \"CONFIDENCE.UNDEFINED\": 0,\n      \"SEVERITY.HIGH\": 3,\n      \"SEVERITY.LOW\": 4,\n      \"SEVERITY.MEDIUM\": 5,\n      \"SEVERITY.UNDEFINED\": 0,\n      \"loc\": 124,\n      \"nosec\": 0,\n      \"skipped_tests\": 0\n    },\n    \"/src/vulnerable/backend/utils.py\": {\n      \"CONFIDENCE.HIGH\": 0,\n      \"CONFIDENCE.LOW\": 0,\n      \"CONFIDENCE.MEDIUM\": 0,\n      \"CONFIDENCE.UNDEFINED\": 0,\n      \"SEVERITY.HIGH\": 0,\n      \"SEVERITY.LOW\": 0,\n      \"SEVERITY.MEDIUM\": 0,\n      \"SEVERITY.UNDEFINED\": 0,\n      \"loc\": 32,\n      \"nosec\": 0,\n      \"skipped_tests\": 0\n    },\n    \"_totals\": {\n      \"CONFIDENCE.HIGH\": 7,\n      \"CONFIDENCE.LOW\": 0,\n      \"CONFIDENCE.MEDIUM\": 5,\n      \"CONFIDENCE.UNDEFINED\": 0,\n      \"SEVERITY.HIGH\": 3,\n      \"SEVERITY.LOW\": 4,\n      \"SEVERITY.MEDIUM\": 5,\n      \"SEVERITY.UNDEFINED\": 0,\n      \"loc\": 156,\n      \"nosec\": 0,\n      \"skipped_tests\": 0\n    }\n  },\n  \"results\": [\n    {\n      \"code\": \"10 import os\\n11 import pickle\\n12 import sqlite3\\n\",\n      \"col_offset\": 0,\n      \"end_col_offset\": 13,\n      \"filename\": \"/src/vulnerable/backend/app.py\",\n      \"issue_confidence\": \"HIGH\",\n      \"issue_cwe\": {\n        \"id\": 502,\n        \"link\": \"https://cwe.mitre.org/data/definitions/502.html\"\n      },\n      \"issue_severity\": \"LOW\",\n      \"issue_text\": \"Consider possible security implications associated with pickle module.\",\n      \"line_number\": 11,\n      \"line_range\": [\n        11\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b403-import-pickle\",\n      \"test_id\": \"B403\",\n      \"test_name\": \"blacklist\"\n    },\n    {\n      \"code\": \"12 import sqlite3\\n13 import subprocess\\n14 \\n\",\n      \"col_offset\": 0,\n      \"end_col_offset\": 17,\n      \"filename\": \"/src/vulnerable/backend/app.py\",\n      \"issue_confidence\": \"HIGH\",\n      \"issue_cwe\": {\n        \"id\": 78,\n        \"link\": \"https://cwe.mitre.org/data/definitions/78.html\"\n      },\n      \"issue_severity\": \"LOW\",\n      \"issue_text\": \"Consider possible security implications associated with the subprocess module.\",\n      \"line_number\": 13,\n      \"line_range\": [\n        13\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess\",\n      \"test_id\": \"B404\",\n      \"test_name\": \"blacklist\"\n    },\n    {\n      \"code\": \"22 app = Flask(__name__)\\n23 app.config[\\\"SECRET_KEY\\\"] = \\\"flask-canary-signing-key-3f9a\\\"\\n24 DB_PASSWORD = \\\"Tr0ub4dor&3-canary\\\"\\n\",\n      \"col_offset\": 11,\n      \"end_col_offset\": 23,\n      \"filename\": \"/src/vulnerable/backend/app.py\",\n      \"issue_confidence\": \"MEDIUM\",\n      \"issue_cwe\": {\n        \"id\": 259,\n        \"link\": \"https://cwe.mitre.org/data/definitions/259.html\"\n      },\n      \"issue_severity\": \"LOW\",\n      \"issue_text\": \"Possible hardcoded password: 'flask-canary-signing-key-3f9a'\",\n      \"line_number\": 23,\n      \"line_range\": [\n        23\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html\",\n      \"test_id\": \"B105\",\n      \"test_name\": \"hardcoded_password_string\"\n    },\n    {\n      \"code\": \"23 app.config[\\\"SECRET_KEY\\\"] = \\\"flask-canary-signing-key-3f9a\\\"\\n24 DB_PASSWORD = \\\"Tr0ub4dor&3-canary\\\"\\n25 AWS_ACCESS_KEY_ID = \\\"AKIAZ7QX3LKD5PMW2N4H\\\"\\n\",\n      \"col_offset\": 14,\n      \"end_col_offset\": 34,\n      \"filename\": \"/src/vulnerable/backend/app.py\",\n      \"issue_confidence\": \"MEDIUM\",\n      \"issue_cwe\": {\n        \"id\": 259,\n        \"link\": \"https://cwe.mitre.org/data/definitions/259.html\"\n      },\n      \"issue_severity\": \"LOW\",\n      \"issue_text\": \"Possible hardcoded password: 'Tr0ub4dor&3-canary'\",\n      \"line_number\": 24,\n      \"line_range\": [\n        24\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html\",\n      \"test_id\": \"B105\",\n      \"test_name\": \"hardcoded_password_string\"\n    },\n    {\n      \"code\": \"37     cursor = get_db().cursor()\\n38     cursor.execute(f\\\"SELECT id, name, price FROM items WHERE name = '{name}'\\\")\\n39     return jsonify(cursor.fetchall())\\n\",\n      \"col_offset\": 21,\n      \"end_col_offset\": 69,\n      \"filename\": \"/src/vulnerable/backend/app.py\",\n      \"issue_confidence\": \"MEDIUM\",\n      \"issue_cwe\": {\n        \"id\": 89,\n        \"link\": \"https://cwe.mitre.org/data/definitions/89.html\"\n      },\n      \"issue_severity\": \"MEDIUM\",\n      \"issue_text\": \"Possible SQL injection vector through string-based query construction.\",\n      \"line_number\": 38,\n      \"line_range\": [\n        38\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html\",\n      \"test_id\": \"B608\",\n      \"test_name\": \"hardcoded_sql_expressions\"\n    },\n    {\n      \"code\": \"44     host = request.args.get(\\\"host\\\", \\\"localhost\\\")\\n45     output = subprocess.check_output(f\\\"ping -c 1 {host}\\\", shell=True)\\n46     return output.decode()\\n\",\n      \"col_offset\": 13,\n      \"end_col_offset\": 69,\n      \"filename\": \"/src/vulnerable/backend/app.py\",\n      \"issue_confidence\": \"HIGH\",\n      \"issue_cwe\": {\n        \"id\": 78,\n        \"link\": \"https://cwe.mitre.org/data/definitions/78.html\"\n      },\n      \"issue_severity\": \"HIGH\",\n      \"issue_text\": \"subprocess call with shell=True identified, security issue.\",\n      \"line_number\": 45,\n      \"line_range\": [\n        45\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/plugins/b602_subprocess_popen_with_shell_equals_true.html\",\n      \"test_id\": \"B602\",\n      \"test_name\": \"subprocess_popen_with_shell_equals_true\"\n    },\n    {\n      \"code\": \"50 def load_session():\\n51     session = pickle.loads(request.data)\\n52     return jsonify(session)\\n\",\n      \"col_offset\": 14,\n      \"end_col_offset\": 40,\n      \"filename\": \"/src/vulnerable/backend/app.py\",\n      \"issue_confidence\": \"HIGH\",\n      \"issue_cwe\": {\n        \"id\": 502,\n        \"link\": \"https://cwe.mitre.org/data/definitions/502.html\"\n      },\n      \"issue_severity\": \"MEDIUM\",\n      \"issue_text\": \"Pickle and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue.\",\n      \"line_number\": 51,\n      \"line_range\": [\n        51\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b301-pickle\",\n      \"test_id\": \"B301\",\n      \"test_name\": \"blacklist\"\n    },\n    {\n      \"code\": \"56 def load_config():\\n57     settings = yaml.load(request.data)\\n58     return jsonify(settings)\\n\",\n      \"col_offset\": 15,\n      \"end_col_offset\": 38,\n      \"filename\": \"/src/vulnerable/backend/app.py\",\n      \"issue_confidence\": \"HIGH\",\n      \"issue_cwe\": {\n        \"id\": 20,\n        \"link\": \"https://cwe.mitre.org/data/definitions/20.html\"\n      },\n      \"issue_severity\": \"MEDIUM\",\n      \"issue_text\": \"Use of unsafe yaml load. Allows instantiation of arbitrary objects. Consider yaml.safe_load().\",\n      \"line_number\": 57,\n      \"line_range\": [\n        57\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/plugins/b506_yaml_load.html\",\n      \"test_id\": \"B506\",\n      \"test_name\": \"yaml_load\"\n    },\n    {\n      \"code\": \"63     expression = request.args.get(\\\"expr\\\", \\\"0\\\")\\n64     return str(eval(expression))\\n65 \\n\",\n      \"col_offset\": 15,\n      \"end_col_offset\": 31,\n      \"filename\": \"/src/vulnerable/backend/app.py\",\n      \"issue_confidence\": \"HIGH\",\n      \"issue_cwe\": {\n        \"id\": 78,\n        \"link\": \"https://cwe.mitre.org/data/definitions/78.html\"\n      },\n      \"issue_severity\": \"MEDIUM\",\n      \"issue_text\": \"Use of possibly insecure function - consider using safer ast.literal_eval.\",\n      \"line_number\": 64,\n      \"line_range\": [\n        64\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b307-eval\",\n      \"test_id\": \"B307\",\n      \"test_name\": \"blacklist\"\n    },\n    {\n      \"code\": \"67 def hash_password(password):\\n68     return hashlib.md5(password.encode()).hexdigest()\\n69 \\n\",\n      \"col_offset\": 11,\n      \"end_col_offset\": 41,\n      \"filename\": \"/src/vulnerable/backend/app.py\",\n      \"issue_confidence\": \"HIGH\",\n      \"issue_cwe\": {\n        \"id\": 327,\n        \"link\": \"https://cwe.mitre.org/data/definitions/327.html\"\n      },\n      \"issue_severity\": \"HIGH\",\n      \"issue_text\": \"Use of weak MD5 hash for security. Consider usedforsecurity=False\",\n      \"line_number\": 68,\n      \"line_range\": [\n        68\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html\",\n      \"test_id\": \"B324\",\n      \"test_name\": \"hashlib\"\n    },\n    {\n      \"code\": \"155 if __name__ == \\\"__main__\\\":\\n156     app.run(host=\\\"0.0.0.0\\\", port=8000, debug=True)\\n\",\n      \"col_offset\": 4,\n      \"end_col_offset\": 50,\n      \"filename\": \"/src/vulnerable/backend/app.py\",\n      \"issue_confidence\": \"MEDIUM\",\n      \"issue_cwe\": {\n        \"id\": 94,\n        \"link\": \"https://cwe.mitre.org/data/definitions/94.html\"\n      },\n      \"issue_severity\": \"HIGH\",\n      \"issue_text\": \"A Flask app appears to be run with debug=True, which exposes the Werkzeug debugger and allows the execution of arbitrary code.\",\n      \"line_number\": 156,\n      \"line_range\": [\n        156\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/plugins/b201_flask_debug_true.html\",\n      \"test_id\": \"B201\",\n      \"test_name\": \"flask_debug_true\"\n    },\n    {\n      \"code\": \"155 if __name__ == \\\"__main__\\\":\\n156     app.run(host=\\\"0.0.0.0\\\", port=8000, debug=True)\\n\",\n      \"col_offset\": 17,\n      \"end_col_offset\": 26,\n      \"filename\": \"/src/vulnerable/backend/app.py\",\n      \"issue_confidence\": \"MEDIUM\",\n      \"issue_cwe\": {\n        \"id\": 605,\n        \"link\": \"https://cwe.mitre.org/data/definitions/605.html\"\n      },\n      \"issue_severity\": \"MEDIUM\",\n      \"issue_text\": \"Possible binding to all interfaces.\",\n      \"line_number\": 156,\n      \"line_range\": [\n        156\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/plugins/b104_hardcoded_bind_all_interfaces.html\",\n      \"test_id\": \"B104\",\n      \"test_name\": \"hardcoded_bind_all_interfaces\"\n    }\n  ]\n}"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.336
+ },
+ "schema": 1,
+ "tool": "bandit",
+ "tool_version": "1.9.4"
+}

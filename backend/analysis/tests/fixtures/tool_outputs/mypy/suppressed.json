@@ -1,0 +1,63 @@
+{
+ "captured_at": "2026-10-22T14:45:16+00:00",
+ "case": "suppressed",
+ "config": {
+  "check_untyped_defs": true,
+  "python_version": "3.12"
+ },
+ "files": [
+  {
+   "content": "import json  # noqa: F401  # pylint: disable=unused-import\n\n\ndef calculate(expression):\n    return eval(expression)  # nosec B307  # noqa: S307  # nosemgrep  # pylint: disable=eval-used\n\n\nAPI_PASSWORD = \"Wr4ngle-Canary-Pass-91\"  # nosec  # noqa: S105  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/app.py",
+   "sha256": "0fc0e4ae4c4c42060a507f0aef522d3d3f3fc527f022f6991ab3d5afa7f9bfd5"
+  },
+  {
+   "content": "AWS_ACCESS_KEY_ID = \"AKIAZ7QX3LKD5PMW2N4J\"  # gitleaks:allow  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/settings.py",
+   "sha256": "6221abca0f58a4cde431ff6fdc4757345c028d1a3654ef3f7173805410f917ef"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/venvs/mypy/bin/python",
+   "/opt/analyzer/scripts/mypy_prefilter.py",
+   "/out/mypy-files.json",
+   "3.12",
+   "--config-file=/opt/analyzer/config/mypy.ini",
+   "--output=json",
+   "--check-untyped-defs",
+   "--",
+   "/src/suppressed/app.py",
+   "/src/suppressed/settings.py"
+  ],
+  "env": {
+   "MYPYPATH": "/src"
+  },
+  "mem_limit": "768m",
+  "report_files": [
+   "mypy-files.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "mypy-files.json": "{\n \"python\": \"3.12.15\",\n \"target\": \"3.12\",\n \"checked\": [\n  \"/src/suppressed/app.py\",\n  \"/src/suppressed/settings.py\"\n ],\n \"unparseable\": []\n}\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 1.361
+ },
+ "schema": 1,
+ "tool": "mypy",
+ "tool_version": "2.4.0"
+}

@@ -1,0 +1,67 @@
+{
+ "captured_at": "2026-10-22T14:44:59+00:00",
+ "case": "clean",
+ "config": {
+  "ignore": "",
+  "select": "E9,F,B,S,PLE",
+  "target_version": "py312"
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "3ecb375bb493dd403274b2197f98bb4b38d226ff186646d66f312c341336381f"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/ruff",
+   "check",
+   "--isolated",
+   "--no-cache",
+   "--ignore-noqa",
+   "--no-fix",
+   "--output-format",
+   "json",
+   "--output-file",
+   "/out/ruff.json",
+   "--target-version",
+   "py312",
+   "--select",
+   "E9,F,B,S,PLE",
+   "--",
+   "/src/clean/backend/app.py",
+   "/src/clean/backend/bookmarks.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "ruff.json"
+  ],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "ruff.json": "[]"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.104
+ },
+ "schema": 1,
+ "tool": "ruff",
+ "tool_version": "0.16.10"
+}

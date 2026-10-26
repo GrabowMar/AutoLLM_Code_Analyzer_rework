@@ -1,0 +1,92 @@
+{
+ "captured_at": "2026-10-22T14:49:26+00:00",
+ "case": "config",
+ "config": {
+  "exclude_rules": "",
+  "per_file_timeout": 10,
+  "rulesets": [
+   "python"
+  ]
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "3ecb375bb493dd403274b2197f98bb4b38d226ff186646d66f312c341336381f"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/app.py",
+   "sha256": "b7512ab0181ead6473277204f7f5cb79c467ccfe5c0458c8989e9d4c3facde98"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/utils.py",
+   "sha256": "faebfaee33659a5f1b2fc249ad25d65194e23e53034e86aa04fd23190c569c13"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/semgrep",
+   "scan",
+   "--json",
+   "--output",
+   "/out/semgrep.json",
+   "--quiet",
+   "--metrics",
+   "off",
+   "--disable-version-check",
+   "--oss-only",
+   "--no-git-ignore",
+   "--disable-nosem",
+   "--no-rewrite-rule-ids",
+   "--timeout",
+   "10",
+   "--timeout-threshold",
+   "3",
+   "--max-target-bytes",
+   "4000000",
+   "--jobs",
+   "1",
+   "--config",
+   "/opt/analyzer/rules/semgrep/python.json",
+   "--",
+   "/src/clean/backend/app.py",
+   "/src/clean/backend/bookmarks.py",
+   "/src/vulnerable/backend/app.py",
+   "/src/vulnerable/backend/utils.py"
+  ],
+  "env": {},
+  "mem_limit": "1g",
+  "report_files": [
+   "semgrep.json"
+  ],
+  "timeout_s": 600
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "semgrep.json": "{\"version\":\"1.180.0\",\"results\":[{\"check_id\":\"python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query\",\"path\":\"/src/vulnerable/backend/app.py\",\"start\":{\"line\":38,\"col\":5,\"offset\":884},\"end\":{\"line\":38,\"col\":79,\"offset\":958},\"extra\":{\"message\":\"Avoiding SQL string concatenation: untrusted input concatenated with raw SQL query can result in SQL Injection. In order to execute raw query safely, prepared statement should be used. SQLAlchemy provides TextualSQL to easily used prepared statement with named parameters. For complex SQL composition, use SQL Expression Language or Schema Definition Language. In most cases, SQLAlchemy ORM will be a better option.\",\"metadata\":{\"category\":\"security\",\"confidence\":\"LOW\",\"cwe\":[\"CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')\"],\"cwe2021-top25\":true,\"cwe2022-top25\":true,\"impact\":\"HIGH\",\"likelihood\":\"LOW\",\"owasp\":[\"A01:2017 - Injection\",\"A03:2021 - Injection\",\"A05:2025 - Injection\"],\"references\":[\"https://docs.sqlalchemy.org/en/14/core/tutorial.html#using-textual-sql\",\"https://www.tutorialspoint.com/sqlalchemy/sqlalchemy_quick_guide.htm\",\"https://docs.sqlalchemy.org/en/14/core/tutorial.html#using-more-specific-text-with-table-expression-literal-column-and-expression-column\"],\"subcategory\":[\"audit\"],\"technology\":[\"sqlalchemy\"]},\"severity\":\"ERROR\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}},{\"check_id\":\"python.flask.security.injection.tainted-sql-string.tainted-sql-string\",\"path\":\"/src/vulnerable/backend/app.py\",\"start\":{\"line\":38,\"col\":20,\"offset\":899},\"end\":{\"line\":38,\"col\":78,\"offset\":957},\"extra\":{\"message\":\"Detected user input used to manually construct a SQL string. This is usually bad practice because manual construction could accidentally result in a SQL injection. An attacker could use a SQL injection to steal or modify contents of the database. Instead, use a parameterized query which is available by default in most database engines. Alternatively, consider using an object-relational mapper (ORM) such as SQLAlchemy which will protect your queries.\",\"metadata\":{\"category\":\"security\",\"confidence\":\"MEDIUM\",\"cwe\":[\"CWE-704: Incorrect Type Conversion or Cast\"],\"impact\":\"MEDIUM\",\"likelihood\":\"MEDIUM\",\"owasp\":[\"A01:2017 - Injection\",\"A03:2021 - Injection\",\"A05:2025 - Injection\"],\"references\":[\"https://docs.sqlalchemy.org/en/14/core/tutorial.html#using-textual-sql\",\"https://www.tutorialspoint.com/sqlalchemy/sqlalchemy_quick_guide.htm\",\"https://docs.sqlalchemy.org/en/14/core/tutorial.html#using-more-specific-text-with-table-expression-literal-column-and-expression-column\"],\"subcategory\":[\"vuln\"],\"technology\":[\"sqlalchemy\",\"flask\"]},\"severity\":\"ERROR\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}},{\"check_id\":\"python.flask.security.injection.subprocess-injection.subprocess-injection\",\"path\":\"/src/vulnerable/backend/app.py\",\"start\":{\"line\":45,\"col\":14,\"offset\":1093},\"end\":{\"line\":45,\"col\":70,\"offset\":1149},\"extra\":{\"message\":\"Detected user input entering a `subprocess` call unsafely. This could result in a command injection vulnerability. An attacker could use this vulnerability to execute arbitrary commands on the host, which allows them to download malware, scan sensitive data, or run any command they wish on the server. Do not let users choose the command to run. In general, prefer to use Python API versions of system commands. If you must use subprocess, use a dictionary to allowlist a set of commands.\",\"metadata\":{\"category\":\"security\",\"confidence\":\"HIGH\",\"cwe\":[\"CWE-78: Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')\"],\"cwe2021-top25\":true,\"cwe2022-top25\":true,\"impact\":\"MEDIUM\",\"likelihood\":\"HIGH\",\"owasp\":[\"A01:2017 - Injection\",\"A03:2021 - Injection\",\"A05:2025 - Injection\"],\"references\":[\"https://semgrep.dev/docs/cheat-sheets/python-command-injection/\"],\"subcategory\":[\"vuln\"],\"technology\":[\"flask\"]},\"severity\":\"ERROR\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}},{\"check_id\":\"python.lang.security.dangerous-subprocess-use.dangerous-subprocess-use\",\"path\":\"/src/vulnerable/backend/app.py\",\"start\":{\"line\":45,\"col\":38,\"offset\":1117},\"end\":{\"line\":45,\"col\":57,\"offset\":1136},\"extra\":{\"message\":\"Detected subprocess function 'check_output' with user controlled data. A malicious actor could leverage this to perform command injection. You may consider using 'shlex.escape()'.\",\"metadata\":{\"asvs\":{\"control_id\":\"5.3.8 OS Command Injection\",\"control_url\":\"https://github.com/OWASP/ASVS/blob/master/4.0/en/0x13-V5-Validation-Sanitization-Encoding.md#v53-output-encoding-and-injection-prevention-requirements\",\"section\":\"V5: Validation, Sanitization and Encoding Verification Requirements\",\"version\":\"4\"},\"category\":\"security\",\"confidence\":\"MEDIUM\",\"cwe\":[\"CWE-78: Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')\"],\"cwe2021-top25\":true,\"cwe2022-top25\":true,\"impact\":\"HIGH\",\"likelihood\":\"MEDIUM\",\"owasp\":[\"A01:2017 - Injection\",\"A03:2021 - Injection\",\"A05:2025 - Injection\"],\"references\":[\"https://stackoverflow.com/questions/3172470/actual-meaning-of-shell-true-in-subprocess\",\"https://docs.python.org/3/library/subprocess.html\",\"https://docs.python.org/3/library/shlex.html\",\"https://semgrep.dev/docs/cheat-sheets/python-command-injection/\"],\"subcategory\":[\"vuln\"],\"technology\":[\"python\"]},\"severity\":\"ERROR\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}},{\"check_id\":\"python.flask.security.insecure-deserialization.insecure-deserialization\",\"path\":\"/src/vulnerable/backend/app.py\",\"start\":{\"line\":51,\"col\":15,\"offset\":1254},\"end\":{\"line\":51,\"col\":41,\"offset\":1280},\"extra\":{\"message\":\"Detected the use of an insecure deserialization library in a Flask route. These libraries are prone to code execution vulnerabilities. Ensure user data does not enter this function. To fix this, try to avoid serializing whole objects. Consider instead using a serializer such as JSON.\",\"metadata\":{\"category\":\"security\",\"confidence\":\"LOW\",\"cwe\":[\"CWE-502: Deserialization of Untrusted Data\"],\"cwe2021-top25\":true,\"cwe2022-top25\":true,\"impact\":\"MEDIUM\",\"likelihood\":\"LOW\",\"owasp\":[\"A08:2017 - Insecure Deserialization\",\"A08:2021 - Software and Data Integrity Failures\",\"A08:2025 - Software or Data Integrity Failures\"],\"references\":[\"https://docs.python.org/3/library/pickle.html\"],\"subcategory\":[\"audit\"],\"technology\":[\"flask\"]},\"severity\":\"ERROR\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}},{\"check_id\":\"python.lang.security.deserialization.pickle.avoid-pickle\",\"path\":\"/src/vulnerable/backend/app.py\",\"start\":{\"line\":51,\"col\":15,\"offset\":1254},\"end\":{\"line\":51,\"col\":41,\"offset\":1280},\"extra\":{\"message\":\"Avoid using `pickle`, which is known to lead to code execution vulnerabilities. When unpickling, the serialized data could be manipulated to run arbitrary code. Instead, consider serializing the relevant data as JSON or a similar text-based serialization format.\",\"metadata\":{\"category\":\"security\",\"confidence\":\"LOW\",\"cwe\":[\"CWE-502: Deserialization of Untrusted Data\"],\"cwe2021-top25\":true,\"cwe2022-top25\":true,\"impact\":\"MEDIUM\",\"likelihood\":\"LOW\",\"owasp\":[\"A08:2017 - Insecure Deserialization\",\"A08:2021 - Software and Data Integrity Failures\",\"A08:2025 - Software or Data Integrity Failures\"],\"references\":[\"https://docs.python.org/3/library/pickle.html\"],\"subcategory\":[\"audit\"],\"technology\":[\"python\"]},\"severity\":\"WARNING\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}},{\"check_id\":\"python.flask.security.insecure-deserialization.insecure-deserialization\",\"path\":\"/src/vulnerable/backend/app.py\",\"start\":{\"line\":57,\"col\":16,\"offset\":1385},\"end\":{\"line\":57,\"col\":39,\"offset\":1408},\"extra\":{\"message\":\"Detected the use of an insecure deserialization library in a Flask route. These libraries are prone to code execution vulnerabilities. Ensure user data does not enter this function. To fix this, try to avoid serializing whole objects. Consider instead using a serializer such as JSON.\",\"metadata\":{\"category\":\"security\",\"confidence\":\"LOW\",\"cwe\":[\"CWE-502: Deserialization of Untrusted Data\"],\"cwe2021-top25\":true,\"cwe2022-top25\":true,\"impact\":\"MEDIUM\",\"likelihood\":\"LOW\",\"owasp\":[\"A08:2017 - Insecure Deserialization\",\"A08:2021 - Software and Data Integrity Failures\",\"A08:2025 - Software or Data Integrity Failures\"],\"references\":[\"https://docs.python.org/3/library/pickle.html\"],\"subcategory\":[\"audit\"],\"technology\":[\"flask\"]},\"severity\":\"ERROR\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}},{\"check_id\":\"python.flask.security.injection.user-eval.eval-injection\",\"path\":\"/src/vulnerable/backend/app.py\",\"start\":{\"line\":64,\"col\":16,\"offset\":1539},\"end\":{\"line\":64,\"col\":32,\"offset\":1555},\"extra\":{\"message\":\"Detected user data flowing into eval. This is code injection and should be avoided.\",\"metadata\":{\"category\":\"security\",\"confidence\":\"MEDIUM\",\"cwe\":[\"CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code ('Eval Injection')\"],\"impact\":\"MEDIUM\",\"likelihood\":\"MEDIUM\",\"owasp\":[\"A03:2021 - Injection\",\"A05:2025 - Injection\"],\"references\":[\"https://nedbatchelder.com/blog/201206/eval_really_is_dangerous.html\"],\"subcategory\":[\"vuln\"],\"technology\":[\"flask\"]},\"severity\":\"ERROR\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}},{\"check_id\":\"python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5\",\"path\":\"/src/vulnerable/backend/app.py\",\"start\":{\"line\":68,\"col\":12,\"offset\":1599},\"end\":{\"line\":68,\"col\":42,\"offset\":1629},\"extra\":{\"message\":\"Detected MD5 hash algorithm which is considered insecure. MD5 is not collision resistant and is therefore not suitable as a cryptographic signature. Use SHA256 or SHA3 instead.\",\"metadata\":{\"asvs\":{\"control_id\":\"6.2.2 Insecure Custom Algorithm\",\"control_url\":\"https://github.com/OWASP/ASVS/blob/master/4.0/en/0x14-V6-Cryptography.md#v62-algorithms\",\"section\":\"V6 Stored Cryptography Verification Requirements\",\"version\":\"4\"},\"bandit-code\":\"B303\",\"category\":\"security\",\"confidence\":\"MEDIUM\",\"cwe\":[\"CWE-327: Use of a Broken or Risky Cryptographic Algorithm\"],\"impact\":\"MEDIUM\",\"likelihood\":\"LOW\",\"owasp\":[\"A03:2017 - Sensitive Data Exposure\",\"A02:2021 - Cryptographic Failures\",\"A04:2025 - Cryptographic Failures\"],\"references\":[\"https://www.schneier.com/blog/archives/2012/10/when_will_we_se.html\",\"https://www.trendmicro.com/vinfo/us/security/news/vulnerabilities-and-exploits/sha-1-collision-signals-the-end-of-the-algorithm-s-viability\",\"http://2012.sharcs.org/slides/stevens.pdf\",\"https://pycryptodome.readthedocs.io/en/latest/src/hash/sha3_256.html\"],\"source-rule-url\":\"https://github.com/PyCQA/bandit/blob/d5f8fa0d89d7b11442fc6ec80ca42953974354c8/bandit/blacklists/calls.py#L59\",\"subcategory\":[\"vuln\"],\"technology\":[\"python\"]},\"severity\":\"WARNING\",\"fingerprint\":\"requires login\",\"lines\":\"requires login\",\"validation_state\":\"NO_VALIDATOR\",\"engine_kind\":\"OSS\"}}],\"errors\":[],\"paths\":{\"scanned\":[\"/src/clean/backend/app.py\",\"/src/clean/backend/bookmarks.py\",\"/src/vulnerable/backend/app.py\",\"/src/vulnerable/backend/utils.py\"]},\"time\":{\"rules\":[],\"rules_parse_time\":0.025827884674072266,\"profiling_times\":{\"config_time\":0.146958589553833,\"core_time\":0.7888329029083252,\"ignores_time\":0.0001857280731201172,\"total_time\":0.9443600177764893},\"parsing_time\":{\"total_time\":0.0,\"per_file_time\":{\"mean\":0.0,\"std_dev\":0.0},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_files\":[]},\"scanning_time\":{\"total_time\":0.09430193901062012,\"per_file_time\":{\"mean\":0.02357548475265503,\"std_dev\":0.0010057804322052277},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_files\":[]},\"matching_time\":{\"total_time\":0.0,\"per_file_and_rule_time\":{\"mean\":0.0,\"std_dev\":0.0},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_rules_on_files\":[]},\"tainting_time\":{\"total_time\":0.0,\"per_def_and_rule_time\":{\"mean\":0.0,\"std_dev\":0.0},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_rules_on_defs\":[]},\"fixpoint_timeouts\":[],\"prefiltering\":{\"project_level_time\":0.0,\"file_level_time\":0.0,\"rules_with_project_prefilters_ratio\":0.0,\"rules_with_file_prefilters_ratio\":1.0,\"rules_selected_ratio\":0.05921052631578947,\"rules_matched_ratio\":0.05921052631578947},\"targets\":[],\"total_bytes\":0,\"max_memory_bytes\":137295360},\"engine_requested\":\"OSS\",\"skipped_rules\":[],\"profiling_results\":[]}"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 3.062
+ },
+ "schema": 1,
+ "tool": "semgrep",
+ "tool_version": "1.180.0"
+}

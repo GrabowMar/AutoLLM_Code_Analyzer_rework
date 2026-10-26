@@ -7,6 +7,11 @@ description = "Project-wide allowlist for documented false positives."
 paths = [
   # `*.example` env templates are intentionally committed placeholders.
   '''(^|/)\.envs/.*\.example$''',
+  # Analyzer self-test fixtures and captured tool outputs contain synthetic,
+  # deliberately planted secrets (the canary must detect them).
+  '''^backend/analysis/data/canary/''',
+  '''^backend/analysis/tests/fixtures/tool_outputs/''',
+  '''^backend/analysis/tests/support/capture_tool_outputs\.py$''',
 ]
 
 [[rules]]

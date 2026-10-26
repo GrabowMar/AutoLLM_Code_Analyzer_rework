@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from django.shortcuts import get_object_or_404
+from ninja import Query
 from ninja import Router
+from ninja.errors import HttpError
 
 from backend.reports import services
 from backend.reports.models import Report
@@ -25,15 +27,28 @@ def list_reports(
     status: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    q: str = Query("", max_length=200, description="Case-insensitive search in report titles."),
+    ordering: str = Query(
+        services.DEFAULT_LIST_ORDERING,
+        description="created_at, completed_at, title, report_type or status; prefix '-' for descending.",
+    ),
 ):
     limit = min(max(limit, 1), 200)
     offset = max(offset, 0)
+    if ordering not in services.LIST_ORDERINGS:
+        raise HttpError(422, f"ordering must be one of: {', '.join(services.LIST_ORDERINGS)}")
+    for name, value in (("q", q), ("report_type", report_type), ("status", status)):
+        if value and "\x00" in value:
+            # PostgreSQL text cannot hold NUL: a client error, never a 500.
+            raise HttpError(422, f"{name} must not contain NUL characters")
     qs, total = services.list_reports(
         user=request.auth,
         report_type=report_type,
         status=status,
         limit=limit,
         offset=offset,
+        q=q,
+        ordering=ordering,
     )
     return {
         "reports": list(qs),
@@ -42,6 +57,8 @@ def list_reports(
             "limit": limit,
             "offset": offset,
         },
+        "q": q.strip(),
+        "ordering": ordering,
     }
 
 
@@ -68,6 +85,9 @@ def generate_report(request, payload: GenerateReportIn):
 
 @router.get("/{report_id}/", response=ReportDetailSchema)
 def get_report(request, report_id: str):
+    # The detail page polls while a report is in flight: a report whose
+    # generating process died is failed here (throttled) so polling ends.
+    services.maybe_reap_dead_reports()
     return get_object_or_404(Report, report_id=report_id, created_by=request.auth)
 
 

@@ -1,0 +1,37 @@
+# lizard: cyclomatic complexity across languages.
+slug: lizard
+name: Lizard
+kind: metrics
+category: complexity
+version: "1.24.1"
+adapter_version: 2
+languages: [python, javascript, jsx, typescript, tsx, vue]
+file_kinds: [source]
+output_kind: mixed
+description: >-
+  Cyclomatic complexity (CCN), length and parameter count of every function
+  in Python, JavaScript, TypeScript and Vue, so complexity is comparable
+  across stacks. Functions above the CCN threshold become findings.
+docs_url: https://github.com/terryyin/lizard
+icon: activity
+display_order: 110
+mem_limit: 512m
+timeout_s: 180
+notes: >-
+  Files without a lizard reader (.pyi, .pyw, .mts, .cts) would be tokenized
+  as C: they are reported as skipped and never passed to it. "#lizard
+  forgive" and "GENERATED CODE" comments, which make lizard drop functions
+  or stop reading a file, are neutralized in staged copies when present.
+config_schema:
+  - name: ccn_threshold
+    type: integer
+    label: CCN threshold
+    description: Functions with a cyclomatic complexity above this are reported (-C).
+    default: 15
+    min: 1
+    max: 200
+  - name: modified_ccn
+    type: boolean
+    label: Modified CCN
+    description: Count a switch with many cases as one decision (-m).
+    default: false

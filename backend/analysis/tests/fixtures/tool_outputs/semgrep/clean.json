@@ -1,0 +1,125 @@
+{
+ "captured_at": "2026-10-22T14:44:20+00:00",
+ "case": "clean",
+ "config": {
+  "exclude_rules": "",
+  "per_file_timeout": 30,
+  "rulesets": [
+   "python",
+   "python-audit",
+   "javascript",
+   "javascript-audit",
+   "html"
+  ]
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "3ecb375bb493dd403274b2197f98bb4b38d226ff186646d66f312c341336381f"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/App.jsx",
+   "sha256": "50b34bd78e3cd0936b45a21d06065bf3a2816bdc18afdb09f9876378beeb279c"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "clean/frontend/src/TagBadge.vue",
+   "sha256": "47812dbf621a248a8411ee2aa9b0f7cdaaf1fee1d4d2b4e37569ad17d79351f5"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "clean/frontend/src/bookmarks.ts",
+   "sha256": "3872ba6ae0c99822ddbea2b5f454f11d68733ee860e6c078cd659fa4553c0e04"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/components/BookmarkList.jsx",
+   "sha256": "efd7854d492966cc76c2341a178b636bbf4567e6073ee63f1c4b44d1c29f1635"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "clean/frontend/src/components/Panel.tsx",
+   "sha256": "63a402046cdf7b1158644a4a595bf0b5bcd49eb4fb974ff2973f91d97e67f23b"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/semgrep",
+   "scan",
+   "--json",
+   "--output",
+   "/out/semgrep.json",
+   "--quiet",
+   "--metrics",
+   "off",
+   "--disable-version-check",
+   "--oss-only",
+   "--no-git-ignore",
+   "--disable-nosem",
+   "--no-rewrite-rule-ids",
+   "--timeout",
+   "30",
+   "--timeout-threshold",
+   "3",
+   "--max-target-bytes",
+   "4000000",
+   "--jobs",
+   "1",
+   "--config",
+   "/opt/analyzer/rules/semgrep/python.json",
+   "--config",
+   "/opt/analyzer/rules/semgrep/python-audit.json",
+   "--config",
+   "/opt/analyzer/rules/semgrep/javascript.json",
+   "--config",
+   "/opt/analyzer/rules/semgrep/javascript-audit.json",
+   "--config",
+   "/opt/analyzer/rules/semgrep/html.json",
+   "--",
+   "/src/clean/backend/app.py",
+   "/src/clean/backend/bookmarks.py",
+   "/src/clean/frontend/src/App.jsx",
+   "/src/clean/frontend/src/TagBadge.vue",
+   "/src/clean/frontend/src/bookmarks.ts",
+   "/src/clean/frontend/src/components/BookmarkList.jsx",
+   "/src/clean/frontend/src/components/Panel.tsx"
+  ],
+  "env": {},
+  "mem_limit": "1g",
+  "report_files": [
+   "semgrep.json"
+  ],
+  "timeout_s": 600
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "semgrep.json": "{\"version\":\"1.180.0\",\"results\":[],\"errors\":[],\"paths\":{\"scanned\":[\"/src/clean/backend/app.py\",\"/src/clean/backend/bookmarks.py\",\"/src/clean/frontend/src/App.jsx\",\"/src/clean/frontend/src/TagBadge.vue\",\"/src/clean/frontend/src/bookmarks.ts\",\"/src/clean/frontend/src/components/BookmarkList.jsx\",\"/src/clean/frontend/src/components/Panel.tsx\"]},\"time\":{\"rules\":[],\"rules_parse_time\":0.23102307319641113,\"profiling_times\":{\"config_time\":0.8093154430389404,\"core_time\":1.2936782836914062,\"ignores_time\":0.0006041526794433594,\"total_time\":2.1121931076049805},\"parsing_time\":{\"total_time\":0.0,\"per_file_time\":{\"mean\":0.0,\"std_dev\":0.0},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_files\":[]},\"scanning_time\":{\"total_time\":0.05205893516540527,\"per_file_time\":{\"mean\":0.0034705956776936845,\"std_dev\":5.9155413399720494e-05},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_files\":[]},\"matching_time\":{\"total_time\":0.0,\"per_file_and_rule_time\":{\"mean\":0.0,\"std_dev\":0.0},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_rules_on_files\":[]},\"tainting_time\":{\"total_time\":0.0,\"per_def_and_rule_time\":{\"mean\":0.0,\"std_dev\":0.0},\"very_slow_stats\":{\"time_ratio\":0.0,\"count_ratio\":0.0},\"very_slow_rules_on_defs\":[]},\"fixpoint_timeouts\":[],\"prefiltering\":{\"project_level_time\":0.0,\"file_level_time\":0.0,\"rules_with_project_prefilters_ratio\":0.0,\"rules_with_file_prefilters_ratio\":0.9643765903307888,\"rules_selected_ratio\":0.05725190839694656,\"rules_matched_ratio\":0.05725190839694656},\"targets\":[],\"total_bytes\":0,\"max_memory_bytes\":280089088},\"engine_requested\":\"OSS\",\"skipped_rules\":[],\"profiling_results\":[]}"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 4.242
+ },
+ "schema": 1,
+ "tool": "semgrep",
+ "tool_version": "1.180.0"
+}

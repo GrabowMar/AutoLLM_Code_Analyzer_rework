@@ -1,0 +1,90 @@
+{
+ "amended": "argv amended 2026-10-22 (adapters fix): the recorded outcome was captured with the previous argv; the added flags do not change the output for these files (verified with the pinned tool outside the image). Re-capture after the analyzer image is rebuilt. stdout regenerated the same way: only filters_used changes (is_swagger_file disabled).",
+ "captured_at": "2026-10-22T14:45:26+00:00",
+ "case": "suppressed",
+ "config": {
+  "base64_limit": 4.5,
+  "hex_limit": 3.0
+ },
+ "files": [
+  {
+   "content": "# hadolint ignore=DL3007\nFROM python:latest\n",
+   "kind": "config",
+   "language": "dockerfile",
+   "path": "suppressed/Dockerfile",
+   "sha256": "027ef084c0b7461355e8c4ae14b9eed1dea68fc05453d6710a2820b5a88858ec"
+  },
+  {
+   "content": "<template>\n  <!-- eslint-disable -->\n  <div v-html=\"html\"></div>\n</template>\n\n<script setup>\ndefineProps({ html: { type: String, default: \"\" } });\n</script>\n",
+   "kind": "source",
+   "language": "vue",
+   "path": "suppressed/Raw.vue",
+   "sha256": "b643d762a7f53d3c14568a99dff7aa0e5339044d8065abedbf42858b524e9d77"
+  },
+  {
+   "content": "import json  # noqa: F401  # pylint: disable=unused-import\n\n\ndef calculate(expression):\n    return eval(expression)  # nosec B307  # noqa: S307  # nosemgrep  # pylint: disable=eval-used\n\n\nAPI_PASSWORD = \"Wr4ngle-Canary-Pass-91\"  # nosec  # noqa: S105  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/app.py",
+   "sha256": "0fc0e4ae4c4c42060a507f0aef522d3d3f3fc527f022f6991ab3d5afa7f9bfd5"
+  },
+  {
+   "content": "// eslint-disable-next-line no-eval\nexport const run = (code) => eval(code);\n/* eslint-disable */\nexport const leftover = () => { const unused = 1; return 0; };\n",
+   "kind": "source",
+   "language": "javascript",
+   "path": "suppressed/run.js",
+   "sha256": "7d574a95ea3a6fd4706e740b142a31639288d9923385bda1b554bd0e6bfb10e7"
+  },
+  {
+   "content": "AWS_ACCESS_KEY_ID = \"AKIAZ7QX3LKD5PMW2N4J\"  # gitleaks:allow  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/settings.py",
+   "sha256": "6221abca0f58a4cde431ff6fdc4757345c028d1a3654ef3f7173805410f917ef"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "env",
+   "-C",
+   "/src",
+   "/opt/analyzer/bin/detect-secrets",
+   "scan",
+   "--all-files",
+   "--no-verify",
+   "--disable-filter",
+   "detect_secrets.filters.allowlist.is_line_allowlisted",
+   "--disable-filter",
+   "detect_secrets.filters.heuristic.is_swagger_file",
+   "--base64-limit",
+   "4.5",
+   "--hex-limit",
+   "3.0",
+   "--",
+   "suppressed/Dockerfile",
+   "suppressed/Raw.vue",
+   "suppressed/app.py",
+   "suppressed/run.js",
+   "suppressed/settings.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {},
+  "stderr": "",
+  "stdout": "{\n  \"version\": \"1.5.0\",\n  \"plugins_used\": [\n    {\n      \"name\": \"ArtifactoryDetector\"\n    },\n    {\n      \"name\": \"AWSKeyDetector\"\n    },\n    {\n      \"name\": \"AzureStorageKeyDetector\"\n    },\n    {\n      \"name\": \"Base64HighEntropyString\",\n      \"limit\": 4.5\n    },\n    {\n      \"name\": \"BasicAuthDetector\"\n    },\n    {\n      \"name\": \"CloudantDetector\"\n    },\n    {\n      \"name\": \"DiscordBotTokenDetector\"\n    },\n    {\n      \"name\": \"GitHubTokenDetector\"\n    },\n    {\n      \"name\": \"GitLabTokenDetector\"\n    },\n    {\n      \"name\": \"HexHighEntropyString\",\n      \"limit\": 3.0\n    },\n    {\n      \"name\": \"IbmCloudIamDetector\"\n    },\n    {\n      \"name\": \"IbmCosHmacDetector\"\n    },\n    {\n      \"name\": \"IPPublicDetector\"\n    },\n    {\n      \"name\": \"JwtTokenDetector\"\n    },\n    {\n      \"name\": \"KeywordDetector\",\n      \"keyword_exclude\": \"\"\n    },\n    {\n      \"name\": \"MailchimpDetector\"\n    },\n    {\n      \"name\": \"NpmDetector\"\n    },\n    {\n      \"name\": \"OpenAIDetector\"\n    },\n    {\n      \"name\": \"PrivateKeyDetector\"\n    },\n    {\n      \"name\": \"PypiTokenDetector\"\n    },\n    {\n      \"name\": \"SendGridDetector\"\n    },\n    {\n      \"name\": \"SlackDetector\"\n    },\n    {\n      \"name\": \"SoftlayerDetector\"\n    },\n    {\n      \"name\": \"SquareOAuthDetector\"\n    },\n    {\n      \"name\": \"StripeDetector\"\n    },\n    {\n      \"name\": \"TelegramBotTokenDetector\"\n    },\n    {\n      \"name\": \"TwilioKeyDetector\"\n    }\n  ],\n  \"filters_used\": [\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_indirect_reference\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_likely_id_string\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_lock_file\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_not_alphanumeric_string\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_potential_uuid\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_prefixed_with_dollar_sign\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_sequential_string\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_templated_secret\"\n    }\n  ],\n  \"results\": {\n    \"suppressed/app.py\": [\n      {\n        \"type\": \"Secret Keyword\",\n        \"filename\": \"suppressed/app.py\",\n        \"hashed_secret\": \"0fdc50fc22bb5ffebe4e0ec476230e3933a2fb91\",\n        \"is_verified\": false,\n        \"line_number\": 8\n      }\n    ],\n    \"suppressed/settings.py\": [\n      {\n        \"type\": \"AWS Access Key\",\n        \"filename\": \"suppressed/settings.py\",\n        \"hashed_secret\": \"5de4f660f1d18c9d2add2d91d2fc1d99643cafef\",\n        \"is_verified\": false,\n        \"line_number\": 1\n      }\n    ]\n  },\n  \"generated_at\": \"2026-10-22T16:31:23Z\"\n}\n",
+  "timed_out": false,
+  "wall_seconds": 0.581
+ },
+ "schema": 1,
+ "tool": "detect-secrets",
+ "tool_version": "1.5.0"
+}

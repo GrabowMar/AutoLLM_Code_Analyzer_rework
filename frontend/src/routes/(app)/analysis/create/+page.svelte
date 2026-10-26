@@ -1,393 +1,506 @@
 <script lang="ts">
-import { onMount } from 'svelte';
-import { goto } from '$app/navigation';
-import * as Card from '$lib/components/ui/card';
-import { Badge } from '$lib/components/ui/badge';
-import { Button } from '$lib/components/ui/button';
-import { Separator } from '$lib/components/ui/separator';
-import ArrowLeft from '@lucide/svelte/icons/arrow-left';
-import ArrowRight from '@lucide/svelte/icons/arrow-right';
-import Check from '@lucide/svelte/icons/check';
-import Rocket from '@lucide/svelte/icons/rocket';
-import Loader from '@lucide/svelte/icons/loader-circle';
-import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-import Store from '@lucide/svelte/icons/store';
-import { toast } from 'svelte-sonner';
-import { createRun } from '$lib/api/runs';
-import { getToolCatalog, type AnalyzerTool } from '$lib/api/analyzers';
-import { getGenerationJobs, type GenerationJobList } from '$lib/api/client';
-import AnalysisTargetForm from '$lib/components/analysis/AnalysisTargetForm.svelte';
-import PageHeader from '$lib/components/PageHeader.svelte';
-import LoadingState from '$lib/components/LoadingState.svelte';
-import ErrorAlert from '$lib/components/ErrorAlert.svelte';
-import { toneClasses } from '$lib/constants/colors';
+	// Ad-hoc run: one application (or pasted files, labelled non-research)
+	// under one analysis profile, with a live mini preflight from
+	// `POST /runs/preview/`. Reads `?generation_job_id=` (application pages
+	// link here). Research comparisons belong in studies.
+	import { onMount, untrack } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import { toast } from 'svelte-sonner';
+	import type { GenerationJobList } from '$lib/api/generation';
+	import type { AnalysisProfile, RunCreatePayload, RunPreview } from '$lib/api/analysis';
+	import { createAnalysisRun, listAnalysisProfiles, previewAnalysisRun } from '$lib/api/analysis';
+	import { apiFieldErrors, formatApiError, isAbortError } from '$lib/api/core';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import * as Card from '$lib/components/ui/card';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import * as Select from '$lib/components/ui/select';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+	import { Segmented } from '$lib/components/ui/segmented';
+	import { toneClasses } from '$lib/constants/colors';
+	import { cn } from '$lib/utils';
+	import ApplicationPicker from '$lib/components/analysis/run/ApplicationPicker.svelte';
+	import PastedFilesEditor, {
+		toSourceCode,
+		type PastedFile
+	} from '$lib/components/analysis/run/PastedFilesEditor.svelte';
+	import RunPreflight from '$lib/components/analysis/run/RunPreflight.svelte';
+	import AppWindow from '@lucide/svelte/icons/app-window';
+	import ClipboardPaste from '@lucide/svelte/icons/clipboard-paste';
+	import FlaskConical from '@lucide/svelte/icons/flask-conical';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import Play from '@lucide/svelte/icons/play';
+	import Sparkles from '@lucide/svelte/icons/sparkles';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
-let step = $state(1);
-const stepLabels = ['Select Source', 'Tools', 'Review'];
+	type Source = 'application' | 'paste';
 
-// Source
-type SourceMode = 'job' | 'paste';
-let sourceMode = $state<SourceMode>('job');
-let jobsLoading = $state(true);
-let jobsError = $state('');
-let jobs = $state<GenerationJobList[]>([]);
-let selectedJobId = $state<string | null>(null);
-let jobSearch = $state('');
-let pasteBackend = $state('');
-let pasteFrontend = $state('');
+	const presetJob = page.url.searchParams.get('generation_job_id') ?? '';
 
-const filteredJobs = $derived(
-	jobs.filter(
-		(j) =>
-			!jobSearch ||
-			(j.model_name ?? '').toLowerCase().includes(jobSearch.toLowerCase()) ||
-			(j.template_name ?? '').toLowerCase().includes(jobSearch.toLowerCase()) ||
-			j.id.toLowerCase().includes(jobSearch.toLowerCase()),
-	),
-);
-const selectedJob = $derived(jobs.find((j) => j.id === selectedJobId));
-const hasSource = $derived(
-	sourceMode === 'job'
-		? selectedJobId !== null
-		: pasteBackend.trim().length > 0 || pasteFrontend.trim().length > 0,
-);
+	// ── Target ─────────────────────────────────────────────────────────
+	let source = $state<Source>('application');
+	let jobId = $state(presetJob);
+	let job = $state<GenerationJobList | null>(null);
+	let pasted = $state<PastedFile[]>([{ id: 0, path: 'backend/app.py', content: '' }]);
+	let name = $state('');
 
-// Tools
-let toolsLoading = $state(true);
-let toolsError = $state('');
-let tools = $state<AnalyzerTool[]>([]);
-let selectedTools = $state(new Set<string>());
+	const sourceCode = $derived(source === 'paste' ? toSourceCode(pasted) : null);
+	const targetReady = $derived(
+		source === 'application' ? !!jobId && (!job || job.status === 'completed') : sourceCode !== null
+	);
 
-const categoryLabels: Record<string, string> = {
-	security: 'Security',
-	lint: 'Lint & Quality',
-	secrets: 'Secrets',
-	performance: 'Performance',
-	ai: 'AI Review',
-};
-const categoryOrder = ['security', 'lint', 'secrets', 'performance', 'ai'];
+	// ── Profiles ───────────────────────────────────────────────────────
+	let profiles = $state<AnalysisProfile[]>([]);
+	let profilesLoading = $state(true);
+	let profilesError = $state('');
+	let profileId = $state('');
 
-const groupedTools = $derived(
-	categoryOrder
-		.map((cat) => ({ category: cat, items: tools.filter((t) => t.category === cat) }))
-		.filter((g) => g.items.length > 0),
-);
-const selectedToolsList = $derived(tools.filter((t) => selectedTools.has(t.slug)));
-const installedSelectedCount = $derived(
-	selectedToolsList.filter((t) => t.installed).length,
-);
-
-function toggleTool(slug: string) {
-	const next = new Set(selectedTools);
-	if (next.has(slug)) next.delete(slug);
-	else next.add(slug);
-	selectedTools = next;
-}
-
-// Config
-let runName = $state('');
-let autoStart = $state(true);
-
-// Launch
-let launching = $state(false);
-let launchError = $state('');
-
-async function loadJobs() {
-	jobsLoading = true;
-	jobsError = '';
-	try {
-		const res = await getGenerationJobs({ status: 'completed', per_page: 100 });
-		jobs = res.items;
-	} catch (err: any) {
-		jobsError = err?.detail ?? 'Failed to load generation jobs';
-	} finally {
-		jobsLoading = false;
+	async function loadProfiles() {
+		profilesLoading = true;
+		profilesError = '';
+		try {
+			profiles = await listAnalysisProfiles();
+			if (!profiles.some((p) => p.id === profileId)) {
+				profileId =
+					profiles.find((p) => p.slug === 'research-default')?.id ?? profiles[0]?.id ?? '';
+			}
+		} catch (e) {
+			profilesError = formatApiError(e, 'Could not load analysis profiles.');
+		} finally {
+			profilesLoading = false;
+		}
 	}
-}
 
-async function loadTools() {
-	toolsLoading = true;
-	toolsError = '';
-	try {
-		tools = await getToolCatalog();
-	} catch (err: any) {
-		toolsError = err?.detail ?? 'Failed to load analyzers';
-	} finally {
-		toolsLoading = false;
+	onMount(() => {
+		void loadProfiles();
+	});
+
+	const profile = $derived(profiles.find((p) => p.id === profileId) ?? null);
+	const systemProfiles = $derived(profiles.filter((p) => p.is_system));
+	const myProfiles = $derived(profiles.filter((p) => !p.is_system));
+
+	function reviewerSummary(p: AnalysisProfile): string {
+		const r = p.summary.reviewer;
+		if (!r.enabled) return 'no AI reviewer';
+		return `AI ${r.engine === 'agent' ? `agent (${r.harness || 'harness'})` : 'single-shot'} · ${r.model} × ${r.samples ?? '—'}`;
 	}
-}
 
-async function handleLaunch() {
-	launching = true;
-	launchError = '';
-	try {
-		const run = await createRun({
-			name: runName || undefined,
-			tool_slugs: [...selectedTools],
-			generation_job_id: sourceMode === 'job' ? (selectedJobId ?? undefined) : undefined,
-			source_code:
-				sourceMode === 'paste'
-					? { backend_code: pasteBackend, frontend_code: pasteFrontend }
-					: undefined,
-			auto_start: autoStart,
+	// ── Preview (mini preflight) ───────────────────────────────────────
+	let preview = $state<RunPreview | null>(null);
+	let previewLoading = $state(false);
+	let previewError = $state('');
+	let fieldErrors = $state<Record<string, string>>({});
+	let previewController: AbortController | null = null;
+	let previewTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function payload(): RunCreatePayload | null {
+		if (!profileId || !targetReady) return null;
+		const base: RunCreatePayload = { profile_id: profileId };
+		if (source === 'application') return { ...base, generation_job_id: jobId };
+		return sourceCode ? { ...base, source_code: sourceCode } : null;
+	}
+
+	const payloadKey = $derived(
+		JSON.stringify(
+			profileId && targetReady
+				? {
+						profileId,
+						source,
+						jobId: source === 'application' ? jobId : null,
+						code: source === 'paste' ? sourceCode : null
+					}
+				: null
+		)
+	);
+
+	async function runPreview() {
+		const body = payload();
+		previewController?.abort();
+		if (!body) {
+			preview = null;
+			previewLoading = false;
+			previewError = '';
+			return;
+		}
+		const mine = new AbortController();
+		previewController = mine;
+		previewLoading = true;
+		try {
+			preview = await previewAnalysisRun(body, { signal: mine.signal });
+			previewError = '';
+			fieldErrors = {};
+		} catch (e) {
+			if (isAbortError(e)) return;
+			previewError = formatApiError(e, 'The preflight failed.');
+			fieldErrors = apiFieldErrors(e);
+		} finally {
+			if (previewController === mine) previewLoading = false;
+		}
+	}
+
+	$effect(() => {
+		const key = payloadKey;
+		untrack(() => {
+			clearTimeout(previewTimer);
+			if (key === 'null') {
+				void runPreview();
+				return;
+			}
+			previewLoading = true;
+			previewTimer = setTimeout(() => void runPreview(), source === 'paste' ? 700 : 250);
 		});
-		toast.success(autoStart ? 'Analysis started' : 'Analysis run created');
-		await goto(`/analysis/${run.id}`);
-	} catch (err: any) {
-		const detail = err?.detail;
-		launchError = Array.isArray(detail)
-			? detail.join('; ')
-			: (detail ?? err?.message ?? 'Failed to create analysis run');
-		toast.error(launchError);
-	} finally {
-		launching = false;
+		return () => clearTimeout(previewTimer);
+	});
+
+	// The preview reflects the current inputs only once it has answered.
+	const previewCurrent = $derived(!previewLoading && !!preview);
+	const blocking = $derived(
+		(preview?.blocking ?? []).filter((i) => !['single_group', 'incomplete_blocks'].includes(i.code))
+	);
+	const targetIneligible = $derived(!!preview?.targets?.[0] && !preview.targets[0].eligible);
+
+	// ── Submit ─────────────────────────────────────────────────────────
+	let submitting = $state(false);
+	let submitError = $state('');
+	let confirmOpen = $state(false);
+
+	const canSubmit = $derived(!!payload() && !submitting && !profilesLoading && !previewLoading);
+
+	function requestSubmit() {
+		if (!canSubmit) return;
+		if (blocking.length > 0 || targetIneligible) {
+			confirmOpen = true;
+			return;
+		}
+		void submit();
 	}
-}
 
-onMount(() => {
-	loadJobs();
-	loadTools();
-});
+	async function submit() {
+		const body = payload();
+		if (!body) return;
+		submitting = true;
+		submitError = '';
+		try {
+			const run = await createAnalysisRun({
+				...body,
+				name: name.trim() || undefined
+			});
+			confirmOpen = false;
+			toast.success('Run queued');
+			await goto(`/analysis/${run.id}`);
+		} catch (e) {
+			submitError = formatApiError(e, 'Could not start the run.');
+			fieldErrors = apiFieldErrors(e);
+			confirmOpen = false;
+		} finally {
+			submitting = false;
+		}
+	}
 
-const canAdvance = $derived.by(() => {
-	if (step === 1) return hasSource;
-	if (step === 2) return installedSelectedCount > 0;
-	return true;
-});
+	const namePlaceholder = $derived(
+		source === 'application'
+			? `Ad-hoc analysis · ${jobId ? jobId.slice(0, 8) : '<job>'}`
+			: 'Ad-hoc analysis · inline source'
+	);
 </script>
 
 <div class="space-y-6">
 	<PageHeader
-		title="New Analysis"
-		description="Pick a source, choose installed analyzers, and launch a run."
-		back={{ href: '/analysis', label: 'Analysis' }}
-	/>
+		title="Ad-hoc run"
+		description="Analyse one application, or files you paste, under an analysis profile. Ad-hoc runs are quick checks outside any study protocol; compare models in a study."
+		back={{ href: '/analysis', label: 'Runs' }}
+	>
+		{#snippet actions()}
+			<Button variant="outline" size="sm" href="/analysis/studies/new">
+				<FlaskConical class="size-3.5" />New study instead
+			</Button>
+		{/snippet}
+	</PageHeader>
 
-	<div class="grid gap-4 sm:gap-6 lg:grid-cols-4">
-		<div class="space-y-6 lg:col-span-3">
-			<!-- Step progress -->
-			<div class="flex items-center gap-2 overflow-x-auto">
-				{#each stepLabels as label, i}
-					<button
-						class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors {step === i + 1 ? 'bg-primary/10 text-primary font-medium' : i + 1 < step ? 'text-success-fg' : 'text-muted-foreground'}"
-						aria-current={step === i + 1 ? 'step' : undefined}
-						onclick={() => { if (i + 1 <= step) step = i + 1; }}
-					>
-						<span class="flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold {step === i + 1 ? 'bg-primary text-primary-foreground' : i + 1 < step ? 'bg-success/15 text-success-fg' : 'bg-muted text-muted-foreground'}">
-							{#if i + 1 < step}
-								<Check class="h-3 w-3" />
-							{:else}
-								{i + 1}
-							{/if}
-						</span>
-						{label}
-					</button>
-					{#if i < stepLabels.length - 1}
-						<div class="h-px flex-1 bg-border"></div>
-					{/if}
-				{/each}
-			</div>
-
-			{#if step === 1}
-				<AnalysisTargetForm
-					{sourceMode}
-					{jobsLoading}
-					{jobsError}
-					{jobs}
-					{filteredJobs}
-					{selectedJobId}
-					bind:jobSearch
-					bind:pasteBackend
-					bind:pasteFrontend
-					onSourceModeChange={(m) => (sourceMode = m)}
-					onSelectJob={(id) => (selectedJobId = id)}
-					onRetryLoadJobs={loadJobs}
-				/>
-			{/if}
-
-			{#if step === 2}
-				<div class="space-y-4">
-					<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-						<p class="text-sm text-muted-foreground">
-							Only <strong>installed</strong> analyzers can be run. Install more from the
-							<a href="/analyzers" class="text-primary underline-offset-2 hover:underline">tool shop</a>.
-						</p>
-						<div class="flex items-center gap-2">
-							<Button variant="outline" size="sm" href="/analyzers">
-								<Store class="mr-1.5 h-3 w-3" /> Shop
-							</Button>
-							<Button variant="outline" size="sm" onclick={loadTools}>
-								<RefreshCw class="mr-1.5 h-3 w-3" /> Refresh
-							</Button>
-							<Badge variant="outline">{installedSelectedCount} selected</Badge>
-						</div>
-					</div>
-
-					{#if toolsLoading}
-						<LoadingState label="loading analyzers" />
-					{:else if toolsError}
-						<ErrorAlert message={toolsError} onretry={loadTools} />
+	<div
+		class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] xl:grid-cols-[minmax(0,1fr)_minmax(0,28rem)]"
+	>
+		<div class="min-w-0 space-y-6">
+			<!-- Target -->
+			<Card.Root>
+				<Card.Header>
+					<Card.Title>Target</Card.Title>
+					<Card.Description>
+						A completed generated application, or files pasted by hand.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="space-y-4">
+					<Segmented
+						aria-label="Target source"
+						bind:value={source}
+						items={[
+							{ value: 'application', label: 'Application', icon: AppWindow },
+							{
+								value: 'paste',
+								label: 'Pasted files',
+								icon: ClipboardPaste,
+								badge: 'non-research'
+							}
+						]}
+					/>
+					{#if source === 'application'}
+						<ApplicationPicker bind:selectedId={jobId} bind:selected={job} />
+						{#if fieldErrors.generation_job_id}
+							<p class="text-xs text-danger-fg" role="alert">
+								{fieldErrors.generation_job_id}
+							</p>
+						{/if}
 					{:else}
-						<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-							{#each groupedTools as group}
-								<Card.Root>
-									<Card.Header>
-										<Card.Title class="text-sm">{categoryLabels[group.category] ?? group.category}</Card.Title>
-										<Card.Description>
-											{group.items.filter((t) => t.installed).length}/{group.items.length} installed
-										</Card.Description>
-									</Card.Header>
-									<Card.Content>
-										<div class="space-y-2">
-											{#each group.items as tool}
-												<label class="flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors focus-within:ring-2 focus-within:ring-ring {tool.installed ? 'cursor-pointer hover:bg-muted/30' : 'cursor-not-allowed opacity-70'}">
-													<input
-														type="checkbox"
-														class="rounded"
-														checked={selectedTools.has(tool.slug)}
-														disabled={!tool.installed}
-														onchange={() => toggleTool(tool.slug)}
-													/>
-													<div class="min-w-0 flex-1">
-														<div class="flex items-center gap-2">
-															<span class="text-sm font-medium">{tool.name}</span>
-															{#if tool.kind === 'ai'}
-																<Badge variant="outline" class="text-[11px]">AI</Badge>
-															{/if}
-															{#if tool.installed}
-																<Badge variant="outline" class="text-[11px] {toneClasses.success}">
-																	<Check class="mr-0.5 h-2.5 w-2.5" /> Installed
-																</Badge>
-															{:else}
-																<Badge variant="outline" class="text-[11px] {toneClasses.warning}">Not installed</Badge>
-																<a href="/analyzers" class="text-[11px] text-warning-fg underline-offset-2 hover:underline">Install →</a>
-															{/if}
-														</div>
-														<div class="text-xs text-muted-foreground line-clamp-2">{tool.description}</div>
-													</div>
-												</label>
-											{/each}
-										</div>
-									</Card.Content>
-								</Card.Root>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			{/if}
-
-			{#if step === 3}
-				<Card.Root>
-					<Card.Header>
-						<Card.Title class="text-sm">Run Settings</Card.Title>
-					</Card.Header>
-					<Card.Content class="space-y-4">
-						<div>
-							<label for="run-name" class="mb-1 block text-sm font-medium">Run name (optional)</label>
-							<input
-								id="run-name"
-								type="text"
-								class="h-9 w-full max-w-sm rounded-md border border-input bg-background px-3 text-sm"
-								placeholder="Analysis run"
-								bind:value={runName}
-							/>
-						</div>
-						<label class="flex items-center gap-2 text-sm">
-							<input type="checkbox" class="rounded" bind:checked={autoStart} />
-							Start immediately after creation
-						</label>
-					</Card.Content>
-				</Card.Root>
-
-				<Card.Root>
-					<Card.Header><Card.Title class="text-sm">Review</Card.Title></Card.Header>
-					<Card.Content class="space-y-3 text-sm">
-						<div class="flex justify-between">
-							<span class="text-muted-foreground">Source</span>
-							<span class="font-medium">
-								{#if sourceMode === 'job' && selectedJob}
-									{selectedJob.model_name ?? selectedJob.id.slice(0, 8)}
-								{:else if sourceMode === 'paste'}
-									Pasted code
-								{:else}
-									—
-								{/if}
+						<div
+							class={cn(
+								'flex items-start gap-2 rounded-md border px-3 py-2 text-xs',
+								toneClasses.warning
+							)}
+							role="note"
+						>
+							<TriangleAlert class="mt-px size-3.5 shrink-0" aria-hidden="true" />
+							<span>
+								<span class="font-medium">Non-research.</span> Pasted source has no model, app, stack
+								or generation metadata and no functional evaluation, so its results cannot join a study
+								or a model comparison. Use it for quick checks only.
 							</span>
 						</div>
-						<Separator />
-						<div>
-							<div class="mb-1 text-muted-foreground">Analyzers ({installedSelectedCount})</div>
-							<div class="flex flex-wrap gap-1">
-								{#each selectedToolsList.filter((t) => t.installed) as t}
-									<Badge variant="secondary" class="text-[11px]">{t.name}</Badge>
-								{/each}
-							</div>
-						</div>
-						{#if launchError}
-							<ErrorAlert message={launchError} />
+						<PastedFilesEditor bind:files={pasted} error={fieldErrors.source_code ?? ''} />
+					{/if}
+				</Card.Content>
+			</Card.Root>
+
+			<!-- Profile -->
+			<Card.Root>
+				<Card.Header>
+					<Card.Title>Analysis profile</Card.Title>
+					<Card.Description>
+						Which tools run, the AI reviewer, the measured scope and outcome rules. The profile is
+						frozen into the run's plan.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="space-y-3">
+					{#if profilesError}
+						<ErrorAlert message={profilesError} onretry={loadProfiles} />
+					{:else}
+						<Label for="profile-select" class="sr-only">Analysis profile</Label>
+						<Select.Root
+							type="single"
+							value={profileId}
+							onValueChange={(v) => (profileId = v)}
+							items={profiles.map((p) => ({ value: p.id, label: p.name }))}
+							disabled={profilesLoading}
+						>
+							<Select.Trigger
+								id="profile-select"
+								class="min-h-9 w-full py-1.5 data-[size=default]:h-auto"
+							>
+								{#if profilesLoading}
+									<span class="flex items-center gap-2 text-muted-foreground">
+										<LoaderCircle
+											class="size-3.5 animate-spin motion-reduce:animate-none"
+											aria-hidden="true"
+										/>Loading profiles…
+									</span>
+								{:else if profile}
+									<span class="flex min-w-0 flex-col items-start text-left">
+										<span class="truncate font-medium"
+											>{profile.name}
+											<span class="font-normal text-muted-foreground">v{profile.version}</span
+											></span
+										>
+										<span class="truncate text-[11px] text-muted-foreground">
+											{profile.summary.tool_count} tools · {reviewerSummary(profile)}
+										</span>
+									</span>
+								{:else}
+									<span class="text-muted-foreground">Choose a profile</span>
+								{/if}
+							</Select.Trigger>
+							<Select.Content>
+								{#if systemProfiles.length}
+									<Select.Group>
+										<Select.GroupHeading>System</Select.GroupHeading>
+										{#each systemProfiles as p (p.id)}
+											<Select.Item value={p.id} label={p.name}>
+												<span class="flex min-w-0 flex-col">
+													<span class="truncate"
+														>{p.name}
+														<span class="text-muted-foreground">v{p.version}</span></span
+													>
+													<span class="truncate text-[11px] text-muted-foreground"
+														>{p.summary.tool_count} tools · {reviewerSummary(p)}</span
+													>
+												</span>
+											</Select.Item>
+										{/each}
+									</Select.Group>
+								{/if}
+								{#if myProfiles.length}
+									<Select.Separator />
+									<Select.Group>
+										<Select.GroupHeading>Yours</Select.GroupHeading>
+										{#each myProfiles as p (p.id)}
+											<Select.Item value={p.id} label={p.name}>
+												<span class="flex min-w-0 flex-col">
+													<span class="truncate"
+														>{p.name}
+														<span class="text-muted-foreground">v{p.version}</span></span
+													>
+													<span class="truncate text-[11px] text-muted-foreground"
+														>{p.summary.tool_count} tools · {reviewerSummary(p)}</span
+													>
+												</span>
+											</Select.Item>
+										{/each}
+									</Select.Group>
+								{/if}
+							</Select.Content>
+						</Select.Root>
+						{#if fieldErrors.profile_id}
+							<p class="text-xs text-danger-fg" role="alert">
+								{fieldErrors.profile_id}
+							</p>
 						{/if}
-					</Card.Content>
-				</Card.Root>
-			{/if}
+
+						{#if profile}
+							{#if profile.description}
+								<p class="text-xs text-muted-foreground">
+									{profile.description}
+								</p>
+							{/if}
+							<div class="flex flex-wrap gap-1">
+								{#each profile.summary.tools as slug (slug)}
+									<span class="rounded border border-border px-1.5 font-mono text-[11px]"
+										>{slug}</span
+									>
+								{/each}
+								{#if profile.summary.reviewer.enabled}
+									<Badge variant="outline" class="gap-1">
+										<Sparkles class="size-3 text-accent-3" aria-hidden="true" />{reviewerSummary(
+											profile
+										)}
+									</Badge>
+								{/if}
+							</div>
+							<a
+								href="/analysis/profiles/{profile.id}"
+								class="inline-block text-xs text-primary underline-offset-2 hover:underline"
+								>View or customize this profile</a
+							>
+						{/if}
+					{/if}
+				</Card.Content>
+			</Card.Root>
+
+			<!-- Name -->
+			<Card.Root>
+				<Card.Header>
+					<Card.Title>Name</Card.Title>
+					<Card.Description>Optional label in the runs list.</Card.Description>
+				</Card.Header>
+				<Card.Content>
+					<Label for="run-name" class="sr-only">Run name</Label>
+					<Input
+						id="run-name"
+						bind:value={name}
+						maxlength={200}
+						placeholder={namePlaceholder}
+						aria-invalid={!!fieldErrors.name}
+					/>
+					{#if fieldErrors.name}
+						<p class="mt-1 text-xs text-danger-fg" role="alert">
+							{fieldErrors.name}
+						</p>
+					{/if}
+				</Card.Content>
+			</Card.Root>
 		</div>
 
-		<!-- Sidebar -->
-		<div class="space-y-4">
+		<!-- Preflight + submit -->
+		<div class="min-w-0 space-y-4 lg:sticky lg:top-4">
 			<Card.Root>
-				<Card.Content class="p-4">
-					<div class="mb-3 text-sm font-medium">Step {step} of {stepLabels.length}</div>
-					<div class="mb-4 h-1.5 overflow-hidden rounded-full bg-muted">
-						<div class="h-full rounded-full bg-primary transition-all" style="width: {(step / stepLabels.length) * 100}%"></div>
-					</div>
-					<div class="flex flex-col gap-2 sm:flex-row sm:justify-between">
-						<Button variant="outline" size="sm" disabled={step === 1} onclick={() => step--}>
-							<ArrowLeft class="mr-1.5 h-3.5 w-3.5" /> Back
-						</Button>
-						{#if step < 3}
-							<Button size="sm" disabled={!canAdvance} onclick={() => step++}>
-								Next <ArrowRight class="ml-1.5 h-3.5 w-3.5" />
-							</Button>
-						{:else}
-							<Button size="sm" disabled={launching || installedSelectedCount === 0} onclick={handleLaunch}>
-								{#if launching}
-									<Loader class="mr-1.5 h-3.5 w-3.5 animate-spin motion-reduce:animate-none" /> Launching…
-								{:else}
-									<Rocket class="mr-1.5 h-3.5 w-3.5" /> Launch
-								{/if}
-							</Button>
-						{/if}
-					</div>
+				<Card.Header>
+					<Card.Title>Preflight</Card.Title>
+					<Card.Description>
+						What will run on this target, checked against the analyzer image.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content>
+					<RunPreflight
+						{preview}
+						loading={previewLoading}
+						error={previewError}
+						idle={source === 'application'
+							? 'Choose an application to check it.'
+							: 'Paste at least one file with a valid path.'}
+					/>
 				</Card.Content>
 			</Card.Root>
 
-			<Card.Root>
-				<Card.Header><Card.Title class="text-sm">Selections</Card.Title></Card.Header>
-				<Card.Content class="space-y-3">
-					<div>
-						<div class="section-label mb-1">Source</div>
-						{#if sourceMode === 'job' && selectedJob}
-							<span class="text-sm">{selectedJob.model_name ?? selectedJob.id.slice(0, 8)}</span>
-						{:else if sourceMode === 'paste' && (pasteBackend.trim() || pasteFrontend.trim())}
-							<span class="text-sm">Pasted code</span>
-						{:else}
-							<span class="text-xs italic text-muted-foreground">Not selected</span>
-						{/if}
-					</div>
-					<Separator />
-					<div>
-						<div class="section-label mb-1">Analyzers ({installedSelectedCount})</div>
-						{#if installedSelectedCount > 0}
-							<div class="flex flex-wrap gap-1">
-								{#each selectedToolsList.filter((t) => t.installed) as t}
-									<Badge variant="secondary" class="text-[11px]">{t.name}</Badge>
-								{/each}
-							</div>
-						{:else}
-							<span class="text-xs italic text-muted-foreground">None selected</span>
-						{/if}
-					</div>
-				</Card.Content>
-			</Card.Root>
+			{#if submitError}
+				<ErrorAlert message={submitError} />
+			{/if}
+
+			<div class="flex flex-wrap items-center justify-end gap-2">
+				{#if !previewCurrent && payload() && previewLoading}
+					<span class="text-xs text-muted-foreground">Checking…</span>
+				{/if}
+				<Button size="sm" onclick={requestSubmit} disabled={!canSubmit}>
+					{#if submitting}
+						<LoaderCircle class="size-3.5 animate-spin motion-reduce:animate-none" />
+					{:else}
+						<Play class="size-3.5" />
+					{/if}
+					Start run
+				</Button>
+			</div>
 		</div>
 	</div>
 </div>
+
+<Dialog.Root bind:open={confirmOpen}>
+	<Dialog.Content class="max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Start despite the preflight?</Dialog.Title>
+			<Dialog.Description>
+				The preflight found problems. The run may fail, or produce data that is incomplete or not
+				comparable.
+			</Dialog.Description>
+		</Dialog.Header>
+		<ul class="my-2 space-y-1.5 text-xs">
+			{#if targetIneligible}
+				<li class={cn('rounded-md border px-2.5 py-1.5', toneClasses.danger)}>
+					The target is not eligible:
+					{preview?.targets[0]?.reasons
+						.filter((r) => r.severity === 'exclude')
+						.map((r) => r.detail)
+						.join('; ') || 'see the preflight'}
+				</li>
+			{/if}
+			{#each blocking as issue, i (`${issue.code}-${i}`)}
+				<li class={cn('rounded-md border px-2.5 py-1.5', toneClasses.danger)}>
+					{issue.detail || issue.code}
+				</li>
+			{/each}
+		</ul>
+		<Dialog.Footer>
+			<Button
+				variant="outline"
+				size="sm"
+				disabled={submitting}
+				onclick={() => (confirmOpen = false)}>Go back</Button
+			>
+			<Button size="sm" disabled={submitting} onclick={submit}>
+				{#if submitting}<LoaderCircle
+						class="size-3.5 animate-spin motion-reduce:animate-none"
+					/>{/if}
+				Start anyway
+			</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>

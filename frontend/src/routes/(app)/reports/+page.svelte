@@ -1,163 +1,310 @@
 <script lang="ts">
-	import { formatDateTime as formatDate } from '$lib/utils/formatters';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import * as Card from '$lib/components/ui/card';
+	import * as Select from '$lib/components/ui/select';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import FilterBar, { type FilterTag } from '$lib/components/FilterBar.svelte';
-	import Plus from '@lucide/svelte/icons/plus';
-	import Eye from '@lucide/svelte/icons/eye';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import Brain from '@lucide/svelte/icons/brain';
-	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
-	import Wrench from '@lucide/svelte/icons/wrench';
-	import TrendingUp from '@lucide/svelte/icons/trending-up';
-	import Layers from '@lucide/svelte/icons/layers';
-	import FlaskConical from '@lucide/svelte/icons/flask-conical';
-	import { toast } from 'svelte-sonner';
+	import PaginationBar from '$lib/components/PaginationBar.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import { downloadExport } from '$lib/api/export';
-	import Download from '@lucide/svelte/icons/download';
+	import NaValue from '$lib/components/analysis/NaValue.svelte';
+	import { REPORT_TYPE_INFO, reportTypeInfo } from '$lib/components/insights/reports/report-types';
+	import { fmtInt, fmtShare, formatTimestamp, shortHash } from '$lib/components/insights/format';
+	import { toast } from 'svelte-sonner';
+	import { formatApiError, isAbortError } from '$lib/api/core';
+	import { exportUrl } from '$lib/api/export';
 	import {
-		getReports,
+		REPORT_TYPES,
 		deleteReport,
-		type ReportSummary,
-		type ReportStatus,
+		getReports,
+		isReportInFlight,
+		type ReportGenerationStatus,
+		type ReportListItem,
 		type ReportType
-	} from '$lib/api/client';
+	} from '$lib/api/reports';
+	import Plus from '@lucide/svelte/icons/plus';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import Download from '@lucide/svelte/icons/download';
+	import FileText from '@lucide/svelte/icons/file-text';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
-	let reports = $state<ReportSummary[]>([]);
+	const FETCH_LIMIT = 200;
+	const PAGE_SIZE = 24;
+	const POLL_MS = 3_000;
+	const STATUSES: ReportGenerationStatus[] = ['pending', 'generating', 'completed', 'failed'];
+	type SortKey = 'newest' | 'oldest' | 'title';
+
+	const initial = page.url.searchParams;
+	const initialType = initial.get('type') ?? '';
+	const initialStatus = initial.get('status') ?? '';
+
+	let typeFilter = $state<ReportType | ''>(
+		(REPORT_TYPES as readonly string[]).includes(initialType) ? (initialType as ReportType) : ''
+	);
+	let statusFilter = $state<ReportGenerationStatus | ''>(
+		(STATUSES as string[]).includes(initialStatus) ? (initialStatus as ReportGenerationStatus) : ''
+	);
+	let sortBy = $state<SortKey>('newest');
+	let searchQuery = $state('');
+	let pageNo = $state(1);
+
+	let reports = $state<ReportListItem[]>([]);
 	let total = $state(0);
 	let loading = $state(true);
-	let error = $state('');
-	let typeFilter = $state<'all' | ReportType>('all');
-	let statusFilter = $state<'all' | ReportStatus>('all');
-	let searchQuery = $state('');
-	let sortBy = $state<'newest' | 'oldest' | 'title'>('newest');
+	let error = $state<string | null>(null);
 
-	// Debounce search
-	let searchDebounce: ReturnType<typeof setTimeout> | null = null;
-	function onSearchInput() {
-		if (searchDebounce) clearTimeout(searchDebounce);
-		searchDebounce = setTimeout(() => load(), 350);
-	}
+	let controller: AbortController | null = null;
 
-	const typeConfig: Record<ReportType, { label: string; icon: typeof Brain }> = {
-		model_analysis: { label: 'Model Analysis', icon: Brain },
-		template_comparison: { label: 'Template Comparison', icon: GitCompareArrows },
-		tool_analysis: { label: 'Tool Analysis', icon: Wrench },
-		generation_analytics: { label: 'Generation Analytics', icon: TrendingUp },
-		comprehensive: { label: 'Comprehensive', icon: Layers },
-		experiment_report: { label: 'Experiment Report', icon: FlaskConical }
-	};
-
-	async function load() {
-		loading = true;
-		error = '';
+	async function load(silent = false) {
+		controller?.abort();
+		const c = new AbortController();
+		controller = c;
+		if (!silent) loading = reports.length === 0;
+		error = null;
 		try {
-			const params: Record<string, string> = {};
-			if (typeFilter !== 'all') params.report_type = typeFilter;
-			if (statusFilter !== 'all') params.status = statusFilter;
-			const res = await getReports(params);
-			let items = res.reports;
-			// Client-side search filter (title + description)
-			if (searchQuery.trim()) {
-				const q = searchQuery.toLowerCase();
-				items = items.filter(
-					(r) => r.title.toLowerCase().includes(q) || (r.description ?? '').toLowerCase().includes(q)
-				);
-			}
-			// Client-side sort
-			if (sortBy === 'newest') {
-				items = [...items].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-			} else if (sortBy === 'oldest') {
-				items = [...items].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-			} else if (sortBy === 'title') {
-				items = [...items].sort((a, b) => a.title.localeCompare(b.title));
-			}
-			reports = items;
+			const res = await getReports(
+				{
+					report_type: typeFilter || undefined,
+					status: statusFilter || undefined,
+					limit: FETCH_LIMIT
+				},
+				{ signal: c.signal }
+			);
+			if (c.signal.aborted) return;
+			reports = res.reports;
 			total = res.pagination.total;
 		} catch (e) {
-			error = (e as Error)?.message || 'Failed to load reports';
+			if (c.signal.aborted || isAbortError(e)) return;
+			error = formatApiError(e, 'Could not load the reports.');
 		} finally {
-			loading = false;
+			if (controller === c) loading = false;
 		}
 	}
 
-	// Delete is gated behind a confirmation dialog.
-	let confirmDeleteId = $state<string | null>(null);
+	// Server-side filters reload; search/sort/paging are client-side.
+	$effect(() => {
+		void [typeFilter, statusFilter];
+		untrack(() => {
+			pageNo = 1;
+			load();
+		});
+	});
+
+	// Keep the URL in sync with the server-side filters (shareable views).
+	$effect(() => {
+		const usp = new URLSearchParams();
+		if (typeFilter) usp.set('type', typeFilter);
+		if (statusFilter) usp.set('status', statusFilter);
+		const next = usp.toString();
+		untrack(() => {
+			if (next === page.url.searchParams.toString()) return;
+			const url = new URL(page.url);
+			url.search = next;
+			goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+		});
+	});
+
+	const anyInFlight = $derived(reports.some((r) => isReportInFlight(r.status)));
+	$effect(() => {
+		if (!anyInFlight) return;
+		const timer = setInterval(() => {
+			if (document.visibilityState === 'visible') load(true);
+		}, POLL_MS);
+		return () => clearInterval(timer);
+	});
+
+	onMount(() => () => controller?.abort());
+
+	const visible = $derived.by(() => {
+		const q = searchQuery.trim().toLowerCase();
+		let items = q
+			? reports.filter(
+					(r) =>
+						r.title.toLowerCase().includes(q) ||
+						(r.description ?? '').toLowerCase().includes(q) ||
+						r.report_id.toLowerCase().includes(q)
+				)
+			: reports;
+		const time = (r: ReportListItem) => new Date(r.created_at).getTime();
+		if (sortBy === 'newest') items = [...items].sort((a, b) => time(b) - time(a));
+		else if (sortBy === 'oldest') items = [...items].sort((a, b) => time(a) - time(b));
+		else items = [...items].sort((a, b) => a.title.localeCompare(b.title));
+		return items;
+	});
+	const pages = $derived(Math.max(1, Math.ceil(visible.length / PAGE_SIZE)));
+	const pageItems = $derived(visible.slice((pageNo - 1) * PAGE_SIZE, pageNo * PAGE_SIZE));
+	$effect(() => {
+		if (pageNo > pages) pageNo = pages;
+	});
+
+	const activeTags = $derived.by((): FilterTag[] => {
+		const tags: FilterTag[] = [];
+		if (typeFilter) {
+			tags.push({
+				key: 'type',
+				label: `Type: ${reportTypeInfo(typeFilter).label}`,
+				onRemove: () => (typeFilter = '')
+			});
+		}
+		if (statusFilter) {
+			tags.push({
+				key: 'status',
+				label: `Status: ${statusFilter}`,
+				onRemove: () => (statusFilter = '')
+			});
+		}
+		if (searchQuery.trim()) {
+			tags.push({
+				key: 'search',
+				label: `“${searchQuery.trim()}”`,
+				onRemove: () => (searchQuery = '')
+			});
+		}
+		return tags;
+	});
+
+	const resultsText = $derived(
+		loading && reports.length === 0
+			? ''
+			: `${visible.length} of ${total} report${total === 1 ? '' : 's'}${total > FETCH_LIMIT ? ` (newest ${FETCH_LIMIT} loaded)` : ''}`
+	);
+
+	const exportParams = $derived({
+		report_type: typeFilter || undefined,
+		status: statusFilter || undefined
+	});
+
+	function clearAll() {
+		typeFilter = '';
+		statusFilter = '';
+		searchQuery = '';
+		sortBy = 'newest';
+	}
+
+	// ── Delete ──
+	let confirmTarget = $state<ReportListItem | null>(null);
 	let confirmOpen = $state(false);
 	let confirmBusy = $state(false);
 
-	function remove(id: string) {
-		confirmDeleteId = id;
+	function askDelete(r: ReportListItem) {
+		confirmTarget = r;
 		confirmOpen = true;
 	}
 
 	async function confirmDelete() {
-		if (!confirmDeleteId) return;
+		if (!confirmTarget) return;
 		confirmBusy = true;
 		try {
-			await deleteReport(confirmDeleteId);
+			await deleteReport(confirmTarget.report_id);
+			reports = reports.filter((r) => r.report_id !== confirmTarget?.report_id);
+			total = Math.max(0, total - 1);
 			confirmOpen = false;
-			await load();
+			toast.success('Report deleted');
 		} catch (e) {
-			toast.error((e as Error)?.message || 'Failed to delete report');
+			toast.error(formatApiError(e, 'Could not delete the report.'));
 		} finally {
 			confirmBusy = false;
 		}
 	}
 
-	const activeFilters = $derived.by(() => {
-		const tags: FilterTag[] = [];
-		if (typeFilter !== 'all') {
-			tags.push({ key: 'type', label: `Type: ${typeConfig[typeFilter as ReportType]?.label ?? typeFilter}`, onRemove: () => { typeFilter = 'all'; } });
-		}
-		if (statusFilter !== 'all') {
-			tags.push({ key: 'status', label: `Status: ${statusFilter}`, onRemove: () => { statusFilter = 'all'; } });
-		}
-		return tags;
-	});
-
-	const resultsText = $derived(reports.length > 0 || !loading ? `${reports.length} of ${total} reports` : '');
-
-	$effect(() => {
-		void typeFilter;
-		void statusFilter;
-		void sortBy;
-		load();
-	});
-
-	onMount(load);
+	const typeItems = REPORT_TYPES.map((t) => ({ value: t, label: REPORT_TYPE_INFO[t].label }));
+	const statusItems = STATUSES.map((s) => ({
+		value: s,
+		label: s.charAt(0).toUpperCase() + s.slice(1)
+	}));
+	const sortItems = [
+		{ value: 'newest', label: 'Newest first' },
+		{ value: 'oldest', label: 'Oldest first' },
+		{ value: 'title', label: 'Title A–Z' }
+	];
 </script>
 
+{#snippet summaryChips(r: ReportListItem)}
+	{@const s = r.summary ?? {}}
+	{@const info = reportTypeInfo(r.report_type)}
+	<div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+		{#if info.measured}
+			<span class="mono-tag">
+				{#if s.measured_jobs != null}{s.measured_jobs} measured job{s.measured_jobs === 1
+						? ''
+						: 's'}{:else}<NaValue reason="Not in the summary" />&nbsp;measured{/if}
+			</span>
+			{#if r.report_type === 'model_analysis'}
+				<span class="mono-tag">
+					{#if s.total_findings != null}{fmtInt(s.total_findings)} static findings{:else}<NaValue
+							reason="No usable static measurement"
+						/>&nbsp;static findings{/if}
+				</span>
+			{:else if r.report_type === 'experiment_report' && s.condition_count != null}
+				<span class="mono-tag">{s.condition_count} conditions</span>
+			{:else if r.report_type === 'template_comparison' && s.model_count != null}
+				<span class="mono-tag">{s.model_count} models</span>
+			{/if}
+			{#if s.plan_hash}
+				<span class="mono-tag" title="Analysis plan {s.plan_hash}"
+					>plan {shortHash(s.plan_hash, 8)}</span
+				>
+			{/if}
+			{#if s.mixed_plans}
+				<span
+					class="inline-flex items-center gap-1 text-warning-fg"
+					title="Jobs were analysed under several plans; only one plan is compared"
+				>
+					<TriangleAlert class="h-3 w-3" aria-hidden="true" />mixed plans
+				</span>
+			{/if}
+		{:else if r.report_type === 'tool_analysis'}
+			{#if s.tool_count != null}<span class="mono-tag">{s.tool_count} tools</span>{/if}
+			{#if s.total_executions != null}<span class="mono-tag">{s.total_executions} executions</span
+				>{/if}
+		{:else if r.report_type === 'generation_analytics'}
+			{#if s.window_days != null}<span class="mono-tag">{s.window_days} days</span>{/if}
+			{#if s.total_jobs != null}<span class="mono-tag">{s.total_jobs} jobs</span>{/if}
+			{#if s.success_rate !== undefined}
+				<span class="mono-tag"
+					>{#if s.success_rate != null}{fmtShare(s.success_rate, 0)}{:else}<NaValue
+							reason="No job has finished"
+						/>{/if}&nbsp;success</span
+				>
+			{/if}
+		{:else if r.report_type === 'comprehensive' && s.platform}
+			<span class="mono-tag">{s.platform.measured_jobs ?? '—'} measured jobs</span>
+			<span class="mono-tag">{s.platform.plans_in_use ?? '—'} plans</span>
+		{/if}
+	</div>
+{/snippet}
+
 <div class="space-y-6">
-	<PageHeader title="Reports" description="Generated insights across models, templates and analysis tools.">
+	<PageHeader
+		title="Reports"
+		description="Generated reports across models, templates, experiments and analysis tools. Analysis numbers come from one analysis plan per report."
+	>
 		{#snippet actions()}
-			<Button variant="outline" size="sm" onclick={load}>
-				<RefreshCw class="mr-2 h-4 w-4" />Refresh
+			<Button
+				variant="outline"
+				size="sm"
+				onclick={() => load(true)}
+				aria-label="Refresh"
+				title="Refresh"
+			>
+				<RefreshCw class="h-3.5 w-3.5" /><span class="hidden lg:inline">Refresh</span>
 			</Button>
-			<!-- Export dropdown -->
-			<details class="relative">
-				<summary class="list-none">
-					<Button variant="outline" size="sm" tag="span">
-						<Download class="mr-2 h-4 w-4" />Export
-					</Button>
-				</summary>
-				<div class="absolute right-0 z-50 mt-1 w-40 rounded-md border bg-popover p-1 shadow-md">
-					<button class="w-full rounded px-3 py-1.5 text-left text-sm hover:bg-accent" onclick={() => downloadExport('reports.csv')}>Reports CSV</button>
-					<button class="w-full rounded px-3 py-1.5 text-left text-sm hover:bg-accent" onclick={() => downloadExport('reports.json')}>Reports JSON</button>
-				</div>
-			</details>
-			<Button size="sm" onclick={() => goto('/reports/create')}>
-				<Plus class="mr-2 h-4 w-4" />New report
+			<Button variant="outline" size="sm" href={exportUrl('reports.csv', exportParams)} download>
+				<Download class="h-3.5 w-3.5" />CSV
+			</Button>
+			<Button variant="outline" size="sm" href={exportUrl('reports.json', exportParams)} download>
+				<Download class="h-3.5 w-3.5" />JSON
+			</Button>
+			<Button size="sm" href="/reports/create">
+				<Plus class="h-3.5 w-3.5" />New report
 			</Button>
 		{/snippet}
 	</PageHeader>
@@ -165,108 +312,169 @@
 	<FilterBar
 		searchPlaceholder="Search reports by title…"
 		bind:searchValue={searchQuery}
-		onSearchInput={onSearchInput}
-		activeTags={activeFilters}
-		resultsText={resultsText}
-		onClearAll={() => { typeFilter = 'all'; statusFilter = 'all'; searchQuery = ''; sortBy = 'newest'; }}
+		onSearchInput={() => (pageNo = 1)}
+		{activeTags}
+		{resultsText}
+		page={pages > 1 ? pageNo : undefined}
+		pages={pages > 1 ? pages : undefined}
+		onGoToPage={(p) => (pageNo = p)}
+		onClearAll={clearAll}
 	>
 		{#snippet filters()}
 			<div class="fb-group">
 				<span class="fb-group-label">Type</span>
-				<button class="fb-chip {typeFilter === 'all' ? 'fb-chip-on' : ''}" aria-pressed={typeFilter === 'all'} onclick={() => { typeFilter = 'all'; }}>All</button>
-				{#each Object.entries(typeConfig) as [k, v] (k)}
-					<button class="fb-chip {typeFilter === k ? 'fb-chip-on' : ''}" aria-pressed={typeFilter === k} onclick={() => { typeFilter = k as ReportType; }}>{v.label}</button>
-				{/each}
+				<Select.Simple
+					size="sm"
+					class="w-56"
+					aria-label="Filter by report type"
+					value={typeFilter}
+					items={typeItems}
+					placeholder="All types"
+					clearLabel="All types"
+					onValueChange={(v) => (typeFilter = v as ReportType | '')}
+				/>
 			</div>
 			<div class="fb-group">
 				<span class="fb-group-label">Status</span>
-				<button class="fb-chip {statusFilter === 'all' ? 'fb-chip-on' : ''}" aria-pressed={statusFilter === 'all'} onclick={() => { statusFilter = 'all'; }}>All</button>
-				{#each ['pending', 'generating', 'completed', 'failed'] as const as st (st)}
-					<button class="fb-chip capitalize {statusFilter === st ? 'fb-chip-on' : ''}" aria-pressed={statusFilter === st} onclick={() => { statusFilter = st; }}>{st}</button>
-				{/each}
+				<Select.Simple
+					size="sm"
+					class="w-44"
+					aria-label="Filter by status"
+					value={statusFilter}
+					items={statusItems}
+					placeholder="All statuses"
+					clearLabel="All statuses"
+					onValueChange={(v) => (statusFilter = v as ReportGenerationStatus | '')}
+				/>
 			</div>
 			<div class="fb-group">
 				<span class="fb-group-label">Sort</span>
-				<button class="fb-chip {sortBy === 'newest' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'newest'} onclick={() => { sortBy = 'newest'; }}>Newest</button>
-				<button class="fb-chip {sortBy === 'oldest' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'oldest'} onclick={() => { sortBy = 'oldest'; }}>Oldest</button>
-				<button class="fb-chip {sortBy === 'title' ? 'fb-chip-on' : ''}" aria-pressed={sortBy === 'title'} onclick={() => { sortBy = 'title'; }}>A–Z</button>
+				<Select.Simple
+					size="sm"
+					class="w-44"
+					aria-label="Sort reports"
+					value={sortBy}
+					items={sortItems}
+					onValueChange={(v) => (sortBy = v as SortKey)}
+				/>
 			</div>
 		{/snippet}
 	</FilterBar>
 
-	{#if loading}
+	{#if error}
+		<ErrorAlert message={error} onretry={() => load()} />
+	{/if}
+
+	{#if loading && reports.length === 0}
 		<LoadingState label="loading reports" />
-	{:else if error}
-		<ErrorAlert message={error} onretry={load} />
-	{:else if reports.length === 0}
-		<EmptyState
-			icon={GitCompareArrows}
-			title="No reports yet"
-			description="Generate your first report to get insights across models, templates and tools."
-		>
-			{#snippet action()}
-				<Button size="sm" onclick={() => goto('/reports/create')}>
-					<Plus class="mr-2 h-4 w-4" />Generate your first report
-				</Button>
-			{/snippet}
-		</EmptyState>
+	{:else if !error && visible.length === 0}
+		{#if reports.length === 0 && !typeFilter && !statusFilter}
+			<EmptyState
+				icon={FileText}
+				title="No reports yet"
+				description="Generate a report to summarise models, templates, experiments or tool behaviour."
+			>
+				{#snippet action()}
+					<Button size="sm" href="/reports/create"><Plus class="h-3.5 w-3.5" />New report</Button>
+				{/snippet}
+			</EmptyState>
+		{:else}
+			<EmptyState
+				icon={FileText}
+				title="No reports match"
+				description="No report matches the current filters."
+			>
+				{#snippet action()}
+					<Button variant="outline" size="sm" onclick={clearAll}>Clear filters</Button>
+				{/snippet}
+			</EmptyState>
+		{/if}
 	{:else}
-		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-			{#each reports as r (r.report_id)}
-				{@const cfg = typeConfig[r.report_type]}
-				{@const TypeIcon = cfg?.icon ?? Brain}
-				<Card.Root class="flex flex-col">
-					<Card.Header class="pb-3">
-						<div class="flex items-start justify-between gap-2">
-							<Badge variant="outline">
-								<TypeIcon class="mr-1 h-3 w-3" />
-								{cfg?.label ?? r.report_type}
-							</Badge>
-							<StatusBadge status={r.status} />
-						</div>
-						<Card.Title class="text-base mt-2 line-clamp-2">{r.title}</Card.Title>
-						{#if r.description}
-							<Card.Description class="line-clamp-2">{r.description}</Card.Description>
-						{/if}
-					</Card.Header>
-					<Card.Content class="flex-1 text-xs text-muted-foreground space-y-1">
-						<div>Created: {formatDate(r.created_at)}</div>
-						{#if r.status === 'generating'}
-							<div class="space-y-1">
-								<div class="flex justify-between text-xs">
-									<span>Generating…</span>
-									<span class="font-mono">{r.progress_percent}%</span>
-								</div>
-								<div class="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-									<div
-										class="h-full rounded-full bg-primary transition-[width] duration-300"
-										style="width: {r.progress_percent}%"
-									></div>
-								</div>
+		<ul class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+			{#each pageItems as r (r.report_id)}
+				{@const info = reportTypeInfo(r.report_type)}
+				{@const TypeIcon = info.icon}
+				<li>
+					<Card.Root class="h-full gap-3">
+						<Card.Header class="gap-2 pb-0">
+							<div class="flex items-start justify-between gap-2">
+								<Badge variant="outline" class="gap-1 text-[11px]">
+									<TypeIcon class="h-3 w-3" aria-hidden="true" />{info.label}
+								</Badge>
+								<StatusBadge status={r.status} />
 							</div>
-						{/if}
-						{#if r.status === 'failed' && r.error_message}
-							<div class="text-destructive line-clamp-2">{r.error_message}</div>
-						{/if}
-					</Card.Content>
-					<Card.Footer class="gap-2 pt-3">
-						<Button size="sm" variant="outline" class="flex-1" onclick={() => goto(`/reports/${r.report_id}`)}>
-							<Eye class="mr-1 h-3 w-3" />View
-						</Button>
-						<Button size="sm" variant="outline" aria-label="Delete report {r.title}" onclick={() => remove(r.report_id)}>
-							<Trash2 class="h-3 w-3" />
-						</Button>
-					</Card.Footer>
-				</Card.Root>
+							<Card.Title class="text-base">
+								<a href="/reports/{r.report_id}" class="line-clamp-2 hover:underline">{r.title}</a>
+							</Card.Title>
+							{#if r.description}
+								<Card.Description class="line-clamp-2">{r.description}</Card.Description>
+							{/if}
+						</Card.Header>
+						<Card.Content class="flex-1 space-y-2 text-xs text-muted-foreground">
+							<div>Created {formatTimestamp(r.created_at)}</div>
+							{#if isReportInFlight(r.status)}
+								<div class="space-y-1">
+									<div class="flex justify-between">
+										<span>{r.status === 'pending' ? 'Queued' : 'Generating'}…</span>
+										<span class="font-mono tabular-nums">{r.progress_percent}%</span>
+									</div>
+									<div
+										class="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+										role="progressbar"
+										aria-valuemin={0}
+										aria-valuemax={100}
+										aria-valuenow={r.progress_percent}
+										aria-label="Generation progress of {r.title}"
+									>
+										<div
+											class="h-full rounded-full bg-primary transition-[width] duration-300"
+											style="width: {r.progress_percent}%"
+										></div>
+									</div>
+								</div>
+							{:else if r.status === 'failed'}
+								<p class="line-clamp-2 text-danger-fg" title={r.error_message}>
+									{r.error_message || 'Generation failed.'}
+								</p>
+							{:else if r.status === 'completed'}
+								{@render summaryChips(r)}
+							{/if}
+						</Card.Content>
+						<Card.Footer class="gap-2">
+							<Button size="sm" variant="outline" class="flex-1" href="/reports/{r.report_id}"
+								>Open</Button
+							>
+							<Button
+								size="sm"
+								variant="outline"
+								aria-label="Delete report {r.title}"
+								onclick={() => askDelete(r)}
+							>
+								<Trash2 class="h-3.5 w-3.5" />
+							</Button>
+						</Card.Footer>
+					</Card.Root>
+				</li>
 			{/each}
-		</div>
+		</ul>
+		{#if pages > 1}
+			<PaginationBar
+				resultsText="Page {pageNo} of {pages}"
+				page={pageNo}
+				{pages}
+				onGoToPage={(p) => (pageNo = p)}
+				class="rounded-md border border-border"
+			/>
+		{/if}
 	{/if}
 </div>
 
 <ConfirmDialog
 	bind:open={confirmOpen}
 	title="Delete report?"
-	description="This permanently removes the report. This cannot be undone."
+	description={confirmTarget
+		? `“${confirmTarget.title}” will be removed permanently. This cannot be undone.`
+		: 'This permanently removes the report.'}
 	confirmLabel="Delete"
 	destructive
 	busy={confirmBusy}

@@ -25,22 +25,48 @@
 	}
 
 	const ITEMS: PaletteItem[] = [
-		{ kind: 'generate', label: 'Generate', description: 'LLM creates a sample app', icon: Sparkles, accent: 'text-chart-3' },
-		{ kind: 'analyze', label: 'Analyze', description: 'Run analyzer tools', icon: Search, accent: 'text-chart-2' },
-		{ kind: 'report', label: 'Report', description: 'Compile findings', icon: FileText, accent: 'text-chart-4' },
-		{ kind: 'wait', label: 'Wait', description: 'Pause execution', icon: Hourglass, accent: 'text-muted-foreground' },
-		{ kind: 'notify', label: 'Notify', description: 'Send a notification', icon: Bell, accent: 'text-chart-1' },
-		{ kind: 'script', label: 'Script', description: 'Custom JSON step', icon: Terminal, accent: 'text-muted-foreground' }
-	];
-
-	const ANALYZER_TOOLS = [
-		{ slug: 'bandit', label: 'Bandit', group: 'Static' },
-		{ slug: 'eslint', label: 'ESLint', group: 'Static' },
-		{ slug: 'pylint', label: 'Pylint', group: 'Static' },
-		{ slug: 'zap', label: 'OWASP ZAP', group: 'Dynamic' },
-		{ slug: 'port_scanner', label: 'Port Scanner', group: 'Dynamic' },
-		{ slug: 'lighthouse', label: 'Lighthouse', group: 'Performance' },
-		{ slug: 'llm_review', label: 'LLM Review', group: 'AI' }
+		{
+			kind: 'generate',
+			label: 'Generate',
+			description: 'LLM creates a sample app',
+			icon: Sparkles,
+			accent: 'text-chart-3'
+		},
+		{
+			kind: 'analyze',
+			label: 'Analyze',
+			description: 'Analyse a generated app with a profile',
+			icon: Search,
+			accent: 'text-chart-2'
+		},
+		{
+			kind: 'report',
+			label: 'Report',
+			description: 'Compile findings',
+			icon: FileText,
+			accent: 'text-chart-4'
+		},
+		{
+			kind: 'wait',
+			label: 'Wait',
+			description: 'Pause execution',
+			icon: Hourglass,
+			accent: 'text-muted-foreground'
+		},
+		{
+			kind: 'notify',
+			label: 'Notify',
+			description: 'Send a notification',
+			icon: Bell,
+			accent: 'text-chart-1'
+		},
+		{
+			kind: 'script',
+			label: 'Script',
+			description: 'Custom JSON step',
+			icon: Terminal,
+			accent: 'text-muted-foreground'
+		}
 	];
 
 	function onDragStart(event: DragEvent, kind: StepKind) {
@@ -50,11 +76,17 @@
 	}
 </script>
 
-<aside class="flex flex-col h-full {compact ? 'w-full' : 'w-64'} shrink-0 {compact ? '' : 'border-r'} bg-card overflow-y-auto">
+<aside
+	class="flex flex-col h-full {compact ? 'w-full' : 'w-64'} shrink-0 {compact
+		? ''
+		: 'border-r'} bg-card overflow-y-auto"
+>
 	{#if !compact}
 		<div class="px-4 py-3 border-b">
 			<h2 class="text-sm font-semibold">Node Palette</h2>
-			<p class="text-xs text-muted-foreground mt-0.5">Drag onto canvas {onAdd ? '· or tap to add' : ''}</p>
+			<p class="text-xs text-muted-foreground mt-0.5">
+				Drag onto canvas {onAdd ? '· or tap to add' : ''}
+			</p>
 		</div>
 	{/if}
 
@@ -80,27 +112,30 @@
 	</div>
 
 	{#if !compact}
-		<div class="px-4 py-3 border-t border-b">
-			<h3 class="section-label">Analysis tools</h3>
-			<p class="text-[11px] text-muted-foreground mt-0.5">Toggle inside Analyze nodes</p>
-		</div>
-
-		<div class="p-3 space-y-3 text-xs">
-			{#each ['Static', 'Dynamic', 'Performance', 'AI'] as group (group)}
-				<div>
-					<p class="section-label mb-1.5">{group}</p>
-					<div class="flex flex-wrap gap-1">
-						{#each ANALYZER_TOOLS.filter((t) => t.group === group) as tool (tool.slug)}
-							<span class="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">{tool.label}</span>
-						{/each}
-					</div>
-				</div>
-			{/each}
+		<div class="space-y-1.5 border-t px-4 py-3 text-[11px] text-muted-foreground">
+			<h3 class="section-label">Analysis</h3>
+			<p class="leading-snug">
+				Analyze steps run an analysis profile (optionally restricted to some tools) from the pinned
+				analyzer image.
+			</p>
+			<p class="flex flex-wrap gap-x-3 gap-y-1">
+				<a
+					href="/analysis/profiles"
+					class="rounded font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+					>Profiles</a
+				>
+				<a
+					href="/analysis/tools"
+					class="rounded font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+					>Tools</a
+				>
+			</p>
 		</div>
 
 		<div class="mt-auto px-4 py-3 border-t text-[11px] text-muted-foreground">
 			<p class="leading-snug">
-				<strong class="text-foreground">Tip:</strong> Connect node outputs to inputs to set dependencies. Press <kbd class="rounded border px-1 bg-muted">Del</kbd> to remove selected items.
+				<strong class="text-foreground">Tip:</strong> Connect node outputs to inputs to set
+				dependencies. Press <kbd class="rounded border px-1 bg-muted">Del</kbd> to remove selected items.
 			</p>
 		</div>
 	{/if}

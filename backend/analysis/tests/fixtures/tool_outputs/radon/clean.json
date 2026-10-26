@@ -1,0 +1,58 @@
+{
+ "captured_at": "2026-10-22T14:45:28+00:00",
+ "case": "clean",
+ "config": {
+  "finding_min_rank": "E"
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "3ecb375bb493dd403274b2197f98bb4b38d226ff186646d66f312c341336381f"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "sh",
+   "-c",
+   "set -e; /opt/analyzer/bin/radon cc --json --show-complexity --output-file /out/radon-cc.json -- \"$@\"; /opt/analyzer/bin/radon mi --json --show --output-file /out/radon-mi.json -- \"$@\"; /opt/analyzer/bin/radon raw --json --output-file /out/radon-raw.json -- \"$@\"",
+   "radon",
+   "/src/clean/backend/app.py",
+   "/src/clean/backend/bookmarks.py"
+  ],
+  "env": {},
+  "mem_limit": "512m",
+  "report_files": [
+   "radon-cc.json",
+   "radon-mi.json",
+   "radon-raw.json"
+  ],
+  "timeout_s": 180
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "radon-cc.json": "{\"/src/clean/backend/app.py\": [{\"type\": \"function\", \"rank\": \"A\", \"complexity\": 4, \"lineno\": 41, \"col_offset\": 0, \"name\": \"create_bookmark\", \"endline\": 50, \"closures\": []}, {\"type\": \"function\", \"rank\": \"A\", \"complexity\": 2, \"lineno\": 30, \"col_offset\": 0, \"name\": \"list_bookmarks\", \"endline\": 37, \"closures\": []}, {\"type\": \"function\", \"rank\": \"A\", \"complexity\": 1, \"lineno\": 23, \"col_offset\": 0, \"name\": \"connect\", \"endline\": 26, \"closures\": []}], \"/src/clean/backend/bookmarks.py\": [{\"type\": \"function\", \"rank\": \"A\", \"complexity\": 2, \"lineno\": 12, \"col_offset\": 0, \"name\": \"count_by_tag\", \"endline\": 16, \"closures\": []}, {\"type\": \"function\", \"rank\": \"A\", \"complexity\": 1, \"lineno\": 6, \"col_offset\": 0, \"name\": \"normalize_title\", \"endline\": 9, \"closures\": []}]}\n",
+   "radon-mi.json": "{\"/src/clean/backend/app.py\": {\"mi\": 74.4247771670279, \"rank\": \"A\"}, \"/src/clean/backend/bookmarks.py\": {\"mi\": 70.69012901603358, \"rank\": \"A\"}}\n",
+   "radon-raw.json": "{\"/src/clean/backend/app.py\": {\"loc\": 50, \"lloc\": 34, \"sloc\": 35, \"comments\": 0, \"multi\": 4, \"blank\": 11, \"single_comments\": 0}, \"/src/clean/backend/bookmarks.py\": {\"loc\": 16, \"lloc\": 13, \"sloc\": 9, \"comments\": 0, \"multi\": 0, \"blank\": 5, \"single_comments\": 2}}\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.427
+ },
+ "schema": 1,
+ "tool": "radon",
+ "tool_version": "6.0.1"
+}

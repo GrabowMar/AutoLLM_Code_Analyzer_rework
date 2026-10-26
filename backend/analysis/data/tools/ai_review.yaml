@@ -1,0 +1,24 @@
+# The AI reviewer: an LLM reads the in-scope code and reports findings (opinions, not measurements).
+slug: ai_review
+name: AI Reviewer
+kind: ai
+category: ai
+version: ""
+adapter_version: 0
+languages: ["*"]
+file_kinds: [source, config]
+output_kind: findings
+description: >-
+  LLM code review (switchable model and harness, default
+  deepseek/deepseek-v4.1-flash via OpenRouter). Replicated k times; only
+  grounded consensus findings are counted, separately from static tools.
+docs_url: https://openrouter.ai/docs
+icon: bot
+display_order: 900
+default_required: false
+mem_limit: 1g
+timeout_s: 900
+notes: >-
+  Configured under the profile's "reviewer" block (engine, harness, model,
+  samples, budget), not through config_schema; run by engine/reviewer.
+config_schema: []

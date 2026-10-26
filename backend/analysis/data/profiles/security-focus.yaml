@@ -1,0 +1,22 @@
+# System profile (seeded; edits create a new version): security and secrets
+# scanners plus the AI reviewer.
+slug: security-focus
+name: Security focus
+description: >-
+  Security and secrets scanners (bandit, semgrep, eslint security rules, gitleaks,
+  detect-secrets) plus the AI reviewer (single-shot, 3 replicates, consensus).
+config:
+  tools:
+    - {slug: bandit, required: true}
+    - {slug: semgrep, required: true}
+    - {slug: eslint, required: true}
+    - {slug: gitleaks, required: true}
+    - {slug: detect-secrets, required: true}
+  reviewer:
+    enabled: true
+    required: true
+    engine: single_shot
+    samples: 3
+    # Reasoning plus answer: DeepSeek V4.1 Flash reasons even at effort low and a
+    # live review truncated at 16k output tokens (a truncated replicate fails).
+    max_output_tokens: 32000

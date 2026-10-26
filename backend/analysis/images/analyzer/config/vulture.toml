@@ -1,0 +1,42 @@
+# Baked vulture configuration of the llmlab analyzer (vulture 2.16), passed
+# with --config so an analysed app's pyproject.toml is never read.
+[tool.vulture]
+min_confidence = 80
+sort_by_size = false
+# Functions registered with a web framework or library by decorator are entry
+# points, not dead code (15 of 16 v1 findings on a generated Flask app).
+ignore_decorators = [
+  "@*.route",
+  "@*.get",
+  "@*.post",
+  "@*.put",
+  "@*.patch",
+  "@*.delete",
+  "@*.head",
+  "@*.options",
+  "@*.websocket",
+  "@*.api_route",
+  "@*.errorhandler",
+  "@*.before_request",
+  "@*.after_request",
+  "@*.before_app_request",
+  "@*.after_app_request",
+  "@*.teardown_request",
+  "@*.teardown_appcontext",
+  "@*.context_processor",
+  "@*.template_filter",
+  "@*.cli.command",
+  "@*.command",
+  "@*.middleware",
+  "@*.exception_handler",
+  "@*.on_event",
+  "@*.user_loader",
+  "@*.request_loader",
+  "@*.listens_for",
+  "@*.validator",
+  "@*.validates",
+  "@*.field_validator",
+  "@*.model_validator",
+  "@*.root_validator",
+  "@*.fixture",
+]

@@ -2,12 +2,7 @@ import dagre from "dagre";
 import type { Edge, Node } from "@xyflow/svelte";
 
 export type StepKind =
-  | "generate"
-  | "analyze"
-  | "report"
-  | "wait"
-  | "notify"
-  | "script";
+  "generate" | "analyze" | "report" | "wait" | "notify" | "script";
 
 export interface PipelineStepDSL {
   name: string;
@@ -183,7 +178,8 @@ export function defaultConfigFor(kind: StepKind): Record<string, unknown> {
     case "generate":
       return { app_num: 1 };
     case "analyze":
-      return { analyzers: ["bandit"], live_target: false };
+      // Seeded system profile: fast static tools, no AI cost.
+      return { profile: "quick-check" };
     case "report":
       return { report_type: "comprehensive" };
     case "wait":

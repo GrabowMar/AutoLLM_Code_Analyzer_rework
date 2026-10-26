@@ -12,6 +12,7 @@ from __future__ import annotations
 import itertools
 from typing import Any
 
+from backend.rankings.services.constants import SCORING_VERSION
 from backend.rankings.services.constants import SEVERITY_WEIGHT_SCHEMES
 from backend.rankings.services.scoring import compute_empirical_quality
 
@@ -20,7 +21,9 @@ def kendall_tau(order_a: list[str], order_b: list[str]) -> float:
     """Rank correlation between two orderings of the same items, -1..1.
 
     Items missing from either ordering are ignored. Fewer than two common
-    items gives a degenerate comparison; return 1.0 (nothing can disagree).
+    items gives a degenerate comparison; return 1.0 (nothing can disagree) —
+    callers must report it as undefined (see ``compute_weight_sensitivity``'s
+    ``defined`` flag), never as evidence of a stable ranking.
     """
     common = [x for x in order_a if x in set(order_b)]
     n = len(common)
@@ -53,7 +56,9 @@ def compute_weight_sensitivity(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     ``rows`` are aggregated ranking entries; only models with an empirical
     score (i.e. local measurements) participate. Rankings are by empirical
-    quality alone — the measurement, deliberately not composite or MSS.
+    quality alone — the measurement, deliberately not composite or MSS. With
+    fewer than two measured models nothing can be compared: ``defined`` is
+    False and the taus are placeholders.
     """
     measured = [r for r in rows if r.get("empirical_quality_score") is not None]
 
@@ -81,12 +86,15 @@ def compute_weight_sensitivity(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "weights": weights,
                 "ranking": rankings[scheme],
                 "kendall_tau": kendall_tau(baseline_order, order),
+                "defined": len(measured) >= 2,
                 "adjacent_swaps": adjacent_swaps(baseline_order, order),
             },
         )
 
     return {
         "models_evaluated": len(measured),
+        "defined": len(measured) >= 2,
+        "scoring_version": SCORING_VERSION,
         "baseline_ranking": rankings.get("baseline", []),
         "schemes": schemes,
     }

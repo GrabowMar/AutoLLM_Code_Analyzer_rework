@@ -1,0 +1,270 @@
+# Finding category per tool and rule (normalizer norm-v1).
+#
+# Categories are models.FindingCategory values (mapped to ISO/IEC 25010 in
+# the docs): security, secrets, bug, type, maintainability, dead_code,
+# duplication, complexity, style, container, dependency, other.
+# Lookup order inside a tool table: `rules` (exact) -> `prefixes` (longest
+# prefix) -> `native` (tool token) -> `core_default` (eslint core rules, i.e.
+# ids without a plugin namespace) -> `default`.
+version: 1
+
+# Categories reported but not counted toward quality outcomes by default.
+# style: typos / formatting are not quality defects (plan outcomes.count_style
+# counts them). complexity / duplication: radon, lizard and jscpd findings
+# are threshold crossings of metrics that the measurement reports as metrics
+# (complexity max/mean, duplication %); counting them as findings as well
+# would double-count (plan outcomes.count_metric_findings counts them).
+uncounted:
+  style: count_style
+  complexity: count_metric_findings
+  duplication: count_metric_findings
+
+tools:
+  ruff:
+    rules:
+      F401: dead_code
+      F841: dead_code
+      F541: style
+      F403: maintainability
+      F405: maintainability
+      E711: style
+      E712: style
+      E713: style
+      E714: style
+      E721: bug
+      E722: bug
+      E731: style
+      E741: style
+      B007: dead_code
+      B018: dead_code
+      S105: secrets
+      S106: secrets
+      S107: secrets
+      ERA001: dead_code
+    prefixes:
+      S: security
+      F: bug
+      B: bug
+      E: style
+      W: style
+      I: style
+      UP: style
+      N: style
+      D: style
+      Q: style
+      COM: style
+      ISC: style
+      PT: style
+      EM: style
+      G: style
+      FBT: style
+      INP: style
+      PTH: style
+      EXE: style
+      ANN: style
+      TC: style
+      TCH: style
+      FA: style
+      ICN: style
+      C4: maintainability
+      C90: complexity
+      SIM: maintainability
+      RET: maintainability
+      ARG: dead_code
+      ERA: dead_code
+      T20: maintainability
+      T10: maintainability
+      PIE: maintainability
+      PERF: maintainability
+      RUF: maintainability
+      TRY: maintainability
+      A: maintainability
+      FURB: maintainability
+      PGH: maintainability
+      SLF: maintainability
+      PD: maintainability
+      ASYNC: bug
+      BLE: bug
+      DTZ: bug
+      YTT: bug
+      LOG: bug
+      NPY: bug
+      DJ: bug
+      FAST: bug
+      PLE: bug
+      PLW: bug
+      PLR: maintainability
+      PLC: style
+    default: maintainability
+
+  bandit:
+    rules:
+      B105: secrets
+      B106: secrets
+      B107: secrets
+    default: security
+
+  semgrep:
+    # metadata.category of the rule; otherwise the rule id's path segment;
+    # otherwise security when the rule carries a CWE.
+    metadata:
+      security: security
+      correctness: bug
+      best-practice: maintainability
+      performance: maintainability
+      maintainability: maintainability
+      portability: maintainability
+      compatibility: maintainability
+      caching: maintainability
+    id_segments:
+      secrets: secrets
+      security: security
+      correctness: bug
+      best-practice: maintainability
+      performance: maintainability
+      maintainability: maintainability
+    with_cwe: security
+    default: maintainability
+
+  pylint:
+    native: {fatal: bug, error: bug, warning: bug, refactor: maintainability, convention: style, info: style}
+    rules:
+      W0611: dead_code
+      unused-import: dead_code
+      W0612: dead_code
+      unused-variable: dead_code
+      W0613: dead_code
+      unused-argument: dead_code
+      W0614: dead_code
+      unused-wildcard-import: dead_code
+      W0101: dead_code
+      unreachable: dead_code
+      W0123: security
+      eval-used: security
+      W0122: security
+      exec-used: security
+      R0801: duplication
+      duplicate-code: duplication
+      R0911: complexity
+      too-many-return-statements: complexity
+      R0912: complexity
+      too-many-branches: complexity
+      R0915: complexity
+      too-many-statements: complexity
+      R1702: complexity
+      too-many-nested-blocks: complexity
+    default: bug
+
+  mypy:
+    default: type
+
+  vulture:
+    default: dead_code
+
+  eslint:
+    rules:
+      no-unused-vars: dead_code
+      no-unused-private-class-members: dead_code
+      no-unused-labels: dead_code
+      no-unreachable: dead_code
+      no-unassigned-vars: bug
+      "@typescript-eslint/no-unused-vars": dead_code
+      no-eval: security
+      no-implied-eval: security
+      no-new-func: security
+      no-script-url: security
+      react/no-danger: security
+      react/jsx-no-target-blank: security
+      vue/no-v-html: security
+      svelte/no-at-html-tags: security
+      no-empty: maintainability
+      no-useless-catch: maintainability
+      no-useless-assignment: maintainability
+      no-debugger: maintainability
+      no-prototype-builtins: maintainability
+      no-case-declarations: maintainability
+      no-empty-pattern: maintainability
+      no-empty-static-block: maintainability
+      preserve-caught-error: maintainability
+      no-irregular-whitespace: style
+      no-extra-boolean-cast: style
+      no-useless-escape: style
+      no-regex-spaces: style
+      no-console: style
+      react/prop-types: style
+      react/react-in-jsx-scope: style
+      react/display-name: style
+      react/no-unescaped-entities: style
+      "@typescript-eslint/no-explicit-any": style
+      "@typescript-eslint/ban-ts-comment": style
+      "@typescript-eslint/no-empty-function": style
+      "@typescript-eslint/no-inferrable-types": style
+    prefixes:
+      "security/": security
+      "no-unsanitized/": security
+      "react-hooks/": bug
+      "react/": bug
+      "import/": bug
+      "@typescript-eslint/": maintainability
+      "vue/": maintainability
+      "svelte/": maintainability
+      "jsx-a11y/": maintainability
+    # ESLint core rules (no plugin namespace) not listed above are the
+    # possible-problems set of @eslint/js recommended: correctness bugs.
+    core_default: bug
+    default: maintainability
+
+  gitleaks:
+    default: secrets
+
+  detect-secrets:
+    default: secrets
+
+  codespell:
+    default: style
+
+  hadolint:
+    default: container
+
+  radon:
+    default: complexity
+
+  lizard:
+    default: complexity
+
+  jscpd:
+    default: duplication
+
+# Finding categories each tool can emit. When a tool is not OK (failed,
+# timed out, skipped, ...) and is REQUIRED or could have scanned a measured
+# file (an optional tool covering a measured language), every category it
+# emits is unavailable (NA) for the run: its count would be a lower bound,
+# not a measurement (engine/measurement.py).
+emits:
+  ruff: [bug, security, secrets, dead_code, maintainability, style, complexity]
+  bandit: [security, secrets]
+  semgrep: [security, secrets, bug, maintainability]
+  pylint: [bug, security, dead_code, maintainability, style, duplication, complexity]
+  mypy: [type]
+  vulture: [dead_code]
+  eslint: [bug, security, dead_code, maintainability, style]
+  gitleaks: [secrets]
+  detect-secrets: [secrets]
+  codespell: [style]
+  hadolint: [container]
+  radon: [complexity]
+  lizard: [complexity]
+  jscpd: [duplication]
+
+# Tool category (models.ToolCategory) -> finding categories, for a tool
+# without an `emits` entry.
+tool_category_emits:
+  security: [security]
+  secrets: [secrets]
+  lint: [bug, maintainability, style]
+  types: [type]
+  dead_code: [dead_code]
+  complexity: [complexity]
+  duplication: [duplication]
+  style: [style]
+  container: [container]

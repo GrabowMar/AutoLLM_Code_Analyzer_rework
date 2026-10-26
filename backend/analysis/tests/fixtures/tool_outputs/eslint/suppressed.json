@@ -1,0 +1,65 @@
+{
+ "captured_at": "2026-10-22T14:44:57+00:00",
+ "case": "suppressed",
+ "config": {
+  "opt_in_rules": []
+ },
+ "files": [
+  {
+   "content": "<template>\n  <!-- eslint-disable -->\n  <div v-html=\"html\"></div>\n</template>\n\n<script setup>\ndefineProps({ html: { type: String, default: \"\" } });\n</script>\n",
+   "kind": "source",
+   "language": "vue",
+   "path": "suppressed/Raw.vue",
+   "sha256": "b643d762a7f53d3c14568a99dff7aa0e5339044d8065abedbf42858b524e9d77"
+  },
+  {
+   "content": "// eslint-disable-next-line no-eval\nexport const run = (code) => eval(code);\n/* eslint-disable */\nexport const leftover = () => { const unused = 1; return 0; };\n",
+   "kind": "source",
+   "language": "javascript",
+   "path": "suppressed/run.js",
+   "sha256": "7d574a95ea3a6fd4706e740b142a31639288d9923385bda1b554bd0e6bfb10e7"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "env",
+   "-C",
+   "/src",
+   "/opt/analyzer/bin/eslint",
+   "--no-config-lookup",
+   "--config",
+   "/opt/analyzer/config/eslint.config.mjs",
+   "--no-inline-config",
+   "--format",
+   "json",
+   "--output-file",
+   "/out/eslint.json",
+   "--",
+   "./suppressed/Raw.vue",
+   "./suppressed/run.js"
+  ],
+  "env": {},
+  "mem_limit": "1g",
+  "report_files": [
+   "eslint.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "eslint.json": "[{\"filePath\":\"/src/suppressed/Raw.vue\",\"messages\":[{\"ruleId\":\"vue/no-v-html\",\"severity\":2,\"message\":\"'v-html' directive can lead to XSS attack.\",\"line\":3,\"column\":8,\"messageId\":\"unexpected\",\"endLine\":3,\"endColumn\":21}],\"suppressedMessages\":[],\"errorCount\":1,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"source\":\"<template>\\n  <!-- eslint-disable -->\\n  <div v-html=\\\"html\\\"></div>\\n</template>\\n\\n<script setup>\\ndefineProps({ html: { type: String, default: \\\"\\\" } });\\n</script>\\n\",\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/suppressed/run.js\",\"messages\":[{\"ruleId\":\"security/detect-eval-with-expression\",\"severity\":2,\"message\":\"eval with argument of type Identifier\",\"line\":2,\"column\":30,\"endLine\":2,\"endColumn\":40},{\"ruleId\":\"no-eval\",\"severity\":2,\"message\":\"`eval` can be harmful.\",\"line\":2,\"column\":30,\"messageId\":\"unexpected\",\"endLine\":2,\"endColumn\":34},{\"ruleId\":\"no-unused-vars\",\"severity\":2,\"message\":\"'unused' is assigned a value but never used.\",\"line\":4,\"column\":39,\"messageId\":\"unusedVar\",\"endLine\":4,\"endColumn\":45,\"suggestions\":[{\"messageId\":\"removeVar\",\"data\":{\"varName\":\"unused\"},\"fix\":{\"range\":[130,147],\"text\":\"\"},\"desc\":\"Remove unused variable 'unused'.\"}]}],\"suppressedMessages\":[],\"errorCount\":3,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"source\":\"// eslint-disable-next-line no-eval\\nexport const run = (code) => eval(code);\\n/* eslint-disable */\\nexport const leftover = () => { const unused = 1; return 0; };\\n\",\"usedDeprecatedRules\":[]}]"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 2.586
+ },
+ "schema": 1,
+ "tool": "eslint",
+ "tool_version": "10.12.0"
+}

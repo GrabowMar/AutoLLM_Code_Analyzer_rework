@@ -266,8 +266,8 @@ def test_remove_action_drops_per_app_image():
 def test_remove_action_keeps_shared_image():
     mock_client = _mock_docker()
     with patch("backend.runtime.services.docker_manager.client", return_value=mock_client):
-        container = ContainerInstanceFactory(status=ContainerInstance.Status.STOPPED, name="analyzer-0123456789")
-        container.image = "backend/analyzer-base:latest"
+        container = ContainerInstanceFactory(status=ContainerInstance.Status.STOPPED, name="llm-shared01")
+        container.image = "backend/shared-base:latest"
         container.save(update_fields=["image"])
         action = _run_remove(container)
 

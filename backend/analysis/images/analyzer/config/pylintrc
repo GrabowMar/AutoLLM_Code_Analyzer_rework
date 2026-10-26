@@ -1,0 +1,29 @@
+# Baked pylint configuration of the llmlab analyzer (pylint 4.1.x / astroid 4.3.x).
+# The adapter passes --rcfile=<this file>, so an analysed app's pylintrc, .pylintrc,
+# pyproject.toml or setup.cfg is never read.
+
+[MAIN]
+jobs=1
+persistent=no
+load-plugins=
+fail-under=0
+limit-inference-results=100
+unsafe-load-any-extension=no
+recursive=no
+
+[MESSAGES CONTROL]
+# Errors, fatals and warnings. Conventions (C), refactoring suggestions (R) and
+# informational messages (I) are style/design noise for this research: 26 of the
+# 31 v1 findings on a generated app were missing docstrings. R0801
+# duplicate-code is part of R; jscpd owns duplication. Also disabled because
+# they measure the analyzer environment, not the code (the app's dependencies
+# are not installed): import-error, no-name-in-module. fixme: a TODO comment is
+# not a defect.
+disable=C,R,I,
+        import-error,
+        no-name-in-module,
+        fixme
+
+[REPORTS]
+reports=no
+score=no

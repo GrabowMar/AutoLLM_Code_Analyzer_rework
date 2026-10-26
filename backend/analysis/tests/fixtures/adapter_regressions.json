@@ -1,0 +1,416 @@
+{
+ "about": "Real outputs of the pinned tools for adapter regression cases (adapters fix, 2026-10-22). Each outcome was produced by running the argv the adapter builds for the case with the pinned tool versions outside the analyzer image (PyPI wheels on host Python 3.14; the lockfile's ESLint/jscpd on Node 24; the sha256-verified gitleaks 8.30.1 binary), paths mapped to the sandbox's /src, /out, /tmp/llmlab-src, /tmp/llmlab-cwd and /tmp/scan (the same /tmp hierarchy as the container). The same procedure reproduced the image-captured golden outputs byte for byte. tests/test_adapters_regressions_docker.py runs the same cases and expectations in the image. Host-interpreter DeprecationWarnings on stderr (Python 3.14 only) were dropped.",
+ "cases": {
+  "bandit_paths": {
+   "argv": [
+    "/opt/analyzer/bin/bandit",
+    "--format",
+    "json",
+    "--output",
+    "/out/bandit.json",
+    "--quiet",
+    "--ignore-nosec",
+    "--severity-level",
+    "all",
+    "--confidence-level",
+    "all",
+    "--exclude",
+    "",
+    "--",
+    "/src/.github/scripts/deploy.py",
+    "/src/app/CVSSScore.py",
+    "/src/app/ok.py"
+   ],
+   "config": {},
+   "files": {
+    ".github/scripts/deploy.py": "import subprocess\n\n\ndef deploy(target):\n    return subprocess.call(target, shell=True)\n",
+    "app/CVSSScore.py": "import pickle\n\n\ndef load(blob):\n    return pickle.loads(blob)\n",
+    "app/ok.py": "import pickle\n\n\ndef load(blob):\n    return pickle.loads(blob)\n"
+   },
+   "outcome": {
+    "exit_code": 1,
+    "out_files": {
+     "bandit.json": "{\n  \"errors\": [],\n  \"generated_at\": \"2026-10-22T16:46:24Z\",\n  \"metrics\": {\n    \"/src/.github/scripts/deploy.py\": {\n      \"CONFIDENCE.HIGH\": 2,\n      \"CONFIDENCE.LOW\": 0,\n      \"CONFIDENCE.MEDIUM\": 0,\n      \"CONFIDENCE.UNDEFINED\": 0,\n      \"SEVERITY.HIGH\": 1,\n      \"SEVERITY.LOW\": 1,\n      \"SEVERITY.MEDIUM\": 0,\n      \"SEVERITY.UNDEFINED\": 0,\n      \"loc\": 3,\n      \"nosec\": 0,\n      \"skipped_tests\": 0\n    },\n    \"/src/app/CVSSScore.py\": {\n      \"CONFIDENCE.HIGH\": 2,\n      \"CONFIDENCE.LOW\": 0,\n      \"CONFIDENCE.MEDIUM\": 0,\n      \"CONFIDENCE.UNDEFINED\": 0,\n      \"SEVERITY.HIGH\": 0,\n      \"SEVERITY.LOW\": 1,\n      \"SEVERITY.MEDIUM\": 1,\n      \"SEVERITY.UNDEFINED\": 0,\n      \"loc\": 3,\n      \"nosec\": 0,\n      \"skipped_tests\": 0\n    },\n    \"/src/app/ok.py\": {\n      \"CONFIDENCE.HIGH\": 2,\n      \"CONFIDENCE.LOW\": 0,\n      \"CONFIDENCE.MEDIUM\": 0,\n      \"CONFIDENCE.UNDEFINED\": 0,\n      \"SEVERITY.HIGH\": 0,\n      \"SEVERITY.LOW\": 1,\n      \"SEVERITY.MEDIUM\": 1,\n      \"SEVERITY.UNDEFINED\": 0,\n      \"loc\": 3,\n      \"nosec\": 0,\n      \"skipped_tests\": 0\n    },\n    \"_totals\": {\n      \"CONFIDENCE.HIGH\": 6,\n      \"CONFIDENCE.LOW\": 0,\n      \"CONFIDENCE.MEDIUM\": 0,\n      \"CONFIDENCE.UNDEFINED\": 0,\n      \"SEVERITY.HIGH\": 1,\n      \"SEVERITY.LOW\": 3,\n      \"SEVERITY.MEDIUM\": 2,\n      \"SEVERITY.UNDEFINED\": 0,\n      \"loc\": 9,\n      \"nosec\": 0,\n      \"skipped_tests\": 0\n    }\n  },\n  \"results\": [\n    {\n      \"code\": \"1 import subprocess\\n2 \\n3 \\n\",\n      \"col_offset\": 0,\n      \"end_col_offset\": 17,\n      \"filename\": \"/src/.github/scripts/deploy.py\",\n      \"issue_confidence\": \"HIGH\",\n      \"issue_cwe\": {\n        \"id\": 78,\n        \"link\": \"https://cwe.mitre.org/data/definitions/78.html\"\n      },\n      \"issue_severity\": \"LOW\",\n      \"issue_text\": \"Consider possible security implications associated with the subprocess module.\",\n      \"line_number\": 1,\n      \"line_range\": [\n        1\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess\",\n      \"test_id\": \"B404\",\n      \"test_name\": \"blacklist\"\n    },\n    {\n      \"code\": \"4 def deploy(target):\\n5     return subprocess.call(target, shell=True)\\n\",\n      \"col_offset\": 11,\n      \"end_col_offset\": 46,\n      \"filename\": \"/src/.github/scripts/deploy.py\",\n      \"issue_confidence\": \"HIGH\",\n      \"issue_cwe\": {\n        \"id\": 78,\n        \"link\": \"https://cwe.mitre.org/data/definitions/78.html\"\n      },\n      \"issue_severity\": \"HIGH\",\n      \"issue_text\": \"subprocess call with shell=True identified, security issue.\",\n      \"line_number\": 5,\n      \"line_range\": [\n        5\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/plugins/b602_subprocess_popen_with_shell_equals_true.html\",\n      \"test_id\": \"B602\",\n      \"test_name\": \"subprocess_popen_with_shell_equals_true\"\n    },\n    {\n      \"code\": \"1 import pickle\\n2 \\n3 \\n\",\n      \"col_offset\": 0,\n      \"end_col_offset\": 13,\n      \"filename\": \"/src/app/CVSSScore.py\",\n      \"issue_confidence\": \"HIGH\",\n      \"issue_cwe\": {\n        \"id\": 502,\n        \"link\": \"https://cwe.mitre.org/data/definitions/502.html\"\n      },\n      \"issue_severity\": \"LOW\",\n      \"issue_text\": \"Consider possible security implications associated with pickle module.\",\n      \"line_number\": 1,\n      \"line_range\": [\n        1\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b403-import-pickle\",\n      \"test_id\": \"B403\",\n      \"test_name\": \"blacklist\"\n    },\n    {\n      \"code\": \"4 def load(blob):\\n5     return pickle.loads(blob)\\n\",\n      \"col_offset\": 11,\n      \"end_col_offset\": 29,\n      \"filename\": \"/src/app/CVSSScore.py\",\n      \"issue_confidence\": \"HIGH\",\n      \"issue_cwe\": {\n        \"id\": 502,\n        \"link\": \"https://cwe.mitre.org/data/definitions/502.html\"\n      },\n      \"issue_severity\": \"MEDIUM\",\n      \"issue_text\": \"Pickle and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue.\",\n      \"line_number\": 5,\n      \"line_range\": [\n        5\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b301-pickle\",\n      \"test_id\": \"B301\",\n      \"test_name\": \"blacklist\"\n    },\n    {\n      \"code\": \"1 import pickle\\n2 \\n3 \\n\",\n      \"col_offset\": 0,\n      \"end_col_offset\": 13,\n      \"filename\": \"/src/app/ok.py\",\n      \"issue_confidence\": \"HIGH\",\n      \"issue_cwe\": {\n        \"id\": 502,\n        \"link\": \"https://cwe.mitre.org/data/definitions/502.html\"\n      },\n      \"issue_severity\": \"LOW\",\n      \"issue_text\": \"Consider possible security implications associated with pickle module.\",\n      \"line_number\": 1,\n      \"line_range\": [\n        1\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b403-import-pickle\",\n      \"test_id\": \"B403\",\n      \"test_name\": \"blacklist\"\n    },\n    {\n      \"code\": \"4 def load(blob):\\n5     return pickle.loads(blob)\\n\",\n      \"col_offset\": 11,\n      \"end_col_offset\": 29,\n      \"filename\": \"/src/app/ok.py\",\n      \"issue_confidence\": \"HIGH\",\n      \"issue_cwe\": {\n        \"id\": 502,\n        \"link\": \"https://cwe.mitre.org/data/definitions/502.html\"\n      },\n      \"issue_severity\": \"MEDIUM\",\n      \"issue_text\": \"Pickle and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue.\",\n      \"line_number\": 5,\n      \"line_range\": [\n        5\n      ],\n      \"more_info\": \"https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b301-pickle\",\n      \"test_id\": \"B301\",\n      \"test_name\": \"blacklist\"\n    }\n  ]\n}"
+    },
+    "stderr": "",
+    "stdout": ""
+   },
+   "selected": [
+    ".github/scripts/deploy.py",
+    "app/CVSSScore.py",
+    "app/ok.py"
+   ],
+   "slug": "bandit"
+  },
+  "codespell_hidden": {
+   "argv": [
+    "/opt/analyzer/bin/codespell",
+    "--config",
+    "/opt/analyzer/config/codespell.cfg",
+    "--builtin",
+    "clear,rare",
+    "--disable-colors",
+    "--check-hidden",
+    "--",
+    "/src/backend/app.py",
+    "/src/frontend/.prettierrc"
+   ],
+   "config": {},
+   "files": {
+    "backend/app.py": "# recieve\n",
+    "frontend/.prettierrc": "{\"semi\": true, \"comment\": \"recieve the seperate occurence\"}\n"
+   },
+   "outcome": {
+    "exit_code": 65,
+    "out_files": {},
+    "stderr": "",
+    "stdout": "Used config files:\n    1: /opt/analyzer/config/codespell.cfg\n/src/backend/app.py:1: recieve ==> receive\n/src/frontend/.prettierrc:1: recieve ==> receive\n/src/frontend/.prettierrc:1: seperate ==> separate\n/src/frontend/.prettierrc:1: occurence ==> occurrence\n"
+   },
+   "selected": [
+    "backend/app.py",
+    "frontend/.prettierrc"
+   ],
+   "slug": "codespell"
+  },
+  "codespell_inline_ignore": {
+   "argv": [
+    "sh",
+    "-c",
+    "set -eu; mkdir /tmp/llmlab-src; cd /src; cp --parents -- \"$@\" /tmp/llmlab-src/; cd /tmp/llmlab-src; sed -E -i -e s/codespell:ignore/codespell-ignore/g -- \"$@\"; mkdir /tmp/llmlab-cwd; cd /tmp/llmlab-cwd; n=$#; for f in \"$@\"; do set -- \"$@\" \"/tmp/llmlab-src/$f\"; done; shift \"$n\"; exec /opt/analyzer/bin/codespell --config /opt/analyzer/config/codespell.cfg --builtin clear,rare --disable-colors --check-hidden -- \"$@\"",
+    "stage",
+    "app.py",
+    "notes.md"
+   ],
+   "config": {},
+   "files": {
+    "app.py": "# recieve  # codespell:ignore recieve\nx = 1  # codespell:ignore-next-line\n# seperate\n",
+    "notes.md": "plain occurence\n"
+   },
+   "outcome": {
+    "exit_code": 65,
+    "out_files": {},
+    "stderr": "",
+    "stdout": "Used config files:\n    1: /opt/analyzer/config/codespell.cfg\n/tmp/llmlab-src/app.py:1: recieve ==> receive\n/tmp/llmlab-src/app.py:1: recieve ==> receive\n/tmp/llmlab-src/app.py:3: seperate ==> separate\n/tmp/llmlab-src/notes.md:1: occurence ==> occurrence\n"
+   },
+   "selected": [
+    "app.py",
+    "notes.md"
+   ],
+   "slug": "codespell"
+  },
+  "detect_secrets_files": {
+   "argv": [
+    "env",
+    "-C",
+    "/src",
+    "/opt/analyzer/bin/detect-secrets",
+    "scan",
+    "--all-files",
+    "--no-verify",
+    "--disable-filter",
+    "detect_secrets.filters.allowlist.is_line_allowlisted",
+    "--disable-filter",
+    "detect_secrets.filters.heuristic.is_swagger_file",
+    "--base64-limit",
+    "4.5",
+    "--hex-limit",
+    "3.0",
+    "--",
+    "backend/swagger_config.py",
+    "docs/swagger.yaml",
+    "static/api.js"
+   ],
+   "config": {},
+   "files": {
+    "Gemfile.lock": "GEM\n  remote: https://rubygems.org/\n",
+    "backend/swagger_config.py": "AWS_ACCESS_KEY_ID = \"AKIAZ7QX3LKD5PMW2N4J\"\n",
+    "docs/swagger.yaml": "openapi: 3.0.0\nx-aws-key: AKIAZ7QX3LKD5PMW2N4J\n",
+    "static/api.js": "export const key = \"AKIAZ7QX3LKD5PMW2N4J\";\n",
+    "static/theme.css": "/* AKIAZ7QX3LKD5PMW2N4J */\nbody { color: red; }\n"
+   },
+   "outcome": {
+    "exit_code": 0,
+    "out_files": {},
+    "stderr": "",
+    "stdout": "{\n  \"version\": \"1.5.0\",\n  \"plugins_used\": [\n    {\n      \"name\": \"ArtifactoryDetector\"\n    },\n    {\n      \"name\": \"AWSKeyDetector\"\n    },\n    {\n      \"name\": \"AzureStorageKeyDetector\"\n    },\n    {\n      \"name\": \"Base64HighEntropyString\",\n      \"limit\": 4.5\n    },\n    {\n      \"name\": \"BasicAuthDetector\"\n    },\n    {\n      \"name\": \"CloudantDetector\"\n    },\n    {\n      \"name\": \"DiscordBotTokenDetector\"\n    },\n    {\n      \"name\": \"GitHubTokenDetector\"\n    },\n    {\n      \"name\": \"GitLabTokenDetector\"\n    },\n    {\n      \"name\": \"HexHighEntropyString\",\n      \"limit\": 3.0\n    },\n    {\n      \"name\": \"IbmCloudIamDetector\"\n    },\n    {\n      \"name\": \"IbmCosHmacDetector\"\n    },\n    {\n      \"name\": \"IPPublicDetector\"\n    },\n    {\n      \"name\": \"JwtTokenDetector\"\n    },\n    {\n      \"name\": \"KeywordDetector\",\n      \"keyword_exclude\": \"\"\n    },\n    {\n      \"name\": \"MailchimpDetector\"\n    },\n    {\n      \"name\": \"NpmDetector\"\n    },\n    {\n      \"name\": \"OpenAIDetector\"\n    },\n    {\n      \"name\": \"PrivateKeyDetector\"\n    },\n    {\n      \"name\": \"PypiTokenDetector\"\n    },\n    {\n      \"name\": \"SendGridDetector\"\n    },\n    {\n      \"name\": \"SlackDetector\"\n    },\n    {\n      \"name\": \"SoftlayerDetector\"\n    },\n    {\n      \"name\": \"SquareOAuthDetector\"\n    },\n    {\n      \"name\": \"StripeDetector\"\n    },\n    {\n      \"name\": \"TelegramBotTokenDetector\"\n    },\n    {\n      \"name\": \"TwilioKeyDetector\"\n    }\n  ],\n  \"filters_used\": [\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_indirect_reference\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_likely_id_string\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_lock_file\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_not_alphanumeric_string\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_potential_uuid\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_prefixed_with_dollar_sign\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_sequential_string\"\n    },\n    {\n      \"path\": \"detect_secrets.filters.heuristic.is_templated_secret\"\n    }\n  ],\n  \"results\": {\n    \"backend/swagger_config.py\": [\n      {\n        \"type\": \"AWS Access Key\",\n        \"filename\": \"backend/swagger_config.py\",\n        \"hashed_secret\": \"5de4f660f1d18c9d2add2d91d2fc1d99643cafef\",\n        \"is_verified\": false,\n        \"line_number\": 1\n      }\n    ],\n    \"docs/swagger.yaml\": [\n      {\n        \"type\": \"AWS Access Key\",\n        \"filename\": \"docs/swagger.yaml\",\n        \"hashed_secret\": \"5de4f660f1d18c9d2add2d91d2fc1d99643cafef\",\n        \"is_verified\": false,\n        \"line_number\": 2\n      }\n    ],\n    \"static/api.js\": [\n      {\n        \"type\": \"AWS Access Key\",\n        \"filename\": \"static/api.js\",\n        \"hashed_secret\": \"5de4f660f1d18c9d2add2d91d2fc1d99643cafef\",\n        \"is_verified\": false,\n        \"line_number\": 1\n      }\n    ]\n  },\n  \"generated_at\": \"2026-10-22T16:46:23Z\"\n}\n"
+   },
+   "selected": [
+    "Gemfile.lock",
+    "backend/swagger_config.py",
+    "docs/swagger.yaml",
+    "static/api.js",
+    "static/theme.css"
+   ],
+   "slug": "detect-secrets"
+  },
+  "gitleaks_allowlist": {
+   "argv": [
+    "sh",
+    "-c",
+    "set -eu; mkdir /tmp/scan; cd /src; cp --parents -- \"$@\" /tmp/scan/; cd /tmp; exec /opt/analyzer/bin/gitleaks dir /tmp/scan --config /opt/analyzer/config/gitleaks.toml --gitleaks-ignore-path /opt/analyzer/config --ignore-gitleaks-allow --report-format json --report-path /out/gitleaks.json --exit-code 0 --redact --no-banner --no-color --log-level warn",
+    "gitleaks",
+    "./backend/app.py"
+   ],
+   "config": {},
+   "files": {
+    "backend/app.py": "AWS_ACCESS_KEY_ID = \"AKIAZ7QX3LKD5PMW2N4J\"\n",
+    "frontend/src/bootstrap.js": "export const awsKey = \"AKIAZ7QX3LKD5PMW2N4J\";\n"
+   },
+   "outcome": {
+    "exit_code": 0,
+    "out_files": {
+     "gitleaks.json": "[\n {\n  \"RuleID\": \"aws-access-token\",\n  \"Description\": \"Identified a pattern that may indicate AWS credentials, risking unauthorized cloud resource access and data breaches on AWS platforms.\",\n  \"StartLine\": 1,\n  \"EndLine\": 1,\n  \"StartColumn\": 22,\n  \"EndColumn\": 41,\n  \"Match\": \"REDACTED\",\n  \"Secret\": \"REDACTED\",\n  \"File\": \"/tmp/scan/backend/app.py\",\n  \"SymlinkFile\": \"\",\n  \"Commit\": \"\",\n  \"Entropy\": 4.121928,\n  \"Author\": \"\",\n  \"Email\": \"\",\n  \"Date\": \"\",\n  \"Message\": \"\",\n  \"Tags\": [],\n  \"Fingerprint\": \"/tmp/scan/backend/app.py:aws-access-token:1\"\n }\n]\n"
+    },
+    "stderr": "4:46PM WRN leaks found: 1\n",
+    "stdout": ""
+   },
+   "selected": [
+    "backend/app.py",
+    "frontend/src/bootstrap.js"
+   ],
+   "slug": "gitleaks"
+  },
+  "jscpd_ignore": {
+   "argv": [
+    "sh",
+    "-c",
+    "set -eu; mkdir /tmp/llmlab-src; cd /src; cp --parents -- \"$@\" /tmp/llmlab-src/; cd /tmp/llmlab-src; sed -E -i -e 's/jscpd:ignore-(start|end)/jscpd-ignore-\\1/g' -- \"$@\"; mkdir /tmp/llmlab-cwd; cd /tmp/llmlab-cwd; n=$#; for f in \"$@\"; do set -- \"$@\" \"/tmp/llmlab-src/$f\"; done; shift \"$n\"; exec /opt/analyzer/bin/jscpd --config /opt/analyzer/config/jscpd.json --min-tokens 50 --min-lines 5 --max-lines 1000000 --max-size 8mb --mode mild --format python,javascript,jsx,typescript,tsx,vue,css,markup --formats-exts 'python:py,pyw,pyi;javascript:js,mjs,cjs;jsx:jsx;typescript:ts,mts,cts;tsx:tsx;vue:vue;css:css,scss,sass,less;markup:html,htm' --reporters json --output /out/jscpd --absolute --no-gitignore --silent -- \"$@\"",
+    "stage",
+    "web/a.js",
+    "web/b.js"
+   ],
+   "config": {},
+   "files": {
+    "web/a.js": "export function totalA(items) {\n  let sum = 0;\n  for (const item of items) {\n    if (item.price > 0 && item.qty > 0) {\n      sum += item.price * item.qty;\n    } else if (item.refund) {\n      sum -= item.refund;\n    }\n  }\n  const tax = sum * 0.21;\n  return Math.round((sum + tax) * 100) / 100;\n}\n",
+    "web/b.js": "// jscpd:ignore-start\nexport function totalB(items) {\n  let sum = 0;\n  for (const item of items) {\n    if (item.price > 0 && item.qty > 0) {\n      sum += item.price * item.qty;\n    } else if (item.refund) {\n      sum -= item.refund;\n    }\n  }\n  const tax = sum * 0.21;\n  return Math.round((sum + tax) * 100) / 100;\n}\n// jscpd:ignore-end\n"
+   },
+   "outcome": {
+    "exit_code": 0,
+    "out_files": {
+     "jscpd/jscpd-report.json": "{\n  \"statistics\": {\n    \"detectionDate\": \"2026-10-22T16:46:23.052Z\",\n    \"formats\": {\n      \"javascript\": {\n        \"sources\": {\n          \"/tmp/llmlab-src/web/b.js\": {\n            \"lines\": 14,\n            \"tokens\": 151,\n            \"sources\": 1,\n            \"clones\": 1,\n            \"duplicatedLines\": 11,\n            \"duplicatedTokens\": 142,\n            \"percentage\": 78.57,\n            \"percentageTokens\": 94.04,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/tmp/llmlab-src/web/a.js\": {\n            \"lines\": 12,\n            \"tokens\": 147,\n            \"sources\": 1,\n            \"clones\": 1,\n            \"duplicatedLines\": 11,\n            \"duplicatedTokens\": 142,\n            \"percentage\": 91.67,\n            \"percentageTokens\": 96.6,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 26,\n          \"tokens\": 298,\n          \"sources\": 2,\n          \"clones\": 1,\n          \"duplicatedLines\": 11,\n          \"duplicatedTokens\": 142,\n          \"percentage\": 42.31,\n          \"percentageTokens\": 47.65,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      }\n    },\n    \"total\": {\n      \"lines\": 26,\n      \"tokens\": 298,\n      \"sources\": 2,\n      \"clones\": 1,\n      \"duplicatedLines\": 11,\n      \"duplicatedTokens\": 142,\n      \"percentage\": 42.31,\n      \"percentageTokens\": 47.65,\n      \"newDuplicatedLines\": 0,\n      \"newClones\": 0\n    }\n  },\n  \"duplicates\": [\n    {\n      \"format\": \"javascript\",\n      \"lines\": 12,\n      \"fragment\": \"(items) {\\n  let sum = 0;\\n  for (const item of items) {\\n    if (item.price > 0 && item.qty > 0) {\\n      sum += item.price * item.qty;\\n    } else if (item.refund) {\\n      sum -= item.refund;\\n    }\\n  }\\n  const tax = sum * 0.21;\\n  return Math.round((sum + tax) * 100) / 100;\\n}\",\n      \"tokens\": 142,\n      \"firstFile\": {\n        \"name\": \"/tmp/llmlab-src/web/a.js\",\n        \"start\": 1,\n        \"end\": 12,\n        \"startLoc\": {\n          \"line\": 1,\n          \"column\": 23,\n          \"position\": 5\n        },\n        \"endLoc\": {\n          \"line\": 12,\n          \"column\": 2,\n          \"position\": 147\n        }\n      },\n      \"secondFile\": {\n        \"name\": \"/tmp/llmlab-src/web/b.js\",\n        \"start\": 2,\n        \"end\": 13,\n        \"startLoc\": {\n          \"line\": 2,\n          \"column\": 23,\n          \"position\": 7\n        },\n        \"endLoc\": {\n          \"line\": 13,\n          \"column\": 2,\n          \"position\": 149\n        }\n      }\n    }\n  ]\n}"
+    },
+    "stderr": "",
+    "stdout": "JSON report saved to /out/jscpd/jscpd-report.json\nDuplications detection: Found 1 exact clones with 11(42.31%) duplicated lines in 2 (1 formats) files.\n"
+   },
+   "selected": [
+    "web/a.js",
+    "web/b.js"
+   ],
+   "slug": "jscpd"
+  },
+  "lizard_markers": {
+   "argv": [
+    "sh",
+    "-c",
+    "set -eu; mkdir /tmp/llmlab-src; cd /src; cp --parents -- \"$@\" /tmp/llmlab-src/; cd /tmp/llmlab-src; sed -E -i -e 's/lizard forgive/lizard-forgive/g' -e 's/GENERATED CODE/GENERATED-CODE/g' -- \"$@\"; mkdir /tmp/llmlab-cwd; cd /tmp/llmlab-cwd; n=$#; for f in \"$@\"; do set -- \"$@\" \"/tmp/llmlab-src/$f\"; done; shift \"$n\"; exec /opt/analyzer/bin/lizard --csv -o /out/lizard.csv -i -1 -C 15 -l javascript -l python -- \"$@\"",
+    "stage",
+    "backend/app.py",
+    "frontend/src/App.jsx"
+   ],
+   "config": {},
+   "files": {
+    "backend/app.py": "def forgiven(a, b, c):  #lizard forgive\n    if a:\n        return 1\n    if b:\n        return 2\n    if c:\n        return 3\n    return 4\n\n\ndef plain(a):\n    if a:\n        return 1\n    return 0\n",
+    "backend/stub.pyi": "def f(x: int) -> int: ...\n",
+    "frontend/src/App.jsx": "// LLM: REPLACE THIS ENTIRE FILE WITH YOUR GENERATED CODE\nexport function pick(a, b) {\n  if (a) { return a; }\n  if (b) { return b; }\n  return null;\n}\n\nexport default function App({ items }) {\n  return items.map((i) => (i ? i : 0));\n}\n"
+   },
+   "outcome": {
+    "exit_code": 0,
+    "out_files": {
+     "lizard.csv": "8,4,26,3,8,\"forgiven@1-8@/tmp/llmlab-src/backend/app.py\",\"/tmp/llmlab-src/backend/app.py\",\"forgiven\",\"forgiven( a , b , c )\",1,8\n4,2,12,1,4,\"plain@11-14@/tmp/llmlab-src/backend/app.py\",\"/tmp/llmlab-src/backend/app.py\",\"plain\",\"plain( a )\",11,14\n5,3,28,2,5,\"pick@2-6@/tmp/llmlab-src/frontend/src/App.jsx\",\"/tmp/llmlab-src/frontend/src/App.jsx\",\"pick\",\"pick ( a , b )\",2,6\n1,2,8,0,1,\"(anonymous)@9-9@/tmp/llmlab-src/frontend/src/App.jsx\",\"/tmp/llmlab-src/frontend/src/App.jsx\",\"(anonymous)\",\"(anonymous)\",9,9\n3,1,18,1,3,\"App@8-10@/tmp/llmlab-src/frontend/src/App.jsx\",\"/tmp/llmlab-src/frontend/src/App.jsx\",\"App\",\"App ( items )\",8,10\n"
+    },
+    "stderr": "",
+    "stdout": ""
+   },
+   "selected": [
+    "backend/app.py",
+    "backend/stub.pyi",
+    "frontend/src/App.jsx"
+   ],
+   "slug": "lizard"
+  },
+  "pylint_pragmas": {
+   "argv": [
+    "sh",
+    "-c",
+    "set -eu; mkdir /tmp/llmlab-src; cd /src; cp --parents -- \"$@\" /tmp/llmlab-src/; cd /tmp/llmlab-src; sed -E -i -e '/#.*\\bpylint:([^;#]*\\b(skip-file|disable-all)\\b|[^;#]*\\bdisable[[:space:]]*=[^;#]*\\ball\\b)/ s/\\bpylint:/pylint-overridden:/g' -- \"$@\"; mkdir /tmp/llmlab-cwd; cd /tmp/llmlab-cwd; n=$#; for f in \"$@\"; do set -- \"$@\" \"/tmp/llmlab-src/$f\"; done; shift \"$n\"; exec /opt/analyzer/bin/pylint --rcfile=/opt/analyzer/config/pylintrc --output-format=json2:/out/pylint.json --persistent=n --jobs=1 --enable=suppressed-message --enable=file-ignored -- \"$@\"",
+    "stage",
+    "svc/app.py",
+    "svc/late.py",
+    "svc/legacy.py",
+    "svc/listed.py",
+    "svc/permsg.py",
+    "svc/text.py"
+   ],
+   "config": {},
+   "files": {
+    "svc/app.py": "import json\n\n\ndef calc(x):\n    return eval(x)\n",
+    "svc/late.py": "import os\n\n\ndef run(cmd):\n    # pylint: skip-file\n    return eval(cmd)\n",
+    "svc/legacy.py": "# pylint: disable=all\nimport os\n\n\ndef run(cmd):\n    return eval(cmd)\n",
+    "svc/listed.py": "import os  # pylint: disable=unused-import, all\n\n\ndef run(cmd):\n    return eval(cmd)\n",
+    "svc/permsg.py": "import os\n\n\ndef run(cmd):\n    return eval(cmd)  # pylint: disable=eval-used\n",
+    "svc/text.py": "NOTE = \"# pylint: skip-file\"\n\n\ndef run(cmd):\n    return eval(cmd)\n"
+   },
+   "outcome": {
+    "exit_code": 0,
+    "out_files": {
+     "pylint.json": "{\n    \"messages\": [\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"eval-used\",\n            \"message\": \"Use of eval\",\n            \"messageId\": \"W0123\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"app\",\n            \"obj\": \"calc\",\n            \"line\": 5,\n            \"column\": 11,\n            \"endLine\": 5,\n            \"endColumn\": 18,\n            \"path\": \"/tmp/llmlab-src/svc/app.py\",\n            \"absolutePath\": \"/tmp/llmlab-src/svc/app.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"unused-import\",\n            \"message\": \"Unused import json\",\n            \"messageId\": \"W0611\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"app\",\n            \"obj\": \"\",\n            \"line\": 1,\n            \"column\": 0,\n            \"endLine\": 1,\n            \"endColumn\": 11,\n            \"path\": \"/tmp/llmlab-src/svc/app.py\",\n            \"absolutePath\": \"/tmp/llmlab-src/svc/app.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"eval-used\",\n            \"message\": \"Use of eval\",\n            \"messageId\": \"W0123\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"late\",\n            \"obj\": \"run\",\n            \"line\": 6,\n            \"column\": 11,\n            \"endLine\": 6,\n            \"endColumn\": 20,\n            \"path\": \"/tmp/llmlab-src/svc/late.py\",\n            \"absolutePath\": \"/tmp/llmlab-src/svc/late.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"unused-import\",\n            \"message\": \"Unused import os\",\n            \"messageId\": \"W0611\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"late\",\n            \"obj\": \"\",\n            \"line\": 1,\n            \"column\": 0,\n            \"endLine\": 1,\n            \"endColumn\": 9,\n            \"path\": \"/tmp/llmlab-src/svc/late.py\",\n            \"absolutePath\": \"/tmp/llmlab-src/svc/late.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"eval-used\",\n            \"message\": \"Use of eval\",\n            \"messageId\": \"W0123\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"legacy\",\n            \"obj\": \"run\",\n            \"line\": 6,\n            \"column\": 11,\n            \"endLine\": 6,\n            \"endColumn\": 20,\n            \"path\": \"/tmp/llmlab-src/svc/legacy.py\",\n            \"absolutePath\": \"/tmp/llmlab-src/svc/legacy.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"unused-import\",\n            \"message\": \"Unused import os\",\n            \"messageId\": \"W0611\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"legacy\",\n            \"obj\": \"\",\n            \"line\": 2,\n            \"column\": 0,\n            \"endLine\": 2,\n            \"endColumn\": 9,\n            \"path\": \"/tmp/llmlab-src/svc/legacy.py\",\n            \"absolutePath\": \"/tmp/llmlab-src/svc/legacy.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"eval-used\",\n            \"message\": \"Use of eval\",\n            \"messageId\": \"W0123\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"listed\",\n            \"obj\": \"run\",\n            \"line\": 5,\n            \"column\": 11,\n            \"endLine\": 5,\n            \"endColumn\": 20,\n            \"path\": \"/tmp/llmlab-src/svc/listed.py\",\n            \"absolutePath\": \"/tmp/llmlab-src/svc/listed.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"unused-import\",\n            \"message\": \"Unused import os\",\n            \"messageId\": \"W0611\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"listed\",\n            \"obj\": \"\",\n            \"line\": 1,\n            \"column\": 0,\n            \"endLine\": 1,\n            \"endColumn\": 9,\n            \"path\": \"/tmp/llmlab-src/svc/listed.py\",\n            \"absolutePath\": \"/tmp/llmlab-src/svc/listed.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"unused-import\",\n            \"message\": \"Unused import os\",\n            \"messageId\": \"W0611\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"permsg\",\n            \"obj\": \"\",\n            \"line\": 1,\n            \"column\": 0,\n            \"endLine\": 1,\n            \"endColumn\": 9,\n            \"path\": \"/tmp/llmlab-src/svc/permsg.py\",\n            \"absolutePath\": \"/tmp/llmlab-src/svc/permsg.py\"\n        },\n        {\n            \"type\": \"info\",\n            \"symbol\": \"suppressed-message\",\n            \"message\": \"Suppressed 'eval-used' (from line 5)\",\n            \"messageId\": \"I0020\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"permsg\",\n            \"obj\": \"\",\n            \"line\": 5,\n            \"column\": 0,\n            \"endLine\": null,\n            \"endColumn\": null,\n            \"path\": \"/tmp/llmlab-src/svc/permsg.py\",\n            \"absolutePath\": \"/tmp/llmlab-src/svc/permsg.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"eval-used\",\n            \"message\": \"Use of eval\",\n            \"messageId\": \"W0123\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"text\",\n            \"obj\": \"run\",\n            \"line\": 5,\n            \"column\": 11,\n            \"endLine\": 5,\n            \"endColumn\": 20,\n            \"path\": \"/tmp/llmlab-src/svc/text.py\",\n            \"absolutePath\": \"/tmp/llmlab-src/svc/text.py\"\n        }\n    ],\n    \"statistics\": {\n        \"messageTypeCount\": {\n            \"fatal\": 0,\n            \"error\": 0,\n            \"warning\": 10,\n            \"refactor\": 0,\n            \"convention\": 0,\n            \"info\": 1\n        },\n        \"modulesLinted\": 9,\n        \"score\": 4.444444444444445\n    }\n}\n"
+    },
+    "stderr": "",
+    "stdout": ""
+   },
+   "selected": [
+    "svc/app.py",
+    "svc/late.py",
+    "svc/legacy.py",
+    "svc/listed.py",
+    "svc/permsg.py",
+    "svc/text.py"
+   ],
+   "slug": "pylint"
+  },
+  "pylint_pragmas_honoured": {
+   "argv": [
+    "/opt/analyzer/bin/pylint",
+    "--rcfile=/opt/analyzer/config/pylintrc",
+    "--output-format=json2:/out/pylint.json",
+    "--persistent=n",
+    "--jobs=1",
+    "--enable=file-ignored",
+    "--",
+    "/src/svc/app.py",
+    "/src/svc/late.py",
+    "/src/svc/legacy.py",
+    "/src/svc/listed.py",
+    "/src/svc/permsg.py",
+    "/src/svc/text.py"
+   ],
+   "config": {
+    "report_suppressed": false
+   },
+   "files": {
+    "svc/app.py": "import json\n\n\ndef calc(x):\n    return eval(x)\n",
+    "svc/late.py": "import os\n\n\ndef run(cmd):\n    # pylint: skip-file\n    return eval(cmd)\n",
+    "svc/legacy.py": "# pylint: disable=all\nimport os\n\n\ndef run(cmd):\n    return eval(cmd)\n",
+    "svc/listed.py": "import os  # pylint: disable=unused-import, all\n\n\ndef run(cmd):\n    return eval(cmd)\n",
+    "svc/permsg.py": "import os\n\n\ndef run(cmd):\n    return eval(cmd)  # pylint: disable=eval-used\n",
+    "svc/text.py": "NOTE = \"# pylint: skip-file\"\n\n\ndef run(cmd):\n    return eval(cmd)\n"
+   },
+   "outcome": {
+    "exit_code": 0,
+    "out_files": {
+     "pylint.json": "{\n    \"messages\": [\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"eval-used\",\n            \"message\": \"Use of eval\",\n            \"messageId\": \"W0123\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"app\",\n            \"obj\": \"calc\",\n            \"line\": 5,\n            \"column\": 11,\n            \"endLine\": 5,\n            \"endColumn\": 18,\n            \"path\": \"/src/svc/app.py\",\n            \"absolutePath\": \"/src/svc/app.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"unused-import\",\n            \"message\": \"Unused import json\",\n            \"messageId\": \"W0611\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"app\",\n            \"obj\": \"\",\n            \"line\": 1,\n            \"column\": 0,\n            \"endLine\": 1,\n            \"endColumn\": 11,\n            \"path\": \"/src/svc/app.py\",\n            \"absolutePath\": \"/src/svc/app.py\"\n        },\n        {\n            \"type\": \"info\",\n            \"symbol\": \"file-ignored\",\n            \"message\": \"Ignoring entire file\",\n            \"messageId\": \"I0013\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"late\",\n            \"obj\": \"\",\n            \"line\": 5,\n            \"column\": 0,\n            \"endLine\": null,\n            \"endColumn\": null,\n            \"path\": \"/src/svc/late.py\",\n            \"absolutePath\": \"/src/svc/late.py\"\n        },\n        {\n            \"type\": \"info\",\n            \"symbol\": \"file-ignored\",\n            \"message\": \"Ignoring entire file\",\n            \"messageId\": \"I0013\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"legacy\",\n            \"obj\": \"\",\n            \"line\": 1,\n            \"column\": 0,\n            \"endLine\": null,\n            \"endColumn\": null,\n            \"path\": \"/src/svc/legacy.py\",\n            \"absolutePath\": \"/src/svc/legacy.py\"\n        },\n        {\n            \"type\": \"info\",\n            \"symbol\": \"file-ignored\",\n            \"message\": \"Ignoring entire file\",\n            \"messageId\": \"I0013\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"listed\",\n            \"obj\": \"\",\n            \"line\": 1,\n            \"column\": 0,\n            \"endLine\": null,\n            \"endColumn\": null,\n            \"path\": \"/src/svc/listed.py\",\n            \"absolutePath\": \"/src/svc/listed.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"unused-import\",\n            \"message\": \"Unused import os\",\n            \"messageId\": \"W0611\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"permsg\",\n            \"obj\": \"\",\n            \"line\": 1,\n            \"column\": 0,\n            \"endLine\": 1,\n            \"endColumn\": 9,\n            \"path\": \"/src/svc/permsg.py\",\n            \"absolutePath\": \"/src/svc/permsg.py\"\n        },\n        {\n            \"type\": \"warning\",\n            \"symbol\": \"eval-used\",\n            \"message\": \"Use of eval\",\n            \"messageId\": \"W0123\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"text\",\n            \"obj\": \"run\",\n            \"line\": 5,\n            \"column\": 11,\n            \"endLine\": 5,\n            \"endColumn\": 20,\n            \"path\": \"/src/svc/text.py\",\n            \"absolutePath\": \"/src/svc/text.py\"\n        }\n    ],\n    \"statistics\": {\n        \"messageTypeCount\": {\n            \"fatal\": 0,\n            \"error\": 0,\n            \"warning\": 4,\n            \"refactor\": 0,\n            \"convention\": 0,\n            \"info\": 3\n        },\n        \"modulesLinted\": 9,\n        \"score\": 5.555555555555555\n    }\n}\n"
+    },
+    "stderr": "",
+    "stdout": ""
+   },
+   "selected": [
+    "svc/app.py",
+    "svc/late.py",
+    "svc/legacy.py",
+    "svc/listed.py",
+    "svc/permsg.py",
+    "svc/text.py"
+   ],
+   "slug": "pylint"
+  },
+  "radon_only_pyi": {
+   "config": {},
+   "files": {
+    "backend/types.pyi": "def f(x: int) -> int: ...\n"
+   },
+   "selected": [],
+   "slug": "radon"
+  },
+  "radon_pyi": {
+   "argv": [
+    "sh",
+    "-c",
+    "set -e; /opt/analyzer/bin/radon cc --json --show-complexity --output-file /out/radon-cc.json -- \"$@\"; /opt/analyzer/bin/radon mi --json --show --output-file /out/radon-mi.json -- \"$@\"; /opt/analyzer/bin/radon raw --json --output-file /out/radon-raw.json -- \"$@\"",
+    "radon",
+    "/src/backend/app.py"
+   ],
+   "config": {},
+   "files": {
+    "backend/app.py": "def f(x):\n    if x:\n        return 1\n    return 2\n",
+    "backend/types.pyi": "def f(x: int) -> int: ...\n",
+    "gui.pyw": "def main():\n    return 0\n"
+   },
+   "outcome": {
+    "exit_code": 0,
+    "out_files": {
+     "radon-cc.json": "{\"/src/backend/app.py\": [{\"type\": \"function\", \"rank\": \"A\", \"endline\": 4, \"lineno\": 1, \"col_offset\": 0, \"name\": \"f\", \"complexity\": 2, \"closures\": []}]}\n",
+     "radon-mi.json": "{\"/src/backend/app.py\": {\"mi\": 100.0, \"rank\": \"A\"}}\n",
+     "radon-raw.json": "{\"/src/backend/app.py\": {\"loc\": 4, \"lloc\": 4, \"sloc\": 4, \"comments\": 0, \"multi\": 0, \"blank\": 0, \"single_comments\": 0}}\n"
+    },
+    "stderr": "",
+    "stdout": ""
+   },
+   "selected": [
+    "backend/app.py",
+    "backend/types.pyi",
+    "gui.pyw"
+   ],
+   "slug": "radon"
+  },
+  "vulture_noqa": {
+   "argv": [
+    "/opt/analyzer/venvs/vulture/bin/python",
+    "-I",
+    "/opt/analyzer/scripts/vulture_isolated.py",
+    "--config",
+    "/opt/analyzer/config/vulture.toml",
+    "--min-confidence",
+    "80",
+    "--",
+    "/src/v/app.py"
+   ],
+   "config": {},
+   "files": {
+    "v/app.py": "import json  # noqa\nimport csv  # noqa: F401\nimport re\nimport os  # noqa: E501\nfrom app import routes, models  # noqa: F401,E402\n\n\ndef handler(request, unused_arg):  # noqa\n    return 1\n    print(\"never\")  # noqa\n"
+   },
+   "outcome": {
+    "exit_code": 3,
+    "out_files": {},
+    "stderr": "",
+    "stdout": "/src/v/app.py:1: unused import 'json' (90% confidence)\n/src/v/app.py:2: unused import 'csv' (90% confidence)\n/src/v/app.py:3: unused import 're' (90% confidence)\n/src/v/app.py:4: unused import 'os' (90% confidence)\n/src/v/app.py:5: unused import 'models' (90% confidence)\n/src/v/app.py:5: unused import 'routes' (90% confidence)\n/src/v/app.py:8: unused variable 'request' (100% confidence)\n/src/v/app.py:8: unused variable 'unused_arg' (100% confidence)\n/src/v/app.py:10: unreachable code after 'return' (100% confidence)\n"
+   },
+   "selected": [
+    "v/app.py"
+   ],
+   "slug": "vulture"
+  },
+  "vulture_unreadable": {
+   "argv": [
+    "/opt/analyzer/venvs/vulture/bin/python",
+    "-I",
+    "/opt/analyzer/scripts/vulture_isolated.py",
+    "--config",
+    "/opt/analyzer/config/vulture.toml",
+    "--min-confidence",
+    "80",
+    "--",
+    "/src/v/asc.py",
+    "/src/v/dead.py",
+    "/src/v/gz.py"
+   ],
+   "config": {},
+   "files": {
+    "v/asc.py": "# -*- coding: ascii -*-\nimport re\nNAME = \"café\"\n",
+    "v/dead.py": "import os\n",
+    "v/gz.py": "# Response encoding: gzip\nimport re\n\n\ndef f():\n    return 1\n"
+   },
+   "outcome": {
+    "exit_code": 3,
+    "out_files": {},
+    "stderr": "Error: Could not read file /src/v/asc.py - \nTry to change the encoding to UTF-8.\nError: Could not read file /src/v/gz.py - \nTry to change the encoding to UTF-8.\n",
+    "stdout": "/src/v/dead.py:1: unused import 'os' (90% confidence)\n"
+   },
+   "selected": [
+    "v/asc.py",
+    "v/dead.py",
+    "v/gz.py"
+   ],
+   "slug": "vulture"
+  }
+ }
+}

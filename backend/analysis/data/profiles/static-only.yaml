@@ -1,0 +1,25 @@
+# System profile (seeded; edits create a new version): static measurement
+# only, no LLM cost.
+slug: static-only
+name: Static only
+description: >-
+  All static analyzers and metrics tools, no AI reviewer. Same tool set and requirements as
+  research-default, so its static outcomes are measured identically.
+config:
+  tools:
+    - {slug: ruff, required: true}
+    - {slug: bandit, required: true}
+    - {slug: semgrep, required: true}
+    - {slug: pylint, required: true}
+    - {slug: mypy, required: true}
+    - {slug: vulture, required: true}
+    - {slug: eslint, required: true}
+    - {slug: gitleaks, required: true}
+    - {slug: detect-secrets, required: true}
+    - {slug: codespell, required: false}
+    - {slug: hadolint, required: false}
+    - {slug: jscpd, required: true}
+    - {slug: radon, required: true}
+    - {slug: lizard, required: true}
+  reviewer:
+    enabled: false

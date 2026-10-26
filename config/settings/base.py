@@ -353,6 +353,17 @@ CELERY_TASK_TIME_LIMIT = 5 * 60
 # https://docs.celeryq.dev/en/stable/userguide/configuration.html#task-soft-time-limit
 # TODO: set to whatever value is adequate in your circumstances
 CELERY_TASK_SOFT_TIME_LIMIT = 60
+# https://docs.celeryq.dev/en/stable/getting-started/backends-and-brokers/redis.html#visibility-timeout
+# Redis hands an unacknowledged message to another worker once the visibility
+# timeout passes (default 1 h). ``acks_late`` tasks acknowledge only when they
+# finish and legitimately run for hours (``analysis.process_run`` up to
+# ANALYSIS_TASK_SOFT_TIME_LIMIT + 10 min, 4 h 10 min by default;
+# ``automation.run_pipeline_task`` up to 12 h 10 min), so with the default a
+# healthy long task would be started a second time. Keep this above the hard
+# time limit of every acks_late task. The cost: a message whose worker died is
+# redelivered only this late; analysis does not wait for that, ``reconcile``
+# requeues a run once its heartbeat is ANALYSIS_STALE_SECONDS old.
+CELERY_BROKER_TRANSPORT_OPTIONS = {"visibility_timeout": 13 * 3600}
 # https://docs.celeryq.dev/en/stable/userguide/configuration.html#beat-scheduler
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 # https://docs.celeryq.dev/en/stable/userguide/configuration.html#worker-send-task-events
@@ -476,8 +487,46 @@ DOCKER_APPS_NETWORK = env("DOCKER_APPS_NETWORK", default="")
 APPS_DOCKER_HOST = env("APPS_DOCKER_HOST", default="")
 APPS_DOCKER_CERT_PATH = env("APPS_DOCKER_CERT_PATH", default="")
 
-# Maximum number of analyzer threads to run in parallel per analysis task.
-ANALYSIS_MAX_WORKERS = env.int("ANALYSIS_MAX_WORKERS", default=4)
+# ── Analysis engine (backend/analysis/engine) ───────────────────────
+# Runs execute as a durable DB state machine (lease + heartbeat) on Celery
+# (``analysis.process_run``), or on a thread when no worker answers a ping.
+# Runs analysed at once across every process (Postgres advisory-lock slots).
+ANALYSIS_MAX_CONCURRENT_RUNS = env.int("ANALYSIS_MAX_CONCURRENT_RUNS", default=2)
+# Memory the tool containers may reserve on the apps daemon, counting every
+# running container there (sample apps, agent sandboxes, other tools): the
+# daemon reports the host's RAM, not the 4 GB cap of apps-dind.
+ANALYSIS_DIND_MEMORY_BUDGET = env.str("ANALYSIS_DIND_MEMORY_BUDGET", default="3500m")
+# A RUNNING run whose heartbeat is older than this is presumed dead and requeued.
+ANALYSIS_STALE_SECONDS = env.int("ANALYSIS_STALE_SECONDS", default=180)
+ANALYSIS_HEARTBEAT_SECONDS = env.int("ANALYSIS_HEARTBEAT_SECONDS", default=15)
+# Executions of one run / one tool before an infrastructure failure is final.
+ANALYSIS_MAX_ATTEMPTS = env.int("ANALYSIS_MAX_ATTEMPTS", default=3)
+# How long a tool may wait for daemon memory before it fails as infra_error.
+ANALYSIS_CAPACITY_WAIT_SECONDS = env.int("ANALYSIS_CAPACITY_WAIT_SECONDS", default=1800)
+ANALYSIS_USE_CELERY = env.bool("ANALYSIS_USE_CELERY", default=True)
+# Ceiling of one analysis.process_run task (the sum of tool budgets is far lower).
+# Its hard limit (+600 s) must stay below the broker's visibility timeout
+# (CELERY_BROKER_TRANSPORT_OPTIONS), or Redis redelivers a run still in progress.
+ANALYSIS_TASK_SOFT_TIME_LIMIT = env.int("ANALYSIS_TASK_SOFT_TIME_LIMIT", default=4 * 3600)
+ANALYSIS_DEFAULT_REVIEW_MODEL = env.str("ANALYSIS_DEFAULT_REVIEW_MODEL", default="deepseek/deepseek-v4.1-flash")
+ANALYSIS_REVIEW_SANDBOX_MEM_LIMIT = env.str("ANALYSIS_REVIEW_SANDBOX_MEM_LIMIT", default="1g")
+# Raw tool outputs / review transcripts: <root>/<this>/<run id>-<HMAC of the run id>/ (gzip + sha256),
+# served only by the owner-scoped artifact API. <root> is ANALYSIS_ARTIFACTS_ROOT when set: point it at a
+# persistent directory the web server does not serve. Empty = MEDIA_ROOT (publicly served at /media/; the
+# HMAC in the directory name keeps a known run id from naming a file there).
+ANALYSIS_ARTIFACTS_DIR = env.str("ANALYSIS_ARTIFACTS_DIR", default="analysis_runs")
+ANALYSIS_ARTIFACTS_ROOT = env.str("ANALYSIS_ARTIFACTS_ROOT", default="")
+# Per tool container limits (memory and timeout come from the tool spec).
+ANALYSIS_TOOL_NANO_CPUS = env.int("ANALYSIS_TOOL_NANO_CPUS", default=1_000_000_000)
+ANALYSIS_TOOL_PIDS_LIMIT = env.int("ANALYSIS_TOOL_PIDS_LIMIT", default=512)
+ANALYSIS_TOOL_TMPFS_SIZE = env.str("ANALYSIS_TOOL_TMPFS_SIZE", default="512m")
+# Bytes kept of a tool's stdout and of its stderr (each), and of its /out directory.
+ANALYSIS_OUTPUT_CAP_BYTES = env.int("ANALYSIS_OUTPUT_CAP_BYTES", default=16 * 1024 * 1024)
+ANALYSIS_OUT_DIR_CAP_BYTES = env.int("ANALYSIS_OUT_DIR_CAP_BYTES", default=128 * 1024 * 1024)
+# Build the analyzer image when a run needs it and it is missing (e.g. pruned).
+ANALYSIS_BUILD_IMAGE_ON_DEMAND = env.bool("ANALYSIS_BUILD_IMAGE_ON_DEMAND", default=True)
+# Run the lease heartbeat on its own thread (tests run it inline instead).
+ANALYSIS_HEARTBEAT_THREAD = env.bool("ANALYSIS_HEARTBEAT_THREAD", default=True)
 
 # ── User-authored stacks ─────────────────────────────────────────────
 # User stacks never ship their own Dockerfile: it is generated server-side

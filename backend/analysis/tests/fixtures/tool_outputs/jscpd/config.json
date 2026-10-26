@@ -1,0 +1,168 @@
+{
+ "captured_at": "2026-10-22T14:45:34+00:00",
+ "case": "config",
+ "config": {
+  "min_lines": 3,
+  "min_tokens": 30,
+  "mode": "strict"
+ },
+ "files": [
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/app.py",
+   "sha256": "407af31598330aa8a30423e97e48100d970ecb136ce058cd6081da9da1ea7aef"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "clean/backend/bookmarks.py",
+   "sha256": "3ecb375bb493dd403274b2197f98bb4b38d226ff186646d66f312c341336381f"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/App.jsx",
+   "sha256": "50b34bd78e3cd0936b45a21d06065bf3a2816bdc18afdb09f9876378beeb279c"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "clean/frontend/src/TagBadge.vue",
+   "sha256": "47812dbf621a248a8411ee2aa9b0f7cdaaf1fee1d4d2b4e37569ad17d79351f5"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "clean/frontend/src/bookmarks.ts",
+   "sha256": "3872ba6ae0c99822ddbea2b5f454f11d68733ee860e6c078cd659fa4553c0e04"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "clean/frontend/src/components/BookmarkList.jsx",
+   "sha256": "efd7854d492966cc76c2341a178b636bbf4567e6073ee63f1c4b44d1c29f1635"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "clean/frontend/src/components/Panel.tsx",
+   "sha256": "63a402046cdf7b1158644a4a595bf0b5bcd49eb4fb974ff2973f91d97e67f23b"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/app.py",
+   "sha256": "b7512ab0181ead6473277204f7f5cb79c467ccfe5c0458c8989e9d4c3facde98"
+  },
+  {
+   "kind": "source",
+   "language": "python",
+   "path": "vulnerable/backend/utils.py",
+   "sha256": "faebfaee33659a5f1b2fc249ad25d65194e23e53034e86aa04fd23190c569c13"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/App.jsx",
+   "sha256": "47a0a1ef7463a2fbdda619183d5a06fc98df96b885fc9ac423f2eb804450cbde"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "vulnerable/frontend/src/Banner.tsx",
+   "sha256": "fde9db28f3a89cc5d70d85571aeef23ae06527ed313e492889de7af3628dd5f2"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "vulnerable/frontend/src/Card.vue",
+   "sha256": "e3f1ac7af90e4290877fa1d335a8ee2ca2e6f6e07d5b18134bc8194d8cb4f5d1"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "vulnerable/frontend/src/api.ts",
+   "sha256": "10db8abdf7e86d4d1fcad8b1032fe585d8de4a9ed01057dc2cca191e1a4dad73"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Footer.jsx",
+   "sha256": "4d21c89dae359815df375738352440af702a72157da2815d9ec744590f4a94b9"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Header.jsx",
+   "sha256": "48f798d3de206f47a4d7edb0baf12379cfc62304952aa884b5117e3c967a9bdc"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/jscpd",
+   "--config",
+   "/opt/analyzer/config/jscpd.json",
+   "--min-tokens",
+   "30",
+   "--min-lines",
+   "3",
+   "--max-lines",
+   "1000000",
+   "--max-size",
+   "8mb",
+   "--mode",
+   "strict",
+   "--format",
+   "python,javascript,jsx,typescript,tsx,vue,css,markup",
+   "--formats-exts",
+   "python:py,pyw,pyi;javascript:js,mjs,cjs;jsx:jsx;typescript:ts,mts,cts;tsx:tsx;vue:vue;css:css,scss,sass,less;markup:html,htm",
+   "--reporters",
+   "json",
+   "--output",
+   "/out/jscpd",
+   "--absolute",
+   "--no-gitignore",
+   "--silent",
+   "--",
+   "/src/clean/backend/app.py",
+   "/src/clean/backend/bookmarks.py",
+   "/src/clean/frontend/src/App.jsx",
+   "/src/clean/frontend/src/TagBadge.vue",
+   "/src/clean/frontend/src/bookmarks.ts",
+   "/src/clean/frontend/src/components/BookmarkList.jsx",
+   "/src/clean/frontend/src/components/Panel.tsx",
+   "/src/vulnerable/backend/app.py",
+   "/src/vulnerable/backend/utils.py",
+   "/src/vulnerable/frontend/src/App.jsx",
+   "/src/vulnerable/frontend/src/Banner.tsx",
+   "/src/vulnerable/frontend/src/Card.vue",
+   "/src/vulnerable/frontend/src/api.ts",
+   "/src/vulnerable/frontend/src/components/Footer.jsx",
+   "/src/vulnerable/frontend/src/components/Header.jsx"
+  ],
+  "env": {},
+  "mem_limit": "768m",
+  "report_files": [
+   "jscpd/jscpd-report.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "jscpd/jscpd-report.json": "{\n  \"statistics\": {\n    \"detectionDate\": \"2026-10-22T14:45:34.561Z\",\n    \"formats\": {\n      \"jsx\": {\n        \"sources\": {\n          \"/src/vulnerable/frontend/src/components/Header.jsx\": {\n            \"lines\": 8,\n            \"tokens\": 48,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/vulnerable/frontend/src/components/Footer.jsx\": {\n            \"lines\": 4,\n            \"tokens\": 27,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/vulnerable/frontend/src/App.jsx\": {\n            \"lines\": 31,\n            \"tokens\": 274,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/src/components/BookmarkList.jsx\": {\n            \"lines\": 17,\n            \"tokens\": 146,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/src/App.jsx\": {\n            \"lines\": 23,\n            \"tokens\": 204,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 83,\n          \"tokens\": 699,\n          \"sources\": 5,\n          \"clones\": 0,\n          \"duplicatedLines\": 0,\n          \"duplicatedTokens\": 0,\n          \"percentage\": 0,\n          \"percentageTokens\": 0,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      },\n      \"typescript\": {\n        \"sources\": {\n          \"/src/vulnerable/frontend/src/api.ts\": {\n            \"lines\": 16,\n            \"tokens\": 125,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/src/bookmarks.ts\": {\n            \"lines\": 15,\n            \"tokens\": 122,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 31,\n          \"tokens\": 247,\n          \"sources\": 2,\n          \"clones\": 0,\n          \"duplicatedLines\": 0,\n          \"duplicatedTokens\": 0,\n          \"percentage\": 0,\n          \"percentageTokens\": 0,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      },\n      \"javascript\": {\n        \"sources\": {\n          \"/src/vulnerable/frontend/src/Card.vue\": {\n            \"lines\": 6,\n            \"tokens\": 48,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/vulnerable/frontend/src/Banner.tsx\": {\n            \"lines\": 1,\n            \"tokens\": 7,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/vulnerable/frontend/src/App.jsx\": {\n            \"lines\": 19,\n            \"tokens\": 193,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/src/components/Panel.tsx\": {\n            \"lines\": 1,\n            \"tokens\": 3,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/src/components/BookmarkList.jsx\": {\n            \"lines\": 2,\n            \"tokens\": 18,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/src/TagBadge.vue\": {\n            \"lines\": 10,\n            \"tokens\": 98,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/src/App.jsx\": {\n            \"lines\": 1,\n            \"tokens\": 3,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 40,\n          \"tokens\": 370,\n          \"sources\": 7,\n          \"clones\": 0,\n          \"duplicatedLines\": 0,\n          \"duplicatedTokens\": 0,\n          \"percentage\": 0,\n          \"percentageTokens\": 0,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      },\n      \"markup\": {\n        \"sources\": {\n          \"/src/vulnerable/frontend/src/Card.vue\": {\n            \"lines\": 6,\n            \"tokens\": 43,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/src/TagBadge.vue\": {\n            \"lines\": 3,\n            \"tokens\": 19,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 9,\n          \"tokens\": 62,\n          \"sources\": 2,\n          \"clones\": 0,\n          \"duplicatedLines\": 0,\n          \"duplicatedTokens\": 0,\n          \"percentage\": 0,\n          \"percentageTokens\": 0,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      },\n      \"tsx\": {\n        \"sources\": {\n          \"/src/vulnerable/frontend/src/Banner.tsx\": {\n            \"lines\": 20,\n            \"tokens\": 130,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/frontend/src/components/Panel.tsx\": {\n            \"lines\": 21,\n            \"tokens\": 153,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 41,\n          \"tokens\": 283,\n          \"sources\": 2,\n          \"clones\": 0,\n          \"duplicatedLines\": 0,\n          \"duplicatedTokens\": 0,\n          \"percentage\": 0,\n          \"percentageTokens\": 0,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      },\n      \"python\": {\n        \"sources\": {\n          \"/src/vulnerable/backend/utils.py\": {\n            \"lines\": 38,\n            \"tokens\": 431,\n            \"sources\": 1,\n            \"clones\": 2,\n            \"duplicatedLines\": 28,\n            \"duplicatedTokens\": 418,\n            \"percentage\": 73.68,\n            \"percentageTokens\": 96.98,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/vulnerable/backend/app.py\": {\n            \"lines\": 157,\n            \"tokens\": 1249,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/backend/bookmarks.py\": {\n            \"lines\": 17,\n            \"tokens\": 135,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          },\n          \"/src/clean/backend/app.py\": {\n            \"lines\": 51,\n            \"tokens\": 419,\n            \"sources\": 1,\n            \"clones\": 0,\n            \"duplicatedLines\": 0,\n            \"duplicatedTokens\": 0,\n            \"percentage\": 0,\n            \"percentageTokens\": 0,\n            \"newDuplicatedLines\": 0,\n            \"newClones\": 0\n          }\n        },\n        \"total\": {\n          \"lines\": 263,\n          \"tokens\": 2234,\n          \"sources\": 4,\n          \"clones\": 1,\n          \"duplicatedLines\": 14,\n          \"duplicatedTokens\": 209,\n          \"percentage\": 5.32,\n          \"percentageTokens\": 9.36,\n          \"newDuplicatedLines\": 0,\n          \"newClones\": 0\n        }\n      }\n    },\n    \"total\": {\n      \"lines\": 467,\n      \"tokens\": 3895,\n      \"sources\": 22,\n      \"clones\": 1,\n      \"duplicatedLines\": 14,\n      \"duplicatedTokens\": 209,\n      \"percentage\": 3,\n      \"percentageTokens\": 5.37,\n      \"newDuplicatedLines\": 0,\n      \"newClones\": 0\n    }\n  },\n  \"duplicates\": [\n    {\n      \"format\": \"python\",\n      \"lines\": 15,\n      \"fragment\": \"(rows):\\n    totals = {}\\n    counts = {}\\n    for customer, amount, status in rows:\\n        if status not in (\\\"paid\\\", \\\"shipped\\\", \\\"delivered\\\"):\\n            continue\\n        totals[customer] = totals.get(customer, 0) + amount\\n        counts[customer] = counts.get(customer, 0) + 1\\n    report = []\\n    for customer in sorted(totals):\\n        average = totals[customer] / counts[customer]\\n        report.append({\\\"customer\\\": customer, \\\"total\\\": round(totals[customer], 2), \\\"average\\\": round(average, 2)})\\n    report.sort(key=lambda entry: entry[\\\"total\\\"], reverse=True)\\n    return report\\n\",\n      \"tokens\": 209,\n      \"firstFile\": {\n        \"name\": \"/src/vulnerable/backend/utils.py\",\n        \"start\": 24,\n        \"end\": 38,\n        \"startLoc\": {\n          \"line\": 24,\n          \"column\": 22,\n          \"position\": 222\n        },\n        \"endLoc\": {\n          \"line\": 38,\n          \"column\": 1,\n          \"position\": 431\n        }\n      },\n      \"secondFile\": {\n        \"name\": \"/src/vulnerable/backend/utils.py\",\n        \"start\": 8,\n        \"end\": 22,\n        \"startLoc\": {\n          \"line\": 8,\n          \"column\": 21,\n          \"position\": 7\n        },\n        \"endLoc\": {\n          \"line\": 22,\n          \"column\": 1,\n          \"position\": 216\n        }\n      }\n    }\n  ]\n}"
+  },
+  "stderr": "",
+  "stdout": "JSON report saved to /out/jscpd/jscpd-report.json\nDuplications detection: Found 1 exact clones with 14(3%) duplicated lines in 22 (6 formats) files.\n",
+  "timed_out": false,
+  "wall_seconds": 0.855
+ },
+ "schema": 1,
+ "tool": "jscpd",
+ "tool_version": "4.3.0"
+}

@@ -83,9 +83,16 @@ def get_app_stats(request) -> Any:
 
 @router.post("/maintenance/clear-stuck-analysis", response=dict)
 def maintenance_clear_stuck_analysis(request, older_than_minutes: int = 60) -> Any:
+    """Run the analysis reconciler (heartbeat-based; ``older_than_minutes`` is kept for compatibility)."""
     _assert_staff(request)
-    count = services.clear_stuck_analysis_tasks(older_than_minutes=older_than_minutes)
-    return {"updated": count}
+    result = services.reconcile_analysis_runs()
+    return {"updated": services.action_count(result), "details": result}
+
+
+@router.post("/maintenance/clear-stuck-reports", response=dict)
+def maintenance_clear_stuck_reports(request, older_than_minutes: int = 60) -> Any:
+    _assert_staff(request)
+    return {"updated": services.clear_stuck_reports(older_than_minutes=older_than_minutes)}
 
 
 @router.post("/maintenance/clear-stuck-generation", response=dict)
@@ -98,8 +105,8 @@ def maintenance_clear_stuck_generation(request, older_than_minutes: int = 60) ->
 @router.post("/maintenance/purge-orphan-containers", response=dict)
 def maintenance_purge_orphan_containers(request) -> Any:
     _assert_staff(request)
-    count = services.purge_orphan_containers()
-    return {"purged": count}
+    details = services.purge_orphans()
+    return {"purged": services.purged_total(details), "details": details}
 
 
 @router.post("/maintenance/clear-caches", response=dict)

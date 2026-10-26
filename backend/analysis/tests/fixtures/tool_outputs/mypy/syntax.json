@@ -1,0 +1,63 @@
+{
+ "captured_at": "2026-10-22T14:45:14+00:00",
+ "case": "syntax",
+ "config": {
+  "check_untyped_defs": true,
+  "python_version": "3.12"
+ },
+ "files": [
+  {
+   "content": "def handler(request:\n    return request\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/broken.py",
+   "sha256": "a213cda8977aafa87b15bec45ead948580c06c66386ac6bd1e94e459981963e4"
+  },
+  {
+   "content": "import os\n\n\ndef read_setting(name):\n    return os.environ.get(name, \"\")\n",
+   "kind": "source",
+   "language": "python",
+   "path": "svc/ok.py",
+   "sha256": "377ef7025dd733242011513a97f32da3f320aa58e5463dfb383708e0a03215b7"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/venvs/mypy/bin/python",
+   "/opt/analyzer/scripts/mypy_prefilter.py",
+   "/out/mypy-files.json",
+   "3.12",
+   "--config-file=/opt/analyzer/config/mypy.ini",
+   "--output=json",
+   "--check-untyped-defs",
+   "--",
+   "/src/svc/broken.py",
+   "/src/svc/ok.py"
+  ],
+  "env": {
+   "MYPYPATH": "/src"
+  },
+  "mem_limit": "768m",
+  "report_files": [
+   "mypy-files.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "mypy-files.json": "{\n \"python\": \"3.12.15\",\n \"target\": \"3.12\",\n \"checked\": [\n  \"/src/svc/ok.py\"\n ],\n \"unparseable\": [\n  {\n   \"path\": \"/src/svc/broken.py\",\n   \"reason\": \"'(' was never closed\",\n   \"line\": 1\n  }\n ]\n}\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 1.354
+ },
+ "schema": 1,
+ "tool": "mypy",
+ "tool_version": "2.4.0"
+}

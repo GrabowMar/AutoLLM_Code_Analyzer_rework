@@ -14,9 +14,9 @@
 		type Stack,
 		type AppRequirementTemplate
 	} from '$lib/api/client';
-	import { getAnalysisProfiles, type AnalysisProfile } from '$lib/api/analysis';
 	import type { Edge } from '@xyflow/svelte';
-	import type { WorkflowNode } from '$lib/utils/pipeline-flow';
+	import { defaultConfigFor, type WorkflowNode } from '$lib/utils/pipeline-flow';
+	import AnalyzeStepConfig from './AnalyzeStepConfig.svelte';
 
 	interface Props {
 		nodes: WorkflowNode[];
@@ -27,7 +27,6 @@
 	let { nodes = $bindable(), edges = $bindable(), selectedNodeId = $bindable() }: Props = $props();
 
 	const KINDS = ['generate', 'analyze', 'report', 'wait', 'notify', 'script'] as const;
-	const ANALYZERS = ['bandit', 'eslint', 'pylint', 'zap', 'port_scanner', 'lighthouse', 'llm_review'];
 	const REPORT_TYPES = [
 		{ value: 'comprehensive', label: 'Comprehensive' },
 		{ value: 'model_analysis', label: 'Model Analysis' },
@@ -44,10 +43,15 @@
 	let models = $state<LLMModelSummary[]>([]);
 	let stacks = $state<Stack[]>([]);
 	let appTemplates = $state<AppRequirementTemplate[]>([]);
-	let analysisProfiles = $state<AnalysisProfile[]>([]);
 
 	const selected = $derived(nodes.find((n) => n.id === selectedNodeId) ?? null);
-	const cfg = $derived(((selected?.data.config ?? {}) as Record<string, unknown>));
+	// Generate steps whose output an analyze step can target.
+	const generateSteps = $derived(
+		nodes
+			.filter((n) => n.data.kind === 'generate' && n.id !== selectedNodeId)
+			.map((n) => n.data.name)
+	);
+	const cfg = $derived((selected?.data.config ?? {}) as Record<string, unknown>);
 	const scriptText = $derived(JSON.stringify(stripPosition(cfg), null, 2));
 	let scriptDraft = $state('');
 	let scriptError = $state('');
@@ -72,6 +76,15 @@
 		updateNode((n) => {
 			const newCfg = { ...(n.data.config as Record<string, unknown>), [key]: value };
 			return { ...n, data: { ...n.data, config: newCfg } };
+		});
+	}
+
+	/** Replace the whole config (keeps the canvas position). */
+	function replaceConfig(next: Record<string, unknown>) {
+		updateNode((n) => {
+			const pos = (n.data.config as Record<string, unknown>)._position;
+			const config = pos === undefined ? { ...next } : { ...next, _position: pos };
+			return { ...n, data: { ...n.data, config } };
 		});
 	}
 
@@ -109,18 +122,16 @@
 		updateNode((n) => ({
 			...n,
 			type: newKind as WorkflowNode['type'],
-			data: { ...n.data, kind: newKind as WorkflowNode['data']['kind'], config: {} }
+			data: {
+				...n.data,
+				kind: newKind as WorkflowNode['data']['kind'],
+				config: defaultConfigFor(newKind as WorkflowNode['data']['kind'])
+			}
 		}));
 	}
 
 	function setMaxRetries(v: number) {
 		updateNode((n) => ({ ...n, data: { ...n.data, max_retries: v } }));
-	}
-
-	function toggleAnalyzer(slug: string) {
-		const list = ((cfg.analyzers as string[]) ?? []) as string[];
-		const next = list.includes(slug) ? list.filter((a) => a !== slug) : [...list, slug];
-		updateConfig('analyzers', next);
 	}
 
 	function deleteNode() {
@@ -150,16 +161,14 @@
 
 	onMount(async () => {
 		try {
-			const [m, s, a, p] = await Promise.allSettled([
+			const [m, s, a] = await Promise.allSettled([
 				getModels({ per_page: 200 }),
 				getStacks(),
-				getAppTemplates(),
-				getAnalysisProfiles()
+				getAppTemplates()
 			]);
 			if (m.status === 'fulfilled') models = m.value.items;
 			if (s.status === 'fulfilled') stacks = s.value;
 			if (a.status === 'fulfilled') appTemplates = a.value;
-			if (p.status === 'fulfilled') analysisProfiles = p.value;
 		} catch {
 			/* ignore */
 		}
@@ -177,14 +186,27 @@
 			</p>
 		</div>
 		{#if selected}
-			<Button variant="ghost" size="icon" class="h-7 w-7 text-destructive hover:text-destructive" onclick={deleteNode} title="Delete node" aria-label="Delete node">
+			<Button
+				variant="ghost"
+				size="icon"
+				class="h-7 w-7 text-destructive hover:text-destructive"
+				onclick={deleteNode}
+				title="Delete node"
+				aria-label="Delete node"
+			>
 				<Trash2 class="h-4 w-4" />
 			</Button>
 		{/if}
 	</div>
 
 	{#if !selected}
-		<EmptyState compact class="flex-1 px-6" icon={MousePointerClick} title="No node selected" description="Click a node on the canvas to edit its configuration here." />
+		<EmptyState
+			compact
+			class="flex-1 px-6"
+			icon={MousePointerClick}
+			title="No node selected"
+			description="Click a node on the canvas to edit its configuration here."
+		/>
 	{:else}
 		<div class="p-4 space-y-4 text-sm">
 			<div class="space-y-1.5">
@@ -195,7 +217,9 @@
 					onchange={(e) => renameNode((e.target as HTMLInputElement).value)}
 					class="w-full rounded-md border bg-background px-2 py-1.5 text-sm font-mono"
 				/>
-				<p class="text-[11px] text-muted-foreground">Must be unique. Renaming updates dependencies.</p>
+				<p class="text-[11px] text-muted-foreground">
+					Must be unique. Renaming updates dependencies.
+				</p>
 			</div>
 
 			<div class="space-y-1.5">
@@ -229,18 +253,22 @@
 						<Label class="text-xs">Model</Label>
 						<select
 							value={(cfg.model_id as string) ?? ''}
-							onchange={(e) => updateConfig('model_id', (e.target as HTMLSelectElement).value || undefined)}
+							onchange={(e) =>
+								updateConfig('model_id', (e.target as HTMLSelectElement).value || undefined)}
 							class="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
 						>
 							<option value="">— Select model —</option>
-							{#each models as m (m.canonical_slug)}<option value={m.canonical_slug}>{m.model_name}</option>{/each}
+							{#each models as m (m.canonical_slug)}<option value={m.canonical_slug}
+									>{m.model_name}</option
+								>{/each}
 						</select>
 					</div>
 					<div class="space-y-1.5">
 						<Label class="text-xs">Template</Label>
 						<select
 							value={(cfg.template_slug as string) ?? ''}
-							onchange={(e) => updateConfig('template_slug', (e.target as HTMLSelectElement).value || undefined)}
+							onchange={(e) =>
+								updateConfig('template_slug', (e.target as HTMLSelectElement).value || undefined)}
 							class="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
 						>
 							<option value="">— Select template —</option>
@@ -257,7 +285,8 @@
 						<input
 							type="number"
 							value={(cfg.app_num as number) ?? 1}
-							oninput={(e) => updateConfig('app_num', parseInt((e.target as HTMLInputElement).value) || 1)}
+							oninput={(e) =>
+								updateConfig('app_num', parseInt((e.target as HTMLInputElement).value) || 1)}
 							min="1"
 							class="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
 						/>
@@ -275,67 +304,15 @@
 							class="w-full rounded-md border bg-background px-2 py-1.5 text-xs resize-y focus:outline-none focus:ring-1 focus:ring-ring"
 						></textarea>
 					</div>
-
 				{:else if selected.data.kind === 'analyze'}
-					{#if analysisProfiles.length > 0}
-						<div class="space-y-1.5">
-							<Label class="text-xs">Profile</Label>
-							<select
-								value={(cfg.profile_id as number | null) ? String(cfg.profile_id) : ''}
-								onchange={(e) => {
-									const val = (e.target as HTMLSelectElement).value;
-									if (!val) {
-										updateConfig('profile_id', null);
-										updateConfig('profile_name', null);
-									} else {
-										const profile = analysisProfiles.find((p) => String(p.id) === val);
-										updateConfig('profile_id', profile?.id ?? null);
-										updateConfig('profile_name', profile?.name ?? null);
-									}
-								}}
-								class="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
-							>
-								<option value="">— No profile —</option>
-								{#each analysisProfiles as p (p.id)}
-									<option value={String(p.id)}>{p.name}{p.is_default ? ' (default)' : ''}</option>
-								{/each}
-							</select>
-							<p class="text-[11px] text-muted-foreground">Analyzer toggles below override profile defaults.</p>
-						</div>
-					{/if}
-					<div class="space-y-1.5">
-						<Label class="text-xs">Analyzers</Label>
-						<div class="flex flex-wrap gap-1.5">
-							{#each ANALYZERS as a (a)}
-								{@const on = ((cfg.analyzers as string[]) ?? []).includes(a)}
-								<button
-									type="button"
-									onclick={() => toggleAnalyzer(a)}
-									class="rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors {on ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-muted-foreground hover:border-primary/50'}"
-								>{a}</button>
-							{/each}
-						</div>
-					</div>
-					<div class="space-y-1.5">
-						<Label class="text-xs">Generation Job Ref</Label>
-						<input
-							type="text"
-							value={(cfg.generation_job as string) ?? ''}
-							oninput={(e) => updateConfig('generation_job', (e.target as HTMLInputElement).value)}
-							placeholder={'{steps.generate.output.generation_job_id}'}
-							class="w-full rounded-md border bg-background px-2 py-1.5 text-xs font-mono"
+					{#key selected.id}
+						<AnalyzeStepConfig
+							config={stripPosition(cfg)}
+							upstream={generateSteps}
+							idPrefix="analyze-{selected.id}"
+							onchange={replaceConfig}
 						/>
-					</div>
-					<label class="flex items-center gap-2 text-xs cursor-pointer">
-						<input
-							type="checkbox"
-							checked={(cfg.live_target as boolean) ?? false}
-							onchange={(e) => updateConfig('live_target', (e.target as HTMLInputElement).checked)}
-							class="rounded"
-						/>
-						Live target (running container)
-					</label>
-
+					{/key}
 				{:else if selected.data.kind === 'report'}
 					<div class="space-y-1.5">
 						<Label class="text-xs">Report Type</Label>
@@ -353,7 +330,8 @@
 							<Label class="text-xs">Template (required)</Label>
 							<select
 								value={(cfg.template_slug as string) ?? ''}
-								onchange={(e) => updateConfig('template_slug', (e.target as HTMLSelectElement).value || undefined)}
+								onchange={(e) =>
+									updateConfig('template_slug', (e.target as HTMLSelectElement).value || undefined)}
 								class="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
 							>
 								<option value="">— Select template —</option>
@@ -366,11 +344,14 @@
 							<Label class="text-xs">Model (required)</Label>
 							<select
 								value={(cfg.model_id as string) ?? ''}
-								onchange={(e) => updateConfig('model_id', (e.target as HTMLSelectElement).value || undefined)}
+								onchange={(e) =>
+									updateConfig('model_id', (e.target as HTMLSelectElement).value || undefined)}
 								class="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
 							>
 								<option value="">— Select model —</option>
-								{#each models as m (m.canonical_slug)}<option value={m.canonical_slug}>{m.model_name}</option>{/each}
+								{#each models as m (m.canonical_slug)}<option value={m.canonical_slug}
+										>{m.model_name}</option
+									>{/each}
 							</select>
 						</div>
 					{/if}
@@ -387,26 +368,26 @@
 							class="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
 						/>
 					</div>
-
 				{:else if selected.data.kind === 'wait'}
 					<div class="space-y-1.5">
 						<Label class="text-xs">Duration (seconds)</Label>
 						<input
 							type="number"
 							value={(cfg.seconds as number) ?? 5}
-							oninput={(e) => updateConfig('seconds', parseInt((e.target as HTMLInputElement).value) || 1)}
+							oninput={(e) =>
+								updateConfig('seconds', parseInt((e.target as HTMLInputElement).value) || 1)}
 							min="1"
 							class="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
 						/>
 					</div>
-
 				{:else if selected.data.kind === 'notify'}
 					<div class="space-y-1.5">
 						<Label class="text-xs">Channel</Label>
 						<input
 							type="text"
 							value={(cfg.channel as string) ?? 'general'}
-							oninput={(e) => updateConfig('channel', (e.target as HTMLInputElement).value || 'general')}
+							oninput={(e) =>
+								updateConfig('channel', (e.target as HTMLInputElement).value || 'general')}
 							placeholder="general"
 							class="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
 						/>
@@ -421,7 +402,6 @@
 							class="w-full rounded-md border bg-background px-2 py-1.5 text-xs resize-y focus:outline-none focus:ring-1 focus:ring-ring"
 						></textarea>
 					</div>
-
 				{:else if selected.data.kind === 'script'}
 					<div class="space-y-1.5">
 						<Label class="text-xs">Operation</Label>
@@ -430,12 +410,17 @@
 							onchange={(e) => updateConfig('code', (e.target as HTMLSelectElement).value)}
 							class="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
 						>
-							{#each SCRIPT_OPERATIONS as op (op.value)}<option value={op.value}>{op.label}</option>{/each}
+							{#each SCRIPT_OPERATIONS as op (op.value)}<option value={op.value}>{op.label}</option
+								>{/each}
 						</select>
-						<p class="text-[11px] text-muted-foreground">Only allowlisted operations run; arbitrary code is rejected.</p>
+						<p class="text-[11px] text-muted-foreground">
+							Only allowlisted operations run; arbitrary code is rejected.
+						</p>
 					</div>
 					<details class="space-y-1.5">
-						<summary class="text-xs cursor-pointer text-muted-foreground hover:text-foreground">Advanced: raw JSON</summary>
+						<summary class="text-xs cursor-pointer text-muted-foreground hover:text-foreground"
+							>Advanced: raw JSON</summary
+						>
 						<textarea
 							bind:value={scriptDraft}
 							rows={8}
@@ -444,7 +429,9 @@
 						{#if scriptError}
 							<p class="text-xs text-destructive">{scriptError}</p>
 						{/if}
-						<Button variant="outline" size="sm" class="w-full" onclick={commitScriptDraft}>Apply JSON</Button>
+						<Button variant="outline" size="sm" class="w-full" onclick={commitScriptDraft}
+							>Apply JSON</Button
+						>
 					</details>
 				{/if}
 			</div>

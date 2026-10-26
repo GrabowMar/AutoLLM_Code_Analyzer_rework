@@ -1,52 +1,106 @@
 <script lang="ts">
-import { onMount } from 'svelte';
-import * as Card from '$lib/components/ui/card';
-import StatusBadge from '$lib/components/StatusBadge.svelte';
-import LoadingState from '$lib/components/LoadingState.svelte';
-import EmptyState from '$lib/components/EmptyState.svelte';
-import ErrorAlert from '$lib/components/ErrorAlert.svelte';
-import { Button } from '$lib/components/ui/button';
-import ChartBar from '@lucide/svelte/icons/chart-bar';
-import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-import { listRuns, type AnalysisRunListItem } from '$lib/api/runs';
+	/**
+	 * ApplicationAnalyses — the analysis runs of one generated application
+	 * (Analyses tab on `/applications/[id]`): status, completeness, static
+	 * findings and AI consensus with honest NA / lower-bound cells, profile
+	 * and plan. Refreshes silently while a run is queued or running.
+	 *
+	 * Props: `jobId` (the generation job).
+	 */
+	import { untrack } from 'svelte';
+	import type { AnalysisRunListItem } from '$lib/api/analysis';
+	import { isRunActive, listAnalysisRuns } from '$lib/api/analysis';
+	import { formatApiError, isAbortError } from '$lib/api/core';
+	import * as Card from '$lib/components/ui/card';
+	import { Button } from '$lib/components/ui/button';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import LoadingState from '$lib/components/LoadingState.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import { cn } from '$lib/utils';
+	import Hint from '$lib/components/analysis/Hint.svelte';
+	import NaValue from '$lib/components/analysis/NaValue.svelte';
+	import RunDataBadge from '$lib/components/analysis/RunDataBadge.svelte';
+	import {
+		aiConsensusCell,
+		fmtAgo,
+		fmtDateTime,
+		fmtInt,
+		phaseLabel,
+		PURPOSE_LABELS,
+		shortHash,
+		staticFindingsCell,
+		toolProgress
+	} from '$lib/components/analysis/run-utils';
+	import Microscope from '@lucide/svelte/icons/microscope';
+	import Plus from '@lucide/svelte/icons/plus';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 
-interface Props { jobId: string }
-let { jobId }: Props = $props();
-
-let tasks = $state<AnalysisRunListItem[]>([]);
-let loading = $state(true);
-let error = $state('');
-
-async function refresh() {
-	loading = true;
-	error = '';
-	try {
-		const res = await listRuns({ generation_job_id: jobId, per_page: 50 });
-		tasks = res.items;
-	} catch (e) {
-		error = (e as Error).message ?? 'Failed to load';
-	} finally {
-		loading = false;
+	interface Props {
+		jobId: string;
 	}
-}
 
-onMount(refresh);
+	let { jobId }: Props = $props();
 
+	const POLL_MS = 5_000;
 
-const summary = $derived.by(() => {
-	const total = tasks.length;
-	const done = tasks.filter(t => t.status === 'completed').length;
-	const running = tasks.filter(t => t.status === 'running').length;
-	const failed = tasks.filter(t => t.status === 'failed').length;
-	return { total, done, running, failed };
-});
+	let runs = $state<AnalysisRunListItem[]>([]);
+	let total = $state(0);
+	let loading = $state(true);
+	let refreshing = $state(false);
+	let error = $state('');
+	let controller: AbortController | null = null;
 
-function findingsOf(t: AnalysisRunListItem): number | string {
-	const rs = t.summary || {};
-	if (typeof rs.total_findings === 'number') return rs.total_findings;
-	if (typeof rs.findings === 'number') return rs.findings;
-	return '—';
-}
+	async function load(silent = false) {
+		controller?.abort();
+		const mine = new AbortController();
+		controller = mine;
+		if (!silent) refreshing = true;
+		try {
+			const res = await listAnalysisRuns(
+				{
+					generation_job_id: jobId,
+					per_page: 50,
+					purpose: ['research', 'adhoc']
+				},
+				{ signal: mine.signal }
+			);
+			runs = res.items;
+			total = res.total;
+			error = '';
+		} catch (e) {
+			if (isAbortError(e)) return;
+			if (!(silent && runs.length)) error = formatApiError(e, 'Could not load the analyses.');
+		} finally {
+			if (controller === mine) {
+				loading = false;
+				refreshing = false;
+			}
+		}
+	}
+
+	$effect(() => {
+		void jobId;
+		untrack(() => void load());
+		return () => controller?.abort();
+	});
+
+	const anyActive = $derived(runs.some((r) => isRunActive(r.status)));
+	$effect(() => {
+		if (!anyActive) return;
+		const timer = setInterval(() => {
+			if (!document.hidden) void load(true);
+		}, POLL_MS);
+		return () => clearInterval(timer);
+	});
+
+	const counts = $derived({
+		complete: runs.filter((r) => !isRunActive(r.status) && r.is_complete).length,
+		active: runs.filter((r) => isRunActive(r.status)).length,
+		incomplete: runs.filter((r) => !isRunActive(r.status) && !r.is_complete).length
+	});
+
+	const createHref = $derived(`/analysis/create?generation_job_id=${encodeURIComponent(jobId)}`);
 </script>
 
 <section id="analyses" class="space-y-4">
@@ -55,48 +109,122 @@ function findingsOf(t: AnalysisRunListItem): number | string {
 			<div class="space-y-1.5">
 				<Card.Title>Analyses</Card.Title>
 				<Card.Description>
-					{summary.total} total · {summary.done} done · {summary.running} running · {summary.failed} failed
+					{#if loading}
+						Analysis runs of this application.
+					{:else}
+						{total} run{total === 1 ? '' : 's'} · {counts.complete} complete · {counts.incomplete}
+						incomplete · {counts.active}
+						in progress
+					{/if}
 				</Card.Description>
 			</div>
 			<div class="flex flex-wrap items-center gap-2">
-				<Button size="sm" variant="outline" onclick={refresh}>
-					<RefreshCw class="h-3.5 w-3.5" /> Refresh
+				<Button size="sm" variant="outline" onclick={() => load()} disabled={refreshing}>
+					<RefreshCw
+						class="size-3.5 {refreshing ? 'animate-spin motion-reduce:animate-none' : ''}"
+					/>Refresh
 				</Button>
-				<Button size="sm" href="/analysis/create?generation_job_id={jobId}">New Analysis</Button>
+				{#if total > runs.length}
+					<Button
+						size="sm"
+						variant="outline"
+						href="/analysis?generation_job_id={encodeURIComponent(jobId)}">All runs</Button
+					>
+				{/if}
+				<Button size="sm" href={createHref}><Plus class="size-3.5" />Analyse</Button>
 			</div>
 		</Card.Header>
-		<Card.Content class="space-y-3">
-			{#if loading}
+		<Card.Content class={cn(runs.length > 0 && !error ? 'p-0' : '')}>
+			{#if loading && runs.length === 0}
 				<LoadingState label="loading analyses" class="py-8" />
 			{:else if error}
-				<ErrorAlert message={error} onretry={refresh} />
-			{:else if tasks.length === 0}
-				<EmptyState compact icon={ChartBar} title="No analyses yet" description="Run an analysis to scan this application for issues.">
+				<ErrorAlert message={error} onretry={() => load()} />
+			{:else if runs.length === 0}
+				<EmptyState
+					compact
+					icon={Microscope}
+					title="Not analysed yet"
+					description="Run the static analyzers and the AI reviewer on this application."
+				>
 					{#snippet action()}
-						<Button size="sm" href="/analysis/create?generation_job_id={jobId}">New Analysis</Button>
+						<Button size="sm" href={createHref}>Analyse this application</Button>
 					{/snippet}
 				</EmptyState>
 			{:else}
-				<div class="overflow-x-auto">
-					<table class="w-full text-sm">
+				<div
+					class={cn('table-scroll-wrapper transition-opacity', refreshing && 'opacity-60')}
+					aria-busy={refreshing}
+				>
+					<table class="table-card-mobile">
 						<thead>
 							<tr>
-								<th>Task</th>
+								<th>Run</th>
 								<th>Status</th>
-								<th>Findings</th>
+								<th>Data</th>
+								<th class="text-right">Static findings</th>
+								<th class="text-right">AI consensus</th>
 								<th>Created</th>
-								<th class="text-right">Actions</th>
 							</tr>
 						</thead>
 						<tbody>
-							{#each tasks as t (t.id)}
+							{#each runs as run (run.id)}
+								{@const st = staticFindingsCell(run)}
+								{@const ai = aiConsensusCell(run)}
+								{@const active = isRunActive(run.status)}
+								{@const progress = toolProgress(run)}
 								<tr>
-									<td class="font-medium">{t.name}</td>
-									<td><StatusBadge status={t.status} /></td>
-									<td class="font-mono text-xs">{findingsOf(t)}</td>
-									<td class="text-xs text-muted-foreground">{new Date(t.created_at).toLocaleString()}</td>
-									<td class="text-right">
-										<Button size="sm" variant="ghost" href="/analysis/{t.id}">View</Button>
+									<td data-label="Run" class="max-w-xs">
+										<div class="min-w-0 flex-1">
+											<a
+												href="/analysis/{run.id}"
+												class="block truncate text-sm font-medium hover:text-primary hover:underline"
+												title={run.name}>{run.name}</a
+											>
+											<span class="block truncate text-[11px] text-muted-foreground">
+												{PURPOSE_LABELS[run.purpose]}{#if run.profile}{' · '}{run.profile.name} v{run
+														.profile.version}{/if}{#if run.plan_hash}{' · '}<span
+														class="font-mono"
+														title="plan hash {run.plan_hash}">{shortHash(run.plan_hash, 8)}</span
+													>{/if}
+											</span>
+										</div>
+									</td>
+									<td data-label="Status">
+										<div class="flex flex-col items-start gap-0.5">
+											<StatusBadge status={run.status} />
+											{#if active}
+												<span class="text-[11px] text-muted-foreground">
+													{phaseLabel(run.phase)} · {progress.done}/{progress.total}
+													tools
+												</span>
+											{/if}
+										</div>
+									</td>
+									<td data-label="Data" class="whitespace-nowrap">
+										<RunDataBadge {run} />
+									</td>
+									<td data-label="Static findings" class="tabular-nums md:text-right">
+										{#if st.value === null}
+											<NaValue reason={st.note} />
+										{:else if st.lowerBound}
+											<Hint text={st.note}>≥ {fmtInt(st.value)}</Hint>
+										{:else}
+											{fmtInt(st.value)}
+										{/if}
+									</td>
+									<td data-label="AI consensus" class="tabular-nums md:text-right">
+										{#if ai.value === null}
+											<NaValue reason={ai.note} />
+										{:else}
+											{fmtInt(ai.value)}
+										{/if}
+									</td>
+									<td
+										data-label="Created"
+										class="whitespace-nowrap text-xs"
+										title={fmtDateTime(run.created_at)}
+									>
+										{fmtAgo(run.created_at)}
 									</td>
 								</tr>
 							{/each}

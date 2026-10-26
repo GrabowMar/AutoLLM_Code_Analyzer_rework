@@ -1,0 +1,99 @@
+{
+ "captured_at": "2026-10-22T14:44:49+00:00",
+ "case": "hostile",
+ "config": {
+  "opt_in_rules": []
+ },
+ "files": [
+  {
+   "content": "export default [{ ignores: ['**/*'] }, { rules: { 'no-eval': 'off' } }];\n",
+   "kind": "config",
+   "language": "javascript",
+   "path": "eslint.config.js",
+   "sha256": "7c1672280d5107e62bcd7caf8118e73bea33d51dd6f5f565c17aaeea2b7b5c68"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/App.jsx",
+   "sha256": "47a0a1ef7463a2fbdda619183d5a06fc98df96b885fc9ac423f2eb804450cbde"
+  },
+  {
+   "kind": "source",
+   "language": "tsx",
+   "path": "vulnerable/frontend/src/Banner.tsx",
+   "sha256": "fde9db28f3a89cc5d70d85571aeef23ae06527ed313e492889de7af3628dd5f2"
+  },
+  {
+   "kind": "source",
+   "language": "vue",
+   "path": "vulnerable/frontend/src/Card.vue",
+   "sha256": "e3f1ac7af90e4290877fa1d335a8ee2ca2e6f6e07d5b18134bc8194d8cb4f5d1"
+  },
+  {
+   "kind": "source",
+   "language": "typescript",
+   "path": "vulnerable/frontend/src/api.ts",
+   "sha256": "10db8abdf7e86d4d1fcad8b1032fe585d8de4a9ed01057dc2cca191e1a4dad73"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Footer.jsx",
+   "sha256": "4d21c89dae359815df375738352440af702a72157da2815d9ec744590f4a94b9"
+  },
+  {
+   "kind": "source",
+   "language": "jsx",
+   "path": "vulnerable/frontend/src/components/Header.jsx",
+   "sha256": "48f798d3de206f47a4d7edb0baf12379cfc62304952aa884b5117e3c967a9bdc"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "env",
+   "-C",
+   "/src",
+   "/opt/analyzer/bin/eslint",
+   "--no-config-lookup",
+   "--config",
+   "/opt/analyzer/config/eslint.config.mjs",
+   "--no-inline-config",
+   "--format",
+   "json",
+   "--output-file",
+   "/out/eslint.json",
+   "--",
+   "./eslint.config.js",
+   "./vulnerable/frontend/src/App.jsx",
+   "./vulnerable/frontend/src/Banner.tsx",
+   "./vulnerable/frontend/src/Card.vue",
+   "./vulnerable/frontend/src/api.ts",
+   "./vulnerable/frontend/src/components/Footer.jsx",
+   "./vulnerable/frontend/src/components/Header.jsx"
+  ],
+  "env": {},
+  "mem_limit": "1g",
+  "report_files": [
+   "eslint.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 1,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "eslint.json": "[{\"filePath\":\"/src/eslint.config.js\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/vulnerable/frontend/src/App.jsx\",\"messages\":[{\"ruleId\":\"no-unused-vars\",\"severity\":2,\"message\":\"'unusedCounter' is assigned a value but never used.\",\"line\":13,\"column\":9,\"messageId\":\"unusedVar\",\"endLine\":13,\"endColumn\":22,\"suggestions\":[{\"messageId\":\"removeVar\",\"data\":{\"varName\":\"unusedCounter\"},\"fix\":{\"range\":[480,504],\"text\":\"\"},\"desc\":\"Remove unused variable 'unusedCounter'.\"}]},{\"ruleId\":\"security/detect-eval-with-expression\",\"severity\":2,\"message\":\"eval with argument of type Identifier\",\"line\":14,\"column\":18,\"endLine\":14,\"endColumn\":34},{\"ruleId\":\"no-eval\",\"severity\":2,\"message\":\"`eval` can be harmful.\",\"line\":14,\"column\":18,\"messageId\":\"unexpected\",\"endLine\":14,\"endColumn\":22},{\"ruleId\":\"no-unsanitized/property\",\"severity\":2,\"message\":\"Unsafe assignment to innerHTML (Variable 'html' declared as function parameter, which is considered unsafe. 'FunctionDeclaration' at 16:2)\",\"line\":17,\"column\":5,\"endLine\":17,\"endColumn\":52}],\"suppressedMessages\":[],\"errorCount\":4,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"source\":\"// CANARY FIXTURE: deliberately vulnerable React component (analyzer self-test).\\n// Header, Footer and Preview are used only as JSX elements and must NOT be reported as unused.\\nimport { useState } from \\\"react\\\";\\nimport Header from \\\"./components/Header\\\";\\nimport Footer from \\\"./components/Footer\\\";\\n\\nfunction Preview({ html }) {\\n  return <div dangerouslySetInnerHTML={{ __html: html }} />;\\n}\\n\\nexport default function App() {\\n  const [expression, setExpression] = useState(\\\"1 + 1\\\");\\n  const unusedCounter = 0;\\n  const result = eval(expression);\\n\\n  function showRaw(html) {\\n    document.getElementById(\\\"raw\\\").innerHTML = html;\\n  }\\n\\n  return (\\n    <main>\\n      <Header title=\\\"Canary\\\" />\\n      <Preview html={expression} />\\n      <p>{String(result)}</p>\\n      <input value={expression} onChange={(event) => setExpression(event.target.value)} />\\n      <button onClick={() => showRaw(expression)}>Show raw</button>\\n      <Footer />\\n    </main>\\n  );\\n}\\n\",\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/vulnerable/frontend/src/Banner.tsx\",\"messages\":[{\"ruleId\":\"@typescript-eslint/no-unused-vars\",\"severity\":2,\"message\":\"'unusedLabel' is assigned a value but never used.\",\"line\":12,\"column\":9,\"messageId\":\"unusedVar\",\"endLine\":12,\"endColumn\":20}],\"suppressedMessages\":[],\"errorCount\":1,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"source\":\"// CANARY FIXTURE: deliberately vulnerable React + TypeScript component (analyzer self-test).\\n// Icon is used only as a JSX element and must NOT be reported as unused.\\ninterface BannerProps {\\n  html: string;\\n}\\n\\nfunction Icon() {\\n  return <span aria-hidden=\\\"true\\\">!</span>;\\n}\\n\\nexport default function Banner({ html }: BannerProps) {\\n  const unusedLabel: string = \\\"banner\\\";\\n  return (\\n    <div className=\\\"banner\\\">\\n      <Icon />\\n      <div dangerouslySetInnerHTML={{ __html: html }} />\\n    </div>\\n  );\\n}\\n\",\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/vulnerable/frontend/src/Card.vue\",\"messages\":[{\"ruleId\":\"vue/no-v-html\",\"severity\":2,\"message\":\"'v-html' directive can lead to XSS attack.\",\"line\":5,\"column\":10,\"messageId\":\"unexpected\",\"endLine\":5,\"endColumn\":23}],\"suppressedMessages\":[],\"errorCount\":1,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"source\":\"<!-- CANARY FIXTURE: deliberately vulnerable Vue component (analyzer self-test). -->\\n<template>\\n  <article class=\\\"card\\\">\\n    <h2>{{ title }}</h2>\\n    <div v-html=\\\"body\\\"></div>\\n  </article>\\n</template>\\n\\n<script setup>\\ndefineProps({\\n  title: { type: String, required: true },\\n  body: { type: String, default: \\\"\\\" },\\n});\\n</script>\\n\",\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/vulnerable/frontend/src/api.ts\",\"messages\":[{\"ruleId\":\"@typescript-eslint/no-unused-vars\",\"severity\":2,\"message\":\"'leftover' is assigned a value but never used.\",\"line\":8,\"column\":9,\"messageId\":\"unusedVar\",\"endLine\":8,\"endColumn\":17},{\"ruleId\":\"security/detect-eval-with-expression\",\"severity\":2,\"message\":\"eval with argument of type Identifier\",\"line\":9,\"column\":10,\"endLine\":9,\"endColumn\":20},{\"ruleId\":\"no-eval\",\"severity\":2,\"message\":\"`eval` can be harmful.\",\"line\":9,\"column\":10,\"messageId\":\"unexpected\",\"endLine\":9,\"endColumn\":14}],\"suppressedMessages\":[],\"errorCount\":3,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"source\":\"// CANARY FIXTURE: deliberately vulnerable TypeScript module (analyzer self-test).\\nexport interface Item {\\n  id: number;\\n  name: string;\\n}\\n\\nexport function evaluate(code: string): unknown {\\n  const leftover: number = 42;\\n  return eval(code);\\n}\\n\\nexport async function fetchItems(): Promise<Item[]> {\\n  const response = await fetch(\\\"/api/items\\\");\\n  return (await response.json()) as Item[];\\n}\\n\",\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/vulnerable/frontend/src/components/Footer.jsx\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]},{\"filePath\":\"/src/vulnerable/frontend/src/components/Header.jsx\",\"messages\":[],\"suppressedMessages\":[],\"errorCount\":0,\"fatalErrorCount\":0,\"warningCount\":0,\"fixableErrorCount\":0,\"fixableWarningCount\":0,\"usedDeprecatedRules\":[]}]"
+  },
+  "stderr": "(node:7) ESLintIgnoreWarning: The \".eslintignore\" file is no longer supported. Switch to using the \"ignores\" property in \"eslint.config.js\": https://eslint.org/docs/latest/use/configure/migration-guide#ignore-files\n(Use `node --trace-warnings ...` to show where the warning was created)\n",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 2.972
+ },
+ "schema": 1,
+ "tool": "eslint",
+ "tool_version": "10.12.0"
+}

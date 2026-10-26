@@ -1,3 +1,5 @@
+"""App config: seeds the analysis catalog, system profiles and beat schedule after ``migrate``."""
+
 from __future__ import annotations
 
 import logging
@@ -23,15 +25,19 @@ class AnalysisConfig(AppConfig):
 
 
 def _seed_catalog(sender, *, using, verbosity=1, **kwargs) -> None:
-    """Sync the analyzer tool catalog with data/tools/*.yaml after migrate."""
-    from backend.analysis.seeding import seed_tools
+    """Sync tools (data/tools), system profiles (data/profiles) and the reconcile beat entry.
+
+    Never contacts Docker (``migrate`` must not depend on the apps daemon);
+    tool versions come from the image via ``seed_analysis_tools`` or after
+    an image build.
+    """
+    from backend.analysis.seeding import seed_all
 
     try:
-        created, updated = seed_tools(using=using)
+        report = seed_all(using=using)
     except Exception:
-        # Seed data must never break `migrate` (malformed YAML, table torn
-        # down by `migrate analysis zero`, ...).
-        logger.exception("Analyzer tool catalog seeding failed")
+        # seed_all isolates its steps; this only guards an import-time failure.
+        logger.exception("Analysis catalog seeding failed")
         return
     if verbosity >= 1:
-        logger.info("Analyzer tool catalog: %s created, %s updated", created, updated)
+        logger.info("Analysis seeding: %s", report)

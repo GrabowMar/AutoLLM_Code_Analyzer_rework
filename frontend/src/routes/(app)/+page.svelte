@@ -18,16 +18,11 @@
 		type AnalyzerHealth,
 		type SeverityDistribution,
 		type AnalysisTrends,
-		type GenerationJobList,
+		type GenerationJobList
 	} from '$lib/api/client';
-	import { listRuns, type AnalysisRunListItem } from '$lib/api/runs';
+	import { listAnalysisRuns, type AnalysisRunListItem } from '$lib/api/analysis';
 	import { formatApiError } from '$lib/api/core';
-	import {
-		timeAgo,
-		normalizeStatus,
-		type RecentAnalysis,
-		type RecentApp,
-	} from '$lib/utils/dashboard';
+	import { timeAgo, normalizeStatus, type RecentApp } from '$lib/utils/dashboard';
 	import HeroPanel from '$lib/components/dashboard/HeroPanel.svelte';
 	import KpiCard from '$lib/components/dashboard/KpiCard.svelte';
 	import TrendPanel from '$lib/components/dashboard/TrendPanel.svelte';
@@ -49,7 +44,7 @@
 	let totalAnalyses = $state<number | null>(null);
 	let completedAnalyses = $state<number | null>(null);
 	let runningAnalyses = $state<number | null>(null);
-	let recentAnalyses = $state<RecentAnalysis[]>([]);
+	let recentAnalyses = $state<AnalysisRunListItem[]>([]);
 	let recentApps = $state<RecentApp[]>([]);
 	let overview = $state<StatisticsOverview | null>(null);
 	let liveActivity = $state<RecentActivityItem[]>([]);
@@ -76,17 +71,18 @@
 				healthResult,
 				severityResult,
 				trendsResult,
-				jobsResult,
+				jobsResult
 			] = await Promise.allSettled([
-				listRuns({ per_page: 5 }),
-				listRuns({ status: 'completed', per_page: 1 }),
-				listRuns({ status: 'running', per_page: 1 }),
+				listAnalysisRuns({ per_page: 5 }),
+				// Complete = every required tool succeeded or was not applicable.
+				listAnalysisRuns({ status: ['completed', 'partial'], is_complete: true, per_page: 1 }),
+				listAnalysisRuns({ status: ['queued', 'running'], per_page: 1 }),
 				getStatisticsOverview(),
 				getStatisticsRecentActivity(8),
 				getStatisticsAnalyzerHealth(),
 				getStatisticsSeverity(),
 				getStatisticsTrends(30),
-				getGenerationJobs({ per_page: 5 }),
+				getGenerationJobs({ per_page: 5 })
 			]);
 
 			totalAnalyses = runsResult.status === 'fulfilled' ? runsResult.value.total : null;
@@ -94,15 +90,7 @@
 				completedResult.status === 'fulfilled' ? completedResult.value.total : null;
 			runningAnalyses = runningResult.status === 'fulfilled' ? runningResult.value.total : null;
 
-			recentAnalyses =
-				runsResult.status === 'fulfilled'
-					? runsResult.value.items.map((run: AnalysisRunListItem) => ({
-							id: run.id,
-							name: run.name,
-							status: normalizeStatus(run.status),
-							time: timeAgo(run.created_at),
-						}))
-					: [];
+			recentAnalyses = runsResult.status === 'fulfilled' ? runsResult.value.items : [];
 
 			overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
 			liveActivity = activityResult.status === 'fulfilled' ? activityResult.value : [];
@@ -117,7 +105,7 @@
 							name: j.template_name || j.scaffolding_name || `Job ${j.id.slice(0, 8)}`,
 							model: j.model_name || j.model_id_str || '—',
 							status: normalizeStatus(j.status),
-							time: timeAgo(j.created_at),
+							time: timeAgo(j.created_at)
 						}))
 					: [];
 
@@ -189,9 +177,9 @@
 	);
 
 	const analysesSubtitle = $derived(
-		completedAnalyses !== null ? `${completedAnalyses} completed` : ''
+		completedAnalyses !== null ? `${completedAnalyses} complete` : ''
 	);
-	const analysesChange = $derived(runningAnalyses !== null ? `${runningAnalyses} running` : '');
+	const analysesChange = $derived(runningAnalyses !== null ? `${runningAnalyses} in progress` : '');
 </script>
 
 <svelte:head>
@@ -260,7 +248,7 @@
 
 	<!-- Tables + side column -->
 	<div class="b-8 rise-in space-y-4 sm:space-y-5" style="--stagger-i: 5">
-		<RecentRunsTable analyses={recentAnalyses} />
+		<RecentRunsTable runs={recentAnalyses} loading={isLoading} />
 		<RecentJobsTable jobs={recentApps} />
 	</div>
 	<div class="b-4 rise-in space-y-4 sm:space-y-5" style="--stagger-i: 6">

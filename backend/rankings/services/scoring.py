@@ -115,34 +115,51 @@ def compute_mss(entry: dict[str, Any]) -> float:
     )
 
 
+def empirical_density(
+    entry: dict[str, Any],
+    *,
+    severity_weights: dict[str, int] | None = None,
+) -> float | None:
+    """Severity-weighted counted static issues per KLOC of measured SLOC.
+
+    ``entry["issues"]`` (deduplicated across tools) and ``entry["measured_sloc"]``
+    must describe the same jobs. Entries built from per-tool counts only may
+    pass ``findings`` / ``local_loc`` instead. None when nothing was measured.
+    """
+    counts = entry.get("issues")
+    if counts is None:
+        counts = entry.get("findings")
+    sloc = entry.get("measured_sloc")
+    if sloc is None:
+        sloc = entry.get("local_loc")
+    if counts is None or not sloc or sloc <= 0:
+        return None
+    weights = severity_weights or SEVERITY_WEIGHTS
+    weighted = sum(weights.get(sev, 0) * (count or 0) for sev, count in counts.items())
+    return weighted / sloc * 1000
+
+
 def compute_empirical_quality(
     entry: dict[str, Any],
     *,
     severity_weights: dict[str, int] | None = None,
 ) -> float | None:
-    """Quality measured by this platform's own experiments, 0..1.
+    """Quality measured by this platform's own analyses, 0..1.
 
-    Combines severity-weighted findings density (per KLOC of generated code,
-    lower is better) with the smoke-test pass rate. Returns None when the
-    model has no completed local generations — no data is not the same as
-    bad data. `severity_weights` lets the sensitivity analysis rescore under
-    alternative schemes; the default is the baseline SEVERITY_WEIGHTS.
+    Combines the severity-weighted issue density (lower is better, see
+    :func:`empirical_density`) with the functional pass rate of the same
+    analysed jobs. Returns None when no job of the model has a usable static
+    measurement: no data is not the same as clean data. ``severity_weights``
+    lets the sensitivity analysis rescore under alternative schemes.
     """
-    if not entry.get("apps_completed"):
+    density = empirical_density(entry, severity_weights=severity_weights)
+    if density is None:
         return None
-    loc = entry.get("local_loc", 0) or 0
-    findings = entry.get("findings") or {}
-    if loc <= 0:
-        return None
-
-    weights = severity_weights or SEVERITY_WEIGHTS
-    weighted = sum(weights.get(sev, 0) * (count or 0) for sev, count in findings.items())
-    density = weighted / loc * 1000
     density_score = max(0.0, 1.0 - min(density, EMPIRICAL_DENSITY_CAP) / EMPIRICAL_DENSITY_CAP)
 
     functional_rate = entry.get("functional_pass_rate")
     if functional_rate is None:
-        # No smoke data — score on density alone rather than punishing.
+        # No functional data — score on density alone rather than punishing.
         return round(density_score, 4)
     return round(
         (1 - EMPIRICAL_FUNCTIONAL_WEIGHT) * density_score + EMPIRICAL_FUNCTIONAL_WEIGHT * float(functional_rate),

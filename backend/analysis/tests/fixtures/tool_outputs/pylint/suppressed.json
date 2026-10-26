@@ -1,0 +1,64 @@
+{
+ "amended": "argv amended 2026-10-22 (adapters fix): the recorded outcome was captured with the previous argv; the added flags do not change the output for these files (verified with the pinned tool outside the image). Re-capture after the analyzer image is rebuilt.",
+ "captured_at": "2026-10-22T14:45:06+00:00",
+ "case": "suppressed",
+ "config": {
+  "extra_disable": "",
+  "include_convention": false,
+  "include_refactor": false,
+  "report_suppressed": true
+ },
+ "files": [
+  {
+   "content": "import json  # noqa: F401  # pylint: disable=unused-import\n\n\ndef calculate(expression):\n    return eval(expression)  # nosec B307  # noqa: S307  # nosemgrep  # pylint: disable=eval-used\n\n\nAPI_PASSWORD = \"Wr4ngle-Canary-Pass-91\"  # nosec  # noqa: S105  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/app.py",
+   "sha256": "0fc0e4ae4c4c42060a507f0aef522d3d3f3fc527f022f6991ab3d5afa7f9bfd5"
+  },
+  {
+   "content": "AWS_ACCESS_KEY_ID = \"AKIAZ7QX3LKD5PMW2N4J\"  # gitleaks:allow  # pragma: allowlist secret\n",
+   "kind": "source",
+   "language": "python",
+   "path": "suppressed/settings.py",
+   "sha256": "6221abca0f58a4cde431ff6fdc4757345c028d1a3654ef3f7173805410f917ef"
+  }
+ ],
+ "image": "llmlab/analyzer:ae319d878c1b",
+ "invocation": {
+  "argv": [
+   "/opt/analyzer/bin/pylint",
+   "--rcfile=/opt/analyzer/config/pylintrc",
+   "--output-format=json2:/out/pylint.json",
+   "--persistent=n",
+   "--jobs=1",
+   "--enable=suppressed-message",
+   "--enable=file-ignored",
+   "--",
+   "/src/suppressed/app.py",
+   "/src/suppressed/settings.py"
+  ],
+  "env": {},
+  "mem_limit": "768m",
+  "report_files": [
+   "pylint.json"
+  ],
+  "timeout_s": 300
+ },
+ "outcome": {
+  "cancelled": false,
+  "exit_code": 0,
+  "infra_error": null,
+  "oom_killed": false,
+  "out_files": {
+   "pylint.json": "{\n    \"messages\": [\n        {\n            \"type\": \"info\",\n            \"symbol\": \"suppressed-message\",\n            \"message\": \"Suppressed 'eval-used' (from line 5)\",\n            \"messageId\": \"I0020\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"app\",\n            \"obj\": \"\",\n            \"line\": 5,\n            \"column\": 0,\n            \"endLine\": null,\n            \"endColumn\": null,\n            \"path\": \"/src/suppressed/app.py\",\n            \"absolutePath\": \"/src/suppressed/app.py\"\n        },\n        {\n            \"type\": \"info\",\n            \"symbol\": \"suppressed-message\",\n            \"message\": \"Suppressed 'unused-import' (from line 1)\",\n            \"messageId\": \"I0020\",\n            \"confidence\": \"UNDEFINED\",\n            \"module\": \"app\",\n            \"obj\": \"\",\n            \"line\": 1,\n            \"column\": 0,\n            \"endLine\": null,\n            \"endColumn\": null,\n            \"path\": \"/src/suppressed/app.py\",\n            \"absolutePath\": \"/src/suppressed/app.py\"\n        }\n    ],\n    \"statistics\": {\n        \"messageTypeCount\": {\n            \"fatal\": 0,\n            \"error\": 0,\n            \"warning\": 0,\n            \"refactor\": 0,\n            \"convention\": 0,\n            \"info\": 2\n        },\n        \"modulesLinted\": 5,\n        \"score\": 10.0\n    }\n}\n"
+  },
+  "stderr": "",
+  "stdout": "",
+  "timed_out": false,
+  "wall_seconds": 0.535
+ },
+ "schema": 1,
+ "tool": "pylint",
+ "tool_version": "4.1.2"
+}

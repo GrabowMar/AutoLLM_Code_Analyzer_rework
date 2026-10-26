@@ -20,6 +20,7 @@ from datetime import UTC
 from datetime import datetime
 from typing import Any
 
+from celery.exceptions import SoftTimeLimitExceeded
 from django.db import connection
 from django.db import transaction
 from django.utils import timezone
@@ -166,7 +167,9 @@ def execute_step(step_run_id: Any) -> None:
 
         failed = _output_is_failed(output)
 
-        if failed and sr.retries_remaining > 0:
+        # A cancelled pipeline's failing step is not retried (a retry would
+        # e.g. submit a fresh analysis run for a pipeline nobody wants).
+        if failed and sr.retries_remaining > 0 and not _is_cancelled(run_id):
             with transaction.atomic():
                 sr_locked = PipelineStepRun.objects.select_for_update().get(
                     id=step_run_id,
@@ -196,7 +199,11 @@ def execute_step(step_run_id: Any) -> None:
             sr_locked = PipelineStepRun.objects.select_for_update().get(id=step_run_id)
             sr_locked.output = output or {}
             sr_locked.completed_at = timezone.now()
-            if failed:
+            if sr_locked.status == RunStatus.CANCELLED:
+                # Cancelled while in flight (pipeline cancel): keep the verdict,
+                # record what the dispatcher reported on its way out.
+                sr_locked.error = output.get("error", "") if isinstance(output, dict) else ""
+            elif failed:
                 sr_locked.status = RunStatus.FAILED
                 sr_locked.error = output.get("error", "Step failed") if isinstance(output, dict) else "Step failed"
             else:
@@ -397,21 +404,31 @@ def execute_run(run_id: Any) -> None:
         else:
             _finish_run(run_id, RunStatus.CANCELLED, "Run partially cancelled")
 
+    except SoftTimeLimitExceeded:
+        # The Celery task's soft limit: say so instead of "internal error",
+        # and stop the steps that have not started yet.
+        logger.exception("Pipeline run %s exceeded its time limit", run_id)
+        _fail_run(run_id, "Pipeline exceeded its time limit")
     except Exception:
         logger.exception("Unexpected error in execute_run for %s", run_id)
-        try:
-            from backend.automation.models import PipelineRun
-
-            PipelineRun.objects.filter(id=run_id, status="running").update(
-                status="failed",
-                error="Internal engine error",
-                completed_at=timezone.now(),
-            )
-            _publish_run_event(run_id, "failed", error="Internal engine error")
-        except Exception:
-            logger.exception("Failed to mark run %s as failed", run_id)
+        _fail_run(run_id, "Internal engine error")
     finally:
         connection.close()
+
+
+def _fail_run(run_id: Any, error: str) -> None:
+    try:
+        from backend.automation.models import PipelineRun
+
+        _cancel_pending_steps(run_id)
+        PipelineRun.objects.filter(id=run_id, status="running").update(
+            status="failed",
+            error=error,
+            completed_at=timezone.now(),
+        )
+        _publish_run_event(run_id, "failed", error=error)
+    except Exception:
+        logger.exception("Failed to mark run %s as failed", run_id)
 
 
 def _finish_run(run_id: Any, status: str, summary_msg: str) -> None:

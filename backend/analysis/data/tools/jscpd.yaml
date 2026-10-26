@@ -1,48 +1,49 @@
+# jscpd: copy/paste (duplication) detector.
 slug: jscpd
 name: jscpd
-description: >-
-  Copy/paste detector. Finds duplicated code blocks across 150+ languages —
-  duplication that usually signals a missing abstraction.
-category: lint
-kind: container
-target_language: any
-icon: copy
-version: "4"
-docs_url: https://github.com/kucherenko/jscpd
-install_cmd: "npm install -g jscpd@4"
-verify_cmd: "jscpd --version"
-# jscpd logs progress to stdout, so write the JSON report to a file and cat
-# only that (same pattern as gitleaks). The report dir outlives the run in the
-# long-lived workspace container, so remove it first — otherwise a failed run
-# would serve the previous run's report as this run's result. jscpd's default
-# --max-lines of 1000 silently skips whole generated apps, so raise both size
-# gates well past realistic generated-file sizes.
-run_cmd: "rm -rf /tmp/jscpd; jscpd {target} --min-tokens 35 --max-lines 50000 --max-size 2mb --reporters json --output /tmp/jscpd --silent >/dev/null 2>&1; cat /tmp/jscpd/jscpd-report.json"
-parser_key: jscpd
+kind: metrics
+category: duplication
+version: "4.3.0"
+adapter_version: 2
+languages: [python, javascript, jsx, typescript, tsx, vue, css, html]
+file_kinds: [source]
 output_kind: mixed
-run_timeout: 120
-install_timeout: 300
-display_order: 80
-config_schema: []
-default_config: {}
-# The sample is Python; without this the test action would write sample.js.
-sample_filename: sample.py
-sample_code: |
-  def compute_invoice_total(items, tax_rate, discount):
-      subtotal = 0
-      for item in items:
-          price = item["price"] * item["quantity"]
-          if item.get("taxable"):
-              price = price * (1 + tax_rate)
-          subtotal += price
-      return subtotal - discount
-
-
-  def compute_order_total(items, tax_rate, discount):
-      subtotal = 0
-      for item in items:
-          price = item["price"] * item["quantity"]
-          if item.get("taxable"):
-              price = price * (1 + tax_rate)
-          subtotal += price
-      return subtotal - discount
+description: >-
+  Copy/paste detector (Rabin-Karp over tokens). Reports each clone pair as a
+  duplication finding and the share of duplicated lines, computed over the
+  scanned files with every line counted once.
+docs_url: https://github.com/kucherenko/jscpd
+icon: copy
+display_order: 120
+mem_limit: 768m
+timeout_s: 300
+notes: >-
+  Only the selected source files are passed (lockfiles, JSON and build output
+  never are), with an explicit --config and a disjoint format/extension map so
+  no file is counted twice; an app's .jscpd.json and .gitignore are ignored.
+  "jscpd:ignore-start/end" markers are neutralized in staged copies when
+  present.
+config_schema:
+  - name: min_tokens
+    type: integer
+    label: Minimum tokens
+    description: Minimum clone size in tokens (--min-tokens).
+    default: 50
+    min: 10
+    max: 1000
+  - name: min_lines
+    type: integer
+    label: Minimum lines
+    description: Minimum clone size in lines (--min-lines).
+    default: 5
+    min: 2
+    max: 200
+  - name: mode
+    type: select
+    label: Detection mode
+    description: Token filtering mode (--mode); mild ignores whitespace and newlines, weak also comments.
+    default: mild
+    options:
+      - {value: strict, label: Strict}
+      - {value: mild, label: Mild}
+      - {value: weak, label: Weak}

@@ -1,259 +1,527 @@
 <script lang="ts">
+	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import { RadioGroup } from 'bits-ui';
 	import * as Card from '$lib/components/ui/card';
+	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { Badge } from '$lib/components/ui/badge';
-	import { onMount } from 'svelte';
-	import Brain from '@lucide/svelte/icons/brain';
-	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
-	import Wrench from '@lucide/svelte/icons/wrench';
-	import TrendingUp from '@lucide/svelte/icons/trending-up';
-	import Layers from '@lucide/svelte/icons/layers';
-	import FlaskConical from '@lucide/svelte/icons/flask-conical';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import { Textarea } from '$lib/components/ui/textarea';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { Label } from '$lib/components/ui/label';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
-	import {
-		generateReport,
-		getModels,
-		getAppTemplates,
-		type LLMModelSummary,
-		type AppRequirementTemplate,
-		type ReportType
-	} from '$lib/api/client';
+	import { ModelPicker, loadModelCatalog, findModel } from '$lib/components/generator';
+	import { REPORT_TYPE_INFO } from '$lib/components/insights/reports/report-types';
+	import { shortHash } from '$lib/components/insights/format';
+	import { cn } from '$lib/utils';
+	import { formatApiError, isAbortError } from '$lib/api/core';
 	import { listExperiments, type Experiment } from '$lib/api/experiments';
+	import { getAppTemplates, type AppRequirementTemplate } from '$lib/api/generation';
+	import { listAnalysisTools } from '$lib/api/analysis/catalog';
+	import type { AnalysisTool } from '$lib/api/analysis/types';
+	import type { LLMModelSummary } from '$lib/api/models';
+	import { getRankings } from '$lib/api/rankings';
+	import {
+		REPORT_TYPES,
+		generateReport,
+		type ReportConfig,
+		type ReportType
+	} from '$lib/api/reports';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import Check from '@lucide/svelte/icons/check';
 
-	const reportTypes: {
-		key: ReportType;
-		label: string;
-		description: string;
-		icon: typeof Brain;
-	}[] = [
-		{ key: 'model_analysis', label: 'Model Analysis', description: 'Aggregate generation, LOC, and findings for a single model.', icon: Brain },
-		{ key: 'template_comparison', label: 'Template Comparison', description: 'Compare model performance on the same app template.', icon: GitCompareArrows },
-		{ key: 'tool_analysis', label: 'Tool Analysis', description: 'Findings breakdown across analyzers / security tools.', icon: Wrench },
-		{ key: 'generation_analytics', label: 'Generation Analytics', description: 'Throughput and success rate over a time window.', icon: TrendingUp },
-		{ key: 'comprehensive', label: 'Comprehensive', description: 'Platform-wide rollup of generation, analysis, and tools.', icon: Layers },
-		{ key: 'experiment_report', label: 'Experiment Report', description: 'Per-condition stats and pairwise A/B deltas for one designed experiment.', icon: FlaskConical }
-	];
+	const params = page.url.searchParams;
+	const initialType = params.get('type') ?? '';
 
-	let step = $state<1 | 2>(1);
-	let selectedType = $state<ReportType | null>(null);
+	let reportType = $state<ReportType>(
+		(REPORT_TYPES as readonly string[]).includes(initialType)
+			? (initialType as ReportType)
+			: 'experiment_report'
+	);
 	let title = $state('');
 	let description = $state('');
-	let modelId = $state('');
-	let templateSlug = $state('');
-	let toolName = $state('');
-	let days = $state(30);
-	let experimentId = $state('');
-	let submitting = $state(false);
-	let error = $state('');
+	let expires = $state('30');
 
-	let models = $state<LLMModelSummary[]>([]);
-	let templates = $state<AppRequirementTemplate[]>([]);
+	// Scope
+	let experimentId = $state(params.get('experiment_id') ?? '');
+	let modelPk = $state<number | null>(null);
+	let pendingModelId = params.get('model_id') ?? '';
+	let templateSlug = $state(params.get('template_slug') ?? '');
+	let filterModelPks = $state<Set<number>>(new Set());
+	let bundleKey = $state(params.get('bundle_key') ?? '');
+	let promptHash = $state(params.get('prompt_hash') ?? '');
+	let toolName = $state(params.get('tool_name') ?? '');
+	let filterModelPk = $state<number | null>(null);
+	let days = $state<number | null>(Number(params.get('days')) || 30);
+
+	// Analysis settings (measured report types)
+	let planHash = $state(params.get('plan_hash') ?? '');
+	let excludeTruncated = $state(true);
+	let excludeInvalid = $state(true);
+	let excludeEmpty = $state(true);
+
 	let experiments = $state<Experiment[]>([]);
+	let templates = $state<AppRequirementTemplate[]>([]);
+	let tools = $state<AnalysisTool[]>([]);
+	let models = $state<LLMModelSummary[]>([]);
+	let plans = $state<Record<string, number>>({});
+	let plansLoading = $state(false);
 
-	onMount(async () => {
-		try {
-			const [m, t, ex] = await Promise.all([
-				getModels({ per_page: 100 }),
-				getAppTemplates(),
-				listExperiments()
-			]);
-			models = m.items;
-			templates = t;
-			experiments = ex;
-		} catch {
-			// non-fatal
-		}
+	let submitting = $state(false);
+	let error = $state<string | null>(null);
+	let fieldErrors = $state<Record<string, string>>({});
+
+	const info = $derived(REPORT_TYPE_INFO[reportType]);
+
+	onMount(() => {
+		listExperiments()
+			.then((list) => (experiments = list))
+			.catch(() => (experiments = []));
+		getAppTemplates()
+			.then((list) => (templates = list))
+			.catch(() => (templates = []));
+		listAnalysisTools()
+			.then((list) => (tools = list))
+			.catch(() => (tools = []));
+		loadModelCatalog()
+			.then((list) => {
+				models = list;
+				if (pendingModelId) {
+					modelPk = findModel(list, pendingModelId)?.id ?? null;
+					pendingModelId = '';
+				}
+			})
+			.catch(() => (models = []));
 	});
 
-	function pickType(t: ReportType) {
-		selectedType = t;
-		step = 2;
+	// Plans in use for the scope (per-plan job counts help pick one).
+	let plansController: AbortController | null = null;
+	$effect(() => {
+		if (!info.measured) return;
+		const scopeExperiment = reportType === 'experiment_report' ? experimentId : '';
+		untrack(async () => {
+			plansController?.abort();
+			const c = new AbortController();
+			plansController = c;
+			plansLoading = true;
+			try {
+				const res = await getRankings(
+					{ per_page: 10, experiment_id: scopeExperiment || undefined },
+					{ signal: c.signal }
+				);
+				if (!c.signal.aborted) plans = res.comparability?.plans ?? {};
+			} catch (e) {
+				if (!isAbortError(e) && !c.signal.aborted) plans = {};
+			} finally {
+				if (plansController === c) plansLoading = false;
+			}
+		});
+	});
+
+	const planItems = $derived.by(() => {
+		const items = Object.entries(plans)
+			.sort((a, b) => b[1] - a[1])
+			.map(([hash, n]) => ({
+				value: hash,
+				label: `${shortHash(hash, 12)} · ${n} job${n === 1 ? '' : 's'}`
+			}));
+		if (planHash && !items.some((i) => i.value === planHash)) {
+			items.unshift({ value: planHash, label: `${shortHash(planHash, 12)} · from the link` });
+		}
+		return items;
+	});
+
+	const experimentItems = $derived(
+		experiments.map((e) => ({
+			value: e.id,
+			label: e.name,
+			description: `${e.status} · ${e.condition_count} conditions`
+		}))
+	);
+	const templateItems = $derived(
+		templates.map((t) => ({ value: t.slug, label: t.name, description: t.category }))
+	);
+	const toolItems = $derived(
+		tools.map((t) => ({ value: t.slug, label: t.name, description: `${t.category} · ${t.kind}` }))
+	);
+	const expiresItems = [
+		{ value: '7', label: '7 days' },
+		{ value: '30', label: '30 days' },
+		{ value: '90', label: '90 days' },
+		{ value: '365', label: '1 year' },
+		{ value: 'never', label: 'Never' }
+	];
+
+	function modelIdOf(pk: number | null): string | undefined {
+		return pk == null ? undefined : findModel(models, pk)?.model_id;
 	}
 
-	async function submit() {
-		if (!selectedType) return;
-		const config: Record<string, unknown> = {};
-		if (selectedType === 'model_analysis') {
-			if (!modelId) {
-				error = 'Pick a model';
-				return;
+	function buildConfig(): { config: ReportConfig; errors: Record<string, string> } {
+		const config: ReportConfig = {};
+		const errors: Record<string, string> = {};
+		if (reportType === 'experiment_report') {
+			if (!experimentId) errors.experiment_id = 'Pick an experiment.';
+			else config.experiment_id = experimentId;
+		}
+		if (reportType === 'model_analysis') {
+			const id = modelIdOf(modelPk);
+			if (!id) errors.model_id = 'Pick a model.';
+			else config.model_id = id;
+		}
+		if (reportType === 'template_comparison') {
+			if (!templateSlug) errors.template_slug = 'Pick an app template.';
+			else config.template_slug = templateSlug;
+			const filter = [...filterModelPks].map(modelIdOf).filter((m): m is string => !!m);
+			if (filter.length) config.filter_models = filter;
+			if (bundleKey.trim()) config.bundle_key = bundleKey.trim();
+			if (promptHash.trim()) config.prompt_hash = promptHash.trim();
+		}
+		if (reportType === 'tool_analysis') {
+			if (toolName) config.tool_name = toolName;
+			const id = modelIdOf(filterModelPk);
+			if (id) config.filter_model = id;
+		}
+		if (reportType === 'generation_analytics' || reportType === 'comprehensive') {
+			if (days == null || !Number.isInteger(days) || days < 1 || days > 365) {
+				errors.days = 'Enter a whole number of days between 1 and 365.';
+			} else config.days = days;
+		}
+		if (info.measured) {
+			if (planHash) {
+				if (!/^[0-9a-f]{64}$/.test(planHash))
+					errors.plan_hash = 'A plan hash has 64 hexadecimal characters.';
+				else config.plan_hash = planHash;
 			}
-			config.model_id = modelId;
+			config.exclude_truncated = excludeTruncated;
+			config.exclude_invalid = excludeInvalid;
+			config.exclude_empty_output = excludeEmpty;
 		}
-		if (selectedType === 'template_comparison') {
-			if (!templateSlug) {
-				error = 'Pick a template';
-				return;
-			}
-			config.template_slug = templateSlug;
-		}
-		if (selectedType === 'tool_analysis' && toolName) {
-			config.tool_name = toolName;
-		}
-		if (selectedType === 'generation_analytics' || selectedType === 'comprehensive') {
-			config.days = Number(days) || 30;
-		}
-		if (selectedType === 'experiment_report') {
-			if (!experimentId) {
-				error = 'Pick an experiment';
-				return;
-			}
-			config.experiment_id = experimentId;
+		return { config, errors };
+	}
+
+	async function submit(event: SubmitEvent) {
+		event.preventDefault();
+		const { config, errors } = buildConfig();
+		fieldErrors = errors;
+		if (Object.keys(errors).length > 0) {
+			error = 'Fix the highlighted fields.';
+			return;
 		}
 		submitting = true;
-		error = '';
+		error = null;
 		try {
-			const r = await generateReport({
-				report_type: selectedType,
-				title: title || undefined,
-				description: description || undefined,
-				config
+			const report = await generateReport({
+				report_type: reportType,
+				config,
+				title: title.trim() || undefined,
+				description: description.trim() || undefined,
+				expires_in_days: expires === 'never' ? null : Number(expires)
 			});
-			goto(`/reports/${r.report_id}`);
+			goto(`/reports/${report.report_id}`);
 		} catch (e) {
-			const obj = e as { detail?: string; message?: string };
-			error = obj?.message || obj?.detail || 'Failed to generate report';
+			error = formatApiError(e, 'Could not start the report.');
 			submitting = false;
 		}
 	}
+
+	/**
+	 * Hand the number itself to `<input type="number">` (typed as the Input's
+	 * string prop): stringifying it would let Svelte rewrite partial input.
+	 */
+	function numberValue(v: number | null): string {
+		return (v ?? '') as unknown as string;
+	}
+
+	function fieldClass(key: string): string {
+		return fieldErrors[key] ? 'border-destructive' : '';
+	}
 </script>
 
-<div class="max-w-3xl space-y-6">
+{#snippet fieldError(key: string)}
+	{#if fieldErrors[key]}<p id="err-{key}" class="text-xs text-danger-fg">{fieldErrors[key]}</p>{/if}
+{/snippet}
+
+<div class="mx-auto max-w-4xl space-y-6">
 	<PageHeader
 		title="New report"
-		description="Pick a report type, then configure and generate it."
+		description="Pick what the report covers. Analysis numbers are taken from one analysis plan; jobs outside it are counted, never treated as clean."
 		back={{ href: '/reports', label: 'Reports' }}
-	>
-		{#snippet meta()}<Badge variant="outline">Step {step} of 2</Badge>{/snippet}
-	</PageHeader>
+	/>
 
-	{#if step === 1}
+	<form class="space-y-6" onsubmit={submit} novalidate>
 		<Card.Root>
 			<Card.Header>
-				<Card.Title>1. Report type</Card.Title>
-				<Card.Description>What should the report cover?</Card.Description>
+				<Card.Title class="text-base">1. Report type</Card.Title>
 			</Card.Header>
 			<Card.Content>
-		<div class="grid gap-3 sm:grid-cols-2">
-			{#each reportTypes as t (t.key)}
-				{@const TypeIcon = t.icon}
-				<button
-					type="button"
-					onclick={() => pickType(t.key)}
-					aria-pressed={selectedType === t.key}
-					class="card-lift rounded-lg border p-4 text-left hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {selectedType === t.key ? 'border-primary bg-primary/5' : ''}"
+				<RadioGroup.Root
+					bind:value={reportType}
+					onValueChange={() => {
+						fieldErrors = {};
+						error = null;
+					}}
+					aria-label="Report type"
+					class="grid gap-3 sm:grid-cols-2"
+					loop
 				>
-					<div class="flex items-center gap-2 mb-1">
-						<TypeIcon class="h-4 w-4 text-primary" />
-						<span class="font-medium">{t.label}</span>
-					</div>
-					<p class="text-xs text-muted-foreground">{t.description}</p>
-				</button>
-			{/each}
-		</div>
+					{#each REPORT_TYPES as t (t)}
+						{@const typeInfo = REPORT_TYPE_INFO[t]}
+						{@const TypeIcon = typeInfo.icon}
+						<RadioGroup.Item
+							value={t}
+							class={cn(
+								'flex cursor-pointer items-start gap-3 rounded-md border border-border p-4 text-left transition-colors duration-150',
+								'hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+								'data-[state=checked]:border-primary data-[state=checked]:bg-primary/5'
+							)}
+						>
+							{#snippet children({ checked })}
+								<TypeIcon
+									class="mt-0.5 h-4 w-4 shrink-0 {checked
+										? 'text-primary'
+										: 'text-muted-foreground'}"
+									aria-hidden="true"
+								/>
+								<span class="min-w-0 flex-1">
+									<span class="flex items-center gap-2 text-sm font-medium">
+										{typeInfo.label}
+										{#if typeInfo.measured}
+											<span
+												class="rounded-full bg-muted px-1.5 text-[11px] font-normal text-muted-foreground"
+												>one plan</span
+											>
+										{/if}
+									</span>
+									<span class="mt-1 block text-xs text-muted-foreground"
+										>{typeInfo.description}</span
+									>
+								</span>
+								{#if checked}<Check class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />{/if}
+							{/snippet}
+						</RadioGroup.Item>
+					{/each}
+				</RadioGroup.Root>
 			</Card.Content>
 		</Card.Root>
-	{:else if selectedType}
+
 		<Card.Root>
 			<Card.Header>
-				<Card.Title>2. Configure · {reportTypes.find((r) => r.key === selectedType)?.label}</Card.Title>
-				<Card.Description>Configure the report and generate.</Card.Description>
+				<Card.Title class="text-base">2. Scope · {info.label}</Card.Title>
 			</Card.Header>
 			<Card.Content class="space-y-4">
-				<div class="space-y-2">
-					<label for="rep-title" class="text-sm font-medium">Title (optional)</label>
-					<Input id="rep-title" bind:value={title} placeholder="Auto-generated if blank" />
-					<p class="text-xs text-muted-foreground">Auto-generated if blank</p>
-				</div>
-				<div class="space-y-2">
-					<label for="rep-desc" class="text-sm font-medium">Description (optional)</label>
-					<Input id="rep-desc" bind:value={description} />
-					<p class="text-xs text-muted-foreground">Optional description</p>
-				</div>
-
-				{#if selectedType === 'model_analysis'}
-					<div class="space-y-2">
-						<label for="rep-model" class="text-sm font-medium">Model</label>
-						<select
-							id="rep-model"
-							bind:value={modelId}
-							class="block w-full std-select py-2"
-						>
-							<option value="">— select a model —</option>
-							{#each models as m (m.model_id)}
-								<option value={m.model_id}>{m.model_name}</option>
-							{/each}
-						</select>
-					</div>
-				{:else if selectedType === 'template_comparison'}
-					<div class="space-y-2">
-						<label for="rep-tmpl" class="text-sm font-medium">Template</label>
-						<select
-							id="rep-tmpl"
-							bind:value={templateSlug}
-							class="block w-full std-select py-2"
-						>
-							<option value="">— select a template —</option>
-							{#each templates as t (t.slug)}
-								<option value={t.slug}>{t.name}</option>
-							{/each}
-						</select>
-					</div>
-				{:else if selectedType === 'tool_analysis'}
-					<div class="space-y-2">
-						<label for="rep-tool" class="text-sm font-medium">Tool name (optional)</label>
-						<Input id="rep-tool" bind:value={toolName} placeholder="bandit, eslint, zap, … (blank = all)" />
-						<p class="text-xs text-muted-foreground">Leave blank to aggregate all tools</p>
-					</div>
-				{:else if selectedType === 'generation_analytics' || selectedType === 'comprehensive'}
-					<div class="space-y-2">
-						<label for="rep-days" class="text-sm font-medium">Window (days)</label>
-						<input
-							id="rep-days"
-							type="number"
-							min="1"
-							max="365"
-							bind:value={days}
-							class="block w-full std-select py-2"
-						/>
-						<p class="text-xs text-muted-foreground">1-365 days</p>
-					</div>
-				{:else if selectedType === 'experiment_report'}
-					<div class="space-y-2">
-						<label for="rep-experiment" class="text-sm font-medium">Experiment</label>
-						<select
+				{#if reportType === 'experiment_report'}
+					<div class="space-y-1.5">
+						<Label for="rep-experiment">Experiment</Label>
+						<Select.Simple
 							id="rep-experiment"
 							bind:value={experimentId}
-							class="block w-full std-select py-2"
-						>
-							<option value="">— select an experiment —</option>
-							{#each experiments as ex (ex.id)}
-								<option value={ex.id}>{ex.name}</option>
-							{/each}
-						</select>
+							items={experimentItems}
+							placeholder={experiments.length ? 'Select an experiment' : 'No experiments yet'}
+							class={fieldClass('experiment_id')}
+							aria-invalid={!!fieldErrors.experiment_id}
+							aria-describedby={fieldErrors.experiment_id ? 'err-experiment_id' : undefined}
+						/>
+						{@render fieldError('experiment_id')}
+					</div>
+				{:else if reportType === 'model_analysis'}
+					<div class="space-y-1.5">
+						<ModelPicker
+							mode="single"
+							bind:selectedId={modelPk}
+							label="Model"
+							idPrefix="rep-model"
+						/>
+						{@render fieldError('model_id')}
+					</div>
+				{:else if reportType === 'template_comparison'}
+					<div class="space-y-1.5">
+						<Label for="rep-template">App template</Label>
+						<Select.Simple
+							id="rep-template"
+							bind:value={templateSlug}
+							items={templateItems}
+							placeholder="Select an app template"
+							class={fieldClass('template_slug')}
+							aria-invalid={!!fieldErrors.template_slug}
+							aria-describedby={fieldErrors.template_slug ? 'err-template_slug' : undefined}
+						/>
+						{@render fieldError('template_slug')}
+					</div>
+					<div class="grid gap-4 sm:grid-cols-2">
+						<div class="space-y-1.5">
+							<Label for="rep-bundle">Bundle key (optional)</Label>
+							<Input id="rep-bundle" bind:value={bundleKey} placeholder="e.g. flask-react@3" />
+							<p class="text-xs text-muted-foreground">
+								One prompt bundle version for a like-for-like comparison.
+							</p>
+						</div>
+						<div class="space-y-1.5">
+							<Label for="rep-prompt">Prompt hash (optional)</Label>
+							<Input id="rep-prompt" bind:value={promptHash} class="font-mono" />
+						</div>
+					</div>
+					<div class="space-y-1.5">
+						<ModelPicker
+							mode="multi"
+							bind:selectedIds={filterModelPks}
+							label="Limit to models (optional)"
+							idPrefix="rep-filter-models"
+							maxHeight="max-h-60"
+						/>
+						<p class="text-xs text-muted-foreground">
+							Leave empty to include every model that generated this template.
+						</p>
+					</div>
+				{:else if reportType === 'tool_analysis'}
+					<div class="space-y-1.5">
+						<Label for="rep-tool">Tool</Label>
+						<Select.Simple
+							id="rep-tool"
+							bind:value={toolName}
+							items={toolItems}
+							placeholder="All tools"
+							clearLabel="All tools"
+						/>
+					</div>
+					<div class="space-y-1.5">
+						<ModelPicker
+							mode="single"
+							bind:selectedId={filterModelPk}
+							label="Only runs of jobs by this model (optional)"
+							idPrefix="rep-tool-model"
+							maxHeight="max-h-60"
+						/>
+						{#if filterModelPk != null}
+							<Button variant="ghost" size="sm" onclick={() => (filterModelPk = null)}
+								>Clear model filter</Button
+							>
+						{/if}
+					</div>
+				{:else}
+					<div class="max-w-xs space-y-1.5">
+						<Label for="rep-days">Window (days)</Label>
+						<Input
+							id="rep-days"
+							type="number"
+							inputmode="numeric"
+							min="1"
+							max="365"
+							step="1"
+							value={numberValue(days)}
+							oninput={(e: Event & { currentTarget: HTMLInputElement }) => {
+								const v = e.currentTarget.valueAsNumber;
+								days = Number.isNaN(v) ? null : v;
+							}}
+							class={fieldClass('days')}
+							aria-invalid={!!fieldErrors.days}
+							aria-describedby={fieldErrors.days ? 'err-days' : undefined}
+						/>
+						{@render fieldError('days')}
 					</div>
 				{/if}
-
-				{#if error}
-					<ErrorAlert message={error} />
-				{/if}
 			</Card.Content>
-			<Card.Footer class="gap-2 justify-end">
-				<Button variant="outline" onclick={() => (step = 1)}>
-					<ArrowLeft class="mr-1 h-4 w-4" />Change type
-				</Button>
-				<Button onclick={submit} disabled={submitting}>
-					{#if submitting}
-						<LoaderCircle class="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" />
-					{/if}
-					Generate report
-				</Button>
-			</Card.Footer>
 		</Card.Root>
-	{/if}
+
+		{#if info.measured}
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="text-base">3. Analysis settings</Card.Title>
+					<Card.Description>
+						Runs are comparable only under one frozen plan. Auto picks the plan that completely
+						measured the most of the report's jobs.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="space-y-4">
+					<div class="space-y-1.5">
+						<Label for="rep-plan">Analysis plan</Label>
+						<Select.Simple
+							id="rep-plan"
+							bind:value={planHash}
+							items={planItems}
+							placeholder={plansLoading
+								? 'Loading plans…'
+								: 'Auto: the plan that measured most jobs'}
+							clearLabel="Auto: the plan that measured most jobs"
+							class={fieldClass('plan_hash')}
+							aria-invalid={!!fieldErrors.plan_hash}
+							aria-describedby={fieldErrors.plan_hash ? 'err-plan_hash' : undefined}
+						/>
+						{@render fieldError('plan_hash')}
+						<p class="text-xs text-muted-foreground">
+							Job counts are the plans' canonical runs in {reportType === 'experiment_report' &&
+							experimentId
+								? 'this experiment'
+								: 'all your jobs'}.
+						</p>
+					</div>
+					<fieldset class="space-y-2">
+						<legend class="text-sm font-medium">Exclude from the trials</legend>
+						<label class="flex items-start gap-2 text-sm">
+							<Checkbox bind:checked={excludeTruncated} class="mt-0.5" />
+							<span
+								>Truncated generations <span class="block text-xs text-muted-foreground"
+									>output cut off by the token or turn limit</span
+								></span
+							>
+						</label>
+						<label class="flex items-start gap-2 text-sm">
+							<Checkbox bind:checked={excludeInvalid} class="mt-0.5" />
+							<span
+								>Invalid samples <span class="block text-xs text-muted-foreground"
+									>the agent's validity check says exclude</span
+								></span
+							>
+						</label>
+						<label class="flex items-start gap-2 text-sm">
+							<Checkbox bind:checked={excludeEmpty} class="mt-0.5" />
+							<span
+								>Empty output <span class="block text-xs text-muted-foreground"
+									>the model wrote no code</span
+								></span
+							>
+						</label>
+					</fieldset>
+				</Card.Content>
+			</Card.Root>
+		{/if}
+
+		<Card.Root>
+			<Card.Header>
+				<Card.Title class="text-base">{info.measured ? '4' : '3'}. Details</Card.Title>
+			</Card.Header>
+			<Card.Content class="space-y-4">
+				<div class="space-y-1.5">
+					<Label for="rep-title">Title (optional)</Label>
+					<Input
+						id="rep-title"
+						bind:value={title}
+						placeholder="Generated from the type and scope if blank"
+						maxlength={200}
+					/>
+				</div>
+				<div class="space-y-1.5">
+					<Label for="rep-desc">Description (optional)</Label>
+					<Textarea id="rep-desc" bind:value={description} rows={2} />
+				</div>
+				<div class="max-w-xs space-y-1.5">
+					<Label for="rep-expires">Keep for</Label>
+					<Select.Simple id="rep-expires" bind:value={expires} items={expiresItems} />
+				</div>
+			</Card.Content>
+		</Card.Root>
+
+		{#if error}<ErrorAlert message={error} />{/if}
+
+		<div class="flex flex-wrap justify-end gap-2">
+			<Button variant="outline" href="/reports">Cancel</Button>
+			<Button type="submit" disabled={submitting}>
+				{#if submitting}<LoaderCircle
+						class="h-4 w-4 animate-spin motion-reduce:animate-none"
+					/>{/if}
+				Generate report
+			</Button>
+		</div>
+	</form>
 </div>

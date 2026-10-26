@@ -1,0 +1,15 @@
+# System profile (seeded; edits create a new version): a fast smoke check,
+# not a research instrument (no metrics tools, no AI reviewer).
+slug: quick-check
+name: Quick check
+description: >-
+  Fast lint, security and secrets pass (ruff, eslint, semgrep, gitleaks) without metrics tools
+  or the AI reviewer. Useful while iterating; not comparable with the research profiles.
+config:
+  tools:
+    - {slug: ruff, required: true}
+    - {slug: semgrep, required: true}
+    - {slug: eslint, required: true}
+    - {slug: gitleaks, required: true}
+  reviewer:
+    enabled: false
