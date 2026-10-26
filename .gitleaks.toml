@@ -12,6 +12,10 @@ paths = [
   '''^backend/analysis/data/canary/''',
   '''^backend/analysis/tests/fixtures/tool_outputs/''',
   '''^backend/analysis/tests/support/capture_tool_outputs\.py$''',
+  # Adapter regression inputs and normalization tests embed the same
+  # synthetic AWS-style keys to exercise secret findings and dedup.
+  '''^backend/analysis/tests/fixtures/adapter_regressions\.json$''',
+  '''^backend/analysis/tests/test_normalize\.py$''',
 ]
 
 [[rules]]

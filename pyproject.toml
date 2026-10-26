@@ -77,10 +77,10 @@ line-length = 119
 # Exclude a variety of commonly ignored directories.
 extend-exclude = [
   "*/migrations/*.py",
-  "staticfiles/*",
   # Deliberately vulnerable self-test fixtures; reformatting them would shift
   # the line numbers their expectations and golden outputs pin.
   "backend/analysis/data/canary/*",
+  "staticfiles/*",
 ]
 lint.select = [
   "A",

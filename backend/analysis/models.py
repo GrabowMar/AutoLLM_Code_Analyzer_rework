@@ -528,7 +528,7 @@ class Finding(models.Model):
     )
     severity_rank = models.PositiveSmallIntegerField(_("severity rank"), default=4)
     native_severity = models.CharField(_("native severity"), max_length=50, blank=True, default="")
-    category = models.CharField(_("category"), max_length=30, choices=FindingCategory.choices, default="other")
+    category = models.CharField(_("category"), max_length=30, choices=FindingCategory, default="other")
     cwe = models.JSONField(_("CWE ids"), default=list, blank=True)
     confidence = models.CharField(_("confidence"), max_length=20, blank=True, default="medium")
     title = models.CharField(_("title"), max_length=500)
@@ -543,7 +543,7 @@ class Finding(models.Model):
     file_origin = models.CharField(
         _("file origin"),
         max_length=20,
-        choices=FileOrigin.choices,
+        choices=FileOrigin,
         default=FileOrigin.UNKNOWN,
     )
     in_measured_scope = models.BooleanField(_("in measured scope"), default=True)

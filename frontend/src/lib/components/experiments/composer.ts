@@ -85,7 +85,12 @@ export interface ExperimentDraft {
 export function defaultPostRun(mode: ComposerMode): PostRunSpec {
   return {
     evaluate: mode === "scaffolding",
-    analysis: { enabled: false, tool_slugs: [], only_passing: false, profile: null },
+    analysis: {
+      enabled: false,
+      tool_slugs: [],
+      only_passing: false,
+      profile: null,
+    },
     report: { enabled: false, exclude_truncated: true },
   };
 }
