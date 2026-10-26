@@ -13,8 +13,9 @@ volumes:
 
 networks:
   default: {}
-  # Internal-only network between the executor's LLM proxy (172.30.99.2:8090)
-  # and apps-dind (172.30.99.3), so gateways of local-model agent runs can
+  # Internal-only network between the executor's LLM proxy (LLM_PROXY_ADDR,
+  # 172.30.99.2:8090) and apps-dind (APPS_DIND_LLMPROXY_ADDR, 172.30.99.3), so
+  # gateways of local-model agent runs can
   # reach the proxy (spec §B.6). No default route, no other members.
   llmproxy:
     internal: true
@@ -82,7 +83,13 @@ services:
       - redis
       - apps-dind
     ports: []
-    command: /start-executor
+    # Run from the bind-mounted repo (not the image's /start-executor copy) so a
+    # stale llmlab/django:local image still starts it; no rebuild needed.
+    command: ["bash", "/app/compose/local/django/start-executor"]
+    # The executor exits 1 when it loses the leader lock (Postgres restart,
+    # dropped lock connection), when its LLM proxy cannot bind, or when
+    # migrations are still pending after 10 min; Docker brings it back.
+    restart: unless-stopped
     networks:
       default: {}
       llmproxy:
@@ -91,6 +98,11 @@ services:
       <<: *django-env
       CONN_MAX_AGE: "0"
       APPS_DIND_MEM_LIMIT: "${APPS_DIND_MEM_LIMIT:-4g}"
+      # Keep the proxy's bind address, the gateways' upstream and the nested
+      # egress subnet in step with the network overrides above / on apps-dind.
+      LLM_PROXY_BIND: "${LLM_PROXY_ADDR:-172.30.99.2}:8090"
+      LLM_PROXY_UPSTREAM: "http://${LLM_PROXY_ADDR:-172.30.99.2}:8090/v1"
+      LLM_GATEWAY_EGRESS_SUBNET: "${LLM_GATEWAY_EGRESS_SUBNET:-10.213.0.0/24}"
     # No extra_hosts: direct endpoints (tailnet/VPN) are reached through host
     # routing + masquerade; host.docker.internal would expose every host-bound
     # service and is rejected by the SSRF validator anyway.
@@ -134,13 +146,15 @@ services:
       LLM_PROXY_PORT: "8090"
       LLM_GATEWAY_EGRESS_SUBNET: "${LLM_GATEWAY_EGRESS_SUBNET:-10.213.0.0/24}"
       LLMPROXY_SUBNET: "${LLMPROXY_SUBNET:-172.30.99.0/29}"
+      APPS_DIND_LLMPROXY_ADDR: "${APPS_DIND_LLMPROXY_ADDR:-172.30.99.3}"
     volumes:
       - apps_dind_data:/var/lib/docker
       - apps_dind_certs:/certs
     networks:
       default: {}
       llmproxy:
-        ipv4_address: "172.30.99.3"
+        # Override together with LLMPROXY_SUBNET / LLM_PROXY_ADDR (same subnet).
+        ipv4_address: "${APPS_DIND_LLMPROXY_ADDR:-172.30.99.3}"
     # Keep APPS_DIND_MEM_LIMIT equal to this cap (django/executor read it).
     mem_limit: ${APPS_DIND_MEM_LIMIT:-4g}
     cpus: ${APPS_DIND_CPUS:-4}
@@ -174,6 +188,11 @@ services:
       - apps-dind
     ports: []
     command: /start-celeryworker
+    environment:
+      <<: *django-env
+      # Prefork defaults to the host's CPU count (12 children, ~1.1 GB idle);
+      # 2 is plenty for the remaining automation/users tasks and fits 1g.
+      CELERY_WORKER_CONCURRENCY: "2"
     # Was 2g; job execution and automation moved to the executor.
     mem_limit: 1g
     cpus: 2

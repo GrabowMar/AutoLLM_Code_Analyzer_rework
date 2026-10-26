@@ -12,8 +12,9 @@ networks:
   llm_apps:
     name: llm_apps
     driver: bridge
-  # Internal-only network for the executor's LLM proxy (spec §B.6). Gateways of
-  # local-model agent runs reach it at ${LLM_PROXY_ADDR:-172.30.99.2}:8090.
+  # Internal-only network for the executor's LLM proxy (spec §B.6). Only the
+  # executor joins it; without apps-dind, local-model agent runs are refused
+  # (see the executor's environment below).
   llmproxy:
     internal: true
     ipam:
@@ -50,10 +51,19 @@ services:
     <<: *django
     image: backend_production_executor
     command: /start-executor
+    # Exits 1 on leader-lock loss, proxy bind failure or pending migrations
+    # after 10 min (production /start does not migrate); Docker brings it back.
+    restart: unless-stopped
     environment:
       - TRAEFIK_DYNAMIC_DIR=/traefik-dynamic
       - DOCKER_APPS_NETWORK=llm_apps
       - CONN_MAX_AGE=0
+      - LLM_PROXY_BIND=${LLM_PROXY_ADDR:-172.30.99.2}:8090
+      - LLM_PROXY_UPSTREAM=http://${LLM_PROXY_ADDR:-172.30.99.2}:8090/v1
+      # No apps-dind here: gateways run on the host daemon and cannot reach the
+      # internal llmproxy network, so local-model AGENT runs are refused
+      # (LLM_LOCAL_AGENT_RUNS defaults to off without APPS_DOCKER_HOST).
+      # Local-model scaffolding runs and OpenRouter agent runs work.
     networks:
       default: {}
       llm_apps: {}

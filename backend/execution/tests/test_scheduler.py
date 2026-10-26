@@ -32,6 +32,7 @@ from backend.generation.models import Experiment
 from backend.generation.models import GenerationJob
 from backend.inference.models import LLMEndpoint
 from backend.inference.models import LLMRequest
+from backend.inference.models import RelaySession
 from backend.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
@@ -207,6 +208,69 @@ class TestResidency:
         assert [c.job_id for c in third.claimed] == [starved.id]
         assert busy.id not in {c.job_id for c in third.claimed}
 
+    def test_a_starved_lane_whose_model_disappears_releases_the_endpoint(self, user, system_ep):
+        endpoint = _k1_endpoint(user)
+        a, b = make_model(endpoint, "a"), make_model(endpoint, "b")
+        make_job(user, a, status=S.RUNNING, phase="running", lease_owner=OWNER)
+        x, y = running_experiment(user), running_experiment(user)
+        for seq in range(6):
+            make_job(user, a, experiment=x, sequence=seq)
+        make_job(user, b, experiment=y, sequence=0)
+        sched = _scheduler(starvation_s=0)
+        sched.tick(slots(), free())  # y waits for residency: its clock starts
+        assert sched.tick(slots(), free()).claimed == []  # drain-for-swap holds x
+        # `ollama rm b` / relay restarted with a partial list: y can no longer run here.
+        RelaySession.objects.filter(endpoint=endpoint).update(models=[{"name": "a", "digest": ""}])
+        GenerationJob.objects.filter(status=S.RUNNING).update(status=S.COMPLETED, phase="", lease_owner="")
+        third = sched.tick(slots(), free())
+        assert third.claimed, "the endpoint must not idle behind a lane that cannot run"
+        assert {GenerationJob.objects.get(id=c.job_id).model_id for c in third.claimed} == {a.id}
+        assert third.lanes[(str(y.id), endpoint.pk)].reason == MODEL_NOT_SERVED
+        assert (str(y.id), endpoint.pk) not in sched.residency_wait_since  # not waiting for residency any more
+
+    def test_a_starved_lane_at_its_experiment_cap_does_not_idle_the_endpoint(self, user, system_ep):
+        endpoint = _k1_endpoint(user)
+        a, b = make_model(endpoint, "a"), make_model(endpoint, "b")
+        x = running_experiment(user)
+        y = running_experiment(user, max_concurrency=1)
+        for seq in range(6):
+            make_job(user, a, experiment=x, sequence=seq)
+        # y is at its cap through its OpenRouter lane; the K=1 endpoint is drained (nothing resident).
+        make_job(user, make_model(), experiment=y, status=S.RUNNING, phase="running", lease_owner=OWNER)
+        make_job(user, b, experiment=y, sequence=0)
+        sched = _scheduler(starvation_s=0)
+        sched.residency_wait_since[(str(y.id), endpoint.pk)] = timezone.now() - timedelta(hours=1)
+        result = sched.tick(slots(), free())
+        assert result.lanes[(str(y.id), endpoint.pk)].reason == EXPERIMENT_CAP
+        assert result.claimed, "x keeps the endpoint while y is held by its own cap"
+        assert {GenerationJob.objects.get(id=c.job_id).experiment_id for c in result.claimed} == {x.id}
+
+    def test_lanes_held_by_a_drain_do_not_start_their_own_starvation_clock(self, user, system_ep):
+        endpoint = _k1_endpoint(user)
+        a, b = make_model(endpoint, "a"), make_model(endpoint, "b")
+        x, y = running_experiment(user), running_experiment(user)
+        make_job(user, a, experiment=x, status=S.RUNNING, phase="running", lease_owner=OWNER)
+        for seq in range(1, 4):
+            make_job(user, a, experiment=x, sequence=seq)
+        make_job(user, b, experiment=y, sequence=0)
+        make_job(user, b, experiment=y, sequence=1)
+        sched = _scheduler(starvation_s=600)
+        long_ago = timezone.now() - timedelta(hours=1)
+        sched.residency_wait_since[(str(y.id), endpoint.pk)] = long_ago
+        held = sched.tick(slots(), free())
+        assert held.lanes[(str(x.id), endpoint.pk)].reason == RESIDENCY_WAIT
+        assert (str(x.id), endpoint.pk) not in sched.residency_wait_since
+        # The drain ends after a long time; y's model is swapped in.
+        GenerationJob.objects.filter(status=S.RUNNING).update(status=S.COMPLETED, phase="", lease_owner="")
+        swapped = sched.tick(slots(), free())
+        assert {GenerationJob.objects.get(id=c.job_id).experiment_id for c in swapped.claimed} == {y.id}
+        # x's clock starts now (real residency wait), so b keeps the endpoint for a full window.
+        sched.tick(slots(), free())
+        since = sched.residency_wait_since.get((str(x.id), endpoint.pk))
+        assert since is not None
+        assert since > long_ago + timedelta(minutes=30)
+        assert sched._drain_for_swap(timezone.now(), {(str(x.id), endpoint.pk): [object()]}) == {}
+
     def test_experiment_option_tightens_k(self, user, system_ep):
         endpoint = make_endpoint(
             user,
@@ -276,6 +340,17 @@ class TestOrderAndFairness:
         urgent = make_job(user, make_model(), experiment=high, sequence=0, priority=5)
         assert [c.job_id for c in _scheduler().tick(slots(), free()).claimed] == [urgent.id]
 
+    def test_openrouter_lane_does_not_take_every_thread_from_local_lanes(self, user, system_ep):
+        endpoint = make_endpoint(user, kind="openai_compatible", api_flavor="openai", served=[("m", "")])
+        x = running_experiment(user)
+        for seq in range(40):
+            make_job(user, make_model(), experiment=x, sequence=seq)
+        local = make_job(user, make_model(endpoint, "m"), experiment=x, sequence=40)
+        sched = _scheduler()
+        result = sched.tick(slots(llm_job_threads=4), free(llm=4))
+        assert len(result.claimed) == 4
+        assert local.id in {c.job_id for c in result.claimed}
+
     def test_experiment_cap_paused_and_backoff(self, user, system_ep):
         capped = running_experiment(user, max_concurrency=1)
         for seq in range(3):
@@ -305,7 +380,7 @@ class TestPrefetch:
     @pytest.fixture
     def fake_inference(self):
         def access(user, model):
-            return mock.Mock(endpoint=model.endpoint, keep_alive="30m")
+            return mock.Mock(endpoint=model.endpoint, keep_alive="30m", num_ctx=8192)
 
         with (
             mock.patch("backend.inference.access.resolve_access", side_effect=access),
@@ -323,12 +398,26 @@ class TestPrefetch:
         assert _reasons(first) == {WARMING_MODEL}
         warmup = LLMRequest.objects.get(source="warmup")
         assert (warmup.path, warmup.body["prompt"], warmup.model_name) == ("/api/generate", "", "qwen")
+        # Same context as the job's chat calls, or Ollama reloads the model on the first real request.
+        assert warmup.body["options"] == {"num_ctx": 8192}
         assert sched.tick(slots(), free()).claimed == []  # still loading; no second warm-up
         assert LLMRequest.objects.filter(source="warmup").count() == 1
         LLMRequest.objects.filter(pk=warmup.pk).update(status="done", load_ms=1500, completed_at=timezone.now())
         third = sched.tick(slots(), free())
         assert {c.job_id for c in third.claimed} == {j.id for j in jobs}
         assert GenerationJob.objects.get(id=jobs[0].id).execution["prefetch_load_s"] == 1.5
+
+    def test_agent_warmup_uses_the_frozen_num_ctx(self, user, system_ep, fake_inference):
+        endpoint = make_endpoint(user, served=[("qwen", "")])
+        model = make_model(endpoint, "qwen")
+        job = make_job(user, model, lane="sandbox")
+        bundle = dict(job.resolved_bundle)
+        bundle["endpoint"] = {**bundle["endpoint"], "num_ctx": 16384, "keep_alive": "1h"}
+        GenerationJob.objects.filter(pk=job.pk).update(resolved_bundle=bundle)
+        _scheduler().tick(slots(), free())
+        warmup = LLMRequest.objects.get(source="warmup")
+        assert warmup.body["options"] == {"num_ctx": 16384}
+        assert warmup.body["keep_alive"] == "1h"
 
     def test_failed_warmup_admits_cold(self, user, system_ep, fake_inference):
         endpoint = make_endpoint(user, served=[("qwen", "")])

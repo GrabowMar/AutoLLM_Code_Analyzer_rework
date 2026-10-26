@@ -32,6 +32,7 @@
 	import { listEndpoints, type EndpointSummary } from '$lib/api/inference';
 	import {
 		createExperiment,
+		createSchedule,
 		experimentErrorBody,
 		launchExperiment,
 		previewDraft,
@@ -563,7 +564,7 @@
 
 	async function saveEdit(b: ExperimentCreateV2): Promise<string> {
 		const id = experimentId!;
-		const { conditions, execution: exec, schedules: _schedules, ...fields } = b;
+		const { conditions, execution: exec, schedules, ...fields } = b;
 		await updateExperiment(id, {
 			...fields,
 			scheduling_policy: exec?.scheduling_policy,
@@ -573,6 +574,9 @@
 			execution_options: exec?.options,
 		});
 		await putConditions(id, conditions);
+		// The edit draft starts with no schedule (existing ones live on the
+		// Automation tab), so one switched on here is new: add it.
+		for (const spec of schedules ?? []) await createSchedule(id, spec);
 		return id;
 	}
 

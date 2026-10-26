@@ -174,7 +174,7 @@ export function applyEndpointEvent<T extends EndpointSummary>(
     live.session_count = data.session_count;
   }
   if (Array.isArray(data.loaded)) {
-    live.loaded = data.loaded as EndpointSummary["live"]["loaded"];
+    live.loaded = normalizeLoaded(data.loaded);
   }
   const next: T = { ...endpoint, live };
   if (typeof data.status === "string") {
@@ -184,6 +184,43 @@ export function applyEndpointEvent<T extends EndpointSummary>(
     next.last_error = (data.last_error as string | null) ?? null;
   }
   return next;
+}
+
+/**
+ * Coerce an event's `loaded` list to the REST `{name, size_vram, cpu_spill}`
+ * shape (older servers sent bare names), dropping nameless and duplicate
+ * entries so keyed `{#each}` blocks never see a duplicate key.
+ */
+export function normalizeLoaded(
+  items: readonly unknown[],
+): EndpointSummary["live"]["loaded"] {
+  const out: EndpointSummary["live"]["loaded"] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    let entry: EndpointSummary["live"]["loaded"][number] | null = null;
+    if (typeof item === "string") {
+      entry = { name: item, size_vram: null, cpu_spill: false };
+    } else if (
+      item &&
+      typeof item === "object" &&
+      typeof (item as { name?: unknown }).name === "string"
+    ) {
+      const raw = item as {
+        name: string;
+        size_vram?: unknown;
+        cpu_spill?: unknown;
+      };
+      entry = {
+        name: raw.name,
+        size_vram: typeof raw.size_vram === "number" ? raw.size_vram : null,
+        cpu_spill: Boolean(raw.cpu_spill),
+      };
+    }
+    if (!entry || !entry.name || seen.has(entry.name)) continue;
+    seen.add(entry.name);
+    out.push(entry);
+  }
+  return out;
 }
 
 /**
@@ -251,4 +288,32 @@ export function probeSummary(result: ProbeResult): {
     tone: "danger",
     text: `Test ${result.status}${result.error ? `: ${result.error}` : ""}`,
   };
+}
+
+/**
+ * Why a relay on another network could not use `url` as its `--server`, or
+ * null when it looks fine. The relay requires https (plain http only for
+ * localhost) and a host it can resolve, so internal names such as
+ * `django:8000` or single-label hosts are flagged.
+ */
+export function relayServerUrlProblem(
+  url: string | null | undefined,
+): string | null {
+  if (!url) return "The server URL is unknown.";
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return `"${url}" is not a valid URL.`;
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const local = host === "localhost" || host === "127.0.0.1" || host === "::1";
+  if (local)
+    return `${host} is only reachable from this server, not from a model machine.`;
+  if (parsed.protocol !== "https:")
+    return "The relay only accepts an https:// server URL.";
+  if (!host.includes(".") && !host.includes(":")) {
+    return `"${host}" looks like an internal host name that a model machine cannot resolve.`;
+  }
+  return null;
 }

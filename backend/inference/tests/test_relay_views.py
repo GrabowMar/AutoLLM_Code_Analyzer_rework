@@ -308,6 +308,39 @@ class TestResultsAndBodies:
         settings.RELAY_MAX_BODY_BYTES = 8 * 1024 * 1024
         assert relay.post("poll", raw=bomb, HTTP_CONTENT_ENCODING="gzip").status_code == 413
 
+    def test_json_bomb_bodies_are_refused_before_parsing(self, relay_setup):
+        endpoint, raw, _token = relay_setup
+        relay = Relay(raw)
+        relay.hello()
+        # Small endpoints cap the decompressed size well below the 32 MB result cap.
+        big = gzip.compress(b'{"x":"' + b"a" * (3 * 1024 * 1024) + b'"}')
+        assert relay.post("poll", raw=big, HTTP_CONTENT_ENCODING="gzip").status_code == 413
+        assert relay.post("hello", raw=big, HTTP_CONTENT_ENCODING="gzip").status_code == 413
+        # Container-heavy documents (parsed size ~30x the bytes) are refused without json.loads.
+        dicts = gzip.compress(b'{"x":[' + b"{}," * 200_000 + b"{}]}")
+        with mock.patch.object(views, "json") as fake_json:
+            assert relay.post("poll", raw=dicts, HTTP_CONTENT_ENCODING="gzip").status_code == 413
+        fake_json.loads.assert_not_called()
+        _serve(relay.session_id)
+        rid = _enqueue(endpoint)[0]
+        claim = relay.poll().json()["requests"][0]
+        many = b'{"claim_token":"x","json":[' + b"{}," * 600_000 + b"{}]}"
+        with mock.patch.object(views, "json") as fake_json:
+            resp = relay.post(f"requests/{rid}/result", raw=gzip.compress(many), HTTP_CONTENT_ENCODING="gzip")
+        assert resp.status_code == 413
+        fake_json.loads.assert_not_called()
+        # Deep nesting is a 400, not a 500.
+        assert relay.post("poll", raw=b"[" * 40_000 + b"]" * 40_000).status_code in (400, 413)
+        assert relay.post("poll", raw=b'{"a":' * 20_000 + b"1" + b"}" * 20_000).status_code == 400
+        # A legitimate large, string-heavy result still goes through.
+        body = {"claim_token": claim["claim_token"], "ok": True, "status_code": 200, "json": {"x": "y" * 4_000_000}}
+        resp = relay.post(
+            f"requests/{rid}/result",
+            raw=gzip.compress(json.dumps(body).encode()),
+            HTTP_CONTENT_ENCODING="gzip",
+        )
+        assert resp.json() == {"accepted": True}
+
     def test_inventory_caps(self, relay_setup, settings):
         _endpoint, raw, _token = relay_setup
         relay = Relay(raw)

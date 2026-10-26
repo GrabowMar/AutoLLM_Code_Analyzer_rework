@@ -251,11 +251,13 @@ LLM_GATEWAY_EGRESS_SUBNET = env.str("LLM_GATEWAY_EGRESS_SUBNET", default="10.213
 LLM_PROXY_MAX_BODY_BYTES = 16 * 1024 * 1024
 RELAY_POLL_TIMEOUT_S = 25
 RELAY_ACK_LEASE_S = 60  # 2 x poll timeout; extended on ack
-RELAY_SESSION_TTL_S = 60
+RELAY_SESSION_TTL_S = 120  # > relay retry gaps, so a short network blip keeps in-flight work
 RELAY_MAX_BODY_BYTES = 8 * 1024 * 1024  # request bodies (gzip ok); decompressed cap 32 MB
 RELAY_RATE_LIMIT_PER_S = 20
 RELAY_MIN_VERSION = "1.0.0"
 RELAY_INVENTORY_MAX_MODELS = 500
+RELAY_MAX_ENDPOINTS_PER_USER = 100  # non-staff relay endpoints per owner
+RELAY_MAX_TOKENS_PER_ENDPOINT = 20  # live (unrevoked, unexpired) tokens; staff exempt
 # frontend + Caddy addresses; client IP = right-most untrusted X-Forwarded-For hop
 TRUSTED_PROXY_CIDRS = env.list("TRUSTED_PROXY_CIDRS", default=[])
 # "cidr:port", e.g. "100.64.0.0/10:11434"
@@ -419,6 +421,9 @@ CELERY_WORKER_SEND_TASK_EVENTS = True
 CELERY_TASK_SEND_SENT_EVENT = True
 # https://docs.celeryq.dev/en/stable/userguide/configuration.html#worker-hijack-root-logger
 CELERY_WORKER_HIJACK_ROOT_LOGGER = False
+# Prefork pool size. Unset = os.cpu_count() (the host's, not the container's
+# cpus quota); local compose sets 2 to fit celeryworker's 1g cap.
+CELERY_WORKER_CONCURRENCY = env.int("CELERY_WORKER_CONCURRENCY", default=None)
 # django-allauth
 # ------------------------------------------------------------------------------
 ACCOUNT_ALLOW_REGISTRATION = env.bool("DJANGO_ACCOUNT_ALLOW_REGISTRATION", True)
@@ -533,6 +538,12 @@ DOCKER_APPS_NETWORK = env("DOCKER_APPS_NETWORK", default="")
 # mutual-TLS client cert (ca.pem, cert.pem, key.pem) for that daemon.
 APPS_DOCKER_HOST = env("APPS_DOCKER_HOST", default="")
 APPS_DOCKER_CERT_PATH = env("APPS_DOCKER_CERT_PATH", default="")
+# Local-model (non-OpenRouter) agent runs: their gateway reaches the executor's
+# LLM proxy only through apps-dind's llmproxy attachment + firewall exception
+# (compose/local/apps-dind/entrypoint.sh). Without apps-dind (production compose,
+# host daemon) that path does not exist, so such runs fail fast instead of
+# burning infra retries. Scaffolding runs on local models are unaffected.
+LLM_LOCAL_AGENT_RUNS = env.bool("LLM_LOCAL_AGENT_RUNS", default=bool(APPS_DOCKER_HOST))
 
 # Maximum number of analyzer threads to run in parallel per analysis task.
 ANALYSIS_MAX_WORKERS = env.int("ANALYSIS_MAX_WORKERS", default=4)

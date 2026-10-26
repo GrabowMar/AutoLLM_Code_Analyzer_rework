@@ -63,7 +63,7 @@
 						<span class="text-muted-foreground"> · {appName(item.appId)}{item.repeat != null ? ` · #${item.repeat + 1}` : ''}</span>
 					</a>
 					<span class="shrink-0 text-[11px] text-muted-foreground">
-						{CELL_STATES[item.code].label}{item.attempt > 1 ? ` · attempt ${item.attempt}` : ''}
+						{CELL_STATES[item.code].label}{item.attempt > 0 ? ` · attempt ${item.attempt + 1}` : ''}
 					</span>
 				</li>
 			{/each}

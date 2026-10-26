@@ -473,7 +473,7 @@ export interface GenerationJobList {
   phase?: JobPhase;
   experiment_seed?: number | null;
   config_fingerprint?: string | null;
-  /** Execution attempt (1 = first; infra retries reuse the row and bump it). */
+  /** Execution attempt, 0-based (0 = first; infra retries reuse the row and bump it). */
   attempt?: number;
   /** Endpoint slug the run used ("openrouter" for the OpenRouter catalog). */
   endpoint_slug?: string | null;
@@ -512,7 +512,7 @@ export interface GenerationJobsQuery {
   phase?: string;
   /** Latest attempt per (condition, app, repeat) cell only. */
   current?: boolean;
-  /** Only rows whose attempt is above this (e.g. 1 = retried runs). */
+  /** Only rows whose 0-based attempt is above this (0 = retried runs). */
   attempt_gt?: number;
 }
 

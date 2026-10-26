@@ -4,7 +4,7 @@ Exactly one executor runs (``manage.py run_executor``). It takes a
 session-level ``pg_try_advisory_lock`` on a dedicated connection as a guard
 against an accidental second instance and re-verifies it in ``pg_locks``
 every tick; losing it stops claiming, releases this instance's leases and
-exits (docker restarts it).
+exits with code 1 (the compose service restarts it: ``restart: unless-stopped``).
 
 Threads:
 
@@ -61,6 +61,7 @@ RECONCILE_EVERY_S = 15.0
 AUTOMATION_EVERY_S = 30.0
 PURGE_EVERY_S = 86400.0
 TICK_EVENT_EVERY_S = 2.0
+SCHEDULE_THREADS = 1  # schedule actions (top up / replicates / clone): short DB work, own pool
 CAPACITY_EVENT_EVERY_S = 5.0
 SHUTDOWN_LLM_GRACE_S = 20.0
 ORPHAN_EVERY_N_RECONCILES = 4
@@ -285,6 +286,7 @@ class Executor:
             "eval": BoundedPool("eval", self.slots.eval_slots, sync=self.sync_pools),
             "llm": BoundedPool("llm", self.slots.llm_job_threads, sync=self.sync_pools),
             "post": BoundedPool("post", self.slots.post_run_slots, sync=self.sync_pools),
+            "schedule": BoundedPool("schedule", SCHEDULE_THREADS, sync=self.sync_pools),
         }
         ExecutorInstance.objects.exclude(id=self.executor_id).filter(stopped_at__isnull=True).update(
             stopped_at=now,
@@ -309,7 +311,11 @@ class Executor:
             logger.info("Startup reconcile: %s expired, %s lost", report.expired, report.lost)
         self._start_thread("heartbeat", self._heartbeat_loop)
         if self.start_proxy:
-            self._start_service("llm-proxy", "backend.inference.proxy_server", "serve", self.stop_event)
+            # Fatal: without the proxy every local-model agent run would fail as
+            # infra while this instance still looks online, so a bind failure
+            # (wrong LLM_PROXY_BIND, no llmproxy attachment) stops the executor
+            # with exit 1 and shows up as a restart loop instead.
+            self._start_service("llm-proxy", "backend.inference.proxy_server", "serve", self.stop_event, fatal=True)
         if self.start_pumps:
             self._start_service(
                 "direct-pumps",
@@ -326,7 +332,13 @@ class Executor:
         thread.start()
         self._threads.append(thread)
 
-    def _start_service(self, name: str, module: str, func: str, *args: Any) -> None:
+    def _start_service(self, name: str, module: str, func: str, *args: Any, fatal: bool = False) -> None:
+        """Run ``module.func(*args)`` in a daemon thread.
+
+        ``fatal``: the service ending for any reason before shutdown (a crash or
+        an early return) stops the executor with exit code 1.
+        """
+
         def target() -> None:
             import importlib
 
@@ -334,10 +346,15 @@ class Executor:
                 getattr(importlib.import_module(module), func)(*args)
             except NotImplementedError:
                 logger.warning("%s is not implemented yet; not started", name)
+                return
             except Exception:
                 logger.exception("%s crashed", name)
             finally:
                 workers.close_db()
+            if fatal and not self.stop_event.is_set():
+                logger.error("%s stopped unexpectedly; stopping the executor", name)
+                self.exit_code = 1
+                self.request_stop(f"{name} stopped")
 
         self._start_thread(name, target)
 
@@ -486,24 +503,34 @@ class Executor:
         transitions.publish_job(job)
 
     def _automation(self) -> None:
-        """Schedules fire and post-runs start on the post-run pool, never on this loop."""
+        """Schedules fire on their own pool and post-runs start on the post-run pool, never on this loop.
+
+        Schedule actions are short DB work; sharing the single post-run thread would queue a due
+        fire behind a multi-hour analysis (and drop it on restart, its ``next_run_at`` already advanced).
+        """
         if self.slots is None or self.slots.draining:
             return
-        from backend.generation.models import ExperimentPostRun
-
         post = self.pools["post"]
+        schedule_pool = self.pools["schedule"]
         try:
             from backend.generation.services.experiment_automation import run_due_schedules
 
             run_due_schedules(
                 timezone.now(),
-                submit=lambda fn, schedule_id: post.submit(workers.run_schedule_action, schedule_id, force=True),
+                submit=lambda fn, schedule_id: schedule_pool.submit(
+                    workers.run_schedule_action,
+                    schedule_id,
+                    force=True,
+                ),
             )
         except NotImplementedError:
             pass
         except Exception:
             logger.exception("run_due_schedules failed")
-        if post.free() <= 0 or not ExperimentPostRun.objects.filter(status=ExperimentPostRun.Status.PENDING).exists():
+        from backend.generation.services.experiment_automation import claimable_post_runs
+
+        # Pending post-runs and running ones whose lease expired (an executor restart mid-analysis).
+        if post.free() <= 0 or not claimable_post_runs().exists():
             return
         if self.slots.defer_post_runs:
             snap_busy = (
@@ -659,34 +686,52 @@ class Executor:
             self._last_endpoints.pop(gone, None)
 
     def _publish_ticks(self, result: TickResult) -> None:
+        """``tick`` events (spec §F.6): rollups of the **current attempt per cell**, like REST status.
+
+        Fields the executor cannot compute cheaply every tick (``throughput``,
+        ``eta_seconds``, ``cells.retried``, per-endpoint ``tokens_per_s`` /
+        ``loaded``) are left out; the client keeps its last REST values for them.
+        """
         from backend.generation.models import Experiment
+        from backend.generation.services.experiments import _progress_for
+        from backend.inference.models import LLMRequest
         from backend.realtime.events import publish_experiment_event
 
-        rows = (
-            GenerationJob.objects.filter(
-                experiment__status__in=[Experiment.Status.RUNNING, Experiment.Status.PAUSED],
+        experiments = list(
+            Experiment.objects.filter(status__in=[Experiment.Status.RUNNING, Experiment.Status.PAUSED])
+            .annotate(
+                n_conditions=Count("conditions", distinct=True),
+                n_apps=Count("app_requirements", distinct=True),
             )
-            .order_by()
-            .values("experiment_id", "status", "phase")
-            .annotate(n=Count("id"))
+            .values_list("id", "repeats", "n_conditions", "n_apps"),
         )
-        counts: dict[Any, dict[str, int]] = {}
-        for row in rows:
-            key = row["phase"] if row["status"] == S.RUNNING and row["phase"] else row["status"]
-            bucket = counts.setdefault(row["experiment_id"], {})
-            bucket[key] = bucket.get(key, 0) + row["n"]
+        progress = _progress_for([row[0] for row in experiments])
         snap = result.snapshot
+        system_ep = snap.system_ep if snap is not None else None
+        leased = dict(
+            LLMRequest.objects.filter(status=LLMRequest.Status.LEASED)
+            .order_by()
+            .values("endpoint_id")
+            .annotate(n=Count("id"))
+            .values_list("endpoint_id", "n"),
+        )
         lanes_by_exp: dict[str, list] = {}
         for state in result.lanes.values():
             lanes_by_exp.setdefault(str(state.experiment_id), []).append(state)
         open_circuits = set(self.breaker.open_endpoints())
-        for experiment_id, bucket in counts.items():
+        live: set[str] = set()
+        for experiment_id, repeats, n_conditions, n_apps in experiments:
+            live.add(str(experiment_id))
+            counts = progress.get(experiment_id) or {}
             endpoints = []
             for state in lanes_by_exp.get(str(experiment_id), []):
+                active = snap.ep_active.get(state.endpoint_id, 0) if snap else 0
                 endpoints.append(
                     {
                         "id": state.endpoint_id,
-                        "slots_used": snap.ep_active.get(state.endpoint_id, 0) if snap else 0,
+                        # Same meaning as REST ``slots.used``: jobs on the OpenRouter row, leased requests locally.
+                        "slots_used": active if state.endpoint_id == system_ep else leased.get(state.endpoint_id, 0),
+                        "active": active,
                         "queued": state.pending_in_window,
                         "blocked_reason": state.reason,
                         "circuit": "open" if state.endpoint_id in open_circuits else "closed",
@@ -695,7 +740,13 @@ class Executor:
             reasons = [e["blocked_reason"] for e in endpoints if e["blocked_reason"]]
             event = {
                 "type": "tick",
-                "counts": bucket,
+                "counts": counts,
+                "cells": {
+                    "total": int(n_conditions) * int(n_apps) * int(repeats or 0),
+                    "done": counts.get("completed", 0),
+                    "failed_final": counts.get("failed", 0) + counts.get("cancelled", 0),
+                    "in_flight": counts.get("running", 0) + counts.get("eval_queued", 0) + counts.get("evaluating", 0),
+                },
                 "endpoints": endpoints,
                 "bottleneck": reasons[0] if reasons else None,
             }
@@ -703,5 +754,5 @@ class Executor:
                 continue
             self._last_ticks[str(experiment_id)] = event
             publish_experiment_event(experiment_id, event)
-        for stale in set(self._last_ticks) - {str(e) for e in counts}:
+        for stale in set(self._last_ticks) - live:
             self._last_ticks.pop(stale, None)

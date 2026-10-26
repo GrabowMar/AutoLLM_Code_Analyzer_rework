@@ -80,7 +80,29 @@ def next_runs(cron: str, tz: str, *, after: datetime | None = None, count: int =
         raise ScheduleError(msg)
     start = (after or timezone.now()).astimezone(zone)
     it = croniter(cron, start)
-    return [it.get_next(datetime).astimezone(ZoneInfo("UTC")) for _ in range(count)]
+    fields = cron.split()
+    fixed_hour = len(fields) > 1 and "*" not in fields[1]
+    runs: list[datetime] = []
+    while len(runs) < count:
+        candidate = it.get_next(datetime)
+        if fixed_hour and _repeated_wall_time(candidate, zone):
+            continue
+        runs.append(candidate.astimezone(ZoneInfo("UTC")))
+    return runs
+
+
+def _repeated_wall_time(moment: datetime, zone: ZoneInfo) -> bool:
+    """Whether *moment* is the second occurrence of an ambiguous local time (DST fall-back).
+
+    A cron with a fixed hour ("30 2 * * *") already fired at the first
+    occurrence an hour earlier; like cron itself, it does not fire again.
+    Wildcard-hour crons keep firing through the repeated hour.
+    """
+    local = moment.astimezone(ZoneInfo("UTC")).astimezone(zone)
+    naive = local.replace(tzinfo=None)
+    first = naive.replace(tzinfo=zone, fold=0).utcoffset()
+    second = naive.replace(tzinfo=zone, fold=1).utcoffset()
+    return first != second and local.utcoffset() == second
 
 
 def validate_cron(cron: str, tz: str) -> list[datetime]:
@@ -161,6 +183,24 @@ def _is_active(experiment: Experiment) -> bool:
     return experiment.status == Experiment.Status.PAUSED or experiment.jobs.filter(status__in=_ACTIVE).exists()
 
 
+def _active_detail(schedule: ExperimentSchedule) -> str | None:
+    """Why ``skip_if_active`` skips this fire, or None.
+
+    ``clone_and_run`` launches clones, not its source (often a template that never
+    runs), so a clone it launched that is still queued, running or paused counts too:
+    a sweep longer than the cron period must not pile up overlapping clones.
+    """
+    if _is_active(schedule.experiment):
+        return "experiment still active"
+    if schedule.action == ExperimentSchedule.Action.CLONE_AND_RUN:
+        clones = Experiment.objects.filter(created_by_schedule=schedule)
+        if clones.filter(
+            Q(status=Experiment.Status.PAUSED) | Q(jobs__status__in=_ACTIVE),
+        ).exists():
+            return "previous clone still active"
+    return None
+
+
 # ── schedules ─────────────────────────────────────────────────────────
 
 
@@ -168,7 +208,8 @@ def run_due_schedules(now: datetime, submit: Callable | None = None) -> list[int
     """Claim enabled schedules with ``next_run_at <= now`` and advance ``next_run_at`` (croniter, schedule tz).
 
     Skips (``last_result={outcome: "skipped"}``) when ``skip_if_active`` and the
-    experiment has PENDING/RUNNING jobs or is paused; otherwise hands the id
+    experiment (for ``clone_and_run`` also a clone it launched) has PENDING/RUNNING
+    jobs or is paused; otherwise hands the id
     to ``submit(run_schedule_action, schedule_id)`` (the post-run pool; when
     ``submit`` is None the caller submits the returned ids). Draining stops
     schedule firing. Returns the ids to run.
@@ -190,8 +231,8 @@ def run_due_schedules(now: datetime, submit: Callable | None = None) -> list[int
                 schedule.enabled = False
                 schedule.last_result = {"outcome": "skipped", "detail": "experiment archived"}
                 schedule.last_run_at = now
-            elif schedule.skip_if_active and _is_active(experiment):
-                schedule.last_result = {"outcome": "skipped", "detail": "experiment still active"}
+            elif schedule.skip_if_active and (detail := _active_detail(schedule)):
+                schedule.last_result = {"outcome": "skipped", "detail": detail}
                 schedule.last_run_at = now
             else:
                 to_run.append(schedule.id)
@@ -352,6 +393,23 @@ def create_manual_post_run(experiment: Experiment) -> ExperimentPostRun:
 
     with transaction.atomic():
         Experiment.objects.select_for_update().filter(pk=experiment.pk).values_list("pk").first()
+        now = timezone.now()
+        # A running row whose lease lapsed belongs to a dead executor (restart, crash);
+        # a manual re-run supersedes it instead of being refused forever.
+        stale = list(
+            experiment.post_runs.select_for_update()
+            .filter(status=ExperimentPostRun.Status.RUNNING)
+            .filter(Q(lease_expires_at__lt=now) | Q(lease_expires_at__isnull=True))
+            .values_list("pk", flat=True),
+        )
+        if stale:
+            ExperimentPostRun.objects.filter(pk__in=stale).update(
+                status=ExperimentPostRun.Status.CANCELLED,
+                lease_owner="",
+                lease_expires_at=None,
+                completed_at=now,
+                error="Interrupted (executor restart); superseded by a manual re-run.",
+            )
         active = experiment.post_runs.filter(
             status__in=(ExperimentPostRun.Status.PENDING, ExperimentPostRun.Status.RUNNING),
         )
@@ -406,19 +464,21 @@ def _post_run_deferred() -> bool:
     return sandbox_used + eval_used >= executor_settings.sandbox_slots + executor_settings.eval_slots
 
 
+def claimable_post_runs(now=None):
+    """Post-runs an executor may start: pending ones, and running ones whose lease expired (restart, crash)."""
+    now = now or timezone.now()
+    return ExperimentPostRun.objects.filter(
+        Q(status=ExperimentPostRun.Status.PENDING)
+        | Q(status=ExperimentPostRun.Status.RUNNING, lease_expires_at__lt=now)
+        | Q(status=ExperimentPostRun.Status.RUNNING, lease_expires_at__isnull=True),
+    )
+
+
 def _claim_post_run(executor_id: str) -> ExperimentPostRun | None:
     now = timezone.now()
     lease = timedelta(seconds=int(settings.EXECUTOR_LEASE_SECONDS))
     with transaction.atomic():
-        post_run = (
-            ExperimentPostRun.objects.select_for_update(skip_locked=True)
-            .filter(
-                Q(status=ExperimentPostRun.Status.PENDING)
-                | Q(status=ExperimentPostRun.Status.RUNNING, lease_expires_at__lt=now),
-            )
-            .order_by("created_at")
-            .first()
-        )
+        post_run = claimable_post_runs(now).select_for_update(skip_locked=True).order_by("created_at").first()
         if post_run is None:
             return None
         post_run.status = ExperimentPostRun.Status.RUNNING

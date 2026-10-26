@@ -170,7 +170,15 @@
 				const tick = d as unknown as TickEvent;
 				data = {
 					...data,
-					items: data.items.map((e) => (e.id === id ? { ...e, progress: tick.counts, eta_seconds: tick.eta_seconds } : e)),
+					items: data.items.map((e) =>
+						e.id === id
+							? {
+									...e,
+									progress: tick.counts ? { ...e.progress, ...tick.counts } : e.progress,
+									eta_seconds: tick.eta_seconds !== undefined ? tick.eta_seconds : e.eta_seconds,
+								}
+							: e,
+					),
 				};
 			} else if (d.type === 'state') {
 				void load(true);

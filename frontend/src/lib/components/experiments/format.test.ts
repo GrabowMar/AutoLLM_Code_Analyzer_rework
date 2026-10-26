@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bottleneckLabel,
   effectivePolicyLabel,
   formatDeltaPp,
   formatEta,
@@ -53,5 +54,18 @@ describe("formatting", () => {
       effectivePolicyLabel({ "gpu-1": "blocked", openrouter: "interleaved" }),
     ).toBe("Per repeat (gpu-1) · Interleaved (openrouter)");
     expect(effectivePolicyLabel(null, "grouped")).toBe("Grouped");
+  });
+});
+
+describe("bottleneckLabel", () => {
+  it("tells an offline endpoint apart from one at capacity", () => {
+    const offline = bottleneckLabel("endpoint_offline:gpu-1");
+    expect(offline?.label).toBe("Endpoint gpu-1 offline");
+    expect(offline?.title).toMatch(/relay/);
+    expect(offline?.title).not.toMatch(/raise its slots/);
+    expect(bottleneckLabel("endpoint:gpu-1")?.title).toMatch(/raise its slots/);
+    // Raw scheduler reasons from live ticks.
+    expect(bottleneckLabel("endpoint_offline")?.title).toMatch(/relay/);
+    expect(bottleneckLabel(null)).toBeNull();
   });
 });

@@ -231,9 +231,15 @@
 							{/each}
 						</div>
 						<p class={cn('text-[11px]', sandboxOverLimit ? 'text-warning-fg' : 'text-muted-foreground')}>
-							apps-dind memory {capacity.limits.apps_dind_mem || 'unknown'} allows at most
-							{capacity.limits.max_sandbox_slots_allowed} sandbox slots (3 GB per sandbox plus gateway, evaluation and
-							analyzer headroom).
+							{#if capacity.limits.max_sandbox_slots_allowed > 0}
+								apps-dind memory {capacity.limits.apps_dind_mem || 'unknown'} allows at most
+								{capacity.limits.max_sandbox_slots_allowed} sandbox slots (3 GB per sandbox plus gateway, evaluation and
+								analyzer headroom).
+							{:else}
+								apps-dind memory {capacity.limits.apps_dind_mem || 'unknown'} fits one sandbox only when evaluation
+								is idle: 1 sandbox slot runs, and sandbox runs and evaluations take turns (3 GB per sandbox plus
+								gateway, evaluation and analyzer headroom). Raise the apps-dind memory to run them side by side.
+							{/if}
 						</p>
 						{#if ruleError}
 							<div class={cn('rounded-md border px-3 py-2 text-xs', toneClasses.danger)} role="alert">

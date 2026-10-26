@@ -372,6 +372,22 @@ class Scheduler:
         extras: dict[str, dict[str, Any]] = {}
         blocked: set[tuple[str, int]] = set()
 
+        lane_threads = {"llm": slots.llm_job_threads, "sandbox": slots.sandbox_slots}
+
+        def endpoint_load(head: LaneRow) -> float:
+            """Share of what this endpoint can really take (its job cap, at most the lane's threads).
+
+            Lanes of one experiment tie on priority and fair share forever (each
+            admission raises both together), so without this the lane with the
+            largest cap (the OpenRouter row, cap 64 > llm threads) would take
+            every free thread while local endpoints sit idle.
+            """
+            ep_state = snap.endpoint(head.ep)
+            cap = ep_state.job_cap if ep_state is not None else 1
+            threads = lane_threads.get(head.lane, 0)
+            usable = max(1, min(cap, threads) if threads > 0 else cap)
+            return ep_active[head.ep] / usable
+
         def sort_key(key: tuple[str, int]) -> tuple:
             head = lanes[key][0]
             ep_state = snap.endpoint(head.ep)
@@ -382,11 +398,14 @@ class Scheduler:
                 -head.priority,
                 user_active[head.user_id],
                 exp_active[head.experiment_id] if head.experiment_id else 0,
+                endpoint_load(head),
                 affinity,
                 warm,
                 started,
                 key,
             )
+
+        held_by_swap: set[tuple[str, int]] = set()
 
         while True:
             candidates = [k for k, q in lanes.items() if q and k not in blocked]
@@ -411,8 +430,7 @@ class Scheduler:
             if reason is not None:
                 blocked.add(key)
                 state.reason = reason
-                if reason == RESIDENCY_WAIT:
-                    self.residency_wait_since.setdefault(key, now)
+                self._note_block(key, head, reason, now, swap, blocked, held_by_swap)
                 continue
             lanes[key].popleft()
             self.residency_wait_since.pop(key, None)
@@ -430,6 +448,42 @@ class Scheduler:
                 state.head_job = lanes[key][0].id
             state.pending_in_window = len(lanes[key])
         return chosen, extras
+
+    def _note_block(
+        self,
+        key: tuple[str, int],
+        head: LaneRow,
+        reason: str,
+        now: datetime,
+        swap: dict[int, tuple[tuple[str, int], str]],
+        blocked: set[tuple[str, int]],
+        held_by_swap: set[tuple[str, int]],
+    ) -> None:
+        """Starvation bookkeeping for a blocked head (spec §C.4 rule 4).
+
+        - Only a lane blocked by residency itself records ``residency_wait_since``;
+          a lane held back by another lane's drain-for-swap does not start a clock
+          (else, after a drain longer than the guard, the drained lane is "starved"
+          the moment the swap lands and the endpoint swaps back after one batch).
+        - A lane whose model is not served is not waiting for residency: its clock goes.
+        - When the starved head itself cannot run for another reason (model not
+          served, its experiment's cap), the swap is abandoned for this tick and the
+          lanes it held are re-evaluated, so the endpoint never idles on it.
+        """
+        starved = swap.get(head.ep)
+        if reason == RESIDENCY_WAIT:
+            if starved is not None and starved[0] != key and starved[1] != head.model_key:
+                held_by_swap.add(key)
+            else:
+                self.residency_wait_since.setdefault(key, now)
+            return
+        if reason == MODEL_NOT_SERVED:
+            self.residency_wait_since.pop(key, None)
+        if starved is not None and starved[0] == key and reason in (MODEL_NOT_SERVED, EXPERIMENT_CAP):
+            del swap[head.ep]
+            for other in [k for k in held_by_swap if k[1] == head.ep]:
+                held_by_swap.discard(other)
+                blocked.discard(other)
 
     def _drain_for_swap(self, now: datetime, lanes) -> dict[int, tuple[tuple[str, int], str]]:
         """Endpoints in drain-for-swap: ``{endpoint: (starved lane, its head's model)}``."""
@@ -532,10 +586,11 @@ class Scheduler:
 
             job = GenerationJob.objects.select_related("model__endpoint", "created_by").get(id=head.id)
             access = resolve_access(job.created_by, job.model)
+            body = warmup_body(head.served_name, job, access, ep)
             enqueue(
                 access,
                 "/api/generate",
-                {"model": head.served_name, "prompt": "", "keep_alive": access.keep_alive or ep.keep_alive},
+                body,
                 job=None,
                 source="warmup",
                 priority=head.priority,
@@ -587,6 +642,30 @@ class Scheduler:
                 ),
             )
         return claimed
+
+
+def warmup_body(served_name: str, job, access, ep) -> dict[str, Any]:
+    """The ``/api/generate`` warm-up body: the same ``num_ctx`` (and keep-alive) the job's chat calls send.
+
+    Ollama reloads a runner whose options differ from the request's
+    (``num_ctx`` among them), so a warm-up at the server's default context
+    would be thrown away by the job's first ``/api/chat`` and the real load
+    would land on the agent's wall clock. Mirrors where each mode's chat calls
+    take their parameters: agents through the LLM proxy from the frozen
+    ``resolved_bundle["endpoint"]`` section, other modes from the live access.
+    """
+    from backend.generation.models import GenerationJob
+
+    section: dict[str, Any] = {}
+    if job.mode == GenerationJob.Mode.AGENT:
+        frozen = (job.resolved_bundle or {}).get("endpoint")
+        section = frozen if isinstance(frozen, dict) else {}
+    num_ctx = section.get("num_ctx") or access.num_ctx
+    keep_alive = section.get("keep_alive") or access.keep_alive or ep.keep_alive
+    body: dict[str, Any] = {"model": served_name, "prompt": "", "keep_alive": keep_alive}
+    if num_ctx:
+        body["options"] = {"num_ctx": int(num_ctx)}
+    return body
 
 
 def _resident_limit(ep, head: LaneRow) -> int | None:

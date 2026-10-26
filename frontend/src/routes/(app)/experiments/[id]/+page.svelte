@@ -110,6 +110,12 @@
 		}
 	}
 
+	/** Runs were queued here (top-up, schedule "Run now"): it may have reopened. */
+	function relaunched() {
+		if (!experiment) return;
+		void load(experiment.id, true).then(() => live?.restart());
+	}
+
 	function ensureLive(detail: ExperimentDetail) {
 		if (detail.status === 'draft') {
 			live?.destroy();
@@ -471,7 +477,7 @@
 			</Tabs.Content>
 			<Tabs.Content value="runs" class="pt-4">
 				{#if tab === 'runs'}
-					<RunsTab {experiment} {appName} onlaunched={() => void load(experiment!.id, true).then(() => live?.restart())} />
+					<RunsTab {experiment} {appName} {counts} {refreshSignal} {tickSignal} onlaunched={relaunched} />
 				{/if}
 			</Tabs.Content>
 			<Tabs.Content value="design" class="pt-4">
@@ -486,7 +492,7 @@
 			</Tabs.Content>
 			<Tabs.Content value="automation" class="pt-4">
 				{#if tab === 'automation'}
-					<AutomationTab {experiment} {postRunSignal} />
+					<AutomationTab {experiment} {postRunSignal} onlaunched={relaunched} />
 				{/if}
 			</Tabs.Content>
 		</Tabs.Root>

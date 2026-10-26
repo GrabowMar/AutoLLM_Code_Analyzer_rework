@@ -89,6 +89,44 @@ class TestCron:
         disabled = automation.validate_schedule({"action": "top_up", "cron": "0 3 * * *", "enabled": False})
         assert disabled["next_run_at"] is None
 
+    def test_a_fixed_hour_cron_fires_once_on_the_dst_fall_back_night(self):
+        from datetime import UTC
+        from datetime import datetime
+
+        before = datetime(2026, 10, 24, 12, tzinfo=UTC)
+        runs = automation.next_runs("30 2 * * *", "Europe/Warsaw", after=before, count=3)
+        assert runs == [
+            datetime(2026, 10, 25, 0, 30, tzinfo=UTC),  # 02:30 CEST
+            datetime(2026, 10, 26, 1, 30, tzinfo=UTC),  # not 02:30 CET on the 25th
+            datetime(2026, 10, 27, 1, 30, tzinfo=UTC),
+        ]
+        # Advancing right after the first fire (how ``_advance`` runs) skips the repeated hour.
+        after_fire = datetime(2026, 10, 25, 0, 30, 17, tzinfo=UTC)
+        assert automation.next_runs("30 2 * * *", "Europe/Warsaw", after=after_fire, count=1) == [runs[1]]
+        new_york = automation.next_runs(
+            "30 1 * * *",
+            "America/New_York",
+            after=datetime(2026, 11, 1, 5, 31, tzinfo=UTC),
+            count=1,
+        )
+        assert new_york == [datetime(2026, 11, 2, 6, 30, tzinfo=UTC)]
+        # Wildcard-hour crons keep firing through the repeated hour.
+        hourly = automation.next_runs(
+            "0 * * * *",
+            "Europe/Warsaw",
+            after=datetime(2026, 10, 24, 23, 30, tzinfo=UTC),
+            count=3,
+        )
+        assert hourly == [datetime(2026, 10, 25, h, tzinfo=UTC) for h in (0, 1, 2)]
+        # Spring forward is unaffected.
+        spring = automation.next_runs(
+            "30 3 * * *",
+            "Europe/Warsaw",
+            after=datetime(2027, 3, 27, 12, tzinfo=UTC),
+            count=1,
+        )
+        assert spring == [datetime(2027, 3, 28, 1, 30, tzinfo=UTC)]
+
 
 # ── the due tick ──────────────────────────────────────────────────────
 
@@ -125,6 +163,23 @@ class TestDueTick:
         Experiment.objects.filter(id=experiment.id).update(status=Experiment.Status.PAUSED)
         _schedule(experiment)
         assert automation.run_due_schedules(timezone.now()) == []
+
+    def test_clone_and_run_skips_while_a_clone_it_launched_is_active(self, user):
+        template, _ = _finished(user)
+        schedule = _schedule(template, "clone_and_run")
+        assert automation.run_due_schedules(timezone.now()) == [schedule.id]
+        result = automation.run_schedule_action(schedule.id)
+        clone = Experiment.objects.get(id=result["experiment_id"])
+        assert clone.jobs.filter(status__in=(S.PENDING, S.RUNNING)).exists()
+        ExperimentSchedule.objects.filter(id=schedule.id).update(next_run_at=timezone.now() - timedelta(minutes=1))
+        assert automation.run_due_schedules(timezone.now()) == []
+        schedule.refresh_from_db()
+        assert schedule.last_result == {"outcome": "skipped", "detail": "previous clone still active"}
+        # Once the clone finishes the next fire goes ahead.
+        clone.jobs.update(status=S.COMPLETED)
+        Experiment.objects.filter(id=clone.id).update(status=Experiment.Status.COMPLETED)
+        ExperimentSchedule.objects.filter(id=schedule.id).update(next_run_at=timezone.now() - timedelta(minutes=1))
+        assert automation.run_due_schedules(timezone.now()) == [schedule.id]
 
     def test_draining_stops_schedule_firing(self, user):
         experiment, _ = _finished(user)

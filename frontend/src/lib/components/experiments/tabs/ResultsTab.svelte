@@ -31,7 +31,7 @@
 	import Trophy from '@lucide/svelte/icons/trophy';
 	import Leaderboard from '../Leaderboard.svelte';
 	import PairedDeltas from '../PairedDeltas.svelte';
-	import { isTerminal } from '../format';
+	import { conditionName, isTerminal } from '../format';
 
 	interface Props {
 		experiment: ExperimentDetail;
@@ -107,21 +107,25 @@
 		goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
 	}
 
-	const conditionLabel = $derived(new Map(experiment.conditions.map((c) => [c.id, c.label])));
+	const conditionLabel = $derived(new Map(experiment.conditions.map((c) => [c.id, conditionName(c)])));
 	const conditionInfo = $derived(
 		experiment.conditions.map((c) => ({
 			id: c.id,
-			label: c.label,
+			label: conditionName(c),
 			model: c.model_name ?? `model #${c.model}`,
 			variant: c.harness_preset_ref ? `${c.harness_preset_ref.name} v${c.harness_preset_ref.version}` : c.harness || '',
 		}))
 	);
 	const matrix = $derived(results ? fromResultsMatrix(results, conditionInfo) : null);
 	const graded = $derived((results?.leaderboard ?? []).some((r) => r.n_graded > 0));
+	/** Graded cells exist, but none is shared by every condition (common cells on). */
+	const onlyOutsideCommon = $derived(
+		!graded && (results?.leaderboard ?? []).some((r) => (r.n_missing?.not_common ?? 0) > 0)
+	);
 	const baselineItems = $derived(
 		experiment.conditions.map((c) => ({
 			value: String(c.id),
-			label: c.label,
+			label: conditionName(c),
 			description: c.id === experiment.baseline_condition_id ? 'pre-registered' : undefined,
 		}))
 	);
@@ -189,7 +193,17 @@
 				<AlertDescription>Interim: conditions are at unequal progress — p-values are hidden until the experiment finishes.</AlertDescription>
 			</Alert>
 		{/if}
-		{#if !graded}
+		{#if onlyOutsideCommon}
+			<EmptyState
+				icon={Trophy}
+				title="No cells graded for every condition yet"
+				description="Some runs are graded, but “Common cells only” compares conditions on the (app, repeat) cells all of them have graded. Turn it off to see the graded runs now."
+			>
+				{#snippet action()}
+					<Button size="sm" variant="outline" onclick={() => toggle('common', false, true)}>Show all graded cells</Button>
+				{/snippet}
+			</EmptyState>
+		{:else if !graded}
 			<EmptyState
 				icon={Trophy}
 				title="No graded cells yet"

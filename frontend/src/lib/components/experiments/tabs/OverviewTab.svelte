@@ -7,6 +7,7 @@
 	 * Props: `experiment`, `live` (ExperimentLive), `appName(id)`.
 	 */
 	import * as Card from '$lib/components/ui/card';
+	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
 	import { Segmented } from '$lib/components/ui/segmented';
 	import * as Select from '$lib/components/ui/select';
@@ -103,7 +104,11 @@
 	{#if live.loading}
 		<LoadingState label="loading live status" />
 	{:else}
-		<EmptyState title="No live status" description={live.error || 'The status could not be loaded.'} />
+		<EmptyState title="No live status" description={live.error || 'The status could not be loaded.'}>
+			{#snippet action()}
+				<Button size="sm" variant="outline" onclick={() => void live.resync()}>Retry</Button>
+			{/snippet}
+		</EmptyState>
 	{/if}
 {:else}
 	<div class="space-y-6">

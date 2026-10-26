@@ -3378,7 +3378,8 @@ def experiment_status_v2(experiment: Experiment, user: AbstractUser) -> dict[str
             continue
         median_s = _median(durations_by_endpoint[key])
         if not endpoint["online"]:
-            eta, bottleneck = None, f"endpoint:{endpoint['slug']}"
+            # Not a capacity problem: the relay (or endpoint) is down.
+            eta, bottleneck = None, f"endpoint_offline:{endpoint['slug']}"
             break
         estimate = _eta(remaining, median_s, endpoint["_parallel"])
         if estimate is None:

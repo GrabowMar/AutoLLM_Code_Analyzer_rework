@@ -7,8 +7,12 @@
  *   buckets; `tick` replaces the rollups; `state` refetches (and tells the
  *   page); `post_run` updates the post-run progress.
  * - Fallback: while SSE is reconnecting, or no event arrived for 20 s while
- *   the experiment is active, `status` is polled every 5 s and `cells` every
- *   15 s. A hidden tab does not poll; becoming visible resyncs.
+ *   cells are in flight (status `running` with running / evaluating cells),
+ *   `status` is polled every 5 s and `cells` every 15 s. A paused experiment,
+ *   or one only waiting on offline endpoints, is legitimately quiet (ticks are
+ *   sent only on change; the heartbeat is an SSE comment), so silence there
+ *   does not count. Until the first status load succeeds, status is retried
+ *   every 5 s. A hidden tab does not poll; becoming visible resyncs.
  * - Stops (closes SSE, no polling) once the experiment is terminal and no
  *   cell is in flight; `restart()` resumes after a top-up or resume.
  *
@@ -58,8 +62,9 @@ export interface ActivityItem {
   appId: number | null;
   repeat: number | null;
   code: CellCode;
+  /** 0-based like `GenerationJob.attempt` (0 = first try). */
   attempt: number;
-  /** A retry (attempt > 1) re-entering the queue or running again. */
+  /** A retry (attempt > 0) re-entering the queue or running again. */
   retry: boolean;
 }
 
@@ -270,8 +275,19 @@ export class ExperimentLive {
   onTicker(): void {
     if (this.destroyed || this.stopped) return;
     const now = this.deps.now();
-    const active = !!this.status && !this.settled;
-    const silent = active && now - this.lastEventAt > SILENCE_MS;
+    if (!this.status) {
+      // The first status load failed: keep retrying it (events need a status).
+      this.polling = false;
+      if (this.deps.hidden()) return;
+      if (now - this.lastStatusPoll >= STATUS_POLL_MS) {
+        void this.refreshStatus().then(() => this.ensureLive());
+      }
+      if (!this.grid && now - this.lastCellsPoll >= CELLS_POLL_MS) {
+        void this.refreshCells();
+      }
+      return;
+    }
+    const silent = this.expectsEvents() && now - this.lastEventAt > SILENCE_MS;
     const fallback = this.connection === "reconnecting" || silent;
     this.polling = fallback;
     if (!fallback || this.deps.hidden()) return;
@@ -279,6 +295,14 @@ export class ExperimentLive {
       void this.refreshStatus().then(() => this.ensureLive());
     }
     if (now - this.lastCellsPoll >= CELLS_POLL_MS) void this.refreshCells();
+  }
+
+  /** Running with cells in flight: job / tick events are due, silence is suspect. */
+  private expectsEvents(): boolean {
+    const s = this.status;
+    if (!s || this.settled || s.status !== "running") return false;
+    const c = s.counts;
+    return (c.running ?? 0) + (c.eval_queued ?? 0) + (c.evaluating ?? 0) > 0;
   }
 
   // ── events ────────────────────────────────────────────────────────
@@ -332,9 +356,9 @@ export class ExperimentLive {
       appId: event.app_id,
       repeat: event.repeat_index,
       code: codeForJobEvent(event),
-      attempt: event.attempt ?? 1,
+      attempt: event.attempt ?? 0,
       retry:
-        (event.attempt ?? 1) > 1 &&
+        (event.attempt ?? 0) > 0 &&
         (event.status === "pending" || event.status === "running"),
     };
     this.activity = [item, ...this.activity].slice(0, ACTIVITY_LIMIT);
@@ -343,27 +367,36 @@ export class ExperimentLive {
   private onTick(event: TickEvent): void {
     const status = this.status;
     if (!status) return;
-    const byId = new Map(event.endpoints.map((e) => [e.id, e]));
+    // The executor's tick carries only what it computes every tick: merge the
+    // keys present and keep the last REST values for the rest.
+    const byId = new Map((event.endpoints ?? []).map((e) => [e.id, e]));
     const endpoints: StatusEndpoint[] = status.endpoints.map((ep) => {
       const t = byId.get(ep.id);
       if (!t) return ep;
-      return {
-        ...ep,
-        slots: { ...ep.slots, used: t.slots_used },
-        jobs: { ...ep.jobs, active: t.active },
-        queued_requests: t.queued,
-        tokens_per_s_5m: t.tokens_per_s,
-        blocked_reason: t.blocked_reason,
-        circuit: t.circuit,
-      };
+      const next: StatusEndpoint = { ...ep };
+      if (t.slots_used !== undefined)
+        next.slots = { ...ep.slots, used: t.slots_used };
+      if (t.active !== undefined) next.jobs = { ...ep.jobs, active: t.active };
+      if (t.queued !== undefined) next.queued_requests = t.queued;
+      if (t.tokens_per_s !== undefined) next.tokens_per_s_5m = t.tokens_per_s;
+      if (t.blocked_reason !== undefined)
+        next.blocked_reason = t.blocked_reason;
+      if (t.circuit !== undefined) next.circuit = t.circuit;
+      return next;
     });
     this.status = {
       ...status,
-      counts: event.counts,
-      cells: event.cells,
-      throughput: event.throughput,
-      eta_seconds: event.eta_seconds,
-      bottleneck: event.bottleneck,
+      counts: event.counts
+        ? { ...status.counts, ...event.counts }
+        : status.counts,
+      cells: event.cells ? { ...status.cells, ...event.cells } : status.cells,
+      throughput: event.throughput ?? status.throughput,
+      eta_seconds:
+        event.eta_seconds !== undefined
+          ? event.eta_seconds
+          : status.eta_seconds,
+      bottleneck:
+        event.bottleneck !== undefined ? event.bottleneck : status.bottleneck,
       endpoints,
     };
     this.callbacks.onTick?.();

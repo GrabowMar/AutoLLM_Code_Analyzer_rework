@@ -90,8 +90,8 @@ const cells: CellsPayload = {
   apps: [{ id: 2, slug: "todo", name: "Todo" }],
   repeats: 2,
   cells: [
-    [0, 0, 0, "r", "j1", null, 1],
-    [0, 0, 1, "p", "j2", null, 1],
+    [0, 0, 0, "r", "j1", null, 0],
+    [0, 0, 1, "p", "j2", null, 0],
   ],
 };
 
@@ -163,7 +163,7 @@ describe("ExperimentLive", () => {
         repeat_index: 0,
         status: "running",
         phase: "eval_queued",
-        attempt: 1,
+        attempt: 0,
         endpoint_id: 7,
         ts: "t",
       },
@@ -176,6 +176,27 @@ describe("ExperimentLive", () => {
       code: "q",
       retry: false,
     });
+    live.destroy();
+  });
+
+  it("flags the first infra retry (attempt is 0-based)", async () => {
+    const live = await started();
+    onEvent!({
+      type: "job",
+      data: {
+        type: "job",
+        job_id: "j1",
+        condition_id: 1,
+        app_id: 2,
+        repeat_index: 0,
+        status: "pending",
+        phase: "",
+        attempt: 1,
+        endpoint_id: 7,
+        ts: "t",
+      },
+    });
+    expect(live.activity[0]).toMatchObject({ attempt: 1, retry: true });
     live.destroy();
   });
 
@@ -209,6 +230,42 @@ describe("ExperimentLive", () => {
     expect(live.status?.eta_seconds).toBe(600);
     expect(live.status?.endpoints[0].slots.used).toBe(2);
     expect(live.status?.endpoints[0].blocked_reason).toBe("endpoint_full");
+    live.destroy();
+  });
+
+  it("merges the executor's partial tick and keeps REST-only fields", async () => {
+    const live = await started();
+    const before = live.status!;
+    // Exactly the shape backend/execution/executor.py `_publish_ticks` sends.
+    const tick = {
+      type: "tick",
+      channel: "experiment:e1",
+      counts: { ...status().counts, completed: 1, pending: 0 },
+      cells: { total: 4, done: 1, failed_final: 0, in_flight: 0 },
+      endpoints: [
+        {
+          id: 7,
+          slots_used: 1,
+          active: 2,
+          queued: 3,
+          blocked_reason: "endpoint_full",
+          circuit: "closed",
+        },
+      ],
+      bottleneck: "endpoint_full",
+    };
+    onEvent!({ type: "tick", data: tick });
+    const after = live.status!;
+    expect(after.cells.done).toBe(1);
+    expect(after.cells.retried).toBe(before.cells.retried);
+    expect(after.throughput).toEqual(before.throughput);
+    expect(after.throughput.per_hour_ewma.toFixed(1)).toBeTypeOf("string");
+    expect(after.eta_seconds).toBe(before.eta_seconds);
+    expect(after.endpoints[0].jobs.active).toBe(2);
+    expect(after.endpoints[0].slots.used).toBe(1);
+    expect(after.endpoints[0].tokens_per_s_5m).toBe(
+      before.endpoints[0].tokens_per_s_5m,
+    );
     live.destroy();
   });
 
@@ -257,6 +314,38 @@ describe("ExperimentLive", () => {
     advance(3_000);
     expect(live.polling).toBe(true);
     expect(deps.getStatus.mock.calls.length).toBeGreaterThanOrEqual(2);
+    live.destroy();
+  });
+
+  it("treats silence as normal while paused or waiting on offline endpoints", async () => {
+    deps.getStatus.mockImplementation(async () => status({ status: "paused" }));
+    const paused = await started();
+    onState!("open");
+    advance(SILENCE_MS * 3);
+    expect(paused.polling).toBe(false);
+    expect(deps.getStatus).toHaveBeenCalledTimes(1);
+    paused.destroy();
+
+    // Running, but only queued cells (the relay is offline): nothing in flight.
+    deps.getStatus.mockImplementation(async () =>
+      status({ counts: { ...status().counts, pending: 2, running: 0 } }),
+    );
+    const waiting = await started();
+    onState!("open");
+    advance(SILENCE_MS * 3);
+    expect(waiting.polling).toBe(false);
+    waiting.destroy();
+  });
+
+  it("retries the status until the first load succeeds", async () => {
+    deps.getStatus.mockRejectedValueOnce(new Error("502"));
+    const live = await started();
+    expect(live.status).toBeNull();
+    onState!("open");
+    advance(STATUS_POLL_MS);
+    await vi.runOnlyPendingTimersAsync();
+    expect(deps.getStatus.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(live.status).not.toBeNull();
     live.destroy();
   });
 

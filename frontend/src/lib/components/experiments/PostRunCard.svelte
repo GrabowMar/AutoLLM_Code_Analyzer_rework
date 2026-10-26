@@ -5,7 +5,9 @@
 	 * progress, report link), with "Run now".
 	 *
 	 * Props: `experimentId`, `mode`, `data` (`GET /post-run/`; live-patched by
-	 * `post_run` events), `onchange()`.
+	 * `post_run` events), `onchange()`, `readonly` (archived: settings are
+	 * shown but cannot be saved), `canRun` (false until a run completed:
+	 * there is nothing to analyse yet).
 	 */
 	import { untrack } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -28,9 +30,11 @@
 		mode: 'agent' | 'scaffolding';
 		data: PostRunConfig;
 		onchange: () => void;
+		readonly?: boolean;
+		canRun?: boolean;
 	}
 
-	let { experimentId, mode, data, onchange }: Props = $props();
+	let { experimentId, mode, data, onchange, readonly = false, canRun = true }: Props = $props();
 
 	let value = $state<PostRunSpec>(untrack(() => structuredClone($state.snapshot(data.config))));
 	let saved = $state(untrack(() => stableKey(data.config)));
@@ -85,16 +89,27 @@
 			<Card.Description>Analysis and the report run once every cell is done (or when you start them).</Card.Description>
 		</div>
 		<div class="flex gap-2">
-			<Button variant="outline" size="sm" disabled={running || active} title={active ? 'A post-run is in progress' : ''} onclick={runNow}>
+			<Button
+				variant="outline"
+				size="sm"
+				disabled={running || active || !canRun}
+				title={active ? 'A post-run is in progress' : !canRun ? 'No run has completed yet: nothing to analyse' : ''}
+				onclick={runNow}
+			>
 				{#if running}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Play />{/if}Run now
 			</Button>
-			<Button size="sm" disabled={!dirty || saving} onclick={save}>
-				{#if saving}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Save />{/if}Save
-			</Button>
+			{#if !readonly}
+				<Button size="sm" disabled={!dirty || saving} onclick={save}>
+					{#if saving}<LoaderCircle class="animate-spin motion-reduce:animate-none" />{:else}<Save />{/if}Save
+				</Button>
+			{/if}
 		</div>
 	</Card.Header>
 	<Card.Content class="space-y-5">
-		<PostRunEditor bind:value {mode} idPrefix="post-run-card" />
+		{#if readonly}
+			<p class="text-xs text-muted-foreground">This experiment is archived: its post-run settings can no longer be changed.</p>
+		{/if}
+		<PostRunEditor bind:value {mode} disabled={readonly} idPrefix="post-run-card" />
 
 		<div class="space-y-2 border-t border-border/60 pt-4">
 			<p class="section-label">History</p>

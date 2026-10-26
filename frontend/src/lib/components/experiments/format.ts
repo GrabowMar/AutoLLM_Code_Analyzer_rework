@@ -168,6 +168,12 @@ export const BOTTLENECK_REMEDIATION: Record<string, string> = {
   llm: "LLM job threads are busy: raise the LLM job thread count (Endpoints → Capacity).",
   endpoint:
     "An endpoint is at capacity: raise its slots (match OLLAMA_NUM_PARALLEL), or balance models across endpoints.",
+  endpoint_offline:
+    "An endpoint with queued cells is offline: check the relay (and Ollama) on that machine; cells resume when it reconnects.",
+  endpoint_full:
+    "An endpoint is at capacity: raise its slots (match OLLAMA_NUM_PARALLEL), or balance models across endpoints.",
+  circuit_open:
+    "An endpoint's circuit breaker is open after repeated failures: check the endpoint; it retries automatically.",
 };
 
 export function bottleneckLabel(bottleneck: string | null | undefined): {
@@ -175,6 +181,13 @@ export function bottleneckLabel(bottleneck: string | null | undefined): {
   title: string;
 } | null {
   if (!bottleneck) return null;
+  if (bottleneck.startsWith("endpoint_offline:")) {
+    const slug = bottleneck.slice("endpoint_offline:".length);
+    return {
+      label: `Endpoint ${slug} offline`,
+      title: BOTTLENECK_REMEDIATION.endpoint_offline,
+    };
+  }
   if (bottleneck.startsWith("endpoint:")) {
     const slug = bottleneck.slice("endpoint:".length);
     return {
@@ -186,6 +199,8 @@ export function bottleneckLabel(bottleneck: string | null | undefined): {
     sandbox: "Sandbox slots",
     eval: "Evaluation slots",
     llm: "LLM job threads",
+    endpoint_offline: "Endpoint offline",
+    endpoint_full: "Endpoint at capacity",
   };
   return {
     label: known[bottleneck] ?? bottleneck.replace(/_/g, " "),
@@ -285,4 +300,13 @@ export function downloadBlob(blob: Blob, filename: string): void {
   a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/** A condition's name: its label, or the server's "model / method" fallback. */
+export function conditionName(c: {
+  id: number;
+  label: string;
+  display_label?: string;
+}): string {
+  return c.label || c.display_label || `Condition #${c.id}`;
 }

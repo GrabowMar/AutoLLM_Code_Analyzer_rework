@@ -4,7 +4,11 @@
 	 * Automation hub did, attached to the experiment). Refetches the post-run
 	 * list on `post_run` events (`postRunSignal`).
 	 *
-	 * Props: `experiment`, `postRunSignal`.
+	 * Props: `experiment`, `postRunSignal`, `onlaunched()` (a schedule's
+	 * "Run now" queued runs on this experiment, which may reopen it).
+	 *
+	 * Archived experiments are read-only here (the API refuses new schedules
+	 * and post-run edits); post-run "Run now" needs at least one completed run.
 	 */
 	import { untrack } from 'svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
@@ -23,9 +27,13 @@
 	interface Props {
 		experiment: ExperimentDetail;
 		postRunSignal?: number;
+		onlaunched?: () => void;
 	}
 
-	let { experiment, postRunSignal = 0 }: Props = $props();
+	let { experiment, postRunSignal = 0, onlaunched }: Props = $props();
+
+	const readonly = $derived(experiment.status === 'archived');
+	const hasCompleted = $derived((experiment.progress?.completed ?? 0) > 0);
 
 	let schedules = $state<ScheduleOut[]>(untrack(() => experiment.schedules ?? []));
 	let postRun = $state<PostRunConfig | null>(null);
@@ -68,9 +76,16 @@
 	{#if error}
 		<ErrorAlert message={error} onretry={reload} />
 	{/if}
-	<SchedulesCard experimentId={experiment.id} {schedules} onchange={loadSchedules} />
+	<SchedulesCard experimentId={experiment.id} {schedules} {readonly} onchange={loadSchedules} {onlaunched} />
 	{#if postRun}
-		<PostRunCard experimentId={experiment.id} mode={experiment.mode} data={postRun} onchange={loadPostRun} />
+		<PostRunCard
+			experimentId={experiment.id}
+			mode={experiment.mode}
+			data={postRun}
+			{readonly}
+			canRun={hasCompleted}
+			onchange={loadPostRun}
+		/>
 	{:else if !error}
 		<LoadingState label="loading post-run" class="py-8" />
 	{/if}

@@ -21,6 +21,23 @@ logger = logging.getLogger(__name__)
 THROTTLE_S = 2
 
 
+def loaded_summary(endpoint) -> list[dict]:
+    """``[{name, size_vram, cpu_spill}]`` for the resident models (same shape as REST ``live.loaded``)."""
+    out = []
+    for item in endpoint.loaded_models or []:
+        if not isinstance(item, dict) or not item.get("name"):
+            continue
+        size, vram = item.get("size"), item.get("size_vram")
+        out.append(
+            {
+                "name": item["name"],
+                "size_vram": vram,
+                "cpu_spill": bool(size and vram is not None and vram < size),
+            },
+        )
+    return out
+
+
 def endpoint_state(endpoint) -> tuple[dict, dict]:
     """``(owner payload, public payload)`` for ``endpoint``."""
     from backend.inference.live import endpoint_status
@@ -36,7 +53,7 @@ def endpoint_state(endpoint) -> tuple[dict, dict]:
     )
     has_active = any(s.role == "active" for s in sessions)
     status = endpoint_status(endpoint, has_live_session=has_active)
-    loaded = [m.get("name") for m in endpoint.loaded_models or [] if isinstance(m, dict)]
+    loaded = loaded_summary(endpoint)
     owner = {
         "type": "endpoint",
         "status": status,
