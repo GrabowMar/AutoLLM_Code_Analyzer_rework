@@ -15,6 +15,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from backend.runtime.models import Stack
 
+# The rendered Dockerfile is not part of a user stack's content_hash (it is
+# regenerated at every build), so its shape stays fixed: a change here would
+# silently rebuild every pinned user-stack version differently. In particular
+# only package.json is copied before the install, so a shipped
+# package-lock.json is not honoured (it never was).
 _FRONTEND_STAGE = """\
 # Stage 1: build the frontend (server-generated — user stacks cannot ship Dockerfiles)
 FROM {frontend_image} AS frontend-builder

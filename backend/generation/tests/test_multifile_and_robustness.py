@@ -260,23 +260,46 @@ class TestRepairPromptRoundtrip:
 
 @pytest.mark.django_db
 def test_build_repair_prompt_renders_errors_and_code():
+    from django.db.models import Max
+
     from backend.generation.models import ContentBlock
     from backend.generation.tests.factories import ContentBlockFactory
 
-    # Auto-seeding already provides a "repair-instructions" v1 block from
-    # data/blocks/validation/repair-instructions.yaml; replace it with
-    # controlled test content instead of asserting against real prose.
-    ContentBlock.objects.filter(slug="repair-instructions", version=1).delete()
+    # Auto-seeding already provides "repair-instructions" from
+    # data/blocks/validation/repair-instructions.yaml; a newer system version
+    # with controlled test content must win over it (the repair round uses the
+    # latest version, not a pinned v1).
+    top = ContentBlock.objects.filter(slug="repair-instructions").aggregate(top=Max("version"))["top"] or 0
     ContentBlockFactory(
         slug="repair-instructions",
-        version=1,
+        version=top + 1,
         block_type=ContentBlock.BlockType.VALIDATION,
         content="Fix {{ filename }}:\n{% for e in errors %}- {{ e }}\n{% endfor %}\n{{ code }}",
         is_system=True,
     )
     prompt = generation_validation.build_repair_prompt("app.py", "x = 1", ["SyntaxError: bad"])
-    assert "app.py" in prompt
+    assert prompt.startswith("Fix app.py:")
     assert "SyntaxError: bad" in prompt
+    assert "x = 1" in prompt
+
+
+@pytest.mark.django_db
+def test_build_repair_prompt_ignores_newer_user_versions():
+    from django.db.models import Max
+
+    from backend.generation.models import ContentBlock
+    from backend.generation.tests.factories import ContentBlockFactory
+
+    top = ContentBlock.objects.filter(slug="repair-instructions").aggregate(top=Max("version"))["top"] or 0
+    ContentBlockFactory(
+        slug="repair-instructions",
+        version=top + 1,
+        block_type=ContentBlock.BlockType.VALIDATION,
+        content="USER COPY {{ filename }}",
+        is_system=False,
+    )
+    prompt = generation_validation.build_repair_prompt("app.py", "x = 1", ["SyntaxError: bad"])
+    assert "USER COPY" not in prompt
     assert "x = 1" in prompt
 
 

@@ -1,89 +1,187 @@
 {
   "slug": "learning_flashcards",
   "name": "Flashcards",
-  "category": "Learning",
-  "description": "Create and study flashcards",
+  "category": "Education",
+  "description": "Write flashcards in shared decks and study them with per-user spaced-repetition progress",
   "difficulty": "standard",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only flashcards; require auth for create/update/delete",
-    "1. Flashcard model: id, question (required), answer (required), deck",
-    "2. GET /api/flashcards - list flashcards",
-    "3. POST /api/flashcards - create flashcard",
-    "4. PUT /api/flashcards/:id - update flashcard",
-    "5. DELETE /api/flashcards/:id - delete flashcard"
+    "Access control: anyone may read flashcards and decks; require auth for creating flashcards, studying and recording answers, and only a card's author may update or delete it (403 otherwise); admin endpoints are restricted to the admin account",
+    "Flashcard validation: question is a required non-empty string of at most 500 characters, answer a required non-empty string of at most 2000 characters, deck an optional string of at most 100 characters (empty means the card has no deck)",
+    "GET /api/flashcards lists active cards, newest first; ?query= matches question or answer case-insensitively, ?deck= keeps cards of that exact deck, ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every matching card",
+    "GET /api/decks lists every deck name used by an active card with its card_count, sorted by name; cards without a deck are not listed",
+    "DELETE /api/flashcards/:id removes the card and everyone's progress on it permanently",
+    "Study progress is kept per user and card in five boxes: a card nobody has answered starts in box 1 for that user; POST /api/flashcards/:id/answers with correct true moves it up one box (at most 5) and with correct false back to box 1, increments correct_count or incorrect_count and sets last_studied_at",
+    "GET /api/study returns the signed-in user's study queue: active cards (of ?deck= when given) ordered by box ascending, then never-studied cards before the least recently studied; ?limit= caps the queue (default 20, at most 100) while total counts every card that matches",
+    "Deactivated cards (is_active false) are left out of the lists, the decks and the study queue and answer 404 on the public card endpoints; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for another author's card or a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "HomePage displays ALL content in read-only mode for public users",
-    "Public users see \"Sign in to create flashcards\" CTAs instead of action buttons",
-    "Logged-in users see same content plus create/edit/delete functionality",
-    "1. Flashcard list with deck filter (visible to all)",
-    "2. Flip animation to show answer (visible to all)",
-    "3. Create flashcard form (logged-in only)",
-    "4. Edit and delete actions (logged-in only)",
-    "5. Search by question text (visible to all)"
+    "Everyone can browse cards and decks and flip cards read-only; signed-in users also get the create controls, edit and delete on their own cards, and study mode, and visitors see a 'Sign in to create and study flashcards' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Card browser: a deck picker filled from the deck list, a search box over question and answer text, and previous/next paging; each card shows its question and flips with an animation to reveal the answer",
+    "Study mode: shows one card from the study queue at a time, flips it on request and offers 'Got it' and 'Missed it' buttons that record the answer and move to the next card, with the card's box shown and a summary at the end of the queue",
+    "Create and edit card forms (question, answer, deck) that show the API's validation messages next to the form; delete asks for confirmation first"
+  ],
+  "admin_requirements": [
+    "Admin overview: every card, active or not, with total, active and inactive counts and the number of decks",
+    "Toggle a card's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/flashcards",
-      "description": "List flashcards",
+      "description": "List active cards, newest first, filtered and paged",
+      "auth": "public",
+      "query": {
+        "query": "Case-insensitive text matched against question and answer",
+        "deck": "Only cards of this exact deck",
+        "page": "1-based page number (default 1)",
+        "page_size": "Cards per page (default 20, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "question": "string",
-            "answer": "string",
-            "deck": "string"
+            "question": "What is the capital of Australia?",
+            "answer": "Canberra",
+            "deck": "Geography",
+            "author": "learner1",
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/flashcards",
+      "description": "Create a card authored by the signed-in user",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "question": "string",
+        "answer": "string",
+        "deck": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "question": "What is the capital of Australia?",
+        "answer": "Canberra",
+        "deck": "Geography",
+        "author": "learner1",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/flashcards/:id",
+      "description": "One active card",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "question": "What is the capital of Australia?",
+        "answer": "Canberra",
+        "deck": "Geography",
+        "author": "learner1",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/flashcards/:id",
+      "description": "Replace one of your cards (question and answer required; an omitted deck is cleared)",
+      "auth": "user",
+      "request": {
+        "question": "string",
+        "answer": "string",
+        "deck": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "question": "What is the capital city of Australia?",
+        "answer": "Canberra",
+        "deck": "Geography",
+        "author": "learner1",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/flashcards/:id",
+      "description": "Delete one of your cards and all progress on it",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/flashcards/:id/answers",
+      "description": "Record the signed-in user's answer to a card and return their updated progress",
+      "auth": "user",
+      "request": {
+        "correct": "boolean"
+      },
+      "response": {
+        "flashcard_id": 1,
+        "box": 2,
+        "correct_count": 1,
+        "incorrect_count": 0,
+        "last_studied_at": "2026-01-16T08:00:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/decks",
+      "description": "Deck names in use with their card counts",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "name": "Geography",
+            "card_count": 12
           }
         ],
         "total": 1
       }
     },
     {
-      "method": "POST",
-      "path": "/api/flashcards",
-      "description": "Create flashcard",
-      "request": {
-        "question": "string",
-        "answer": "string",
-        "deck": "string"
+      "method": "GET",
+      "path": "/api/study",
+      "description": "The signed-in user's study queue with their progress on each card",
+      "auth": "user",
+      "query": {
+        "deck": "Only cards of this exact deck",
+        "limit": "Most cards to return (default 20, at most 100)"
       },
-      "response": {
-        "id": 1,
-        "question": "string",
-        "answer": "string",
-        "deck": "string"
-      }
-    },
-    {
-      "method": "PUT",
-      "path": "/api/flashcards/:id",
-      "description": "Update flashcard",
-      "request": {
-        "question": "string",
-        "answer": "string",
-        "deck": "string"
-      },
-      "response": {
-        "id": 1,
-        "question": "string",
-        "answer": "string",
-        "deck": "string"
-      }
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/flashcards/:id",
-      "description": "Delete flashcard",
       "request": null,
-      "response": {}
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "question": "What is the capital of Australia?",
+            "answer": "Canberra",
+            "deck": "Geography",
+            "box": 1,
+            "correct_count": 0,
+            "incorrect_count": 0,
+            "last_studied_at": null
+          }
+        ],
+        "total": 1
+      }
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -91,42 +189,67 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Flashcard",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "question": "string (required)",
-      "answer": "text (required)",
-      "deck": "string (optional)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Flashcard",
+      "description": "A question and answer card, optionally grouped in a deck by name",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who wrote it; shown as author)",
+        "question": "string (required, max 500 chars)",
+        "answer": "string (required, max 2000 chars)",
+        "deck": "string (optional, max 100 chars)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the card from public endpoints and study)"
+      }
+    },
+    {
+      "name": "CardProgress",
+      "description": "One user's study progress on one card; created on the first answer",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "flashcard_id": "integer (references Flashcard.id; deleted with the card)",
+        "user_id": "integer (references the signed-in user; one row per user and card)",
+        "box": "integer (1-5, default 1)",
+        "correct_count": "integer (default 0)",
+        "incorrect_count": "integer (default 0)",
+        "last_studied_at": "datetime (ISO 8601 in JSON)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any flashcard"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/flashcards",
-      "description": "Admin overview: list all flashcards and counts",
+      "description": "Admin overview: every card with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
-        "inactive": 0
+        "items": [
+          {
+            "id": 1,
+            "question": "What is the capital of Australia?",
+            "deck": "Geography",
+            "author": "learner1",
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
+        "inactive": 0,
+        "decks": 1
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/flashcards/:id/toggle",
-      "description": "Toggle flashcard active status",
+      "description": "Flip a card's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

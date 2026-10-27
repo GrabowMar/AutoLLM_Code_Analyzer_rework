@@ -32,7 +32,7 @@
 	import Trophy from '@lucide/svelte/icons/trophy';
 	import Leaderboard from '../Leaderboard.svelte';
 	import PairedDeltas from '../PairedDeltas.svelte';
-	import { MIN_APPS_FOR_CI, conditionName, isTerminal } from '../format';
+	import { CORRECTION_LABEL, MIN_APPS_FOR_CI, conditionName, isTerminal } from '../format';
 	import StudyFigure from '../study/StudyFigure.svelte';
 	import StudySection from '../study/StudySection.svelte';
 	import { ResultsFeed } from '../study/results.svelte';
@@ -238,7 +238,10 @@
 						<strong class="font-medium text-foreground">Figure 3.</strong>
 						Mean app-level difference in pass rate from the baseline (square), in percentage points, with the paired cluster-bootstrap 95%
 						interval (whiskers; from {MIN_APPS_FOR_CI} paired apps). Filled: the interval excludes 0; hollow: it includes 0. W/L/T: apps won, lost
-						and tied; n: apps graded for both. p: Wilcoxon signed-rank, Holm-adjusted across conditions{results.interim ? ' (withheld: interim)' : ''}.
+						and tied; n: apps graded for both. p: Wilcoxon signed-rank ({results.paired.alternative}), {CORRECTION_LABEL[results.paired.correction] ??
+							results.paired.correction}-adjusted across conditions, α = {results.paired.alpha}; {results.paired.status === 'confirmatory'
+							? 'confirmatory (the pre-registered plan)'
+							: 'exploratory'}{results.interim ? ' (withheld: interim)' : ''}.
 					{/snippet}
 				</StudyFigure>
 			</StudySection>

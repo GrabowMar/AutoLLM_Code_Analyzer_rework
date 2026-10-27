@@ -2,71 +2,105 @@
   "slug": "api_url_shortener",
   "name": "URL Shortener",
   "category": "API Integration",
-  "description": "Create short URLs",
+  "description": "Turn long web addresses into short links and count how often each one is followed",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "1. POST /api/shorten - accept long URL, generate 6-character random code",
-    "2. URL model: id, original_url, short_code (unique), created_at, click_count",
-    "3. GET /api/r/:code - lookup and redirect to original URL, increment counter",
-    "4. Validate URL format before shortening",
-    "5. GET /api/urls - return list of recently shortened URLs with click counts",
-    "Access control: allow public read-only short URL redirect and public list; require auth for creation and admin actions"
+    "Access control: anyone may follow short links and read the list of recent links; require auth for creating and deleting short links; admin endpoints are restricted to the admin account",
+    "POST /api/urls stores original_url for the signed-in user and gives it a unique short_code of 6 characters from A-Z, a-z and 0-9; a randomly drawn code that is already taken is drawn again",
+    "URL validation: original_url is required, at most 2048 characters, and must be a valid URL; anything else answers 400",
+    "Every link in a response carries short_url, the path /r/<short_code> on this app, so the frontend can build the full short address from its own origin",
+    "Following a short link: GET /r/<short_code> (outside /api, served before the frontend's history fallback) answers 302 with Location set to original_url and adds 1 to click_count; an unknown or deactivated code answers 404",
+    "GET /api/urls returns active links, newest first; ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every active link",
+    "Only the user who created a link may delete it (403 for anyone else); DELETE /api/urls/:id removes the link permanently",
+    "Deactivated links (is_active false) are left out of GET /api/urls, answer 404 on GET /api/urls/:id and no longer redirect; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-owner or a non-admin, 404 for unknown ids or codes"
   ],
   "frontend_requirements": [
-    "1. Input field for long URL with 'Shorten' button",
-    "2. Display shortened URL with copy-to-clipboard button",
-    "3. Show click count for generated URLs",
-    "4. List of recently shortened URLs",
-    "5. Validation error for invalid URLs",
-    "Public guest view for shortening URLs with CTA to sign in for management"
+    "Everyone sees the list of recent links with their click counts; signed-in users also get the shorten form and a delete button on their own links, and visitors see a 'Sign in to shorten links' prompt in place of the form",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Shorten form: a field for the long address and a 'Shorten' button; on success show the full short address with a copy-to-clipboard button, and show the API's validation message when the address is rejected",
+    "Recent links list: short address, original address (truncated with the full value on hover), click count and creation date, with previous/next paging",
+    "Delete asks for confirmation first and removes the link from the list"
+  ],
+  "admin_requirements": [
+    "Admin overview: every link, active or not, with its owner and click count, and total, active and inactive counts",
+    "Toggle a link's active status from the overview"
   ],
   "api_endpoints": [
     {
+      "method": "POST",
+      "path": "/api/urls",
+      "description": "Shorten an address for the signed-in user",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "original_url": "string"
+      },
+      "response": {
+        "id": 1,
+        "original_url": "https://example.org/articles/2026/short-links-explained",
+        "short_code": "aB3xY9",
+        "short_url": "/r/aB3xY9",
+        "click_count": 0,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
       "method": "GET",
       "path": "/api/urls",
-      "description": "List recently shortened URLs",
+      "description": "List active links, newest first, paged",
+      "auth": "public",
+      "query": {
+        "page": "1-based page number (default 1)",
+        "page_size": "Links per page (default 20, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "original_url": "string",
-            "short_code": "string",
-            "click_count": 0,
-            "created_at": "ISO8601"
+            "original_url": "https://example.org/articles/2026/short-links-explained",
+            "short_code": "aB3xY9",
+            "short_url": "/r/aB3xY9",
+            "click_count": 12,
+            "created_at": "2026-01-15T10:30:00Z"
           }
         ],
-        "total": 1
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/api/shorten",
-      "description": "Create short URL from original URL",
-      "request": {
-        "url": "string"
-      },
-      "response": {
-        "id": 1,
-        "original_url": "string",
-        "short_code": "string",
-        "short_url": "/api/r/abc123",
-        "click_count": 0,
-        "created_at": "ISO8601"
+        "total": 1,
+        "page": 1,
+        "page_size": 20
       }
     },
     {
       "method": "GET",
-      "path": "/api/r/:code",
-      "description": "Redirect short code to original URL",
+      "path": "/api/urls/:id",
+      "description": "One active link with its click count",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "original_url": "https://example.org/articles/2026/short-links-explained",
+        "short_code": "aB3xY9",
+        "short_url": "/r/aB3xY9",
+        "click_count": 12,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/urls/:id",
+      "description": "Delete one of the signed-in user's links",
+      "auth": "user",
+      "success_status": 204,
       "request": null,
       "response": null
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -74,42 +108,54 @@
       }
     }
   ],
-  "data_model": {
-    "name": "URL",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "original_url": "string (required, max 2048 chars)",
-      "short_code": "string (unique, 6 chars)",
-      "click_count": "integer (default: 0)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "ShortUrl",
+      "description": "A long address and the short code that redirects to it",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "original_url": "string (required, a valid URL, max 2048 chars)",
+        "short_code": "string (unique, exactly 6 characters from A-Z, a-z, 0-9)",
+        "click_count": "integer (default 0; +1 for every redirect)",
+        "user_id": "integer (references the signed-in user who created it)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the link from public endpoints and stops its redirect)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any short URL"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/urls",
-      "description": "Admin overview: list all URLs and counts",
+      "description": "Admin overview: every link with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "original_url": "https://example.org/articles/2026/short-links-explained",
+            "short_code": "aB3xY9",
+            "username": "linkmaker",
+            "click_count": 12,
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/urls/:id/toggle",
-      "description": "Toggle URL active status",
+      "description": "Flip a link's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

@@ -6,18 +6,18 @@ _default:
   backend_summary: "The backend is a Python web application."
   frontend_summary: "a JavaScript single-page app"
 flask-react:
-  backend_summary: "The backend is a Flask 3 application (Python 3.11)."
+  backend_summary: "The backend is a Flask 3.1 application (Python 3.13)."
   start_command: "python app.py"
-  frontend_summary: "React 18 + Vite + Tailwind CSS, entry component `frontend/src/App.jsx`"
+  frontend_summary: "React 19 + React Router 8 + Vite 8 + Tailwind CSS 4, built with Node 24, entry component `frontend/src/App.jsx`"
 fastapi-react:
-  backend_summary: "The backend is a FastAPI application (Python 3.11) exposing `app` in `app.py`."
+  backend_summary: "The backend is a FastAPI application (Python 3.13) exposing `app` in `app.py`."
   start_command: "uvicorn app:app --host 0.0.0.0 --port 8000"
-  frontend_summary: "React 18 + Vite + Tailwind CSS, entry component `frontend/src/App.jsx`"
+  frontend_summary: "React 19 + React Router 8 + Vite 8 + Tailwind CSS 4, built with Node 24, entry component `frontend/src/App.jsx`"
 fastapi-vue:
-  backend_summary: "The backend is a FastAPI application (Python 3.11) exposing `app` in `app.py`."
+  backend_summary: "The backend is a FastAPI application (Python 3.13) exposing `app` in `app.py`."
   start_command: "uvicorn app:app --host 0.0.0.0 --port 8000"
-  frontend_summary: "Vue 3 + Vite, entry component `frontend/src/App.vue`"
+  frontend_summary: "Vue 3.5 + Vue Router 5 + Vite 8 + Tailwind CSS 4, built with Node 24, entry component `frontend/src/App.vue`"
 generic-python:
-  backend_summary: "The backend is a Python 3.11 web application (choose any framework and list it in requirements.txt)."
+  backend_summary: "The backend is a Python 3.13 web application (choose any framework and list it in requirements.txt)."
   start_command: "python app.py"
   frontend_summary: "none"

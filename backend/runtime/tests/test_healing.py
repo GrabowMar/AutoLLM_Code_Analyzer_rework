@@ -108,3 +108,83 @@ def test_verbatim_agent_output_is_not_applicable(tmp_path):
 
 def test_unknown_mode_falls_back_to_full():
     assert svc.resolve_healing_mode(object(), "bogus") == svc.HealingMode.FULL
+
+
+def test_vue_lucide_imports_are_healed_like_react(tmp_path):
+    vue = '<script setup>\nimport { Github, House } from "@lucide/vue";\n</script>\n<template><Github /></template>\n'
+    job = GenerationJobFactory(
+        mode="scaffolding",
+        stack_slug="fastapi-vue",
+        result_data={"result_schema_version": 2, "files": {"app.py": "app = None\n", "frontend/src/App.vue": vue}},
+    )
+    dest, report = _build(job, tmp_path)
+
+    text = (dest / "frontend" / "src" / "App.vue").read_text()
+    assert 'import { CircleAlert as Github, House } from "@lucide/vue"' in text
+    assert "frontend/src/App.vue:lucide_icons" in report.patches
+
+
+def test_react_router_dom_imports_point_at_react_router(tmp_path):
+    app = "import { Routes, Route } from 'react-router-dom';\nexport default function App() { return null; }\n"
+    page = 'import { useNavigate } from "react-router-dom";\nexport const x = useNavigate;\n'
+    dest, report = _build(
+        _job(files={"app.py": _BACKEND, "frontend/src/App.jsx": app, "frontend/src/pages/x.js": page}),
+        tmp_path,
+    )
+
+    assert "from 'react-router';" in (dest / "frontend" / "src" / "App.jsx").read_text()
+    assert 'from "react-router";' in (dest / "frontend" / "src" / "pages" / "x.js").read_text()
+    assert {"frontend/src/App.jsx:react_router_dom", "frontend/src/pages/x.js:react_router_dom"} <= set(report.patches)
+
+    raw, raw_report = _build(_job(files={"app.py": _BACKEND, "frontend/src/App.jsx": app}), tmp_path / "raw", "none")
+    assert "react-router-dom" in (raw / "frontend" / "src" / "App.jsx").read_text()
+    assert not raw_report.patches
+
+
+def test_router_dom_kept_when_the_model_installs_it(tmp_path):
+    app = "import { Routes } from 'react-router-dom';\nexport default function App() { return null; }\n"
+    package = '{"dependencies": {"react-router-dom": "7.0.0"}}'
+    dest, report = _build(
+        _job(files={"app.py": _BACKEND, "frontend/src/App.jsx": app, "frontend/package.json": package}),
+        tmp_path,
+    )
+    assert "react-router-dom" in (dest / "frontend" / "src" / "App.jsx").read_text()
+    assert not any(p.endswith(":react_router_dom") for p in report.patches)
+
+
+def test_model_stylesheet_keeps_the_tailwind4_entry(tmp_path):
+    css = (
+        "@import url('https://fonts.example/x.css');\n"
+        "@tailwind base;\n@tailwind utilities;\n.card { @apply rounded-lg; }\n"
+    )
+    dest, report = _build(_job(files={"app.py": _BACKEND, "frontend/src/App.css": css}), tmp_path)
+
+    healed = (dest / "frontend" / "src" / "App.css").read_text()
+    assert healed.startswith("@import \"tailwindcss\";\n@import url('https://fonts.example/x.css');\n")
+    assert "@tailwind" not in healed
+    assert "--color-primary-500" in healed
+    assert healed.rstrip().endswith(".card { @apply rounded-lg; }")
+    assert "frontend/src/App.css:tailwind_entry" in report.patches
+
+    own = '@import "tailwindcss";\n.x { color: red; }\n'
+    dest2, report2 = _build(_job(files={"app.py": _BACKEND, "frontend/src/App.css": own}), tmp_path / "own")
+    assert (dest2 / "frontend" / "src" / "App.css").read_text() == own
+    assert not any(p.endswith(":tailwind_entry") for p in report2.patches)
+
+
+def test_passlib_gets_a_compatible_bcrypt_unless_the_template_pins_one(tmp_path):
+    code = "from passlib.context import CryptContext\nimport bcrypt\nfrom flask import Flask\napp = Flask(__name__)\n"
+    dest, report = _build(_job(files={"app.py": code}), tmp_path)
+
+    # flask-react pins bcrypt==5.0.0: the template's pin wins, no duplicate line.
+    assert "passlib[bcrypt]" in report.added_requirements
+    assert not any(r.startswith("bcrypt") for r in report.added_requirements)
+    assert (dest / "requirements.txt").read_text().count("bcrypt==") == 1
+
+    fastapi = GenerationJobFactory(
+        mode="scaffolding",
+        stack_slug="fastapi-react",
+        result_data={"result_schema_version": 2, "files": {"app.py": "from passlib.context import CryptContext\n"}},
+    )
+    _dest, fa_report = _build(fastapi, tmp_path / "fa")
+    assert {"passlib[bcrypt]", "bcrypt==4.0.1"} <= set(fa_report.added_requirements)

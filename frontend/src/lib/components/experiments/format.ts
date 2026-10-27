@@ -237,6 +237,13 @@ export function formatHours(hours: number | null | undefined): string {
  */
 export const MIN_APPS_FOR_CI = 3;
 
+/** Multiple-comparison corrections of the paired tests (analysis plan `correction`). */
+export const CORRECTION_LABEL: Record<string, string> = {
+  holm: "Holm",
+  bh: "BH",
+  none: "unadjusted",
+};
+
 /** 0..1 → "87%"; null → "—". */
 export function formatPercent(
   value: number | null | undefined,

@@ -8,6 +8,8 @@
 		rule: string;
 		search: string;
 		sort: 'severity' | 'file' | 'tool' | 'rule';
+		/** Collapse findings of several tools that report one issue into one row. */
+		merge: boolean;
 	}
 
 	export const EMPTY_FILTERS: FindingFilters = {
@@ -18,6 +20,7 @@
 		rule: '',
 		search: '',
 		sort: 'severity',
+		merge: true,
 	};
 </script>
 
@@ -26,7 +29,10 @@
 	 * FindingsExplorer — a run's findings: facet rail (tool, level as the tool
 	 * reported it, category, file, rule — with counts), search, sort, a table
 	 * whose rows expand into `FindingDetail`, pagination and CSV/JSON export of
-	 * the current filter.
+	 * the current filter. With `filters.merge` one row is one issue: findings of
+	 * several tools that report the same thing (the study's cross-tool dedup)
+	 * collapse into it and are listed under "Also reported by". Facets and
+	 * exports still count findings.
 	 *
 	 * Props: `runId`, `tools` (slug → catalog tool, for names/icons), `filters`
 	 * (bindable; the page keeps it in the URL), `refreshKey` (bump to refetch, e.g.
@@ -36,6 +42,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Select from '$lib/components/ui/select';
 	import Search from '@lucide/svelte/icons/search';
 	import X from '@lucide/svelte/icons/x';
@@ -82,6 +89,7 @@
 	let page = $state(1);
 	let findings = $state<RunFinding[]>([]);
 	let total = $state(0);
+	let findingsTotal = $state<number | null>(null);
 	let pages = $state(1);
 	let loading = $state(true);
 	let error = $state('');
@@ -110,15 +118,21 @@
 		};
 	}
 
+	/** Distinct tools of a row: its own, then those of its duplicates. */
+	function rowTools(f: RunFinding): string[] {
+		return [...new Set([f.tool_slug, ...(f.duplicates ?? []).map((d) => d.tool_slug)])];
+	}
+
 	async function loadFindings(quiet = false) {
 		findingsCtl?.abort();
 		const ctl = new AbortController();
 		findingsCtl = ctl;
 		if (!quiet) loading = true;
 		try {
-			const data = await getRunFindings(runId, { ...params(), page, per_page: PER_PAGE }, { signal: ctl.signal });
+			const data = await getRunFindings(runId, { ...params(), group: filters.merge, page, per_page: PER_PAGE }, { signal: ctl.signal });
 			findings = data.items;
 			total = data.total;
+			findingsTotal = data.findings_total ?? null;
 			pages = data.pages;
 			page = data.page;
 			error = '';
@@ -143,7 +157,7 @@
 	}
 
 	// Filters (and the page) drive the table; the tool filter and refreshKey drive the facets.
-	const filterKey = $derived(JSON.stringify(params()));
+	const filterKey = $derived(JSON.stringify({ ...params(), merge: filters.merge }));
 	let lastFilterKey = '';
 	$effect(() => {
 		const key = filterKey;
@@ -204,7 +218,7 @@
 	}
 
 	function clearAll() {
-		filters = { ...EMPTY_FILTERS, sort: filters.sort };
+		filters = { ...EMPTY_FILTERS, sort: filters.sort, merge: filters.merge };
 	}
 
 	function goToPage(p: number) {
@@ -235,9 +249,13 @@
 		].filter(Boolean) as { key: keyof FindingFilters; label: string }[]
 	);
 
-	const resultsText = $derived(
-		total === 0 ? '' : `${(page - 1) * PER_PAGE + 1}–${Math.min(page * PER_PAGE, total)} of ${total}`
-	);
+	const resultsText = $derived.by(() => {
+		if (total === 0) return '';
+		const range = `${(page - 1) * PER_PAGE + 1}–${Math.min(page * PER_PAGE, total)} of ${total}`;
+		if (findingsTotal === null) return `${range} findings`;
+		const merged = findingsTotal - total;
+		return `${range} issues · ${findingsTotal} findings${merged > 0 ? `, ${merged} merged as duplicates` : ''}`;
+	});
 
 	const sortItems = [
 		{ value: 'severity', label: 'Level (as reported)' },
@@ -404,6 +422,9 @@
 			<Button variant="outline" size="sm" class="lg:hidden" aria-expanded={showFacetsMobile} onclick={() => (showFacetsMobile = !showFacetsMobile)}>
 				<SlidersHorizontal class="size-3.5" />Filters
 			</Button>
+			<label class="flex cursor-pointer items-center gap-2 text-xs whitespace-nowrap" title="One row per issue: findings of several tools that report the same thing are merged">
+				<Checkbox bind:checked={() => filters.merge, (v) => (filters = { ...filters, merge: v })} />Merge duplicates
+			</label>
 			<div class="w-44">
 				<Select.Simple
 					bind:value={() => filters.sort, (v) => (filters = { ...filters, sort: (v || 'severity') as FindingFilters['sort'] })}
@@ -440,7 +461,7 @@
 
 		<TableToolbar>
 			{#snippet summary()}
-				{#if resultsText}{resultsText} findings · click a row for details{:else if !loading}No findings{/if}
+				{#if resultsText}{resultsText} · click a row for details{:else if !loading}No findings{/if}
 				{#if live}<span class="text-info-fg"> · more arrive as tools finish</span>{/if}
 			{/snippet}
 		</TableToolbar>
@@ -473,6 +494,7 @@
 					<tbody>
 						{#each findings as f (f.id)}
 							{@const open = expanded.has(f.id)}
+							{@const slugs = rowTools(f)}
 							<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the expand button is the keyboard path) -->
 							<tr class="row-link align-top" data-selected={open} onclick={() => toggle(f.id)}>
 								<td class="w-8 pr-0">
@@ -500,10 +522,16 @@
 									{#if f.file_path}<span class="block truncate" title={locationText(f)} dir="rtl">&lrm;{locationText(f)}</span>{:else}—{/if}
 								</td>
 								<td class="whitespace-nowrap text-xs">
-									<span class="inline-flex items-center gap-1.5">
-										<ToolIcon tool={tools.get(f.tool_slug) ?? { slug: f.tool_slug }} size="xs" />
+									<span class="inline-flex items-center gap-1.5" title={slugs.map(toolName).join(', ')}>
+										{#each slugs as slug (slug)}
+											<ToolIcon tool={tools.get(slug) ?? { slug }} size="xs" />
+										{/each}
 										{toolName(f.tool_slug)}
+										{#if slugs.length > 1}<span class="text-muted-foreground">+{slugs.length - 1}</span>{/if}
 									</span>
+									{#if f.duplicates?.length}
+										<p class="cell-sub text-[11px] text-muted-foreground">{f.duplicates.length + 1} findings</p>
+									{/if}
 								</td>
 							</tr>
 							{#if open}
@@ -513,6 +541,42 @@
 										<!-- width 0 / min-width 100%: long code lines scroll inside instead of widening the table -->
 										<div class="@container w-0 min-w-full">
 											<FindingDetail finding={f} toolName={toolName(f.tool_slug)} />
+											{#if f.duplicates?.length}
+												<div class="mt-4 border-t border-border pt-3">
+													<p class="section-label mb-1.5">Also reported by</p>
+													<ul class="space-y-1">
+														{#each f.duplicates as d (d.id)}
+															{@const dOpen = expanded.has(d.id)}
+															<li>
+																<button
+																	type="button"
+																	class="flex w-full cursor-pointer items-start gap-2 rounded px-1 py-1 text-left text-xs hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+																	aria-expanded={dOpen}
+																	aria-controls="finding-{d.id}"
+																	onclick={() => toggle(d.id)}
+																>
+																	<ChevronRight class={cn('mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform duration-150', dOpen && 'rotate-90')} />
+																	<span class="inline-flex shrink-0 items-center gap-1.5 font-medium">
+																		<ToolIcon tool={tools.get(d.tool_slug) ?? { slug: d.tool_slug }} size="xs" />
+																		{toolName(d.tool_slug)}
+																	</span>
+																	<LevelBadge label={d.tool_severity} />
+																	<span class="min-w-0 flex-1 [overflow-wrap:anywhere]">
+																		{d.title}
+																		{#if d.rule_id}<span class="font-mono text-muted-foreground"> · {d.rule_id}</span>{/if}
+																		{#if d.file_path && locationText(d) !== locationText(f)}<span class="font-mono text-muted-foreground"> · {locationText(d)}</span>{/if}
+																	</span>
+																</button>
+																{#if dOpen}
+																	<div class="py-2 pl-6" id="finding-{d.id}">
+																		<FindingDetail finding={d} toolName={toolName(d.tool_slug)} />
+																	</div>
+																{/if}
+															</li>
+														{/each}
+													</ul>
+												</div>
+											{/if}
 										</div>
 									</td>
 								</tr>

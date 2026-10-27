@@ -552,14 +552,16 @@ ANALYSIS_MAX_WORKERS = env.int("ANALYSIS_MAX_WORKERS", default=4)
 # ── User-authored stacks ─────────────────────────────────────────────
 # User stacks never ship their own Dockerfile: it is generated server-side
 # from a pinned template, and base images must come from this allowlist.
+# Older tags stay listed so existing stacks and exported packages still
+# validate; the builtin stacks use python:3.13-slim + node:24-alpine.
 STACK_ALLOWED_BASE_IMAGES = {
     "python": env.list(
         "STACK_ALLOWED_PYTHON_IMAGES",
-        default=["python:3.11-slim", "python:3.12-slim"],
+        default=["python:3.11-slim", "python:3.12-slim", "python:3.13-slim", "python:3.14-slim"],
     ),
     "node": env.list(
         "STACK_ALLOWED_NODE_IMAGES",
-        default=["node:20-alpine", "node:22-alpine"],
+        default=["node:20-alpine", "node:22-alpine", "node:24-alpine"],
     ),
 }
 # When True, non-staff stacks need staff approval before jobs can use them.

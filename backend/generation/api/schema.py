@@ -20,6 +20,9 @@ from backend.generation.models import GenerationJob
 from backend.generation.models import GenerationProfile
 from backend.generation.services.sampling import MODE_DEFAULT_MAX_TOKENS
 from backend.generation.services.sampling import MODE_DEFAULT_TEMPERATURE
+from backend.generation.services.spec_models import normalize_data_models
+from backend.generation.services.spec_models import primary_data_model
+from backend.generation.services.spec_models import row_content_hash
 
 # ── Template schemas ──────────────────────────────────────────────────
 
@@ -68,6 +71,11 @@ class StackWriteSchema(Schema):
 
 
 class AppRequirementTemplateSchema(ModelSchema):
+    """An app spec. ``data_models`` lists every model; ``data_model`` is the first (the v2 shape)."""
+
+    data_model: dict = {}
+    data_models: list[dict] = []
+
     class Meta:
         model = AppRequirementTemplate
         fields = [
@@ -80,28 +88,49 @@ class AppRequirementTemplateSchema(ModelSchema):
             "frontend_requirements",
             "admin_requirements",
             "api_endpoints",
-            "data_model",
             "admin_api_endpoints",
             "difficulty",
+            "spec_schema_version",
+            "version",
+            "content_hash",
             "is_default",
             "created_at",
             "updated_at",
         ]
 
+    @staticmethod
+    def resolve_data_model(obj: AppRequirementTemplate) -> dict:
+        return primary_data_model(obj)
+
+    @staticmethod
+    def resolve_data_models(obj: AppRequirementTemplate) -> list[dict]:
+        return normalize_data_models(obj)
+
+    @staticmethod
+    def resolve_content_hash(obj: AppRequirementTemplate) -> str:
+        return row_content_hash(obj)
+
 
 class AppRequirementCreateSchema(Schema):
-    """POST/PUT body for an app spec. PUT replaces every field except the slug."""
+    """POST/PUT body for an app spec. PUT replaces every field except the slug.
+
+    Models come as ``data_models`` (schema v3) or a legacy single
+    ``data_model``; when both are sent, ``data_models`` wins. An unset
+    ``spec_schema_version`` keeps the spec's current one (1 for a new spec).
+    """
 
     name: str
     slug: str
     category: str = ""
     description: str = ""
     difficulty: Literal["", "basic", "standard", "advanced"] = ""
+    spec_schema_version: int | None = None
     backend_requirements: list = []
     frontend_requirements: list = []
     admin_requirements: list = []
     api_endpoints: list = []
     data_model: dict = {}
+    data_models: list = []
     admin_api_endpoints: list = []
 
 

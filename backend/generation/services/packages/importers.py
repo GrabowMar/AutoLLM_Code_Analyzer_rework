@@ -38,6 +38,11 @@ from backend.generation.services.packages.constants import SUPPORTED_TEMPLATE_PA
 from backend.generation.services.packages.constants import TEMPLATE_PACKAGE_KIND
 from backend.generation.services.packages.constants import TEMPLATE_PACKAGE_SCHEMA_VERSION
 from backend.generation.services.packages.visibility import visible_blocks_for
+from backend.generation.services.spec_models import normalize_data_models
+from backend.generation.services.spec_models import requirement_content_hash
+from backend.generation.services.spec_models import row_content_hash
+from backend.generation.services.spec_models import spec_fields_of
+from backend.generation.services.spec_models import stored_data_model
 from backend.generation.services.versioning import content_hash
 
 if TYPE_CHECKING:
@@ -335,6 +340,7 @@ def _import_app_template(
 ) -> AppRequirementTemplate:
     payload = _validate_app_template_payload(raw_template)
     existing = AppRequirementTemplate.objects.filter(slug=payload["slug"]).first()
+    payload["content_hash"] = requirement_content_hash(spec_fields_of(AppRequirementTemplate(**payload)))
     if existing is None:
         return AppRequirementTemplate.objects.create(
             **payload,
@@ -346,6 +352,9 @@ def _import_app_template(
         return existing
 
     if conflict_strategy == "overwrite" and existing.created_by_id == user.id:
+        # One mutable row per slug: new content gets the next version.
+        if payload["content_hash"] != row_content_hash(existing):
+            payload["version"] = existing.version + 1
         _assign_fields(existing, payload)
         existing.save(update_fields=[*payload.keys() - {"slug"}, "updated_at"])
         return existing
@@ -684,9 +693,14 @@ def _validate_app_template_payload(raw_template: Any) -> dict[str, Any]:
         "frontend_requirements": raw_template.get("frontend_requirements") or [],
         "admin_requirements": raw_template.get("admin_requirements") or [],
         "api_endpoints": raw_template.get("api_endpoints") or [],
-        "data_model": raw_template.get("data_model") or {},
         "admin_api_endpoints": raw_template.get("admin_api_endpoints") or [],
     }
+    # Spec schema v3 lists its models under data_models (preferred when both
+    # are present); older specs carry one data_model object.
+    if isinstance(raw_template.get("data_models"), list) and raw_template["data_models"]:
+        payload["data_models"] = raw_template["data_models"]
+    else:
+        payload["data_model"] = raw_template.get("data_model") or {}
     # v3 exports carry the difficulty; older packages leave it unset (and
     # unmatched against, so they still reuse identical specs).
     if "difficulty" in raw_template:
@@ -695,6 +709,9 @@ def _validate_app_template_payload(raw_template: Any) -> dict[str, Any]:
             msg = f"App template {slug}: difficulty must be one of basic, standard, advanced"
             raise ValueError(msg)
         payload["difficulty"] = difficulty
+    # Likewise the spec schema version (v3 spec rules apply from it on).
+    if raw_template.get("spec_schema_version") is not None:
+        payload["spec_schema_version"] = raw_template["spec_schema_version"]
     # The same contract the seeder's specs and POST /app-specs/ meet (the
     # slug pattern aside: older specs and import renames use hyphens).
     from backend.generation.services.data_lint import app_spec_errors
@@ -703,6 +720,9 @@ def _validate_app_template_payload(raw_template: Any) -> dict[str, Any]:
     if errors:
         msg = "; ".join(errors[:5]) + (f" (+{len(errors) - 5} more)" if len(errors) > 5 else "")
         raise ValueError(msg)
+    # Column values: data_model holds either form (see spec_models).
+    payload["data_model"] = stored_data_model(payload)
+    payload.pop("data_models", None)
     return payload
 
 
@@ -805,9 +825,10 @@ def _app_template_matches(existing: AppRequirementTemplate, payload: dict[str, A
         and (existing.frontend_requirements or []) == payload["frontend_requirements"]
         and (existing.admin_requirements or []) == payload["admin_requirements"]
         and (existing.api_endpoints or []) == payload["api_endpoints"]
-        and (existing.data_model or {}) == payload["data_model"]
+        and normalize_data_models(existing) == normalize_data_models(payload)
         and (existing.admin_api_endpoints or []) == payload["admin_api_endpoints"]
         and ("difficulty" not in payload or existing.difficulty == payload["difficulty"])
+        and ("spec_schema_version" not in payload or existing.spec_schema_version == payload["spec_schema_version"])
     )
 
 

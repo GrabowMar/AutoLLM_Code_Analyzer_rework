@@ -7,7 +7,7 @@
 	 * Tools (state, time, version, errors, raw output of every tool).
 	 *
 	 * URL: `?tab=overview|findings|tools` and the findings filters
-	 * (`tool`, `level`, `cat`, `file`, `rule`, `q`, `sort`), so views can be linked.
+	 * (`tool`, `level`, `cat`, `file`, `rule`, `q`, `sort`, `merge=0`), so views can be linked.
 	 */
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import { goto, replaceState } from '$app/navigation';
@@ -87,6 +87,7 @@
 			rule: p.get('rule') ?? '',
 			search: p.get('q') ?? '',
 			sort: sort === 'file' || sort === 'tool' || sort === 'rule' ? sort : 'severity',
+			merge: p.get('merge') !== '0',
 		};
 	}
 
@@ -107,6 +108,7 @@
 		set('rule', filters.rule);
 		set('q', filters.search);
 		set('sort', filters.sort, 'severity');
+		set('merge', filters.merge ? '' : '0');
 		if (url.search === page.url.search) return;
 		try {
 			replaceState(url, page.state);
@@ -127,7 +129,7 @@
 	}
 
 	function showFindings(partial: Partial<FindingFilters>) {
-		filters = { ...EMPTY_FILTERS, sort: filters.sort, ...partial };
+		filters = { ...EMPTY_FILTERS, sort: filters.sort, merge: filters.merge, ...partial };
 		setTab('findings');
 		window.scrollTo({ top: 0 });
 	}

@@ -501,8 +501,11 @@ def test_eslint_levels_core_rule_docs_and_suggestions():
             },
         ],
     )
-    core, plugin, fatal = parsers.parse("eslint", raw).findings
-    assert [f.tool_severity for f in (core, plugin, fatal)] == ["error", "warning", "error"]
+    parsed = parsers.parse("eslint", raw)
+    # The parsing error is a coverage gap, not a finding.
+    core, plugin = parsed.findings
+    assert [f.tool_severity for f in (core, plugin)] == ["error", "warning"]
+    assert parsed.warnings == ["Not parsed (1 of 1 file(s)): /work/x.js:1: Parsing error: x"]
     assert core.tool_specific_data == {
         "docs_url": "https://eslint.org/docs/latest/rules/no-empty",
         "fix": "Add comment inside empty block statement.",
@@ -511,7 +514,6 @@ def test_eslint_levels_core_rule_docs_and_suggestions():
     }
     # Plugin rules get no guessed documentation link.
     assert "docs_url" not in plugin.tool_specific_data
-    assert fatal.tool_specific_data == {}
 
 
 def test_semgrep_labels_metadata_and_login_placeholder():
@@ -720,3 +722,210 @@ def test_gitleaks_never_stores_the_secret_value():
     for f in findings:
         assert secret not in repr(f)
         assert "rest" not in f.code_snippet
+
+
+# --- Output that is not a clean, complete report ---------------------------
+
+
+def test_json_report_followed_by_stderr_text_is_still_parsed():
+    # exec_in merges stderr into stdout: pylint's JSON, then a warning line.
+    report = [{"type": "warning", "symbol": "unused-import", "message": "Unused import os", "path": "app.py"}]
+    raw = json.dumps(report, indent=2) + "\nWARNING: something on stderr [x]\n"
+    parsed = parsers.parse("pylint", raw)
+    assert parsed.error is None
+    assert [f.rule_id for f in parsed.findings] == ["unused-import"]
+
+
+def test_json_report_after_bracketed_log_line_is_found():
+    # A bracket inside a log line must not be taken for the report.
+    raw = "[INFO] scanning\n" + json.dumps({"results": [], "errors": []}) + "\n"
+    assert parsers.parse("bandit", raw).error is None
+
+
+def test_object_report_is_not_mistaken_for_its_inner_list():
+    raw = 'note: {"partial": 1\n' + json.dumps({"results": [{"issue_text": "x", "test_id": "B1"}]})
+    assert [f.rule_id for f in parsers.parse("bandit", raw).findings] == ["B1"]
+
+
+def test_output_without_json_report_is_an_error_not_a_clean_result():
+    parsed = parsers.parse("pylint", "Traceback (most recent call last):\n  ...\nKeyError: 'x'\n")
+    assert parsed.findings == []
+    assert parsed.error is not None
+    assert "no JSON report" in parsed.error
+    # Truncated JSON is no report either.
+    assert parsers.parse("semgrep", '{"results": [{"check_id": "a"').error is not None
+    # Empty output stays an empty result (the runner judges it by exit code).
+    assert parsers.parse("pylint", "").error is None
+
+
+def test_bandit_files_it_could_not_parse_are_warnings():
+    raw = json.dumps(
+        {
+            "results": [{"issue_text": "md5", "test_id": "B303", "filename": "a.py"}],
+            "errors": [{"filename": "b.py", "reason": "syntax error while parsing AST from file"}],
+            "metrics": {"_totals": {}, "a.py": {}, "b.py": {}},
+        },
+    )
+    parsed = parsers.parse("bandit", raw)
+    assert parsed.error is None
+    assert len(parsed.findings) == 1
+    assert parsed.warnings == ["Not scanned (1 file(s)): b.py: syntax error while parsing AST from file"]
+
+
+def test_bandit_that_could_parse_no_file_is_an_error():
+    raw = json.dumps(
+        {
+            "results": [],
+            "errors": [{"filename": "a.py", "reason": "syntax error while parsing AST from file"}],
+            "metrics": {"_totals": {}, "a.py": {}},
+        },
+    )
+    parsed = parsers.parse("bandit", raw)
+    assert parsed.error is not None
+    assert "a.py" in parsed.error
+
+
+def test_semgrep_errors_and_skipped_files_are_warnings():
+    raw = json.dumps(
+        {
+            "results": [],
+            "errors": [
+                {
+                    "code": 3,
+                    "level": "warn",
+                    "type": ["PartialParsing", [{"path": "a.js"}]],
+                    "message": "Syntax error at line a.js:3:\n `<` was unexpected",
+                    "path": "a.js",
+                },
+            ],
+            "paths": {
+                "scanned": ["a.js", "b.py"],
+                "skipped": [
+                    {"path": "node_modules/x.js", "reason": "semgrepignore_patterns_match"},
+                    {"path": "big.js", "reason": "exceeded_size_limit"},
+                ],
+            },
+        },
+    )
+    parsed = parsers.parse("semgrep", raw)
+    assert parsed.error is None
+    assert parsed.warnings == [
+        "Semgrep errors (1): a.js: PartialParsing: Syntax error at line a.js:3:",
+        # Ignore-pattern skips are by design: only the size-limit skip is a gap.
+        "Not scanned (1 file(s)): big.js: exceeded_size_limit",
+    ]
+
+
+def test_semgrep_that_analyzed_no_file_is_an_error():
+    raw = json.dumps(
+        {
+            "results": [],
+            "errors": [{"level": "error", "type": "Syntax error", "message": "Syntax error", "path": "a.py"}],
+            "paths": {"scanned": ["a.py"]},
+        },
+    )
+    assert parsers.parse("semgrep", raw).error is not None
+    # Nothing scanned and nothing reported as wrong: a plain empty result.
+    assert parsers.parse("semgrep", json.dumps({"results": [], "errors": [], "paths": {"scanned": []}})).error is None
+
+
+def test_mypy_blocking_error_is_not_a_measurement():
+    raw = "app.py: error: Duplicate module named 'app' (also at './app.py')\n"
+    parsed = parsers.parse("mypy", raw)
+    assert parsed.findings == []
+    assert "Duplicate module named" in parsed.error
+
+    syntax = parsers.parse("mypy", "models.py:12: error: invalid syntax  [syntax]\n")
+    assert [f.rule_id for f in syntax.findings] == ["syntax"]  # kept on the failed result
+    assert "models.py:12" in syntax.error
+
+    summary = parsers.parse("mypy", "Found 1 error in 1 file (errors prevented further checking)\n")
+    assert summary.error is not None
+
+    ok = parsers.parse("mypy", "app.py:3: error: Incompatible types  [assignment]\n")
+    assert ok.error is None
+    assert len(ok.findings) == 1
+
+
+def test_eslint_fatal_parse_errors_are_warnings_not_findings():
+    raw = json.dumps(
+        [
+            {
+                "filePath": "/work/a.jsx",
+                "messages": [
+                    {"ruleId": None, "fatal": True, "severity": 2, "message": "Parsing error: Unexpected token <"},
+                ],
+            },
+            {"filePath": "/work/b.js", "messages": [{"ruleId": "no-undef", "severity": 2, "message": "x", "line": 2}]},
+        ],
+    )
+    parsed = parsers.parse("eslint", raw)
+    assert [f.rule_id for f in parsed.findings] == ["no-undef"]
+    assert parsed.error is None
+    assert parsed.warnings == ["Not parsed (1 of 2 file(s)): /work/a.jsx:?: Parsing error: Unexpected token <"]
+
+
+def test_eslint_with_every_file_fatal_is_an_error():
+    raw = json.dumps(
+        [{"filePath": "/work/a.jsx", "messages": [{"ruleId": None, "severity": 2, "message": "Parsing error: x"}]}],
+    )
+    parsed = parsers.parse("eslint", raw)
+    assert parsed.findings == []
+    assert parsed.error is not None
+    # The security and react flavours share the parser.
+    assert parsers.parse("eslint_security", raw).error is not None
+
+
+def _jscpd_clone(first: tuple[int, int], second: tuple[int, int], lines: int, fmt: str, name: str = "src/App.jsx"):
+    return {
+        "format": fmt,
+        "lines": lines,
+        "tokens": lines * 10,
+        "fragment": "x",
+        "firstFile": {"name": name, "start": first[0], "end": first[1]},
+        "secondFile": {"name": name, "start": second[0], "end": second[1]},
+    }
+
+
+def test_jscpd_drops_clones_repeated_by_embedded_language_streams():
+    # Run b214ced5: App.jsx was tokenized as javascript, jsx and css, so the
+    # same copied block came back once per stream with shifted ranges.
+    report = {
+        "duplicates": [
+            _jscpd_clone((2104, 2141), (1571, 1598), 38, "javascript"),
+            _jscpd_clone((2120, 2140), (1573, 1595), 21, "jsx"),
+            _jscpd_clone((3519, 3525), (3423, 3429), 7, "javascript"),
+            # Backwards range: an artifact of a non-contiguous jsx stream.
+            _jscpd_clone((3519, 3535), (3423, 2155), 17, "jsx"),
+            # Same lines on one side only: a different clone.
+            _jscpd_clone((3519, 3525), (100, 106), 7, "javascript"),
+            _jscpd_clone((10, 20), (30, 40), 11, "python", name="app.py"),
+        ],
+        "statistics": {
+            "formats": {
+                "css": {"sources": {"src/App.jsx": {"lines": 37, "tokens": 330}}},
+                "javascript": {"sources": {"src/App.jsx": {"lines": 3163, "tokens": 32428}}},
+                "jsx": {"sources": {"src/App.jsx": {"lines": 3600, "tokens": 5000}}},
+                "python": {"sources": {"app.py": {"lines": 400, "tokens": 2242}}},
+            },
+            "total": {"lines": 7200, "sources": 4, "clones": 6},
+        },
+    }
+    parsed = parsers.parse("jscpd", json.dumps(report))
+    assert [(f.file_path, f.line_number, f.tool_specific_data["lines"]) for f in parsed.findings] == [
+        ("src/App.jsx", 2104, 38),
+        ("src/App.jsx", 3519, 7),
+        ("src/App.jsx", 3519, 7),
+        ("app.py", 10, 11),
+    ]
+    assert parsed.findings[2].tool_specific_data["duplicate_of"]["start_line"] == 100
+    # One source per file; a file's lines are its longest stream, not the sum.
+    assert parsed.metrics == {
+        "clones": 4,
+        "duplicated_lines": 63,
+        "duplicated_tokens": 630,
+        "total_lines": 4000,
+        "total_sources": 2,
+        "duplication_percentage": 1.57,
+        "token_duplication_percentage": 1.57,
+    }

@@ -16,15 +16,22 @@ from collections import defaultdict
 from typing import TYPE_CHECKING
 from typing import Any
 
+from django.db.models import Exists
+from django.db.models import OuterRef
+
 from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import Finding
 from backend.analysis.models import ToolResult
 from backend.generation.models import GenerationJob
 from backend.statistics.services.dedup import DEFAULT_LINE_TOLERANCE
+from backend.statistics.services.dedup import RECORD_FIELDS
 from backend.statistics.services.dedup import SEVERITY_RANK
 from backend.statistics.services.dedup import cluster_findings
+from backend.statistics.services.dedup import finding_record
 from backend.statistics.services.dedup import issue_class
 from backend.statistics.services.dedup import tool_overlap
+from backend.statistics.services.dependencies import cluster_package
+from backend.statistics.services.dependencies import model_added_packages
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractBaseUser
@@ -39,9 +46,25 @@ def study_jobs(
     experiment_id: str | None = None,
     batch_id: str | None = None,
     job_ids: list[str] | None = None,
+    current_only: bool = True,
 ) -> QuerySet[GenerationJob]:
-    """The jobs a study table describes (owner-scoped unless *user* is None or staff)."""
+    """The jobs a study table describes (owner-scoped unless *user* is None or staff).
+
+    With *current_only* (the default) a retried experiment cell counts once:
+    its latest attempt, as on the experiment's Results tab. Superseded
+    attempts would otherwise double-count the cell in every denominator.
+    """
     qs = GenerationJob.objects.select_related("model", "app_requirement")
+    if current_only:
+        newer_attempt = GenerationJob.objects.filter(
+            experiment_id=OuterRef("experiment_id"),
+            condition_id=OuterRef("condition_id"),
+            app_requirement_id=OuterRef("app_requirement_id"),
+            repeat_index=OuterRef("repeat_index"),
+            created_at__gt=OuterRef("created_at"),
+        )
+        # Ad-hoc jobs (no experiment cell) never match: NULL = NULL is not true in SQL.
+        qs = qs.exclude(Exists(newer_attempt))
     if user is not None and getattr(user, "is_authenticated", False) and not getattr(user, "is_staff", False):
         qs = qs.filter(created_by=user)
     if experiment_id:
@@ -72,38 +95,8 @@ def _finding_records(result_to_job: dict[str, str], *, include_ai: bool) -> list
     qs = Finding.objects.filter(result_id__in=list(result_to_job))
     if not include_ai:
         qs = qs.exclude(result__tool_slug__in=AnalyzerTool.ai_slugs())
-    records = []
-    for row in qs.values(
-        "id",
-        "result_id",
-        "result__tool_slug",
-        "rule_id",
-        "severity",
-        "category",
-        "file_path",
-        "line_number",
-        "tool_specific_data",
-        "title",
-    ):
-        extra = row["tool_specific_data"] if isinstance(row["tool_specific_data"], dict) else {}
-        records.append(
-            {
-                "id": row["id"],
-                "run_id": result_to_job[str(row["result_id"])],
-                "tool": row["result__tool_slug"],
-                "rule_id": row["rule_id"],
-                "severity": row["severity"],
-                "category": row["category"],
-                "file_path": row["file_path"],
-                "line": row["line_number"],
-                "end_line": extra.get("end_line"),
-                "cwe": extra.get("cwe") or "",
-                "package": extra.get("package") or "",
-                "issue_key": extra.get("issue_key") or "",
-                "title": row["title"],
-            },
-        )
-    return records
+    rows = qs.values("result_id", *RECORD_FIELDS)
+    return [finding_record(row, result_to_job[str(row["result_id"])]) for row in rows]
 
 
 def tool_coverage(result_ids: list, *, include_ai: bool) -> dict[str, Any]:
@@ -139,10 +132,17 @@ def tool_coverage(result_ids: list, *, include_ai: bool) -> dict[str, Any]:
             measured[slug].add(str(job_id))
         else:
             reasons[slug][skip_reason or status] += 1
-    n_runs = len(apps)
-    common = sorted(t for t in all_tools if len(measured[t]) == n_runs)
+    # An app no (non-AI) tool measured has no measurement at all: it is left
+    # out of the scope rather than allowed to empty ``tools_common`` (which
+    # would make every other app read as zero issues).
+    measured_apps = set().union(*measured.values()) if measured else set()
+    unmeasured = sorted(apps - measured_apps)
+    n_runs = len(measured_apps)
+    common = sorted(t for t in all_tools if n_runs and len(measured[t]) == n_runs)
     return {
         "apps": n_runs,
+        "apps_measured": sorted(measured_apps),
+        "apps_unmeasured": unmeasured,
         "tools_common": common,
         "tools_partial": {
             t: {"apps_measured": len(measured[t]), "apps_missing": n_runs - len(measured[t]), **reasons[t]}
@@ -172,7 +172,10 @@ def _group_summary(apps: list[dict[str, Any]]) -> dict[str, Any]:
         "median_unique_per_app": pystats.median(unique) if unique else None,
         "sd_unique_per_app": round(pystats.stdev(unique), 2) if len(unique) > 1 else None,
         "loc": loc,
-        "unique_per_kloc": _per_kloc(sum(unique), loc),
+        "code_unique": sum(a["code_unique"] for a in apps),
+        "dependency_unique": sum(a["dependency_unique"] for a in apps),
+        "dependency_added": sum(a["dependency_added"] for a in apps),
+        "unique_per_kloc": _per_kloc(sum(a["code_unique"] for a in apps), loc),
         "security_unique": sum(a["security_unique"] for a in apps),
         **{f"unique_{s}": sev[s] for s in SEVERITIES},
     }
@@ -224,14 +227,28 @@ def issue_breakdowns(
     for c in clusters:
         clusters_by_run[c.run_id].append(c)
 
+    # Only apps the counted instrument set measured: an app whose tools all
+    # failed (or that only an AI reviewer saw) has unknown counts, not zero.
+    if common_tools_only:
+        measured_apps = set(coverage["apps_measured"]) if coverage["tools_common"] else set()
+    else:
+        measured_apps = set(coverage["apps_measured"])
     apps: list[dict[str, Any]] = []
+    stack_memo: dict = {}
     for job_id, (run_id, _at) in latest_run.items():
+        if job_id not in measured_apps:
+            continue
         job = jobs_by_id[job_id]
         own = clusters_by_run.get(job_id, [])
         # Source LOC, not metrics.lines_of_code (which counts every generated
         # line, lockfiles included): the denominator must mean the same for all apps.
         loc = loc_from_job(job)["total_loc"]
         sev = Counter(c.severity for c in own)
+        # Dependency advisories describe packages, not lines: they stay out of
+        # the per-kLOC density, and only packages the model added itself (not
+        # the scaffold's pins or transitive ones) are the model's choice.
+        deps = [c for c in own if c.category == "dependency"]
+        added = model_added_packages(job, stack_memo) if deps else set()
         apps.append(
             {
                 **job_labels(job),
@@ -240,8 +257,11 @@ def issue_breakdowns(
                 "raw_findings": raw_by_run.get(job_id, 0),
                 "unique_issues": len(own),
                 "multi_tool_issues": sum(1 for c in own if len(c.tools) > 1),
+                "code_unique": len(own) - len(deps),
+                "dependency_unique": len(deps),
+                "dependency_added": sum(1 for c in deps if cluster_package(c) in added),
                 "security_unique": sum(1 for c in own if c.category in ("security", "secrets")),
-                "unique_per_kloc": _per_kloc(len(own), int(loc or 0)),
+                "unique_per_kloc": _per_kloc(len(own) - len(deps), int(loc or 0)),
                 **{f"unique_{s}": sev.get(s, 0) for s in SEVERITIES},
             },
         )

@@ -2,91 +2,145 @@
   "slug": "iot_sensor_display",
   "name": "Sensor Dashboard",
   "category": "IoT",
-  "description": "Display live sensor readings",
+  "description": "Register sensors, record their readings and watch the latest values and recent history on a dashboard",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only sensor data; require auth for registering sensors and posting readings",
-    "1. Sensor model: id, name (required), location, unit, last_value, last_updated",
-    "2. GET /api/sensors - list sensors",
-    "3. GET /api/sensors/:id - get sensor details",
-    "4. POST /api/sensors - register new sensor",
-    "5. POST /api/sensors/:id/readings - update last_value"
+    "Access control: anyone may read sensors and their readings; require auth for registering and deleting sensors and for posting readings, and only the user who registered a sensor may post readings to it or delete it (403 otherwise); admin endpoints are restricted to the admin account",
+    "Sensor validation: name is a required non-empty string of at most 100 characters, unit a required non-empty string of at most 20 characters (for example C, %, hPa), location an optional string of at most 100 characters",
+    "Readings: POST /api/sensors/:id/readings stores a numeric value with the current time as recorded_at and makes it the sensor's last_value and last_updated; a missing or non-numeric value answers 400",
+    "A new sensor has last_value and last_updated null until its first reading",
+    "GET /api/sensors lists active sensors sorted by name, each with owner (the registering user's username), last_value and last_updated",
+    "GET /api/sensors/:id/readings lists a sensor's readings newest first; ?limit= caps how many are returned (default 50, at most 500) while total counts all of the sensor's readings",
+    "DELETE /api/sensors/:id removes the sensor and its readings permanently",
+    "Deactivated sensors (is_active false) are left out of GET /api/sensors, answer 404 on the public sensor endpoints and accept no readings; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for another user's sensor or a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "Public guest view of sensors with CTA to sign in for management",
-    "1. Sensor cards with name, location, last value, unit",
-    "2. Detail modal with last updated time",
-    "3. Add sensor form",
-    "4. Refresh button",
-    "5. Empty state when no sensors"
+    "Everyone sees the sensor dashboard and sensor details read-only; signed-in users also get the register-sensor form and, on their own sensors, the record-reading and delete controls, and visitors see a 'Sign in to register sensors' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Dashboard: one card per sensor with name, location, last value with its unit and how long ago it was updated; it polls the API every 10 seconds and also has a manual refresh button",
+    "Sensor detail view: the sensor's fields and a line chart plus a table of its recent readings",
+    "Register-sensor and record-reading forms that show the API's validation messages next to the form; delete asks for confirmation first",
+    "An empty state that explains how to register the first sensor when there are none"
+  ],
+  "admin_requirements": [
+    "Admin overview: every sensor, active or not, with total, active and inactive counts and the total number of readings",
+    "Toggle a sensor's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/sensors",
-      "description": "List sensors",
+      "description": "List active sensors by name with their latest value",
+      "auth": "public",
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "name": "string",
-            "location": "string",
+            "name": "Greenhouse air",
+            "location": "Greenhouse 2",
+            "unit": "C",
+            "owner": "grower1",
             "last_value": 21.4,
-            "unit": "C"
+            "last_updated": "2026-01-15T10:30:00Z",
+            "created_at": "2026-01-10T09:00:00Z"
           }
         ],
         "total": 1
       }
     },
     {
-      "method": "GET",
-      "path": "/api/sensors/:id",
-      "description": "Get sensor details",
-      "request": null,
-      "response": {
-        "id": 1,
-        "name": "string",
-        "location": "string",
-        "last_value": 21.4,
-        "unit": "C",
-        "last_updated": "ISO8601"
-      }
-    },
-    {
       "method": "POST",
       "path": "/api/sensors",
-      "description": "Register new sensor",
+      "description": "Register a sensor owned by the signed-in user",
+      "auth": "user",
+      "success_status": 201,
       "request": {
         "name": "string",
-        "location": "string",
-        "unit": "string"
+        "unit": "string",
+        "location": "string (optional)"
       },
       "response": {
         "id": 1,
-        "name": "string",
-        "location": "string",
-        "unit": "string"
+        "name": "Greenhouse air",
+        "location": "Greenhouse 2",
+        "unit": "C",
+        "owner": "grower1",
+        "last_value": null,
+        "last_updated": null,
+        "created_at": "2026-01-10T09:00:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/sensors/:id",
+      "description": "One active sensor",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "name": "Greenhouse air",
+        "location": "Greenhouse 2",
+        "unit": "C",
+        "owner": "grower1",
+        "last_value": 21.4,
+        "last_updated": "2026-01-15T10:30:00Z",
+        "created_at": "2026-01-10T09:00:00Z"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/sensors/:id",
+      "description": "Delete one of your sensors and its readings",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/sensors/:id/readings",
+      "description": "Readings of a sensor, newest first",
+      "auth": "public",
+      "query": {
+        "limit": "How many of the newest readings to return (default 50, at most 500)"
+      },
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "sensor_id": 1,
+            "value": 21.4,
+            "recorded_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1
       }
     },
     {
       "method": "POST",
       "path": "/api/sensors/:id/readings",
-      "description": "Post a new reading",
+      "description": "Record a reading for one of your sensors",
+      "auth": "user",
+      "success_status": 201,
       "request": {
-        "value": 21.4
+        "value": "number"
       },
       "response": {
         "id": 1,
-        "last_value": 21.4,
-        "last_updated": "ISO8601"
+        "sensor_id": 1,
+        "value": 21.4,
+        "recorded_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -94,43 +148,66 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Sensor",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "name": "string (required, max 100 chars)",
-      "location": "string (optional)",
-      "unit": "string (required)",
-      "last_value": "decimal (nullable)",
-      "last_updated": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Sensor",
+      "description": "A registered sensor; last_value and last_updated mirror its newest reading",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who registered it)",
+        "name": "string (required, max 100 chars)",
+        "unit": "string (required, max 20 chars)",
+        "location": "string (optional, max 100 chars)",
+        "last_value": "number (null until the first reading)",
+        "last_updated": "datetime (null until the first reading, ISO 8601 in JSON)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the sensor from public endpoints)"
+      }
+    },
+    {
+      "name": "Reading",
+      "description": "One recorded value of a sensor",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "sensor_id": "integer (references Sensor.id; deleted with the sensor)",
+        "value": "number (required)",
+        "recorded_at": "datetime (auto, ISO 8601 in JSON)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any sensor"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/sensors",
-      "description": "Admin overview: list all sensors and counts",
+      "description": "Admin overview: every sensor with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
-        "inactive": 0
+        "items": [
+          {
+            "id": 1,
+            "name": "Greenhouse air",
+            "owner": "grower1",
+            "reading_count": 120,
+            "is_active": true,
+            "created_at": "2026-01-10T09:00:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
+        "inactive": 0,
+        "readings": 120
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/sensors/:id/toggle",
-      "description": "Toggle sensor active status",
+      "description": "Flip a sensor's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

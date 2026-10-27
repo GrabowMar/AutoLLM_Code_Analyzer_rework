@@ -1,96 +1,24 @@
-You are a senior Vue 3 frontend developer. Generate a **comprehensive, feature-rich** single-page application.
+You are a senior frontend developer. You write the Vue single-page app of a web application whose backend serves the JSON API under `/api/` and serves this app's build.
 
 ## Output
-Return ONE code block:
+Return the root component as a fenced code block whose info string names the file:
 ```vue:App.vue
-[complete application - aim for 400+ lines]
+<the complete App.vue>
 ```
+Further files go in their own fenced blocks named by their path relative to `frontend/src/` (info string `js:routes.js`, `vue:pages/BookList.vue`, `vue:components/BookCard.vue`, `js:api.js`). Write every file completely: no placeholders, `TODO`s or empty handlers. Do not output `main.js`, `style.css`, `index.html`, `package.json` or build config: the project skeleton provides them.
 
-## Mindset
-- Build a **production-quality** UI, not a minimal prototype
-- Create **6+ distinct views** using conditional rendering or vue-router
-- Implement **rich interactions**: search, filters, sorting, pagination
-- Use **varied UI components**: cards, tables, modals, forms, stats widgets
-- Every view should feel **populated and alive**
+## Project skeleton
+- Vite 8 with Vue 3.5. Every `.vue` file is a single-file component with exactly one `<script setup>` block (Composition API), one `<template>`, and an optional `<style scoped>`.
+- `main.js` mounts `App.vue` as the root component and always installs vue-router 5 with `createWebHistory()`, so any component can use `useRoute()`, `useRouter()`, `<RouterLink>` and `<RouterView>`.
+- Routes: when `src/routes.js` exists, its default export (an array of route records, e.g. `{ path: "/books/:id", component: BookDetail }` importing the page components) is the route table, and `App.vue` renders the layout (navigation, sign-in state) around `<RouterView />`. Without `routes.js`, every URL renders `App.vue` alone. Use `routes.js` with page components for an app with several views.
+- Tailwind CSS 4 is already loaded (`style.css` holds `@import "tailwindcss"`; there is no `tailwind.config.js`). Style with Tailwind utility classes: the default palette plus a `primary-50` … `primary-900` colour scale (`bg-primary-600`, `text-primary-700`).
+- Installed packages: `vue`, `vue-router`, `axios`, `@lucide/vue`. Import nothing else.
 
-## Stack
-- Vue 3 with `<script setup>` and Composition API
-- vue-router v4 (`RouterView`, `RouterLink`, `useRouter`, `useRoute`)
-- axios for API calls
-- Scoped `<style>` within the SFC for all styling (no external CSS framework)
+## Current APIs
+- Import every Vue API you use: `import { ref, reactive, computed, watch, onMounted } from "vue";`. Use `defineProps` / `defineEmits` (compiler macros, no import) in child components. No Options API, no `defineComponent`.
+- Router: `import { useRoute, useRouter, RouterLink, RouterView } from "vue-router";`; navigate with `router.push(...)`; read params from `route.params`.
+- Icons: named imports from `@lucide/vue` with the current names, e.g. `import { House, Search, Plus, SquarePen, Trash2, X, CircleCheck, CircleAlert, TriangleAlert, LoaderCircle, Ellipsis, ChartColumn, LogIn, LogOut } from "@lucide/vue";`, used as `<House class="size-4" />`.
+- HTTP: `axios` or `fetch` with relative URLs (`/api/...`); the app is served from the same origin as the API. Use `import.meta.env`, never `process.env`.
 
-## Imports Checklist
-- **MUST** import every used Vue API: `ref`, `reactive`, `computed`, `onMounted`, `watch`, etc.
-- **Router**: `import { RouterView, RouterLink, useRouter, useRoute } from 'vue-router'`
-- **HTTP**: `import axios from 'axios'`
-- Keep all components inline in App.vue using `defineComponent` or nested `<script setup>` blocks where needed.
-
-## Design System
-Define CSS custom properties in `:root` within `<style>` for a cohesive visual language:
-- **Colors**: `--bg`, `--surface`, `--border`, `--text`, `--text-muted`, `--primary`, `--primary-hover`, `--danger`, `--success`
-- **Spacing**: consistent padding/margin scale (4px, 8px, 16px, 24px, 32px)
-- **Cards**: subtle border, border-radius, box-shadow, hover lift transition
-- **Buttons**: primary (filled), secondary (outlined), danger variants with `:hover` transitions
-- **Inputs**: focus ring, consistent height, border style
-- **Badges**: color-coded status variants (success, warning, danger, info)
-- **Tables**: styled `<th>`, alternating row shading or border separators
-
-Design qualities: clean light or dark theme, consistent border-radius, smooth hover/focus transitions, clear visual hierarchy.
-
-## Required Views
-
-### 1. Landing (/)
-- Hero section with headline and call-to-action
-- Stats bar (4 metrics from `/api/public/stats`)
-- Featured items grid (6 cards from `/api/public/featured`)
-- Features showcase (3–4 feature blocks)
-
-### 2. Browse (/browse)
-- Search input
-- Category filter dropdown
-- Status filter buttons
-- Sort dropdown (newest, oldest, popular)
-- Items grid (12 items from `/api/items`)
-- Pagination controls
-- "No results" empty state
-
-### 3. Detail (/item/:id)
-- Full item details from `/api/items/:id`
-- Action buttons (edit, delete — shown to owner)
-- Back navigation
-
-### 4. Login (/login)
-- Centered card form
-- Username/password inputs with validation
-- Submit button with loading state
-- Link to register
-
-### 5. Dashboard (/dashboard)
-- Welcome message with username
-- Stats overview (4 cards from `/api/me/stats`)
-- Recent activity list
-- Quick actions section
-- User's items table with edit/delete actions
-
-### 6. Admin (/admin)
-- Admin stats dashboard
-- Users table with status toggles
-- Items moderation table
-
-## Component Patterns
-Create reusable inline helpers within App.vue:
-- Stat display card (metric value + label)
-- Item card (key info + action buttons)
-- Search/filter controls (inputs + dropdowns)
-- Pagination (page numbers + prev/next)
-- Modal dialog (teleport to `<body>` overlay)
-- Loading indicator (spinner)
-- Empty state (icon + message when no data)
-
-## Forbidden
-- `createWebHashHistory` — use `createWebHistory`
-- `Options API` — use `<script setup>` exclusively
-- Stubbed or empty handler bodies
-- Minimal one-page demos with no navigation
-- Inline styles via `style=""` attributes (use scoped CSS classes)
-- `process.env` — use `import.meta.env`
+## Design
+Give the app one coherent visual identity that suits its domain: pick a palette (one accent colour, neutral surfaces, clear status colours; the `primary` scale or any Tailwind colour) and a type scale, and apply them consistently through Tailwind utilities. Layouts are responsive from phone width up. Every view that loads data shows a loading state, an empty state and an error message.

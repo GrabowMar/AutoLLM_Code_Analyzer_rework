@@ -67,6 +67,27 @@ class TestSlots:
         assert _reasons(second) == {SANDBOX_FULL}
         assert claimed.id in {j.id for j in jobs}
 
+    def test_retried_attempt_queue_time_counts_from_its_own_enqueue(self, user, system_ep):
+        job = make_job(user, make_model(), lane="sandbox")
+        now = timezone.now()
+        GenerationJob.objects.filter(id=job.id).update(
+            queued_at=now - timedelta(hours=2),
+            attempt=1,
+            run_after=now - timedelta(seconds=5),
+            execution={"requeued_at": (now - timedelta(seconds=35)).isoformat()},
+        )
+        result = _scheduler().tick(slots(sandbox_slots=1), free())
+        assert len(result.claimed) == 1
+        job.refresh_from_db()
+        assert 0 <= job.execution["queue_seconds"] < 60
+
+    def test_first_attempt_queue_time_counts_from_queued_at(self, user, system_ep):
+        job = make_job(user, make_model(), lane="sandbox")
+        GenerationJob.objects.filter(id=job.id).update(queued_at=timezone.now() - timedelta(hours=1))
+        _scheduler().tick(slots(sandbox_slots=1), free())
+        job.refresh_from_db()
+        assert job.execution["queue_seconds"] >= 3500
+
     def test_admission_is_bounded_by_free_pool_threads(self, user, system_ep):
         for _ in range(3):
             make_job(user, make_model())

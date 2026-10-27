@@ -147,7 +147,7 @@
 								{#if row.mixed_fingerprints}
 									<span
 										class="rounded-full border border-warning/30 bg-warning/10 px-1.5 text-xs text-warning-fg"
-										title="Runs span {row.mixed_fingerprints.count} configuration fingerprints (majority {formatPercent(row.mixed_fingerprints.majority_share)}). Filter with “Majority fingerprint only”."
+										title="Replicates of {row.mixed_fingerprints.apps ?? 1} app(s) ran under up to {row.mixed_fingerprints.count} configurations (majority {formatPercent(row.mixed_fingerprints.majority_share)}). Filter with “Majority fingerprint only”."
 									>mixed fingerprints</span>
 								{/if}
 							</span>

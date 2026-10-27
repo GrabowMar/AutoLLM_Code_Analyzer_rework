@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://autollm-code-analyzer/generation/requirements-spec.json",
   "title": "App requirement spec",
-  "description": "Structured requirement JSON consumed by seed_generation_templates / backend.generation.seeding.seed_requirements",
+  "description": "Structured requirement JSON consumed by seed_generation_templates / backend.generation.seeding.seed_requirements. spec_schema_version 3 lists its models under data_models; v1/v2 specs (one data_model object) still validate.",
   "type": "object",
   "required": [
     "slug",
@@ -11,8 +11,11 @@
     "description",
     "backend_requirements",
     "frontend_requirements",
-    "api_endpoints",
-    "data_model"
+    "api_endpoints"
+  ],
+  "anyOf": [
+    { "required": ["data_model"] },
+    { "required": ["data_models"] }
   ],
   "properties": {
     "slug": {
@@ -27,7 +30,12 @@
       "type": "string",
       "enum": ["basic", "standard", "advanced"]
     },
-    "spec_schema_version": { "type": "integer", "minimum": 1 },
+    "spec_schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3,
+      "description": "3 = current format (data_models; endpoint auth/query/success_status). data_lint's rules beyond this schema apply from 3 on"
+    },
     "backend_requirements": {
       "type": "array",
       "minItems": 1,
@@ -52,20 +60,38 @@
       "items": { "$ref": "#/$defs/endpoint" }
     },
     "data_model": {
+      "description": "Legacy (v1/v2): the spec's single model. v3 specs use data_models",
       "type": "object",
       "required": ["name", "fields"],
       "properties": {
         "name": { "type": "string", "minLength": 1 },
-        "fields": {
-          "type": "object",
-          "minProperties": 1,
-          "additionalProperties": { "type": "string", "minLength": 1 }
-        }
+        "fields": { "$ref": "#/$defs/fields" }
       }
+    },
+    "data_models": {
+      "description": "v3: every model of the app, primary model first",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/model" }
     }
   },
   "additionalProperties": false,
   "$defs": {
+    "fields": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "model": {
+      "type": "object",
+      "required": ["name", "fields"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "fields": { "$ref": "#/$defs/fields" }
+      },
+      "additionalProperties": false
+    },
     "endpoint": {
       "type": "object",
       "required": ["method", "path", "description"],
@@ -76,6 +102,22 @@
         },
         "path": { "type": "string", "pattern": "^/api/" },
         "description": { "type": "string", "minLength": 1 },
+        "auth": {
+          "description": "Who may call it: anyone, a signed-in user, or the admin account",
+          "type": "string",
+          "enum": ["public", "user", "admin"]
+        },
+        "query": {
+          "description": "Query parameters: {name: what it does}",
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "success_status": {
+          "description": "Status of a successful call (200 when absent)",
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 399
+        },
         "request": {},
         "response": {}
       }

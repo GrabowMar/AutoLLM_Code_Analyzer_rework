@@ -1,54 +1,67 @@
 {
   "slug": "auth_user_login",
   "name": "User Login",
-  "category": "Auth",
-  "description": "Register and sign in users",
+  "category": "Authentication",
+  "description": "Register accounts with an email address, sign in and view the signed-in profile",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: public registration/login; require auth for profile access",
-    "1. User model: id, email (required, unique), password_hash, is_admin, created_at",
-    "2. POST /api/auth/register - create user account",
-    "3. POST /api/auth/login - return JWT token",
-    "4. GET /api/auth/me - return current user profile",
-    "5. Validate: strong password (min 8 chars) and email format"
+    "Access control: anyone may register and sign in; require auth for reading the own profile; admin endpoints are restricted to the admin account",
+    "POST /api/auth/register creates an account from email, password and an optional display_name; it answers 201 with the new account",
+    "Registration validation: email is required, at most 254 characters and of the form name@domain with a dot in the domain; it is stored in lower case and must be unique ignoring case (a second registration answers 409); password is at least 8 and at most 128 characters; display_name, when given, is at most 50 characters",
+    "POST /api/auth/login takes email (matched ignoring case) and password and answers 200 with a top-level token, token_type \"bearer\" and the account; a wrong email or password answers 401, and a deactivated account answers 403",
+    "A token is sent as Authorization: Bearer <token> and stays valid for 24 hours; GET /api/auth/me answers 401 without a valid token and returns the signed-in account otherwise",
+    "The admin account has is_admin true; every other account has is_admin false",
+    "Deactivated accounts (is_active false) cannot sign in, and requests carrying their tokens answer 401; the admin overview still lists them, and the admin cannot deactivate its own account (400)",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 for a failed sign-in or a missing or invalid token, 403 for a deactivated account or a non-admin on admin endpoints, 404 for unknown ids, 409 for an email that is already registered"
   ],
   "frontend_requirements": [
-    "Public login/register view with CTA to sign in",
-    "1. Tab switch between Login and Register",
-    "2. Inline form validation and error messages",
-    "3. Show authenticated banner with user email",
-    "4. Logout button clears token",
-    "5. Protected area message only visible when logged in"
+    "Visitors see a card with 'Sign in' and 'Register' tabs; after signing in the card is replaced by the signed-in profile",
+    "Register form: email, password, password confirmation and optional display name; check required fields, email format, the 8-character password minimum and matching confirmation before sending, and show the API's message (for example an already registered email) under the form",
+    "Sign-in form: email and password; show the API's error message on failure and keep the token for later requests on success",
+    "Signed-in view: a banner with the display name (or the email when there is none), a profile panel filled from /api/auth/me with email and member-since date, and a 'Sign out' button that discards the token and returns to the sign-in card",
+    "When a request answers 401 (for example an expired token), discard the token and show the sign-in card with a 'Please sign in again' message"
+  ],
+  "admin_requirements": [
+    "Admin overview: every account, newest first, with email, display name, admin flag, active status and creation date, plus total, active and inactive counts",
+    "Toggle an account's active status from the overview; the button is disabled on the admin's own row"
   ],
   "api_endpoints": [
     {
       "method": "POST",
       "path": "/api/auth/register",
-      "description": "Register a new user",
+      "description": "Register a new account",
+      "auth": "public",
+      "success_status": 201,
       "request": {
         "email": "string",
-        "password": "string"
+        "password": "string",
+        "display_name": "string (optional)"
       },
       "response": {
-        "id": 1,
-        "email": "string",
-        "created_at": "ISO8601"
+        "id": 2,
+        "email": "ada@example.com",
+        "display_name": "Ada",
+        "is_admin": false,
+        "created_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "POST",
       "path": "/api/auth/login",
-      "description": "Login and get JWT token",
+      "description": "Sign in and receive a bearer token",
+      "auth": "public",
       "request": {
         "email": "string",
         "password": "string"
       },
       "response": {
-        "token": "jwt-token",
+        "token": "eyJhbGciOi...",
+        "token_type": "bearer",
         "user": {
-          "id": 1,
-          "email": "string",
+          "id": 2,
+          "email": "ada@example.com",
+          "display_name": "Ada",
           "is_admin": false
         }
       }
@@ -56,19 +69,22 @@
     {
       "method": "GET",
       "path": "/api/auth/me",
-      "description": "Get current user profile",
+      "description": "The signed-in account",
+      "auth": "user",
       "request": null,
       "response": {
-        "id": 1,
-        "email": "string",
+        "id": 2,
+        "email": "ada@example.com",
+        "display_name": "Ada",
         "is_admin": false,
-        "created_at": "ISO8601"
+        "created_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -76,42 +92,53 @@
       }
     }
   ],
-  "data_model": {
-    "name": "User",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "email": "string (required, unique)",
-      "password_hash": "string (required)",
-      "is_admin": "boolean (default: false)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "User",
+      "description": "An account that signs in with its email address",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "email": "string (required, max 254 chars, stored in lower case, unique)",
+        "password_hash": "string (required)",
+        "display_name": "string (optional, max 50 chars)",
+        "is_admin": "boolean (default false; true only for the admin account)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false blocks sign-in and rejects the account's tokens)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any user"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/users",
-      "description": "Admin overview: list all users and counts",
+      "description": "Admin overview: every account, newest first, with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 2,
+            "email": "ada@example.com",
+            "display_name": "Ada",
+            "is_admin": false,
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 2,
+        "active": 2,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/users/:id/toggle",
-      "description": "Toggle user active status",
+      "description": "Flip an account's active status (not allowed on the admin's own account)",
+      "auth": "admin",
       "request": null,
       "response": {
-        "id": 1,
-        "is_active": true
+        "id": 2,
+        "is_active": false
       }
     }
   ]

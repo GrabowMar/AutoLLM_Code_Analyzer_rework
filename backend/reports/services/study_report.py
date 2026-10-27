@@ -140,14 +140,21 @@ def app_table(
                 "analyzed": analyzed is not None,
                 "raw_findings": analyzed["raw_findings"] if analyzed else None,
                 "unique_issues": analyzed["unique_issues"] if analyzed else None,
+                "code_unique": analyzed["code_unique"] if analyzed else None,
+                "dependency_unique": analyzed["dependency_unique"] if analyzed else None,
+                "dependency_added": analyzed["dependency_added"] if analyzed else None,
                 "security_unique": analyzed["security_unique"] if analyzed else None,
                 "issues_per_kloc": analyzed["unique_per_kloc"] if analyzed else None,
                 **{f"unique_{s}": (analyzed or {}).get(f"unique_{s}") for s in SEVERITIES},
                 "avg_complexity": cx.get("average_complexity"),
                 "max_complexity": cx.get("max_complexity"),
-                "cost": float(metrics["cost"]) if metrics.get("cost") else None,
+                "cost": float(metrics["cost"]) if metrics.get("cost") is not None else None,
                 "tokens": metrics.get("total_tokens"),
                 "healing_changed": healing.get("changed"),
+                # Upstream providers that served the run's LLM calls (OpenRouter routing).
+                "providers": sorted(
+                    p for p in ((data.get("agent") or {}).get("providers") or {}) if p and p != "unknown"
+                ),
             },
         )
     return rows, issues
@@ -167,7 +174,8 @@ def model_criteria(rows: list[dict[str, Any]]) -> dict[str, float | None]:
     """The plan metrics for one group of app rows (``analysis_plan.METRICS``)."""
     analyzed = [r for r in rows if r["analyzed"]]
     loc = sum(r["loc"] for r in analyzed)
-    unique = sum(r["unique_issues"] or 0 for r in analyzed)
+    # Code issues only: dependency advisories do not scale with lines written.
+    unique = sum(r["code_unique"] or 0 for r in analyzed)
     return {
         "deploy_rate": _share(r["deployed"] for r in rows),
         "pass_rate": _mean(r["pass_rate"] for r in rows),
@@ -295,6 +303,8 @@ def code_metrics_section(rows, seed: int) -> dict[str, Any]:
     spread = []
     for template, items in _group(generated, "template").items():
         per_model = {m: _mean(r["loc"] for r in v) for m, v in _group(items, "model").items()}
+        if not template or len(per_model) < 2:  # a spread needs two models on one template
+            continue
         cx = {m: _mean(r["avg_complexity"] for r in v) for m, v in _group(items, "model").items()}
         spread.append(
             {
@@ -437,6 +447,20 @@ def planned_comparisons_section(rows, experiment: Experiment | None, plan: dict[
     metrics = list(dict.fromkeys([primary, *secondary, *questions_by_metric]))
     min_apps = int(plan.get("min_apps_per_condition") or 0)
     by_condition = _group([r for r in rows if r["condition_id"] is not None], "condition_id")
+    # Common cells, as on the Results tab: an (app, repeat) excluded or missing
+    # in one condition is dropped for all, so an exclusion (e.g. truncation)
+    # cannot select on the outcome of one arm only.
+    cell_sets = [{(r["app_id"], r["repeat_index"]) for r in items} for items in by_condition.values()]
+    common_cells = set.intersection(*cell_sets) if cell_sets else set()
+    by_condition = {
+        cid: [r for r in items if (r["app_id"], r["repeat_index"]) in common_cells]
+        for cid, items in by_condition.items()
+    }
+    interim = experiment.status not in (
+        Experiment.Status.COMPLETED,
+        Experiment.Status.CANCELLED,
+        Experiment.Status.ARCHIVED,
+    )
     base_rows = by_condition.get(experiment.baseline_condition_id, [])
     alpha = plan.get("alpha", 0.05)
     correction = plan.get("correction", "holm")
@@ -454,6 +478,9 @@ def planned_comparisons_section(rows, experiment: Experiment | None, plan: dict[
 
     families = []
     for metric in metrics:
+        # A one-sided test only when every question on this metric declares the same direction.
+        directions = {q["direction"] for q in questions_by_metric.get(metric, [])}
+        alternative = directions.pop() if len(directions) == 1 else "two-sided"
         base = per_app(base_rows, metric)
         comparisons = []
         for cid, items in by_condition.items():
@@ -488,7 +515,7 @@ def planned_comparisons_section(rows, experiment: Experiment | None, plan: dict[
                     "wins": wins,
                     "losses": losses,
                     "p_sign": round(sign_test_p(wins, losses), 4) if sign_test_p(wins, losses) is not None else None,
-                    "p_wilcoxon": round(wilcoxon_p(deltas), 4) if wilcoxon_p(deltas) is not None else None,
+                    "p_wilcoxon": round(p, 4) if (p := wilcoxon_p(deltas, alternative)) is not None else None,
                 },
             )
         tested = [c for c in comparisons if not c.get("skipped")]
@@ -497,12 +524,16 @@ def planned_comparisons_section(rows, experiment: Experiment | None, plan: dict[
         for c, adj in zip(tested, adjusted, strict=True):
             c["p_adjusted"] = adj
             c["significant"] = adj is not None and adj < alpha
+            if interim:
+                # Peeking at significance mid-run invites optional stopping.
+                c.update(p_sign=None, p_wilcoxon=None, p_adjusted=None, significant=None)
         role = "primary" if metric == primary else "secondary" if metric in secondary else "research_question"
         families.append(
             {
                 "metric": metric,
                 "role": role,
                 "status": "confirmatory",
+                "alternative": alternative,
                 "research_questions": [
                     {"id": q["id"], "direction": q["direction"]} for q in questions_by_metric.get(metric, [])
                 ],
@@ -514,8 +545,8 @@ def planned_comparisons_section(rows, experiment: Experiment | None, plan: dict[
         "alpha": alpha,
         "correction": correction,
         "min_apps_per_condition": min_apps,
-        "interim": experiment.status
-        not in (Experiment.Status.COMPLETED, Experiment.Status.CANCELLED, Experiment.Status.ARCHIVED),
+        "interim": interim,
+        "common_cells": len(common_cells),
         "families": families,
     }
 
@@ -746,6 +777,75 @@ def validity_section(
             "issues",
             f"{share:.0%} of raw findings were duplicates of another tool's report and count once.",
         )
+    dep_total = issues["totals"].get("dependency_unique") or 0
+    if dep_total:
+        inherited = dep_total - (issues["totals"].get("dependency_added") or 0)
+        add(
+            "scaffold_dependencies",
+            "warning" if inherited / dep_total >= 0.5 else "info",
+            "issues",
+            f"{inherited} of {dep_total} dependency advisories ({inherited / dep_total:.0%}) are in packages the "
+            "model did not add (pinned by the stack scaffold, or transitive): they measure the template more "
+            "than the model. They are kept out of issues per kLOC; compare models on the advisories in "
+            "packages they added.",
+        )
+    pass_values = {r["pass_rate"] for r in rows if r["evaluated"] and r["pass_rate"] is not None}
+    n_graded = sum(1 for r in rows if r["evaluated"] and r["pass_rate"] is not None)
+    if len(pass_values) == 1 and n_graded >= 2:
+        add(
+            "ceiling",
+            "warning",
+            "funnel, ranking, planned_comparisons",
+            f"Every evaluated app scored a pass rate of {next(iter(pass_values)):g}: the conformance suite does "
+            "not discriminate between models here (ceiling/floor effect); comparisons on it cannot show a "
+            "difference. Use harder apps or another metric.",
+        )
+    multi_provider = sorted(
+        m for m, v in by_model.items() if m and len({p for r in v for p in r.get("providers") or []}) > 1
+    )
+    if multi_provider:
+        add(
+            "mixed_providers",
+            "warning",
+            "all",
+            f"Upstream provider varied across runs of: {', '.join(multi_provider)}. Providers can serve "
+            "different quantizations and stacks; pin provider routing to hold it constant.",
+        )
+    if protocol.get("in_flight_excluded"):
+        add(
+            "in_flight",
+            "warning",
+            "all",
+            f"{protocol['in_flight_excluded']} job(s) are still queued or running and are left out; "
+            "this is an interim view.",
+        )
+    if len(protocol.get("evaluators") or {}) > 1:
+        add(
+            "mixed_evaluators",
+            "warning",
+            "funnel, ranking, planned_comparisons",
+            f"Apps were graded by {len(protocol['evaluators'])} different evaluator/test-suite versions "
+            f"({', '.join(sorted(protocol['evaluators']))}); pass rates are pooled across them. Re-evaluate "
+            "the older ones for a single instrument.",
+        )
+    drifted = sorted(t["slug"] for t in protocol.get("tools") or [] if len(t.get("installed_versions") or {}) > 1)
+    if drifted:
+        add(
+            "mixed_tool_versions",
+            "warning",
+            "issues",
+            f"Different versions of {', '.join(drifted)} measured different apps; "
+            "issue counts are pooled across them.",
+        )
+    unmeasured = (issues.get("coverage") or {}).get("apps_unmeasured") or []
+    if unmeasured:
+        add(
+            "unmeasured_apps",
+            "warning",
+            "issues",
+            f"{len(unmeasured)} analyzed app(s) have no successful static-tool result; their issue counts are "
+            "missing (not zero).",
+        )
     if not plan:
         add("no_plan", "info", "all", "No pre-registered analysis plan: every analysis here is exploratory.")
     if config.get("_exclusions_overridden"):
@@ -797,6 +897,12 @@ def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any
     line_tolerance = int(config.get("line_tolerance", 2))
     jobs_qs = study_jobs(user, experiment_id=config.get("experiment_id"), batch_id=config.get("batch_id"))
     jobs = list(jobs_qs)
+    # Jobs still queued or running have no outcome yet; counting them would
+    # read as "not generated" (a failure) in the funnel and rates.
+    in_flight = [j for j in jobs if j.status in (GenerationJob.Status.PENDING, GenerationJob.Status.RUNNING)]
+    if in_flight:
+        jobs = [j for j in jobs if j not in in_flight]
+        jobs_qs = jobs_qs.exclude(id__in=[j.id for j in in_flight])
     total_jobs = len(jobs)
     plan = (experiment.analysis_plan if experiment else None) or {}
     if plan:
@@ -834,6 +940,7 @@ def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any
     accounting = run_accounting(jobs_qs)
     protocol = protocol_section(jobs, rows, experiment, config)
     protocol["truncated_excluded"] = total_jobs - len(jobs)
+    protocol["in_flight_excluded"] = len(in_flight)
     protocol["settings"]["exclusions_source"] = "analysis_plan" if plan else "report_config"
     planned = planned_comparisons_section(rows, experiment, plan)
     # Which tools' findings the issue counts include (measured on every app) and which were left out.
@@ -846,7 +953,12 @@ def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any
         "metric_definitions": PLAN_METRICS,
         "funnel": funnel_section(rows),
         "model_outcomes": [
-            {"model": m, "apps": len(by_model[m]), **c, "status": "confirmatory" if declared else "exploratory"}
+            {
+                "model": m,
+                "apps": len(by_model[m]),
+                **c,
+                "status": {k: "confirmatory" if k in declared else "exploratory" for k in c},
+            }
             for m, c in criteria_by_model.items()
         ],
         "issues": issues_out,

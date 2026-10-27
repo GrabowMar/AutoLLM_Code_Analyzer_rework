@@ -20,6 +20,8 @@ from backend.generation.models import ContentBlock
 from backend.generation.models import GenerationProfile
 from backend.generation.services.llm_params import SAMPLING_KEYS
 from backend.generation.services.llm_params import merge_llm_params
+from backend.generation.services.spec_models import normalize_data_models
+from backend.generation.services.spec_models import row_content_hash
 from backend.runtime.services.scaffolding import resolve_stack_slug
 from backend.runtime.services.scaffolding import stack_snapshot_entry
 
@@ -91,6 +93,18 @@ def default_profile_slug() -> str:
 
 
 def app_requirement_to_dict(app_req: AppRequirementTemplate) -> dict[str, Any]:
+    """The spec as prompts, the brief, the evaluation and job snapshots read it.
+
+    ``data_models`` lists every model (a legacy single model as a one-item
+    list) and ``data_model`` is the first of them, for readers of the v2
+    shape. ``version`` and ``content_hash`` name the row's content: the
+    seeder updates spec rows in place, and the whole dict feeds
+    ``prompt_hash`` and so ``run_fingerprint``, so runs on different spec
+    content never share a fingerprint. Snapshots frozen before these keys
+    existed keep their app dict as it was (a retry pins it verbatim; see
+    ``job_cloning.library_pins``).
+    """
+    models = normalize_data_models(app_req)
     return {
         "id": app_req.id,
         "slug": app_req.slug,
@@ -101,8 +115,12 @@ def app_requirement_to_dict(app_req: AppRequirementTemplate) -> dict[str, Any]:
         "frontend_requirements": app_req.frontend_requirements or [],
         "admin_requirements": app_req.admin_requirements or [],
         "api_endpoints": app_req.api_endpoints or [],
-        "data_model": app_req.data_model or {},
+        "data_model": models[0] if models else {},
+        "data_models": models,
         "admin_api_endpoints": app_req.admin_api_endpoints or [],
+        "spec_schema_version": app_req.spec_schema_version,
+        "version": app_req.version,
+        "content_hash": row_content_hash(app_req),
     }
 
 
@@ -408,10 +426,12 @@ def build_resolved_snapshot(
     stack_entry = stack_snapshot_entry(snapshot["scaffolding_slug"])
     if stack_entry:
         snapshot["stack"] = stack_entry
+    from backend.generation.services.prompt_renderer import FRONTEND_CONTEXT_VERSION
+
+    snapshot["frontend_context_version"] = FRONTEND_CONTEXT_VERSION
     _attach_endpoint_section(snapshot, model)
     snapshot["prompt_hash"] = _snapshot_prompt_hash(snapshot)
-    snapshot["run_fingerprint"] = run_fingerprint(snapshot)
-    return snapshot
+    return fingerprint_snapshot(snapshot)
 
 
 def _attach_endpoint_section(snapshot: dict[str, Any], model: LLMModel | None) -> None:
@@ -504,8 +524,7 @@ def attach_rendered_backend_prompts(
         "user": messages[1]["content"],
     }
     snapshot["prompt_hash"] = _snapshot_prompt_hash(snapshot)
-    snapshot["run_fingerprint"] = run_fingerprint(snapshot)
-    return snapshot
+    return fingerprint_snapshot(snapshot)
 
 
 def snapshot_for_scaffolding_job(job: GenerationJob) -> dict[str, Any]:
@@ -557,7 +576,7 @@ def attach_generation_options(
         options["enable_repair"] = bool(enable_repair)
     if options:
         snapshot["generation"] = options
-        snapshot["run_fingerprint"] = run_fingerprint(snapshot)
+        fingerprint_snapshot(snapshot)
     return snapshot
 
 
@@ -634,6 +653,34 @@ def run_fingerprint(snapshot: dict[str, Any]) -> str:
     Two jobs with equal fingerprints were configured identically — an exact
     replay should reproduce the run up to provider nondeterminism.
     """
+    return _fingerprint(_fingerprint_payload(snapshot))
+
+
+def config_fingerprint(snapshot: dict[str, Any]) -> str:
+    """:func:`run_fingerprint` without the seed: one value per (condition, app) configuration.
+
+    Replicates of one cell that differ only in their seed share it, so the
+    experiment results flag a (condition, app) whose replicates ran under
+    different configurations (mixed fingerprints), as agent snapshots do.
+    """
+    payload = _fingerprint_payload(snapshot)
+    payload.pop("seed")
+    return _fingerprint(payload)
+
+
+def fingerprint_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Set ``run_fingerprint`` and ``config_fingerprint`` on a template-mode *snapshot* (returned)."""
+    snapshot["run_fingerprint"] = run_fingerprint(snapshot)
+    snapshot["config_fingerprint"] = config_fingerprint(snapshot)
+    return snapshot
+
+
+def _fingerprint(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(encoded.encode()).hexdigest()[:16]
+
+
+def _fingerprint_payload(snapshot: dict[str, Any]) -> dict[str, Any]:
     payload = {
         "prompt_hash": snapshot.get("prompt_hash"),
         "seed": snapshot.get("seed"),
@@ -658,8 +705,11 @@ def run_fingerprint(snapshot: dict[str, Any]) -> str:
 
     if (src := llm_source(snapshot)) is not None:
         payload["llm_source"] = src
-    encoded = json.dumps(payload, sort_keys=True, default=str)
-    return hashlib.sha256(encoded.encode()).hexdigest()[:16]
+    # The frontend stage's backend summary procedure (absent from snapshots
+    # frozen before it was versioned, so their fingerprints stay stable).
+    if snapshot.get("frontend_context_version") is not None:
+        payload["frontend_context_version"] = snapshot["frontend_context_version"]
+    return payload
 
 
 def derive_experiment_seed(base_seed: int, *parts: Any) -> int:

@@ -1,61 +1,167 @@
 {
   "slug": "api_weather_display",
   "name": "Weather Display",
-  "category": "API",
-  "description": "Look up current weather by city",
+  "category": "Data Lookup",
+  "description": "Look up current weather by city from the app's own store of weather reports",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only weather lookups; require auth for cache management",
-    "1. WeatherCache model: id, city (required), temperature, condition, fetched_at, expires_at",
-    "2. GET /api/weather?city=NAME - return current weather, use cached result when fresh",
-    "3. GET /api/weather/recent - return last 10 cached lookups",
-    "4. Validate: city is required and max 100 chars",
-    "5. Graceful error handling for unknown cities"
+    "Access control: anyone may look up weather and read recent lookups; require auth for creating, updating and deleting weather reports; admin endpoints are restricted to the admin account",
+    "Data source: the app serves weather only from its own store of reports and calls no outside service; on first start the store holds sample reports for at least five cities (for example London, Paris, Tokyo, New York and Sydney)",
+    "A report holds the current conditions of one city; city names are unique ignoring case (a second report for the same city answers 409)",
+    "Report validation: city is a required non-empty string of at most 100 characters; country, when given, is at most 100 characters; temperature_c is a number from -90 to 60; condition is one of sunny, cloudy, rain, snow, storm, fog; humidity, when given, is a whole number 0-100; wind_kph, when given, is a number from 0 to 500",
+    "observed_at is set by the server whenever a report is created or replaced; temperatures are stored and returned in degrees Celsius",
+    "GET /api/weather returns active reports ordered by city name; ?city= keeps only the report whose city equals the given name ignoring case and surrounding spaces (an empty list when there is none), ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every matching report",
+    "Every request to GET /api/weather with ?city= is recorded as a lookup of the name as typed, with found true or false; GET /api/weather/recent returns lookups newest first, ?limit= caps how many are returned (default 10, at most 50), and total counts every stored lookup",
+    "Deactivated reports (is_active false) are left out of GET /api/weather, are not found by lookups and answer 404 on GET /api/weather/:id; the admin overview still lists them",
+    "DELETE /api/weather/:id removes a report permanently; any signed-in user may create, replace and delete any report",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids, 409 for a duplicate city"
   ],
   "frontend_requirements": [
-    "Public guest weather search with CTA to sign in for cache management",
-    "1. Search input for city with 'Search' button",
-    "2. Weather card showing city, temperature, condition, last updated",
-    "3. Recent searches list (last 5)",
-    "4. Loading and error states",
-    "5. Units toggle (C/F) display-only"
+    "Everyone gets the city search and the recent lookups read-only; signed-in users also get the add, edit and delete controls for reports, and visitors see a 'Sign in to manage reports' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "City search: an input with a 'Search' button that asks GET /api/weather with ?city=; show a weather card with city, country, temperature, condition, humidity, wind and the observed time, or a 'No weather data for <city>' message when nothing matches",
+    "A Celsius/Fahrenheit switch converts the shown temperatures in the browser (F = C * 9 / 5 + 32); the API is always asked for Celsius",
+    "Recent lookups: the five newest lookups (?limit=5), each showing the city as typed and whether it was found; clicking one repeats the search",
+    "Show a loading state while a request runs and the API's error message when one fails",
+    "Report management for signed-in users: a list of all reports with add and edit forms that show the API's validation messages, and delete after a confirmation"
+  ],
+  "admin_requirements": [
+    "Admin overview: every report, active or not, with total, active and inactive counts",
+    "Toggle a report's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/weather",
-      "description": "Get current weather by city (?city=)",
-      "request": null,
-      "response": {
-        "city": "string",
-        "temperature": 20.5,
-        "condition": "string",
-        "fetched_at": "ISO8601"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/weather/recent",
-      "description": "List recent cached lookups",
+      "description": "Active weather reports by city name, optionally narrowed to one city",
+      "auth": "public",
+      "query": {
+        "city": "City name matched exactly, ignoring case and surrounding spaces; records a lookup",
+        "page": "1-based page number (default 1)",
+        "page_size": "Reports per page (default 20, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "city": "string",
-            "temperature": 20.5,
-            "condition": "string",
-            "fetched_at": "ISO8601"
+            "city": "Oslo",
+            "country": "Norway",
+            "temperature_c": 4.5,
+            "condition": "cloudy",
+            "humidity": 81,
+            "wind_kph": 14.0,
+            "observed_at": "2026-01-15T10:30:00Z"
           }
         ],
-        "total": 10
+        "total": 1,
+        "page": 1,
+        "page_size": 20
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/weather",
+      "description": "Add a weather report for a city",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "city": "string",
+        "country": "string (optional)",
+        "temperature_c": "number",
+        "condition": "string (sunny|cloudy|rain|snow|storm|fog)",
+        "humidity": "integer (optional)",
+        "wind_kph": "number (optional)"
+      },
+      "response": {
+        "id": 1,
+        "city": "Oslo",
+        "country": "Norway",
+        "temperature_c": 4.5,
+        "condition": "cloudy",
+        "humidity": 81,
+        "wind_kph": 14.0,
+        "observed_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "GET",
+      "path": "/api/weather/recent",
+      "description": "Recent lookups, newest first",
+      "auth": "public",
+      "query": {
+        "limit": "How many lookups to return (default 10, at most 50)"
+      },
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "city": "oslo",
+            "found": true,
+            "report_id": 1,
+            "looked_up_at": "2026-01-15T10:31:00Z"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/weather/:id",
+      "description": "One active weather report",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "city": "Oslo",
+        "country": "Norway",
+        "temperature_c": 4.5,
+        "condition": "cloudy",
+        "humidity": 81,
+        "wind_kph": 14.0,
+        "observed_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/weather/:id",
+      "description": "Replace a report's fields (city, temperature_c and condition required; an omitted country, humidity or wind_kph is cleared)",
+      "auth": "user",
+      "request": {
+        "city": "string",
+        "country": "string (optional)",
+        "temperature_c": "number",
+        "condition": "string (sunny|cloudy|rain|snow|storm|fog)",
+        "humidity": "integer (optional)",
+        "wind_kph": "number (optional)"
+      },
+      "response": {
+        "id": 1,
+        "city": "Oslo",
+        "country": "Norway",
+        "temperature_c": 3.0,
+        "condition": "rain",
+        "humidity": 90,
+        "wind_kph": 20.5,
+        "observed_at": "2026-01-15T12:00:00Z"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/weather/:id",
+      "description": "Delete a weather report",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
+    },
+    {
+      "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -63,43 +169,65 @@
       }
     }
   ],
-  "data_model": {
-    "name": "WeatherCache",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "city": "string (required, max 100 chars)",
-      "temperature": "decimal (nullable)",
-      "condition": "string (nullable)",
-      "fetched_at": "datetime (auto, ISO 8601 format in JSON)",
-      "expires_at": "datetime (nullable)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "WeatherReport",
+      "description": "The current conditions of one city, kept in the app's own store",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "city": "string (required, max 100 chars, unique ignoring case)",
+        "country": "string (optional, max 100 chars)",
+        "temperature_c": "number (required, -90 to 60, degrees Celsius)",
+        "condition": "string (one of: sunny, cloudy, rain, snow, storm, fog)",
+        "humidity": "integer (optional, 0-100, percent)",
+        "wind_kph": "number (optional, 0 to 500)",
+        "observed_at": "datetime (set by the server on create and replace, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the report from public endpoints and lookups)"
+      }
+    },
+    {
+      "name": "Lookup",
+      "description": "One city search made through GET /api/weather with ?city=",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "city": "string (the name as typed, max 100 chars)",
+        "found": "boolean (whether an active report matched)",
+        "report_id": "integer (optional, references WeatherReport.id; cleared when the report is deleted)",
+        "looked_up_at": "datetime (auto, ISO 8601 in JSON)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any cached entry"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
-      "path": "/api/admin/weather-cache",
-      "description": "Admin overview: list all cache entries and counts",
+      "path": "/api/admin/weather",
+      "description": "Admin overview: every report with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "city": "Oslo",
+            "condition": "cloudy",
+            "is_active": true,
+            "observed_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
-      "path": "/api/admin/weather-cache/:id/toggle",
-      "description": "Toggle cache entry active status",
+      "path": "/api/admin/weather/:id/toggle",
+      "description": "Flip a report's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

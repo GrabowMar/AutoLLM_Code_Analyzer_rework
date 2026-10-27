@@ -2,95 +2,163 @@
   "slug": "content_recipe_list",
   "name": "Recipe Book",
   "category": "Content",
-  "description": "Save and view recipes",
+  "description": "Share recipes with ingredients and step-by-step instructions, browsable by category",
   "difficulty": "standard",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only recipes; require auth for create/update/delete",
-    "1. Recipe model: id, title (required), ingredients (JSON array), instructions (text), category (optional)",
-    "2. CRUD endpoints: GET /api/recipes, GET /api/recipes/:id, POST, DELETE",
-    "3. Filter by category: ?category=dessert query parameter",
-    "4. Seed with 3-5 sample recipes",
-    "5. JSON responses with proper status codes (200, 201, 404)"
+    "Access control: anyone may read recipes; require auth for creating, updating and deleting recipes; admin endpoints are restricted to the admin account",
+    "Recipes: any signed-in user may create a recipe; only its author may update or delete it (403 for anyone else); DELETE /api/recipes/:id removes the recipe permanently",
+    "Recipe validation: title is a required non-empty string of at most 255 characters; ingredients is a list of 1 to 50 non-empty strings of at most 200 characters each; instructions is a required non-empty text of at most 10000 characters; category is one of breakfast, main, dessert, snack, drink, other (default other); prep_minutes, when given, is a whole number from 1 to 1440; servings, when given, is a whole number from 1 to 100",
+    "GET /api/recipes returns active recipes, newest first, without ingredients and instructions; ?category= keeps one category, ?query= matches the title case-insensitively, ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every matching recipe",
+    "GET /api/recipes/:id returns the full recipe, with ingredients in the order they were given",
+    "Every recipe in a response carries author, the username of the user who created it",
+    "On first start the app holds three to five sample recipes from at least two categories, authored by the admin account",
+    "Deactivated recipes (is_active false) are left out of GET /api/recipes and answer 404 on the public recipe endpoints; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-author or a non-admin, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "HomePage displays ALL content in read-only mode for public users",
-    "Public users see \"Sign in to add recipes\" CTAs instead of action buttons",
-    "Logged-in users see same content plus create/edit/delete functionality",
-    "1. Recipe list showing title and category (visible to all)",
-    "2. Click recipe to view full details (ingredients and instructions) (visible to all)",
-    "3. Add recipe form with title, ingredients, instructions, category (logged-in only)",
-    "4. Delete button with confirmation (logged-in only)",
-    "5. Filter by category dropdown (visible to all)"
+    "Everyone sees the recipe list and recipe details read-only; signed-in users also get an add button and, on their own recipes, edit and delete controls, and visitors see a 'Sign in to add recipes' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Recipe list: cards with title, category, prep time and author, a category dropdown and a title search box that filter the list, and previous/next paging",
+    "Recipe detail view: title, category, prep time, servings, author, the ingredients as a list and the instructions with their line breaks kept",
+    "Add and edit forms: title, category select, prep time, servings, ingredient rows that can be added and removed, and an instructions text area; show the API's validation messages next to the form, and ask for confirmation before deleting"
+  ],
+  "admin_requirements": [
+    "Admin overview: every recipe, active or not, with its author and category, plus total, active and inactive counts",
+    "Toggle a recipe's active status from the overview"
   ],
   "api_endpoints": [
     {
-      "method": "GET",
-      "path": "/api/recipes",
-      "description": "List recipes (supports ?category= filter)",
-      "request": null,
-      "response": {
-        "items": [
-          {
-            "id": 1,
-            "title": "string",
-            "category": "string",
-            "created_at": "ISO8601"
-          }
-        ],
-        "total": 1
-      }
-    },
-    {
       "method": "POST",
       "path": "/api/recipes",
-      "description": "Create new recipe",
+      "description": "Create a recipe as the signed-in user",
+      "auth": "user",
+      "success_status": 201,
       "request": {
         "title": "string",
         "ingredients": [
           "string"
         ],
         "instructions": "string",
-        "category": "string"
+        "category": "string (breakfast|main|dessert|snack|drink|other)",
+        "prep_minutes": "integer (optional)",
+        "servings": "integer (optional)"
       },
       "response": {
         "id": 1,
-        "title": "string",
+        "title": "Lemon Pancakes",
         "ingredients": [
-          "string"
+          "200 g flour",
+          "2 eggs",
+          "300 ml milk",
+          "1 lemon"
         ],
-        "instructions": "string",
-        "category": "string",
-        "created_at": "ISO8601"
+        "instructions": "Whisk the eggs and milk.\nFold in the flour and lemon zest.\nFry small rounds until golden.",
+        "category": "breakfast",
+        "prep_minutes": 25,
+        "servings": 4,
+        "author": "cook1",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/recipes",
+      "description": "List active recipes, newest first, filtered and paged",
+      "auth": "public",
+      "query": {
+        "category": "One of breakfast, main, dessert, snack, drink, other",
+        "query": "Case-insensitive text matched against the title",
+        "page": "1-based page number (default 1)",
+        "page_size": "Recipes per page (default 20, at most 100)"
+      },
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "title": "Lemon Pancakes",
+            "category": "breakfast",
+            "prep_minutes": 25,
+            "servings": 4,
+            "author": "cook1",
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20
       }
     },
     {
       "method": "GET",
       "path": "/api/recipes/:id",
-      "description": "Get recipe details",
+      "description": "One active recipe with ingredients and instructions",
+      "auth": "public",
       "request": null,
       "response": {
         "id": 1,
+        "title": "Lemon Pancakes",
+        "ingredients": [
+          "200 g flour",
+          "2 eggs",
+          "300 ml milk",
+          "1 lemon"
+        ],
+        "instructions": "Whisk the eggs and milk.\nFold in the flour and lemon zest.\nFry small rounds until golden.",
+        "category": "breakfast",
+        "prep_minutes": 25,
+        "servings": 4,
+        "author": "cook1",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/recipes/:id",
+      "description": "Replace a recipe's fields (title, ingredients and instructions required; an omitted category becomes other, an omitted prep_minutes or servings is cleared)",
+      "auth": "user",
+      "request": {
         "title": "string",
         "ingredients": [
           "string"
         ],
         "instructions": "string",
-        "category": "string",
-        "created_at": "ISO8601"
+        "category": "string (breakfast|main|dessert|snack|drink|other)",
+        "prep_minutes": "integer (optional)",
+        "servings": "integer (optional)"
+      },
+      "response": {
+        "id": 1,
+        "title": "Lemon Pancakes",
+        "ingredients": [
+          "200 g flour",
+          "2 eggs",
+          "300 ml milk",
+          "1 lemon"
+        ],
+        "instructions": "Whisk the eggs and milk.\nFold in the flour and lemon zest.\nFry small rounds until golden.",
+        "category": "breakfast",
+        "prep_minutes": 20,
+        "servings": 4,
+        "author": "cook1",
+        "created_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "DELETE",
       "path": "/api/recipes/:id",
-      "description": "Delete recipe",
+      "description": "Delete one of the signed-in user's recipes",
+      "auth": "user",
+      "success_status": 204,
       "request": null,
-      "response": {}
+      "response": null
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -98,43 +166,56 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Recipe",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "title": "string (required, max 255 chars)",
-      "ingredients": "JSON array of strings (required)",
-      "instructions": "text (required)",
-      "category": "string (optional, max 100 chars)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Recipe",
+      "description": "A recipe shared by a signed-in user",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "title": "string (required, max 255 chars)",
+        "ingredients": "list of strings (required, 1-50 items, each max 200 chars, order kept)",
+        "instructions": "text (required, max 10000 chars)",
+        "category": "string (one of: breakfast, main, dessert, snack, drink, other; default other)",
+        "prep_minutes": "integer (optional, 1-1440)",
+        "servings": "integer (optional, 1-100)",
+        "user_id": "integer (references the signed-in user who created it)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the recipe from public endpoints)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any recipe"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/recipes",
-      "description": "Admin overview: list all recipes and counts",
+      "description": "Admin overview: every recipe with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "title": "Lemon Pancakes",
+            "category": "breakfast",
+            "author": "cook1",
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/recipes/:id/toggle",
-      "description": "Toggle recipe active status",
+      "description": "Flip a recipe's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

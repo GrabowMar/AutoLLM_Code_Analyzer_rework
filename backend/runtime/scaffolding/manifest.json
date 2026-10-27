@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "default_stack": "generic-python",
   "substitution_files": [".env.example"],
   "stacks": {
@@ -8,14 +8,16 @@
       "aliases": ["react-flask"],
       "has_frontend": true,
       "default_port": 8000,
-      "patch_profile": "flask"
+      "patch_profile": "flask",
+      "server_kind": "python"
     },
     "generic-python": {
       "directory": "generic-python",
       "aliases": [],
       "has_frontend": false,
       "default_port": 8000,
-      "patch_profile": "flask"
+      "patch_profile": "flask",
+      "server_kind": "python"
     },
     "fastapi-vue": {
       "directory": "fastapi-vue",
@@ -23,7 +25,8 @@
       "has_frontend": true,
       "frontend_component": "App.vue",
       "default_port": 8000,
-      "patch_profile": "none"
+      "patch_profile": "none",
+      "server_kind": "uvicorn"
     },
     "fastapi-react": {
       "directory": "fastapi-react",
@@ -31,7 +34,8 @@
       "has_frontend": true,
       "frontend_component": "App.jsx",
       "default_port": 8000,
-      "patch_profile": "none"
+      "patch_profile": "none",
+      "server_kind": "uvicorn"
     }
   }
 }

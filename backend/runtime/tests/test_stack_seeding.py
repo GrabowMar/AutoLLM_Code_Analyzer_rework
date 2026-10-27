@@ -32,6 +32,9 @@ def test_seed_stacks_creates_builtin_rows():
     assert "app.py" in flask.files
     assert "frontend/src/App.jsx" in flask.files
     assert flask.content_hash
+    assert flask.server_kind == "python"
+    fastapi = Stack.objects.filter(slug="fastapi-react", is_builtin=True).order_by("-version").first()
+    assert fastapi.server_kind == "uvicorn"
 
 
 @pytest.mark.django_db

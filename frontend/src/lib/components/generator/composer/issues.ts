@@ -39,6 +39,7 @@ const TITLES: Record<string, string> = {
   reasoning_exceeds_output_cap: "Reasoning budget above the output cap",
   resolution_failed: "A run could not be resolved",
   params_dropped: "Parameters dropped",
+  provider_unpinned: "Upstream provider not pinned",
   harness_native_sampling: "Harness-native sampling",
   context_window_fallback: "Context window unknown",
   cost_cap_may_bind: "Cost cap may end runs early",

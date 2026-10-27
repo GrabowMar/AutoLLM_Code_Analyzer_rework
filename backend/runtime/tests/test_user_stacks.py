@@ -102,6 +102,16 @@ def test_generated_dockerfile_fullstack_python():
     assert "USER appuser" in text
     assert "EXPOSE 8000" in text
     assert 'CMD ["python", "app.py"]' in text
+    assert "COPY frontend/package.json ./" in text
+    assert "RUN npm install --silent" in text
+
+
+def test_allowlist_keeps_old_tags_and_offers_builtin_runtimes():
+    from django.conf import settings
+
+    allowed = settings.STACK_ALLOWED_BASE_IMAGES
+    assert {"python:3.12-slim", "python:3.13-slim", "python:3.14-slim"} <= set(allowed["python"])
+    assert {"node:20-alpine", "node:24-alpine"} <= set(allowed["node"])
 
 
 def test_generated_dockerfile_backend_only_uvicorn():

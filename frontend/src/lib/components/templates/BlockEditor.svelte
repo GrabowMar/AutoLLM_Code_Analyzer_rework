@@ -138,7 +138,7 @@
 			<Label class="text-xs" for="block-content">Content (Jinja2)</Label>
 			<Textarea id="block-content" bind:value={content} rows={14} class="text-xs font-mono leading-relaxed" />
 			<p class="text-[11px] text-muted-foreground">
-				Variables: <span class="font-mono">name, slug, description, backend_requirements, frontend_requirements, admin_requirements, api_endpoints, data_model</span>{#if blockType === 'prompt_stage' && stage === 'frontend'}, <span class="font-mono">backend_api_context</span>{/if}
+				Variables: <span class="font-mono">name, slug, description, backend_requirements, frontend_requirements, admin_requirements, api_endpoints, data_model, contract</span>{#if blockType === 'prompt_stage' && stage === 'frontend'}, <span class="font-mono">backend_api_context</span>{/if}
 			</p>
 		</div>
 

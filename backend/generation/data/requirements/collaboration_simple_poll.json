@@ -2,90 +2,150 @@
   "slug": "collaboration_simple_poll",
   "name": "Quick Polls",
   "category": "Collaboration",
-  "description": "Create polls and vote",
+  "description": "Create quick polls that anyone can vote on and watch the results",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public poll voting and viewing; require auth for poll creation/deletion",
-    "1. Poll model: id, question (required), created_at",
-    "2. PollOption model: id, poll_id, text, votes",
-    "3. GET /api/polls - list polls with options",
-    "4. POST /api/polls - create poll with 2-6 options",
-    "5. POST /api/polls/:id/vote - increment option votes"
+    "Access control: anyone may view polls and vote; require auth for creating and deleting polls; admin endpoints are restricted to the admin account",
+    "POST /api/polls creates a poll for the signed-in user from a question and its options; options is a list of 2 to 6 distinct option texts, and when it is omitted or empty the poll gets the two options 'Yes' and 'No'",
+    "Poll validation: question is a required non-empty string of at most 500 characters; each option text is a non-empty string of at most 200 characters; a list with one option, more than six, or a repeated text (ignoring case) answers 400",
+    "Options keep the order they were given in; position numbers them 1, 2, 3 ... within their poll",
+    "POST /api/polls/:id/vote takes the position of the chosen option and adds 1 to its votes; every call counts as one vote, and an unknown position answers 400",
+    "Every poll in a response carries its options (id, position, text, votes) in position order and total_votes, the sum of their votes",
+    "GET /api/polls returns active polls, newest first; ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every active poll",
+    "Only the user who created a poll may delete it (403 for anyone else); DELETE /api/polls/:id removes the poll, its options and their votes permanently",
+    "Deactivated polls (is_active false) are left out of GET /api/polls, answer 404 on GET /api/polls/:id and reject votes with 404; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-owner or a non-admin, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "Public guest view of polls with CTA to sign in for creating polls",
-    "1. Poll list with question and options",
-    "2. Vote buttons with immediate count update",
-    "3. Results bar chart per poll",
-    "4. Create poll form with dynamic options",
-    "5. Loading and empty states"
+    "Everyone sees the poll list and can vote; signed-in users also get the create form and a delete button on their own polls, and visitors see a 'Sign in to create polls' prompt in place of the form",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Each poll shows its question and one vote button per option; after a vote the counts update at once from the API's answer and the poll switches to its results",
+    "Results: a horizontal bar per option with its vote count and share of total_votes in percent",
+    "The browser remembers which polls this visitor has voted on and shows those polls as results, without vote buttons",
+    "Create poll form: a question field and option fields that can be added (up to six) and removed (down to two), showing the API's validation messages",
+    "Show loading and empty states, and previous/next paging for the poll list"
+  ],
+  "admin_requirements": [
+    "Admin overview: every poll, active or not, with its creator and total votes, plus total, active and inactive counts",
+    "Toggle a poll's active status from the overview"
   ],
   "api_endpoints": [
     {
+      "method": "POST",
+      "path": "/api/polls",
+      "description": "Create a poll as the signed-in user",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "question": "string",
+        "options": "array (optional)"
+      },
+      "response": {
+        "id": 1,
+        "question": "Where should the team lunch be?",
+        "options": [
+          {
+            "id": 1,
+            "position": 1,
+            "text": "Noodle bar",
+            "votes": 0
+          }
+        ],
+        "total_votes": 0,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
       "method": "GET",
       "path": "/api/polls",
-      "description": "List all polls with options",
+      "description": "List active polls with their options, newest first, paged",
+      "auth": "public",
+      "query": {
+        "page": "1-based page number (default 1)",
+        "page_size": "Polls per page (default 20, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "question": "string",
+            "question": "Where should the team lunch be?",
             "options": [
               {
                 "id": 1,
-                "text": "A",
-                "votes": 2
+                "position": 1,
+                "text": "Noodle bar",
+                "votes": 4
               }
             ],
-            "created_at": "ISO8601"
+            "total_votes": 7,
+            "created_at": "2026-01-15T10:30:00Z"
           }
         ],
-        "total": 1
+        "total": 1,
+        "page": 1,
+        "page_size": 20
       }
     },
     {
-      "method": "POST",
-      "path": "/api/polls",
-      "description": "Create new poll",
-      "request": {
-        "question": "string",
-        "options": [
-          "A",
-          "B"
-        ]
-      },
+      "method": "GET",
+      "path": "/api/polls/:id",
+      "description": "One active poll with its options",
+      "auth": "public",
+      "request": null,
       "response": {
         "id": 1,
-        "question": "string",
+        "question": "Where should the team lunch be?",
         "options": [
           {
             "id": 1,
-            "text": "A",
-            "votes": 0
+            "position": 1,
+            "text": "Noodle bar",
+            "votes": 4
           }
         ],
-        "created_at": "ISO8601"
+        "total_votes": 7,
+        "created_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "POST",
       "path": "/api/polls/:id/vote",
-      "description": "Vote on an option",
+      "description": "Vote for the option at a position; answers the updated poll",
+      "auth": "public",
       "request": {
-        "option_id": 1
+        "position": 1
       },
       "response": {
         "id": 1,
-        "option_id": 1,
-        "votes": 3
+        "question": "Where should the team lunch be?",
+        "options": [
+          {
+            "id": 1,
+            "position": 1,
+            "text": "Noodle bar",
+            "votes": 5
+          }
+        ],
+        "total_votes": 8,
+        "created_at": "2026-01-15T10:30:00Z"
       }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/polls/:id",
+      "description": "Delete one of the signed-in user's polls",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -93,41 +153,62 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Poll",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "question": "string (required, max 500 chars)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Poll",
+      "description": "A question with 2 to 6 options; total_votes is computed from them",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "question": "string (required, max 500 chars)",
+        "user_id": "integer (references the signed-in user who created it)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the poll from public endpoints and stops voting)"
+      }
     },
-    "related": "PollOption (id, poll_id, text, votes)"
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any poll"
+    {
+      "name": "PollOption",
+      "description": "One answer of a poll and its vote count",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "poll_id": "integer (references Poll.id; deleted with the poll)",
+        "position": "integer (1-based order within the poll)",
+        "text": "string (required, max 200 chars, unique within the poll ignoring case)",
+        "votes": "integer (default 0)"
+      }
+    }
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/polls",
-      "description": "Admin overview: list all polls and counts",
+      "description": "Admin overview: every poll with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "question": "Where should the team lunch be?",
+            "username": "organiser",
+            "total_votes": 7,
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/polls/:id/toggle",
-      "description": "Toggle poll active status",
+      "description": "Flip a poll's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

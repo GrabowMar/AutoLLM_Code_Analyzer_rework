@@ -2,85 +2,133 @@
   "slug": "messaging_notifications",
   "name": "Notification Center",
   "category": "Messaging",
-  "description": "View and manage notifications",
+  "description": "A personal inbox of notifications that each user can read, filter, mark as read and clear",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only notifications; require auth for creation",
-    "1. Notification model: id, message (required), type (info/warning/error), read (boolean), created_at",
-    "2. GET /api/notifications - return all, support ?unread=true filter",
-    "3. PUT /api/notifications/:id/read - mark as read",
-    "4. DELETE /api/notifications/:id - delete notification",
-    "5. POST /api/notifications - create new notification with type validation"
+    "Access control: require auth for every notification endpoint, and each signed-in user sees and changes only their own notifications; admin endpoints are restricted to the admin account",
+    "POST /api/notifications adds a notification to the signed-in user's own inbox; message is a required non-empty string of at most 500 characters and type one of info, warning or error (default info); new notifications are unread",
+    "GET /api/notifications lists the signed-in user's active notifications, newest first; ?read=true or ?read=false filters by read state, ?type= by type, ?page= and ?page_size= page the result (page_size default 20, at most 100); total counts every matching notification and unread_count all of the user's unread ones regardless of the filters",
+    "PATCH /api/notifications/:id sets read to true or false",
+    "POST /api/notifications/read-all marks every unread notification of the signed-in user as read and returns how many changed",
+    "DELETE /api/notifications/:id removes the notification permanently",
+    "Deactivated notifications (is_active false) are left out of the owner's list and counts and answer 404 on the item endpoints; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "Public guest view of notifications with CTA to sign in for management",
-    "1. Notification list with visual indicator based on type, message, time ago",
-    "2. Unread count badge in header",
-    "3. Unread notifications highlighted",
-    "4. 'Mark as read' button per notification",
-    "5. Delete button, 'Mark all as read' button"
+    "Visitors see a short description of the notification center and a 'Sign in to see your notifications' prompt; everything else is for signed-in users",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "A header badge with the unread count that stays in step with the list",
+    "Notification list: an icon and colour per type, the message and a relative time ('5 minutes ago'), unread notifications highlighted, tabs for All, Unread and Read, a type filter and previous/next paging",
+    "Per notification: a 'Mark as read' / 'Mark as unread' toggle and a delete button; above the list a 'Mark all as read' button",
+    "A small 'New notification' form (message and type) for adding one to your own inbox, showing the API's validation messages next to the form"
+  ],
+  "admin_requirements": [
+    "Admin overview: every notification of every user, active or not, with total, active and inactive counts and the number of unread ones",
+    "Toggle a notification's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/notifications",
-      "description": "List all notifications (supports ?read=true/false filter)",
+      "description": "The signed-in user's active notifications, newest first, filtered and paged",
+      "auth": "user",
+      "query": {
+        "read": "true for read notifications only, false for unread only",
+        "type": "Only notifications of this type (info, warning or error)",
+        "page": "1-based page number (default 1)",
+        "page_size": "Notifications per page (default 20, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "message": "string",
+            "message": "Your weekly report is ready",
             "type": "info",
             "read": false,
-            "created_at": "ISO8601"
+            "created_at": "2026-01-15T10:30:00Z"
           }
         ],
         "total": 1,
-        "unread_count": 5
+        "unread_count": 1,
+        "page": 1,
+        "page_size": 20
       }
     },
     {
       "method": "POST",
       "path": "/api/notifications",
-      "description": "Create new notification",
+      "description": "Add a notification to the signed-in user's inbox",
+      "auth": "user",
+      "success_status": 201,
       "request": {
         "message": "string",
         "type": "string (info|warning|error)"
       },
       "response": {
         "id": 1,
-        "message": "string",
+        "message": "Your weekly report is ready",
         "type": "info",
         "read": false,
-        "created_at": "ISO8601"
+        "created_at": "2026-01-15T10:30:00Z"
       }
     },
     {
-      "method": "PUT",
-      "path": "/api/notifications/:id/read",
-      "description": "Mark notification as read",
+      "method": "POST",
+      "path": "/api/notifications/read-all",
+      "description": "Mark all of the signed-in user's notifications as read",
+      "auth": "user",
+      "request": null,
+      "response": {
+        "updated": 3,
+        "unread_count": 0
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/notifications/:id",
+      "description": "One of the signed-in user's notifications",
+      "auth": "user",
       "request": null,
       "response": {
         "id": 1,
-        "message": "string",
+        "message": "Your weekly report is ready",
+        "type": "info",
+        "read": false,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/notifications/:id",
+      "description": "Mark a notification as read or unread",
+      "auth": "user",
+      "request": {
+        "read": "boolean"
+      },
+      "response": {
+        "id": 1,
+        "message": "Your weekly report is ready",
         "type": "info",
         "read": true,
-        "created_at": "ISO8601"
+        "created_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "DELETE",
       "path": "/api/notifications/:id",
-      "description": "Delete notification",
+      "description": "Delete a notification",
+      "auth": "user",
+      "success_status": 204,
       "request": null,
-      "response": {}
+      "response": null
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -88,42 +136,55 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Notification",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "message": "text (required)",
-      "type": "string (info, warning, error)",
-      "read": "boolean (default: false)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Notification",
+      "description": "One notification in one user's inbox",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user whose inbox holds it)",
+        "message": "string (required, max 500 chars)",
+        "type": "string (one of: info, warning, error; default info)",
+        "read": "boolean (default false)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the notification from its owner)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any notification"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/notifications",
-      "description": "Admin overview: list all notifications and counts",
+      "description": "Admin overview: every notification with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
-        "inactive": 0
+        "items": [
+          {
+            "id": 1,
+            "username": "member1",
+            "message": "Your weekly report is ready",
+            "type": "info",
+            "read": false,
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
+        "inactive": 0,
+        "unread": 1
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/notifications/:id/toggle",
-      "description": "Toggle notification active status",
+      "description": "Flip a notification's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

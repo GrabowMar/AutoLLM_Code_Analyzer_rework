@@ -2,40 +2,56 @@
   "slug": "geolocation_store_list",
   "name": "Store Finder",
   "category": "Geolocation",
-  "description": "Find stores by location",
+  "description": "Browse a directory of store locations and find the ones nearest to you",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only store browsing; require auth for create/update/delete",
-    "1. Store model: id, name, address, latitude, longitude, phone",
-    "2. GET /api/stores - return all stores",
-    "3. GET /api/stores/nearby?lat=X&lng=Y&radius=5 - filter by distance",
-    "4. Seed with 5-10 sample store locations",
-    "5. GET /api/stores/:id - return single store details"
+    "Access control: anyone may browse stores; require auth for creating, updating and deleting stores; admin endpoints are restricted to the admin account",
+    "Stores: any signed-in user may create, update and delete any store; DELETE /api/stores/:id removes the store permanently",
+    "Store validation: name is a required non-empty string of at most 100 characters, address a required non-empty string of at most 255 characters, phone an optional string of at most 30 characters; latitude is a required number from -90 to 90 and longitude a required number from -180 to 180",
+    "GET /api/stores lists active stores sorted by name; ?query= matches name or address case-insensitively",
+    "Proximity search: when GET /api/stores gets both ?lat= and ?lng=, it keeps only stores within ?radius= kilometres (default 25, at most 500) of that point, sorts them nearest first and sets each store's distance_km to the great-circle distance rounded to one decimal; without a location distance_km is null; lat without lng (or the reverse) or an out-of-range value answers 400",
+    "On first start with an empty store table, seed 8 sample stores spread across a few cities so the finder is usable straight away",
+    "Deactivated stores (is_active false) are left out of GET /api/stores and answer 404 on GET /api/stores/:id; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "Public guest view for store browsing with CTA to sign in for management",
-    "1. Store list showing name, address, phone",
-    "2. Display distance from user location (if permission granted)",
-    "3. Optional: simple map using Leaflet.js showing store markers",
-    "4. Click store to view details",
-    "5. 'Get Directions' button with link to Google Maps"
+    "Everyone sees the store list and store details read-only; signed-in users also get the add, edit and delete controls, and visitors see a 'Sign in to manage stores' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Store list: name, address and phone of each store, with a search box that filters by name or address",
+    "A 'Use my location' button asks the browser for the visitor's position, then lists the nearby stores with their distance in km and a radius selector; if permission is denied the plain list stays and a short note explains why",
+    "A simple location plot that places each listed store (and the visitor, when known) by latitude and longitude, drawn by the page itself without external map tiles",
+    "Clicking a store opens its details: name, address, phone and coordinates, with a button that copies the coordinates",
+    "Add and edit store forms that show the API's validation messages next to the form; delete asks for confirmation first"
+  ],
+  "admin_requirements": [
+    "Admin overview: every store, active or not, with total, active and inactive counts",
+    "Toggle a store's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/stores",
-      "description": "List all stores (supports ?lat=, ?lng=, ?radius= for proximity search)",
+      "description": "List active stores, by name or nearest first when a location is given",
+      "auth": "public",
+      "query": {
+        "query": "Case-insensitive text matched against name and address",
+        "lat": "Latitude of the search point (-90 to 90); requires lng",
+        "lng": "Longitude of the search point (-180 to 180); requires lat",
+        "radius": "Search radius in kilometres when lat and lng are given (default 25, at most 500)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "name": "string",
-            "address": "string",
-            "latitude": 40.7128,
-            "longitude": -74.006,
-            "distance": 2.5
+            "name": "Harbor Street Market",
+            "address": "12 Harbor St, Boston, MA",
+            "phone": "+1 617 555 0101",
+            "latitude": 42.3601,
+            "longitude": -71.0589,
+            "distance_km": 2.4,
+            "created_at": "2026-01-15T10:30:00Z"
           }
         ],
         "total": 1
@@ -44,40 +60,81 @@
     {
       "method": "POST",
       "path": "/api/stores",
-      "description": "Create new store",
+      "description": "Create a store",
+      "auth": "user",
+      "success_status": 201,
       "request": {
         "name": "string",
         "address": "string",
+        "phone": "string (optional)",
         "latitude": "number",
         "longitude": "number"
       },
       "response": {
         "id": 1,
-        "name": "string",
-        "address": "string",
-        "latitude": 40.7128,
-        "longitude": -74.006,
-        "created_at": "ISO8601"
+        "name": "Harbor Street Market",
+        "address": "12 Harbor St, Boston, MA",
+        "phone": "+1 617 555 0101",
+        "latitude": 42.3601,
+        "longitude": -71.0589,
+        "distance_km": null,
+        "created_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "GET",
       "path": "/api/stores/:id",
-      "description": "Get store details",
+      "description": "One active store",
+      "auth": "public",
       "request": null,
       "response": {
         "id": 1,
+        "name": "Harbor Street Market",
+        "address": "12 Harbor St, Boston, MA",
+        "phone": "+1 617 555 0101",
+        "latitude": 42.3601,
+        "longitude": -71.0589,
+        "distance_km": null,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/stores/:id",
+      "description": "Replace a store's fields (name, address, latitude and longitude required; an omitted phone is cleared)",
+      "auth": "user",
+      "request": {
         "name": "string",
         "address": "string",
-        "latitude": 40.7128,
-        "longitude": -74.006,
-        "created_at": "ISO8601"
+        "phone": "string (optional)",
+        "latitude": "number",
+        "longitude": "number"
+      },
+      "response": {
+        "id": 1,
+        "name": "Harbor Street Market",
+        "address": "14 Harbor St, Boston, MA",
+        "phone": "+1 617 555 0101",
+        "latitude": 42.3603,
+        "longitude": -71.0587,
+        "distance_km": null,
+        "created_at": "2026-01-15T10:30:00Z"
       }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/stores/:id",
+      "description": "Delete a store",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -85,43 +142,53 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Store",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "name": "string (required, max 100 chars)",
-      "address": "string (required, max 255 chars)",
-      "latitude": "decimal (required, -90 to 90)",
-      "longitude": "decimal (required, -180 to 180)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Store",
+      "description": "A store location; distance_km is computed per request and not stored",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "name": "string (required, max 100 chars)",
+        "address": "string (required, max 255 chars)",
+        "phone": "string (optional, max 30 chars)",
+        "latitude": "number (required, -90 to 90)",
+        "longitude": "number (required, -180 to 180)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the store from public endpoints)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any store"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/stores",
-      "description": "Admin overview: list all stores and counts",
+      "description": "Admin overview: every store with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "name": "Harbor Street Market",
+            "address": "12 Harbor St, Boston, MA",
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/stores/:id/toggle",
-      "description": "Toggle store active status",
+      "description": "Flip a store's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

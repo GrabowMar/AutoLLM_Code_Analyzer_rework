@@ -2,8 +2,9 @@ slug: tone-standard
 version: 1
 block_type: prompt_tone
 name: Standard tone
-description: Balanced scope — comprehensive APIs without extreme line-count pressure
+description: Balanced scope — every requirement implemented completely, no line-count targets or padding
 content: |
   ## Generation tone
-  Produce a **complete, production-quality** application appropriate to the requirements below.
-  Match the specified scope for seed data and feature depth; do not pad with unrelated features.
+  Produce a complete, working application: implement every requirement completely, in clear and well-organised code.
+  Do not add features the requirements do not ask for, and do not pad the code to reach a length.
+  The backend seeds a small set of realistic sample records at startup, so every view has something to show on first start.

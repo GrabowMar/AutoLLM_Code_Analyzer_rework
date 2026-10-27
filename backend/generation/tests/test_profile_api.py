@@ -96,6 +96,93 @@ def test_app_spec_create_and_update_keep_the_whole_contract(client):
     assert spec.description == "Edited"
     assert spec.api_endpoints == SPEC_BODY["api_endpoints"]
     assert spec.data_model == SPEC_BODY["data_model"]
+    assert updated.json()["data_models"] == [SPEC_BODY["data_model"]]
+    assert updated.json()["spec_schema_version"] == 1
+    assert updated.json()["version"] == 2
+
+
+V3_SPEC_BODY = {
+    "name": "Book Library",
+    "slug": "test_book_library_v3",
+    "category": "CRUD",
+    "description": "Track books",
+    "spec_schema_version": 3,
+    "backend_requirements": ["Access control: anyone may list books; require auth for creating books"],
+    "frontend_requirements": ["Book list"],
+    "api_endpoints": [
+        {
+            "method": "GET",
+            "path": "/api/books",
+            "description": "List",
+            "auth": "public",
+            "request": None,
+            "response": {"items": [], "total": 0},
+        },
+        {
+            "method": "POST",
+            "path": "/api/books",
+            "description": "Create",
+            "auth": "user",
+            "success_status": 201,
+            "request": {"title": "string"},
+            "response": {"id": 1},
+        },
+        {"method": "GET", "path": "/api/health", "description": "Health", "auth": "public", "response": {}},
+    ],
+    "data_models": [
+        {"name": "Book", "fields": {"id": "integer", "title": "string"}},
+        {"name": "Review", "description": "A rating", "fields": {"id": "integer"}},
+    ],
+}
+
+
+@pytest.mark.django_db
+def test_app_spec_v3_round_trips_data_models_and_bumps_version_on_change(client):
+    client.force_login(UserFactory())
+
+    created = client.post("/api/generation/app-specs/", data=json.dumps(V3_SPEC_BODY), content_type="application/json")
+    assert created.status_code == 200, created.json()
+    out = created.json()
+    assert out["data_models"] == V3_SPEC_BODY["data_models"]
+    assert out["data_model"] == V3_SPEC_BODY["data_models"][0]
+    assert out["spec_schema_version"] == 3
+    assert out["version"] == 1
+    spec = AppRequirementTemplate.objects.get(slug=V3_SPEC_BODY["slug"])
+    assert spec.data_model == V3_SPEC_BODY["data_models"]
+    assert spec.content_hash == out["content_hash"]
+
+    url = f"/api/generation/app-specs/{V3_SPEC_BODY['slug']}/"
+    # Same content (no schema version sent: the spec keeps v3): same version.
+    same = {k: v for k, v in V3_SPEC_BODY.items() if k != "spec_schema_version"}
+    unchanged = client.put(url, data=json.dumps(same), content_type="application/json")
+    assert unchanged.json()["version"] == 1
+    assert unchanged.json()["spec_schema_version"] == 3
+
+    edited = client.put(
+        url,
+        data=json.dumps({**V3_SPEC_BODY, "description": "Edited"}),
+        content_type="application/json",
+    )
+    assert edited.json()["version"] == 2
+    assert edited.json()["content_hash"] != out["content_hash"]
+
+
+@pytest.mark.django_db
+def test_app_spec_v3_conventions_are_enforced_on_save(client):
+    client.force_login(UserFactory())
+    body = {**V3_SPEC_BODY, "api_endpoints": V3_SPEC_BODY["api_endpoints"][:2]}
+
+    response = client.post("/api/generation/app-specs/", data=json.dumps(body), content_type="application/json")
+
+    assert response.status_code == 400
+    assert any("/api/health" in e for e in response.json()["errors"])
+    # The same spec declared v2 only has to validate.
+    legacy = client.post(
+        "/api/generation/app-specs/",
+        data=json.dumps({**body, "spec_schema_version": 2}),
+        content_type="application/json",
+    )
+    assert legacy.status_code == 200
 
 
 @pytest.mark.django_db

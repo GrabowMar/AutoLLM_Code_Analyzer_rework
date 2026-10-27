@@ -20,7 +20,7 @@ uninstall_cmd: "npm uninstall -g eslint"
 # plugin's jsx-uses-vars rules only mark JSX-referenced components as used (they
 # never report): without them every imported component is "unused".
 run_cmd: |
-  printf '%s' '{"root":true,"env":{"browser":true,"node":true,"es2022":true},"parserOptions":{"ecmaVersion":"latest","sourceType":"module","ecmaFeatures":{"jsx":true}},"settings":{"react":{"version":"18.2"}},"plugins":["react"],"rules":{"no-undef":"error","no-unused-vars":"warn","react/jsx-uses-vars":"error","react/jsx-uses-react":"error"}}' > /tmp/eslint-base.json
+  printf '%s' '{"root":true,"env":{"browser":true,"node":true,"es2022":true},"parserOptions":{"ecmaVersion":"latest","sourceType":"module","ecmaFeatures":{"jsx":true}},"settings":{"react":{"version":"19.2"}},"plugins":["react"],"rules":{"no-undef":"error","no-unused-vars":"warn","react/jsx-uses-vars":"error","react/jsx-uses-react":"error"}}' > /tmp/eslint-base.json
   eslint {target} --ext .js,.jsx,.cjs,.mjs -f json --no-eslintrc -c /tmp/eslint-base.json --resolve-plugins-relative-to "$(npm root -g)" --ignore-pattern node_modules 2>/dev/null
 parser_key: eslint
 file_patterns: ["*.js", "*.jsx", "*.cjs", "*.mjs"]

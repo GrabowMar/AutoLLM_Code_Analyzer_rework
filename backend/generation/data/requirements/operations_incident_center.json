@@ -2,78 +2,329 @@
   "slug": "operations_incident_center",
   "name": "Incident Center",
   "category": "Operations",
-  "description": "Coordinate production incidents, responders, timelines, and postmortem actions.",
-  "difficulty": "basic",
-  "spec_schema_version": 2,
+  "description": "Coordinate production incidents, their responders and timelines, and the postmortems that follow",
+  "difficulty": "advanced",
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Incident model with severity, service_name, status, commander, opened_at, resolved_at, impact_summary, and customer_updates",
-    "Timeline event model for acknowledgements, mitigations, escalations, and recoveries",
-    "GET /api/incidents with severity, status, service, and commander filters plus search and pagination",
-    "POST /api/incidents, PUT /api/incidents/:id, and POST /api/incidents/:id/timeline for active response updates",
-    "GET /api/public/stats for open incident counts and MTTR style summary metrics",
-    "GET /api/incidents/:id/postmortem-preview to assemble a draft incident summary"
+    "Access control: anyone may read the public stats; require auth for reading, opening and updating incidents, posting timeline events and reading postmortem previews; admin endpoints are restricted to the admin account",
+    "Incidents: any signed-in user may open an incident and update any incident; incidents are never deleted",
+    "Incident validation: title (at most 200 characters) and service_name (at most 100 characters) are required non-empty strings; severity is one of sev1, sev2, sev3, sev4; impact_summary, when given, is at most 2000 characters; commander, when given, is a non-empty string of at most 50 characters naming the responder (normally a username; it is not checked against the accounts) and defaults to the signed-in user's username",
+    "A new incident starts in status investigating with opened_at set to the creation time and opened_by set to the signed-in user's username",
+    "PATCH /api/incidents/:id changes only the fields it is given (title, service_name, severity, status, commander, impact_summary, postmortem_completed); status is one of investigating, mitigated, monitoring, resolved and may move in any direction",
+    "Status changes set the timestamps: mitigated_at is set the first time an incident reaches mitigated, monitoring or resolved; resolved_at is set when it becomes resolved; moving a resolved incident to any other status is a reopen that clears resolved_at and adds 1 to reopen_count",
+    "Every status change made through PATCH appends a status_change timeline event authored by the signed-in user whose message names the old and new status (for example \"investigating -> mitigated\")",
+    "SLA: the resolution target is 60 minutes for sev1, 240 for sev2, 1440 for sev3 and 4320 for sev4; sla_due_at is opened_at plus the target of the current severity, and sla_breached is true when the incident was resolved after sla_due_at or is still unresolved past it",
+    "GET /api/incidents returns incidents newest opened first; ?severity=, ?status= and ?service_name= match exactly, ?commander= matches the commander username, ?open=true keeps only unresolved incidents, ?query= matches title, service_name or impact_summary case-insensitively, ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every matching incident",
+    "Timeline: POST /api/incidents/:id/timeline appends an event of type acknowledgement, mitigation, escalation, recovery, customer_update or note with a required message of at most 2000 characters, authored by the signed-in user; status_change events are only created by the server; posting an event does not change the incident's status; GET /api/incidents/:id/timeline lists events oldest first",
+    "Customer updates are the timeline events of type customer_update",
+    "GET /api/public/stats returns open_total, open_by_severity (an object with a count for each of sev1 to sev4), sla_breached_open, resolved_last_30_days, and mttr_minutes (the mean of resolved_at minus opened_at in minutes over incidents resolved in the last 30 days, rounded to one decimal, null when there are none)",
+    "GET /api/incidents/:id/postmortem-preview assembles a draft without storing anything: the incident's fields, duration_minutes (resolved_at or now minus opened_at, whole minutes), the full timeline oldest first, and draft, a plain-text summary with the title, severity, service, duration, impact summary and one line per timeline event",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "Operations landing page with severity totals and active incident cards",
-    "Browse table with severity filters, service search, and SLA badges",
-    "Incident detail page with timeline entries and customer update feed",
-    "Responder dashboard with assigned incidents and overdue follow-ups",
-    "Admin view for incident audits and postmortem completion tracking"
+    "Operations landing page for everyone with the public stats (open incidents by severity, SLA breaches, resolved in 30 days, MTTR); signed-in users also see cards for the open incidents, and visitors see a 'Sign in to respond to incidents' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Incident browser: a table with severity, title, service, status, commander, opened time and an SLA badge (on track, breached), filters for severity and status, an open-only switch, a search box and previous/next paging",
+    "Open-incident form (title, service, severity, optional impact summary and commander) that shows the API's validation messages",
+    "Incident detail page: the incident's fields, controls to change status, severity and commander, the timeline oldest first with a form to post an event, and a separate customer update feed showing only customer_update events",
+    "Responder dashboard: the signed-in user's open incidents as commander (?commander=<username>&open=true), with SLA-breached ones highlighted as overdue",
+    "Postmortem preview page that shows the assembled draft for an incident and lets a responder mark the postmortem completed"
+  ],
+  "admin_requirements": [
+    "Admin audit view: every incident with its reopen count and postmortem status, plus counts of open sev1 incidents, incidents ever reopened and postmortems due",
+    "Postmortems due are resolved sev1 and sev2 incidents whose postmortem_completed is false; show avg_mitigation_minutes (mean of mitigated_at minus opened_at over incidents that have mitigated_at, rounded to one decimal, null when there are none)"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/incidents",
-      "description": "List incidents with multi-field filters",
+      "description": "List incidents, newest opened first, filtered and paged",
+      "auth": "user",
+      "query": {
+        "severity": "Exact severity: sev1, sev2, sev3 or sev4",
+        "status": "Exact status: investigating, mitigated, monitoring or resolved",
+        "service_name": "Exact service name",
+        "commander": "Commander username",
+        "open": "true keeps only incidents that are not resolved",
+        "query": "Case-insensitive text matched against title, service_name and impact_summary",
+        "page": "1-based page number (default 1)",
+        "page_size": "Incidents per page (default 20, at most 100)"
+      },
       "request": null,
       "response": {
-        "items": [],
-        "total": 0
+        "items": [
+          {
+            "id": 7,
+            "title": "Checkout API returning 502s",
+            "service_name": "checkout-api",
+            "severity": "sev1",
+            "status": "mitigated",
+            "commander": "dana",
+            "impact_summary": "About 30% of checkout requests failed for EU customers.",
+            "opened_by": "dana",
+            "opened_at": "2026-03-02T09:14:00Z",
+            "mitigated_at": "2026-03-02T09:52:00Z",
+            "resolved_at": null,
+            "sla_due_at": "2026-03-02T10:14:00Z",
+            "sla_breached": false,
+            "postmortem_completed": false,
+            "reopen_count": 0,
+            "timeline_count": 4
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/incidents",
+      "description": "Open an incident (status investigating)",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "title": "string",
+        "service_name": "string",
+        "severity": "string (sev1|sev2|sev3|sev4)",
+        "impact_summary": "string (optional)",
+        "commander": "string (optional)"
+      },
+      "response": {
+        "id": 7,
+        "title": "Checkout API returning 502s",
+        "service_name": "checkout-api",
+        "severity": "sev1",
+        "status": "investigating",
+        "commander": "dana",
+        "impact_summary": "About 30% of checkout requests failed for EU customers.",
+        "opened_by": "dana",
+        "opened_at": "2026-03-02T09:14:00Z",
+        "mitigated_at": null,
+        "resolved_at": null,
+        "sla_due_at": "2026-03-02T10:14:00Z",
+        "sla_breached": false,
+        "postmortem_completed": false,
+        "reopen_count": 0,
+        "timeline_count": 0
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/incidents/:id",
+      "description": "One incident",
+      "auth": "user",
+      "request": null,
+      "response": {
+        "id": 7,
+        "title": "Checkout API returning 502s",
+        "service_name": "checkout-api",
+        "severity": "sev1",
+        "status": "mitigated",
+        "commander": "dana",
+        "impact_summary": "About 30% of checkout requests failed for EU customers.",
+        "opened_by": "dana",
+        "opened_at": "2026-03-02T09:14:00Z",
+        "mitigated_at": "2026-03-02T09:52:00Z",
+        "resolved_at": null,
+        "sla_due_at": "2026-03-02T10:14:00Z",
+        "sla_breached": false,
+        "postmortem_completed": false,
+        "reopen_count": 0,
+        "timeline_count": 4
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/incidents/:id",
+      "description": "Change some of an incident's fields; status changes set timestamps and add a timeline event",
+      "auth": "user",
+      "request": {
+        "title": "string (optional)",
+        "service_name": "string (optional)",
+        "severity": "string (sev1|sev2|sev3|sev4)",
+        "status": "string (investigating|mitigated|monitoring|resolved)",
+        "commander": "string (optional)",
+        "impact_summary": "string (optional)",
+        "postmortem_completed": "boolean (optional)"
+      },
+      "response": {
+        "id": 7,
+        "title": "Checkout API returning 502s",
+        "service_name": "checkout-api",
+        "severity": "sev1",
+        "status": "mitigated",
+        "commander": "dana",
+        "impact_summary": "About 30% of checkout requests failed for EU customers.",
+        "opened_by": "dana",
+        "opened_at": "2026-03-02T09:14:00Z",
+        "mitigated_at": "2026-03-02T09:52:00Z",
+        "resolved_at": null,
+        "sla_due_at": "2026-03-02T10:14:00Z",
+        "sla_breached": false,
+        "postmortem_completed": false,
+        "reopen_count": 0,
+        "timeline_count": 4
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/incidents/:id/timeline",
+      "description": "An incident's timeline, oldest first",
+      "auth": "user",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 14,
+            "incident_id": 7,
+            "event_type": "mitigation",
+            "message": "Rolled back release 2026.03.02-1; error rate falling.",
+            "author": "dana",
+            "created_at": "2026-03-02T09:50:00Z"
+          }
+        ],
+        "total": 1
       }
     },
     {
       "method": "POST",
       "path": "/api/incidents/:id/timeline",
-      "description": "Append a response timeline event",
+      "description": "Append a timeline event as the signed-in user",
+      "auth": "user",
+      "success_status": 201,
       "request": {
-        "event_type": "mitigation",
+        "event_type": "string (acknowledgement|mitigation|escalation|recovery|customer_update|note)",
         "message": "string"
       },
       "response": {
         "id": 14,
-        "incident_id": 2
+        "incident_id": 7,
+        "event_type": "mitigation",
+        "message": "Rolled back release 2026.03.02-1; error rate falling.",
+        "author": "dana",
+        "created_at": "2026-03-02T09:50:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/incidents/:id/postmortem-preview",
+      "description": "Assemble a draft postmortem for an incident (nothing is stored)",
+      "auth": "user",
+      "request": null,
+      "response": {
+        "incident_id": 7,
+        "title": "Checkout API returning 502s",
+        "severity": "sev1",
+        "service_name": "checkout-api",
+        "status": "resolved",
+        "opened_at": "2026-03-02T09:14:00Z",
+        "resolved_at": "2026-03-02T10:05:00Z",
+        "duration_minutes": 51,
+        "impact_summary": "About 30% of checkout requests failed for EU customers.",
+        "timeline": [
+          {
+            "id": 14,
+            "incident_id": 7,
+            "event_type": "mitigation",
+            "message": "Rolled back release 2026.03.02-1; error rate falling.",
+            "author": "dana",
+            "created_at": "2026-03-02T09:50:00Z"
+          }
+        ],
+        "draft": "Checkout API returning 502s (sev1, checkout-api)\nDuration: 51 minutes\n..."
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/stats",
+      "description": "Aggregate incident figures for the public landing page",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "open_total": 2,
+        "open_by_severity": {
+          "sev1": 1,
+          "sev2": 0,
+          "sev3": 1,
+          "sev4": 0
+        },
+        "sla_breached_open": 1,
+        "resolved_last_30_days": 12,
+        "mttr_minutes": 95.5
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
       }
     }
   ],
-  "data_model": {
-    "name": "Incident",
-    "fields": {
-      "id": "integer primary key",
-      "title": "string, required",
-      "service_name": "string",
-      "severity": "string (sev1, sev2, sev3, sev4)",
-      "status": "string (investigating, mitigated, monitoring, resolved)",
-      "commander": "string",
-      "impact_summary": "text",
-      "customer_updates": "json/text",
-      "opened_at": "datetime",
-      "resolved_at": "datetime nullable"
+  "data_models": [
+    {
+      "name": "Incident",
+      "description": "A production incident; sla_due_at, sla_breached and timeline_count are computed",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "title": "string (required, max 200 chars)",
+        "service_name": "string (required, max 100 chars)",
+        "severity": "string (one of: sev1, sev2, sev3, sev4)",
+        "status": "string (one of: investigating, mitigated, monitoring, resolved; default investigating)",
+        "commander": "string (username, max 50 chars; defaults to the user who opened it)",
+        "impact_summary": "string (optional, max 2000 chars)",
+        "opened_by": "string (username of the signed-in user who opened it)",
+        "opened_at": "datetime (auto, ISO 8601 in JSON)",
+        "mitigated_at": "datetime (nullable; first time the status left investigating)",
+        "resolved_at": "datetime (nullable; cleared on reopen)",
+        "postmortem_completed": "boolean (default false)",
+        "reopen_count": "integer (default 0)"
+      }
+    },
+    {
+      "name": "TimelineEvent",
+      "description": "One entry in an incident's response timeline",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "incident_id": "integer (references Incident.id)",
+        "event_type": "string (one of: acknowledgement, mitigation, escalation, recovery, customer_update, note, status_change; status_change is server-created)",
+        "message": "string (required, max 2000 chars)",
+        "author": "string (username of the signed-in user who posted it)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)"
+      }
     }
-  },
-  "admin_requirements": [
-    "Audit trail for reopened incidents and overdue postmortems",
-    "Admin metrics for average mitigation time and unresolved Sev1 incidents"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/incidents",
-      "description": "Admin incident audit dashboard",
+      "description": "Admin audit: every incident with reopen and postmortem metrics",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
+        "items": [
+          {
+            "id": 7,
+            "title": "Checkout API returning 502s",
+            "severity": "sev1",
+            "status": "resolved",
+            "commander": "dana",
+            "opened_at": "2026-03-02T09:14:00Z",
+            "resolved_at": "2026-03-02T10:05:00Z",
+            "reopen_count": 1,
+            "postmortem_completed": false
+          }
+        ],
+        "total": 1,
         "sev1_open": 0,
-        "postmortems_due": 0
+        "reopened": 1,
+        "postmortems_due": 1,
+        "avg_mitigation_minutes": 38.0
       }
     }
   ]

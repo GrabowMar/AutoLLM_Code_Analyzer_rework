@@ -23,7 +23,13 @@ logger = logging.getLogger(__name__)
 _TEMPLATES_DIR = Path(__file__).parent.parent / "scaffolding"
 _MANIFEST_PATH = _TEMPLATES_DIR / "manifest.json"
 _LUCIDE_ICONS_PATH = _TEMPLATES_DIR / "lucide_icons.json"
-_LUCIDE_FALLBACK = "AlertCircle"
+# lucide_icons.json: every value export of the pinned lucide-react (frontend/package.json),
+# regenerated from that release's dist/lucide-react.d.ts whenever the pin moves.
+# The Vue stack pins @lucide/vue at the same release, whose icon exports are the
+# same; only the framework helpers below differ (dist/lucide-vue.d.ts, 1.61.0).
+_LUCIDE_FALLBACK = "CircleAlert"
+_LUCIDE_REACT_ONLY = frozenset({"LucideProvider", "useLucideContext"})
+_LUCIDE_VUE_ONLY = frozenset({"LUCIDE_CONTEXT", "setLucideProps", "useLucideProps"})
 
 _SUBSTITUTION_PATTERN = re.compile(r"\{\{(\w+)(?:\|([^}]+))?\}\}")
 
@@ -43,8 +49,9 @@ class HealingMode(StrEnum):
     """How much the build repairs model output before Docker sees it.
 
     ``full`` (the default) infers missing requirements, applies the runtime
-    patches (sqlite path, port, app context, unknown lucide icons) and fills
-    a missing entry file with a placeholder. ``no_deps`` keeps the patches
+    patches (sqlite path, port, app context, unknown lucide icons,
+    ``react-router-dom`` imports, the skeleton's Tailwind stylesheet entry)
+    and fills a missing entry file with a placeholder. ``no_deps`` keeps the patches
     but leaves requirements.txt as the template wrote it. ``none`` builds the
     model output exactly as written, so its deploy rate is attributable to
     the model alone.
@@ -316,6 +323,9 @@ def _materialize_files(
     component = stack.get("frontend_component", "App.jsx")
     is_vue = component.endswith(".vue")
 
+    css_entry = _css_entry(dest_path, is_vue=is_vue) if stack.get("has_frontend") else None
+    keeps_router_dom = _declares_router_dom(dest_path, files.get("frontend/package.json"))
+
     backend_python: list[str] = []
     for src_path, content in files.items():
         text = content
@@ -326,8 +336,15 @@ def _materialize_files(
             text = _patch_backend_code(text, report, out_path)
         if not out_path.startswith("frontend/") and out_path.endswith(".py"):
             backend_python.append(text)
-        elif out_path.startswith("frontend/") and out_path.endswith((".jsx", ".tsx")) and not is_vue and patch:
-            text = _sanitize_lucide_imports(text, report, out_path)
+        elif out_path.startswith("frontend/") and patch:
+            text = _patch_frontend_file(
+                text,
+                out_path,
+                is_vue=is_vue,
+                css_entry=css_entry,
+                keeps_router_dom=keeps_router_dom,
+                report=report,
+            )
 
         target = dest_path / out_path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -345,7 +362,11 @@ def _materialize_files(
     )
 
     if report.mode == HealingMode.FULL:
-        report.added_requirements = _patch_requirements(dest_path, "\n\n".join(backend_python))
+        report.added_requirements = _patch_requirements(
+            dest_path,
+            "\n\n".join(backend_python),
+            local_modules=_local_module_names(list(files)),
+        )
 
     if stack.get("has_frontend"):
         src_dir = dest_path / "frontend" / "src"
@@ -359,6 +380,113 @@ def _materialize_files(
             report=report,
             label=rel,
         )
+
+
+def _patch_frontend_file(
+    text: str,
+    out_path: str,
+    *,
+    is_vue: bool,
+    css_entry: tuple[str, str] | None,
+    keeps_router_dom: bool,
+    report: HealingReport,
+) -> str:
+    """Healed builds: repair one model-written ``frontend/`` file against the skeleton.
+
+    The skeleton's Tailwind stylesheet keeps its ``@import "tailwindcss"``
+    entry and theme tokens, unknown lucide icons are aliased (React and Vue
+    alike), and React imports of ``react-router-dom`` (not installed since
+    the skeleton moved to react-router 8, which exports the same API) are
+    pointed at ``react-router``.
+    """
+    if css_entry is not None and out_path == css_entry[0]:
+        healed = _heal_tailwind_entry(text, css_entry[1])
+        if healed != text:
+            report.patches.append(f"{out_path}:tailwind_entry")
+        return healed
+    if is_vue:
+        if out_path.endswith((".vue", ".js", ".ts")):
+            text = _sanitize_lucide_imports(text, report, out_path, is_vue=True)
+        return text
+    if out_path.endswith((".jsx", ".tsx")):
+        text = _sanitize_lucide_imports(text, report, out_path)
+    if out_path.endswith((".jsx", ".tsx", ".js", ".ts")) and not keeps_router_dom:
+        text = _fix_react_router_dom(text, report, out_path)
+    return text
+
+
+def _css_entry(dest_path: Path, *, is_vue: bool) -> tuple[str, str] | None:
+    """``(path, text)`` of the skeleton's Tailwind 4 stylesheet entry, or None.
+
+    None for skeletons without one (older pinned stack versions configure
+    Tailwind 3 through tailwind.config.js, user stacks may differ), so their
+    stylesheets are written as the model gave them.
+    """
+    rel = "frontend/src/style.css" if is_vue else "frontend/src/App.css"
+    path = dest_path / rel
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8")
+    return (rel, text) if _TAILWIND_IMPORT_RE.search(text) else None
+
+
+def _declares_router_dom(dest_path: Path, model_package_json: str | None) -> bool:
+    """Whether the build installs ``react-router-dom`` (the model's or the skeleton's package.json lists it)."""
+    text = model_package_json
+    if text is None:
+        path = dest_path / "frontend" / "package.json"
+        text = path.read_text(encoding="utf-8") if path.is_file() else "{}"
+    try:
+        package = json.loads(text)
+    except ValueError:
+        # Unparseable: npm fails on it anyway; leave the imports alone.
+        return True
+    if not isinstance(package, dict):
+        return True
+    return any(
+        isinstance(deps, dict) and "react-router-dom" in deps
+        for deps in (package.get("dependencies"), package.get("devDependencies"))
+    )
+
+
+_TAILWIND_IMPORT_RE = re.compile(r"""@import\s+(?:url\(\s*)?["']tailwindcss["']""")
+# Tailwind 3 entry points: ``@tailwind base;`` and ``@import "tailwindcss/base";``.
+_TAILWIND3_DIRECTIVE_RE = re.compile(
+    r"""^[ \t]*@(?:tailwind\s+[\w-]+|import\s+["']tailwindcss/[\w-]+(?:\.css)?["'])\s*;[ \t]*\n?""",
+    re.MULTILINE,
+)
+_CSS_IMPORT_RE = re.compile(r"""^[ \t]*@import\b[^;]*;[ \t]*\n?""", re.MULTILINE)
+
+
+def _heal_tailwind_entry(css: str, skeleton: str) -> str:
+    """Keep the skeleton's Tailwind 4 entry in a model-written stylesheet that replaces it.
+
+    A stylesheet that imports ``tailwindcss`` itself is the model's own
+    complete entry and stays as written. Otherwise its Tailwind 3 directives
+    are dropped and the skeleton's import and ``@theme`` tokens go first, so
+    utilities are generated and ``@apply`` resolves; the model's own
+    ``@import`` statements stay ahead of every rule, as CSS requires.
+    """
+    if _TAILWIND_IMPORT_RE.search(css):
+        return css
+    body = _TAILWIND3_DIRECTIVE_RE.sub("", css)
+    model_imports = "".join(m.group(0) for m in _CSS_IMPORT_RE.finditer(body))
+    body = _CSS_IMPORT_RE.sub("", body).strip()
+    skeleton_imports = "".join(m.group(0) for m in _CSS_IMPORT_RE.finditer(skeleton))
+    skeleton_rest = _CSS_IMPORT_RE.sub("", skeleton).strip()
+    parts = [skeleton_imports + model_imports, skeleton_rest, body]
+    return "\n\n".join(p.strip() for p in parts if p.strip()) + "\n"
+
+
+_ROUTER_DOM_IMPORT_RE = re.compile(r"""(\b(?:from|import)\s*\(?\s*)(["'])react-router-dom\2""")
+
+
+def _fix_react_router_dom(code: str, report: HealingReport | None = None, filename: str = "") -> str:
+    """``from "react-router-dom"`` -> ``from "react-router"`` (v7+ re-exports one from the other)."""
+    fixed = _ROUTER_DOM_IMPORT_RE.sub(r"\1\2react-router\2", code)
+    if report is not None and fixed != code:
+        report.patches.append(f"{filename}:react_router_dom")
+    return fixed
 
 
 def _fill_missing(
@@ -428,8 +556,10 @@ def _materialize_legacy(
             front = _placeholder_frontend_vue() if is_vue else _placeholder_frontend()
             if build:
                 report.patches.append(f"frontend/src/{component}:placeholder")
-        if build and frontend_text and not is_vue and patch:
-            front = _sanitize_lucide_imports(front, report, f"frontend/src/{component}")
+        if build and frontend_text and patch:
+            front = _sanitize_lucide_imports(front, report, f"frontend/src/{component}", is_vue=is_vue)
+            if not is_vue and not _declares_router_dom(dest_path, None):
+                front = _fix_react_router_dom(front, report, f"frontend/src/{component}")
         if front:
             (src_dir / component).write_text(front, encoding="utf-8")
         elif (src_dir / component).is_file():
@@ -517,21 +647,57 @@ def _copy_template_dir(src: Path, dst: Path) -> None:
             shutil.copy2(str(item), str(dest_item))
 
 
-def _patch_requirements(dest: Path, backend_code: str) -> list[str]:
+_REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+def _requirement_key(name: str) -> str:
+    """PEP 503 normalized project name (``Flask_SQLAlchemy`` == ``flask-sqlalchemy``)."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _requirement_names(text: str) -> set[str]:
+    """Normalized project names in a requirements.txt, ignoring extras, pins and markers.
+
+    ``uvicorn[standard]==0.54.0`` and ``pwdlib[argon2]; python_version>='3.10'``
+    yield ``uvicorn`` and ``pwdlib``; option lines (``-r``, ``--index-url``)
+    and comments are skipped.
+    """
+    names: set[str] = set()
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line or line.startswith("-"):
+            continue
+        match = _REQUIREMENT_NAME.match(line)
+        if match:
+            names.add(_requirement_key(match.group(1)))
+    return names
+
+
+def _local_module_names(paths: list[str]) -> frozenset[str]:
+    """Top-level import names the written backend files provide (``db.py``, ``routers/``)."""
+    names: set[str] = set()
+    for rel in paths:
+        if rel.startswith("frontend/"):
+            continue
+        top = rel.split("/", 1)[0]
+        if "/" in rel or top.endswith(".py"):
+            names.add(top.removesuffix(".py"))
+    return frozenset(names)
+
+
+def _patch_requirements(dest: Path, backend_code: str, local_modules: frozenset[str] = frozenset()) -> list[str]:
     """Merge inferred deps from generated code into the template requirements.txt; returns the added ones."""
     req_path = dest / "requirements.txt"
     if not req_path.exists() or not backend_code:
         return []
 
     existing_text = req_path.read_text()
-    existing_pkgs = {
-        line.split("==")[0].split(">=")[0].split("<=")[0].split("~=")[0].strip().lower()
-        for line in existing_text.splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    }
+    existing_pkgs = _requirement_names(existing_text)
 
-    inferred = infer_python_dependencies(backend_code)
-    new_pkgs = [pkg for pkg in inferred if pkg.lower() not in existing_pkgs]
+    inferred = infer_python_dependencies(backend_code, local_modules=local_modules)
+    # Compared by project name, so an inferred pin (``bcrypt==4.0.1``) never
+    # duplicates a package the template already pins: the template's pin wins.
+    new_pkgs = [pkg for pkg in inferred if not _requirement_names(pkg) & existing_pkgs]
 
     if new_pkgs:
         extra = "\n".join(new_pkgs)
@@ -642,7 +808,8 @@ def _fix_flask_port(code: str) -> str:
     )
 
 
-def _get_valid_lucide_icons() -> frozenset[str]:
+def _get_valid_lucide_icons(*, vue: bool = False) -> frozenset[str]:
+    """Value exports of the pinned ``lucide-react`` (or, with *vue*, ``@lucide/vue``)."""
     global _valid_lucide_icons  # noqa: PLW0603
     if _valid_lucide_icons is None:
         try:
@@ -650,48 +817,76 @@ def _get_valid_lucide_icons() -> frozenset[str]:
             _valid_lucide_icons = frozenset(data)
         except Exception:  # noqa: BLE001
             _valid_lucide_icons = frozenset()
+    if vue and _valid_lucide_icons:
+        return (_valid_lucide_icons - _LUCIDE_REACT_ONLY) | _LUCIDE_VUE_ONLY
     return _valid_lucide_icons
 
 
-def _sanitize_lucide_imports(code: str, report: HealingReport | None = None, filename: str = "") -> str:
-    """Replace unknown lucide-react icon names with a safe fallback."""
-    valid = _get_valid_lucide_icons()
+def _sanitize_lucide_imports(
+    code: str,
+    report: HealingReport | None = None,
+    filename: str = "",
+    *,
+    is_vue: bool = False,
+) -> str:
+    """Import unknown lucide icon names as the fallback icon under their own name.
+
+    ``lucide-react`` imports in React stacks, ``@lucide/vue`` imports in Vue
+    stacks: an unknown name is a hard build error in both.
+    """
+    valid = _get_valid_lucide_icons(vue=is_vue)
     if not valid:
         return code
-    sanitized = _replace_unknown_lucide(code, valid)
+    sanitized = _replace_unknown_lucide(code, valid, package="@lucide/vue" if is_vue else "lucide-react")
     if report is not None and sanitized != code:
         report.patches.append(f"{filename}:lucide_icons")
     return sanitized
 
 
-def _replace_unknown_lucide(code: str, valid: frozenset[str]) -> str:
+def _replace_unknown_lucide(code: str, valid: frozenset[str], package: str = "lucide-react") -> str:
+    """``import { Github, House }`` -> ``import { CircleAlert as Github, House }``.
+
+    Aliasing (rather than dropping the name) keeps every ``<Github />`` usage
+    bound, so the page renders the fallback icon instead of crashing on an
+    undefined component.
+    """
+
     def _fix_import(match: re.Match[str]) -> str:
         prefix, names_str, suffix = match.group(1), match.group(2), match.group(3)
         names = [n.strip() for n in names_str.split(",") if n.strip()]
         fixed: list[str] = []
-        fallback_needed = False
         for name in names:
-            base = name.split(" as ")[0].strip() if " as " in name else name
-            if base in valid:
+            base, _, local = (part.strip() for part in name.partition(" as "))
+            # ``type LucideProps`` (TSX) imports a type, not a value.
+            if base in valid or base.startswith("type "):
                 fixed.append(name)
             else:
-                fallback_needed = True
-        if fallback_needed and _LUCIDE_FALLBACK not in [n.split(" as ")[0].strip() for n in fixed]:
-            fixed.append(_LUCIDE_FALLBACK)
-        if not fixed:
-            fixed = [_LUCIDE_FALLBACK]
-        return f"{prefix}{', '.join(fixed)}{suffix}"
+                fixed.append(f"{_LUCIDE_FALLBACK} as {local or base}")
+        if fixed == names:
+            return match.group(0)
+        return f"{prefix} {', '.join(fixed)} {suffix}"
 
     pattern = re.compile(
-        r"(import\s*\{)([^}]+)(\}\s*from\s*['\"]lucide-react['\"])",
+        rf"(import\s*\{{)([^}}]+)(\}}\s*from\s*['\"]{re.escape(package)}['\"])",
         re.DOTALL,
     )
     return pattern.sub(_fix_import, code)
 
 
+# Pre-``server_kind`` placeholder choice (see _placeholder_backend_for_stack).
+_LEGACY_FASTAPI_PLACEHOLDER_SLUGS = frozenset({"fastapi-vue"})
+
+
 def _placeholder_backend_for_stack(stack: dict[str, Any]) -> str:
-    slug = stack.get("canonical_slug", "")
-    if slug == "fastapi-vue":
+    """The stub entry file for *stack*: FastAPI for uvicorn-served stacks, else Flask.
+
+    Decided by ``server_kind`` (what the image starts), so every uvicorn
+    stack — builtin or user-authored — gets an ASGI ``app``. Builtin rows
+    seeded before ``server_kind`` existed all carry the default ``python``;
+    retries and re-evaluations pinned to such a row must keep the stub they
+    got then, which chose by slug (FastAPI for ``fastapi-vue`` only).
+    """
+    if stack.get("server_kind") == "uvicorn" or stack.get("canonical_slug") in _LEGACY_FASTAPI_PLACEHOLDER_SLUGS:
         return _placeholder_fastapi()
     return _placeholder_backend()
 
@@ -700,22 +895,24 @@ def _placeholder_fastapi() -> str:
     return (
         "import os\n"
         "from pathlib import Path\n"
-        "from fastapi import FastAPI\n"
+        "from fastapi import FastAPI, HTTPException\n"
         "from fastapi.responses import FileResponse\n"
         "from fastapi.staticfiles import StaticFiles\n\n"
         "app = FastAPI(title='Generated App')\n"
-        "_STATIC = Path(__file__).parent / 'static'\n"
-        "if _STATIC.is_dir():\n"
-        "    app.mount('/assets', StaticFiles(directory=_STATIC / 'assets'), name='assets')\n\n"
+        "_STATIC = Path(__file__).parent / 'static'\n\n"
         "@app.get('/api/health')\n"
         "def health():\n"
         "    return {'status': 'ok'}\n\n"
-        "@app.get('/{full_path:path}')\n"
-        "def spa(full_path: str = ''):\n"
+        "if _STATIC.is_dir():\n"
+        "    app.mount('/static', StaticFiles(directory=_STATIC), name='static')\n\n"
+        "@app.get('/{full_path:path}', include_in_schema=False)\n"
+        "def spa(full_path: str):\n"
+        "    if full_path == 'api' or full_path.startswith('api/'):\n"
+        "        raise HTTPException(status_code=404, detail='Not Found')\n"
         "    index = _STATIC / 'index.html'\n"
         "    if index.is_file():\n"
         "        return FileResponse(index)\n"
-        "    return {'detail': 'frontend not built'}\n"
+        "    raise HTTPException(status_code=404, detail='frontend not built')\n"
     )
 
 
@@ -732,9 +929,11 @@ def _placeholder_backend() -> str:
         "@app.route('/', defaults={'path': ''})\n"
         "@app.route('/<path:path>')\n"
         "def _serve_spa(path):\n"
-        "    target = _STATIC / path if path else None\n"
-        "    if target and target.is_file():\n"
-        "        return send_from_directory(str(_STATIC), path)\n"
+        "    if path == 'api' or path.startswith('api/'):\n"
+        "        return jsonify({'detail': 'Not found'}), 404\n"
+        "    rel = path.removeprefix('static/')\n"
+        "    if rel and (_STATIC / rel).is_file():\n"
+        "        return send_from_directory(str(_STATIC), rel)\n"
         "    return send_from_directory(str(_STATIC), 'index.html')\n\n"
         "if __name__ == '__main__':\n"
         "    port = int(os.environ.get('PORT', 8000))\n"

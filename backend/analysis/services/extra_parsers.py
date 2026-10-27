@@ -17,6 +17,7 @@ from typing import Any
 
 from backend.analysis.services.base import FindingData
 from backend.analysis.services.base import ParsedOutput
+from backend.analysis.services.parsers import _advisory_ids
 from backend.analysis.services.parsers import _compact
 from backend.analysis.services.parsers import _float
 from backend.analysis.services.parsers import _label
@@ -172,7 +173,7 @@ def parse_pip_audit(raw: str) -> list[FindingData]:
                                 "installed_version": version,
                                 "fixed_versions": fixes,
                                 "vuln_id": vid,
-                                "aliases": aliases,
+                                "aliases": _advisory_ids(vid, aliases),
                                 "manifest": path,
                                 # Legacy keys.
                                 "version": version,
@@ -388,12 +389,23 @@ _LIZARD_FIELDS = (
 _LIZARD_THRESHOLDS = ((25, "high"), (15, "medium"))
 
 
+# The run command's preamble: ``# files: <ext> <count>`` per source extension.
+_LIZARD_FILES_RE = re.compile(r"^# files: (?P<ext>\w+) (?P<count>\d+)\s*$", re.MULTILINE)
+
+
 @register("lizard")
 def parse_lizard(raw: str) -> ParsedOutput:
     """``lizard --csv``: one row per function. All rows feed the metrics; only
-    functions over CCN 15 become findings."""
+    functions over CCN 15 become findings.
+
+    The runner only runs Lizard when applicable files exist, so no function
+    row at all means it read nothing (a language it was not told to parse):
+    an error, not a clean result. The preamble's per-extension file counts
+    flag an extension none of whose files yielded a function.
+    """
     functions: list[dict[str, Any]] = []
     findings: list[FindingData] = []
+    present = {m.group("ext"): int(m.group("count")) for m in _LIZARD_FILES_RE.finditer(raw or "")}
     for row in csv.reader(io.StringIO(raw or "")):
         if len(row) != len(_LIZARD_FIELDS):
             continue
@@ -429,7 +441,15 @@ def parse_lizard(raw: str) -> ParsedOutput:
                 ),
             )
     if not functions:
-        return ParsedOutput(findings=findings)
+        files = ", ".join(f"{n} .{ext}" for ext, n in sorted(present.items()))
+        return ParsedOutput(
+            findings=findings,
+            error="Lizard measured no function" + (f" in {files} file(s)" if files else "") + ": nothing was analyzed",
+        )
+    measured = {f["file"].rsplit(".", 1)[-1].lower() for f in functions if "." in f["file"]}
+    warnings = [
+        f"No function measured in {n} .{ext} file(s)" for ext, n in sorted(present.items()) if ext not in measured
+    ]
     ccns = [f["ccn"] for f in functions]
     worst = max(functions, key=lambda f: f["ccn"])
     metrics = {
@@ -440,7 +460,7 @@ def parse_lizard(raw: str) -> ParsedOutput:
         "total_nloc": sum(f["nloc"] for f in functions),
         "functions_over_15": sum(1 for c in ccns if c > 15),
     }
-    return ParsedOutput(findings=findings, metrics=metrics)
+    return ParsedOutput(findings=findings, metrics=metrics, warnings=warnings)
 
 
 # --- JavaScript security ----------------------------------------------------
@@ -470,16 +490,16 @@ _ESLINT_SECURITY_CWE = {
 
 
 @register("eslint_security")
-def parse_eslint_security(raw: str) -> list[FindingData]:
+def parse_eslint_security(raw: str) -> ParsedOutput:
     """ESLint JSON from eslint-plugin-security (every rule reports as a warning)."""
-    findings = parse_eslint(raw)
-    for f in findings:
+    parsed = parse_eslint(raw)
+    for f in parsed.findings:
         f.category = "security"
         f.severity = "high" if f.rule_id in _ESLINT_SECURITY_HIGH else "medium"
         f.confidence = "medium"
         if f.rule_id in _ESLINT_SECURITY_CWE:
             f.tool_specific_data = {**f.tool_specific_data, "cwe": _ESLINT_SECURITY_CWE[f.rule_id]}
-    return findings
+    return parsed
 
 
 # --- Web (HTML / CSS) and shell ---------------------------------------------

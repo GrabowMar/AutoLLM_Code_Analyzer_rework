@@ -2,64 +2,97 @@
   "slug": "realtime_chat_room",
   "name": "Chat Room",
   "category": "Real-time",
-  "description": "Simple real-time messaging",
+  "description": "A single shared chat room with live message delivery and typing indicators",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only chat view; restrict sending messages to authenticated users",
-    "1. WebSocket endpoint at /api/ws/chat for bidirectional communication",
-    "2. Message model: id, username, text, timestamp",
-    "3. Broadcast incoming messages to all connected clients",
-    "4. Store last 50 messages in memory or SQLite",
-    "5. GET /api/messages - return recent message history for new connections"
+    "Access control: anyone may read the message history and listen on the WebSocket; require auth for sending messages and typing notices; admin endpoints are restricted to the admin account",
+    "Messages: text is a required non-empty string of at most 1000 characters after trimming; each message carries the username of the signed-in user who sent it",
+    "Messages are stored durably (they survive a restart) and are never edited",
+    "POST /api/messages stores a message and broadcasts it to every connected WebSocket client",
+    "GET /api/messages returns the most recent active messages in ascending id order; ?limit= sets how many (default 50, at most 100), ?before= returns only messages with an id below the given id (to load older history), and total counts every active message",
+    "WebSocket /api/ws/chat: clients connect with an optional ?token= carrying their sign-in token; every client receives message frames {\"type\": \"message\", id, username, text, created_at} for each new message",
+    "Signed-in WebSocket clients may send {\"type\": \"message\", \"text\": ...}, which is stored and broadcast exactly like POST /api/messages, and {\"type\": \"typing\"}, which is broadcast to the other clients as {\"type\": \"typing\", \"username\": ...} and not stored",
+    "A frame the server cannot accept (no or invalid token, empty or too long text, unknown type) is answered with {\"type\": \"error\", \"detail\": \"<message>\"} to that client only, and the connection stays open",
+    "Deactivated messages (is_active false) are left out of GET /api/messages; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "Public guest view of chat with CTA to sign in for sending messages",
-    "1. Message list showing username, text, and time",
-    "2. Input field with send button at bottom",
-    "3. Auto-scroll to newest message",
-    "4. WebSocket connection with reconnect logic",
-    "5. Show 'typing...' indicator when appropriate"
+    "Everyone sees the live message list read-only; signed-in users also get the message input with a send button, and visitors see a 'Sign in to chat' prompt in its place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests and the WebSocket, show the signed-in username and offer sign-out",
+    "Message list showing username, text and time, the user's own messages styled differently; it loads history from /api/messages, appends live messages and scrolls to the newest unless the reader has scrolled up",
+    "A 'Load older messages' control that fetches earlier history with ?before=",
+    "The WebSocket connection reconnects automatically with an increasing delay and shows a connection status (connected, reconnecting)",
+    "While a signed-in user types, send a typing notice at most every 2 seconds; show '<username> is typing...' for other users and hide it 3 seconds after their last notice"
+  ],
+  "admin_requirements": [
+    "Admin overview: every message, active or not, with total, active and inactive counts",
+    "Toggle a message's active status from the overview to hide or restore it"
   ],
   "api_endpoints": [
     {
+      "method": "POST",
+      "path": "/api/messages",
+      "description": "Send a message as the signed-in user and broadcast it",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "text": "string"
+      },
+      "response": {
+        "id": 1,
+        "username": "alex",
+        "text": "Morning, everyone!",
+        "created_at": "2026-04-01T08:00:00Z"
+      }
+    },
+    {
       "method": "GET",
       "path": "/api/messages",
-      "description": "Get recent chat messages",
+      "description": "Recent active messages in ascending id order",
+      "auth": "public",
+      "query": {
+        "limit": "How many of the most recent messages (default 50, at most 100)",
+        "before": "Only messages with an id below this id"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "username": "string",
-            "text": "string",
-            "timestamp": "ISO8601"
+            "username": "alex",
+            "text": "Morning, everyone!",
+            "created_at": "2026-04-01T08:00:00Z"
           }
         ],
-        "total": 50
+        "total": 1
       }
     },
     {
       "method": "WS",
       "path": "/api/ws/chat",
-      "description": "WebSocket endpoint for real-time messaging",
+      "description": "Live room: broadcasts message and typing frames; signed-in clients may send them",
+      "auth": "public",
+      "query": {
+        "token": "Sign-in token; required for sending message and typing frames"
+      },
       "request": {
         "type": "message",
-        "username": "string",
-        "text": "string"
+        "text": "Morning, everyone!"
       },
       "response": {
         "type": "message",
         "id": 1,
-        "username": "string",
-        "text": "string",
-        "timestamp": "ISO8601"
+        "username": "alex",
+        "text": "Morning, everyone!",
+        "created_at": "2026-04-01T08:00:00Z"
       }
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -67,41 +100,51 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Message",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "username": "string (required, max 50 chars)",
-      "text": "text (required, max 1000 chars)",
-      "timestamp": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Message",
+      "description": "One chat message in the shared room",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who sent it)",
+        "username": "string (the sender's username)",
+        "text": "string (required, max 1000 chars)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the message from the history)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any message"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/messages",
-      "description": "Admin overview: list all messages and counts",
+      "description": "Admin overview: every message with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "username": "alex",
+            "text": "Morning, everyone!",
+            "created_at": "2026-04-01T08:00:00Z",
+            "is_active": true
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/messages/:id/toggle",
-      "description": "Toggle message active status",
+      "description": "Flip a message's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

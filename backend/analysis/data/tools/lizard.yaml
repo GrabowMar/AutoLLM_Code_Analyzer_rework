@@ -15,7 +15,14 @@ docs_url: https://github.com/terryyin/lizard
 install_cmd: "pip install --user --upgrade 'lizard==1.17.*'"
 verify_cmd: "lizard --version"
 uninstall_cmd: "pip uninstall -y lizard"
-run_cmd: "lizard {target} --csv -l python -l javascript -l typescript -x '*/node_modules/*' 2>/dev/null"
+# Lizard parses only the languages named with -l: .jsx and .tsx have their own
+# readers ("jsx", "tsx"), so without them React components are silently not
+# analyzed. The preamble counts the source files per extension (config files
+# like vite.config.js hold no functions) so the parser can flag an extension
+# that yielded no function at all.
+run_cmd: |
+  find {target} -name node_modules -prune -o -type f \( -name '*.py' -o -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' \) -not -name '*.config.*' -print | sed -n 's/.*\.\([A-Za-z]*\)$/\1/p' | sort | uniq -c | while read -r n ext; do echo "# files: $ext $n"; done
+  lizard {target} --csv -l python -l javascript -l typescript -l jsx -l tsx -x '*/node_modules/*' 2>/dev/null
 parser_key: lizard
 file_patterns: ["*.py", "*.js", "*.jsx", "*.ts", "*.tsx"]
 output_kind: mixed

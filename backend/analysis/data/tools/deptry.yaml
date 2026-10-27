@@ -21,7 +21,7 @@ run_cmd: |
   cd {target} && find . -name 'requirements*.txt' -not -path '*/node_modules/*' -not -path '*/.venv/*' -exec dirname {} \; | sort -u | while IFS= read -r d; do
     echo "### ${d#./}"
     rm -f /tmp/deptry.json
-    (cd "$d" && deptry . --json-output /tmp/deptry.json --package-module-name-map 'PyJWT=jwt,python-dotenv=dotenv,Pillow=PIL,beautifulsoup4=bs4,PyYAML=yaml,scikit-learn=sklearn,python-jose=jose,psycopg2-binary=psycopg2,opencv-python=cv2,python-dateutil=dateutil,python-multipart=multipart,pymongo=pymongo|bson,dnspython=dns,protobuf=google.protobuf' >/dev/null 2>&1; cat /tmp/deptry.json 2>/dev/null)
+    (cd "$d" && deptry . --json-output /tmp/deptry.json --package-module-name-map 'PyJWT=jwt,python-dotenv=dotenv,Pillow=PIL,beautifulsoup4=bs4,PyYAML=yaml,scikit-learn=sklearn,python-jose=jose,psycopg2-binary=psycopg2,opencv-python=cv2,python-dateutil=dateutil,python-multipart=multipart|python_multipart,argon2-cffi=argon2,pwdlib=pwdlib,email-validator=email_validator,pymongo=pymongo|bson,dnspython=dns,protobuf=google.protobuf' >/dev/null 2>&1; cat /tmp/deptry.json 2>/dev/null)
     echo
   done
 parser_key: deptry

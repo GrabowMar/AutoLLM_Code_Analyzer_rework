@@ -7,7 +7,9 @@ metadata:
   metrics:
     - deploy_success
     - api_health_reachable
+    - conformance_pass_rate
     - prompt_token_total
 content: |
   ## Evaluation rubric (informational)
-  Record deploy success, `/api/health` reachability, and total prompt tokens on the job metrics payload.
+  Record deploy success, `GET /api/health` reachability, the conformance suite's pass rate
+  (`metrics.functional`) and total prompt tokens on the job metrics payload.

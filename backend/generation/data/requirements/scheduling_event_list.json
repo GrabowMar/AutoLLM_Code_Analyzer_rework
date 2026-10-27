@@ -2,43 +2,52 @@
   "slug": "scheduling_event_list",
   "name": "Event Calendar",
   "category": "Scheduling",
-  "description": "Track events by date",
+  "description": "A shared calendar of upcoming events that can be browsed by day, week or month",
   "difficulty": "standard",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only event listings; require auth for create/update/delete",
-    "1. Event model: id, title (required), date (required), time, description, location",
-    "2. CRUD endpoints: GET /api/events, POST, PUT, DELETE",
-    "3. Filter by date range: ?start=YYYY-MM-DD&end=YYYY-MM-DD",
-    "4. Sort events by date ascending",
-    "5. Validate: end_time must be after start_time, title is required"
+    "Access control: anyone may read events; require auth for creating, updating and deleting events; admin endpoints are restricted to the admin account",
+    "Events: any signed-in user may create, update and delete any event; created_by records the creator's username; DELETE /api/events/:id removes the event permanently",
+    "Event validation: title is a required non-empty string of at most 200 characters; start_time is a required ISO 8601 date-time; end_time, when given, is an ISO 8601 date-time not before start_time (equal is allowed); description is at most 2000 and location at most 200 characters",
+    "Date-times without a UTC offset are taken as UTC, and responses give every date-time in UTC with a trailing Z",
+    "GET /api/events returns active events sorted by start_time ascending; ?start_date= and ?end_date= (YYYY-MM-DD, both inclusive, either may be omitted) keep events whose start_time falls on a UTC date in that range, a start_date after end_date answers 400, and total counts every matching event",
+    "Deactivated events (is_active false) are left out of GET /api/events and answer 404 on the public event endpoints; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "HomePage displays ALL content in read-only mode for public users",
-    "Public users see \"Sign in to create events\" CTAs instead of action buttons",
-    "Logged-in users see same content plus create/edit/delete functionality",
-    "1. Event list grouped by date, showing title and time (visible to all)",
-    "2. Add event form with date picker, time picker, title, description (logged-in only)",
-    "3. Click event to view details in modal (visible to all)",
-    "4. Edit and delete buttons per event (logged-in only)",
-    "5. Filter buttons: Today, This Week, This Month, All (visible to all)"
+    "Everyone sees the event list and event details read-only; signed-in users also get the add, edit and delete controls, and visitors see a 'Sign in to add events' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Event list grouped by date with a heading per day, each event showing its time range, title and location, shown in the viewer's local time zone",
+    "Quick filters Today, This Week, This Month and All that request the matching ?start_date=&end_date= range",
+    "Selecting an event opens its details (title, time range, location, description, creator) in a dialog",
+    "Add and edit forms with a date and time picker for start and an optional end, title, location and description; they show the API's validation messages, and delete asks for confirmation first"
+  ],
+  "admin_requirements": [
+    "Admin overview: every event, active or not, with total, active and inactive counts",
+    "Toggle an event's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/events",
-      "description": "List all events (supports ?start_date= and ?end_date= filters)",
+      "description": "List active events by start_time ascending, optionally within a date range",
+      "auth": "public",
+      "query": {
+        "start_date": "YYYY-MM-DD; keep events starting on or after this UTC date",
+        "end_date": "YYYY-MM-DD; keep events starting on or before this UTC date"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "title": "string",
-            "description": "string",
-            "start_time": "ISO8601",
-            "end_time": "ISO8601",
-            "location": "string",
-            "created_at": "ISO8601"
+            "title": "Team offsite planning",
+            "description": "Agree on the agenda and venue.",
+            "location": "Room 4B",
+            "start_time": "2026-05-12T09:00:00Z",
+            "end_time": "2026-05-12T10:30:00Z",
+            "created_by": "jo",
+            "created_at": "2026-05-01T12:00:00Z"
           }
         ],
         "total": 1
@@ -47,56 +56,81 @@
     {
       "method": "POST",
       "path": "/api/events",
-      "description": "Create new event",
+      "description": "Create an event",
+      "auth": "user",
+      "success_status": 201,
       "request": {
         "title": "string",
+        "start_time": "ISO8601",
+        "end_time": "ISO8601",
         "description": "string (optional)",
-        "start_time": "string",
-        "end_time": "string",
         "location": "string (optional)"
       },
       "response": {
         "id": 1,
-        "title": "string",
-        "description": "string",
-        "start_time": "ISO8601",
-        "end_time": "ISO8601",
-        "location": "string",
-        "created_at": "ISO8601"
+        "title": "Team offsite planning",
+        "description": "Agree on the agenda and venue.",
+        "location": "Room 4B",
+        "start_time": "2026-05-12T09:00:00Z",
+        "end_time": "2026-05-12T10:30:00Z",
+        "created_by": "jo",
+        "created_at": "2026-05-01T12:00:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/events/:id",
+      "description": "One active event",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "title": "Team offsite planning",
+        "description": "Agree on the agenda and venue.",
+        "location": "Room 4B",
+        "start_time": "2026-05-12T09:00:00Z",
+        "end_time": "2026-05-12T10:30:00Z",
+        "created_by": "jo",
+        "created_at": "2026-05-01T12:00:00Z"
       }
     },
     {
       "method": "PUT",
       "path": "/api/events/:id",
-      "description": "Update event",
+      "description": "Replace an event's fields (title and start_time required; an omitted end_time, description or location is cleared)",
+      "auth": "user",
       "request": {
-        "title": "string (optional)",
+        "title": "string",
+        "start_time": "ISO8601",
+        "end_time": "ISO8601",
         "description": "string (optional)",
-        "start_time": "string (optional)",
-        "end_time": "string (optional)",
         "location": "string (optional)"
       },
       "response": {
         "id": 1,
-        "title": "string",
-        "description": "string",
-        "start_time": "ISO8601",
-        "end_time": "ISO8601",
-        "location": "string",
-        "created_at": "ISO8601"
+        "title": "Team offsite planning",
+        "description": "Agree on the agenda and venue.",
+        "location": "Room 4B",
+        "start_time": "2026-05-12T09:00:00Z",
+        "end_time": "2026-05-12T10:30:00Z",
+        "created_by": "jo",
+        "created_at": "2026-05-01T12:00:00Z"
       }
     },
     {
       "method": "DELETE",
       "path": "/api/events/:id",
-      "description": "Delete event",
+      "description": "Delete an event",
+      "auth": "user",
+      "success_status": 204,
       "request": null,
-      "response": {}
+      "response": null
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -104,44 +138,54 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Event",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "title": "string (required, max 255 chars)",
-      "description": "text (optional)",
-      "start_time": "datetime (required, ISO 8601 format)",
-      "end_time": "datetime (required, ISO 8601 format)",
-      "location": "string (optional, max 255 chars)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Event",
+      "description": "A calendar event",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "title": "string (required, max 200 chars)",
+        "description": "string (optional, max 2000 chars)",
+        "location": "string (optional, max 200 chars)",
+        "start_time": "datetime (required, ISO 8601, UTC in JSON)",
+        "end_time": "datetime (optional, not before start_time, ISO 8601, UTC in JSON)",
+        "created_by": "string (username of the signed-in user who created it)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the event from public endpoints)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any event"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/events",
-      "description": "Admin overview: list all events and counts",
+      "description": "Admin overview: every event with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "title": "Team offsite planning",
+            "start_time": "2026-05-12T09:00:00Z",
+            "created_by": "jo",
+            "is_active": true
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/events/:id/toggle",
-      "description": "Toggle event active status",
+      "description": "Flip an event's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

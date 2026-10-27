@@ -175,11 +175,77 @@ class TestBrief:
         assert snap["contract"]["accounts"] is False
         assert "## Accounts" not in snap["brief"]["text"]
 
+    def test_states_every_data_model_and_the_v3_endpoint_fields(self):
+        app = _app(
+            slug="multi",
+            api_endpoints=[
+                {"method": "GET", "path": "/api/todos", "description": "List", "request": None, "response": {"items": []}, "auth": "public", "query": {"page": "page number (optional)"}},
+                {"method": "POST", "path": "/api/todos", "description": "Create", "request": {"title": "string"}, "response": {"id": 1}, "auth": "user", "success_status": 201},
+            ],
+            admin_api_endpoints=[
+                {"method": "GET", "path": "/api/admin/todos", "description": "Admin", "request": None, "response": {}, "auth": "admin"},
+            ],
+        )  # fmt: skip
+        app.data_model = [
+            {"name": "Todo", "fields": {"id": "int", "list_id": "int"}},
+            {"name": "TodoList", "description": "A named list", "fields": {"id": "int", "name": "str"}},
+        ]
+        app.save()
+        snap = _snapshot(app=app)
+        brief = snap["brief"]["text"]
+        assert snap["app_requirement"]["data_models"][1]["name"] == "TodoList"
+        assert "## Data models\n```json\n[" in brief
+        assert '"name": "TodoList"' in brief
+        assert (
+            "### GET /api/todos\nList\nAccess: anyone, without signing in.\nQuery parameters:\n- `page`: page number (optional)\n"
+            in brief
+        )
+        assert "### POST /api/todos\nCreate\nAccess: signed-in users.\nSuccess status: HTTP 201.\nRequest:" in brief
+        assert "### GET /api/admin/todos\nAdmin\nAccess: admin accounts only.\n" in brief
+
+    def test_single_model_spec_keeps_the_v3_layout(self):
+        brief = _snapshot()["brief"]["text"]
+        assert '## Data model\n```json\n{\n  "fields": {\n    "id": "int"\n  },\n  "name": "Todo"\n}\n```' in brief
+        assert "Access:" not in brief
+        assert "Query parameters" not in brief
+        assert "Success status" not in brief
+
+    def test_brief_json_is_not_html_escaped(self):
+        from backend.generation.services.agent.brief import render_brief
+
+        app = {
+            "name": "Q",
+            "description": "d",
+            "data_model": {"name": "Note", "description": "A user's note <b>", "fields": {"title": "s", "id": "i"}},
+        }
+        text = render_brief(
+            app=app,
+            description="",
+            stack_slug="flask-react",
+            stack_config={"has_frontend": True},
+            agent_config=merge_agent_config(),
+        )
+        assert '"description": "A user\'s note <b>",\n  "fields": {\n    "id": "i",\n    "title": "s"' in text
+        assert "\\u0027" not in text
+
+    def test_legacy_app_dict_without_data_models_renders(self):
+        from backend.generation.services.agent.brief import render_brief
+
+        legacy = {"name": "Old", "description": "d", "data_model": {"name": "Book", "fields": {"id": "int"}}}
+        text = render_brief(
+            app=legacy,
+            description="",
+            stack_slug="flask-react",
+            stack_config={"has_frontend": True},
+            agent_config=merge_agent_config(),
+        )
+        assert '## Data model\n```json\n{\n  "fields": {\n    "id": "int"\n  },\n  "name": "Book"\n}\n```' in text
+
     def test_task_description_is_added_to_the_spec_not_swapped_in(self):
         model, app = _model(), _app()
         plain = _snapshot(model=model, app=app)["brief"]
         with_context = _snapshot(model=model, app=app, description="  Prefer a dark colour scheme.  ")["brief"]
-        assert with_context["version"] == 3
+        assert with_context["version"] == 4
         assert "Additional context" not in plain["text"]
         # The spec's own description stays; the task description follows it.
         text = with_context["text"]
@@ -248,6 +314,27 @@ class TestBrief:
 
 
 class TestAgentSnapshot:
+    def test_spec_content_reaches_the_run_fingerprint_even_outside_the_brief(self):
+        from backend.generation.services.agent.snapshot import agent_run_fingerprint
+
+        model, app = _model(), _app()
+        before = _snapshot(model=model, app=app)
+        assert before["app_requirement"]["version"] == app.version
+        assert before["app_requirement"]["content_hash"]
+        app.difficulty = "advanced"  # spec content the brief does not state
+        app.save()
+        after = _snapshot(model=model, app=app)
+        assert after["brief"]["sha256"] == before["brief"]["sha256"]
+        assert after["prompt_hash"] == before["prompt_hash"]
+        assert after["run_fingerprint"] != before["run_fingerprint"]
+        assert after["config_fingerprint"] != before["config_fingerprint"]
+        # App dicts frozen before the hash existed keep their fingerprint.
+        legacy = json.loads(json.dumps(before))
+        del legacy["app_requirement"]["content_hash"]
+        stripped = json.loads(json.dumps(legacy))
+        stripped["app_requirement"] = None
+        assert agent_run_fingerprint(legacy) == agent_run_fingerprint(stripped)
+
     def test_prompt_hash_is_the_task_identity_across_models_harnesses_seeds(self):
         app = _app()
         a = _snapshot(model=_model(), app=app, experiment_seed=1)
@@ -393,6 +480,14 @@ class TestHarnesses:
         assert snap["brief"]["text"].splitlines()[0] not in command
         assert command.startswith("cd /workspace\nexec ")
         assert files["brief.md"].decode() == snap["brief"]["text"]
+
+    def test_mini_trajectory_path_is_passed_on_the_command_line(self):
+        # mini's CLI --output default would override agent.output_path from the config.
+        from backend.generation.services.agent.harnesses.mini_swe_agent import TRAJECTORY
+
+        snap = _snapshot(agent_overrides={"harness": "mini-swe-agent"})
+        command = get_harness("mini-swe-agent").command(snap["harness"])
+        assert command.endswith(f"-o {TRAJECTORY}")
 
     def test_mini_task_travels_as_config_file(self):
         snap = _snapshot(agent_overrides={"harness": "mini-swe-agent", "max_llm_requests": 42})
@@ -613,14 +708,14 @@ class TestGateway:
 # ── runner: evidence → result_data / metrics / status ──────────────────
 
 
-def _call(seq, *, status=200, provider="Novita", cost=0.001, error=None, diff=None):
+def _call(seq, *, status=200, provider="Novita", cost=0.001, error=None, diff=None, finish_reason="tool_calls"):
     response = {
         "id": f"gen-{seq}",
         "provider": provider,
         "model": "deepseek/deepseek-v4.1-flash",
         "content": "",
         "tool_calls": [{"id": "c", "name": "write", "arguments": "{}"}],
-        "finish_reason": "tool_calls",
+        "finish_reason": finish_reason,
         "usage": {"prompt_tokens": 100, "completion_tokens": 10, "cost": cost},
         "error": error,
     }
@@ -635,7 +730,7 @@ def _call(seq, *, status=200, provider="Novita", cost=0.001, error=None, diff=No
     }
 
 
-def _result(calls, *, termination="completed", events=None, workspace=None):
+def _result(calls, *, termination="completed", events=None, workspace=None, extra_outputs=None):
     jsonl = "\n".join(json.dumps(c) for c in calls).encode()
     return SandboxResult(
         termination=termination,
@@ -648,6 +743,7 @@ def _result(calls, *, termination="completed", events=None, workspace=None):
             ),
             "exit.json": b'{"exit_code": 0, "agent_seconds": 11}',
             "diffstat.txt": b" app.py | 1 +\n",
+            **(extra_outputs or {}),
         },
         gateway_logs={
             "calls.jsonl": jsonl,
@@ -848,6 +944,95 @@ class TestRunnerExecute:
         with pytest.raises(AgentRunError) as exc:
             AgentRunner(agent_job)._record(agent_job.resolved_bundle, {}, _result(calls))
         assert exc.value.infra is False
+
+    def test_rate_limits_and_timeouts_without_a_successful_call_are_infra(self, agent_job):
+        for status in (429, 408, 500):
+            calls = [_call(1, status=status, error={"message": "rate limited"})]
+            with pytest.raises(AgentRunError) as exc:
+                AgentRunner(agent_job)._record(agent_job.resolved_bundle, {}, _result(calls))
+            assert exc.value.infra is True, status
+
+    def test_openrouter_run_ending_on_failed_calls_is_infra_interrupted(
+        self,
+        agent_job,
+        no_frontend_validator,
+        monkeypatch,
+    ):
+        calls = [
+            _call(1),
+            _call(2, status=429, error={"message": "rate limited"}, cost=0.0),
+            _call(3, status=502, error={"code": "upstream_error", "message": "gone"}, cost=0.0),
+        ]
+        self._fake_sandbox(monkeypatch, _result(calls, termination="harness_error"))
+        agent_job.status = GenerationJob.Status.RUNNING
+        agent_job.save()
+        assert "endpoint" not in agent_job.resolved_bundle
+        assert AgentRunner(agent_job).run_stage() == "infra_interrupted"
+        assert "2 failed LLM call" in agent_job.error_message
+        agent_job.refresh_from_db()
+        agent = agent_job.result_data["agent"]
+        assert agent["ended_on_llm_error"] == {"trailing_failures": 2, "status": 502, "code": "upstream_error"}
+        assert agent["validity"]["valid"] is False
+        assert "ended_on_llm_error" in {n["code"] for n in agent["validity"]["notes"]}
+
+    def test_failed_call_before_a_successful_one_is_only_noted(self, agent_job, no_frontend_validator):
+        calls = [_call(1), _call(2, status=429, error={"message": "rl"}), _call(3), _call(4), _call(5)]
+        AgentRunner(agent_job)._record(agent_job.resolved_bundle, {}, _result(calls))
+        agent = agent_job.result_data["agent"]
+        assert agent["ended_on_llm_error"] is None
+        notes = {
+            n["code"]: n["severity"]
+            for n in assess_validity(agent_job.resolved_bundle, agent_job.result_data)["notes"]
+        }
+        assert notes["llm_errors"] == "info"
+        # A clear share of transient failures is a warning, not just context.
+        calls = [
+            _call(1),
+            _call(2, status=503, error={"message": "x"}),
+            _call(3, status=503, error={"message": "x"}),
+            _call(4),
+        ]
+        AgentRunner(agent_job)._record(agent_job.resolved_bundle, {}, _result(calls))
+        notes = {
+            n["code"]: n["severity"]
+            for n in assess_validity(agent_job.resolved_bundle, agent_job.result_data)["notes"]
+        }
+        assert notes["llm_errors"] == "warn"
+
+    def test_timeout_on_a_failed_call_is_not_reclassified(self, agent_job, no_frontend_validator):
+        calls = [_call(1), _call(2, status=503, error={"message": "x"})]
+        AgentRunner(agent_job)._record(agent_job.resolved_bundle, {}, _result(calls, termination="timeout"))
+        assert agent_job.result_data["agent"]["ended_on_llm_error"] is None
+
+    def test_cost_counts_failed_calls_the_gateway_accounted(self, agent_job, no_frontend_validator):
+        calls = [_call(1, cost=0.01), _call(2, status=500, error={"message": "x"}, cost=0.002), _call(3, cost=0.01)]
+        AgentRunner(agent_job)._record(agent_job.resolved_bundle, {}, _result(calls))
+        assert agent_job.metrics["cost"] == pytest.approx(0.022)
+        assert agent_job.metrics["failed_call_cost"] == pytest.approx(0.002)
+        assert agent_job.metrics["total_tokens"] == 330
+
+    def test_harness_step_limit_is_a_request_budget_stop(self, agent_job, no_frontend_validator):
+        traj = {"info": {"exit_status": "LimitsExceeded", "model_stats": {"api_calls": 2}}, "messages": []}
+        result = _result([_call(1), _call(2)], extra_outputs={"traj.json": json.dumps(traj).encode()})
+        agent_job.resolved_bundle["harness"]["name"] = "mini-swe-agent"
+        AgentRunner(agent_job)._record(agent_job.resolved_bundle, {}, result)
+        agent = agent_job.result_data["agent"]
+        assert (agent["termination"], agent["budget_exhausted"]) == ("budget_exhausted", "max_requests")
+        assert agent_job.metrics["harness_steps"] == 2
+        notes = {n["code"] for n in assess_validity(agent_job.resolved_bundle, agent_job.result_data)["notes"]}
+        assert "budget:max_requests" in notes
+
+    def test_final_response_truncation_is_flagged_mid_run_is_not(self, agent_job, no_frontend_validator):
+        mid = [_call(1, finish_reason="length"), _call(2, finish_reason="stop")]
+        AgentRunner(agent_job)._record(agent_job.resolved_bundle, {}, _result(mid))
+        agent = agent_job.result_data["agent"]
+        assert (agent["truncated_calls"], agent["final_response_truncated"]) == (1, False)
+        final = [_call(1), _call(2, finish_reason="length")]
+        AgentRunner(agent_job)._record(agent_job.resolved_bundle, {}, _result(final))
+        assert agent_job.result_data["agent"]["final_response_truncated"] is True
+        budget = _result(final, events=[{"event": "budget_exhausted", "reason": "max_requests"}])
+        AgentRunner(agent_job)._record(agent_job.resolved_bundle, {}, budget)
+        assert agent_job.result_data["agent"]["final_response_truncated"] is False
 
     def test_contended_and_retried_runs_are_flagged(self):
         snap = {"gateway": {"dropped_params": {}}, "llm": {"model_slug": "m"}}

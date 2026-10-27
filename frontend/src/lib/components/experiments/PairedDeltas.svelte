@@ -3,7 +3,7 @@
 	 * PairedDeltas — each condition against the baseline as a forest plot:
 	 * the mean app-level Δ (square) with its paired cluster-bootstrap 95% CI
 	 * (whiskers) around a zero line, wins / losses / ties over apps, n and the
-	 * Holm-adjusted p (hidden while the experiment is interim). Ink marks only:
+	 * p adjusted as the frozen analysis plan says, else Holm (hidden while the experiment is interim). Ink marks only:
 	 * a filled square's interval excludes 0, a hollow one's includes it — the
 	 * sign is read from the axis, never from a red/green hue. Renders the plot
 	 * table only; the page's StudyFigure supplies the title and caption.
@@ -15,7 +15,7 @@
 	import { cn } from '$lib/utils';
 	import { tableFrame } from '$lib/components/table';
 	import type { ExperimentResults, PairedRow } from '$lib/api/types/experiments';
-	import { MIN_APPS_FOR_CI, formatDeltaPp, formatP } from './format';
+	import { CORRECTION_LABEL, MIN_APPS_FOR_CI, formatDeltaPp, formatP } from './format';
 
 	interface Props {
 		results: ExperimentResults;
@@ -96,10 +96,14 @@
 {#snippet pValue(row: PairedRow)}
 	{#if results.interim}
 		<span class="text-muted-foreground" title="Hidden while conditions are at unequal progress">—</span>
-	{:else if row.p_holm == null}
+	{:else if row.p_adjusted == null}
 		<span class="text-muted-foreground">—</span>
 	{:else}
-		<span class={row.p_holm < 0.05 ? 'font-semibold text-foreground' : ''}>{formatP(row.p_holm)}</span>
+		<span
+			class={row.significant ? 'font-semibold text-foreground' : ''}
+			title="{results.paired.status} · {CORRECTION_LABEL[results.paired.correction] ?? results.paired.correction}, α = {results.paired.alpha}, {results.paired.alternative}"
+			>{formatP(row.p_adjusted)}</span
+		>
 	{/if}
 {/snippet}
 
@@ -147,7 +151,13 @@
 					<th scope="col" class="num">Δ [95% CI]</th>
 					<th scope="col" class="num" title="Apps where the condition beat / lost to / tied the baseline">W/L/T</th>
 					<th scope="col" class="num" title="Apps with a mean for both conditions">n</th>
-					<th scope="col" class="num" title="Wilcoxon signed-rank, Holm-adjusted across conditions">p (Holm)</th>
+					<th
+						scope="col"
+						class="num"
+						title="Wilcoxon signed-rank ({results.paired.alternative}), {CORRECTION_LABEL[results.paired.correction] ??
+							results.paired.correction} across conditions; {results.paired.status}"
+						>p ({CORRECTION_LABEL[results.paired.correction] ?? results.paired.correction})</th
+					>
 				</tr>
 			</thead>
 			<tbody>

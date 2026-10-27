@@ -38,12 +38,18 @@ def _read_skeleton_files(directory: Path) -> dict[str, str]:
 
 
 def _stack_hash_payload(config: dict[str, Any], files: dict[str, str]) -> dict[str, Any]:
+    """Everything that changes what a build of this stack produces (not aliases).
+
+    ``server_kind`` picks the healing placeholder backend (Flask vs FastAPI),
+    so it is part of the identity like the skeleton files.
+    """
     return {
         "has_frontend": bool(config.get("has_frontend")),
         "default_port": config.get("default_port", 8000),
         "patch_profile": config.get("patch_profile", "none"),
         "frontend_component": config.get("frontend_component", ""),
         "backend_filename": config.get("backend_filename", "app.py"),
+        "server_kind": config.get("server_kind", "python"),
         "files": files,
     }
 
@@ -76,6 +82,7 @@ def seed_stacks(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, int]:
             "patch_profile": config.get("patch_profile", "none"),
             "frontend_component": config.get("frontend_component", ""),
             "backend_filename": config.get("backend_filename", "app.py"),
+            "server_kind": config.get("server_kind", "python"),
             "aliases": config.get("aliases", []),
             "files": files,
             "content_hash": new_hash,

@@ -18,9 +18,11 @@ assets:
 
 Each section is a list; a missing section counts as empty.
 
+An app spec is exported in its own form: a v3 spec with its `data_models` list, an older one with its single `data_model` object. The spec format itself (`spec_schema_version`, endpoint `auth`/`query`/`success_status`) is described in [App spec format](/docs/GENERATION_PROCESS#app-spec-format-schema-v3); it is versioned separately from the package format.
+
 | Section | Fields |
 | --- | --- |
-| `app_specs` | `name`, `slug`, `category`, `description`, `backend_requirements`, `frontend_requirements`, `admin_requirements`, `api_endpoints`, `data_model`, `admin_api_endpoints`, `difficulty` (`""` \| `basic` \| `standard` \| `advanced`) |
+| `app_specs` | `name`, `slug`, `category`, `description`, `backend_requirements`, `frontend_requirements`, `admin_requirements`, `api_endpoints`, `data_models` (spec schema v3) or `data_model` (v1/v2), `admin_api_endpoints`, `difficulty` (`""` \| `basic` \| `standard` \| `advanced`), `spec_schema_version` |
 | `blocks` | `block_type`, `slug`, `version`, `name`, `description`, `content`, `metadata` |
 | `profiles` | `name`, `slug`, `version` (informational), `description`, `scaffolding_slug`, `block_refs: [{type, slug, version?}]`, `llm_config` |
 | `stacks` | `slug`, `name`, `description`, `has_frontend`, `default_port`, `patch_profile`, `frontend_component`, `backend_filename`, `backend_base_image`, `frontend_base_image`, `server_kind` (`python` \| `uvicorn`), `files` (path → text) |
@@ -59,10 +61,10 @@ The response names the rows the package resolved to, created or reused, per sect
 
 Accepted schema versions are 1, 2 and 3; anything else is refused. Assets import in dependency order: app specs → blocks → stacks → profiles → presets. Each entry is validated:
 
-- **App specs** must be valid against `data/requirements/schema.json` (name, category, description, at least one backend and frontend requirement and API endpoint, a data model with fields), except that the slug need not be snake_case (older specs and renamed imports use hyphens). `difficulty`, when present, must be `""`, `basic`, `standard` or `advanced`. App spec slugs are unique across all owners. `POST /app-specs/` checks the same schema, slug pattern included, and `PUT` checks it without the slug; both answer `400 {detail, errors}`.
+- **App specs** must be valid against `data/requirements/schema.json` (name, category, description, at least one backend and frontend requirement and API endpoint, and `data_models` or a legacy `data_model`, each model with fields), except that the slug need not be snake_case (older specs and renamed imports use hyphens). `difficulty`, when present, must be `""`, `basic`, `standard` or `advanced`; empty `difficulty`, `data_model`, `data_models` and `spec_schema_version` count as absent. A spec with `spec_schema_version` 3 must also meet the v3 conventions (every endpoint has an `auth`, a public `GET /api/health`, an `Access control: …` first backend requirement, and so on); v1/v2 specs only have to validate, so old packages keep importing. When an entry carries both `data_models` and `data_model`, `data_models` wins. App spec slugs are unique across all owners. `POST /app-specs/` checks the same rules, slug pattern included, and `PUT` checks them without the slug; both answer `400 {detail, errors}`.
 - **Blocks** need a `slug`, `name` and `content`. A missing `block_type` defaults to `prompt_tone`, and a missing `version` to 1; any other `block_type` must be one of `ContentBlock.BlockType`.
 - **Profiles.** `llm_config` follows the same rules as `POST /profiles/`. Every block ref must resolve to a block in the package or a block you can see. A ref without a `version` takes the package's own block of that slug, else the latest system version, else your latest own version. A ref without a `type` takes the block's type. A missing `scaffolding_slug` means `GENERATION_DEFAULT_STACK`; any other must be a known stack (or alias) after the remapping below, a stack in the same package included.
-- **Stacks** are re-validated against this install's base-image allowlist (`STACK_ALLOWED_BASE_IMAGES`) and file rules, and always use a generated Dockerfile. An unknown `patch_profile` becomes `none`, and an unknown `server_kind` becomes `python`. They go through the approval queue like locally created ones: an import is approved at once when the importer is staff or `STACK_REQUIRE_APPROVAL` is off.
+- **Stacks** are re-validated against this install's base-image allowlist (`STACK_ALLOWED_BASE_IMAGES`; by default `python:3.11-slim`, `python:3.12-slim`, `python:3.13-slim`, `python:3.14-slim` and `node:20-alpine`, `node:22-alpine`, `node:24-alpine`, so stacks exported before the move to Python 3.13 / Node 24 still import) and file rules, and always use a generated Dockerfile. An unknown `patch_profile` becomes `none`, and an unknown `server_kind` becomes `python`. They go through the approval queue like locally created ones: an import is approved at once when the importer is staff or `STACK_REQUIRE_APPROVAL` is off.
 - **Presets** are normalized and validated like `POST /presets/`. For example, a sampling preset may not set `provider`, `stop` or `response_format`, and options must be ones the harness offers.
 
 ### Conflicts
@@ -71,7 +73,7 @@ One rule holds for every asset: content you can already see that is **identical*
 
 | Asset | `rename` | `overwrite` (your own item) | `error` |
 | --- | --- | --- | --- |
-| App spec (one mutable row per slug, slugs global) | new slug `slug-2` | updated in place | refused |
+| App spec (one mutable row per slug, slugs global) | new slug `slug-2` | updated in place; a content change bumps the row's `version` | refused |
 | Block (`slug` + `version`) | new slug `slug-2`, same version | **new version** of the slug; the package's profiles follow it | refused |
 | Profile | new slug `slug-2`, version 1 | **new version** | refused |
 | Stack | new slug `slug-2` | renamed too (stack versions are immutable) | refused |
@@ -134,4 +136,5 @@ To add a starter, drop a file into `data/packages/` and run the lint.
 - **Starters:** the current schema version, a header whose slug is the file name, `content_file` paths that exist inside `data/`, app specs valid against `data/requirements/schema.json`, and block refs that name system blocks by slug (versions only for the package's own blocks) with the blocks' real types. Profiles must use known stacks and a valid `llm_config`, and a profile that reuses a `catalog.yaml` slug must equal that entry, or import would duplicate it. Presets must be valid, unreserved and unique, and harness presets must change at least one option.
 - **System presets** (`data/presets/`): valid configs, files named `<kind>-<slug>.yaml`, and a default preset for every harness, for sampling and for budget.
 - **Catalog and manifests** (`data/blocks/catalog.yaml`, `data/requirements/manifests/`): refs to system blocks by slug only, at most one default profile per stack, a `default_bundle_slug` that names a catalog profile, and known apps and base profiles.
-- **Requirement specs** and the stage/role coverage of every frontend stack's catalog profiles.
+- **Requirement specs** (`data/requirements/*.json`): valid against `schema.json`, a `slug` equal to the file name, and, for `spec_schema_version` 3 (every shipped spec), the v3 conventions ([App spec format](/docs/GENERATION_PROCESS#app-spec-format-schema-v3)). Request samples the conformance tester would send verbatim although they read like type descriptors, and 3xx success statuses, are printed as warnings and do not fail the lint.
+- The stage/role coverage of every frontend stack's catalog profiles.

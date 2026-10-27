@@ -43,10 +43,26 @@ export interface AppRequirementTemplate {
   admin_requirements: string[];
   api_endpoints: any[];
   admin_api_endpoints: any[];
+  /** The first data model (the v2 shape); `{}` when the spec has none. */
   data_model: Record<string, any>;
+  /** Every data model, primary first (a legacy single model as a one-item list). */
+  data_models?: AppSpecDataModel[];
+  /** Spec schema version; 3 is current (data_models, endpoint auth/query/success_status). */
+  spec_schema_version?: number;
+  /** Bumped whenever the spec content changes (one mutable row per slug). */
+  version?: number;
+  /** sha256 of the spec content; job snapshots embed it with `version`. */
+  content_hash?: string;
   is_default: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface AppSpecDataModel {
+  name: string;
+  description?: string;
+  /** Field name -> type text, e.g. "string (required, max 255 chars)". */
+  fields: Record<string, string>;
 }
 
 export interface BatchCreateResponse {
@@ -1225,7 +1241,11 @@ export interface AppSpecWritePayload {
   admin_requirements?: string[];
   api_endpoints?: unknown[];
   admin_api_endpoints?: unknown[];
+  /** Legacy single model; send `data_models` instead for schema v3. */
   data_model?: Record<string, unknown>;
+  data_models?: AppSpecDataModel[];
+  /** Omitted on PUT: the spec keeps its current version. */
+  spec_schema_version?: number;
 }
 
 export async function createAppTemplate(

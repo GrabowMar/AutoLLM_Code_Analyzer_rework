@@ -13,14 +13,32 @@ The single implementation behind the Results tab, ``ResultsMatrix`` (via
   (2 000 draws, RNG seeded by the experiment id), for the per-condition CI and
   for the paired delta CI.
 * **Tests:** a two-sided exact sign test and a Wilcoxon signed-rank test on
-  the app-level deltas (zero deltas dropped), Holm-adjusted across the
-  conditions compared with the baseline (``p_holm`` adjusts the Wilcoxon p).
-  P-values are null while the experiment is not terminal (``interim``).
+  the app-level deltas (zero deltas dropped), adjusted across the conditions
+  compared with the baseline. ``p_holm`` is always the Holm-adjusted Wilcoxon
+  p; ``p_adjusted`` / ``significant`` use the experiment's frozen analysis
+  plan (its ``correction`` and ``alpha``, one-sided when every research
+  question on ``pass_rate`` declares the same direction) when the plan
+  declares ``pass_rate`` and the baseline is the pre-registered one
+  (``paired.status = "confirmatory"``); otherwise Holm at 0.05 and
+  ``paired.status = "exploratory"``. P-values are null while the experiment
+  is not terminal (``interim``).
 * **Usable cells:** a cell counts when its current attempt is COMPLETED and
   graded (``metrics.functional.pass_rate`` not null). Exclusions (invalid,
   truncated, minority fingerprint) remove the (app, repeat) cell for every
   condition through the common-cells rule (default on), so they never select
   on one condition's outcome.
+* **Truncation:** ``exclude_truncated`` drops a cell whose *final output* is
+  truncated: single-shot (scaffolding) output cut at the output cap
+  (``backend_truncated`` / ``frontend_truncated``), or an agent run that ended
+  on a cut-off response (``agent.final_response_truncated``). A cut-off
+  response in the middle of an agent run is not a truncated app (the agent
+  saw the cut and kept working); those runs keep their validity ``warn`` note
+  and are counted per condition as ``truncated_call_runs`` and per run as
+  ``truncated_calls``.
+* **Cost and time:** ``cost_usd`` / ``tokens_total`` include the spend of
+  attempts the executor retried (``execution.prior_attempts_*``; also shown
+  apart as ``retry_cost_usd``). ``median_seconds`` is the agent's sandbox wall
+  clock (``agent.wall_seconds``) for agent runs, the job duration otherwise.
 """
 
 from __future__ import annotations
@@ -57,6 +75,8 @@ MIN_APPS_FOR_INFERENCE = 6
 METRICS = ("pass_rate",)
 _EXACT_WILCOXON_MAX_N = 25
 
+# Fewer apps than this get no bootstrap interval (the UI uses the same threshold).
+MIN_APPS_FOR_CI = 3
 NOTE_INTERIM = "Interim: conditions at unequal progress; p-values are hidden until the experiment ends"
 NOTE_POST_HOC = "Baseline chosen post hoc; p-values exploratory"
 NOTE_NO_PREREGISTERED = "No pre-registered baseline; the first condition is used (exploratory)"
@@ -64,6 +84,14 @@ NOTE_FEW_APPS = "Too few apps for inference (fewer than 6): treat p-values as de
 NOTE_ONE_SIDED = "Common cells off: exclusions may select on the outcome"
 NOTE_NO_USABLE_PREFIX = "Left out of the common cells (no graded cells yet): "
 NOTE_TIMINGS = "Timings are not comparable across endpoints (machine and load differ)"
+NOTE_CEILING = (
+    "Every graded cell scored {value:g}: the outcome does not discriminate between conditions "
+    "(ceiling/floor effect); use harder apps or another metric"
+)
+NOTE_PROVIDERS_PREFIX = (
+    "Served by more than one upstream provider (quantization and serving stacks can differ; "
+    "pin provider routing to hold it constant): "
+)
 _TERMINAL = (Experiment.Status.COMPLETED, Experiment.Status.CANCELLED, Experiment.Status.ARCHIVED)
 
 
@@ -89,10 +117,13 @@ class _Cell:
     validity_warn: bool
     truncated: bool
     termination: str | None
+    truncated_calls: int
+    retry_cost: float
     fingerprint: str | None
     cost: float
     tokens: float
     seconds: float | None
+    providers: tuple[str, ...]
     terminal: bool
     excluded: str = ""  # "", "invalid", "truncated", "fingerprint"
 
@@ -174,8 +205,12 @@ def paired_bootstrap_ci(
 
 
 def _bootstrap(fn: Callable[..., list | None], data: dict[Any, Any], seed: int) -> list | None:
-    """``fn(data, Random(seed))``, memoised in the cache on its exact inputs (it is deterministic)."""
-    if not data:
+    """``fn(data, Random(seed))``, memoised in the cache on its exact inputs (it is deterministic).
+
+    None below ``MIN_APPS_FOR_CI`` apps: resampling one or two clusters gives a
+    zero-width or meaningless interval (one app at 100% would read as [1, 1]).
+    """
+    if len(data) < MIN_APPS_FOR_CI:
         return None
     key = (
         "experiment-results:ci:"
@@ -224,13 +259,18 @@ def _ranks(values: list[float]) -> list[float]:
     return ranks
 
 
-def wilcoxon_p(deltas: list[float]) -> float | None:
-    """Two-sided Wilcoxon signed-rank p for *deltas* (zeros dropped; average ranks for ties).
+def wilcoxon_p(deltas: list[float], alternative: str = "two-sided") -> float | None:  # noqa: PLR0911
+    """Wilcoxon signed-rank p for *deltas* (zeros dropped; average ranks for ties).
 
-    Exact (the null distribution of W+ by dynamic programming over doubled
-    ranks, so tied half-ranks stay integers) up to 25 non-zero deltas; the
-    normal approximation with tie and continuity correction above.
+    ``alternative`` is ``two-sided`` (default), ``greater`` (deltas tend to be
+    positive) or ``less``. Exact (the null distribution of W+ by dynamic
+    programming over doubled ranks, so tied half-ranks stay integers) up to 25
+    non-zero deltas; the normal approximation with tie and continuity
+    correction above.
     """
+    if alternative not in ("two-sided", "greater", "less"):
+        msg = f"Unknown alternative {alternative!r}"
+        raise ValueError(msg)
     nonzero = [d for d in deltas if d != 0]
     n = len(nonzero)
     if n == 0:
@@ -248,6 +288,10 @@ def wilcoxon_p(deltas: list[float]) -> float | None:
                 nxt[s + r] += c
             counts = nxt
         observed = round(2 * w_plus)
+        if alternative == "greater":
+            return min(1.0, sum(c for s, c in counts.items() if s >= observed) / 2**n)
+        if alternative == "less":
+            return min(1.0, sum(c for s, c in counts.items() if s <= observed) / 2**n)
         mirrored = round(2 * total) - observed
         lo, hi = min(observed, mirrored), max(observed, mirrored)
         extreme = sum(c for s, c in counts.items() if s <= lo or s >= hi)
@@ -257,7 +301,12 @@ def wilcoxon_p(deltas: list[float]) -> float | None:
     variance = n * (n + 1) * (2 * n + 1) / 24 - sum(t**3 - t for t in tie_groups) / 48
     if variance <= 0:
         return None
-    z = (abs(w_plus - mean) - 0.5) / math.sqrt(variance)
+    sd = math.sqrt(variance)
+    if alternative == "greater":
+        return min(1.0, 0.5 * math.erfc(((w_plus - mean - 0.5) / sd) / math.sqrt(2)))
+    if alternative == "less":
+        return min(1.0, 0.5 * math.erfc(((mean - w_plus - 0.5) / sd) / math.sqrt(2)))
+    z = (abs(w_plus - mean) - 0.5) / sd
     return min(1.0, math.erfc(max(z, 0.0) / math.sqrt(2)))
 
 
@@ -285,12 +334,29 @@ def _float(value: Any) -> float | None:
         return None
 
 
+# Fields read on top of experiments.CURRENT_FIELDS.
+_EXTRA_FIELDS = (
+    "result_data__agent__final_response_truncated",
+    "result_data__agent__truncated_calls",
+    "result_data__agent__wall_seconds",
+    "execution__prior_attempts_total_tokens",
+    "result_data__agent__providers",
+)
+
+
+def _seconds(row: dict[str, Any]) -> float | None:
+    """The run's own time: the sandbox wall clock for agent runs (job duration adds eval queue + grading)."""
+    wall = _float(row.get("result_data__agent__wall_seconds"))
+    return wall if wall is not None else _float(row.get("duration_seconds"))
+
+
 def _cells(experiment: Experiment, now) -> list[_Cell]:
+    from backend.generation.services.experiments import CURRENT_FIELDS
     from backend.generation.services.experiments import cell_code
     from backend.generation.services.experiments import current_jobs
 
     cells = []
-    for row in current_jobs(experiment):
+    for row in current_jobs(experiment, (*CURRENT_FIELDS, *_EXTRA_FIELDS)):
         validity = row.get("result_data__agent__validity")
         validity = validity if isinstance(validity, dict) else {}
         notes = validity.get("notes") or []
@@ -310,18 +376,56 @@ def _cells(experiment: Experiment, now) -> list[_Cell]:
                 valid=validity.get("valid") if "valid" in validity else None,
                 validity_warn=any(isinstance(n, dict) and n.get("severity") == "warn" for n in notes),
                 truncated=bool(
-                    row.get("result_data__backend_truncated") or row.get("result_data__frontend_truncated"),
+                    row.get("result_data__backend_truncated")
+                    or row.get("result_data__frontend_truncated")
+                    or row.get("result_data__agent__final_response_truncated") is True,
                 ),
                 termination=row.get("result_data__agent__termination"),
+                truncated_calls=int(_float(row.get("result_data__agent__truncated_calls")) or 0),
                 fingerprint=row.get("resolved_bundle__config_fingerprint"),
-                cost=_float(row.get("metrics__cost")) or 0.0,
-                tokens=_float(row.get("metrics__total_tokens")) or 0.0,
-                seconds=_float(row.get("duration_seconds")) if graded else None,
+                retry_cost=(retry_cost := _float(row.get("execution__prior_attempts_cost")) or 0.0),
+                cost=(_float(row.get("metrics__cost")) or 0.0) + retry_cost,
+                tokens=(_float(row.get("metrics__total_tokens")) or 0.0)
+                + (_float(row.get("execution__prior_attempts_total_tokens")) or 0.0),
+                seconds=_seconds(row) if graded else None,
+                providers=tuple(sorted(p for p in (row.get("result_data__agent__providers") or {}) if p != "unknown"))
+                if isinstance(row.get("result_data__agent__providers"), dict)
+                else (),
                 terminal=status
                 in (GenerationJob.Status.COMPLETED, GenerationJob.Status.FAILED, GenerationJob.Status.CANCELLED),
             ),
         )
     return cells
+
+
+def _test_plan(experiment: Experiment, baseline_source: str) -> dict[str, Any]:
+    """How the paired p-values are adjusted and read (see the module docstring)."""
+    from backend.generation.services.analysis_plan import declared_metrics
+
+    plan = experiment.analysis_plan if isinstance(experiment.analysis_plan, dict) else {}
+    frozen = bool(plan) and experiment.analysis_plan_frozen_at is not None
+    if frozen and "pass_rate" in declared_metrics(plan) and baseline_source == "preregistered":
+        directions = {
+            q.get("direction") for q in plan.get("research_questions") or [] if q.get("metric") == "pass_rate"
+        }
+        alternative = directions.pop() if len(directions) == 1 else "two-sided"
+        return {
+            "status": "confirmatory",
+            "correction": plan.get("correction", "holm"),
+            "alpha": float(plan.get("alpha", 0.05)),
+            "alternative": alternative if alternative in ("two-sided", "greater", "less") else "two-sided",
+        }
+    return {"status": "exploratory", "correction": "holm", "alpha": 0.05, "alternative": "two-sided"}
+
+
+def _adjust(p_values: list[float | None], correction: str) -> list[float | None]:
+    if correction == "bh":
+        from backend.statistics.services.inference import benjamini_hochberg
+
+        return benjamini_hochberg(p_values)
+    if correction == "none":
+        return list(p_values)
+    return holm(p_values)
 
 
 def _resolve_baseline(
@@ -383,18 +487,40 @@ def compute(
         by_condition[cell.condition_id].append(cell)
 
     # Mixed fingerprints per condition; ``majority`` drops the minority cells.
+    # ``config_fingerprint`` covers the app spec too (every app of a condition
+    # has its own), so drift is judged per (condition, app): replicates of one
+    # app that ran under different configurations (e.g. a top-up after a
+    # preset or harness change).
     mixed: dict[int, dict[str, Any] | None] = {}
     for condition in conditions:
-        prints = Counter(c.fingerprint for c in by_condition[condition.id] if c.fingerprint)
-        if len(prints) > 1:
+        per_app: dict[int, list[_Cell]] = defaultdict(list)
+        for cell in by_condition[condition.id]:
+            if cell.fingerprint:
+                per_app[cell.app_id].append(cell)
+        drifted, minority_cells, total, most = 0, 0, 0, 1
+        for app_cells in per_app.values():
+            prints = Counter(c.fingerprint for c in app_cells)
+            total += len(app_cells)
+            if len(prints) <= 1:
+                continue
+            drifted += 1
+            most = max(most, len(prints))
             majority, count = prints.most_common(1)[0]
-            mixed[condition.id] = {"count": len(prints), "majority_share": round(count / sum(prints.values()), 4)}
+            minority_cells += len(app_cells) - count
             if filters.fingerprint == "majority":
-                for cell in by_condition[condition.id]:
-                    if cell.fingerprint and cell.fingerprint != majority:
+                for cell in app_cells:
+                    if cell.fingerprint != majority:
                         cell.excluded = "fingerprint"
-        else:
-            mixed[condition.id] = None
+        mixed[condition.id] = (
+            {
+                "count": most,  # most configurations seen for one app
+                "apps": drifted,
+                "minority_cells": minority_cells,
+                "majority_share": round(1 - minority_cells / total, 4),
+            }
+            if drifted
+            else None
+        )
 
     for cell in cells:
         if cell.excluded or cell.value is None:
@@ -486,6 +612,8 @@ def compute(
                     seed ^ condition.id,
                 ),
                 "cost_usd": round(sum(c.cost for c in mine), 4),
+                "retry_cost_usd": round(sum(c.retry_cost for c in mine), 4),
+                "truncated_call_runs": sum(1 for c in mine if c.truncated_calls),
                 "tokens_total": int(sum(c.tokens for c in mine)),
                 "median_seconds": round(_percentile(seconds, 0.5), 1) if seconds else None,
                 "timing_endpoint_slug": condition_endpoint_slug(condition),
@@ -498,6 +626,7 @@ def compute(
     for rank, row in enumerate(ranked, start=1):
         row["rank"] = rank
 
+    test_plan = _test_plan(experiment, baseline_source)
     paired_rows = []
     if base_condition is not None:
         base_values = app_values[base_condition.id]
@@ -519,19 +648,34 @@ def compute(
                     "losses": losses,
                     "ties": len(deltas) - wins - losses,
                     "sign_test_p": sign_test_p(wins, losses),
-                    "wilcoxon_p": wilcoxon_p(deltas),
+                    "wilcoxon_p": wilcoxon_p(deltas, test_plan["alternative"]),
                 },
             )
-        adjusted = holm([r["wilcoxon_p"] for r in paired_rows])
-        for row, p in zip(paired_rows, adjusted, strict=True):
-            row["p_holm"] = p
-            for key in ("sign_test_p", "wilcoxon_p", "p_holm"):
+        raw = [r["wilcoxon_p"] for r in paired_rows]
+        adjusted = _adjust(raw, test_plan["correction"])
+        for row, p_holm, p_adj in zip(paired_rows, holm(raw), adjusted, strict=True):
+            row["p_holm"] = p_holm
+            row["p_adjusted"] = p_adj
+            row["significant"] = p_adj is not None and p_adj < test_plan["alpha"]
+            for key in ("sign_test_p", "wilcoxon_p", "p_holm", "p_adjusted"):
                 if interim:
                     row[key] = None
                 elif row[key] is not None:
                     row[key] = round(row[key], 6)
+            if interim:
+                row["significant"] = None
 
     n_apps = len({c.app_id for c in cells if kept(c)})
+    kept_values = {c.value for c in cells if kept(c) and c.value is not None}
+    if len(kept_values) == 1 and sum(1 for c in cells if kept(c)) >= 2:
+        notes.append(NOTE_CEILING.format(value=next(iter(kept_values))))
+    multi_provider = [
+        condition_label(c)
+        for c in conditions
+        if len({p for cell in by_condition[c.id] if kept(cell) for p in cell.providers}) > 1
+    ]
+    if multi_provider:
+        notes.append(NOTE_PROVIDERS_PREFIX + "; ".join(multi_provider))
     if interim:
         notes.insert(0, NOTE_INTERIM)
     elif paired_rows and n_apps < MIN_APPS_FOR_INFERENCE:
@@ -558,6 +702,8 @@ def compute(
                             "repeat_index": c.repeat,
                             "pass_rate": round(c.value, 4) if c.value is not None else None,
                             "termination": c.termination,
+                            "truncated": c.truncated,
+                            "truncated_calls": c.truncated_calls,
                             "valid": c.valid,
                             "code": c.code,
                         }
@@ -581,6 +727,7 @@ def compute(
         "paired": {
             "baseline_condition_id": base_condition.id if base_condition is not None else None,
             "pairing": "app_blocked",
+            **test_plan,
             "n_apps": n_apps,
             "rows": paired_rows,
         },

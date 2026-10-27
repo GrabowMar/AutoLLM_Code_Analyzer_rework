@@ -258,6 +258,38 @@ def test_findings_filter_by_the_reported_level(api_client, user):
     assert [f["rule_id"] for f in api_client.get(f"{url}?sort=file").json()["items"]][-1] == "F821"
 
 
+def test_grouped_findings_collapse_one_issue_reported_by_several_tools(api_client, user):
+    run = AnalysisRunFactory(created_by=user, status="completed")
+    bandit = ToolResultFactory(run=run, tool_slug="bandit")
+    ruff = ToolResultFactory(run=run, tool_slug="ruff", category="lint")
+    # Ruff's S602 is Bandit's B602 on the same line: one issue.
+    FindingFactory(
+        result=bandit,
+        severity="high",
+        tool_severity="HIGH",
+        file_path="app.py",
+        line_number=4,
+        rule_id="B602",
+    )
+    FindingFactory(result=ruff, severity="high", tool_severity="", file_path="app.py", line_number=4, rule_id="S602")
+    FindingFactory(result=ruff, severity="medium", tool_severity="", file_path="app.py", line_number=9, rule_id="F401")
+    url = f"/api/analysis/runs/{run.id}/findings/"
+
+    body = api_client.get(f"{url}?group=true").json()
+    assert (body["total"], body["findings_total"]) == (2, 3)
+    first = body["items"][0]
+    assert (first["rule_id"], first["issue_class"]) == ("B602", "shell-injection")
+    assert [(d["tool_slug"], d["rule_id"]) for d in first["duplicates"]] == [("ruff", "S602")]
+    assert body["items"][1]["duplicates"] == []
+
+    # Grouping applies to the filtered findings.
+    only_ruff = api_client.get(f"{url}?group=true&tool_slug=ruff").json()
+    assert (only_ruff["total"], only_ruff["items"][0]["duplicates"]) == (2, [])
+
+    flat = api_client.get(url).json()
+    assert (flat["total"], flat["findings_total"]) == (3, None)
+
+
 def test_facets_count_reported_levels_and_unrated(api_client, user):
     run = _findings_run(user)
     body = api_client.get(f"/api/analysis/runs/{run.id}/findings/facets/").json()

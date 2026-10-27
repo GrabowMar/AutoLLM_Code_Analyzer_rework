@@ -2,80 +2,173 @@
   "slug": "dataviz_sales_table",
   "name": "Sales Dashboard",
   "category": "Data Visualization",
-  "description": "View and visualize sales data",
+  "description": "Record sales and explore them as a filterable table, headline totals and a daily chart",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only sales view; require auth for create/update/delete",
-    "1. Sale model: id, product (required), amount (decimal), quantity (integer), date (default today)",
-    "2. GET /api/sales - return all sales, support date range filter (?start_date=, ?end_date=)",
-    "3. GET /api/sales/summary - return totals (total_sales, total_transactions, average_sale)",
-    "4. Seed with sample data if database is empty",
-    "5. POST /api/sales - create new sale with validation (amount > 0, quantity >= 1)"
+    "Access control: anyone may read sales, the summary and the daily series; require auth for creating, updating and deleting sales; admin endpoints are restricted to the admin account",
+    "Sale validation: product is a required non-empty string of at most 100 characters; amount is the sale's total value, a number greater than 0 and at most 1000000, stored with 2 decimal places; quantity is a whole number of at least 1; date is a date (YYYY-MM-DD) no later than today and defaults to today",
+    "On first start with no sales, seed about 40 sample sales spread over the previous 60 days across a handful of products",
+    "GET /api/sales returns active sales, newest date first; ?start_date= and ?end_date= keep sales dated within that inclusive range, ?product= keeps sales of exactly that product (ignoring case), ?page= and ?page_size= page the result (page_size default 25, at most 100), and total counts every matching sale",
+    "GET /api/sales/summary returns total_sales (sum of amount), total_transactions (number of sales), average_sale (total_sales divided by total_transactions, rounded to 2 decimals, 0 without sales) and total_quantity, for the same ?start_date=, ?end_date= and ?product= filters",
+    "GET /api/sales/daily returns one entry per calendar day in the filtered range that has sales, oldest first, with that day's amount total and number of sales; it accepts the same filters",
+    "Any signed-in user may update or delete any sale; PUT /api/sales/:id replaces product, amount, quantity and date, and DELETE /api/sales/:id removes the sale permanently",
+    "Deactivated sales (is_active false) are left out of the lists, the summary and the daily series, and answer 404 on the public sale endpoints; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input or an end_date before start_date, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "Public guest view of sales with CTA to sign in for full analytics",
-    "1. Sales table with date, product, amount, quantity columns",
-    "2. Total sales and transaction count displayed prominently at top",
-    "3. Simple bar chart showing sales over time (Chart.js or similar)",
-    "4. Date range filter (this month, last month, custom)",
-    "5. Add new sale form with product, amount, quantity, date"
+    "Everyone sees the dashboard read-only; signed-in users also get the add, edit and delete controls, and visitors see a 'Sign in to record sales' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Headline cards at the top for total sales, number of transactions and average sale, matching the current filters",
+    "A bar chart of daily sales totals for the current filters, with dates on the x axis and amounts on the y axis",
+    "A date range filter with 'This month', 'Last month' and custom start/end dates, plus a product filter; the cards, chart and table all follow it",
+    "Sales table with date, product, quantity and amount columns and previous/next paging",
+    "Add and edit sale forms (product, amount, quantity, date defaulting to today) that show the API's validation messages; delete asks for confirmation first"
+  ],
+  "admin_requirements": [
+    "Admin overview: every sale, active or not, with total, active and inactive counts",
+    "Toggle a sale's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/sales",
-      "description": "List all sales (supports ?start_date= and ?end_date= filters)",
+      "description": "List active sales, newest date first, filtered and paged",
+      "auth": "public",
+      "query": {
+        "start_date": "Earliest sale date to include (YYYY-MM-DD, inclusive)",
+        "end_date": "Latest sale date to include (YYYY-MM-DD, inclusive)",
+        "product": "Exact product name, ignoring case",
+        "page": "1-based page number (default 1)",
+        "page_size": "Sales per page (default 25, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "product": "string",
-            "amount": 100.5,
-            "quantity": 5,
-            "date": "ISO8601",
-            "created_at": "ISO8601"
+            "product": "Desk Lamp",
+            "amount": 89.97,
+            "quantity": 3,
+            "date": "2026-01-15",
+            "created_at": "2026-01-15T10:30:00Z"
           }
         ],
         "total": 1,
-        "sum": 100.5
+        "page": 1,
+        "page_size": 25
       }
     },
     {
       "method": "POST",
       "path": "/api/sales",
-      "description": "Create new sale record",
+      "description": "Record a sale",
+      "auth": "user",
+      "success_status": 201,
       "request": {
         "product": "string",
         "amount": "number",
         "quantity": "integer",
-        "date": "string (optional)"
+        "date": "YYYY-MM-DD"
       },
       "response": {
         "id": 1,
-        "product": "string",
-        "amount": 100.5,
-        "quantity": 5,
-        "date": "ISO8601",
-        "created_at": "ISO8601"
+        "product": "Desk Lamp",
+        "amount": 89.97,
+        "quantity": 3,
+        "date": "2026-01-15",
+        "created_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "GET",
       "path": "/api/sales/summary",
-      "description": "Get sales summary statistics",
+      "description": "Headline totals for the filtered sales",
+      "auth": "public",
+      "query": {
+        "start_date": "Earliest sale date to include (YYYY-MM-DD, inclusive)",
+        "end_date": "Latest sale date to include (YYYY-MM-DD, inclusive)",
+        "product": "Exact product name, ignoring case"
+      },
       "request": null,
       "response": {
         "total_sales": 1500.75,
         "total_transactions": 25,
-        "average_sale": 60.03
+        "average_sale": 60.03,
+        "total_quantity": 71
       }
     },
     {
       "method": "GET",
+      "path": "/api/sales/daily",
+      "description": "Daily totals for the filtered sales, oldest day first",
+      "auth": "public",
+      "query": {
+        "start_date": "Earliest sale date to include (YYYY-MM-DD, inclusive)",
+        "end_date": "Latest sale date to include (YYYY-MM-DD, inclusive)",
+        "product": "Exact product name, ignoring case"
+      },
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "date": "2026-01-15",
+            "amount": 254.5,
+            "transactions": 4
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/sales/:id",
+      "description": "One active sale",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "product": "Desk Lamp",
+        "amount": 89.97,
+        "quantity": 3,
+        "date": "2026-01-15",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/sales/:id",
+      "description": "Replace a sale's fields (product, amount, quantity and date)",
+      "auth": "user",
+      "request": {
+        "product": "string",
+        "amount": "number",
+        "quantity": "integer",
+        "date": "YYYY-MM-DD"
+      },
+      "response": {
+        "id": 1,
+        "product": "Desk Lamp",
+        "amount": 89.97,
+        "quantity": 3,
+        "date": "2026-01-15",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/sales/:id",
+      "description": "Delete a sale",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
+    },
+    {
+      "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -83,43 +176,53 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Sale",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "product": "string (required, max 100 chars)",
-      "amount": "decimal (required, 2 decimal places)",
-      "quantity": "integer (required, min 1)",
-      "date": "date (default: today)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Sale",
+      "description": "One recorded sale; summaries and the daily series are computed from active sales",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "product": "string (required, max 100 chars)",
+        "amount": "decimal (required, > 0, at most 1000000, 2 decimal places; a number in JSON)",
+        "quantity": "integer (required, min 1)",
+        "date": "date (YYYY-MM-DD, default today, not in the future)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the sale from public endpoints and totals)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any record"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/sales",
-      "description": "Admin overview: list all sales and counts",
+      "description": "Admin overview: every sale with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "product": "Desk Lamp",
+            "amount": 89.97,
+            "date": "2026-01-15",
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/sales/:id/toggle",
-      "description": "Toggle sale active status",
+      "description": "Flip a sale's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

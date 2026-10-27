@@ -83,6 +83,8 @@ function paired(id: number, delta: number, pHolm: number | null): PairedRow {
     sign_test_p: null,
     wilcoxon_p: null,
     p_holm: pHolm,
+    p_adjusted: pHolm,
+    significant: pHolm == null ? null : pHolm < 0.05,
   };
 }
 
@@ -106,6 +108,10 @@ function results(
     paired: {
       baseline_condition_id: 1,
       pairing: "app_blocked",
+      status: "exploratory",
+      correction: "holm",
+      alpha: 0.05,
+      alternative: "two-sided",
       n_apps: 8,
       rows,
     },

@@ -2,44 +2,113 @@
   "slug": "validation_xml_checker",
   "name": "XML Validator",
   "category": "Validation",
-  "description": "Validate XML syntax",
+  "description": "Check whether XML documents are well-formed and point to the first syntax error",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public validation; restrict history listing to authenticated users",
-    "1. POST /api/validate/xml - accept {xml: string}",
-    "2. Parse XML using Python's xml.etree or lxml",
-    "3. Return {valid: true} or {valid: false, error: message, line: number}",
-    "4. Handle syntax errors with helpful messages",
-    "5. Store each validation attempt in SQLite (XmlValidation) with valid/error/line and an xml_preview (first 200 chars)"
+    "Access control: anyone may check XML without saving; require auth for saving checks and for reading or deleting the check history; restrict each user's history to that user; admin endpoints are restricted to the admin account",
+    "A check decides whether the submitted text is a well-formed XML document (syntax only; there is no schema validation); xml is a required non-empty string of at most 200000 characters, otherwise 400",
+    "A check result always carries valid, error, line, column and root_element: a well-formed document has error, line and column null and root_element set to the name of its root element; otherwise error is a readable message for the first problem found, line and column are its 1-based position (null when unknown) and root_element is null",
+    "A document that is not well-formed is still a successful check: it answers 200 (or 201 when saved) with valid false",
+    "POST /api/validate/xml checks without storing anything",
+    "POST /api/validations checks the same way and saves the result to the signed-in user's history with xml_preview (the first 200 characters of the document)",
+    "GET /api/validations returns the signed-in user's active checks newest first; ?valid= (true or false) filters by result, ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every matching check",
+    "DELETE /api/validations/:id removes one of the signed-in user's checks permanently",
+    "Deactivated checks (is_active false) are left out of the owner's history; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "Public guest validation view with CTA to sign in for saved history",
-    "1. Large textarea for XML input with monospace font",
-    "2. 'Validate' button",
-    "3. Result display: green checkmark for valid, red X with error message for invalid",
-    "4. Show line number for errors",
-    "5. Sample XML button to load example"
+    "Everyone can check XML; signed-in users also get a 'Save to history' switch and a history panel, and visitors see a 'Sign in to keep a history' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "A large monospace text area with line numbers for the XML and a Validate button; with 'Save to history' on the check goes through /api/validations, otherwise through /api/validate/xml",
+    "Result display: a clear valid state naming the root element, or an invalid state with the error message and its line and column, and the offending line highlighted in the text area",
+    "A 'Load sample' button that fills in a short well-formed example document",
+    "History panel: the user's checks with result, preview and time, a valid/invalid filter, previous/next paging and a delete control per entry"
+  ],
+  "admin_requirements": [
+    "Admin overview: every saved check, active or not, with its user and total, active and inactive counts",
+    "Toggle a check's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "POST",
-      "path": "/api/validate/xml",
-      "description": "Validate XML syntax",
+      "path": "/api/validations",
+      "description": "Check XML and save the result to the signed-in user's history",
+      "auth": "user",
+      "success_status": 201,
       "request": {
         "xml": "string"
       },
       "response": {
         "id": 1,
+        "valid": false,
+        "error": "mismatched tag: expected </book>",
+        "line": 3,
+        "column": 12,
+        "root_element": null,
+        "xml_preview": "<catalog>\n  <book>\n    <title>Dune</titel>",
+        "created_at": "2026-06-10T15:20:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/validations",
+      "description": "The signed-in user's saved checks, newest first, filtered and paged",
+      "auth": "user",
+      "query": {
+        "valid": "true or false; keep only checks with that result",
+        "page": "1-based page number (default 1)",
+        "page_size": "Checks per page (default 20, at most 100)"
+      },
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "valid": false,
+            "error": "mismatched tag: expected </book>",
+            "line": 3,
+            "column": 12,
+            "root_element": null,
+            "xml_preview": "<catalog>\n  <book>\n    <title>Dune</titel>",
+            "created_at": "2026-06-10T15:20:00Z"
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/validations/:id",
+      "description": "Delete one of your saved checks",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/validate/xml",
+      "description": "Check whether XML is well-formed (not saved)",
+      "auth": "public",
+      "request": {
+        "xml": "string"
+      },
+      "response": {
         "valid": true,
         "error": null,
-        "line": null
+        "line": null,
+        "column": null,
+        "root_element": "catalog"
       }
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -47,43 +116,56 @@
       }
     }
   ],
-  "data_model": {
-    "name": "XmlValidation",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "xml_preview": "text (required, first 200 chars)",
-      "valid": "boolean (required)",
-      "error": "text (nullable)",
-      "line": "integer (nullable)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "XmlValidation",
+      "description": "One saved well-formedness check in a user's history",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who saved it)",
+        "xml_preview": "string (first 200 chars of the document)",
+        "valid": "boolean (required)",
+        "error": "string (nullable; message for the first problem)",
+        "line": "integer (nullable, 1-based)",
+        "column": "integer (nullable, 1-based)",
+        "root_element": "string (nullable; root element name when valid)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the check from its owner's history)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any validation"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/validations",
-      "description": "Admin overview: list all validations and counts",
+      "description": "Admin overview: every check with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "username": "lee",
+            "valid": false,
+            "xml_preview": "<catalog>\n  <book>",
+            "is_active": true,
+            "created_at": "2026-06-10T15:20:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/validations/:id/toggle",
-      "description": "Toggle validation active status",
+      "description": "Flip a check's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

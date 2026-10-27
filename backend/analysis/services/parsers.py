@@ -8,6 +8,7 @@ aggregate metrics alongside any findings. Parsers are looked up by the
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import re
@@ -103,25 +104,71 @@ def has_parser(parser_key: str) -> bool:
     return parser_key in _PARSERS
 
 
+# Upper bound on decode attempts in ``_loads`` (each opener is one attempt).
+_MAX_JSON_ATTEMPTS = 200
+_OPENER_RE = re.compile(r"[\[{]")
+_LINE_OPENER_RE = re.compile(r"^[ \t]*[\[{]", re.MULTILINE)
+
+
 def _loads(raw: str) -> Any:
-    raw = (raw or "").strip()
-    if not raw:
+    """The JSON report in *raw*, or None when it holds none.
+
+    ``exec_in`` merges stdout and stderr, so the report may be preceded or
+    followed by log lines ("WARNING ..."). The report is the first JSON value
+    that decodes, tried at the openers that start a line first (a bracket in
+    a log line, ``[INFO]``, must not win), then at any opener; text after it
+    is ignored.
+    """
+    text = (raw or "").strip()
+    if not text:
         return None
-    # Tools sometimes emit warnings before the JSON payload; trim to first
-    # JSON delimiter to be forgiving.
-    for opener in ("[", "{"):
-        idx = raw.find(opener)
-        if idx > 0:
-            try:
-                return json.loads(raw[idx:])
-            except json.JSONDecodeError:
-                continue
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        # Tool produced no JSON (e.g. an empty scan or a CLI error banner).
-        # Treat as "no findings" rather than raising a noisy parser error.
-        return None
+    decoder = json.JSONDecoder()
+    tried: set[int] = set()
+    candidates = itertools.chain(
+        (m.end() - 1 for m in _LINE_OPENER_RE.finditer(text)),
+        (m.start() for m in _OPENER_RE.finditer(text)),
+    )
+    for idx in candidates:
+        if idx in tried:
+            continue
+        if len(tried) >= _MAX_JSON_ATTEMPTS:
+            break
+        tried.add(idx)
+        try:
+            return decoder.raw_decode(text, idx)[0]
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+class NoJSONReportError(ValueError):
+    """The tool printed output, but no JSON report in it."""
+
+    def __init__(self, text: str) -> None:
+        tail = ("…" + text[-300:]) if len(text) > 300 else text
+        super().__init__(f"no JSON report in the tool output: {tail}")
+
+
+def _json(raw: str, empty: Any) -> Any:
+    """The JSON report in *raw*; *empty* when the tool printed nothing.
+
+    Output without a decodable report (a crash banner, a truncated report)
+    raises: ``parse`` turns that into an error, so the result is recorded as
+    failed instead of as a clean, zero-finding one.
+    """
+    data = _loads(raw)
+    if data is not None:
+        return data
+    text = (raw or "").strip()
+    if not text:
+        return empty
+    raise NoJSONReportError(text)
+
+
+def _clip_list(items: list[str], limit: int = 10) -> str:
+    """``"a; b; c (+N more)"`` for warning messages."""
+    shown = "; ".join(items[:limit])
+    return f"{shown} (+{len(items) - limit} more)" if len(items) > limit else shown
 
 
 # --- Shared helpers ---------------------------------------------------------
@@ -134,6 +181,8 @@ def _loads(raw: str) -> Any:
 # aliases, cvss_score, cvss_vector, manifest, url, method, param, evidence,
 # attack, instances, other_info, secret_type, complexity, function, nloc,
 # duplicate_of, lines, tokens) and only carries keys with a real value.
+# ``aliases`` lists every id the advisory is known by (PYSEC/GHSA/CVE/vendor
+# ids), ``vuln_id`` included, so cross-tool dedup can cluster on any of them.
 
 
 # Finding.tool_severity is a CharField(max_length=40).
@@ -185,6 +234,17 @@ def _urls(*values: Any, limit: int = 20) -> list[str]:
     return out[:limit]
 
 
+def _advisory_ids(*values: Any) -> list[str]:
+    """Distinct advisory ids in *values* (strings or lists of strings), in order."""
+    out: list[str] = []
+    for value in values:
+        for item in value if isinstance(value, (list, tuple)) else [value]:
+            text = str(item or "").strip()
+            if text and text not in out:
+                out.append(text)
+    return out
+
+
 def _clip(value: Any, limit: int) -> str:
     return str(value or "")[:limit]
 
@@ -210,8 +270,11 @@ def _cwe_field(value: Any) -> dict[str, str]:
 
 
 @register("bandit")
-def parse_bandit(raw: str) -> list[FindingData]:
-    data = _loads(raw) or {}
+def parse_bandit(raw: str) -> ParsedOutput:
+    """``bandit -f json``: ``results[]``; files it could not parse are in ``errors[]``."""
+    data = _json(raw, {})
+    if not isinstance(data, dict):
+        return ParsedOutput(error="Unexpected bandit report (not a JSON object)")
     sev_map = {"HIGH": "high", "MEDIUM": "medium", "LOW": "low"}
     conf_map = {"HIGH": "high", "MEDIUM": "medium", "LOW": "low"}
     findings: list[FindingData] = []
@@ -241,7 +304,17 @@ def parse_bandit(raw: str) -> list[FindingData]:
                 ),
             ),
         )
-    return findings
+    parsed = ParsedOutput(findings=findings)
+    errors = [e for e in data.get("errors") or [] if isinstance(e, dict)]
+    if errors:
+        failed = sorted({str(e.get("filename") or "?") for e in errors})
+        details = [f"{e.get('filename') or '?'}: {e.get('reason') or 'error'}" for e in errors]
+        parsed.warnings.append(f"Not scanned ({len(failed)} file(s)): {_clip_list(details)}")
+        # ``metrics`` has one entry per file bandit opened (plus ``_totals``).
+        opened = {k for k in (data.get("metrics") or {}) if k != "_totals"}
+        if not findings and (not opened or opened <= set(failed)):
+            parsed.error = f"Bandit could not scan any file — {_clip_list(details, 5)}"
+    return parsed
 
 
 def _pyflakes_severity(code: str) -> str:
@@ -259,7 +332,7 @@ def _pyflakes_severity(code: str) -> str:
 
 @register("ruff")
 def parse_ruff(raw: str) -> list[FindingData]:
-    data = _loads(raw) or []
+    data = _json(raw, [])
     findings: list[FindingData] = []
     for item in data:
         loc = item.get("location") or {}
@@ -306,14 +379,36 @@ def _eslint_docs_url(rule_id: str) -> str:
     return ""
 
 
+def _eslint_fatal(msg: dict[str, Any]) -> bool:
+    """A message saying ESLint could not parse the file ("Parsing error: ..."), not a rule hit."""
+    return bool(msg.get("fatal")) or (
+        not msg.get("ruleId") and str(msg.get("message") or "").startswith("Parsing error")
+    )
+
+
 @register("eslint")
-def parse_eslint(raw: str) -> list[FindingData]:
-    data = _loads(raw) or []
+def parse_eslint(raw: str) -> ParsedOutput:
+    """``eslint -f json``: one entry per linted file.
+
+    A fatal message means the file could not be parsed, so no rule ran on
+    it: that is a coverage gap (``warnings``), not a finding. When no file
+    could be parsed the result is an error.
+    """
+    data = _json(raw, [])
+    if not isinstance(data, list):
+        return ParsedOutput(error="Unexpected ESLint report (not a JSON list)")
     sev_map = {2: "high", 1: "low"}
     findings: list[FindingData] = []
+    not_parsed: list[str] = []
     for file_entry in data:
         file_path = file_entry.get("filePath", "")
-        for msg in file_entry.get("messages", []):
+        messages = file_entry.get("messages") or []
+        fatal = [m for m in messages if _eslint_fatal(m)]
+        if fatal:
+            not_parsed.append(f"{file_path}:{fatal[0].get('line', '?')}: {fatal[0].get('message', '')}"[:300])
+        for msg in messages:
+            if _eslint_fatal(msg):
+                continue
             rule_id = msg.get("ruleId") or ""
             suggestions = [
                 s.get("desc") for s in msg.get("suggestions") or [] if isinstance(s, dict) and s.get("desc")
@@ -340,7 +435,12 @@ def parse_eslint(raw: str) -> list[FindingData]:
                     ),
                 ),
             )
-    return findings
+    parsed = ParsedOutput(findings=findings)
+    if not_parsed:
+        parsed.warnings.append(f"Not parsed ({len(not_parsed)} of {len(data)} file(s)): {_clip_list(not_parsed)}")
+        if len(not_parsed) == len(data):
+            parsed.error = f"ESLint could not parse any file — {_clip_list(not_parsed, 3)}"
+    return parsed
 
 
 _SEMGREP_CATEGORIES = {
@@ -354,8 +454,11 @@ _SEMGREP_CATEGORIES = {
 
 
 @register("semgrep")
-def parse_semgrep(raw: str) -> list[FindingData]:
-    data = _loads(raw) or {}
+def parse_semgrep(raw: str) -> ParsedOutput:
+    """``semgrep --json``: ``results[]``, plus ``errors[]`` and ``paths`` for what was not (fully) analyzed."""
+    data = _json(raw, {})
+    if not isinstance(data, dict):
+        return ParsedOutput(error="Unexpected Semgrep report (not a JSON object)")
     sev_map = {"ERROR": "high", "WARNING": "medium", "INFO": "low"}
     findings: list[FindingData] = []
     for item in data.get("results", []):
@@ -401,10 +504,69 @@ def parse_semgrep(raw: str) -> list[FindingData]:
                 ),
             ),
         )
-    return findings
+    return _semgrep_coverage(data, ParsedOutput(findings=findings))
 
 
 _SEMGREP_NO_LINES = "requires login"
+# ``paths.skipped`` reasons that mean a file Semgrep should have analyzed was
+# not (ignore patterns, wrong language, minified/binary files are by design).
+_SEMGREP_GAP_REASONS = frozenset(
+    {
+        "analysis_failed_parser_or_internal_error",
+        "exceeded_size_limit",
+        "too_big",
+        "too_many_matches",
+        "insufficient_permissions",
+        "nonexistent_file",
+        "timeout",
+    },
+)
+
+
+def _semgrep_error_text(err: dict[str, Any]) -> str:
+    kind = err.get("type")
+    if isinstance(kind, list):  # ["PartialParsing", [locations]]
+        kind = kind[0] if kind else ""
+    where = err.get("path") or ""
+    text = str(err.get("message") or kind or "error").splitlines()[0][:200]
+    return f"{where}: {kind}: {text}" if where else f"{kind}: {text}" if kind else text
+
+
+def _semgrep_coverage(data: dict[str, Any], parsed: ParsedOutput) -> ParsedOutput:
+    """Errors (files parsed only partially or not at all, rules that failed) and
+    skipped paths are coverage gaps; nothing scanned at all is an error."""
+    errors = [e for e in data.get("errors") or [] if isinstance(e, dict)]
+    if errors:
+        parsed.warnings.append(
+            f"Semgrep errors ({len(errors)}): {_clip_list([_semgrep_error_text(e) for e in errors])}",
+        )
+    paths = data.get("paths") if isinstance(data.get("paths"), dict) else {}
+    skipped = [
+        f"{s.get('path')}: {s.get('reason')}"
+        for s in paths.get("skipped") or []
+        if isinstance(s, dict) and str(s.get("reason") or "").lower() in _SEMGREP_GAP_REASONS
+    ]
+    if skipped:
+        parsed.warnings.append(f"Not scanned ({len(skipped)} file(s)): {_clip_list(skipped)}")
+    scanned = paths.get("scanned")
+    # A file with a (non-partial) parse error was not analyzed at all.
+    unparsed = {
+        e.get("path")
+        for e in errors
+        if e.get("path") and "partial" not in str(e.get("type") or "").lower().replace(" ", "")
+    }
+    if (
+        not parsed.findings
+        and isinstance(scanned, list)
+        and (errors or skipped)
+        and (not scanned or set(scanned) <= unparsed)
+    ):
+        parsed.error = "Semgrep scanned no file — " + _clip_list(
+            [_semgrep_error_text(e) for e in errors] + skipped,
+            3,
+        )
+    return parsed
+
 
 # Pylint message type -> the folder of its message pages in the docs.
 _PYLINT_DOC_DIRS = {
@@ -419,7 +581,7 @@ _PYLINT_DOC_DIRS = {
 
 @register("pylint")
 def parse_pylint(raw: str) -> list[FindingData]:
-    data = _loads(raw) or []
+    data = _json(raw, [])
     sev_map = {
         "fatal": "high",
         "error": "high",
@@ -470,11 +632,22 @@ _MYPY_LINE_RE = re.compile(
 )
 
 
+_MYPY_FILE_ERROR_RE = re.compile(r"^(?P<file>[^\s:][^:]*): error: (?P<msg>.+)$")
+# The error summary's note when a blocking error stopped the run.
+_MYPY_BLOCKED = "errors prevented further checking"
+
+
 @register("mypy")
-def parse_mypy(raw: str) -> list[FindingData]:
-    """Mypy has no stable JSON output; parse its ``file:line: level: msg`` text."""
+def parse_mypy(raw: str) -> ParsedOutput:
+    """Mypy has no stable JSON output; parse its ``file:line: level: msg`` text.
+
+    A blocking error (a syntax error, a module found twice, an invalid
+    package name) stops mypy before it type-checks anything: the findings
+    are kept but the result is an error, not a (near-)clean measurement.
+    """
     sev_map = {"error": "medium", "warning": "low", "note": "info"}
     findings: list[FindingData] = []
+    blockers: list[str] = []
     last: FindingData | None = None
     for raw_line in (raw or "").splitlines():
         line = raw_line.rstrip()
@@ -482,6 +655,11 @@ def parse_mypy(raw: str) -> list[FindingData]:
             continue
         m = _MYPY_LINE_RE.match(line)
         if not m:
+            # File-level errors carry no line number ("app.py: error: Duplicate
+            # module named 'app'"); mypy only prints them for blocking errors.
+            fm = _MYPY_FILE_ERROR_RE.match(line)
+            if fm:
+                blockers.append(f"{fm.group('file')}: {fm.group('msg').strip()}"[:300])
             continue
         if m.group("level") == "note":
             # A note continues the preceding error on the same line ("See
@@ -503,7 +681,14 @@ def parse_mypy(raw: str) -> list[FindingData]:
             tool_severity=m.group("level"),
         )
         findings.append(last)
-    return findings
+        if m.group("code") == "syntax":
+            blockers.append(f"{last.file_path}:{last.line_number}: {last.title}"[:300])
+    parsed = ParsedOutput(findings=findings)
+    if blockers or _MYPY_BLOCKED in (raw or ""):
+        parsed.error = "Mypy stopped at a blocking error before type-checking — " + (
+            _clip_list(blockers, 3) or _MYPY_BLOCKED
+        )
+    return parsed
 
 
 def _attach_mypy_note(finding: FindingData, note: str) -> None:
@@ -521,7 +706,7 @@ def parse_radon(raw: str) -> ParsedOutput:
     Complexity is metric-shaped, so every block feeds the metrics; only the
     truly pathological ranks (E/F) also become findings.
     """
-    data = _loads(raw) or {}
+    data = _json(raw, {})
     if not isinstance(data, dict):
         return ParsedOutput()
     sev_map = {"E": "high", "F": "critical"}
@@ -635,7 +820,7 @@ def parse_vulture(raw: str) -> list[FindingData]:
 @register("detect_secrets")
 def parse_detect_secrets(raw: str) -> list[FindingData]:
     """detect-secrets baseline JSON: ``{"results": {path: [item]}}``."""
-    data = _loads(raw) or {}
+    data = _json(raw, {})
     if not isinstance(data, dict):
         return []
     findings: list[FindingData] = []
@@ -665,18 +850,124 @@ def parse_detect_secrets(raw: str) -> list[FindingData]:
     return findings
 
 
+def _jscpd_range(side: dict[str, Any]) -> tuple[int, int] | None:
+    start, end = _int(side.get("start")), _int(side.get("end"))
+    if start is None:
+        return None
+    end = start if end is None else end
+    return (min(start, end), max(start, end))
+
+
+def _ranges_overlap(a: tuple[int, int] | None, b: tuple[int, int] | None) -> bool:
+    return a is not None and b is not None and a[0] <= b[1] and b[0] <= a[1]
+
+
+def _jscpd_unique_clones(duplicates: list[Any]) -> list[dict[str, Any]]:
+    """The clones of *duplicates* minus those that repeat an already-kept clone.
+
+    jscpd tokenizes a file once per embedded language (a .jsx file yields
+    ``javascript``, ``jsx`` and ``css`` token streams) and detects clones in
+    each stream, so one copied block can be reported two or three times with
+    slightly different line ranges. A clone whose ranges both overlap a kept
+    clone of the same file pair is such a repeat. Larger clones are kept
+    first; a clone whose range runs backwards (an artifact of a non-contiguous
+    embedded-language stream) only when nothing overlaps it.
+    """
+    clones = [d for d in duplicates if isinstance(d, dict)]
+
+    def _key(dup: dict[str, Any]) -> tuple[int, int]:
+        sides = (dup.get("firstFile") or {}, dup.get("secondFile") or {})
+        sane = all((_int(s.get("end")) or 0) >= (_int(s.get("start")) or 0) for s in sides)
+        return (0 if sane else 1, -(_int(dup.get("lines")) or 0))
+
+    kept: list[dict[str, Any]] = []
+    for dup in sorted(clones, key=_key):
+        first, second = dup.get("firstFile") or {}, dup.get("secondFile") or {}
+        a = (str(first.get("name") or ""), _jscpd_range(first))
+        b = (str(second.get("name") or ""), _jscpd_range(second))
+        repeat = False
+        for other in kept:
+            of, os_ = other.get("firstFile") or {}, other.get("secondFile") or {}
+            oa = (str(of.get("name") or ""), _jscpd_range(of))
+            ob = (str(os_.get("name") or ""), _jscpd_range(os_))
+            for x, y in ((oa, ob), (ob, oa)):
+                if a[0] == x[0] and b[0] == y[0] and _ranges_overlap(a[1], x[1]) and _ranges_overlap(b[1], y[1]):
+                    repeat = True
+                    break
+            if repeat:
+                break
+        if not repeat:
+            kept.append(dup)
+    # Back in report order (stable output for the same input).
+    order = {id(d): i for i, d in enumerate(clones)}
+    return sorted(kept, key=lambda d: order[id(d)])
+
+
+def _jscpd_metrics(data: dict[str, Any], clones: list[dict[str, Any]]) -> dict[str, Any]:
+    """Duplication statistics per unique source file.
+
+    jscpd's own totals count a file once per token stream (format) it was
+    split into: a .jsx file is three "sources" and its lines are summed
+    three times, and repeated clones inflate the duplicated lines. The
+    per-format ``sources`` give each file's size; a file's lines are the
+    largest span any of its streams covers, its tokens the sum (the streams
+    split the file's tokens between them).
+    """
+    stats = data.get("statistics") or {}
+    files: dict[str, dict[str, int]] = {}
+    for fmt in (stats.get("formats") or {}).values():
+        for name, src in ((fmt or {}).get("sources") or {}).items():
+            entry = files.setdefault(name, {"lines": 0, "tokens": 0})
+            entry["lines"] = max(entry["lines"], _int((src or {}).get("lines")) or 0)
+            entry["tokens"] += _int((src or {}).get("tokens")) or 0
+    total = stats.get("total") or {}
+    if not files:
+        # No per-format breakdown: jscpd's totals are all there is.
+        return (
+            {
+                "clones": total.get("clones", 0),
+                "duplicated_lines": total.get("duplicatedLines", 0),
+                "duplicated_tokens": total.get("duplicatedTokens", 0),
+                "total_lines": total.get("lines", 0),
+                "total_sources": total.get("sources", 0),
+                "duplication_percentage": round(float(total.get("percentage", 0.0)), 2),
+                "token_duplication_percentage": round(float(total.get("percentageTokens", 0.0)), 2),
+            }
+            if total
+            else {}
+        )
+    total_lines = sum(f["lines"] for f in files.values())
+    total_tokens = sum(f["tokens"] for f in files.values())
+    sources = len(files)
+    # jscpd's measure: each clone's lines/tokens once (as its totals count them).
+    dup_lines = sum(_int(c.get("lines")) or 0 for c in clones)
+    dup_tokens = sum(_int(c.get("tokens")) or 0 for c in clones)
+    return {
+        "clones": len(clones),
+        "duplicated_lines": dup_lines,
+        "duplicated_tokens": dup_tokens,
+        "total_lines": total_lines,
+        "total_sources": sources,
+        "duplication_percentage": round(100.0 * dup_lines / total_lines, 2) if total_lines else 0.0,
+        "token_duplication_percentage": round(100.0 * dup_tokens / total_tokens, 2) if total_tokens else 0.0,
+    }
+
+
 @register("jscpd")
 def parse_jscpd(raw: str) -> ParsedOutput:
-    """jscpd JSON report: ``{"duplicates": [...], "statistics": {"total": {...}}}``.
+    """jscpd JSON report: ``{"duplicates": [...], "statistics": {"formats": {...}, "total": {...}}}``.
 
     Clones are location-anchored and stay findings; the overall duplication
-    statistics are metric-shaped and would otherwise be lost.
+    statistics are metric-shaped and would otherwise be lost. Both are
+    computed over unique clones and unique source files (see
+    :func:`_jscpd_unique_clones`, :func:`_jscpd_metrics`).
     """
-    data = _loads(raw) or {}
+    data = _json(raw, {})
     if not isinstance(data, dict):
-        return ParsedOutput()
+        return ParsedOutput(error="Unexpected jscpd report (not a JSON object)")
+    clones = _jscpd_unique_clones(data.get("duplicates") or [])
     findings: list[FindingData] = []
-    for dup in data.get("duplicates") or []:
+    for dup in clones:
         first = dup.get("firstFile") or {}
         second = dup.get("secondFile") or {}
         lines = dup.get("lines") or 0
@@ -711,27 +1002,12 @@ def parse_jscpd(raw: str) -> ParsedOutput:
                 ),
             ),
         )
-
-    total = ((data.get("statistics") or {}).get("total")) or {}
-    metrics = (
-        {
-            "clones": total.get("clones", 0),
-            "duplicated_lines": total.get("duplicatedLines", 0),
-            "duplicated_tokens": total.get("duplicatedTokens", 0),
-            "total_lines": total.get("lines", 0),
-            "total_sources": total.get("sources", 0),
-            "duplication_percentage": round(float(total.get("percentage", 0.0)), 2),
-            "token_duplication_percentage": round(float(total.get("percentageTokens", 0.0)), 2),
-        }
-        if total
-        else {}
-    )
-    return ParsedOutput(findings=findings, metrics=metrics)
+    return ParsedOutput(findings=findings, metrics=_jscpd_metrics(data, clones))
 
 
 @register("hadolint")
 def parse_hadolint(raw: str) -> list[FindingData]:
-    data = _loads(raw) or []
+    data = _json(raw, [])
     if not isinstance(data, list):
         return []
     sev_map = {"error": "high", "warning": "medium", "info": "low", "style": "info"}
@@ -798,7 +1074,7 @@ def parse_codespell(raw: str) -> list[FindingData]:
 
 @register("gitleaks")
 def parse_gitleaks(raw: str) -> list[FindingData]:
-    data = _loads(raw) or []
+    data = _json(raw, [])
     if not isinstance(data, list):
         return []
     findings: list[FindingData] = []

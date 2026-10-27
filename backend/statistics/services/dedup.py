@@ -102,18 +102,22 @@ _LINT_CLASSES: dict[str, str] = {
 }
 
 # Semgrep check ids are dotted paths; the last segments name the rule.
+# Keywords match whole hyphen/underscore-separated tokens, first match wins,
+# so the specific ones (md5, sha1) come before the generic ones (secret).
 _SEMGREP_KEYWORDS: tuple[tuple[str, str], ...] = (
     ("debug-enabled", "flask-debug"),
     ("bad-host", "bind-all-interfaces"),
     ("bind-all", "bind-all-interfaces"),
-    ("sql", "sql-injection"),
-    ("hardcoded", "hardcoded-secret"),
-    ("hard-coded", "hardcoded-secret"),
-    ("secret", "hardcoded-secret"),
-    ("password", "hardcoded-secret"),
     ("insecure-hash", "weak-hash"),
     ("md5", "weak-hash"),
     ("sha1", "weak-hash"),
+    ("sql", "sql-injection"),
+    ("sqli", "sql-injection"),
+    ("sqlalchemy-execute-raw-query", "sql-injection"),
+    ("formatted-sql-query", "sql-injection"),
+    ("hardcoded", "hardcoded-secret"),
+    ("hard-coded", "hardcoded-secret"),
+    ("secret", "hardcoded-secret"),
     ("cert-validation", "tls-verification-disabled"),
     ("verify-false", "tls-verification-disabled"),
     ("subprocess-shell", "shell-injection"),
@@ -158,6 +162,20 @@ _SECRET_TOOLS = frozenset({"detect-secrets", "detect_secrets", "gitleaks"})
 _VULN_TOOLS = frozenset({"pip-audit", "npm-audit", "osv-scanner", "trivy", "retire"})
 _VULN_PREFIX = "vulnerable-dependency:"
 _RUFF_BANDIT_RE = re.compile(r"^S(\d{3})$")
+_TOKEN_SPLIT_RE = re.compile(r"[._\-]+")
+
+
+def _has_tokens(tokens: list[str], needle: list[str]) -> bool:
+    """Whether *needle* occurs as a contiguous run of whole tokens in *tokens*."""
+    n = len(needle)
+    return any(tokens[i : i + n] == needle for i in range(len(tokens) - n + 1))
+
+
+def advisory_ids(finding: dict[str, Any]) -> set[str]:
+    """The advisory ids (rule id plus CVE/GHSA/PYSEC aliases) a vulnerability finding names."""
+    ids = {finding.get("rule_id") or "", finding.get("vuln_id") or ""}
+    ids.update(a for a in finding.get("aliases") or [] if isinstance(a, str))
+    return {i.strip().upper() for i in ids if i and i.strip()}
 
 
 def issue_class(  # noqa: PLR0911
@@ -191,10 +209,13 @@ def issue_class(  # noqa: PLR0911
     if mapped:
         return mapped
     if tool == "semgrep" and rule:
-        tail = ".".join(rule.lower().split(".")[-2:])
+        tokens = _TOKEN_SPLIT_RE.split(".".join(rule.lower().split(".")[-2:]))
         for keyword, cls in _SEMGREP_KEYWORDS:
-            if keyword in tail:
+            if _has_tokens(tokens, keyword.split("-")):
                 return cls
+    if (tool == "radon" and rule in ("CC-D", "CC-E", "CC-F")) or (tool == "lizard" and rule == "CCN"):
+        # Both flag one over-complex function (radon ranks D-F, lizard's CCN threshold).
+        return "high-complexity"
     if cwe:
         return _CWE_CLASSES.get(cwe.upper(), cwe.lower())
     return f"{tool}:{rule or 'unknown'}"
@@ -241,14 +262,31 @@ class IssueCluster:
         }
 
 
+def _same_report(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """Whether two findings of one tool are the same report (an exact duplicate)."""
+    if a.get("line") != b.get("line") or (a.get("rule_id") or "") != (b.get("rule_id") or ""):
+        return False
+    # File-level findings (no line) of one rule can still name different
+    # things: three hallucinated packages, five unused dependencies.
+    return (a.get("package") or "") == (b.get("package") or "") and (
+        a.get("line") is not None or (a.get("title") or "") == (b.get("title") or "")
+    )
+
+
 def _fits(cluster: IssueCluster, f: dict[str, Any], tolerance: int) -> bool:
     line = f.get("line")
+    if cluster.issue_class.startswith(_VULN_PREFIX):
+        # One package can have many advisories: tools agree only when they name
+        # the same one (under any of its ids, linked through the members' aliases).
+        known = set().union(*(advisory_ids(m) for m in cluster.members if m["tool"] != f["tool"]))
+        if known and not known & advisory_ids(f):
+            return False
     for m in cluster.members:
         m_line = m.get("line")
         if m["tool"] == f["tool"]:
             # Same tool: only an exact duplicate merges; any other report by
             # that tool is a distinct issue it found.
-            if m_line != line or (m.get("rule_id") or "") != (f.get("rule_id") or ""):
+            if not _same_report(m, f):
                 return False
             continue
         if line is None or m_line is None:
@@ -260,6 +298,42 @@ def _fits(cluster: IssueCluster, f: dict[str, Any], tolerance: int) -> bool:
         if not (lo - tolerance <= line <= hi + tolerance):
             return False
     return True
+
+
+# The Finding.values() fields :func:`finding_record` reads.
+RECORD_FIELDS = (
+    "id",
+    "result__tool_slug",
+    "rule_id",
+    "severity",
+    "category",
+    "file_path",
+    "line_number",
+    "tool_specific_data",
+    "title",
+)
+
+
+def finding_record(row: dict[str, Any], run_id: str) -> dict[str, Any]:
+    """A :func:`cluster_findings` record from a ``Finding.objects.values(*RECORD_FIELDS)`` row."""
+    extra = row["tool_specific_data"] if isinstance(row["tool_specific_data"], dict) else {}
+    return {
+        "id": row["id"],
+        "run_id": run_id,
+        "tool": row["result__tool_slug"],
+        "rule_id": row["rule_id"],
+        "severity": row["severity"],
+        "category": row["category"],
+        "file_path": row["file_path"],
+        "line": row["line_number"],
+        "end_line": extra.get("end_line") or extra.get("endline"),
+        "cwe": extra.get("cwe") or "",
+        "package": extra.get("package") or "",
+        "vuln_id": extra.get("vuln_id") or "",
+        "aliases": extra.get("aliases") or [],
+        "issue_key": extra.get("issue_key") or "",
+        "title": row["title"],
+    }
 
 
 def cluster_findings(
@@ -303,6 +377,10 @@ def cluster_findings(
     return clusters
 
 
+def _comparable_key(cluster: IssueCluster) -> tuple[str, str]:
+    return cluster.issue_class, posixpath.splitext(cluster.file_path)[1].lower()
+
+
 def tool_overlap(clusters: list[IssueCluster]) -> dict[str, Any]:
     """Per-tool unique/exclusive counts and pairwise co-detection between tools.
 
@@ -310,12 +388,14 @@ def tool_overlap(clusters: list[IssueCluster]) -> dict[str, Any]:
     restricted to issue classes *both* tools reported somewhere in the
     data: a pair that cannot detect the same things is not a disagreement.
     """
-    classes_by_tool: dict[str, set[str]] = defaultdict(set)
+    # Comparable = same class on the same kind of file: ESLint's and Vulture's
+    # "unused-variable" never look at the same code, so they cannot disagree.
+    classes_by_tool: dict[str, set[tuple[str, str]]] = defaultdict(set)
     per_tool: dict[str, Counter] = defaultdict(Counter)
     for c in clusters:
         tools = c.tools
         for t in tools:
-            classes_by_tool[t].add(c.issue_class)
+            classes_by_tool[t].add(_comparable_key(c))
             per_tool[t]["unique_issues"] += 1
             per_tool[t]["exclusive" if len(tools) == 1 else "shared"] += 1
         for m in c.members:
@@ -328,7 +408,7 @@ def tool_overlap(clusters: list[IssueCluster]) -> dict[str, Any]:
             continue
         both = only_a = only_b = 0
         for c in clusters:
-            if c.issue_class not in comparable:
+            if _comparable_key(c) not in comparable:
                 continue
             has_a, has_b = a in c.tools, b in c.tools
             if has_a and has_b:
@@ -342,7 +422,7 @@ def tool_overlap(clusters: list[IssueCluster]) -> dict[str, Any]:
             {
                 "tool_a": a,
                 "tool_b": b,
-                "comparable_classes": sorted(comparable),
+                "comparable_classes": sorted({cls for cls, _ext in comparable}),
                 "both": both,
                 "only_a": only_a,
                 "only_b": only_b,

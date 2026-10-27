@@ -1,12 +1,17 @@
-FROM node:20-alpine AS frontend-builder
+# Stage 1: build the frontend (no lockfile: package.json pins exact versions)
+FROM node:24-alpine AS frontend-builder
 WORKDIR /frontend
 COPY frontend/package*.json ./
-RUN npm install --silent
+RUN npm install --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
-FROM python:3.11-slim
+# Stage 2: FastAPI (uvicorn) serves the API + the built SPA from ./static
+FROM python:3.13-slim
 WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
@@ -20,6 +25,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 COPY --from=frontend-builder /frontend/dist ./static
 RUN mkdir -p data
+
+RUN addgroup --system appgroup \
+    && adduser --system --ingroup appgroup appuser \
+    && chown -R appuser:appgroup /app
+USER appuser
 
 EXPOSE 8000
 

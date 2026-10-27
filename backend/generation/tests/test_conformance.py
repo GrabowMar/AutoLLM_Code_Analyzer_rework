@@ -325,3 +325,93 @@ class TestHealingAblation:
             True,
         )
         assert runner.is_deployed("infra_error") is None
+
+
+@pytest.mark.django_db
+class TestEvaluatorClassification:
+    """Who is to blame: the sample (build_failed / failed) or the platform (infra_error)."""
+
+    def _job(self):
+        from backend.generation.models import GenerationJob
+        from backend.generation.tests.factories import AppRequirementTemplateFactory
+        from backend.users.tests.factories import UserFactory
+
+        app = AppRequirementTemplateFactory(**SPEC)
+        return GenerationJob.objects.create(mode="scaffolding", created_by=UserFactory(), app_requirement=app)
+
+    def test_not_applicable_is_ungraded_not_zero(self):
+        from backend.generation.models import GenerationJob
+        from backend.generation.services.evaluation import runner
+        from backend.users.tests.factories import UserFactory
+
+        job = GenerationJob.objects.create(mode="scaffolding", created_by=UserFactory())
+        with mock.patch.object(runner.Evaluation, "run", return_value={"status": "not_applicable"}):
+            runner.evaluate_job(job)
+        job.refresh_from_db()
+        assert job.metrics["functional"]["pass_rate"] is None
+
+    def test_docker_client_errors_are_infra_build_step_errors_are_the_samples(self):
+        import requests
+
+        from backend.generation.services.evaluation import runner
+
+        evaluation = runner.Evaluation(self._job())
+        evaluation.client = mock.MagicMock()
+        evaluation.client.api.build.side_effect = requests.exceptions.ConnectionError("Max retries exceeded")
+        ok, _log, client_error = evaluation._docker_build("build-ctx")
+        assert (ok, client_error is not None) == (False, True)
+
+        evaluation.client.api.build.side_effect = None
+        evaluation.client.api.build.return_value = iter([{"stream": "Step 1"}, {"error": "pip: no matching dist"}])
+        ok, log, client_error = evaluation._docker_build("build-ctx")
+        assert (ok, client_error) == (False, None)
+        assert "no matching dist" in log
+
+        with (
+            mock.patch.object(runner, "prepare_build_dir"),
+            mock.patch.object(runner.Evaluation, "_docker_build", return_value=(False, "ERROR: x", "APIError: 500")),
+        ):
+            build = evaluation._build()
+        assert build["infra_suspected"] is True
+        assert len(build["attempts"]) == 2  # retried once, like a registry outage
+        with (
+            mock.patch.object(runner, "prepare_build_dir"),
+            mock.patch.object(runner.Evaluation, "_docker_build", return_value=(False, "ERROR: bad import", None)),
+        ):
+            assert evaluation._build()["infra_suspected"] is False
+        assert runner._INFRA_PATTERNS.search("write /var/lib/docker/x: no space left on device")
+
+    def _run_with_tester_timeout(self, probe_output: bytes):
+        import requests
+
+        from backend.generation.services.evaluation import runner
+
+        client = mock.MagicMock()
+        app = mock.MagicMock()
+        app.attrs = {"State": {"Status": "running"}}
+        app.logs.return_value = b"slow"
+        tester = mock.MagicMock()
+        tester.wait.side_effect = requests.exceptions.ReadTimeout("read timed out")
+        tester.status = "running"
+        tester.exec_run.return_value = (0, probe_output)
+        client.containers.create.side_effect = [app, tester]
+        with (
+            mock.patch.object(runner.docker_manager, "new_client", return_value=client),
+            mock.patch.object(runner, "ensure_image", return_value=("tester:tag", "sha256:t")),
+            mock.patch.object(runner, "get_stack_config", return_value={"has_frontend": False}),
+            mock.patch.object(runner, "resolve_stack_slug", return_value="generic-python"),
+            mock.patch.object(runner.Evaluation, "_build", return_value={"ok": True}),
+        ):
+            return runner.Evaluation(self._job()).run()
+
+    def test_tester_timeout_on_a_healthy_app_is_a_failed_sample(self):
+        outcome = self._run_with_tester_timeout(b"200\n")
+        assert outcome["status"] == "failed"
+        assert outcome["tester_timed_out"] is True
+        assert outcome["summary"]["pass_rate"] == 0.0
+        assert outcome["checks"][0]["name"] == "health responds 200"
+
+    def test_tester_timeout_without_confirmed_health_stays_infra(self):
+        outcome = self._run_with_tester_timeout(b"0\n")
+        assert outcome["status"] == "infra_error"
+        assert outcome["tester_timed_out"] is True

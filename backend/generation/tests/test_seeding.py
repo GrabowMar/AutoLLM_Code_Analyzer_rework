@@ -98,6 +98,30 @@ def test_seed_requirements_bumps_version_field_on_change():
     assert req.version == 2
 
 
+def test_seed_requirements_stores_v3_models_schema_version_and_a_matching_hash():
+    import json
+
+    from backend.generation.seeding import REQUIREMENTS_DIR
+    from backend.generation.services.profile_resolver import app_requirement_to_dict
+    from backend.generation.services.spec_models import requirement_content_hash
+    from backend.generation.services.spec_models import row_content_hash
+
+    seed_requirements()
+    data = json.loads((REQUIREMENTS_DIR / "crud_book_library.json").read_text(encoding="utf-8"))
+    req = AppRequirementTemplate.objects.get(slug="crud_book_library")
+    assert req.spec_schema_version == 3
+    assert req.data_model == data["data_models"]
+    assert req.content_hash == requirement_content_hash(data) == row_content_hash(req)
+    app = app_requirement_to_dict(req)
+    assert app["version"] == req.version
+    assert app["content_hash"] == req.content_hash
+    assert [m["name"] for m in app["data_models"]] == ["Book", "Review"]
+
+    seed_requirements()
+    req.refresh_from_db()
+    assert req.version == 1
+
+
 def test_seed_requirements_does_not_ingest_schema_json_as_a_spec():
     """schema.json lives alongside the *.json specs it validates; it must not be seeded as one."""
     seed_requirements()

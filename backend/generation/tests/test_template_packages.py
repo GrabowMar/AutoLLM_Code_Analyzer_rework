@@ -700,3 +700,83 @@ def test_app_spec_api_validates_against_the_schema():
     )
     assert emptied.status_code == 400
     assert "api_endpoints" in emptied.json()["detail"]
+
+
+def _v3_spec(slug: str, **extra) -> dict:
+    """A minimal spec schema v3 app spec (two models) that meets the v3 conventions."""
+    return {
+        **_spec(slug),
+        "spec_schema_version": 3,
+        "backend_requirements": ["Access control: anyone may list things; require auth for creating things"],
+        "api_endpoints": [
+            {
+                "method": "GET",
+                "path": "/api/things",
+                "description": "List",
+                "auth": "public",
+                "query": {"tag": "Only this tag"},
+                "response": {"items": [], "total": 0},
+            },
+            {
+                "method": "POST",
+                "path": "/api/things",
+                "description": "Create",
+                "auth": "user",
+                "success_status": 201,
+                "request": {"name": "string"},
+                "response": {"id": 1},
+            },
+            {"method": "GET", "path": "/api/health", "description": "Health", "auth": "public"},
+        ],
+        "data_model": None,
+        "data_models": [
+            {"name": "Thing", "fields": {"id": "integer"}},
+            {"name": "Tag", "description": "A label", "fields": {"id": "integer", "label": "string"}},
+        ],
+        **extra,
+    }
+
+
+def test_v3_app_spec_round_trips_data_models_through_export_and_import():
+    from backend.generation.models import AppRequirementTemplate
+
+    owner = UserFactory()
+    client = _client(owner)
+    spec = {k: v for k, v in _v3_spec("v3_app").items() if v is not None}
+    assert _import(client, _package(app_specs=[spec])).status_code == 200
+    row = AppRequirementTemplate.objects.get(slug="v3_app")
+    assert row.data_model == spec["data_models"]
+    assert row.spec_schema_version == 3
+    assert row.content_hash
+
+    exported = _export(client, {"app_template_slugs": ["v3_app"]})["assets"]["app_specs"][0]
+    assert exported["data_models"] == spec["data_models"]
+    assert "data_model" not in exported
+    assert exported["spec_schema_version"] == 3
+    assert exported["api_endpoints"][1]["success_status"] == 201
+
+    # Re-importing identical content reuses the row; changed content overwrites in place, next version.
+    assert _import(client, _package(app_specs=[exported]), "overwrite").json()["app_specs"] == ["v3_app"]
+    row.refresh_from_db()
+    assert row.version == 1
+    changed = {**exported, "data_models": exported["data_models"][:1]}
+    assert _import(client, _package(app_specs=[changed]), "overwrite").json()["app_specs"] == ["v3_app"]
+    row.refresh_from_db()
+    assert row.version == 2
+    assert row.data_model == changed["data_models"]
+
+
+def test_v3_conventions_apply_on_import_but_legacy_specs_still_import():
+    client = _client(UserFactory())
+    broken = {k: v for k, v in _v3_spec("v3_broken").items() if v is not None}
+    broken["api_endpoints"] = broken["api_endpoints"][:2]  # no /api/health
+    response = _import(client, _package(app_specs=[broken]))
+    assert response.status_code == 400
+    assert "/api/health" in response.json()["detail"]
+
+    # A v2 spec: one data_model, no auth fields, no health endpoint.
+    legacy = _import(client, _package(app_specs=[_spec("legacy_app", spec_schema_version=2)]))
+    assert legacy.status_code == 200, legacy.content
+    exported = _export(client, {"app_template_slugs": ["legacy_app"]})["assets"]["app_specs"][0]
+    assert exported["data_model"] == {"name": "Thing", "fields": {"id": "integer"}}
+    assert "data_models" not in exported

@@ -54,6 +54,9 @@ from backend.analysis.services.serialize import iso
 from backend.analysis.services.serialize import serialize_result
 from backend.common.pagination import paginate_queryset
 from backend.generation.models import GenerationJob
+from backend.statistics.services.dedup import RECORD_FIELDS
+from backend.statistics.services.dedup import cluster_findings
+from backend.statistics.services.dedup import finding_record
 
 # A batch (and its preview) analyzes at most this many apps.
 MAX_BATCH_APPS = 100
@@ -649,6 +652,7 @@ def list_findings(
     rule_id: str = Query(""),
     search: str = Query(""),
     sort: str = Query("severity"),
+    group: bool = Query(default=False, description="Collapse findings of one issue (several tools) into one item."),
 ):
     run = _get_run(request, run_id, related=False)
     qs = _findings_qs(
@@ -661,6 +665,8 @@ def list_findings(
         rule_id=rule_id,
         search=search,
     ).order_by(*_FINDING_SORTS.get(sort, _FINDING_SORTS["severity"]), "id")
+    if group:
+        return _grouped_findings(qs, page, per_page)
     page_qs, total, page, pages = paginate_queryset(qs, page, per_page)
     return {
         "items": [_serialize_finding(f) for f in page_qs],
@@ -668,6 +674,42 @@ def list_findings(
         "page": page,
         "per_page": per_page,
         "pages": pages,
+    }
+
+
+def _grouped_findings(qs, page: int, per_page: int) -> dict[str, Any]:
+    """One item per issue: its first finding in *qs* order, the rest as ``duplicates``.
+
+    Issues are the cross-tool clusters of the study statistics, built from the
+    filtered findings, and ordered by where their first finding sorts.
+    """
+    rows = list(qs.values(*RECORD_FIELDS))
+    clusters = cluster_findings([finding_record(r, "") for r in rows])
+    position = {r["id"]: i for i, r in enumerate(rows)}
+    ordered = sorted(clusters, key=lambda c: min(position[m["id"]] for m in c.members))
+    total = len(ordered)
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = max(1, min(page, pages))
+    window = ordered[(page - 1) * per_page : page * per_page]
+    ids = [m["id"] for c in window for m in c.members]
+    by_id = {f.id: f for f in Finding.objects.filter(id__in=ids).select_related("result")}
+    items = []
+    for c in window:
+        members = sorted((by_id[m["id"]] for m in c.members), key=lambda f: position[f.id])
+        items.append(
+            {
+                **_serialize_finding(members[0]),
+                "duplicates": [_serialize_finding(f) for f in members[1:]],
+                "issue_class": c.issue_class,
+            },
+        )
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": pages,
+        "findings_total": len(rows),
     }
 
 

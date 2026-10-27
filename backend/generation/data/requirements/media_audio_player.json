@@ -2,73 +2,125 @@
   "slug": "media_audio_player",
   "name": "Audio Player",
   "category": "Media",
-  "description": "Play and manage audio tracks",
+  "description": "Keep a shared library of audio tracks by link and play them in a browser player",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only tracks; require auth for upload/delete",
-    "1. Track model: id, title (required), artist, url (required), duration",
-    "2. GET /api/tracks - list tracks",
-    "3. POST /api/tracks - add track",
-    "4. DELETE /api/tracks/:id - delete track",
-    "5. Validate: url must be valid and duration non-negative"
+    "Access control: anyone may list tracks, play them and count plays; require auth for adding tracks, and only the user who added a track may delete it (403 otherwise); admin endpoints are restricted to the admin account",
+    "Tracks are stored as links: the app keeps each track's audio url and metadata and does not store or fetch audio files itself",
+    "Track validation: title is a required non-empty string of at most 200 characters, artist an optional string of at most 200 characters, url a required valid URL of at most 500 characters, duration an optional whole number of seconds from 0 to 86400",
+    "GET /api/tracks lists active tracks, newest first; ?query= matches title or artist case-insensitively, ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every matching track",
+    "POST /api/tracks/:id/plays adds one to the track's play_count; the player calls it when a track starts playing",
+    "DELETE /api/tracks/:id removes the track permanently",
+    "Deactivated tracks (is_active false) are left out of GET /api/tracks and answer 404 on the public track endpoints; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for another user's track or a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "Public guest player with CTA to sign in for management",
-    "1. Track list with play buttons",
-    "2. Audio player with progress bar",
-    "3. Current track display",
-    "4. Add track form",
-    "5. Delete track action"
+    "Everyone can browse and play tracks; signed-in users also get the add-track form and a delete control on their own tracks, and visitors see a 'Sign in to add tracks' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Track list: title, artist, duration (m:ss) and play count with a play button per track, a search box over title and artist, and previous/next paging",
+    "A player bar that stays visible while browsing: current title and artist, play/pause, previous/next through the listed tracks, and a seekable progress bar with elapsed and total time; it shows a clear message when a track's audio cannot be loaded",
+    "An add-track form (title, artist, url, duration) that shows the API's validation messages next to the form; delete asks for confirmation first"
+  ],
+  "admin_requirements": [
+    "Admin overview: every track, active or not, with total, active and inactive counts and the total number of plays",
+    "Toggle a track's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/tracks",
-      "description": "List tracks",
+      "description": "List active tracks, newest first, filtered and paged",
+      "auth": "public",
+      "query": {
+        "query": "Case-insensitive text matched against title and artist",
+        "page": "1-based page number (default 1)",
+        "page_size": "Tracks per page (default 20, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "title": "string",
-            "artist": "string",
-            "url": "string",
-            "duration": 180
+            "title": "Morning Tide",
+            "artist": "The Coastal Trio",
+            "url": "https://media.example.com/audio/morning-tide.mp3",
+            "duration": 214,
+            "play_count": 7,
+            "added_by": "listener1",
+            "created_at": "2026-01-15T10:30:00Z"
           }
         ],
-        "total": 1
+        "total": 1,
+        "page": 1,
+        "page_size": 20
       }
     },
     {
       "method": "POST",
       "path": "/api/tracks",
-      "description": "Create track",
+      "description": "Add a track as the signed-in user",
+      "auth": "user",
+      "success_status": 201,
       "request": {
         "title": "string",
-        "artist": "string",
+        "artist": "string (optional)",
         "url": "string",
-        "duration": 180
+        "duration": "integer (optional)"
       },
       "response": {
         "id": 1,
-        "title": "string",
-        "artist": "string",
-        "url": "string",
-        "duration": 180
+        "title": "Morning Tide",
+        "artist": "The Coastal Trio",
+        "url": "https://media.example.com/audio/morning-tide.mp3",
+        "duration": 214,
+        "play_count": 0,
+        "added_by": "listener1",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/tracks/:id",
+      "description": "One active track",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "title": "Morning Tide",
+        "artist": "The Coastal Trio",
+        "url": "https://media.example.com/audio/morning-tide.mp3",
+        "duration": 214,
+        "play_count": 7,
+        "added_by": "listener1",
+        "created_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "DELETE",
       "path": "/api/tracks/:id",
-      "description": "Delete track",
+      "description": "Delete one of your tracks",
+      "auth": "user",
+      "success_status": 204,
       "request": null,
-      "response": {}
+      "response": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/tracks/:id/plays",
+      "description": "Count one play of a track",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "play_count": 8
+      }
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -76,43 +128,57 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Track",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "title": "string (required)",
-      "artist": "string (optional)",
-      "url": "string (required)",
-      "duration": "integer (seconds, optional)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Track",
+      "description": "A linked audio track with its play count",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who added it; shown as added_by)",
+        "title": "string (required, max 200 chars)",
+        "artist": "string (optional, max 200 chars)",
+        "url": "string (required, a valid URL, max 500 chars)",
+        "duration": "integer (optional, seconds, 0 to 86400)",
+        "play_count": "integer (default 0)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the track from public endpoints)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any track"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/tracks",
-      "description": "Admin overview: list all tracks and counts",
+      "description": "Admin overview: every track with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
-        "inactive": 0
+        "items": [
+          {
+            "id": 1,
+            "title": "Morning Tide",
+            "artist": "The Coastal Trio",
+            "play_count": 7,
+            "added_by": "listener1",
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
+        "inactive": 0,
+        "plays": 7
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/tracks/:id/toggle",
-      "description": "Toggle track active status",
+      "description": "Flip a track's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

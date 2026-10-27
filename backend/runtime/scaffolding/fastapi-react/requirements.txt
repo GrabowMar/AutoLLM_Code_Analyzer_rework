@@ -1,10 +1,8 @@
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-sqlalchemy>=2.0.0
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
-# passlib 1.7.4 is incompatible with bcrypt>=4.1 (raises "password cannot be
-# longer than 72 bytes" during its backend self-test). Pin the last compatible
-# release. Remove once passlib ships a bcrypt 4.1+ compatible version.
-bcrypt==4.0.1
-python-multipart>=0.0.9
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+email-validator==2.3.0
+SQLAlchemy==2.1.6
+PyJWT==2.15.1
+pwdlib[argon2]==0.3.1
+python-multipart==0.0.32

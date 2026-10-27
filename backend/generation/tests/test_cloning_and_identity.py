@@ -21,6 +21,7 @@ from backend.generation.services.agent.snapshot import build_agent_snapshot
 from backend.generation.services.agent.snapshot import reseed_agent_snapshot
 from backend.generation.services.experiments import launch_experiment
 from backend.generation.services.job_cloning import CellTakenError
+from backend.generation.services.job_cloning import apply_pinned_snapshot
 from backend.generation.services.job_cloning import cell_seed
 from backend.generation.services.job_cloning import cell_taken_by
 from backend.generation.services.job_cloning import clone_job
@@ -399,6 +400,206 @@ class TestCloneCells:
         with mock.patch(JOBS_DISPATCH):
             res = client.post(f"{API}/jobs/{job.id}/retry/")
         assert GenerationJob.objects.get(id=res.json()["id"]).experiment_seed == 4242
+
+
+# ── retries keep the original's spec content and stack version ──────
+
+
+def _change_library(app, stack_slug="flask-react"):
+    """Edit *app* in place (as the seeder does) and add a newer builtin version of *stack_slug*."""
+    from backend.generation.models import AppRequirementTemplate
+
+    AppRequirementTemplate.objects.filter(id=app.id).update(
+        description="Rewritten task text",
+        backend_requirements=["Notes have a title and tags"],
+        version=app.version + 1,
+    )
+    latest = Stack.objects.filter(slug=stack_slug).order_by("-version").first()
+    newer = Stack.objects.get(pk=latest.pk)
+    newer.pk = None
+    newer.version = latest.version + 1
+    newer.content_hash = "f" * 64
+    newer.files = {**(latest.files or {}), "NEWER.txt": "newer skeleton\n"}
+    newer.save()
+    return latest, newer
+
+
+class TestRetryLibraryPins:
+    def test_agent_retry_keeps_spec_content_and_stack_version(self, user_client):
+        client, user = user_client
+        experiment, app, _c1, c2 = _agent_experiment(user)
+        _launch(experiment, user)
+        failed = experiment.jobs.get(condition=c2)
+        GenerationJob.objects.filter(id=failed.id).update(status=S.FAILED)
+        frozen = failed.resolved_bundle
+        old_stack, newer = _change_library(app)
+        assert frozen["stack"]["version"] == old_stack.version
+
+        # The stated stack runtimes changed too: the kept skeleton keeps the brief that describes it.
+        newer_summaries = {"flask-react": {"backend_summary": "The backend is a Flask 9 application."}}
+        with (
+            mock.patch(JOBS_DISPATCH),
+            mock.patch("backend.generation.services.agent.brief._stack_contracts", return_value=newer_summaries),
+        ):
+            res = client.post(f"{API}/jobs/{failed.id}/retry/")
+        assert res.status_code == 200, res.content
+        retry = GenerationJob.objects.get(id=res.json()["id"]).resolved_bundle
+        assert retry["brief"] == frozen["brief"]
+        assert "Flask 9" not in retry["brief"]["text"]
+        assert retry["app_requirement"] == frozen["app_requirement"]
+        assert retry["stack"] == frozen["stack"]
+        assert retry["brief"]["sha256"] == frozen["brief"]["sha256"]
+        assert (retry["prompt_hash"], retry["run_fingerprint"]) == (frozen["prompt_hash"], frozen["run_fingerprint"])
+        assert retry["library_pin"] == {
+            "source_job_id": str(failed.id),
+            "app_requirement": "pinned",
+            "app_requirement_version": frozen["app_requirement"]["version"],
+            "app_requirement_content_hash": frozen["app_requirement"]["content_hash"],
+            "stack_pinned": frozen["stack"],
+            "stack": "pinned",
+            "brief": "pinned",
+        }
+        # A fresh job for the same cell would run the new material.
+        app.refresh_from_db()
+        fresh = build_agent_snapshot(
+            app_requirement=app,
+            description="",
+            profile=None,
+            stack_slug="flask-react",
+            model=c2.model,
+            max_tokens=None,
+            experiment_seed=failed.experiment_seed,
+            agent_overrides={"harness": "aider"},
+        )
+        assert fresh["stack"]["version"] == newer.version
+        assert fresh["app_requirement"]["content_hash"] != frozen["app_requirement"]["content_hash"]
+        assert fresh["run_fingerprint"] != frozen["run_fingerprint"]
+
+    def test_a_removed_stack_version_falls_back_to_the_latest_and_says_so(self, user_client):
+        client, user = user_client
+        experiment, app, _c1, c2 = _agent_experiment(user)
+        _launch(experiment, user)
+        failed = experiment.jobs.get(condition=c2)
+        GenerationJob.objects.filter(id=failed.id).update(status=S.FAILED)
+        old_stack, newer = _change_library(app)
+        old_stack.delete()
+
+        with mock.patch(JOBS_DISPATCH):
+            res = client.post(f"{API}/jobs/{failed.id}/retry/")
+        assert res.status_code == 200, res.content
+        retry = GenerationJob.objects.get(id=res.json()["id"]).resolved_bundle
+        assert retry["stack"]["version"] == newer.version
+        assert retry["app_requirement"] == failed.resolved_bundle["app_requirement"]
+        pin = retry["library_pin"]
+        assert (pin["app_requirement"], pin["stack"]) == ("pinned", "latest")
+        assert pin["stack_pinned"]["version"] == old_stack.version
+        assert pin["stack_reason"] == "the pinned stack version no longer exists with that content"
+        # Re-rendered for the stack it now runs on.
+        assert "brief" not in pin
+        # Different skeleton, so not the same run configuration.
+        assert retry["run_fingerprint"] != failed.resolved_bundle["run_fingerprint"]
+
+    def test_scaffolding_retry_keeps_spec_content_and_stack_version(self, user_client):
+        client, user = user_client
+        experiment, app, _c1, c2 = _scaffolding_experiment(user, base_seed=99)
+        _launch(experiment, user)
+        failed = experiment.jobs.get(condition=c2)
+        GenerationJob.objects.filter(id=failed.id).update(status=S.FAILED)
+        frozen = failed.resolved_bundle
+        _change_library(app, frozen["scaffolding_slug"])
+
+        with mock.patch(JOBS_DISPATCH):
+            res = client.post(f"{API}/jobs/{failed.id}/retry/")
+        assert res.status_code == 200, res.content
+        retry_job = GenerationJob.objects.get(id=res.json()["id"])
+        retry = retry_job.resolved_bundle
+        assert retry["app_requirement"] == frozen["app_requirement"]
+        assert retry["stack"] == frozen["stack"]
+        # The backend prompts are rendered from the kept spec, so the task material is identical.
+        assert retry["prompts"]["backend"] == frozen["prompts"]["backend"]
+        assert retry_job.prompt_hash == retry["prompt_hash"] == frozen["prompt_hash"]
+        assert retry["run_fingerprint"] == frozen["run_fingerprint"]
+        assert (retry["library_pin"]["app_requirement"], retry["library_pin"]["stack"]) == ("pinned", "pinned")
+
+    @pytest.mark.parametrize("mode", ["scaffolding", "agent"])
+    def test_top_up_cells_keep_the_content_their_siblings_froze(self, user_client, mode):
+        # A relaunch refilling a failed cell must not move it to library content
+        # updated since the experiment's other cells froze theirs.
+        _client, user = user_client
+        if mode == "agent":
+            experiment, app, _c1, c2 = _agent_experiment(user)
+        else:
+            experiment, app, _c1, c2 = _scaffolding_experiment(user, base_seed=99)
+        _launch(experiment, user)
+        failed = experiment.jobs.get(condition=c2)
+        frozen = failed.resolved_bundle
+        GenerationJob.objects.filter(id=failed.id).update(status=S.FAILED)
+        _change_library(app, frozen.get("scaffolding_slug") or "flask-react")
+
+        _launch(experiment, user)
+        refill = experiment.jobs.filter(condition=c2).exclude(id=failed.id).get().resolved_bundle
+        assert refill["app_requirement"] == frozen["app_requirement"]
+        assert refill["stack"] == frozen["stack"]
+        assert refill["config_fingerprint"] == frozen["config_fingerprint"]
+        assert refill["library_pin"]["source_job_id"] == str(failed.id)
+        assert refill["library_pin"]["via"] == "experiment_top_up"
+
+    def test_scaffolding_snapshots_frozen_before_the_context_version_keep_version_1(self, user_client):
+        _client, user = user_client
+        experiment, _app, _c1, c2 = _scaffolding_experiment(user, base_seed=99)
+        _launch(experiment, user)
+        job = experiment.jobs.get(condition=c2)
+        assert job.resolved_bundle["frontend_context_version"] == 2
+        legacy = {k: v for k, v in job.resolved_bundle.items() if k != "frontend_context_version"}
+        GenerationJob.objects.filter(id=job.id).update(resolved_bundle=legacy)
+        job.refresh_from_db()
+
+        apply_pinned_snapshot(job, job)
+        job.refresh_from_db()
+        assert "frontend_context_version" not in job.resolved_bundle
+
+    @pytest.mark.parametrize("mode", ["scaffolding", "agent"])
+    def test_refreezing_a_pending_job_in_place_keeps_its_spec_and_stack(self, user_client, mode):
+        # Accepting digest drift re-freezes pending jobs with source == job.
+        _client, user = user_client
+        if mode == "agent":
+            experiment, app, _c1, c2 = _agent_experiment(user)
+        else:
+            experiment, app, _c1, c2 = _scaffolding_experiment(user, base_seed=99)
+        _launch(experiment, user)
+        job = experiment.jobs.get(condition=c2)
+        frozen = job.resolved_bundle
+        _change_library(app, frozen.get("scaffolding_slug") or "flask-react")
+
+        apply_pinned_snapshot(job, job)
+        job.refresh_from_db()
+        assert job.resolved_bundle["app_requirement"] == frozen["app_requirement"]
+        assert job.resolved_bundle["stack"] == frozen["stack"]
+        assert job.resolved_bundle["library_pin"]["source_job_id"] == str(job.id)
+        assert (
+            job.resolved_bundle["library_pin"]["app_requirement"],
+            job.resolved_bundle["library_pin"]["stack"],
+        ) == (
+            "pinned",
+            "pinned",
+        )
+        assert job.prompt_hash == frozen["prompt_hash"]
+
+    def test_a_cell_that_never_froze_a_snapshot_resolves_the_live_spec(self, user_client):
+        client, user = user_client
+        experiment, app, _c1, c2 = _agent_experiment(user)
+        _launch(experiment, user)
+        broken = experiment.jobs.get(condition=c2)
+        GenerationJob.objects.filter(id=broken.id).update(status=S.FAILED, resolved_bundle={})
+        _change_library(app)
+
+        with mock.patch(JOBS_DISPATCH):
+            res = client.post(f"{API}/jobs/{broken.id}/retry/")
+        assert res.status_code == 200, res.content
+        retry = GenerationJob.objects.get(id=res.json()["id"]).resolved_bundle
+        assert retry["app_requirement"]["description"] == "Rewritten task text"
+        assert retry["library_pin"]["app_requirement"] == "live"
+        assert retry["library_pin"]["stack"] == "latest"
 
 
 # ── rerun keeps the frozen gateway ───────────────────────────────────
