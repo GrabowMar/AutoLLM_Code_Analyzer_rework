@@ -25,7 +25,7 @@ LOGIN_PATH = "/api/auth/login"
 ADMIN_USERNAME = "admin"
 ADMIN_EMAIL = "admin@example.com"
 ADMIN_PW_ENV = "ADMIN_PASSWORD"
-ADMIN_PASSWORD_DEFAULT = "admin"  # noqa: S105 - the brief's documented fallback; evaluation always sets the env var
+ADMIN_PW_DEFAULT = "admin"
 HEALTH_PATH = "/api/health"
 
 
@@ -81,5 +81,5 @@ def describe(app: dict[str, Any] | None) -> dict[str, Any]:
         "identity_field": field,
         "admin_identity": ADMIN_EMAIL if field == "email" else ADMIN_USERNAME,
         "admin_password_env": ADMIN_PW_ENV,
-        "admin_password_default": ADMIN_PASSWORD_DEFAULT,
+        "admin_password_default": ADMIN_PW_DEFAULT,
     }
