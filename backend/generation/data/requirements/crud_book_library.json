@@ -2,42 +2,146 @@
   "slug": "crud_book_library",
   "name": "Book Library",
   "category": "CRUD",
-  "description": "Track your book collection",
+  "description": "Catalogue a shared book collection and collect reader reviews",
   "difficulty": "standard",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "1. Book model: id, title (required), author (required), year (integer, optional), isbn (optional)",
-    "2. CRUD endpoints: GET /api/books, POST /api/books, PUT /api/books/:id, DELETE /api/books/:id",
-    "3. Search support: ?query=text searches title and author",
-    "4. Input validation: title and author required, year must be 4 digits",
-    "5. JSON responses with proper status codes (200, 201, 400, 404)",
-    "Access control: allow public read-only book listings; require auth for create/update/delete"
+    "Access control: anyone may read books and reviews; require auth for creating, updating and deleting books and for posting reviews; admin endpoints are restricted to the admin account",
+    "Books: any signed-in user may create, update and delete any book; DELETE /api/books/:id removes the book and its reviews permanently",
+    "Book validation: title and author are required non-empty strings of at most 255 characters; year, when given, is a whole number from 1000 to the current year; isbn, when given, is at most 20 characters",
+    "GET /api/books returns active books, newest first; ?query= matches title or author case-insensitively, ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every matching book",
+    "Every book in a response carries review_count and average_rating (the mean rating rounded to one decimal, null without reviews)",
+    "Reviews: POST /api/books/:id/reviews stores a rating (whole number 1-5) and an optional comment of at most 1000 characters for the signed-in user; a user reviews a book at most once (a second review answers 409)",
+    "Deactivated books (is_active false) are left out of GET /api/books and answer 404 on the public book endpoints; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids, 409 for a duplicate review"
   ],
   "frontend_requirements": [
-    "HomePage displays ALL books in read-only mode for public users",
-    "Public users see 'Sign in to add books' CTAs instead of action buttons",
-    "Logged-in users see same content plus create/edit/delete functionality",
-    "1. Book list table with columns: title, author, year (visible to all)",
-    "2. Add book form (logged-in only)",
-    "3. Edit button (logged-in only)",
-    "4. Delete button with confirmation (logged-in only)",
-    "5. Simple search box to filter books (visible to all)"
+    "Everyone sees the book list and book details read-only; signed-in users also get the add, edit, delete and review controls, and visitors see a 'Sign in to add books' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Book list: a table with title, author, year and average rating, a search box that filters by title or author, and previous/next paging",
+    "Book detail view: the book's fields, its reviews (username, rating, comment, date) and, for signed-in users, a form to post a rating with an optional comment",
+    "Add and edit book forms that show the API's validation messages next to the form; delete asks for confirmation first"
+  ],
+  "admin_requirements": [
+    "Admin overview: every book, active or not, with total, active and inactive counts",
+    "Toggle a book's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/books",
-      "description": "List all books",
+      "description": "List active books, newest first, filtered and paged",
+      "auth": "public",
+      "query": {
+        "query": "Case-insensitive text matched against title and author",
+        "page": "1-based page number (default 1)",
+        "page_size": "Books per page (default 20, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "title": "string",
-            "author": "string",
-            "year": 2020,
-            "isbn": "string",
-            "created_at": "ISO8601"
+            "title": "The Left Hand of Darkness",
+            "author": "Ursula K. Le Guin",
+            "year": 1969,
+            "isbn": "9780441478125",
+            "review_count": 2,
+            "average_rating": 4.5,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/books",
+      "description": "Create a book",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "title": "string",
+        "author": "string",
+        "year": "integer (optional)",
+        "isbn": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "title": "The Left Hand of Darkness",
+        "author": "Ursula K. Le Guin",
+        "year": 1969,
+        "isbn": "9780441478125",
+        "review_count": 0,
+        "average_rating": null,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/books/:id",
+      "description": "One active book",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "title": "The Left Hand of Darkness",
+        "author": "Ursula K. Le Guin",
+        "year": 1969,
+        "isbn": "9780441478125",
+        "review_count": 2,
+        "average_rating": 4.5,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/books/:id",
+      "description": "Replace a book's fields (title and author required; an omitted year or isbn is cleared)",
+      "auth": "user",
+      "request": {
+        "title": "string",
+        "author": "string",
+        "year": "integer (optional)",
+        "isbn": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "title": "The Left Hand of Darkness",
+        "author": "Ursula K. Le Guin",
+        "year": 1969,
+        "isbn": "9780441478125",
+        "review_count": 2,
+        "average_rating": 4.5,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/books/:id",
+      "description": "Delete a book and its reviews",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/books/:id/reviews",
+      "description": "Reviews of a book, newest first",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "book_id": 1,
+            "username": "reader1",
+            "rating": 5,
+            "comment": "Still feels new.",
+            "created_at": "2026-01-16T08:00:00Z"
           }
         ],
         "total": 1
@@ -45,53 +149,28 @@
     },
     {
       "method": "POST",
-      "path": "/api/books",
-      "description": "Create new book",
+      "path": "/api/books/:id/reviews",
+      "description": "Review a book as the signed-in user",
+      "auth": "user",
+      "success_status": 201,
       "request": {
-        "title": "string",
-        "author": "string",
-        "year": "integer (optional)",
-        "isbn": "string (optional)"
+        "rating": "integer",
+        "comment": "string (optional)"
       },
       "response": {
         "id": 1,
-        "title": "string",
-        "author": "string",
-        "year": 2020,
-        "isbn": "string",
-        "created_at": "ISO8601"
+        "book_id": 1,
+        "username": "reader1",
+        "rating": 5,
+        "comment": "Still feels new.",
+        "created_at": "2026-01-16T08:00:00Z"
       }
-    },
-    {
-      "method": "PUT",
-      "path": "/api/books/:id",
-      "description": "Update book",
-      "request": {
-        "title": "string (optional)",
-        "author": "string (optional)",
-        "year": "integer (optional)",
-        "isbn": "string (optional)"
-      },
-      "response": {
-        "id": 1,
-        "title": "string",
-        "author": "string",
-        "year": 2020,
-        "isbn": "string",
-        "created_at": "ISO8601"
-      }
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/books/:id",
-      "description": "Delete book",
-      "request": null,
-      "response": {}
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -99,43 +178,65 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Book",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "title": "string (required, max 255 chars)",
-      "author": "string (required, max 255 chars)",
-      "year": "integer (optional, 4 digits)",
-      "isbn": "string (optional, max 20 chars)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Book",
+      "description": "A catalogued book; review_count and average_rating are computed from its reviews",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "title": "string (required, max 255 chars)",
+        "author": "string (required, max 255 chars)",
+        "year": "integer (optional, 1000 to the current year)",
+        "isbn": "string (optional, max 20 chars)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the book from public endpoints)"
+      }
+    },
+    {
+      "name": "Review",
+      "description": "One user's rating of one book",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "book_id": "integer (references Book.id; deleted with the book)",
+        "user_id": "integer (references the signed-in user who wrote it; one review per user and book)",
+        "rating": "integer (required, 1-5)",
+        "comment": "string (optional, max 1000 chars)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any book"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/books",
-      "description": "Admin overview: list all books and counts",
+      "description": "Admin overview: every book with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "title": "The Left Hand of Darkness",
+            "author": "Ursula K. Le Guin",
+            "is_active": true,
+            "review_count": 2,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/books/:id/toggle",
-      "description": "Toggle book active status",
+      "description": "Flip a book's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

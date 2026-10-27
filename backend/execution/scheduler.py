@@ -110,7 +110,13 @@ SET status = 'running', phase = 'running', started_at = now(), lease_owner = %(o
            'started_seq', nextval('execution_start_seq'),
            'queued_at', queued_at,
            'claimed_at', now(),
-           'queue_seconds', round(extract(epoch FROM now() - queued_at)::numeric, 2),
+           'queue_seconds', round(extract(epoch FROM now() - (
+             CASE WHEN attempt > 0
+                  -- a retried attempt waits from when it became eligible again (requeue + backoff),
+                  -- not from the first attempt's queued_at
+                  THEN greatest(coalesce((execution->>'requeued_at')::timestamptz, queued_at),
+                                coalesce(run_after, queued_at))
+                  ELSE queued_at END))::numeric, 2),
            'executor', %(owner)s::text)
       || coalesce((%(extras)s::jsonb) -> (id::text), '{}'::jsonb)
 WHERE id = ANY(%(ids)s::uuid[])

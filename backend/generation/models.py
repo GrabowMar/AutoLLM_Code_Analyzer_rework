@@ -36,6 +36,8 @@ class AppRequirementTemplate(models.Model):
         blank=True,
     )
     api_endpoints = models.JSONField(_("API endpoints"), default=list, blank=True)
+    # The spec's own form: a legacy single {name, fields} object, or a schema
+    # v3 ``data_models`` list. Read it through spec_models.normalize_data_models.
     data_model = models.JSONField(_("data model"), default=dict, blank=True)
     admin_api_endpoints = models.JSONField(
         _("admin API endpoints"),

@@ -2,95 +2,136 @@
   "slug": "crud_todo_list",
   "name": "Todo List",
   "category": "Productivity",
-  "description": "Track personal tasks",
+  "description": "Keep a private list of personal tasks with priorities and due dates",
   "difficulty": "standard",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only todos; require auth for create/update/delete",
-    "1. Todo model: id, title (required), description, priority, completed, created_at",
-    "2. GET /api/todos - list todos",
-    "3. POST /api/todos - create todo",
-    "4. PUT /api/todos/:id - update todo",
-    "5. DELETE /api/todos/:id - delete todo"
+    "Access control: require auth for every todo endpoint; each signed-in user sees and changes only their own todos; admin endpoints are restricted to the admin account",
+    "Todo validation: title is a required non-empty string of at most 255 characters; description, when given, is at most 2000 characters; priority is one of low, medium, high (default medium); due_date, when given, is a date (YYYY-MM-DD); completed defaults to false",
+    "GET /api/todos returns the user's active todos, open ones first, then by due_date (todos without one last), then newest first; ?completed=true or false and ?priority= filter the list, ?page= and ?page_size= page it (page_size default 50, at most 200), total counts every matching todo and remaining counts the user's open todos regardless of filters",
+    "PATCH /api/todos/:id changes only the fields it is given (title, description, priority, due_date, completed); sending due_date null clears it; completed_at is set when a todo becomes completed and cleared when it is reopened",
+    "DELETE /api/todos/:id removes the todo permanently",
+    "Deactivated todos (is_active false) are left out of the owner's list and answer 404 on the todo endpoints; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "HomePage displays ALL todos in read-only mode for public users",
-    "Public users see 'Sign in to manage' CTAs instead of action buttons",
-    "Logged-in users see same content plus create/edit/delete functionality",
-    "1. Todo list with title, priority, and status (visible to all)",
-    "2. Add todo form (logged-in only)",
-    "3. Toggle completed checkbox (logged-in only)",
-    "4. Edit and delete buttons per todo (logged-in only)",
-    "5. Filters for All / Active / Completed (visible to all)"
+    "Visitors see a short description of the app and a 'Sign in to keep your todo list' prompt; the list and every control are for signed-in users",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Todo list: each todo shows its title, priority, due date (overdue open todos are highlighted) and a completed checkbox that saves immediately; a counter shows how many todos remain open",
+    "Filter tabs for All, Active and Completed, a priority filter, and a 'Load more' button when more todos exist",
+    "An add form (title, optional description, priority, optional due date) and inline editing of a todo, both showing the API's validation messages; delete asks for confirmation first"
+  ],
+  "admin_requirements": [
+    "Admin overview: every user's todos, active or not, with the owner's username and total, active and inactive counts",
+    "Toggle a todo's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/todos",
-      "description": "List all todos",
+      "description": "List the signed-in user's active todos, filtered and paged",
+      "auth": "user",
+      "query": {
+        "completed": "true for completed todos, false for open ones (default: both)",
+        "priority": "Only todos of this priority (low, medium or high)",
+        "page": "1-based page number (default 1)",
+        "page_size": "Todos per page (default 50, at most 200)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "title": "string",
-            "description": "string",
-            "priority": "medium",
+            "title": "Renew passport",
+            "description": "Photos are in the desk drawer.",
+            "priority": "high",
+            "due_date": "2026-03-01",
             "completed": false,
-            "created_at": "ISO8601"
+            "completed_at": null,
+            "created_at": "2026-01-15T10:30:00Z"
           }
         ],
-        "total": 1
+        "total": 1,
+        "remaining": 1,
+        "page": 1,
+        "page_size": 50
       }
     },
     {
       "method": "POST",
       "path": "/api/todos",
-      "description": "Create new todo",
+      "description": "Create a todo for the signed-in user",
+      "auth": "user",
+      "success_status": 201,
       "request": {
         "title": "string",
-        "description": "string",
-        "priority": "low|medium|high"
+        "description": "string (optional)",
+        "priority": "string (low|medium|high)",
+        "due_date": "YYYY-MM-DD"
       },
       "response": {
         "id": 1,
-        "title": "string",
-        "description": "string",
-        "priority": "medium",
+        "title": "Renew passport",
+        "description": "Photos are in the desk drawer.",
+        "priority": "high",
+        "due_date": "2026-03-01",
         "completed": false,
-        "created_at": "ISO8601"
+        "completed_at": null,
+        "created_at": "2026-01-15T10:30:00Z"
       }
     },
     {
-      "method": "PUT",
+      "method": "GET",
       "path": "/api/todos/:id",
-      "description": "Update todo",
+      "description": "One of the signed-in user's todos",
+      "auth": "user",
+      "request": null,
+      "response": {
+        "id": 1,
+        "title": "Renew passport",
+        "description": "Photos are in the desk drawer.",
+        "priority": "high",
+        "due_date": "2026-03-01",
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/todos/:id",
+      "description": "Change some of a todo's fields (every field optional)",
+      "auth": "user",
       "request": {
-        "title": "string",
-        "description": "string",
-        "priority": "low|medium|high",
-        "completed": true
+        "title": "string (optional)",
+        "priority": "string (low|medium|high)",
+        "completed": "boolean (optional)"
       },
       "response": {
         "id": 1,
-        "title": "string",
-        "description": "string",
-        "priority": "medium",
+        "title": "Renew passport",
+        "description": "Photos are in the desk drawer.",
+        "priority": "high",
+        "due_date": "2026-03-01",
         "completed": true,
-        "created_at": "ISO8601"
+        "completed_at": "2026-02-20T18:05:00Z",
+        "created_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "DELETE",
       "path": "/api/todos/:id",
-      "description": "Delete todo",
+      "description": "Delete a todo",
+      "auth": "user",
+      "success_status": 204,
       "request": null,
-      "response": {}
+      "response": null
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -98,39 +139,52 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Todo",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "title": "string (required, max 255 chars)",
-      "description": "text (optional)",
-      "priority": "string (low, medium, high - default: medium)",
-      "completed": "boolean (default: false)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Todo",
+      "description": "One task on a user's private list",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who owns it)",
+        "title": "string (required, max 255 chars)",
+        "description": "text (optional, max 2000 chars)",
+        "priority": "string (one of: low, medium, high; default medium)",
+        "due_date": "date (optional, YYYY-MM-DD)",
+        "completed": "boolean (default false)",
+        "completed_at": "datetime (optional; set when completed, cleared when reopened; ISO 8601 in JSON)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the todo from its owner)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any todo"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/todos",
-      "description": "Admin overview: list all todos and counts",
+      "description": "Admin overview: every user's todos with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "title": "Renew passport",
+            "username": "alice",
+            "completed": false,
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/todos/:id/toggle",
-      "description": "Toggle todo active status",
+      "description": "Flip a todo's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,

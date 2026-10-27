@@ -303,12 +303,22 @@ class PaginatedRunsSchema(Schema):
     pages: int
 
 
+class GroupedFindingSchema(FindingSchema):
+    # With group=true: the other findings (often of other tools) that report the
+    # same issue (statistics.services.dedup), and that issue's class.
+    duplicates: list[FindingSchema] = []
+    issue_class: str = ""
+
+
 class PaginatedFindingsSchema(Schema):
-    items: list[FindingSchema]
+    items: list[GroupedFindingSchema]
+    # Issues when grouped, else findings.
     total: int
     page: int
     per_page: int
     pages: int
+    # With group=true: the findings behind the `total` issues.
+    findings_total: int | None = None
 
 
 class FacetValueSchema(Schema):

@@ -2,89 +2,167 @@
   "slug": "education_quiz_app",
   "name": "Quiz Application",
   "category": "Education",
-  "description": "Take multiple choice quizzes",
-  "difficulty": "basic",
-  "spec_schema_version": 2,
+  "description": "Take short random multiple-choice quizzes, review the answers, and keep a history of saved attempts",
+  "difficulty": "standard",
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public quiz taking; restrict quiz creation and results history to authenticated users",
-    "1. Question model: id, question_text (required), options (JSON array), correct_answer (integer index)",
-    "2. GET /api/quiz/questions - return 5-10 random questions",
-    "3. POST /api/quiz/submit - accept answers array, return score and correct answers",
-    "4. Seed with 20+ sample questions",
-    "5. GET /api/quiz/review/:id - return quiz results for review"
+    "Access control: anyone may draw a quiz and submit answers; require auth for adding questions and for the attempt history (an attempt is saved only for a signed-in user, who alone can read it); admin endpoints are restricted to the admin account",
+    "Questions have a text, four options (option_a to option_d) and a correct_option (one of A, B, C, D); on first start with no questions, seed at least 20 general-knowledge questions (ids from 1)",
+    "Question validation: text is a required non-empty string of at most 500 characters; each option is a required non-empty string of at most 200 characters; correct_option must be A, B, C or D",
+    "GET /api/quiz returns ?count= random active questions (default 5, from 1 to 10; fewer when fewer exist), without their correct_option; total is the number of questions returned",
+    "POST /api/attempts scores a list of answers, each a question_id and the selected option (A to D): every question_id must be an active question and appear at most once, and at least one answer is required; score is the percentage of correct answers rounded to a whole number",
+    "The attempt response always lists every answered question with its text, options, the selected option, the correct_option and is_correct; for a signed-in user the attempt is saved and its id returned, for a visitor id is null and nothing is stored",
+    "GET /api/attempts lists the signed-in user's saved attempts, newest first; GET /api/attempts/:id returns one of them with the same results as the submit response",
+    "Deactivated questions (is_active false) are never drawn and cannot be answered in new attempts; saved attempts keep showing them; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "Public guest view for taking quizzes with CTA to sign in for saved results",
-    "1. Display one question at a time with radio buttons for options",
-    "2. 'Next' button to proceed, 'Submit' on last question",
-    "3. Show score after submission with correct/incorrect indicators",
-    "4. Review mode showing all questions with correct answers",
-    "5. 'Start New Quiz' button"
+    "Everyone can take quizzes; signed-in users also get the attempt history and the 'Add question' form, and visitors see a 'Sign in to save your results' prompt on the result screen",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Quiz view: one question at a time with its four options as radio buttons, a progress indicator ('Question 2 of 5'), 'Next' to move on and 'Submit' on the last question",
+    "Result view: the score as a percentage and the number correct, then every question with the chosen and the correct option marked, and a 'Start new quiz' button",
+    "History view: the user's saved attempts (date, score, number of questions); opening one shows its review",
+    "Add question form (text, four options, the correct option) that shows the API's validation messages"
+  ],
+  "admin_requirements": [
+    "Admin overview: every question, active or not, newest first, with its correct option and total, active and inactive counts",
+    "Toggle a question's active status from the overview"
   ],
   "api_endpoints": [
     {
+      "method": "POST",
+      "path": "/api/questions",
+      "description": "Add a question as the signed-in user",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "text": "string",
+        "option_a": "string",
+        "option_b": "string",
+        "option_c": "string",
+        "option_d": "string",
+        "correct_option": "string (A|B|C|D)"
+      },
+      "response": {
+        "id": 21,
+        "text": "Which planet has the shortest year?",
+        "option_a": "Mercury",
+        "option_b": "Venus",
+        "option_c": "Mars",
+        "option_d": "Neptune",
+        "correct_option": "A",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
       "method": "GET",
-      "path": "/api/quiz/questions",
-      "description": "Get random quiz questions",
+      "path": "/api/quiz",
+      "description": "Draw random active questions, without their answers",
+      "auth": "public",
+      "query": {
+        "count": "Number of questions (default 5, from 1 to 10)"
+      },
       "request": null,
       "response": {
-        "questions": [
+        "items": [
           {
             "id": 1,
-            "question": "string",
-            "options": [
-              "A",
-              "B",
-              "C",
-              "D"
-            ]
+            "text": "What is the chemical symbol for gold?",
+            "option_a": "Ag",
+            "option_b": "Au",
+            "option_c": "Gd",
+            "option_d": "Go"
           }
-        ]
+        ],
+        "total": 1
       }
     },
     {
       "method": "POST",
-      "path": "/api/quiz/submit",
-      "description": "Submit quiz answers and get score",
+      "path": "/api/attempts",
+      "description": "Score answers; saved as an attempt for a signed-in user",
+      "auth": "public",
+      "success_status": 201,
       "request": {
         "answers": [
           {
             "question_id": 1,
-            "answer": "string"
+            "selected": "string (A|B|C|D)"
           }
         ]
       },
       "response": {
-        "score": 75,
-        "total": 100,
-        "correct": 3,
-        "total_questions": 4,
+        "id": 1,
+        "score": 80,
+        "correct": 4,
+        "total_questions": 5,
+        "submitted_at": "2026-01-15T10:35:00Z",
         "results": [
           {
             "question_id": 1,
-            "correct": true,
-            "user_answer": "A",
-            "correct_answer": "A"
+            "text": "What is the chemical symbol for gold?",
+            "option_a": "Ag",
+            "option_b": "Au",
+            "option_c": "Gd",
+            "option_d": "Go",
+            "selected": "B",
+            "correct_option": "B",
+            "is_correct": true
           }
         ]
       }
     },
     {
       "method": "GET",
-      "path": "/api/quiz/review/:id",
-      "description": "Review quiz results",
+      "path": "/api/attempts",
+      "description": "The signed-in user's saved attempts, newest first",
+      "auth": "user",
       "request": null,
       "response": {
-        "score": 75,
-        "total": 100,
-        "submitted_at": "ISO8601",
-        "results": []
+        "items": [
+          {
+            "id": 1,
+            "score": 80,
+            "correct": 4,
+            "total_questions": 5,
+            "submitted_at": "2026-01-15T10:35:00Z"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/attempts/:id",
+      "description": "Review one of the signed-in user's attempts",
+      "auth": "user",
+      "request": null,
+      "response": {
+        "id": 1,
+        "score": 80,
+        "correct": 4,
+        "total_questions": 5,
+        "submitted_at": "2026-01-15T10:35:00Z",
+        "results": [
+          {
+            "question_id": 1,
+            "text": "What is the chemical symbol for gold?",
+            "option_a": "Ag",
+            "option_b": "Au",
+            "option_c": "Gd",
+            "option_d": "Go",
+            "selected": "B",
+            "correct_option": "B",
+            "is_correct": true
+          }
+        ]
       }
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -92,41 +170,78 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Question",
-    "fields": {
-      "id": "integer (primary key)",
-      "question": "text (required)",
-      "options": "JSON array (4 options)",
-      "correct_answer": "string (A-D, not exposed to frontend until submitted)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Question",
+      "description": "A multiple-choice question with four options; seeded on first start",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "text": "string (required, max 500 chars)",
+        "option_a": "string (required, max 200 chars)",
+        "option_b": "string (required, max 200 chars)",
+        "option_c": "string (required, max 200 chars)",
+        "option_d": "string (required, max 200 chars)",
+        "correct_option": "string (one of: A, B, C, D; left out of quiz draws)",
+        "user_id": "integer (optional; references the signed-in user who added it, null for seeded questions)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false keeps the question out of new quizzes)"
+      }
+    },
+    {
+      "name": "Attempt",
+      "description": "A signed-in user's scored quiz submission",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who submitted it)",
+        "score": "integer (0-100, percentage of correct answers)",
+        "correct": "integer (number of correct answers)",
+        "total_questions": "integer (number of answered questions)",
+        "submitted_at": "datetime (auto, ISO 8601 in JSON)"
+      }
+    },
+    {
+      "name": "AttemptAnswer",
+      "description": "One answered question within an attempt",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "attempt_id": "integer (references Attempt.id; deleted with the attempt)",
+        "question_id": "integer (references Question.id)",
+        "selected": "string (one of: A, B, C, D)",
+        "is_correct": "boolean"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any question"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/questions",
-      "description": "Admin overview: list all questions and counts",
+      "description": "Admin overview: every question with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 21,
+            "text": "Which planet has the shortest year?",
+            "correct_option": "A",
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 21,
+        "active": 21,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/questions/:id/toggle",
-      "description": "Toggle question active status",
+      "description": "Flip a question's active status",
+      "auth": "admin",
       "request": null,
       "response": {
-        "id": 1,
-        "is_active": true
+        "id": 21,
+        "is_active": false
       }
     }
   ]

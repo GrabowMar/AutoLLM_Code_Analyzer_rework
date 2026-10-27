@@ -15,6 +15,9 @@ from backend.generation.api.views._router import router
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.services.data_lint import app_spec_errors
 from backend.generation.services.packages import visible_app_templates_for
+from backend.generation.services.spec_models import requirement_content_hash
+from backend.generation.services.spec_models import row_content_hash
+from backend.generation.services.spec_models import stored_data_model
 from backend.generation.services.versioning import content_hash
 from backend.runtime.services.dockerfile_gen import generate_dockerfile
 from backend.runtime.services.scaffolding import load_manifest
@@ -270,15 +273,35 @@ def list_app_templates(request):
     return visible_app_templates_for(request.auth)
 
 
+def _app_spec_body(payload: AppRequirementCreateSchema, *, schema_version: int) -> dict:
+    """The spec document of *payload*: one of ``data_models``/``data_model``, and its schema version."""
+    body = payload.dict()
+    body["spec_schema_version"] = body.get("spec_schema_version") or schema_version
+    if body.get("data_models"):
+        body.pop("data_model", None)
+    else:
+        body.pop("data_models", None)
+    return body
+
+
+def _app_spec_row_values(body: dict) -> dict:
+    """Column values for a validated spec *body* (``data_model`` holds either form; see ``spec_models``)."""
+    values = {k: v for k, v in body.items() if k not in ("data_model", "data_models")}
+    values["data_model"] = stored_data_model(body)
+    values["content_hash"] = requirement_content_hash(body)
+    return values
+
+
 @router.post("/app-specs/", response={200: AppRequirementTemplateSchema, 400: dict})
 def create_app_template(request, payload: AppRequirementCreateSchema):
     # Slugs are unique across every owner; don't say whose it is.
     if AppRequirementTemplate.objects.filter(slug=payload.slug).exists():
         return 400, {"detail": f"App spec slug {payload.slug!r} is already in use."}
-    if errors := app_spec_errors(payload.dict(), label="App spec"):
+    body = _app_spec_body(payload, schema_version=1)
+    if errors := app_spec_errors(body, label="App spec"):
         return 400, {"detail": "; ".join(errors), "errors": errors}
     return 200, AppRequirementTemplate.objects.create(
-        **payload.dict(),
+        **_app_spec_row_values(body),
         created_by=request.auth,
     )
 
@@ -292,11 +315,16 @@ def get_app_template(request, slug: str):
 def update_app_template(request, slug: str, payload: AppRequirementCreateSchema):
     template = _mutable_template_or_403(request.auth, slug=slug)
     # The slug never changes (and may predate the snake_case rule).
-    body = {**payload.dict(), "slug": template.slug}
+    body = {**_app_spec_body(payload, schema_version=template.spec_schema_version), "slug": template.slug}
     if errors := app_spec_errors(body, label="App spec", check_slug=False):
         return 400, {"detail": "; ".join(errors), "errors": errors}
-    for attr, value in payload.dict(exclude={"slug"}).items():
-        setattr(template, attr, value)
+    values = _app_spec_row_values(body)
+    # One mutable row per slug, like the seeder: new content, next version.
+    if values["content_hash"] != row_content_hash(template):
+        values["version"] = template.version + 1
+    for attr, value in values.items():
+        if attr != "slug":
+            setattr(template, attr, value)
     template.save()
     return 200, template
 

@@ -3,67 +3,43 @@
 {{ description }}
 
 ## Task
-Generate `app.py` - a **comprehensive, production-quality** Flask API. Aim for **300+ lines** of well-structured code.
-
-**IMPORTANT: Do not copy basic generic patterns. Each application should feel distinct in its logic, variable naming, and internal structure.**
+Generate `app.py`: the complete Flask backend for this application. Implement every requirement and every endpoint below completely, with the request and response shapes shown.
 
 ## Requirements
 
 ### Features
-{% for req in backend_requirements %}
+{% for req in backend_requirements -%}
 - {{ req }}
 {% endfor %}
-
 ### Admin Features
-{% for req in admin_requirements %}
+{% for req in admin_requirements -%}
 - {{ req }}
 {% endfor %}
-
-### Data Model Context
+### Data Model
 {{ data_model }}
 
-### API Endpoints (Minimum required)
+### API Endpoints
 {{ api_endpoints }}
-
+{% if admin_api_endpoints %}
 {{ admin_api_endpoints }}
-
-## Implementation Requirements
-
-### 1. Rich and Unique Data Models
-Each model must have **6+ meaningful fields** beyond just 'id' and 'name'. Use domain-specific naming:
-- Domain-specific core fields (e.g., `payload_size`, `coordinate_x`, `serial_number`, `stock_level`)
-- ENUM-like status fields using strings (e.g., `DRAFT`, `VALIDATED`, `PROCESSED`, `ARCHIVED`)
-- Realistic metadata (timers, counters, flags)
-- Clear relationships if specified in requirements
-
-### 2. Specialized Public Endpoints
-Implement logical public endpoints that match the application category:
-- **Statistics**: Summary metrics relevant to the app's purpose.
-- **Discovery**: Endpoints to fetch "featured", "recent", or "trending" items for a landing page.
-- **Helpers**: Domain-specific logic (e.g., converters, validators, generators).
-
-### 3. Advanced Querying & Business Logic
-The main list endpoint must support:
-- **Search**: Multi-field search logic.
-- **Filtering**: At least 2 domain-specific filters.
-- **Sorting**: Flexible sorting on multiple fields.
-- **Pagination**: Standard industrial pagination (offset/limit).
-- **Domain Logic**: The code should not just be CRUD; implement the specific algorithms or logic implied by the app description.
-
-### 4. Realistic and Diverse Seed Data (15+ records)
-Create a `seed_data()` function that populates the DB with **15-20 highly varied** records:
-- Use realistic, descriptive strings, not "Test 1", "Test 2".
-- Diversity in statuses, timestamps (spread over weeks), and priorities.
-- Distribute items across different "owners" or "categories".
-
-### 5. Secure Admin & Authentication
-- Implement robust JWT or Session-based auth logic (mocked if necessary, but structurally present).
-- Admin endpoints must have decorator-based protection.
-- Admin dashboard should return a rich JSON structure with complex aggregation metrics.
-
-## Output Structure
-- One single `app.py` file.
-- Use Flask-SQLAlchemy, Flask-CORS, and standard Python libraries.
-- **Aim for 300+ lines.** If needed, expand on validation logic, helper functions, and detailed docstrings.
-
-**START GENERATION NOW.**
+{% endif %}
+## Runtime contract
+The platform builds the app, starts it with `python app.py` and checks the following automatically.
+- `GET {{ contract.health_path }}` returns HTTP 200 with a JSON body.
+- All API routes live under `/api/`, and the server listens on `0.0.0.0:8000`.
+- The built frontend is copied to `./static`: serve its files by path, and `index.html` for `/` and for every other non-API path (client-side routes).
+- Data lives in SQLite at `/app/data/app.db`; the app starts from an empty `data/` directory, so it creates its schema (and any seed data) at startup.
+{% if contract.accounts %}
+### Accounts
+{% if contract.spec_defines_auth -%}
+- Implement the register and login endpoints listed above. Login returns the token in a top-level `token` field.
+{% else -%}
+- `POST {{ contract.register_path }}` with JSON `{"{{ contract.identity_field }}": string, "password": string}` creates an account (HTTP 201).
+- `POST {{ contract.login_path }}` with the same JSON body returns HTTP 200 and `{"token": string}` (a top-level `token` field).
+{% endif -%}
+- Authenticated requests send `Authorization: Bearer <token>`.{% if contract.writes_require_auth %} Endpoints the requirements reserve for signed-in users answer HTTP 401 without a valid token.{% endif %}
+{% if contract.admin -%}
+- Endpoints under `/api/admin/` require an admin account. At startup, make sure an admin account `{{ contract.admin_identity }}` exists whose password is the value of the environment variable `{{ contract.admin_password_env }}` (use `"{{ contract.admin_password_default }}"` if it is unset); it signs in through the same login endpoint.
+{% endif -%}
+{% endif %}
+**Return the complete `app.py` now.**

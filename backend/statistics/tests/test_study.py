@@ -261,3 +261,53 @@ def test_failed_tool_is_not_measured(scope):
     ToolResultFactory(run=run, tool_slug="ruff", status=ToolResult.Status.FAILED)
     coverage = study.issue_breakdowns(study.study_jobs(user))["coverage"]
     assert coverage["tools_partial"]["ruff"] == {"apps_measured": 1, "apps_missing": 1, "failed": 1}
+
+
+def test_dependency_advisories_split_by_who_added_the_package():
+    from backend.runtime.models import Stack
+    from backend.statistics.services.dependencies import manifest_packages
+
+    Stack.objects.create(
+        slug="dep-stack",
+        version=1,
+        files={
+            "requirements.txt": "Flask-CORS==4.0.0\nPyJWT==2.8.0\n",
+            "frontend/package.json": '{"devDependencies": {"vite": "^5"}}',
+        },
+    )
+    user = UserFactory()
+    files = {
+        "app.py": "x = 1\n" * 100,
+        "requirements.txt": "flask_cors==4.0.0  # kept\nPyJWT==2.8.0\nrequests==2.0\n",
+    }
+    job = _job(
+        user,
+        LLMModelFactory(),
+        AppRequirementTemplateFactory(),
+        result_data={"files": files},
+        stack_slug="dep-stack",
+        resolved_bundle={"stack": {"slug": "dep-stack", "version": 1}},
+    )
+    assert manifest_packages(files) == {"flask-cors", "pyjwt", "requests"}
+    run = _run(job, {"bandit": [("B105", 10, "low")]})
+    osv = ToolResultFactory(run=run, tool_slug="osv-scanner")
+    for vuln, pkg in (("GHSA-1", "Flask-Cors"), ("GHSA-2", "requests"), ("GHSA-3", "esbuild")):
+        FindingFactory(
+            result=osv,
+            rule_id=vuln,
+            category="dependency",
+            line_number=None,
+            file_path="requirements.txt",
+            title=f"{pkg} {vuln}",
+            tool_specific_data={"package": pkg, "vuln_id": vuln},
+        )
+    data = study.issue_breakdowns(study.study_jobs(user), common_tools_only=False)
+    app = data["per_app"][0]
+    assert (app["unique_issues"], app["code_unique"], app["dependency_unique"], app["dependency_added"]) == (
+        4,
+        1,
+        3,
+        1,
+    )
+    # Only the code issue counts per kLOC (100 source lines).
+    assert app["unique_per_kloc"] == 10.0

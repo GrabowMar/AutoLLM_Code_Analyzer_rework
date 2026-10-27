@@ -668,3 +668,36 @@ def test_source_loc_ignores_lockfiles_manifests_and_docs():
         "frontend/dist/vendor.min.js": "x\n" * 100,
     }
     assert loc_from_files(files) == {"backend_loc": 2, "frontend_loc": 2, "total_loc": 4, "source_files": 3}
+
+
+def test_experiment_report_markdown_keeps_paired_rows_and_notes():
+    from backend.reports.services.renderers import render_markdown
+
+    data = {
+        "experiment": {"name": "E", "status": "completed", "repeats": 2},
+        "conditions": [
+            {"condition_id": 1, "label": "Base", "issues_dedup": {"apps": 2, "code_unique": 3}, "generation": {}},
+            {"condition_id": 2, "label": "Other", "issues_dedup": {"apps": 2, "code_unique": 5}, "generation": {}},
+        ],
+        "results": {
+            "baseline_condition_id": 1,
+            "baseline_source": "preregistered",
+            "leaderboard": [{"rank": 1, "label": "Base", "pass_rate_mean": 0.9}],
+            "paired": {
+                "status": "confirmatory",
+                "correction": "holm",
+                "alpha": 0.05,
+                "rows": [
+                    {"condition_id": 2, "n_pairs": 6, "mean_delta": -0.1, "wilcoxon_p": 0.03, "p_adjusted": 0.06},
+                ],
+            },
+            "notes": ["Every graded cell scored 1"],
+        },
+    }
+    report = Report(report_type=Report.Type.EXPERIMENT_REPORT, title="T", report_data=data)
+    md = render_markdown(report)
+    assert "## Paired vs baseline (confirmatory, two-sided)" in md
+    assert "| Other | 6 | -0.1 |" in md
+    assert "p (holm)" in md
+    assert "Every graded cell scored 1" in md
+    assert "Base (preregistered)" in md

@@ -2,68 +2,121 @@
   "slug": "fileproc_image_upload",
   "name": "Image Upload",
   "category": "File Processing",
-  "description": "Upload and view images",
+  "description": "Upload PNG and JPEG images to a shared public gallery and view them full size",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public gallery view; require auth for upload/delete",
-    "1. Image model: id, filename (required), url (required), uploaded_at",
-    "2. GET /api/images - list images",
-    "3. POST /api/images - upload image",
-    "4. DELETE /api/images/:id - delete image",
-    "5. Validate: allow only jpg/png and size limit"
+    "Access control: anyone may view the gallery and the image files; require auth for uploading images, and only the uploader may delete an image (403 for anyone else); admin endpoints are restricted to the admin account",
+    "POST /api/images takes a JSON body with filename (the original file name, required, at most 255 characters), data (the file's bytes, base64-encoded) and an optional title of at most 100 characters; the response describes the stored image",
+    "Accepted formats are PNG and JPEG; any other data, data that is not valid base64, or an empty file answers 400; files larger than 5 MB after decoding answer 413",
+    "Each stored image records its content_type (image/png or image/jpeg), size_bytes and a url (the path of GET /api/images/:id/file) the frontend can use directly in an image element",
+    "GET /api/images/:id/file returns the stored bytes unchanged with the image's content type; two uploads with the same filename are kept as separate images",
+    "GET /api/images returns active images, newest first; ?page= and ?page_size= page the result (page_size default 24, at most 100), and total counts every active image",
+    "DELETE /api/images/:id removes the image and its stored file permanently",
+    "Deactivated images (is_active false) are left out of GET /api/images and answer 404 on the public image endpoints, file included; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for deleting someone else's image or a non-admin on admin endpoints, 404 for unknown ids, 413 for files over 5 MB"
   ],
   "frontend_requirements": [
-    "Public gallery with CTA to sign in for uploads",
-    "1. Grid of image thumbnails",
-    "2. Upload form with file picker",
-    "3. Preview of selected image",
-    "4. Delete button per image",
-    "5. Empty state when no images"
+    "Everyone sees the gallery; signed-in users also get the upload form and a delete button on their own images, and visitors see a 'Sign in to upload images' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Gallery: a responsive grid of thumbnails with title (or filename), uploader and date, previous/next paging, and an empty state when there are no images",
+    "Clicking a thumbnail opens the image full size with its filename, title and file size",
+    "Upload form: a file picker limited to PNG and JPEG, an optional title, a preview of the chosen image before uploading, and the API's error message when an upload is rejected; delete asks for confirmation first"
+  ],
+  "admin_requirements": [
+    "Admin overview: every image, active or not, with uploader and size and total, active and inactive counts",
+    "Toggle an image's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/images",
-      "description": "List images",
+      "description": "List active images, newest first, paged",
+      "auth": "public",
+      "query": {
+        "page": "1-based page number (default 1)",
+        "page_size": "Images per page (default 24, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "filename": "string",
-            "url": "string",
-            "uploaded_at": "ISO8601"
+            "filename": "harbour-at-dusk.jpg",
+            "title": "Harbour at dusk",
+            "content_type": "image/jpeg",
+            "size_bytes": 482133,
+            "url": "/api/images/1/file",
+            "username": "photographer1",
+            "uploaded_at": "2026-01-15T10:30:00Z"
           }
         ],
-        "total": 1
+        "total": 1,
+        "page": 1,
+        "page_size": 24
       }
     },
     {
       "method": "POST",
       "path": "/api/images",
-      "description": "Upload image",
+      "description": "Upload an image (JSON body with the base64-encoded file)",
+      "auth": "user",
+      "success_status": 201,
       "request": {
-        "file": "multipart"
+        "filename": "pixel.png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        "title": "string (optional)"
       },
       "response": {
         "id": 1,
-        "filename": "string",
-        "url": "string",
-        "uploaded_at": "ISO8601"
+        "filename": "pixel.png",
+        "title": "A single pixel",
+        "content_type": "image/png",
+        "size_bytes": 70,
+        "url": "/api/images/1/file",
+        "username": "photographer1",
+        "uploaded_at": "2026-01-15T10:30:00Z"
       }
+    },
+    {
+      "method": "GET",
+      "path": "/api/images/:id",
+      "description": "One active image's details",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "filename": "harbour-at-dusk.jpg",
+        "title": "Harbour at dusk",
+        "content_type": "image/jpeg",
+        "size_bytes": 482133,
+        "url": "/api/images/1/file",
+        "username": "photographer1",
+        "uploaded_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/images/:id/file",
+      "description": "The stored image bytes, served with the image's content type (not JSON)",
+      "auth": "public",
+      "request": null,
+      "response": null
     },
     {
       "method": "DELETE",
       "path": "/api/images/:id",
-      "description": "Delete image",
+      "description": "Delete one of the signed-in user's images",
+      "auth": "user",
+      "success_status": 204,
       "request": null,
-      "response": {}
+      "response": null
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -71,41 +124,54 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Image",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "filename": "string (required)",
-      "url": "string (required)",
-      "uploaded_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Image",
+      "description": "An uploaded PNG or JPEG image; the bytes are stored by the app and served from its file endpoint",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who uploaded it)",
+        "filename": "string (required, max 255 chars; the original file name)",
+        "title": "string (optional, max 100 chars)",
+        "content_type": "string (one of: image/png, image/jpeg)",
+        "size_bytes": "integer (decoded size, at most 5 MB)",
+        "uploaded_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the image from public endpoints)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any image"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/images",
-      "description": "Admin overview: list all images and counts",
+      "description": "Admin overview: every image with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "filename": "harbour-at-dusk.jpg",
+            "username": "photographer1",
+            "size_bytes": 482133,
+            "is_active": true,
+            "uploaded_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/images/:id/toggle",
-      "description": "Toggle image active status",
+      "description": "Flip an image's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

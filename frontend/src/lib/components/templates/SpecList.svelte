@@ -17,7 +17,7 @@
 	import WandSparkles from '@lucide/svelte/icons/wand-sparkles';
 	import type { AppRequirementTemplate } from '$lib/api/generation';
 	import { tableFrame } from '$lib/components/table';
-	import { canEditSpec } from './spec';
+	import { canEditSpec, specDataModels } from './spec';
 
 	interface Props {
 		specs: AppRequirementTemplate[];
@@ -42,9 +42,9 @@
 		onOpen(s);
 	}
 
+	/** Fields across every data model (v3 specs may list several). */
 	function fieldCount(s: AppRequirementTemplate): number {
-		const fields = (s.data_model as { fields?: unknown } | null)?.fields;
-		return fields && typeof fields === 'object' ? Object.keys(fields).length : 0;
+		return specDataModels(s).reduce((n, m) => n + Object.keys(m.fields).length, 0);
 	}
 </script>
 
@@ -65,7 +65,7 @@
 					<th scope="col" class="hidden md:table-cell">Category</th>
 					<th scope="col" class="hidden sm:table-cell">Difficulty</th>
 					<th scope="col" class="num hidden sm:table-cell" title="Endpoints the conformance suite calls">Endpoints</th>
-					<th scope="col" class="num hidden sm:table-cell" title="Data model fields">Fields</th>
+					<th scope="col" class="num hidden sm:table-cell" title="Fields across all data models">Fields</th>
 					<th scope="col"><span class="sr-only">Actions</span></th>
 				</tr>
 			</thead>

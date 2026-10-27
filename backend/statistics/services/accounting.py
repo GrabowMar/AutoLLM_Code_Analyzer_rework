@@ -144,8 +144,9 @@ def _evaluation_counts(jobs: list[GenerationJob]) -> dict[str, Any]:
 def run_accounting(jobs: QuerySet[GenerationJob]) -> dict[str, Any]:
     """Apps, analysis runs and per-tool executions actually recorded for *jobs*.
 
-    ``latest`` counts each job's latest finished run (what the result
-    tables describe); ``all_runs`` includes re-analyses and unfinished runs.
+    ``tools.latest`` counts each job's latest result per tool (what the
+    result tables describe), ``analysis_runs.latest`` its latest finished run;
+    ``all_runs`` includes re-analyses and unfinished runs.
     ``planned`` is what the runs asked for (sum of selected tools), so a gap
     between planned and executed is visible instead of assumed away.
     """
@@ -154,7 +155,9 @@ def run_accounting(jobs: QuerySet[GenerationJob]) -> dict[str, Any]:
     status = Counter(j.status for j in job_list)
     latest_ids = AnalysisRun.latest_ids_per_job(job_ids)
     all_runs = AnalysisRun.objects.filter(generation_job_id__in=job_ids)
-    latest_results = ToolResult.objects.filter(run_id__in=latest_ids)
+    # What the issue tables count: each job's latest result per tool (a later
+    # partial re-analysis does not hide the tools it did not re-run).
+    latest_results = ToolResult.objects.filter(id__in=ToolResult.latest_ids_per_job(job_ids))
     planned = sum(
         len(slugs or [])
         for slugs in AnalysisRun.objects.filter(id__in=latest_ids).values_list("tool_slugs", flat=True)

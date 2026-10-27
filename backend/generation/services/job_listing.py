@@ -13,7 +13,8 @@ the database:
 * ``termination``        -- ``result_data.agent.termination``
 * ``validity``           -- ``result_data.agent.validity`` as one level:
                             ``exclude`` (not a valid sample) > ``warn`` > ``valid``
-* ``config_fingerprint`` -- ``resolved_bundle.config_fingerprint`` (agent snapshots)
+* ``config_fingerprint`` -- ``resolved_bundle.config_fingerprint`` (agent snapshots; scaffolding
+                            snapshots since the generation-library modernization)
 """
 
 from __future__ import annotations

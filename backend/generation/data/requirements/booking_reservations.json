@@ -2,78 +2,159 @@
   "slug": "booking_reservations",
   "name": "Reservation System",
   "category": "Booking",
-  "description": "Book time slots or rooms",
+  "description": "Reserve a table for a date and time, with a public view of how full each time slot is",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only reservation listings; require auth for create/update/delete",
-    "1. Reservation model: id, name (required), email (required), date (required), time (HH:MM format), party_size (integer)",
-    "2. CRUD endpoints: GET /api/reservations, POST, DELETE",
-    "3. Filter by date: ?date=YYYY-MM-DD query parameter",
-    "4. Validate: prevent double-booking same time slot, validate email format",
-    "5. JSON responses with proper status codes (200, 201, 400, 404, 409 for conflicts)"
+    "Access control: anyone may read slot availability; require auth for creating, viewing, changing and cancelling reservations, and a user reaches only their own reservations; admin endpoints are restricted to the admin account",
+    "A time slot is one date plus one time (HH:MM, 24-hour); every slot seats at most 20 guests in total over its active reservations",
+    "Reservation validation: name is a required non-empty string of at most 100 characters; email is required, at most 254 characters and of the form name@domain; date is YYYY-MM-DD and today or later (server date); time is a valid HH:MM; party_size is a whole number from 1 to 12; notes, when given, is at most 500 characters",
+    "Double booking: a create or replace that would put a slot above 20 guests answers 409 and changes nothing; when replacing, the reservation's own guests are not counted twice",
+    "GET /api/reservations returns the signed-in user's active reservations ordered by date and time, earliest first; ?date= keeps one day, and total counts every matching reservation",
+    "DELETE /api/reservations/:id cancels the reservation by removing it permanently, which frees its seats",
+    "GET /api/availability lists, for one day (?date=, default today), every slot that has at least one active reservation, earliest first, with booked and remaining seats",
+    "Deactivated reservations (is_active false) are left out of the user's list, answer 404 on the item endpoints and do not count against slot capacity; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids, 409 for a full slot"
   ],
   "frontend_requirements": [
-    "Public guest view of reservations with CTA to sign in for booking",
-    "1. Reservation list grouped by date, showing name, email, time, party size",
-    "2. Book form: name, email, date picker, time picker, party size",
-    "3. Validation for email format and required fields",
-    "4. Cancel reservation button with confirmation",
-    "5. Today's reservations highlighted"
+    "Everyone sees a day picker with that day's booked slots and remaining seats; signed-in users also get the booking form and their own reservations, and visitors see a 'Sign in to book a table' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Booking form: name, email, date picker, time picker, party size and optional notes; check required fields and email format before sending and show the API's message, including 'slot is full', next to the form",
+    "My reservations: grouped by date with time, party size, name and notes; reservations for today are highlighted",
+    "Each reservation has an edit action that reopens the booking form with its values and a cancel action that asks for confirmation first"
+  ],
+  "admin_requirements": [
+    "Admin overview: every reservation of every user, active or not, with total, active and inactive counts and the number of guests booked for today",
+    "Toggle a reservation's active status from the overview"
   ],
   "api_endpoints": [
     {
+      "method": "POST",
+      "path": "/api/reservations",
+      "description": "Book a slot for the signed-in user",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "name": "string",
+        "email": "string",
+        "date": "YYYY-MM-DD",
+        "time": "HH:MM",
+        "party_size": 2,
+        "notes": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "name": "Grace Hopper",
+        "email": "grace@example.com",
+        "date": "2026-01-20",
+        "time": "19:30",
+        "party_size": 2,
+        "notes": "Window table if possible",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
       "method": "GET",
       "path": "/api/reservations",
-      "description": "List all reservations (supports ?date= filter)",
+      "description": "The signed-in user's active reservations, earliest first",
+      "auth": "user",
+      "query": {
+        "date": "Only reservations on this day (YYYY-MM-DD)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "name": "string",
-            "email": "string",
-            "date": "YYYY-MM-DD",
-            "time": "HH:MM",
+            "name": "Grace Hopper",
+            "email": "grace@example.com",
+            "date": "2026-01-20",
+            "time": "19:30",
             "party_size": 2,
-            "created_at": "ISO8601"
+            "notes": "Window table if possible",
+            "created_at": "2026-01-15T10:30:00Z"
           }
         ],
         "total": 1
       }
     },
     {
-      "method": "POST",
-      "path": "/api/reservations",
-      "description": "Create new reservation",
+      "method": "GET",
+      "path": "/api/reservations/:id",
+      "description": "One of the signed-in user's reservations",
+      "auth": "user",
+      "request": null,
+      "response": {
+        "id": 1,
+        "name": "Grace Hopper",
+        "email": "grace@example.com",
+        "date": "2026-01-20",
+        "time": "19:30",
+        "party_size": 2,
+        "notes": "Window table if possible",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/reservations/:id",
+      "description": "Replace a reservation's fields (all required except notes; an omitted notes is cleared)",
+      "auth": "user",
       "request": {
         "name": "string",
         "email": "string",
         "date": "YYYY-MM-DD",
         "time": "HH:MM",
-        "party_size": 2
+        "party_size": 3,
+        "notes": "string (optional)"
       },
       "response": {
         "id": 1,
-        "name": "string",
-        "email": "string",
-        "date": "YYYY-MM-DD",
-        "time": "HH:MM",
-        "party_size": 2,
-        "created_at": "ISO8601"
+        "name": "Grace Hopper",
+        "email": "grace@example.com",
+        "date": "2026-01-20",
+        "time": "20:00",
+        "party_size": 3,
+        "notes": null,
+        "created_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "DELETE",
       "path": "/api/reservations/:id",
-      "description": "Cancel reservation",
+      "description": "Cancel one of the signed-in user's reservations",
+      "auth": "user",
+      "success_status": 204,
       "request": null,
-      "response": {}
+      "response": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/availability",
+      "description": "Booked slots of one day with remaining seats",
+      "auth": "public",
+      "query": {
+        "date": "The day to show (YYYY-MM-DD, default today)"
+      },
+      "request": null,
+      "response": {
+        "date": "2026-01-20",
+        "capacity": 20,
+        "items": [
+          {
+            "time": "19:30",
+            "booked": 6,
+            "remaining": 14
+          }
+        ],
+        "total": 1
+      }
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -81,44 +162,59 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Reservation",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "name": "string (required, max 100 chars)",
-      "email": "string (required, valid email)",
-      "date": "date (required)",
-      "time": "string (required, HH:MM format)",
-      "party_size": "integer (required, min 1)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Reservation",
+      "description": "A table booked by a signed-in user for one time slot",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who booked it)",
+        "name": "string (required, max 100 chars)",
+        "email": "string (required, max 254 chars, name@domain)",
+        "date": "date (YYYY-MM-DD, today or later when created or replaced)",
+        "time": "string (required, HH:MM, 24-hour)",
+        "party_size": "integer (required, 1-12)",
+        "notes": "string (optional, max 500 chars)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the reservation and frees its seats)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any reservation"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/reservations",
-      "description": "Admin overview: list all reservations and counts",
+      "description": "Admin overview: every reservation with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
-        "inactive": 0
+        "items": [
+          {
+            "id": 1,
+            "username": "grace",
+            "name": "Grace Hopper",
+            "date": "2026-01-20",
+            "time": "19:30",
+            "party_size": 2,
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
+        "inactive": 0,
+        "guests_today": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/reservations/:id/toggle",
-      "description": "Toggle reservation active status",
+      "description": "Flip a reservation's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

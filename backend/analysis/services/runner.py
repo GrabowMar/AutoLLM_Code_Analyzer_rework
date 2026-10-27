@@ -674,10 +674,14 @@ def _run_container_tool(
     if error is None:
         parsed = parsers.parse(tool.parser_key, raw) if tool.parser_key else ParsedOutput()
         error = parsed.error
-        if error is None and exit_code not in (0, None) and not parsed.findings and not parsed.metrics:
+        if exit_code not in (0, None) and not parsed.findings and not parsed.metrics:
             # Linters exit non-zero *because* they found something; non-zero
             # with nothing parsed means the tool itself failed.
-            error = f"Exited with code {exit_code} without a parsable report: {_tail(raw)}"
+            error = (
+                f"Exited with code {exit_code} without a parsable report: {_tail(raw)}"
+                if error is None
+                else f"Exited with code {exit_code}: {error}"
+            )
     if error is not None:
         # Keep what the parser did find (nonexistent-package/-version findings
         # of a manifest whose audit could not run): stored on the failed

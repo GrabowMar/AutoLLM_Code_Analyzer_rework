@@ -2,41 +2,152 @@
   "slug": "inventory_stock_list",
   "name": "Inventory",
   "category": "Inventory",
-  "description": "Track stock levels",
+  "description": "Track stock levels of warehouse items, record stock movements and spot items that need reordering",
   "difficulty": "standard",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only inventory; require auth for create/update/delete",
-    "1. Item model: id, name (required), sku, quantity, location",
-    "2. GET /api/items - list items",
-    "3. POST /api/items - create item",
-    "4. PUT /api/items/:id - update item",
-    "5. DELETE /api/items/:id - delete item"
+    "Access control: anyone may read items and their stock movements; require auth for creating, updating and deleting items and for recording stock movements; admin endpoints are restricted to the admin account",
+    "Items: any signed-in user may create, update and delete any item; DELETE /api/items/:id removes the item and its movements permanently",
+    "Item validation: name is a required non-empty string of at most 200 characters; sku a required non-empty string of at most 40 characters, unique across items (a duplicate answers 409); location an optional string of at most 100 characters; quantity a whole number of at least 0 (default 0); reorder_level a whole number of at least 0 (default 5)",
+    "Every item in a response carries low_stock, true when quantity is at or below reorder_level",
+    "Quantity changes only through stock movements after creation: PUT /api/items/:id replaces name, sku, location and reorder_level and leaves quantity alone",
+    "Stock movements: POST /api/items/:id/movements records a non-zero whole-number delta (positive for stock received, negative for stock taken out) with an optional reason of at most 200 characters for the signed-in user and applies it to the item's quantity; a movement that would take the quantity below 0 answers 409 and changes nothing",
+    "GET /api/items lists active items sorted by name; ?query= matches name or sku case-insensitively, ?location= keeps items at that exact location, ?low_stock=true keeps only low-stock items, ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every matching item",
+    "GET /api/items/:id/movements lists an item's movements newest first",
+    "Deactivated items (is_active false) are left out of GET /api/items and answer 404 on the public item endpoints; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids, 409 for a duplicate sku or a movement that would make stock negative"
   ],
   "frontend_requirements": [
-    "HomePage displays ALL content in read-only mode for public users",
-    "Public users see \"Sign in to manage inventory\" CTAs instead of action buttons",
-    "Logged-in users see same content plus create/edit/delete functionality",
-    "1. Inventory table: name, sku, quantity, location (visible to all)",
-    "2. Add item form (logged-in only)",
-    "3. Edit item dialog (logged-in only)",
-    "4. Delete item button (logged-in only)",
-    "5. Low-stock highlight (visible to all)"
+    "Everyone sees the inventory table and item details read-only; signed-in users also get the add, edit, delete and stock-movement controls, and visitors see a 'Sign in to manage inventory' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Inventory table: name, sku, location, quantity and reorder level, with low-stock rows highlighted, a search box, a location filter, a 'Low stock only' switch and previous/next paging",
+    "Item detail view: the item's fields and its movement history (date, username, delta, reason, quantity after); signed-in users get 'Receive' and 'Take out' forms that record a movement and update the shown quantity",
+    "Add and edit item forms that show the API's validation messages next to the form, including a duplicate sku; delete asks for confirmation first"
+  ],
+  "admin_requirements": [
+    "Admin overview: every item, active or not, with total, active and inactive counts and the number of low-stock items",
+    "Toggle an item's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/items",
-      "description": "List items",
+      "description": "List active items by name, filtered and paged",
+      "auth": "public",
+      "query": {
+        "query": "Case-insensitive text matched against name and sku",
+        "location": "Only items at this exact location",
+        "low_stock": "true keeps only items at or below their reorder level",
+        "page": "1-based page number (default 1)",
+        "page_size": "Items per page (default 20, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "name": "string",
-            "sku": "SKU-001",
-            "quantity": 10,
-            "location": "A1"
+            "name": "M6 hex bolt",
+            "sku": "BOLT-M6-40",
+            "location": "Aisle 3, bin 12",
+            "quantity": 4,
+            "reorder_level": 10,
+            "low_stock": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/items",
+      "description": "Create an item with its opening quantity",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "name": "string",
+        "sku": "string",
+        "location": "string (optional)",
+        "quantity": "integer (optional)",
+        "reorder_level": "integer (optional)"
+      },
+      "response": {
+        "id": 1,
+        "name": "M6 hex bolt",
+        "sku": "BOLT-M6-40",
+        "location": "Aisle 3, bin 12",
+        "quantity": 50,
+        "reorder_level": 10,
+        "low_stock": false,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/items/:id",
+      "description": "One active item",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "name": "M6 hex bolt",
+        "sku": "BOLT-M6-40",
+        "location": "Aisle 3, bin 12",
+        "quantity": 50,
+        "reorder_level": 10,
+        "low_stock": false,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/items/:id",
+      "description": "Replace an item's descriptive fields (name and sku required; an omitted location is cleared, an omitted reorder_level resets to 5; quantity is unchanged)",
+      "auth": "user",
+      "request": {
+        "name": "string",
+        "sku": "string",
+        "location": "string (optional)",
+        "reorder_level": "integer (optional)"
+      },
+      "response": {
+        "id": 1,
+        "name": "M6 hex bolt, zinc",
+        "sku": "BOLT-M6-40",
+        "location": "Aisle 3, bin 14",
+        "quantity": 50,
+        "reorder_level": 10,
+        "low_stock": false,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/items/:id",
+      "description": "Delete an item and its movements",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/items/:id/movements",
+      "description": "Stock movements of an item, newest first",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "item_id": 1,
+            "delta": -6,
+            "reason": "Order 1042",
+            "quantity_after": 44,
+            "username": "stockkeeper",
+            "created_at": "2026-01-16T08:00:00Z"
           }
         ],
         "total": 1
@@ -44,51 +155,29 @@
     },
     {
       "method": "POST",
-      "path": "/api/items",
-      "description": "Create item",
+      "path": "/api/items/:id/movements",
+      "description": "Record a stock movement and apply it to the item's quantity",
+      "auth": "user",
+      "success_status": 201,
       "request": {
-        "name": "string",
-        "sku": "string",
-        "quantity": 10,
-        "location": "string"
+        "delta": "integer",
+        "reason": "string (optional)"
       },
       "response": {
         "id": 1,
-        "name": "string",
-        "sku": "string",
-        "quantity": 10,
-        "location": "string"
+        "item_id": 1,
+        "delta": -6,
+        "reason": "Order 1042",
+        "quantity_after": 44,
+        "username": "stockkeeper",
+        "created_at": "2026-01-16T08:00:00Z"
       }
-    },
-    {
-      "method": "PUT",
-      "path": "/api/items/:id",
-      "description": "Update item",
-      "request": {
-        "name": "string",
-        "sku": "string",
-        "quantity": 10,
-        "location": "string"
-      },
-      "response": {
-        "id": 1,
-        "name": "string",
-        "sku": "string",
-        "quantity": 10,
-        "location": "string"
-      }
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/items/:id",
-      "description": "Delete item",
-      "request": null,
-      "response": {}
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -96,43 +185,69 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Item",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "name": "string (required, max 200 chars)",
-      "sku": "string (optional)",
-      "quantity": "integer (required, min 0)",
-      "location": "string (optional)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Item",
+      "description": "A stocked item; low_stock is computed from quantity and reorder_level",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "name": "string (required, max 200 chars)",
+        "sku": "string (required, unique, max 40 chars)",
+        "location": "string (optional, max 100 chars)",
+        "quantity": "integer (min 0, default 0; changed by stock movements after creation)",
+        "reorder_level": "integer (min 0, default 5)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the item from public endpoints)"
+      }
+    },
+    {
+      "name": "StockMovement",
+      "description": "One change to an item's quantity",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "item_id": "integer (references Item.id; deleted with the item)",
+        "user_id": "integer (references the signed-in user who recorded it)",
+        "delta": "integer (required, non-zero)",
+        "reason": "string (optional, max 200 chars)",
+        "quantity_after": "integer (the item's quantity after this movement)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any item"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/items",
-      "description": "Admin overview: list all items and counts",
+      "description": "Admin overview: every item with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
-        "inactive": 0
+        "items": [
+          {
+            "id": 1,
+            "name": "M6 hex bolt",
+            "sku": "BOLT-M6-40",
+            "quantity": 4,
+            "low_stock": true,
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
+        "inactive": 0,
+        "low_stock": 1
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/items/:id/toggle",
-      "description": "Toggle item active status",
+      "description": "Flip an item's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

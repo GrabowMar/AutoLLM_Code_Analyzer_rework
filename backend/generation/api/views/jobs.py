@@ -354,6 +354,9 @@ def retry_job(request, job_id: str):
 
     The retry replaces the failed trial: it takes over the job's experiment
     cell and batch and runs under the cell's seed (common random numbers).
+    It keeps the original's spec content and stack version even if the
+    library changed since (``job_cloning.library_pins``), so the cell is not
+    silently re-run on different task material.
     """
     original = _load_job_for_cloning(request, job_id)
     if original.status not in ("failed", "cancelled"):

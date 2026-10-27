@@ -26,7 +26,7 @@ You are working alone: nobody will answer questions or review intermediate steps
 {% for req in app.admin_requirements %}- {{ req }}
 {% endfor %}
 {% endif -%}
-{% if app.data_model %}## Data model
+{% if app.data_model %}## Data model{% if app.data_model is not mapping %}s{% endif %}
 ```json
 {{ app.data_model | tojson(indent=2) }}
 ```
@@ -37,7 +37,11 @@ Implement every endpoint below. Request and response bodies are JSON and must us
 {% for ep in endpoints %}
 ### {{ ep.method }} {{ ep.path }}
 {{ ep.description }}
-{% if ep.request %}Request:
+{% if ep.auth %}Access: {{ access_labels[ep.auth] }}.
+{% endif %}{% if ep.query %}Query parameters:
+{% for name, text in ep.query.items() %}- `{{ name }}`: {{ text }}
+{% endfor %}{% endif %}{% if ep.success_status %}Success status: HTTP {{ ep.success_status }}.
+{% endif %}{% if ep.request %}Request:
 ```json
 {{ ep.request | tojson(indent=2) }}
 ```

@@ -9,9 +9,10 @@ description: >-
 metadata:
   role: repair_prompt
 content: |
-  The file `{{ filename }}` you generated has validation errors and must be
-  corrected. Return the file in FULL — do not describe the fix, output the
-  complete corrected file in one code block with the same filename.
+  The file `{{ filename }}` you generated fails validation and must be
+  corrected. Fix the errors below without changing what the file does, and
+  return the file in FULL: output the complete corrected file, not a
+  description of the fix or a partial diff.
 
   ## Errors
   {% for error in errors %}
@@ -23,4 +24,5 @@ content: |
   {{ code }}
   ```
 
-  Return ONLY the corrected file as a single code block.
+  Return ONLY the corrected file, as a single code block whose info string
+  is its language and file name (for example `python:app.py` or `jsx:App.jsx`).

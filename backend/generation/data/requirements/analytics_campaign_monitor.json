@@ -2,90 +2,364 @@
   "slug": "analytics_campaign_monitor",
   "name": "Campaign Monitor",
   "category": "Analytics",
-  "description": "Track campaign performance, budget pacing, and channel health across launches.",
-  "difficulty": "basic",
-  "spec_schema_version": 2,
+  "description": "Track marketing campaign performance, budget pacing and channel health from daily performance snapshots",
+  "difficulty": "advanced",
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Campaign model with fields for channel, owner, status, daily_budget, spend_to_date, conversion_goal, launch_at, and notes",
-    "Performance snapshot model that stores impressions, clicks, conversions, and revenue per campaign day",
-    "GET /api/campaigns with search, status filter, channel filter, owner filter, sorting, and pagination",
-    "POST /api/campaigns and PUT /api/campaigns/:id with validation for budgets, launch windows, and channel values",
-    "GET /api/public/stats and GET /api/public/featured for landing page summary cards",
-    "GET /api/campaigns/:id/performance for trend summaries and pacing warnings"
+    "Access control: anyone may read campaigns, their performance and the public summaries; require auth for creating and updating campaigns and for recording performance, and only a campaign's owner may change it; admin endpoints are restricted to the admin account",
+    "Campaigns: any signed-in user may create one and becomes its owner; PATCH /api/campaigns/:id and POST /api/campaigns/:id/performance by anyone else answer 403",
+    "Campaign validation: name is a required non-empty string of at most 120 characters; channel is one of search, social, email, video; daily_budget is a number above 0 and at most 1000000; conversion_goal, when given, is a whole number of at least 1; launch_at is a required ISO 8601 date-time; end_at, when given, is not before launch_at; notes, when given, is at most 2000 characters",
+    "Status: a new campaign starts as draft; PATCH may move draft to active, active to paused, paused to active, and active or paused to completed; setting the current status again is allowed, any other change answers 409, and a completed campaign accepts no further changes (409)",
+    "Performance snapshots: POST /api/campaigns/:id/performance records one day's impressions, clicks, conversions, revenue and spend; all are zero or more, clicks may not exceed impressions and conversions may not exceed clicks (400); posting a date that already has a snapshot replaces it (200), a new date answers 201",
+    "Computed fields on every campaign: spend_to_date and conversions are the sums over its snapshots; planned_spend is daily_budget times the number of snapshot days; pacing is spend_to_date divided by planned_spend rounded to two decimals (null without snapshots); pacing_status is 'over' when pacing is above 1.10, 'under' when it is below 0.90, 'on_track' otherwise and 'no_data' without snapshots",
+    "GET /api/campaigns returns active campaigns; ?query= matches the name case-insensitively, ?status=, ?channel= and ?owner= (the owner's username) filter exactly, ?pacing_status= keeps one pacing status, ?sort= is one of -created_at (default), launch_at, -launch_at, name, -spend_to_date, -updated_at, ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every matching campaign",
+    "GET /api/campaigns/:id/performance returns the campaign's snapshots by date (oldest first), their totals, click-through rate (clicks / impressions), conversion rate (conversions / clicks) and cost per conversion (spend / conversions), each rounded to four decimals and null when the divisor is 0, plus alerts: one overspend_day alert for each snapshot whose spend is above daily_budget, and one pacing_over or pacing_under alert when pacing_status is over or under",
+    "GET /api/public/stats summarises active campaigns: counts by status, total spend, total conversions, total revenue and the number of over-pacing campaigns; GET /api/public/featured returns up to three active campaigns with status active and the most conversions, ties broken by the newer campaign",
+    "Deactivated campaigns (is_active false) are left out of every public list and summary and answer 404 on the public campaign endpoints; the admin overview still lists them; campaigns are never deleted",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-owner or a non-admin, 404 for unknown ids, 409 for a status change that is not allowed"
   ],
   "frontend_requirements": [
-    "Landing page with campaign totals, spend pacing, and featured campaign cards",
-    "Browse page with channel filters, status chips, and sort controls",
-    "Campaign detail page with KPIs, timeline table, and warning badges",
-    "Dashboard page for owners showing budget alerts and recent campaign edits",
-    "Admin panel for approving paused campaigns and reviewing overspend risk"
+    "Everyone sees the landing page, the campaign browser and campaign details read-only; signed-in users also get the create form, their dashboard and, on their own campaigns, the edit, status and record-performance controls, and visitors see a 'Sign in to manage campaigns' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Landing page: summary cards from /api/public/stats (active campaigns, total spend, conversions, revenue, over-pacing count) and cards for the featured campaigns",
+    "Campaign browser: a table with name, channel, status, owner, daily budget, spend to date and a pacing badge; a name search, status chips, channel and pacing filters, sort controls and previous/next paging",
+    "Campaign detail: key figures (spend to date against planned spend, conversions against conversion_goal, click-through and conversion rates, cost per conversion), a chart of daily spend and conversions, a table of the snapshots and the alerts as warning badges",
+    "Owner dashboard: the signed-in user's campaigns (?owner= with their username), over-pacing campaigns first, then the most recently updated (?sort=-updated_at), with their alerts",
+    "Create and edit forms and a record-performance form for one day's figures, each showing the API's validation messages next to the form; status buttons offer only the changes the current status allows"
+  ],
+  "admin_requirements": [
+    "Admin overview: every campaign, active or not, with total, active and inactive counts, the number of paused and over-pacing campaigns and the conversions recorded for the last seven days",
+    "Review queue: the overview filtered to paused or over-pacing campaigns (?status=paused, ?pacing_status=over)",
+    "Toggle a campaign's active status from the overview to take it out of the public views"
   ],
   "api_endpoints": [
     {
-      "method": "GET",
-      "path": "/api/campaigns",
-      "description": "List campaigns with search, filters, sorting, and pagination",
-      "request": null,
-      "response": {
-        "items": [],
-        "total": 0,
-        "page": 1
-      }
-    },
-    {
       "method": "POST",
       "path": "/api/campaigns",
-      "description": "Create a new campaign",
+      "description": "Create a campaign owned by the signed-in user (status draft)",
+      "auth": "user",
+      "success_status": 201,
       "request": {
         "name": "string",
-        "channel": "string",
-        "daily_budget": 120.0
+        "channel": "string (search|social|email|video)",
+        "daily_budget": 120.0,
+        "conversion_goal": "integer (optional)",
+        "launch_at": "ISO8601",
+        "end_at": "string (optional)",
+        "notes": "string (optional)"
       },
       "response": {
         "id": 1,
-        "status": "draft"
+        "name": "Spring launch search",
+        "channel": "search",
+        "status": "draft",
+        "owner": "marketer1",
+        "daily_budget": 120.0,
+        "conversion_goal": 300,
+        "launch_at": "2026-03-01T09:00:00Z",
+        "end_at": "2026-03-31T23:59:00Z",
+        "notes": "Brand and product keywords",
+        "spend_to_date": 0.0,
+        "conversions": 0,
+        "planned_spend": 0.0,
+        "pacing": null,
+        "pacing_status": "no_data",
+        "created_at": "2026-01-15T10:30:00Z",
+        "updated_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/campaigns",
+      "description": "List active campaigns, searched, filtered, sorted and paged",
+      "auth": "public",
+      "query": {
+        "query": "Case-insensitive text matched against the name",
+        "status": "One of draft, active, paused, completed",
+        "channel": "One of search, social, email, video",
+        "owner": "The owner's username",
+        "pacing_status": "One of over, under, on_track, no_data",
+        "sort": "One of -created_at (default), launch_at, -launch_at, name, -spend_to_date, -updated_at",
+        "page": "1-based page number (default 1)",
+        "page_size": "Campaigns per page (default 20, at most 100)"
+      },
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "name": "Spring launch search",
+            "channel": "search",
+            "status": "active",
+            "owner": "marketer1",
+            "daily_budget": 120.0,
+            "conversion_goal": 300,
+            "launch_at": "2026-03-01T09:00:00Z",
+            "spend_to_date": 1310.5,
+            "conversions": 142,
+            "pacing": 1.09,
+            "pacing_status": "on_track",
+            "updated_at": "2026-03-11T08:00:00Z"
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/campaigns/:id",
+      "description": "One active campaign with its computed fields",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "name": "Spring launch search",
+        "channel": "search",
+        "status": "active",
+        "owner": "marketer1",
+        "daily_budget": 120.0,
+        "conversion_goal": 300,
+        "launch_at": "2026-03-01T09:00:00Z",
+        "end_at": "2026-03-31T23:59:00Z",
+        "notes": "Brand and product keywords",
+        "spend_to_date": 1310.5,
+        "conversions": 142,
+        "planned_spend": 1200.0,
+        "pacing": 1.09,
+        "pacing_status": "on_track",
+        "created_at": "2026-01-15T10:30:00Z",
+        "updated_at": "2026-03-11T08:00:00Z"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/campaigns/:id",
+      "description": "Change some of a campaign's fields or its status (owner only); omitted fields keep their values",
+      "auth": "user",
+      "request": {
+        "name": "string (optional)",
+        "status": "string (draft|active|paused|completed)",
+        "daily_budget": 150.0,
+        "conversion_goal": "integer (optional)",
+        "notes": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "name": "Spring launch search",
+        "channel": "search",
+        "status": "active",
+        "owner": "marketer1",
+        "daily_budget": 150.0,
+        "conversion_goal": 300,
+        "launch_at": "2026-03-01T09:00:00Z",
+        "end_at": "2026-03-31T23:59:00Z",
+        "notes": "Brand and product keywords",
+        "spend_to_date": 1310.5,
+        "conversions": 142,
+        "planned_spend": 1500.0,
+        "pacing": 0.87,
+        "pacing_status": "under",
+        "created_at": "2026-01-15T10:30:00Z",
+        "updated_at": "2026-03-11T09:15:00Z"
       }
     },
     {
       "method": "GET",
       "path": "/api/campaigns/:id/performance",
-      "description": "Return daily performance summaries and pacing alerts",
+      "description": "Daily snapshots, totals, rates and pacing alerts of an active campaign",
+      "auth": "public",
       "request": null,
       "response": {
         "campaign_id": 1,
-        "snapshots": [],
-        "alerts": []
+        "items": [
+          {
+            "id": 1,
+            "date": "2026-03-01",
+            "impressions": 18400,
+            "clicks": 610,
+            "conversions": 14,
+            "revenue": 980.0,
+            "spend": 131.5
+          }
+        ],
+        "total": 10,
+        "totals": {
+          "impressions": 176000,
+          "clicks": 5900,
+          "conversions": 142,
+          "revenue": 9940.0,
+          "spend": 1310.5
+        },
+        "click_through_rate": 0.0335,
+        "conversion_rate": 0.0241,
+        "cost_per_conversion": 9.2289,
+        "pacing": 1.09,
+        "pacing_status": "on_track",
+        "alerts": [
+          {
+            "type": "overspend_day",
+            "date": "2026-03-01",
+            "message": "Spend 131.50 is above the daily budget of 120.00"
+          }
+        ]
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/campaigns/:id/performance",
+      "description": "Record or replace one day's snapshot (owner only)",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "date": "YYYY-MM-DD",
+        "impressions": "integer",
+        "clicks": "integer",
+        "conversions": "integer",
+        "revenue": "number",
+        "spend": "number"
+      },
+      "response": {
+        "id": 1,
+        "campaign_id": 1,
+        "date": "2026-03-01",
+        "impressions": 18400,
+        "clicks": 610,
+        "conversions": 14,
+        "revenue": 980.0,
+        "spend": 131.5
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/stats",
+      "description": "Landing-page summary over active campaigns",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "total_campaigns": 12,
+        "by_status": {
+          "draft": 2,
+          "active": 7,
+          "paused": 2,
+          "completed": 1
+        },
+        "total_spend": 18250.75,
+        "total_conversions": 1630,
+        "total_revenue": 96420.0,
+        "over_pacing": 2
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/featured",
+      "description": "Up to three running campaigns with the most conversions",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "name": "Spring launch search",
+            "channel": "search",
+            "owner": "marketer1",
+            "conversions": 142,
+            "spend_to_date": 1310.5,
+            "pacing_status": "on_track"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
       }
     }
   ],
-  "data_model": {
-    "name": "Campaign",
-    "fields": {
-      "id": "integer primary key",
-      "name": "string, required",
-      "channel": "string (search, social, email, video)",
-      "owner": "string",
-      "status": "string (draft, active, paused, completed)",
-      "daily_budget": "decimal",
-      "spend_to_date": "decimal",
-      "conversion_goal": "integer",
-      "launch_at": "datetime",
-      "notes": "text"
+  "data_models": [
+    {
+      "name": "Campaign",
+      "description": "A marketing campaign; spend_to_date, conversions, planned_spend, pacing and pacing_status are computed from its snapshots",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "name": "string (required, max 120 chars)",
+        "channel": "string (one of: search, social, email, video)",
+        "status": "string (one of: draft, active, paused, completed; default draft)",
+        "owner_id": "integer (references the signed-in user who created it; shown as the owner's username)",
+        "daily_budget": "number (required, > 0, at most 1000000)",
+        "conversion_goal": "integer (optional, >= 1)",
+        "launch_at": "datetime (required, ISO 8601 in JSON)",
+        "end_at": "datetime (optional, not before launch_at)",
+        "notes": "text (optional, max 2000 chars)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "updated_at": "datetime (auto, changes on every update and every recorded snapshot)",
+        "is_active": "boolean (default true; false hides the campaign from public endpoints and summaries)"
+      }
+    },
+    {
+      "name": "PerformanceSnapshot",
+      "description": "One campaign's figures for one day",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "campaign_id": "integer (references Campaign.id; one snapshot per campaign and date)",
+        "date": "date (YYYY-MM-DD)",
+        "impressions": "integer (>= 0)",
+        "clicks": "integer (>= 0, at most impressions)",
+        "conversions": "integer (>= 0, at most clicks)",
+        "revenue": "number (>= 0)",
+        "spend": "number (>= 0)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)"
+      }
     }
-  },
-  "admin_requirements": [
-    "Admin moderation queue for paused and overspending campaigns",
-    "Admin metrics for active campaigns, overspend count, and trailing conversions"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/campaigns",
-      "description": "Admin overview of campaigns and risk metrics",
+      "description": "Admin overview: every campaign with counts and risk metrics",
+      "auth": "admin",
+      "query": {
+        "status": "One of draft, active, paused, completed",
+        "pacing_status": "One of over, under, on_track, no_data"
+      },
       "request": null,
       "response": {
-        "items": [],
-        "overspend_count": 0
+        "items": [
+          {
+            "id": 1,
+            "name": "Spring launch search",
+            "owner": "marketer1",
+            "status": "paused",
+            "pacing_status": "over",
+            "spend_to_date": 1650.0,
+            "is_active": true
+          }
+        ],
+        "total": 1,
+        "active": 1,
+        "inactive": 0,
+        "paused": 1,
+        "over_pacing": 1,
+        "conversions_last_7_days": 61
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/campaigns/:id/toggle",
+      "description": "Flip a campaign's active status",
+      "auth": "admin",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": false
       }
     }
   ]

@@ -4,6 +4,11 @@ Covers requirement specs, stack parity of the catalog profiles, the catalog
 and manifests themselves (system block refs, one default per stack), system
 run presets (``data/presets``) and starter packages (``data/packages``).
 
+Specs are checked against ``schema.json``; specs of ``spec_schema_version``
+3 or later must also meet the conventions the hidden evaluation relies on
+(:func:`spec_convention_issues`). Older specs only have to validate, so
+legacy packages keep importing.
+
 Pure data checks — no DB access — so they can run in CI or as a pytest test
 without a database. Used by ``manage.py lint_generation_data`` and
 ``backend.generation.tests.test_data_lint``.
@@ -11,7 +16,11 @@ without a database. Used by ``manage.py lint_generation_data`` and
 
 from __future__ import annotations
 
+import functools
+import importlib.util
 import json
+import re
+from pathlib import Path
 from typing import Any
 
 import jsonschema
@@ -22,6 +31,8 @@ from backend.generation.seeding import MANIFESTS_DIR
 from backend.generation.seeding import PROMPT_STAGE_SEEDS
 from backend.generation.seeding import REQUIREMENTS_DIR
 from backend.generation.seeding import _yaml_block_seeds
+from backend.generation.services.evaluation import contract
+from backend.generation.services.spec_models import SPEC_SCHEMA_VERSION
 from backend.runtime.services.scaffolding import load_manifest
 
 SCHEMA_PATH = REQUIREMENTS_DIR / "schema.json"
@@ -60,46 +71,296 @@ def _spec_validator() -> jsonschema.Draft202012Validator:
     return jsonschema.Draft202012Validator(json.loads(SCHEMA_PATH.read_text(encoding="utf-8")))
 
 
+def _error_text(err: jsonschema.ValidationError, label: str) -> str:
+    message = err.message
+    if err.validator == "anyOf" and not err.path:
+        # The root anyOf is the model rule; the default message dumps the whole spec.
+        message = "a spec needs data_models (schema v3) or data_model (v1/v2)"
+    return f"{label}: {'.'.join(str(p) for p in err.path) or '<root>'}: {message}"
+
+
 def _spec_errors(validator: jsonschema.Draft202012Validator, data: Any, label: str) -> list[str]:
-    return [
-        f"{label}: {'.'.join(str(p) for p in err.path) or '<root>'}: {err.message}"
-        for err in sorted(validator.iter_errors(data), key=lambda e: list(e.path))
-    ]
+    return [_error_text(err, label) for err in sorted(validator.iter_errors(data), key=lambda e: list(e.path))]
+
+
+# Optional keys an API or form payload sends empty when they are unset.
+_EMPTY_MEANS_ABSENT = ("difficulty", "data_model", "data_models", "spec_schema_version")
 
 
 def app_spec_errors(spec: dict[str, Any], *, label: str = "app spec", check_slug: bool = True) -> list[str]:
-    """Errors of one app spec against ``schema.json`` (used by the API and package import).
+    """Errors of one app spec (used by the API and package import).
 
-    Empty optional values (``difficulty: ""``) count as absent. With
-    ``check_slug=False`` the slug's snake_case pattern is not enforced: specs
-    created before the schema, and slugs the importer renames (``slug-2``),
-    keep working.
+    ``schema.json`` errors, plus :func:`spec_convention_issues` errors for a
+    v3+ spec. Empty optional values (``difficulty: ""``, ``data_model: {}``)
+    count as absent. With ``check_slug=False`` the slug's snake_case pattern
+    is not enforced: specs created before the schema, and slugs the importer
+    renames (``slug-2``), keep working.
     """
-    data = {k: v for k, v in spec.items() if not (k == "difficulty" and not v)}
+    data = {k: v for k, v in spec.items() if not (k in _EMPTY_MEANS_ABSENT and not v)}
     errors = []
     for err in sorted(_spec_validator().iter_errors(data), key=lambda e: list(e.path)):
         if not check_slug and list(err.path) == ["slug"] and err.validator == "pattern":
             continue
-        errors.append(f"{label}: {'.'.join(str(p) for p in err.path) or '<root>'}: {err.message}")
+        errors.append(_error_text(err, label))
+    if not errors:
+        errors.extend(f"{label}: {problem}" for problem in spec_convention_issues(data)[0])
     return errors
 
 
-def lint_requirement_specs() -> list[str]:
-    """Validate every ``data/requirements/*.json`` against ``schema.json``."""
-    errors: list[str] = []
-    validator = _spec_validator()
+def app_spec_warnings(spec: dict[str, Any], *, label: str = "app spec") -> list[str]:
+    """Warnings of one v3+ app spec: what saves, but the evaluation may grade differently than intended."""
+    data = {k: v for k, v in spec.items() if not (k in _EMPTY_MEANS_ABSENT and not v)}
+    if list(_spec_validator().iter_errors(data)):
+        return []
+    return [f"{label}: {problem}" for problem in spec_convention_issues(data)[1]]
 
+
+def _spec_file_documents() -> list[tuple[str, Any]]:
+    """``(file name, parsed JSON or JSONDecodeError)`` of every spec file."""
+    documents: list[tuple[str, Any]] = []
     for path in sorted(REQUIREMENTS_DIR.glob("*.json")):
         if path.name == "schema.json":
             continue
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            documents.append((path.name, json.loads(path.read_text(encoding="utf-8"))))
         except json.JSONDecodeError as exc:
-            errors.append(f"{path.name}: invalid JSON ({exc})")
+            documents.append((path.name, exc))
+    return documents
+
+
+def lint_requirement_specs() -> list[str]:
+    """Validate every ``data/requirements/*.json``: ``schema.json``, and the v3 conventions."""
+    errors: list[str] = []
+    validator = _spec_validator()
+
+    for name, data in _spec_file_documents():
+        if isinstance(data, json.JSONDecodeError):
+            errors.append(f"{name}: invalid JSON ({data})")
             continue
-        errors.extend(_spec_errors(validator, data, path.name))
+        schema_errors = _spec_errors(validator, data, name)
+        errors.extend(schema_errors)
+        if not schema_errors:
+            errors.extend(f"{name}: {problem}" for problem in spec_convention_issues(data)[0])
+        if isinstance(data, dict) and data.get("slug") and data["slug"] != Path(name).stem:
+            errors.append(f"{name}: slug {data['slug']!r} must equal the file name")
 
     return errors
+
+
+def lint_requirement_warnings() -> list[str]:
+    """Warnings of the shipped v3 specs (printed by ``lint_generation_data``; they do not fail it)."""
+    warnings: list[str] = []
+    validator = _spec_validator()
+    for name, data in _spec_file_documents():
+        if isinstance(data, json.JSONDecodeError) or _spec_errors(validator, data, name):
+            continue
+        warnings.extend(f"{name}: {problem}" for problem in spec_convention_issues(data)[1])
+    return warnings
+
+
+# ── v3 spec conventions ───────────────────────────────────────────────
+
+TESTER_PATH = Path(__file__).resolve().parents[1] / "images" / "conformance-tester" / "tester.py"
+
+_PATH_PARAM_RE = re.compile(r":[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}")
+_PROSE_PATH_RE = re.compile(r"(?:\b(GET|POST|PUT|PATCH|DELETE|WS)\s+)?(/api/[A-Za-z0-9_\-./:{}]*)")
+_PROSE_QUERY_RE = re.compile(r"[?&]([A-Za-z_][A-Za-z0-9_]*)=")
+_REQUIREMENT_KEYS = ("backend_requirements", "frontend_requirements", "admin_requirements")
+# Contract endpoints every app with accounts has, listed in the spec or not.
+_IMPLICIT_PATHS = frozenset({contract.REGISTER_PATH, contract.LOGIN_PATH})
+# Words that start a value meant as a type descriptor (the tester knows only some of them).
+_TYPE_WORDS = frozenset(
+    {
+        "string", "str", "text", "integer", "int", "number", "float", "decimal", "boolean", "bool",
+        "array", "list", "object", "dict", "date", "datetime", "time", "timestamp", "uuid", "enum",
+        "email", "url", "uri", "json", "iso", "iso8601", "iso-8601", "one",
+    },
+)  # fmt: skip
+_DESCRIPTOR_HINTS = ("optional", "required", " | ", "e.g.", "one of", "max ", "min ")
+
+
+@functools.cache
+def _tester_module() -> Any:
+    """The conformance tester itself, so request-body checks cannot drift from its synthesis."""
+    spec = importlib.util.spec_from_file_location("llmlab_conformance_tester_lint", TESTER_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _norm_path(path: str) -> str:
+    """``/api/books/{book_id}/`` -> ``/api/books/:p`` (parameter names and a trailing slash do not matter)."""
+    path = _PATH_PARAM_RE.sub(":p", path.strip())
+    return path.rstrip("/") if path != "/" else path
+
+
+def _has_param(path: str) -> bool:
+    return bool(_PATH_PARAM_RE.search(path))
+
+
+def _labelled_endpoints(spec: dict[str, Any]) -> list[tuple[str, bool, dict[str, Any]]]:
+    out = []
+    for key, admin in (("api_endpoints", False), ("admin_api_endpoints", True)):
+        out += [(f"{key}[{i}]", admin, ep) for i, ep in enumerate(spec.get(key) or []) if isinstance(ep, dict)]
+    return out
+
+
+def _verbatim_descriptor_values(sample: Any, key: str, where: str) -> list[str]:
+    """Request-body strings the tester would send as-is although they read like a type descriptor."""
+    if isinstance(sample, dict):
+        return [
+            problem
+            for name, value in sample.items()
+            for problem in _verbatim_descriptor_values(value, name, f"{where}.{name}")
+        ]
+    if isinstance(sample, list):
+        return _verbatim_descriptor_values(sample[0], key, f"{where}[0]") if sample else []
+    if not isinstance(sample, str):
+        return []
+    sent = _tester_module().Synth("lint").value(sample, key)
+    if sent != sample:
+        return []
+    text = sample.strip().lower()
+    first = re.split(r"[^a-z0-9\-]+", text, maxsplit=1)[0]
+    if first in _TYPE_WORDS or any(hint in text for hint in _DESCRIPTOR_HINTS):
+        return [
+            f"{where}: {sample!r} is sent verbatim by the conformance tester; use a descriptor it types "
+            "('string', 'integer (optional)', 'number', 'boolean', 'string (a|b)', 'YYYY-MM-DD', 'HH:MM', "
+            "'ISO8601') or a literal example value",
+        ]
+    return []
+
+
+def _list_response_problems(response: Any) -> list[str]:
+    """A collection GET answers ``{"items": [...], "total": <int>, ...}``."""
+    if isinstance(response, list):
+        return ['a list response must be the envelope {"items": [...], "total": n}']
+    if not isinstance(response, dict):
+        return []
+    if "items" in response:
+        problems = []
+        if not isinstance(response["items"], list):
+            problems.append("items must be a list")
+        total = response.get("total")
+        if not isinstance(total, int) or isinstance(total, bool):
+            problems.append('a list response needs an integer "total" (the number of matching items)')
+        return problems
+    if any(isinstance(v, list) for v in response.values()):
+        return ['a response with a list must put it under "items", with an integer "total"']
+    return []
+
+
+def spec_convention_issues(spec: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """``(errors, warnings)`` of a schema-valid spec against the v3 conventions.
+
+    Empty for specs older than ``spec_schema_version`` 3. The rules keep a
+    spec gradable by the hidden evaluation (``evaluation/contract.py`` and
+    the conformance tester): unique endpoints, every endpoint named in the
+    prose listed, a public health check, an access-control line the contract
+    recognises, admin endpoints under ``/api/admin/``, the list envelope,
+    and request samples the tester can turn into valid bodies.
+    """
+    if not isinstance(spec, dict) or int(spec.get("spec_schema_version") or 1) < SPEC_SCHEMA_VERSION:
+        return [], []
+    errors: list[str] = []
+    warnings: list[str] = []
+    endpoints = _labelled_endpoints(spec)
+
+    if "data_model" in spec:
+        errors.append("data_model: v3 specs list every model under data_models")
+    model_names = [str(m.get("name", "")) for m in spec.get("data_models") or [] if isinstance(m, dict)]
+    errors.extend(
+        f"data_models: model {name!r} is listed twice"
+        for name in sorted(set(model_names))
+        if model_names.count(name) > 1
+    )
+
+    seen: dict[tuple[str, str], str] = {}
+    query_params: set[str] = set()
+    for label, admin, ep in endpoints:
+        method, path = str(ep.get("method", "")).upper(), str(ep.get("path", ""))
+        sig = (method, _norm_path(path))
+        if sig in seen:
+            errors.append(f"{label}: {method} {path} is already {seen[sig]}")
+        seen.setdefault(sig, label)
+        query_params.update(ep.get("query") or {})
+        auth = ep.get("auth")
+        if auth is None:
+            errors.append(f"{label}: {method} {path}: auth is required in v3 (public, user or admin)")
+        if admin:
+            if not path.startswith("/api/admin/"):
+                errors.append(f"{label}: admin endpoint paths start with /api/admin/")
+            if auth not in (None, "admin"):
+                errors.append(f"{label}: admin endpoints have auth 'admin'")
+        else:
+            if path.startswith("/api/admin"):
+                errors.append(f"{label}: /api/admin/ endpoints belong in admin_api_endpoints")
+            if auth == "admin":
+                errors.append(f"{label}: admin-only endpoints belong in admin_api_endpoints (under /api/admin/)")
+        if method == "GET" and not _has_param(path) and path != contract.HEALTH_PATH:
+            errors.extend(f"{label}: {method} {path}: {p}" for p in _list_response_problems(ep.get("response")))
+        status = ep.get("success_status")
+        if status == 204 and ep.get("response") not in (None, {}, []):
+            errors.append(f"{label}: success_status 204 has no body; set response to null")
+        elif isinstance(status, int) and status >= 300:
+            warnings.append(
+                f"{label}: success_status {status}: the conformance tester follows redirects and counts only "
+                "2xx answers (an external redirect target is unreachable from its network)",
+            )
+        if method in ("POST", "PUT", "PATCH") and isinstance(ep.get("request"), dict):
+            warnings.extend(_verbatim_descriptor_values(ep["request"], "", f"{label}.request"))
+
+    health = [ep for label, admin, ep in endpoints if not admin and str(ep.get("method", "")).upper() == "GET"
+              and ep.get("path") == contract.HEALTH_PATH]  # fmt: skip
+    if not health:
+        errors.append(f"api_endpoints: GET {contract.HEALTH_PATH} is required (the evaluation polls it)")
+    elif health[0].get("auth") not in (None, "public"):
+        errors.append(f"api_endpoints: GET {contract.HEALTH_PATH} must be public")
+
+    backend = spec.get("backend_requirements") or []
+    first = str(backend[0]) if backend else ""
+    if not first.lower().startswith("access control:"):
+        errors.append('backend_requirements[0]: v3 specs start with an "Access control: ..." requirement')
+    elif not contract.writes_require_auth(spec):
+        errors.append(
+            'backend_requirements[0]: the access-control line must say what it restricts ("require auth for ..." '
+            'or "restrict ... to ...")',
+        )
+    elif target := next(
+        (
+            (label, ep)
+            for label, admin, ep in endpoints
+            if not admin
+            and str(ep.get("method", "")).upper() == "POST"
+            and ep.get("path") not in _IMPLICIT_PATHS
+            and not _has_param(str(ep.get("path", "")))
+        ),
+        None,
+    ):
+        label, ep = target
+        if ep.get("auth") == "public":
+            errors.append(
+                f"{label}: POST {ep.get('path')} is the write the evaluation sends anonymously and expects "
+                "401/403 for; it must have auth 'user' (or list a user-only create endpoint first)",
+            )
+
+    known = {sig[1] for sig in seen} | set(_IMPLICIT_PATHS)
+    for key in _REQUIREMENT_KEYS:
+        for i, line in enumerate(spec.get(key) or []):
+            for method, raw in _PROSE_PATH_RE.findall(str(line)):
+                path = _norm_path(raw.split("?", 1)[0].rstrip(".,;:)"))
+                if path in ("/api", "") or path.endswith("/..."):
+                    continue
+                if method and method != "WS" and (method, path) not in seen and path not in _IMPLICIT_PATHS:
+                    errors.append(f"{key}[{i}]: mentions {method} {raw.rstrip('.,;:)')}, which is not an endpoint")
+                elif path not in known:
+                    errors.append(f"{key}[{i}]: mentions {raw.rstrip('.,;:)')}, which is not an endpoint")
+            errors.extend(
+                f"{key}[{i}]: mentions query parameter {name!r}, which no endpoint's query documents"
+                for name in _PROSE_QUERY_RE.findall(str(line))
+                if name not in query_params
+            )
+    return errors, warnings
 
 
 def lint_stack_parity() -> list[str]:
@@ -312,7 +573,11 @@ def _starter_asset_errors(assets: dict[str, Any], label: str) -> list[str]:
         except (ValueError, OSError) as exc:
             errors.append(f"{label}: {exc}")
             continue
-        errors.extend(_spec_errors(validator, data, f"{label} app spec {data.get('slug')!r}"))
+        spec_label = f"{label} app spec {data.get('slug')!r}"
+        schema_errors = _spec_errors(validator, data, spec_label)
+        errors.extend(schema_errors)
+        if not schema_errors:
+            errors.extend(f"{spec_label}: {problem}" for problem in spec_convention_issues(data)[0])
 
     package_blocks: dict[str, str] = {}
     for entry in _section(assets, "blocks", label, errors):

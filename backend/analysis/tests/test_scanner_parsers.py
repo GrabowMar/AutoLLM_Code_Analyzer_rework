@@ -514,7 +514,7 @@ def test_trivy_labels_cvss_and_fix_versions():
     assert (data["installed_version"], data["vuln_id"], data["aliases"]) == (
         "3.0.0",
         "CVE-2026-27205",
-        ["GHSA-68rp-wp8r-4726"],
+        ["CVE-2026-27205", "GHSA-68rp-wp8r-4726"],
     )
     assert data["docs_url"] == "https://avd.aquasec.com/nvd/cve-2026-27205"
     assert (data["version"], data["fixed_version"]) == ("3.0.0", "2.3.4, 3.1.3")  # legacy keys
@@ -619,9 +619,134 @@ def test_retire_and_djlint_labels():
         ["1.9.0b1"],
         "CVE-2012-6708",
     )
-    assert data["aliases"] == ["GHSA-2pqj-h3vj-pqgw"]
+    assert data["aliases"] == ["CVE-2012-6708", "GHSA-2pqj-h3vj-pqgw"]
     assert data["references"] == ["https://nvd.nist.gov/vuln/detail/CVE-2012-6708"]
 
     [dj] = _parse("djlint", "work/static/index.html:2:0:H031:Consider adding meta keywords.\n")
     assert (dj.tool_severity, dj.suggestion) == ("", "")
     assert dj.tool_specific_data == {"docs_url": "https://www.djlint.com/docs/linter/#rules"}
+
+
+def _zap_alert(pluginid: str, riskcode: str, instances: list[dict], **extra) -> dict:
+    return {
+        "pluginid": pluginid,
+        "name": extra.pop("name", f"Alert {pluginid}"),
+        "riskcode": riskcode,
+        "confidence": "2",
+        "instances": instances,
+        "count": str(len(instances)),
+        **extra,
+    }
+
+
+def test_zap_informational_alerts_are_not_security_and_skip_hashed_bundles():
+    base = "http://172.17.0.6:8000"
+    report = {
+        "site": [
+            {
+                "@name": base,
+                "alerts": [
+                    # Suspicious comments only inside the Vite bundle: dropped.
+                    _zap_alert(
+                        "10027",
+                        "0",
+                        [{"uri": f"{base}/static/assets/index-DcMykpf9.js", "method": "GET", "evidence": "select"}],
+                    ),
+                    # Informational hit in the app's own script: kept, not security.
+                    _zap_alert(
+                        "10027",
+                        "0",
+                        [
+                            {"uri": f"{base}/assets/index-C2K5CO6L.js", "method": "GET", "evidence": "from"},
+                            {"uri": f"{base}/app.js", "method": "GET", "evidence": "admin"},
+                        ],
+                    ),
+                    # A real (low) issue on a bundle: kept but marked as build output.
+                    _zap_alert(
+                        "10003",
+                        "1",
+                        [{"uri": f"{base}/static/js/main.3f2a1b9c.js", "method": "GET", "evidence": "jquery 1.8"}],
+                    ),
+                ],
+            },
+        ],
+    }
+    comment, library = _parse("zap", json.dumps(report))
+    assert (comment.category, comment.severity, comment.tool_severity) == ("best_practice", "info", "Informational")
+    assert comment.file_path == "/app.js"
+    assert library.category == "security"
+    assert library.tool_specific_data["build_asset"] is True
+    assert "build_asset" not in comment.tool_specific_data
+
+
+def test_zap_collapses_identical_passive_evidence_across_spa_fallback_paths():
+    base = "http://app:8000"
+    instances = [
+        {"uri": f"{base}/", "method": "GET", "evidence": "<!-- TODO: remove admin -->"},
+        {"uri": f"{base}/robots.txt", "method": "GET", "evidence": "<!-- TODO: remove admin -->"},
+        {"uri": f"{base}/sitemap.xml", "method": "GET", "evidence": "<!-- TODO: remove admin -->"},
+        {"uri": f"{base}/about", "method": "GET", "evidence": "something else"},
+    ]
+    active = [
+        {"uri": f"{base}/a?q=1", "method": "GET", "param": "q", "attack": "' OR 1=1", "evidence": "SQL error"},
+        {"uri": f"{base}/b?q=1", "method": "GET", "param": "q", "attack": "' OR 1=1", "evidence": "SQL error"},
+    ]
+    report = {
+        "site": [
+            {
+                "@name": base,
+                "alerts": [_zap_alert("10027", "0", instances), _zap_alert("40018", "3", active)],
+            },
+        ],
+    }
+    spa, about, sqli_a, sqli_b = _parse("zap", json.dumps(report))
+    assert spa.file_path == "/"
+    assert spa.tool_specific_data["urls"] == [f"{base}/", f"{base}/robots.txt", f"{base}/sitemap.xml"]
+    assert about.file_path == "/about"
+    assert "urls" not in about.tool_specific_data
+    # Active findings with the same evidence are separate endpoints.
+    assert (sqli_a.file_path, sqli_b.file_path) == ("/a", "/b")
+
+
+def test_zap_missing_report_is_an_error():
+    parsed = parsers.parse("zap", "cat: /tmp/zap/report.json: No such file or directory\n")
+    assert parsed.error is not None
+
+
+def test_vulnerability_aliases_hold_every_advisory_id():
+    trivy = {
+        "Results": [
+            {
+                "Target": "requirements.txt",
+                "Vulnerabilities": [
+                    {
+                        "VulnerabilityID": "CVE-2026-1",
+                        "VendorIDs": ["GHSA-aaaa", "CVE-2026-1"],
+                        "PkgName": "flask",
+                        "Severity": "HIGH",
+                    },
+                ],
+            },
+        ],
+    }
+    [t] = _parse("trivy", json.dumps(trivy))
+    assert (t.tool_specific_data["vuln_id"], t.tool_specific_data["aliases"]) == (
+        "CVE-2026-1",
+        ["CVE-2026-1", "GHSA-aaaa"],
+    )
+    osv = {
+        "results": [
+            {
+                "source": {"path": "requirements.txt"},
+                "packages": [
+                    {
+                        "package": {"name": "flask", "version": "1"},
+                        "vulnerabilities": [],
+                        "groups": [{"ids": ["PYSEC-9"], "aliases": ["CVE-2026-9", "GHSA-bbbb"]}],
+                    },
+                ],
+            },
+        ],
+    }
+    [o] = _parse("osv_scanner", json.dumps(osv))
+    assert o.tool_specific_data["aliases"] == ["PYSEC-9", "CVE-2026-9", "GHSA-bbbb"]

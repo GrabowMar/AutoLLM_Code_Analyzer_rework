@@ -1,9 +1,10 @@
 <script lang="ts">
 	/**
-	 * EndpointListEditor — an app spec's API contract: method, path, description
-	 * and optional request/response JSON samples per endpoint. The conformance
-	 * suite calls every endpoint and checks the response fields, and synthesises
-	 * request bodies from the samples.
+	 * EndpointListEditor — an app spec's API contract: method, path, who may
+	 * call it (auth), description, and under the disclosure the query
+	 * parameters, success status and request/response JSON samples. The
+	 * conformance suite calls every endpoint and checks the response fields,
+	 * and synthesises request bodies from the samples.
 	 *
 	 * Props: `endpoints` (bindable, replaced on edit), `prefix` (field-id prefix
 	 * matching `specIssues`), `label`, `readonly`, `problem(fieldId)` → message.
@@ -15,7 +16,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import { HTTP_METHODS, emptyEndpoint, type EndpointDraft, type HttpMethod } from './spec';
+	import { ENDPOINT_AUTH, HTTP_METHODS, emptyEndpoint, type EndpointAuth, type EndpointDraft, type HttpMethod } from './spec';
 
 	interface Props {
 		endpoints: EndpointDraft[];
@@ -27,6 +28,8 @@
 	let { endpoints = $bindable(), prefix, label, readonly = false, problem = () => '' }: Props = $props();
 
 	const methodItems = HTTP_METHODS.map((m) => ({ value: m, label: m }));
+	const AUTH_LABELS: Record<EndpointAuth, string> = { public: 'Public', user: 'Signed-in user', admin: 'Admin' };
+	const authItems = ENDPOINT_AUTH.map((a) => ({ value: a, label: AUTH_LABELS[a] }));
 	// Rows whose request/response samples are shown; new rows open.
 	let open = $state<Record<number, boolean>>({});
 
@@ -35,7 +38,8 @@
 	}
 
 	function add() {
-		const e = emptyEndpoint(endpoints.length ? 'POST' : 'GET');
+		const method = endpoints.length ? 'POST' : 'GET';
+		const e = emptyEndpoint(method, prefix === 'aep' ? 'admin' : method === 'GET' ? 'public' : 'user');
 		endpoints = [...endpoints, e];
 		open = { ...open, [e.key]: true };
 	}
@@ -57,7 +61,10 @@
 		{@const descProblem = problem(`${id}-desc`)}
 		{@const reqProblem = problem(`${id}-request`)}
 		{@const resProblem = problem(`${id}-response`)}
-		{@const expanded = open[e.key] || !!reqProblem || !!resProblem}
+		{@const authProblem = problem(`${id}-auth`)}
+		{@const queryProblem = problem(`${id}-query`)}
+		{@const statusProblem = problem(`${id}-status`)}
+		{@const expanded = open[e.key] || !!reqProblem || !!resProblem || !!queryProblem || !!statusProblem}
 		<div class="rounded-md border border-border bg-muted/10">
 			<div class="flex flex-wrap items-start gap-2 p-2">
 				<button
@@ -65,7 +72,7 @@
 					class="mt-1.5 cursor-pointer text-muted-foreground transition-transform duration-150 hover:text-foreground {expanded ? 'rotate-90' : ''}"
 					aria-expanded={expanded}
 					aria-controls="{id}-samples"
-					aria-label="{expanded ? 'Hide' : 'Show'} request and response samples for {label.toLowerCase()} {i + 1}"
+					aria-label="{expanded ? 'Hide' : 'Show'} query, status and samples for {label.toLowerCase()} {i + 1}"
 					onclick={() => (open = { ...open, [e.key]: !open[e.key] })}
 				>
 					<ChevronRight class="size-4" />
@@ -96,6 +103,22 @@
 					/>
 					{#if pathProblem}<p class="text-[11px] text-danger-fg">{pathProblem}</p>{/if}
 				</div>
+				<div class="w-[9.5rem] shrink-0 space-y-1">
+					{#if readonly}
+						<span class="inline-block pt-1.5 text-xs text-muted-foreground">{e.auth ? AUTH_LABELS[e.auth] : 'Auth not stated'}</span>
+					{:else}
+						<Select.Simple
+							size="sm"
+							value={e.auth}
+							items={authItems}
+							placeholder="Who may call it"
+							aria-label="{label} {i + 1} auth"
+							aria-invalid={!!authProblem}
+							onValueChange={(v) => patch(e.key, { auth: v as EndpointAuth })}
+						/>
+					{/if}
+					{#if authProblem}<p class="text-[11px] text-danger-fg">{authProblem}</p>{/if}
+				</div>
 				<div class="min-w-[12rem] flex-[2] space-y-1">
 					<Input
 						id="{id}-desc"
@@ -124,6 +147,34 @@
 			</div>
 			{#if expanded}
 				<div id="{id}-samples" class="grid gap-2 border-t border-border p-2 sm:grid-cols-2">
+					<div class="space-y-1">
+						<label for="{id}-query" class="section-label">Query parameters <span class="font-normal normal-case">(one "name: what it does" per line)</span></label>
+						<Textarea
+							id="{id}-query"
+							value={e.query}
+							readonly={readonly}
+							rows={2}
+							aria-invalid={!!queryProblem}
+							placeholder="query: text matched against title and author"
+							class="bg-background font-mono text-[11px] leading-normal"
+							oninput={(ev: Event & { currentTarget: HTMLTextAreaElement }) => patch(e.key, { query: ev.currentTarget.value })}
+						/>
+						{#if queryProblem}<p class="text-[11px] text-danger-fg">{queryProblem}</p>{/if}
+					</div>
+					<div class="space-y-1">
+						<label for="{id}-status" class="section-label">Success status <span class="font-normal normal-case">(blank = 200)</span></label>
+						<Input
+							id="{id}-status"
+							value={e.successStatus}
+							readonly={readonly}
+							inputmode="numeric"
+							aria-invalid={!!statusProblem}
+							placeholder="201"
+							class="h-8 w-24 font-mono text-xs"
+							oninput={(ev) => patch(e.key, { successStatus: ev.currentTarget.value })}
+						/>
+						{#if statusProblem}<p class="text-[11px] text-danger-fg">{statusProblem}</p>{/if}
+					</div>
 					<div class="space-y-1">
 						<label for="{id}-request" class="section-label">Request sample (JSON)</label>
 						<Textarea

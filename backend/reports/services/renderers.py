@@ -1,7 +1,7 @@
 """Render a report as Markdown or LaTeX (booktabs) tables.
 
-The study report has curated tables, one per section, in the order a paper
-reports them. Every other report type falls back to a generic rendering:
+The study and experiment reports have curated tables, one per section, in
+the order a paper reports them. Every other report type falls back to a generic rendering:
 top-level scalars as a key/value table, and every list of objects as a
 table of its scalar columns.
 """
@@ -78,7 +78,7 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
         ("Analysis plan hash", experiment.get("analysis_plan_hash")),
         ("Plan frozen at", experiment.get("analysis_plan_frozen_at")),
         ("Data fingerprint", (protocol.get("data_fingerprint") or "")[:16]),
-        ("Seed", (protocol.get("settings") or {}).get("seed")),
+        ("Resampling seed (bootstrap/permutation)", (protocol.get("settings") or {}).get("seed")),
     ]
     tables.append(Table("Protocol", [("k", "Item"), ("v", "Value")], [{"k": k, "v": v} for k, v in kv]))
 
@@ -131,8 +131,11 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
         ("duplicate_findings", "Duplicates"),
         ("mean_unique_per_app", "Mean/app"),
         ("median_unique_per_app", "Median/app"),
-        ("unique_per_kloc", "Per kLOC"),
+        ("code_unique", "Code issues"),
+        ("unique_per_kloc", "Code issues / kLOC"),
         ("security_unique", "Security"),
+        ("dependency_unique", "Dependency advisories"),
+        ("dependency_added", "In model-added packages"),
         ("unique_critical", "Critical"),
         ("unique_high", "High"),
     ]
@@ -269,6 +272,7 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
             **r,
             "near": (near.get(r["model"]) or {}).get("rank_ci95"),
             "any": (anyw.get(r["model"]) or {}).get("rank_ci95"),
+            "top1": (near.get(r["model"]) or {}).get("p_rank_1"),
             "top3": (near.get(r["model"]) or {}).get("p_top_3"),
             "boot": (boot.get(r["model"]) or {}).get("rank_ci95"),
         }
@@ -285,7 +289,9 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
                 ("wsm_rank", "WSM"),
                 ("near", "Rank 95% (weights ±)"),
                 ("any", "Rank 95% (any weights)"),
-                ("top3", "P(top 3)"),
+                ("top1", "P(rank 1)"),
+                # With 3 or fewer models every model is in the top 3.
+                *([("top3", "P(top 3)")] if len(rank_rows) > 3 else []),
                 ("boot", "Rank 95% (data)"),
             ],
             rank_rows,
@@ -298,14 +304,16 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
     for family in planned.get("families") or []:
         tables.append(
             Table(
-                f"Planned comparison: {family['metric']} ({family['role']}, {family['status']})",
+                f"Planned comparison: {family['metric']} ({family['role']}, {family['status']}, "
+                f"{family.get('alternative', 'two-sided')})",
                 [
                     ("condition", "Condition"),
                     ("n_pairs", "Apps"),
                     ("mean_delta", "Mean delta"),
                     ("median_delta", "Median delta"),
-                    ("wins", "Wins"),
-                    ("losses", "Losses"),
+                    # Sign counts of (condition - baseline): "above" is worse for cost-type metrics.
+                    ("wins", "Above baseline"),
+                    ("losses", "Below baseline"),
                     ("p_wilcoxon", "p (Wilcoxon)"),
                     ("p_adjusted", f"p ({planned.get('correction')})"),
                     ("significant", f"< {planned.get('alpha')}"),
@@ -314,7 +322,9 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
                 " ".join(
                     note
                     for note in (
-                        "Interim: do not interpret p-values yet." if planned.get("interim") else "",
+                        "Interim: p-values are withheld until the experiment finishes."
+                        if planned.get("interim")
+                        else "",
                         (
                             f"Not tested (fewer than {planned.get('min_apps_per_condition')} apps): "
                             + ", ".join(c["condition"] for c in family["comparisons"] if c.get("skipped"))
@@ -352,6 +362,99 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
     return tables
 
 
+def _experiment_tables(data: dict[str, Any]) -> list[Table]:
+    """Curated tables of an experiment report: design, leaderboard, paired comparison, notes, code issues."""
+    exp = data.get("experiment") or {}
+    results = data.get("results") or {}
+    conditions = data.get("conditions") or []
+    labels = {c["condition_id"]: c["label"] for c in conditions}
+    kv = [
+        ("Experiment", exp.get("name")),
+        ("Hypothesis", exp.get("hypothesis")),
+        ("Status", exp.get("status")),
+        ("Repeats", exp.get("repeats")),
+        ("Baseline", f"{labels.get(results.get('baseline_condition_id'), '-')} ({results.get('baseline_source')})"),
+        ("Interim", results.get("interim")),
+        ("Balanced", results.get("balanced")),
+        ("Results computed at", results.get("generated_at")),
+    ]
+    tables = [Table("Experiment", [("k", "Item"), ("v", "Value")], [{"k": k, "v": v} for k, v in kv])]
+    tables.append(
+        Table(
+            "Leaderboard (conformance pass rate)",
+            [
+                ("rank", "Rank"),
+                ("label", "Condition"),
+                ("n_apps", "Apps"),
+                ("n_graded", "Graded"),
+                ("missing", "Missing"),
+                ("k_passed", "Fully passed"),
+                ("pass_rate_mean", "Mean pass rate"),
+                ("pass_rate_ci95", "95% CI (app bootstrap)"),
+                ("cost_usd", "Cost (USD)"),
+                ("median_seconds", "Median run (s)"),
+            ],
+            [
+                {
+                    **r,
+                    "missing": sum((r.get("n_missing") or {}).values())
+                    if isinstance(r.get("n_missing"), dict)
+                    else r.get("n_missing"),
+                }
+                for r in results.get("leaderboard") or []
+            ],
+            "Graded and Missing count runs (app x repeat). The mean is over apps (each app's repeats averaged "
+            "first); no interval below 3 apps.",
+        ),
+    )
+    paired = results.get("paired") or {}
+    if paired.get("rows"):
+        correction = paired.get("correction") or "none"
+        kind = f"{paired.get('status', 'exploratory')}, {paired.get('alternative', 'two-sided')}"
+        tables.append(
+            Table(
+                f"Paired vs baseline ({kind})",
+                [
+                    ("condition", "Condition"),
+                    ("n_pairs", "Apps"),
+                    ("mean_delta", "Mean delta"),
+                    ("ci95", "95% CI"),
+                    ("wins", "Above baseline"),
+                    ("losses", "Below baseline"),
+                    ("ties", "Ties"),
+                    ("wilcoxon_p", "p (Wilcoxon)"),
+                    ("p_adjusted", f"p ({correction})"),
+                    ("significant", f"< {paired.get('alpha')}"),
+                ],
+                [{**r, "condition": labels.get(r["condition_id"], r["condition_id"])} for r in paired["rows"]],
+                "App-blocked: each delta is one app's mean pass rate minus the baseline's on the same app.",
+            ),
+        )
+    notes = results.get("notes") or []
+    if notes:
+        tables.append(Table("Notes", [("note", "Note")], [{"note": n} for n in notes]))
+    tables.append(
+        Table(
+            "Code issues per condition (deduplicated across tools)",
+            [
+                ("label", "Condition"),
+                ("issues_dedup.apps", "Runs analyzed"),
+                ("issues_dedup.raw_findings", "Raw findings"),
+                ("issues_dedup.unique_issues", "Unique issues"),
+                ("issues_dedup.code_unique", "Code issues"),
+                ("issues_dedup.unique_per_kloc", "Code issues / kLOC"),
+                ("issues_dedup.security_unique", "Security"),
+                ("issues_dedup.dependency_unique", "Dependency advisories"),
+                ("issues_dedup.dependency_added", "In model-added packages"),
+                ("generation.total_cost", "Generation cost (USD)"),
+            ],
+            conditions,
+            "Each app's latest result per tool; AI-reviewer findings excluded.",
+        ),
+    )
+    return tables
+
+
 def _generic_tables(data: dict[str, Any], prefix: str = "") -> list[Table]:
     tables: list[Table] = []
     scalars = [{"k": k, "v": v} for k, v in data.items() if not isinstance(v, (dict, list))]
@@ -374,8 +477,16 @@ def _generic_tables(data: dict[str, Any], prefix: str = "") -> list[Table]:
 def report_tables(report: Report) -> list[Table]:
     data = report.report_data or {}
     if report.report_type == Report.Type.STUDY_REPORT:
-        return _study_tables(data)
-    return _generic_tables(data)
+        tables = _study_tables(data)
+    elif report.report_type == Report.Type.EXPERIMENT_REPORT and "results" in data:
+        tables = _experiment_tables(data)
+    else:
+        tables = _generic_tables(data)
+    for table in tables:
+        if len(table.rows) > _MAX_ROWS:
+            cut = f"First {_MAX_ROWS} of {len(table.rows)} rows; the JSON export has all of them."
+            table.note = f"{table.note} {cut}".strip()
+    return tables
 
 
 # ── Markdown ─────────────────────────────────────────────────────────────
@@ -439,16 +550,21 @@ def render_latex(report: Report) -> str:
         "% Requires \\usepackage{booktabs} and \\usepackage{longtable}.",
         "",
     ]
+    used_labels: set[str] = set()
     for table in report_tables(report):
         if not table.rows:
             continue
+        label = _label(table.title)
+        while label in used_labels:
+            label += "-x"
+        used_labels.add(label)
         spec = "l" * len(table.columns)
         caption = tex_escape(table.title)
         if table.note:
             caption += r". \footnotesize " + tex_escape(table.note)
         out += [
             f"\\begin{{longtable}}{{{spec}}}",
-            f"\\caption{{{caption}}}\\label{{{_label(table.title)}}}\\\\",
+            f"\\caption{{{caption}}}\\label{{{label}}}\\\\",
             "\\toprule",
             " & ".join(tex_escape(h) for _, h in table.columns) + r" \\",
             "\\midrule",

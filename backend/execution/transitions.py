@@ -339,6 +339,29 @@ def _interrupted_validity(result_data: dict[str, Any], detail: str) -> dict[str,
     return result
 
 
+_SPEND_KEYS = ("cost", "prompt_tokens", "completion_tokens", "total_tokens")
+
+
+def _attempt_spend(metrics: Any) -> dict[str, float | int]:
+    """An attempt's LLM spend from its ``metrics`` (empty when it recorded none)."""
+    if not isinstance(metrics, dict):
+        return {}
+    spend: dict[str, float | int] = {}
+    for key in _SPEND_KEYS:
+        value = metrics.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value:
+            spend[key] = value
+    return spend
+
+
+def _accumulate_prior_spend(execution: dict[str, Any], spend: dict[str, float | int]) -> None:
+    """Add a wiped attempt's spend to ``execution.prior_attempts_{cost,total_tokens,...}``."""
+    for key, value in spend.items():
+        name = f"prior_attempts_{key}"
+        total = (execution.get(name) or 0) + value
+        execution[name] = round(total, 8) if key == "cost" else int(total)
+
+
 def infra_retry(job: GenerationJob, reason: str, error: str = "") -> bool:
     """Requeue the same row as attempt+1 (same snapshot and seed) or fail it for good (spec §C.7).
 
@@ -347,6 +370,12 @@ def infra_retry(job: GenerationJob, reason: str, error: str = "") -> bool:
     (2 for ad-hoc jobs; attempts consumed by ``executor_lost`` do not count). Exhausted
     ``infra_interrupted`` ends COMPLETED with validity ``invalid: infra_interrupted``; other
     exhausted reasons end FAILED.
+
+    Each attempt's LLM spend (``metrics.cost`` / tokens) is kept in its
+    ``execution.attempts[]`` record; on a requeue (which wipes ``metrics``) it is
+    also summed into ``execution.prior_attempts_cost`` / ``prior_attempts_*_tokens``
+    so cost totals can include it. ``execution.requeued_at`` is the new
+    attempt's enqueue time (the scheduler's ``queue_seconds`` counts from it).
     """
     from backend.generation.models import GenerationArtifact
 
@@ -356,7 +385,7 @@ def infra_retry(job: GenerationJob, reason: str, error: str = "") -> bool:
         row = (
             GenerationJob.objects.select_for_update()
             .filter(id=job.id, attempt=attempt, status=S.RUNNING)
-            .values("execution", "started_at", "experiment_id", "endpoint_id", "batch_id")
+            .values("execution", "metrics", "started_at", "experiment_id", "endpoint_id", "batch_id")
             .first()
         )
         if row is None:
@@ -371,10 +400,18 @@ def infra_retry(job: GenerationJob, reason: str, error: str = "") -> bool:
             record = {"attempt": attempt, "reason": reason, "error": (error or "")[:1000], "at": now.isoformat()}
             if execution.get("infra_errors"):
                 record["infra_errors"] = execution.pop("infra_errors")[-20:]
+            spend = _attempt_spend(row["metrics"])
+            if spend:
+                record.update(spend)
             execution["attempts"] = [*(execution.get("attempts") or []), record]
             if reason == REASON_EXECUTOR_LOST:
                 execution["executor_lost_count"] = lost + 1
             if allowed:
+                # The attempt's metrics are wiped below: carry its spend forward
+                # so experiment totals keep what earlier attempts cost.
+                if spend:
+                    _accumulate_prior_spend(execution, spend)
+                execution["requeued_at"] = now.isoformat()
                 if reason == REASON_EXECUTOR_LOST:
                     delay = LOST_RETRY_DELAY_S
                 else:

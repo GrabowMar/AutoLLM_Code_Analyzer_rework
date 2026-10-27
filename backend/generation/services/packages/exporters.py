@@ -234,7 +234,8 @@ def _dedupe_blocks(blocks: list[ContentBlock]) -> list[ContentBlock]:
 
 
 def _serialize_app_template(template: AppRequirementTemplate) -> dict[str, Any]:
-    return {
+    """The spec in its own form: ``data_models`` for a v3 spec, else the legacy ``data_model``."""
+    data = {
         "name": template.name,
         "slug": template.slug,
         "category": template.category,
@@ -243,10 +244,15 @@ def _serialize_app_template(template: AppRequirementTemplate) -> dict[str, Any]:
         "frontend_requirements": template.frontend_requirements or [],
         "admin_requirements": template.admin_requirements or [],
         "api_endpoints": template.api_endpoints or [],
-        "data_model": template.data_model or {},
         "admin_api_endpoints": template.admin_api_endpoints or [],
         "difficulty": template.difficulty or "",
+        "spec_schema_version": template.spec_schema_version,
     }
+    if isinstance(template.data_model, list):
+        data["data_models"] = template.data_model
+    else:
+        data["data_model"] = template.data_model or {}
+    return data
 
 
 def _serialize_block(block: ContentBlock) -> dict[str, Any]:

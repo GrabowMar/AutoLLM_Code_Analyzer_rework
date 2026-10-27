@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from jinja2 import StrictUndefined
 from jinja2 import select_autoescape
 
 from backend.generation.services.evaluation import contract as contract_mod
+from backend.generation.services.spec_models import data_model_for_prompt
 
 # v2: autonomy statement for every harness, accounts/admin contract, the
 # automatic-evaluation notice, request budget as the primary limit.
@@ -27,7 +29,16 @@ from backend.generation.services.evaluation import contract as contract_mod
 # "Additional context" section (it used to replace the spec's description);
 # user-authored stacks state their real start command. Briefs without such a
 # description, on builtin stacks, are byte-identical to v2.
-BRIEF_VERSION = 3
+# v4: a spec with several data models (schema v3 ``data_models``) lists them
+# all under "Data models"; an endpoint's access level, query parameters and
+# success status are stated when the spec gives them; the builtin stack
+# summaries name the current runtimes (Python 3.13, Node 24 toolchains).
+# JSON blocks (data models, request and response bodies) are no longer
+# HTML-escaped (Jinja's ``tojson`` printed ' < > & as \u0027 \u003c ...).
+# Keys stay sorted: a spec read back from the database (jsonb) has lost its
+# authoring order, so sorting is what keeps the brief, and its sha256,
+# independent of how the spec was loaded.
+BRIEF_VERSION = 4
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "agent"
 BRIEF_TEMPLATE_PATH = _DATA_DIR / "brief.md.jinja2"
@@ -36,6 +47,13 @@ STACK_CONTRACTS_PATH = _DATA_DIR / "stacks.yaml"
 # Files the platform owns: restored from the pinned stack after the run, so
 # the agent cannot change how its own output is built and evaluated.
 PROTECTED_FILES = ("Dockerfile", ".dockerignore", "docker-compose.yml")
+
+# How the brief states a spec endpoint's ``auth`` level (schema v3).
+ACCESS_LABELS = {
+    "public": "anyone, without signing in",
+    "user": "signed-in users",
+    "admin": "admin accounts only",
+}
 
 
 def sha256_text(text: str) -> str:
@@ -92,6 +110,11 @@ def _network_summary(policy: str) -> str:
     return "nothing: no package downloads are possible, use only what is installed"
 
 
+def _brief_json(value: Any, indent: int | None = None) -> str:
+    """``tojson`` without HTML escaping: the brief is Markdown for an LLM, never HTML."""
+    return json.dumps(value, indent=indent, sort_keys=True)
+
+
 def render_brief(
     *,
     app: dict[str, Any] | None,
@@ -120,6 +143,7 @@ def render_brief(
         keep_trailing_newline=True,
         autoescape=select_autoescape(enabled_extensions=("html", "xml"), default_for_string=False),
     )
+    env.filters["tojson"] = _brief_json
     template = env.from_string(BRIEF_TEMPLATE_PATH.read_text(encoding="utf-8"))
     endpoints = [*(app.get("api_endpoints") or []), *(app.get("admin_api_endpoints") or [])]
     text = template.render(
@@ -128,7 +152,8 @@ def render_brief(
             "backend_requirements": app.get("backend_requirements") or [],
             "frontend_requirements": app.get("frontend_requirements") or [],
             "admin_requirements": app.get("admin_requirements") or [],
-            "data_model": app.get("data_model") or {},
+            # The one model, or the list of all of them (legacy app dicts carry only data_model).
+            "data_model": data_model_for_prompt(app),
         },
         description=task_description,
         additional_context=additional_context,
@@ -139,9 +164,13 @@ def render_brief(
                 "description": ep.get("description", ""),
                 "request": ep.get("request"),
                 "response": ep.get("response"),
+                "auth": ep.get("auth") if ep.get("auth") in ACCESS_LABELS else None,
+                "query": ep.get("query") if isinstance(ep.get("query"), dict) else None,
+                "success_status": ep.get("success_status"),
             }
             for ep in endpoints
         ],
+        access_labels=ACCESS_LABELS,
         stack=stack_contract(stack_slug, stack_config),
         contract=contract_mod.describe(app),
         protected_files=PROTECTED_FILES,

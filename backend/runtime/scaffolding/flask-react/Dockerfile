@@ -1,14 +1,17 @@
-# Stage 1: Build React frontend
-FROM node:20-alpine AS frontend-builder
+# Stage 1: build the frontend (no lockfile: package.json pins exact versions)
+FROM node:24-alpine AS frontend-builder
 WORKDIR /frontend
 COPY frontend/package*.json ./
-RUN npm install --silent
+RUN npm install --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
-# Stage 2: Flask serves API + static SPA
-FROM python:3.11-slim
+# Stage 2: Flask serves the API + the built SPA from ./static
+FROM python:3.13-slim
 WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \

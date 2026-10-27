@@ -3,27 +3,35 @@
 {{ description }}
 
 ## Task
-Generate `App.vue` as a **feature-rich Vue 3 application** with clear sections, strong data-fetching states, and a distinctive visual identity.
+Generate `App.vue` (plus `routes.js` and the page and component files it uses): the complete Vue frontend for this application. Implement every frontend and admin requirement below completely against the backend API, and give each feature its own route or view.
 
 ## Backend API Context
 {{ backend_api_context }}
-
+{% if admin_api_endpoints %}
+{{ admin_api_endpoints }}
+{% endif %}
 ## Requirements
 
 ### Features
-{% for req in frontend_requirements %}
+{% for req in frontend_requirements -%}
 - {{ req }}
 {% endfor %}
-
 ### Admin Features
-{% for req in admin_requirements %}
+{% for req in admin_requirements -%}
 - {{ req }}
 {% endfor %}
-
-## Implementation Requirements
-- Use `<script setup>` with Composition API state.
-- Build reusable inline components or section helpers within the file.
-- Include landing, browse/list, detail, dashboard, auth, and admin experiences.
-- Add meaningful loading, empty, and error states for network requests.
-
-**GENERATE COMPLETE APP.VUE NOW.**
+## Integration
+- Call the endpoints above with relative `/api/...` URLs and use the request and response shapes they define; show API errors to the user.
+- Routes are client-side (`createWebHistory`); the backend serves `index.html` for every non-API path, so deep links and reloads work.
+{% if contract.accounts -%}
+{% if contract.spec_defines_auth -%}
+- Accounts: use the register and login endpoints in the API context. Login returns the token in a top-level `token` field.
+{% else -%}
+- Accounts: a register view posts `{"{{ contract.identity_field }}": ..., "password": ...}` as JSON to `{{ contract.register_path }}`; a login view posts the same body to `{{ contract.login_path }}`, which returns `{"token": string}`.
+{% endif -%}
+- Keep the token (for example in `localStorage`), send it as `Authorization: Bearer <token>` on API requests, show who is signed in and offer sign-out. Views for signed-in users send guests to the login view.
+{% if contract.admin -%}
+- The admin views (calling `/api/admin/...`) are for the admin account, which signs in through the same login view.
+{% endif -%}
+{% endif %}
+**Return the complete `App.vue` and the files it uses now.**

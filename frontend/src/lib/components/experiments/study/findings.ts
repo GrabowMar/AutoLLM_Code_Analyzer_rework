@@ -12,6 +12,7 @@ import type {
   PairedRow,
 } from "$lib/api/types/experiments";
 import {
+  CORRECTION_LABEL,
   MIN_APPS_FOR_CI,
   conditionName,
   formatDeltaPp,
@@ -20,7 +21,7 @@ import {
   plural,
 } from "../format";
 
-/** Significance level the page reports against (Holm-adjusted p). */
+/** Default significance level when the results carry no analysis-plan alpha. */
 export const ALPHA = 0.05;
 
 /** A finding's text: plain strings with emphasised (bold) parts. */
@@ -153,7 +154,7 @@ function leaderFindings(rows: LeaderboardRow[]): Finding[] {
   return [{ kind: "leader", parts }];
 }
 
-/** Differences against the baseline (paired by app, Holm-adjusted). */
+/** Differences against the baseline (paired by app, adjusted as the plan says, else Holm). */
 function effectFindings(
   results: ExperimentResults,
   labelOf: (id: number) => string,
@@ -164,6 +165,12 @@ function effectFindings(
   );
   if (baselineId == null || rows.length === 0) return [];
   const baseline = labelOf(baselineId);
+  const alpha = results.paired.alpha ?? ALPHA;
+  const correction =
+    CORRECTION_LABEL[results.paired.correction] ??
+    results.paired.correction ??
+    "Holm";
+  const pOf = (r: PairedRow) => r.p_adjusted ?? r.p_holm;
   const largest = [...rows].sort(
     (a, b) =>
       Math.abs(b.mean_delta as number) - Math.abs(a.mean_delta as number),
@@ -173,7 +180,7 @@ function effectFindings(
     { strong: labelOf(largest.condition_id) },
     " ",
     { strong: formatDeltaPp(largest.mean_delta) },
-    ` (${deltaCiText(largest)}${withP && largest.p_holm != null ? `, p = ${formatP(largest.p_holm)}` : ""}).`,
+    ` (${deltaCiText(largest)}${withP && pOf(largest) != null ? `, p = ${formatP(pOf(largest))}` : ""}).`,
   ];
 
   if (results.interim) {
@@ -189,7 +196,7 @@ function effectFindings(
       },
     ];
   }
-  if (rows.every((r) => r.p_holm == null)) {
+  if (rows.every((r) => pOf(r) == null)) {
     return [
       {
         kind: "null",
@@ -202,7 +209,9 @@ function effectFindings(
       },
     ];
   }
-  const significant = rows.filter((r) => r.p_holm != null && r.p_holm < ALPHA);
+  const significant = rows.filter(
+    (r) => r.significant ?? (pOf(r) != null && (pOf(r) as number) < alpha),
+  );
   if (significant.length === 0) {
     return [
       {
@@ -210,7 +219,7 @@ function effectFindings(
         parts: [
           "No condition differs from the baseline ",
           { strong: baseline },
-          ` at α = ${ALPHA} (Holm). `,
+          ` at α = ${alpha} (${correction}, ${results.paired.status ?? "exploratory"}). `,
           ...largestParts("Largest observed difference: ", true),
         ],
       },
@@ -226,11 +235,11 @@ function effectFindings(
       parts: [
         `${significant.length} of ${plural(rows.length, "condition")} differ from the baseline `,
         { strong: baseline },
-        ` (Holm-adjusted p < ${ALPHA}). Largest: `,
+        ` (${correction}-adjusted p < ${alpha}, ${results.paired.status ?? "exploratory"}). Largest: `,
         { strong: labelOf(strongest.condition_id) },
         " ",
         { strong: formatDeltaPp(strongest.mean_delta) },
-        ` (${deltaCiText(strongest)}, p = ${formatP(strongest.p_holm)}).`,
+        ` (${deltaCiText(strongest)}, p = ${formatP(pOf(strongest))}).`,
       ],
     },
   ];

@@ -132,6 +132,10 @@ export interface RunFinding {
   tool_slug: string;
   /** Standardized extras (see `FindingDetail`): rule_name, docs_url, cwe, package, url, … */
   tool_specific_data: Record<string, any>;
+  /** With `group`: the other findings (often of other tools) that report the same issue. */
+  duplicates?: RunFinding[];
+  /** With `group`: the issue's cross-tool class (e.g. `vulnerable-dependency:pyjwt`). */
+  issue_class?: string;
 }
 
 export interface Paginated<T> {
@@ -143,7 +147,10 @@ export interface Paginated<T> {
 }
 
 export type PaginatedRuns = Paginated<AnalysisRunListItem>;
-export type PaginatedRunFindings = Paginated<RunFinding>;
+export type PaginatedRunFindings = Paginated<RunFinding> & {
+  /** With `group`: the findings behind the `total` issues. */
+  findings_total?: number | null;
+};
 
 export interface FacetValue {
   value: string;
@@ -229,6 +236,8 @@ export interface FindingsParams {
   rule_id?: string;
   search?: string;
   sort?: "severity" | "file" | "tool" | "rule";
+  /** One item per issue: findings of several tools that report the same thing collapse. */
+  group?: boolean;
 }
 
 interface RequestOptions {

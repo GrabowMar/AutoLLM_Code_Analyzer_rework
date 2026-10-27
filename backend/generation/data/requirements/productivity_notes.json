@@ -2,98 +2,172 @@
   "slug": "productivity_notes",
   "name": "Notes",
   "category": "Productivity",
-  "description": "Create and organize notes",
+  "description": "Write notes, tag them and find them again by tag or text",
   "difficulty": "standard",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only notes; require auth for create/update/delete",
-    "1. Note model: id, title (required), content, tags, created_at",
-    "2. GET /api/notes - list notes",
-    "3. POST /api/notes - create note",
-    "4. PUT /api/notes/:id - update note",
-    "5. DELETE /api/notes/:id - delete note"
+    "Access control: anyone may read notes; require auth for creating notes; restrict updating and deleting a note to the user who wrote it; admin endpoints are restricted to the admin account",
+    "Notes belong to the signed-in user who created them; updating or deleting another user's note answers 403; DELETE /api/notes/:id removes the note permanently",
+    "Note validation: title is a required non-empty string of at most 200 characters; content, when given, is at most 20000 characters; pinned defaults to false",
+    "Tags: a note has at most 10 tags; each tag is trimmed and lower-cased, 1 to 30 characters, and duplicates are dropped; a missing tags list means no tags",
+    "Every note in a response carries author (the writer's username), created_at and updated_at; updated_at changes on every update",
+    "GET /api/notes returns active notes, pinned notes first and then most recently updated first; ?tag= keeps notes carrying that tag, ?author= keeps notes by that username, ?query= matches title or content case-insensitively, ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every matching note",
+    "GET /api/tags lists every tag used by active notes with the number of notes carrying it, most used first",
+    "Deactivated notes (is_active false) are left out of GET /api/notes and GET /api/tags and answer 404 on the public note endpoints; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for another user's note or a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "HomePage displays ALL content in read-only mode for public users",
-    "Public users see \"Sign in to create notes\" CTAs instead of action buttons",
-    "Logged-in users see same content plus create/edit/delete functionality",
-    "1. Notes list with title and tags (visible to all)",
-    "2. Note editor with title and content (logged-in only)",
-    "3. Tag filter chips (visible to all)",
-    "4. Edit and delete actions (logged-in only)",
-    "5. Empty state messaging (visible to all)"
+    "Everyone sees the notes list and note details read-only; signed-in users also get a new-note button and, on their own notes, edit and delete controls, and visitors see a 'Sign in to write notes' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Notes list: cards with title, the start of the content, tags, author and last update, pinned notes marked, a search box, previous/next paging and a 'My notes' switch for signed-in users",
+    "Tag filter chips built from /api/tags with their counts; choosing a chip filters the list by that tag and choosing it again clears the filter",
+    "Note editor for title, content, tags and pinned that shows the API's validation messages; delete asks for confirmation first",
+    "Empty states for no notes at all and for a filter or search with no matches"
+  ],
+  "admin_requirements": [
+    "Admin overview: every note, active or not, with its author and total, active and inactive counts",
+    "Toggle a note's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/notes",
-      "description": "List notes",
+      "description": "List active notes, pinned first then most recently updated, filtered and paged",
+      "auth": "public",
+      "query": {
+        "tag": "Keep notes carrying this tag (case-insensitive)",
+        "author": "Keep notes written by this username",
+        "query": "Case-insensitive text matched against title and content",
+        "page": "1-based page number (default 1)",
+        "page_size": "Notes per page (default 20, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "title": "string",
-            "content": "string",
+            "title": "Sprint retro ideas",
+            "content": "Try a silent brainstorm first.\nTimebox to 45 minutes.",
             "tags": [
-              "tag"
-            ]
+              "work",
+              "ideas"
+            ],
+            "pinned": true,
+            "author": "sam",
+            "created_at": "2026-02-10T14:00:00Z",
+            "updated_at": "2026-02-11T09:30:00Z"
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/notes",
+      "description": "Create a note as the signed-in user",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "title": "string",
+        "content": "string (optional)",
+        "tags": [
+          "string"
+        ],
+        "pinned": "boolean (optional)"
+      },
+      "response": {
+        "id": 1,
+        "title": "Sprint retro ideas",
+        "content": "Try a silent brainstorm first.\nTimebox to 45 minutes.",
+        "tags": [
+          "work",
+          "ideas"
+        ],
+        "pinned": true,
+        "author": "sam",
+        "created_at": "2026-02-10T14:00:00Z",
+        "updated_at": "2026-02-11T09:30:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/notes/:id",
+      "description": "One active note",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "title": "Sprint retro ideas",
+        "content": "Try a silent brainstorm first.\nTimebox to 45 minutes.",
+        "tags": [
+          "work",
+          "ideas"
+        ],
+        "pinned": true,
+        "author": "sam",
+        "created_at": "2026-02-10T14:00:00Z",
+        "updated_at": "2026-02-11T09:30:00Z"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/notes/:id",
+      "description": "Replace one of your notes (title required; omitted content and tags are cleared, an omitted pinned becomes false)",
+      "auth": "user",
+      "request": {
+        "title": "string",
+        "content": "string (optional)",
+        "tags": [
+          "string"
+        ],
+        "pinned": "boolean (optional)"
+      },
+      "response": {
+        "id": 1,
+        "title": "Sprint retro ideas",
+        "content": "Try a silent brainstorm first.\nTimebox to 45 minutes.",
+        "tags": [
+          "work",
+          "ideas"
+        ],
+        "pinned": true,
+        "author": "sam",
+        "created_at": "2026-02-10T14:00:00Z",
+        "updated_at": "2026-02-11T09:30:00Z"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/notes/:id",
+      "description": "Delete one of your notes",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "description": "Tags used by active notes with their note counts, most used first",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "tag": "work",
+            "count": 3
           }
         ],
         "total": 1
       }
     },
     {
-      "method": "POST",
-      "path": "/api/notes",
-      "description": "Create note",
-      "request": {
-        "title": "string",
-        "content": "string",
-        "tags": [
-          "tag"
-        ]
-      },
-      "response": {
-        "id": 1,
-        "title": "string",
-        "content": "string",
-        "tags": [
-          "tag"
-        ]
-      }
-    },
-    {
-      "method": "PUT",
-      "path": "/api/notes/:id",
-      "description": "Update note",
-      "request": {
-        "title": "string",
-        "content": "string",
-        "tags": [
-          "tag"
-        ]
-      },
-      "response": {
-        "id": 1,
-        "title": "string",
-        "content": "string",
-        "tags": [
-          "tag"
-        ]
-      }
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/notes/:id",
-      "description": "Delete note",
-      "request": null,
-      "response": {}
-    },
-    {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -101,42 +175,54 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Note",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "title": "string (required, max 200 chars)",
-      "content": "text (optional)",
-      "tags": "JSON array of strings (optional)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Note",
+      "description": "A note written by a signed-in user",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who wrote it)",
+        "title": "string (required, max 200 chars)",
+        "content": "string (optional, max 20000 chars)",
+        "tags": "list of strings (at most 10; each trimmed, lower-cased, 1-30 chars, no duplicates)",
+        "pinned": "boolean (default false)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "updated_at": "datetime (auto, changes on every update, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the note from public endpoints)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any note"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/notes",
-      "description": "Admin overview: list all notes and counts",
+      "description": "Admin overview: every note with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "title": "Sprint retro ideas",
+            "author": "sam",
+            "is_active": true,
+            "created_at": "2026-02-10T14:00:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/notes/:id/toggle",
-      "description": "Toggle note active status",
+      "description": "Flip a note's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

@@ -273,7 +273,7 @@ def _crash_detail(container: ContainerInstance, state: dict) -> str:
 
 def _write_minimal_dockerfile(path: Path) -> None:
     (path / "Dockerfile").write_text(
-        "FROM python:3.11-slim\n"
+        "FROM python:3.13-slim\n"
         "WORKDIR /app\n"
         "COPY . .\n"
         "RUN pip install flask --quiet\n"

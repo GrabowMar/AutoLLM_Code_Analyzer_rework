@@ -14,12 +14,32 @@ Outcome ``status``:
 * ``passed`` / ``failed`` -- the suite ran; ``summary.pass_rate`` grades it,
 * ``build_failed`` / ``start_failed`` -- the sample does not build or never
   answers its health check (a sample outcome, pass_rate 0),
-* ``infra_error`` -- the platform could not evaluate (daemon down, registry
-  outage during build after a retry): **not** a property of the sample,
-  exclude it from analyses and re-evaluate.
+* ``infra_error`` -- the platform could not evaluate (daemon down or out of
+  disk, docker client/API errors, registry outage during build after a
+  retry): **not** a property of the sample, exclude it from analyses and
+  re-evaluate.
+
+Build errors are split by where they come from: an ``error`` chunk of the
+build stream is a failed build step (the sample's ``build_failed``, unless
+its text is a registry/network/disk signature); an exception raised by the
+docker client itself (connection refused, ``Max retries exceeded``, an API
+500, ...) is the platform's and makes the build ``infra_error``. A read
+timeout of the build stream (a step silent for ``BUILD_TIMEOUT_S``) stays a
+build failure.
+
+A tester that is still running at ``TESTER_TIMEOUT_S`` means the suite got
+past the health phase (an app that never answers health fails every check
+without a request) and the app then answered too slowly to finish: when the
+app still answers its health endpoint (probed from inside the tester
+container) the outcome is ``failed`` with ``pass_rate`` 0 and
+``tester_timed_out`` set (the tester reports only at the end, so there is no
+partial score). If that cannot be confirmed it stays ``infra_error``.
 
 ``EVALUATOR_VERSION`` + the tester's own VERSION and sha256 identify the
-grading procedure, so scores are only compared under the same one.
+grading procedure, so scores are only compared under the same one. The
+build's healing (``runtime/services/scaffolding.py``: patches, inferred
+requirements, placeholder entry files) is part of that procedure, so a
+change to it bumps ``EVALUATOR_VERSION`` too.
 """
 
 # Teardown/probing code catches everything on purpose: evaluation must always
@@ -39,6 +59,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 
+import requests
+
 from backend.generation.services.agent.images import IMAGES_DIR
 from backend.generation.services.agent.images import TESTER_IMAGE
 from backend.generation.services.agent.sandbox import SandboxError
@@ -46,6 +68,7 @@ from backend.generation.services.agent.sandbox import ensure_image
 from backend.generation.services.agent.workspace import make_tar
 from backend.generation.services.evaluation import contract as contract_mod
 from backend.generation.services.profile_resolver import app_requirement_to_dict
+from backend.generation.services.prompt_renderer import templates_state_contract
 from backend.runtime.services import docker_manager
 from backend.runtime.services.scaffolding import HealingMode
 from backend.runtime.services.scaffolding import HealingReport
@@ -60,7 +83,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-EVALUATOR_VERSION = 1
+# 2: generation-library modernization (lucide icons aliased instead of dropped
+# and healed in Vue too, react-router-dom imports and the Tailwind 4
+# stylesheet entry healed, requirement names normalized, local modules and
+# passlib's bcrypt handled, placeholder backends serving ./static by path).
+EVALUATOR_VERSION = 2
 LABEL = "llmlab.evaluation"
 BUILD_TIMEOUT_S = 1200
 TESTER_TIMEOUT_S = 600
@@ -69,9 +96,10 @@ APP_MEM_LIMIT = "1g"
 _INFRA_PATTERNS = re.compile(
     r"ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|Temporary failure in name resolution|"
     r"Could not resolve host|Read timed out|Connection reset by peer|503 Service Unavailable|"
-    r"TLS handshake timeout|network is unreachable",
+    r"TLS handshake timeout|network is unreachable|no space left on device",
     re.IGNORECASE,
 )
+HEALTH_PROBE_TIMEOUT_S = 10
 
 
 def tester_identity() -> dict[str, Any]:
@@ -193,7 +221,15 @@ class Evaluation:
         self.containers.append(tester)
         tester.put_archive("/work", make_tar({"plan.json": json.dumps(plan).encode()}))
         tester.start()
-        tester.wait(timeout=TESTER_TIMEOUT_S)
+        try:
+            tester.wait(timeout=TESTER_TIMEOUT_S)
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError):
+            # Only a tester that is demonstrably still running timed out; a
+            # daemon that cannot answer reload() raises here (infra_error).
+            tester.reload()
+            if tester.status != "running":
+                raise
+            return self._tester_timed_out(app, tester, plan, build, tester_tag, tester_id)
         output = tester.logs().decode("utf-8", errors="replace")
         report = _parse_report(output)
 
@@ -230,6 +266,47 @@ class Evaluation:
             "error": report.get("error"),
         }
 
+    def _tester_timed_out(self, app, tester, plan, build, tester_tag, tester_id) -> dict[str, Any]:
+        health_status = _probe_health(tester, plan)
+        app.reload()
+        app_state = app.attrs.get("State", {})
+        app_log = app.logs(tail=200).decode("utf-8", errors="replace")
+        common = {
+            "build": build,
+            "tester_image": tester_tag,
+            "tester_image_id": tester_id,
+            "tester_timed_out": True,
+            "health_probe_status": health_status,
+            "app_exit_code": app_state.get("ExitCode") if app_state.get("Status") != "running" else None,
+            "app_oom_killed": bool(app_state.get("OOMKilled")),
+            "app_log_tail": app_log[-8000:],
+        }
+        if health_status != 200:
+            return {
+                **common,
+                "status": "infra_error",
+                "error": f"tester timed out after {TESTER_TIMEOUT_S}s and the app's health could not be confirmed",
+            }
+        summary = {**_zero_summary(), "incomplete": True}
+        return {
+            **common,
+            "status": "failed",
+            "summary": summary,
+            # The tester's own health check is not in a report; record the probe as that check.
+            "checks": [
+                {
+                    "category": "runtime",
+                    "name": "health responds 200",
+                    "passed": True,
+                    "detail": "platform probe after the tester timed out",
+                },
+            ],
+            "error": (
+                f"the conformance suite did not finish within {TESTER_TIMEOUT_S}s: "
+                "the app answers its health check but too slowly elsewhere (no partial score)"
+            ),
+        }
+
     def _build(self) -> dict[str, Any]:
         attempts: list[dict[str, Any]] = []
         report = HealingReport()
@@ -238,9 +315,12 @@ class Evaluation:
             with tempfile.TemporaryDirectory(prefix="llmlab-eval-") as tmp:
                 prepare_build_dir(self.job, Path(tmp), healing=self.healing, report=report)
                 started = time.monotonic()
-                ok, log = self._docker_build(tmp)
-            infra = not ok and bool(_INFRA_PATTERNS.search(log))
-            attempts.append({"ok": ok, "seconds": round(time.monotonic() - started, 1), "infra_suspected": infra})
+                ok, log, client_error = self._docker_build(tmp)
+            infra = not ok and (client_error is not None or bool(_INFRA_PATTERNS.search(log)))
+            attempt = {"ok": ok, "seconds": round(time.monotonic() - started, 1), "infra_suspected": infra}
+            if client_error is not None:
+                attempt["client_error"] = client_error[:1000]
+            attempts.append(attempt)
             if ok or not infra:
                 break
         image_bytes = None
@@ -255,9 +335,11 @@ class Evaluation:
             "healing": report.to_dict(),
         }
 
-    def _docker_build(self, path: str) -> tuple[bool, str]:
+    def _docker_build(self, path: str) -> tuple[bool, str, str | None]:
+        """``(ok, log, client_error)``: ``client_error`` is set when the docker client/daemon failed."""
         lines: list[str] = []
         ok = True
+        client_error = None
         try:
             for chunk in self.client.api.build(
                 path=path,
@@ -273,10 +355,15 @@ class Evaluation:
                 if chunk.get("error"):
                     lines.append("ERROR: " + chunk["error"] + "\n")
                     ok = False
+        except requests.exceptions.ReadTimeout as exc:
+            # A build step silent for BUILD_TIMEOUT_S: counted against the sample.
+            lines.append(f"ERROR: build timed out: {exc}\n")
+            ok = False
         except Exception as exc:
             lines.append(f"ERROR: {exc}\n")
             ok = False
-        return ok, "".join(lines)
+            client_error = f"{type(exc).__name__}: {exc}"
+        return ok, "".join(lines), client_error
 
     def _teardown(self) -> None:
         for container in self.containers:
@@ -294,6 +381,32 @@ class Evaluation:
                 self.client.images.remove(self.image_tag, force=True)
             except Exception as exc:
                 logger.debug("Removing evaluation image failed: %s", exc)
+
+
+def _probe_health(tester, plan: dict[str, Any]) -> int | None:
+    """HTTP status of the app's health endpoint, fetched from inside the (still running) tester container."""
+    url = plan["base_url"].rstrip("/") + (plan.get("contract") or {}).get("health_path", "/health")
+    script = (
+        "import sys, urllib.request, urllib.error\n"
+        "try:\n"
+        f"    r = urllib.request.urlopen(sys.argv[1], timeout={HEALTH_PROBE_TIMEOUT_S})\n"
+        "    print(r.status)\n"
+        "except urllib.error.HTTPError as e:\n"
+        "    print(e.code)\n"
+        "except Exception:\n"
+        "    print(0)\n"
+    )
+    try:
+        code, out = tester.exec_run(["python", "-c", script, url], demux=False)
+    except Exception as exc:
+        logger.warning("Health probe after tester timeout failed: %s", exc)
+        return None
+    if code != 0:
+        return None
+    try:
+        return int(out.decode("utf-8", errors="replace").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
 
 
 def _zero_summary() -> dict[str, Any]:
@@ -333,11 +446,14 @@ def evaluate_job(
     never written to (it raises ``LeaseLost``). Default: a plain ``save``.
     """
     outcome = Evaluation(job).run()
-    # Only samples whose prompt stated this contract (agent brief v2+) were
-    # asked for e.g. the accounts endpoints; template-mode scores against it
-    # are not comparable with agent-mode ones.
+    # Only samples whose prompt stated this contract were asked for e.g. the
+    # accounts endpoints: agent briefs v2+ (the snapshot freezes the contract)
+    # and scaffolding prompts whose backend templates render it. Scores of
+    # older template-mode prompts are not comparable with those.
     snapshot = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
-    outcome["contract_stated_in_prompt"] = isinstance(snapshot.get("contract"), dict)
+    outcome["contract_stated_in_prompt"] = isinstance(snapshot.get("contract"), dict) or templates_state_contract(
+        snapshot.get("prompt_templates"),
+    )
     result = dict(job.result_data or {})
     result["evaluation"] = outcome
     job.result_data = result
@@ -350,7 +466,8 @@ def evaluate_job(
         "source": "conformance",
         "status": outcome["status"],
         "passed": outcome["status"] == "passed",
-        "pass_rate": summary.get("pass_rate", 0.0) if outcome["status"] != "infra_error" else None,
+        # Non-sample outcomes (infra_error, not_applicable) are ungraded, never a measured 0.
+        "pass_rate": summary.get("pass_rate", 0.0) if outcome["status"] not in NON_SAMPLE_STATUSES else None,
         "health_ok": any(c["name"] == "health responds 200" and c["passed"] for c in checks),
         "endpoints_ok": sum(1 for c in endpoint_checks if c["passed"]),
         "endpoints_checked": len(endpoint_checks),

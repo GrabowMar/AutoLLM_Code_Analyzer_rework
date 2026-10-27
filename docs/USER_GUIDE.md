@@ -167,13 +167,14 @@ The Generation Library holds everything a sample run is assembled from. A side m
 
 | Group | Section | What it holds |
 | --- | --- | --- |
-| What to build | **App specs** | Requirements, data model and API contract. Agent runs on a spec are graded by a hidden conformance suite. |
+| What to build | **App specs** | Requirements, data models and API contract (per endpoint: who may call it, query parameters, success status). Agent runs on a spec are graded by a hidden conformance suite. |
 | Where it runs | **Stacks** | Project skeletons (Dockerfile, port, entry point). Stacks you create need an admin's approval before others can run them. |
 | How agents run | **Harness**, **Sampling**, **Budget** | Versioned presets. Changing one saves a new version, and every job records the version it used. **Show archived** lists older ones. |
 | Template prompts | **Profiles**, **Blocks** | Used only by template scaffolding. Profiles are ordered prompt blocks for one stack. Blocks are versioned prompt text. |
 
 - Each section has a search box and a **New …** button (for example **New app spec**, **New stack**, **New profile**, **New block**).
 - Catalog app specs are read-only for non-staff users. Use **Duplicate to edit** to make your own copy.
+- The spec editor's **Data models** section lists any number of models (**Add model**, **Add field**). **Spec format** is v3 (current) for new specs; a legacy v1/v2 spec keeps its format and is checked against the schema only, not the v3 conventions ([App spec format](/docs/GENERATION_PROCESS#app-spec-format-schema-v3)).
 - **Packages** (header button) has three tabs:
   - **Starter packages**.
   - **Export**: bundles app specs, profiles, blocks, user stacks and presets into one file.

@@ -1,10 +1,15 @@
 slug: scaffolding-flask-compile
 version: 1
 block_type: validation
-name: Flask compile check
-description: Post-generation Python syntax validation for Flask scaffolds
+name: Python compile check
+description: >-
+  Documents the post-generation Python check of scaffolding output (no
+  profile references it; validation blocks are never added to a prompt).
 metadata:
   check: py_compile
   target: app.py
 content: |
-  Validate generated backend with `python -m py_compile app.py` before marking the job complete.
+  After generation, every `.py` file (the stack's `app.py` entry first) is compiled and
+  AST-checked in-process (`compile()` plus stub detection), and frontend JS/JSX files are
+  parsed with esbuild. A file that fails gets one repair round driven by the
+  `repair-instructions` block (unless the run disables repair) before the job is built.

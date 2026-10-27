@@ -2,89 +2,167 @@
   "slug": "monitoring_server_stats",
   "name": "Server Monitor",
   "category": "Monitoring",
-  "description": "Track server status",
+  "description": "A status board of servers fed by reported check results, with check history and uptime",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only server list; require auth for create/update",
-    "1. Server model: id, name (required), host, status, last_check",
-    "2. GET /api/servers - list servers",
-    "3. GET /api/servers/:id - get server details",
-    "4. POST /api/servers - register server",
-    "5. POST /api/servers/:id/ping - update last_check and status"
+    "Access control: anyone may read servers and their check history; require auth for registering, updating and deleting servers and for reporting check results; admin endpoints are restricted to the admin account",
+    "The app is a status board: check results are reported to it through POST /api/servers/:id/checks (by a monitoring script or a person), and the app itself never connects to the registered hosts",
+    "Servers: any signed-in user may register, update and delete any server; DELETE /api/servers/:id removes the server and its check history permanently",
+    "Server validation: name is a required non-empty string of at most 100 characters; host a required host name or IP address of at most 255 characters, without scheme, port or path",
+    "Checks: a check result has status online or offline and an optional response_ms (a whole number of at least 0); recording one sets the server's status and last_check from it, and a server without checks has status unknown and last_check null",
+    "Every server in a response carries uptime_percent: the share of its last 100 checks that were online, as a percentage rounded to one decimal, or null without checks",
+    "GET /api/servers lists active servers sorted by name; ?status= keeps servers with that current status (online, offline or unknown)",
+    "GET /api/servers/:id/checks lists a server's checks newest first; ?limit= caps how many are returned (default 50, at most 500) while total counts all of the server's checks",
+    "Deactivated servers (is_active false) are left out of GET /api/servers, answer 404 on the public server endpoints and accept no check results; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "Public guest view of server status with CTA to sign in for management",
-    "1. Server list with status badges",
-    "2. Detail view with last check time",
-    "3. Add server form",
-    "4. Manual refresh button",
-    "5. Empty state messaging"
+    "Everyone sees the status board and server details read-only; signed-in users also get the add, edit, delete and report-check controls, and visitors see a 'Sign in to manage servers' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Status board: each server's name, host, a coloured status badge (online, offline, unknown), uptime and how long ago it was last checked, with a status filter; it refreshes every 30 seconds and has a manual refresh button",
+    "Server detail view: the server's fields and its recent checks (time, status, response time) as a table and a simple response-time chart",
+    "Add and edit server forms and a 'Report check' form (status and optional response time) that show the API's validation messages next to the form; delete asks for confirmation first",
+    "An empty state that explains how to register the first server when there are none"
+  ],
+  "admin_requirements": [
+    "Admin overview: every server, active or not, with total, active and inactive counts and the number of servers per current status",
+    "Toggle a server's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/servers",
-      "description": "List servers",
+      "description": "List active servers by name with their current status",
+      "auth": "public",
+      "query": {
+        "status": "Only servers with this current status (online, offline or unknown)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "name": "string",
-            "host": "example.com",
+            "name": "API node 1",
+            "host": "api1.internal.example",
             "status": "online",
-            "last_check": "ISO8601"
+            "last_check": "2026-01-15T10:30:00Z",
+            "uptime_percent": 99.0,
+            "created_at": "2026-01-10T09:00:00Z"
           }
         ],
         "total": 1
       }
     },
     {
-      "method": "GET",
-      "path": "/api/servers/:id",
-      "description": "Get server details",
-      "request": null,
-      "response": {
-        "id": 1,
-        "name": "string",
-        "host": "example.com",
-        "status": "online",
-        "last_check": "ISO8601"
-      }
-    },
-    {
       "method": "POST",
       "path": "/api/servers",
-      "description": "Register server",
+      "description": "Register a server",
+      "auth": "user",
+      "success_status": 201,
       "request": {
         "name": "string",
         "host": "example.com"
       },
       "response": {
         "id": 1,
+        "name": "API node 1",
+        "host": "api1.internal.example",
+        "status": "unknown",
+        "last_check": null,
+        "uptime_percent": null,
+        "created_at": "2026-01-10T09:00:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/servers/:id",
+      "description": "One active server",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "name": "API node 1",
+        "host": "api1.internal.example",
+        "status": "online",
+        "last_check": "2026-01-15T10:30:00Z",
+        "uptime_percent": 99.0,
+        "created_at": "2026-01-10T09:00:00Z"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/servers/:id",
+      "description": "Replace a server's name and host (both required; status and history are kept)",
+      "auth": "user",
+      "request": {
         "name": "string",
-        "host": "example.com",
-        "status": "unknown"
+        "host": "example.org"
+      },
+      "response": {
+        "id": 1,
+        "name": "API node 1 (eu)",
+        "host": "api1-eu.internal.example",
+        "status": "online",
+        "last_check": "2026-01-15T10:30:00Z",
+        "uptime_percent": 99.0,
+        "created_at": "2026-01-10T09:00:00Z"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/servers/:id",
+      "description": "Delete a server and its check history",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/servers/:id/checks",
+      "description": "Check results of a server, newest first",
+      "auth": "public",
+      "query": {
+        "limit": "How many of the newest checks to return (default 50, at most 500)"
+      },
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "server_id": 1,
+            "status": "online",
+            "response_ms": 42,
+            "checked_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1
       }
     },
     {
       "method": "POST",
-      "path": "/api/servers/:id/ping",
-      "description": "Update server status",
+      "path": "/api/servers/:id/checks",
+      "description": "Report a check result and update the server's status",
+      "auth": "user",
+      "success_status": 201,
       "request": {
-        "status": "online|offline"
+        "status": "string (online|offline)",
+        "response_ms": "integer (optional)"
       },
       "response": {
         "id": 1,
+        "server_id": 1,
         "status": "online",
-        "last_check": "ISO8601"
+        "response_ms": 42,
+        "checked_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -92,42 +170,69 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Server",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "name": "string (required)",
-      "host": "string (required)",
-      "status": "string (online, offline, unknown - default: unknown)",
-      "last_check": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Server",
+      "description": "A monitored server; status and last_check mirror its newest check, uptime_percent is computed",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "name": "string (required, max 100 chars)",
+        "host": "string (required, host name or IP address, max 255 chars)",
+        "status": "string (one of: online, offline, unknown; unknown until the first check)",
+        "last_check": "datetime (null until the first check, ISO 8601 in JSON)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the server from public endpoints)"
+      }
+    },
+    {
+      "name": "Check",
+      "description": "One reported check result",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "server_id": "integer (references Server.id; deleted with the server)",
+        "status": "string (required, one of: online, offline)",
+        "response_ms": "integer (optional, >= 0)",
+        "checked_at": "datetime (auto, ISO 8601 in JSON)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any server"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/servers",
-      "description": "Admin overview: list all servers and counts",
+      "description": "Admin overview: every server with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
-        "inactive": 0
+        "items": [
+          {
+            "id": 1,
+            "name": "API node 1",
+            "host": "api1.internal.example",
+            "status": "online",
+            "is_active": true,
+            "created_at": "2026-01-10T09:00:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
+        "inactive": 0,
+        "by_status": {
+          "online": 1,
+          "offline": 0,
+          "unknown": 0
+        }
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/servers/:id/toggle",
-      "description": "Toggle server active status",
+      "description": "Flip a server's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

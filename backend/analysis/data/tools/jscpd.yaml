@@ -21,7 +21,18 @@ uninstall_cmd: "npm uninstall -g jscpd"
 # --max-lines of 1000 silently skips whole generated apps, so raise both size
 # gates well past realistic generated-file sizes. Lockfiles repeat package.json
 # by construction, so they are not scanned.
-run_cmd: "rm -rf /tmp/jscpd; jscpd {target} --ignore '**/package-lock.json,**/*.lock,**/node_modules/**,**/*.min.js' --min-tokens 35 --max-lines 50000 --max-size 2mb --reporters json --output /tmp/jscpd --silent >/dev/null 2>&1; cat /tmp/jscpd/jscpd-report.json"
+#
+# jscpd tokenizes .jsx/.tsx once per embedded language (javascript, jsx, css
+# streams) and detects clones in each, so one copied block was reported up to
+# three times and the file counted as three sources. --formats-exts maps .jsx
+# to javascript and .tsx to typescript (one stream each); since that option
+# replaces jscpd's whole extension table, the table is rebuilt from jscpd's
+# own FORMATS so every other language keeps being scanned. Should that fail,
+# jscpd runs with its defaults and the parser drops the repeated clones.
+run_cmd: |
+  rm -rf /tmp/jscpd
+  fx="$(NODE_PATH="$(npm root -g)" node -e 'const t=require(require.resolve("@jscpd/tokenizer",{paths:[require.resolve("jscpd")]}));const m={};for(const [f,v] of Object.entries(t.FORMATS)){if(f==="jsx"||f==="tsx")continue;const e=(v.exts||[]).filter(Boolean);if(e.length)m[f]=e}m.javascript.push("jsx");m.typescript.push("tsx");console.log(Object.entries(m).map(([f,e])=>f+":"+e.join(",")).join(";"))' 2>/dev/null)"
+  jscpd {target} --ignore '**/package-lock.json,**/*.lock,**/node_modules/**,**/*.min.js' --min-tokens 35 --max-lines 50000 --max-size 2mb ${fx:+--formats-exts "$fx"} --reporters json --output /tmp/jscpd --silent >/dev/null 2>&1; cat /tmp/jscpd/jscpd-report.json
 parser_key: jscpd
 output_kind: mixed
 run_timeout: 120

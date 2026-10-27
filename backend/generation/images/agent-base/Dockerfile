@@ -4,7 +4,9 @@
 # The base release is pinned exactly: a floating tag would change the
 # environment under an unchanged content hash. (Debian packages still resolve
 # at build time; the built image id is recorded per run.)
-FROM node:22.23.3-bookworm-slim
+# Runtimes match the builtin stacks' Dockerfiles: Node 24 here, and trixie's
+# Debian python3 is 3.13 (the stacks run python:3.13-slim).
+FROM node:24.22.1-trixie-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

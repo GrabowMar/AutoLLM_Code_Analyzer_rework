@@ -17,13 +17,15 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from backend.analysis.services.base import FindingData
+from backend.analysis.services.base import ParsedOutput
 from backend.analysis.services.extra_parsers import _cwe
+from backend.analysis.services.parsers import _advisory_ids
 from backend.analysis.services.parsers import _clip
 from backend.analysis.services.parsers import _compact
 from backend.analysis.services.parsers import _cwe_field
 from backend.analysis.services.parsers import _float
+from backend.analysis.services.parsers import _json
 from backend.analysis.services.parsers import _label
-from backend.analysis.services.parsers import _loads
 from backend.analysis.services.parsers import _urls
 from backend.analysis.services.parsers import register
 
@@ -111,47 +113,98 @@ def _zap_labels(alert: dict[str, Any]) -> tuple[str, str]:
     )
 
 
+# A bundler's content-hashed build output (Vite ``/assets/index-DcMykpf9.js``,
+# CRA ``/static/js/main.3f2a1b9c.js``): minified vendor code, not the app's
+# source, and renamed on every build.
+_HASHED_ASSET_RE = re.compile(
+    r"/[\w.-]*?[.-](?=[A-Za-z0-9_-]*[0-9A-Z])[A-Za-z0-9_-]{8,}(?:\.chunk)?\.(?:m?js|css)(?:\.map)?$",
+)
+
+
+def _is_hashed_asset(url: str) -> bool:
+    return bool(_HASHED_ASSET_RE.search(_url_path(url)))
+
+
+def _zap_instance_groups(instances: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """*instances* grouped into one group per finding.
+
+    Instances on the same path collapse (one per HTTP method). So do paths
+    whose hits are all passive (no attack) with the same evidence: an SPA
+    serves its index page for every unknown route (``/robots.txt``,
+    ``/sitemap.xml``), so ZAP sees the same response — and reports the same
+    issue — once per route it probed.
+    """
+    by_path: dict[str, list[dict[str, Any]]] = {}
+    for inst in instances:
+        by_path.setdefault(_url_path(inst.get("uri", "")), []).append(inst)
+    groups: list[list[dict[str, Any]]] = []
+    by_evidence: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for path_group in by_path.values():
+        keys = {
+            (str(i.get("evidence") or ""), str(i.get("param") or ""))
+            for i in path_group
+            if i.get("evidence") and not i.get("attack")
+        }
+        passive_same = len(keys) == 1 and all(i.get("evidence") and not i.get("attack") for i in path_group)
+        if passive_same:
+            key = next(iter(keys))
+            if key in by_evidence:
+                by_evidence[key].extend(path_group)
+                continue
+            by_evidence[key] = path_group
+        groups.append(path_group)
+    return groups
+
+
 @register("zap")
-def parse_zap(raw: str) -> list[FindingData]:
+def parse_zap(raw: str) -> ParsedOutput:
     """ZAP's traditional JSON report: ``site[].alerts[]`` with ``instances[]``.
 
     One finding per alert and endpoint (instances of the same alert on the
-    same path, e.g. one per HTTP method, collapse). ``systemic`` alerts — the
-    same issue on every page, like a missing security header — are one
+    same path, e.g. one per HTTP method, collapse; so do passive hits with
+    the same evidence on several SPA-fallback routes). ``systemic`` alerts —
+    the same issue on every page, like a missing security header — are one
     finding listing the affected URLs. Alerts with confidence 0 are ones a
     user marked as false positives.
+
+    Informational alerts (risk 0: suspicious comments, fingerprints) are not
+    weaknesses and are kept out of the ``security`` category. Hits inside
+    content-hashed build bundles are third-party minified code: informational
+    ones are dropped, others are kept and marked ``build_asset``.
     """
-    data = _loads(raw)
+    data = _json(raw, {})
     if not isinstance(data, dict):
-        return []
+        return ParsedOutput(error="Unexpected ZAP report (not a JSON object)")
     findings: list[FindingData] = []
     for site in data.get("site") or []:
         for alert in site.get("alerts") or []:
             confidence = str(alert.get("confidence", ""))
             if confidence == "0" or str(alert.get("pluginid", "")) in _ZAP_SKIP:
                 continue
+            risk = str(alert.get("riskcode", ""))
+            informational = risk == "0"
             title = alert.get("name") or alert.get("alert") or "ZAP alert"
             instances = alert.get("instances") or [{"uri": site.get("@name", "")}]
+            if informational:
+                instances = [inst for inst in instances if not _is_hashed_asset(inst.get("uri", ""))]
+                if not instances:
+                    continue
             urls = list(dict.fromkeys(inst.get("uri", "") for inst in instances))
-            if alert.get("systemic"):
-                instances = instances[:1]
+            groups = [instances] if alert.get("systemic") else _zap_instance_groups(instances)
             risk_word, confidence_word = _zap_labels(alert)
             plugin_id = str(alert.get("pluginid", ""))
             references = _urls(_plain(alert.get("reference")))
-            seen: set[str] = set()
-            for inst in instances:
-                path = _url_path(inst.get("uri", ""))
-                if path in seen:
-                    continue
-                seen.add(path)
+            for group in groups:
+                inst = group[0]
+                group_urls = urls if alert.get("systemic") else list(dict.fromkeys(i.get("uri", "") for i in group))
                 findings.append(
                     FindingData(
-                        severity=_ZAP_RISK.get(str(alert.get("riskcode", "")), "info"),
-                        category="security",
+                        severity=_ZAP_RISK.get(risk, "info"),
+                        category="best_practice" if informational else "security",
                         title=title,
                         description=_plain(alert.get("desc")),
                         suggestion=_plain(alert.get("solution")),
-                        file_path=path,
+                        file_path=_url_path(inst.get("uri", "")),
                         code_snippet=str(inst.get("evidence") or "")[:500],
                         rule_id=plugin_id,
                         confidence=_ZAP_CONFIDENCE.get(confidence, "medium"),
@@ -166,7 +219,8 @@ def parse_zap(raw: str) -> list[FindingData]:
                                 "evidence": _clip(inst.get("evidence"), 500),
                                 "other_info": _clip(_plain(inst.get("otherinfo") or alert.get("otherinfo")), 1000),
                                 "instances": int(alert.get("count") or 1),
-                                **({"urls": urls[:50]} if alert.get("systemic") else {}),
+                                "urls": group_urls[:50] if len(group_urls) > 1 or alert.get("systemic") else [],
+                                "build_asset": True if all(_is_hashed_asset(u) for u in group_urls) else None,
                                 "references": references,
                                 "docs_url": f"https://www.zaproxy.org/docs/alerts/{plugin_id}/"
                                 if plugin_id.isdigit()
@@ -177,7 +231,7 @@ def parse_zap(raw: str) -> list[FindingData]:
                         ),
                     ),
                 )
-    return findings
+    return ParsedOutput(findings=findings)
 
 
 _NUCLEI_SEVERITY = {"critical": "critical", "high": "high", "medium": "medium", "low": "low", "info": "info"}
@@ -232,7 +286,7 @@ def parse_nuclei(raw: str) -> list[FindingData]:
                         "docs_url": hit.get("template-url"),
                         "evidence": evidence,
                         "vuln_id": cve_ids[0] if cve_ids else None,
-                        "aliases": cve_ids[1:],
+                        "aliases": cve_ids,
                         "cvss_score": cvss_score,
                         "cvss_vector": classification.get("cvss-metrics") if cvss_score else None,
                         "curl": hit.get("curl-command"),
@@ -255,7 +309,7 @@ def parse_wapiti(raw: str) -> list[FindingData]:
     the attacks provoked (a robustness signal). ``additionals`` (fingerprints,
     allowed HTTP methods) are informational noise and skipped.
     """
-    data = _loads(raw)
+    data = _json(raw, {})
     if not isinstance(data, dict):
         return []
     classifications = data.get("classifications") or {}
@@ -306,7 +360,7 @@ _TRIVY_SEVERITY = {"CRITICAL": "critical", "HIGH": "high", "MEDIUM": "medium", "
 @register("trivy")
 def parse_trivy(raw: str) -> list[FindingData]:
     """``trivy fs --format json``: ``Results[]`` with vulns, misconfigs and secrets."""
-    data = _loads(raw)
+    data = _json(raw, {})
     if not isinstance(data, dict):
         return []
     findings: list[FindingData] = []
@@ -333,7 +387,7 @@ def parse_trivy(raw: str) -> list[FindingData]:
                             # "1.2.5, 2.0.1" when several release lines are fixed.
                             "fixed_versions": [f.strip() for f in str(fixed).split(",") if f.strip()],
                             "vuln_id": vid,
-                            "aliases": [a for a in v.get("VendorIDs") or [] if a != vid],
+                            "aliases": _advisory_ids(vid, v.get("VendorIDs")),
                             **_trivy_cvss(v),
                             "docs_url": v.get("PrimaryURL"),
                             "references": _urls(v.get("References")),
@@ -431,7 +485,7 @@ def parse_osv_scanner(raw: str) -> list[FindingData]:
     ``packages[].groups`` collapses aliases of one vulnerability (PYSEC/GHSA/
     CVE) and carries the max CVSS score; one finding per package and group.
     """
-    data = _loads(raw)
+    data = _json(raw, {})
     if not isinstance(data, dict):
         return []
     findings: list[FindingData] = []
@@ -501,7 +555,7 @@ def parse_osv_scanner(raw: str) -> list[FindingData]:
                                 "ecosystem": meta.get("ecosystem", ""),
                                 "fixed_versions": fixed,
                                 "vuln_id": ids[0] if ids else None,
-                                "aliases": aliases,
+                                "aliases": _advisory_ids(ids, aliases),
                                 "cvss_score": _float(max_severity),
                                 # Only when unambiguous: max_severity may come
                                 # from any of the records' vectors.
@@ -531,7 +585,7 @@ _RETIRE_SEVERITY = {"critical": "critical", "high": "high", "medium": "medium", 
 @register("retire")
 def parse_retire(raw: str) -> list[FindingData]:
     """``retire --outputformat json``: ``data[].results[].vulnerabilities[]``."""
-    data = _loads(raw)
+    data = _json(raw, {})
     if not isinstance(data, dict):
         return []
     findings: list[FindingData] = []
@@ -562,7 +616,7 @@ def parse_retire(raw: str) -> list[FindingData]:
                                 "installed_version": version,
                                 "fixed_versions": [str(below)] if below else [],
                                 "vuln_id": str(ref),
-                                "aliases": [a for a in [*cves, github_id] if a and a != ref],
+                                "aliases": _advisory_ids(ref, cves, github_id),
                                 "references": _urls(vuln.get("info")),
                                 "detection": res.get("detection", ""),
                                 "version": version,  # legacy key

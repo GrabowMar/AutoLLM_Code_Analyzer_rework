@@ -395,7 +395,8 @@ def test_pip_audit_has_no_severity_and_standard_dependency_keys():
         "installed_version": "3.0.0",
         "fixed_versions": ["3.1.3"],
         "vuln_id": "PYSEC-2026-2151",
-        "aliases": ["CVE-2026-27205"],
+        # Every id of the advisory, vuln_id first (dedup clusters on any of them).
+        "aliases": ["PYSEC-2026-2151", "CVE-2026-27205"],
         "manifest": "requirements.txt",
         "version": "3.0.0",
         "fix_versions": ["3.1.3"],
@@ -533,3 +534,33 @@ def test_eslint_security_plugin_rules_keep_level_and_cwe():
     [f] = parsers.parse("eslint_security", raw).findings
     assert f.tool_severity == "warning"
     assert f.tool_specific_data == {"cwe": "CWE-78"}
+
+
+def _lizard_row(file: str, name: str, ccn: int = 2, start: int = 1) -> str:
+    return f'5,{ccn},30,1,5,"{name}@{start}-{start + 4}@{file}","{file}","{name}","{name}( )",{start},{start + 4}'
+
+
+def test_lizard_without_any_function_is_an_error():
+    parsed = parsers.parse("lizard", "# files: jsx 2\n")
+    assert parsed.metrics == {}
+    assert parsed.error == "Lizard measured no function in 2 .jsx file(s): nothing was analyzed"
+    # Old run command (no preamble), empty CSV.
+    assert parsers.parse("lizard", "").error is not None
+
+
+def test_lizard_flags_an_extension_without_measured_functions():
+    raw = "# files: jsx 3\n# files: py 1\n" + _lizard_row("/work/app.py", "index") + "\n"
+    parsed = parsers.parse("lizard", raw)
+    assert parsed.error is None
+    assert parsed.metrics["functions"] == 1
+    assert parsed.warnings == ["No function measured in 3 .jsx file(s)"]
+
+    both = raw + _lizard_row("/work/src/App.jsx", "App") + "\n"
+    assert parsers.parse("lizard", both).warnings == []
+
+
+def test_pip_audit_aliases_include_its_own_id():
+    vuln = {"id": "PYSEC-1", "fix_versions": [], "aliases": ["GHSA-x", "PYSEC-1", "CVE-2026-1"]}
+    report = {"dependencies": [{"name": "flask", "version": "1", "vulns": [vuln]}]}
+    [f] = parsers.parse("pip_audit", f"### requirements.txt\n{json.dumps(report)}\n").findings
+    assert f.tool_specific_data["aliases"] == ["PYSEC-1", "GHSA-x", "CVE-2026-1"]

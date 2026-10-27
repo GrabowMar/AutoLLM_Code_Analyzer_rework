@@ -12,6 +12,13 @@ Outcome semantics (what an analysis can rely on):
 * A run with no successful LLM call (bad key, no provider matching the
   routing policy, sandbox failure) is an infrastructure failure: FAILED, with
   the upstream error surfaced.
+* A run whose last LLM call(s) failed transiently (408/429/5xx after the
+  gateway's own retries) and that then stopped is *infra-interrupted*: retried
+  as a new attempt; when retries run out it stays COMPLETED but invalid.
+* ``budget_exhausted`` also covers a harness that stopped at its own step
+  limit (mini-swe-agent's ``LimitsExceeded``, step_limit = max_llm_requests).
+* ``metrics.cost``/tokens sum every call the gateway accounted, failed ones
+  included (``metrics.failed_call_cost`` is the failed share).
 
 The gateway's call log is the authoritative LLM record (tokens, cost, served
 provider, every request); the harness's own report (event stream,
@@ -149,8 +156,10 @@ class AgentRunner:
         """The sandbox stage: run the harness, record the evidence; returns the stage outcome.
 
         ``"evaluate"`` (``AGENT_AUTO_EVALUATE``: the sandbox slot is released and
-        the eval pool grades the sample), ``"done"`` or, for a local-endpoint run
-        that ended after the proxy returned an infra error, ``"infra_interrupted"``.
+        the eval pool grades the sample), ``"done"`` or ``"infra_interrupted"``: a
+        local-endpoint run after the proxy returned an infra error, or any run
+        that ended on LLM calls failing transiently after the gateway's retries
+        (``result_data.agent.ended_on_llm_error``).
         Raises ``AgentRunError`` (``infra=True`` for platform failures),
         ``AgentRunCancelled`` or ``LeaseLost``.
         """
@@ -224,6 +233,16 @@ class AgentRunner:
                 f"{e.get('code')} ({e.get('status')})" for e in execution["infra_errors"][-3:]
             )
             return OUTCOME_INFRA_INTERRUPTED
+        # Any endpoint (OpenRouter included): the run ended on LLM calls that
+        # failed after the gateway's own retries (outage, rate limit), so how
+        # far the agent got says nothing about the model.
+        ended = job.result_data["agent"].get("ended_on_llm_error")
+        if ended:
+            job.error_message = (
+                f"the run ended after {ended['trailing_failures']} failed LLM call(s) "
+                f"(HTTP {ended.get('status')}{', ' + ended['code'] if ended.get('code') else ''})"
+            )
+            return OUTCOME_INFRA_INTERRUPTED
         return OUTCOME_EVALUATE if settings.AGENT_AUTO_EVALUATE else OUTCOME_DONE
 
     def execute(self) -> None:
@@ -268,13 +287,20 @@ class AgentRunner:
                 infra=_transport_failure(calls),
             )
 
+        adapter = get_harness(snapshot["harness"]["name"])
+        hsum = adapter.parse_report(result.outputs)
+
         budget_events = [e for e in gateway_events if e.get("event") == "budget_exhausted"]
+        budget_reason = budget_events[0].get("reason") if budget_events else None
         termination = result.termination
         if budget_events and termination in ("completed", "harness_error"):
             termination = "budget_exhausted"
-
-        adapter = get_harness(snapshot["harness"]["name"])
-        hsum = adapter.parse_report(result.outputs)
+        elif hsum.exit_status in HARNESS_LIMIT_STATUSES and termination in ("completed", "harness_error"):
+            # The harness stopped itself at its step limit (mini's step_limit =
+            # max_llm_requests) before the gateway ever had to refuse a request.
+            termination = "budget_exhausted"
+            budget_reason = "max_requests"
+        ended_on_llm_error = _ended_on_llm_error(calls, termination)
         exit_info = _safe_json(result.outputs.get("exit.json"))
 
         stack_slug = snapshot["scaffolding_slug"]
@@ -293,7 +319,10 @@ class AgentRunner:
         fe_validation = validate_frontend_files(files) if stack_config.get("has_frontend") else None
         validation_passed = py_validation.passed and (fe_validation is None or fe_validation.passed)
 
-        usage = self._usage(ok_calls)
+        # Spend over every call the gateway accounted (a failed call can still be billed).
+        failed_calls = [c for c in calls if _call_failed(c)]
+        usage = self._usage(calls)
+        failed_call_cost = self._usage(failed_calls)["cost"]
         providers = Counter((c.get("response") or {}).get("provider") or "unknown" for c in ok_calls)
         served_models = Counter((c.get("response") or {}).get("model") or "unknown" for c in ok_calls)
         policy_overrides = Counter(key for c in calls for key in (c.get("policy_diff") or {}) if key == "model")
@@ -320,7 +349,7 @@ class AgentRunner:
                     "sandbox_mem_limit",
                 )
             },
-            "budget_exhausted": budget_events[0].get("reason") if budget_events else None,
+            "budget_exhausted": budget_reason,
             "network_policy": snapshot["agent"]["network_policy"],
             "egress": {
                 "allowed_connects": sum(1 for e in gateway_events if e.get("event") == "connect"),
@@ -333,10 +362,17 @@ class AgentRunner:
             },
             "llm_calls": len(calls),
             "llm_calls_failed": len(calls) - len(ok_calls),
+            "llm_calls_failed_transient": sum(1 for c in failed_calls if _is_transient_failure(c)),
+            "failed_call_cost": failed_call_cost,
+            "ended_on_llm_error": ended_on_llm_error,
             "llm_seconds": round(sum(float(c.get("duration_s") or 0) for c in calls), 2),
             # Responses cut off at the per-call output cap (same cap for every
             # harness; single-turn harnesses are most exposed to it).
             "truncated_calls": sum(1 for c in ok_calls if (c.get("response") or {}).get("finish_reason") == "length"),
+            # The run ended on a cut-off response (its last successful call hit
+            # the cap and the agent stopped by itself right after): the final
+            # state may be truncated, unlike a mid-run cut-off the agent recovers from.
+            "final_response_truncated": _final_response_truncated(ok_calls, termination),
             "upstream_retries": sum(int(c.get("upstream_retries") or 0) for c in calls),
             "sampling_policy": snapshot["gateway"].get("sampling_policy"),
             "harness_sampling_stripped": dict(
@@ -389,6 +425,8 @@ class AgentRunner:
             termination=termination,
             providers=dict(providers),
         ).dump()
+        # Part of ``cost`` already; kept apart so billed-but-failed spend is visible.
+        job.metrics["failed_call_cost"] = failed_call_cost
         self._write_call_artifacts(calls)
 
     @staticmethod
@@ -540,19 +578,71 @@ def run_record_dir(job: GenerationJob) -> Path:
 
 # Transport failures (gateway upstream error, proxy unavailable / wait, relay lease expiry):
 # with no successful call they say nothing about the model, so the attempt is retried.
-_TRANSPORT_STATUSES = {502, 503, 504}
+# Mirrors the gateway's RETRY_STATUSES: rate limits (429), request timeouts (408)
+# and 5xx are what it already retried before giving the failure to the harness.
+_TRANSPORT_STATUSES = {408, 429, 500, 502, 503, 504}
 _TRANSPORT_CODES = {"upstream_error", "endpoint_unavailable", "proxy_wait", "lease_expired", "unavailable", "timeout"}
+# Harness self-reported exit statuses that mean "stopped at its own step limit".
+HARNESS_LIMIT_STATUSES = frozenset({"LimitsExceeded"})
+# Terminations that a trailing LLM failure can explain (the harness gave up on
+# the error). Timeouts, budget and memory stops end the run for their own reason.
+_LLM_ERROR_TERMINATIONS = frozenset({"completed", "harness_error"})
+# A run where at least this share of calls failed transiently is flagged even
+# when it did not end on a failure.
+FAILED_CALL_WARN_SHARE = 0.25
+
+
+def _call_failed(call: dict) -> bool:
+    return call.get("status") != 200 or bool((call.get("response") or {}).get("error"))
+
+
+def _is_transient_failure(call: dict) -> bool:
+    if not _call_failed(call):
+        return False
+    err = (call.get("response") or {}).get("error") or call.get("error")
+    code = err.get("code") if isinstance(err, dict) else None
+    return call.get("status") in _TRANSPORT_STATUSES or code in _TRANSPORT_CODES
 
 
 def _transport_failure(calls: list[dict]) -> bool:
     for call in calls:
-        response = call.get("response") or {}
-        err = response.get("error") or call.get("error")
-        if not err and call.get("status") == 200:
+        if not _call_failed(call):
             continue
-        code = err.get("code") if isinstance(err, dict) else None
-        return call.get("status") in _TRANSPORT_STATUSES or code in _TRANSPORT_CODES
+        return _is_transient_failure(call)
     return False
+
+
+def _ended_on_llm_error(calls: list[dict], termination: str) -> dict[str, Any] | None:
+    """The trailing transient LLM failures a run ended on, or None.
+
+    The run's last call(s) failed after the gateway's retries and the harness
+    then stopped by itself (``completed`` / ``harness_error``): an outage or
+    rate limit, not the model, ended it.
+    """
+    if termination not in _LLM_ERROR_TERMINATIONS:
+        return None
+    ordered = sorted(calls, key=lambda c: int(c.get("seq") or 0))
+    trailing = []
+    for call in reversed(ordered):
+        if not _call_failed(call):
+            break
+        trailing.append(call)
+    if not trailing or not _is_transient_failure(trailing[0]):
+        return None
+    last = trailing[0]
+    err = (last.get("response") or {}).get("error") or last.get("error")
+    return {
+        "trailing_failures": len(trailing),
+        "status": last.get("status"),
+        "code": err.get("code") if isinstance(err, dict) else None,
+    }
+
+
+def _final_response_truncated(ok_calls: list[dict], termination: str) -> bool:
+    if not ok_calls or termination not in _LLM_ERROR_TERMINATIONS:
+        return False
+    last = max(ok_calls, key=lambda c: int(c.get("seq") or 0))
+    return (last.get("response") or {}).get("finish_reason") == "length"
 
 
 _STUB_RE = re.compile(r"def\s+\w+\s*\([^)]*\)\s*(?:->[^:]+)?:\s*\n\s+(?:pass|\.\.\.)\s*$", re.MULTILINE)
@@ -637,8 +727,26 @@ def assess_validity(
             "warn",
             f"{agent['truncated_calls']} model responses hit the per-call output cap and were cut off",
         )
-    if agent.get("llm_calls_failed"):
-        note("llm_errors", "info", f"{agent['llm_calls_failed']} LLM calls failed (after gateway retries)")
+    failed = int(agent.get("llm_calls_failed") or 0)
+    transient = int(agent.get("llm_calls_failed_transient") or 0)
+    total_calls = int(agent.get("llm_calls") or 0)
+    ended = agent.get("ended_on_llm_error")
+    if ended:
+        note(
+            "ended_on_llm_error",
+            "exclude",
+            f"the run ended after {ended.get('trailing_failures')} LLM call(s) failed after gateway retries "
+            f"(HTTP {ended.get('status')}): an outage or rate limit, not the model, stopped it",
+        )
+    elif total_calls and transient >= 2 and transient / total_calls >= FAILED_CALL_WARN_SHARE:
+        note(
+            "llm_errors",
+            "warn",
+            f"{transient} of {total_calls} LLM calls failed transiently (after gateway retries): "
+            "provider trouble shaped this run",
+        )
+    elif failed:
+        note("llm_errors", "info", f"{failed} LLM calls failed (after gateway retries)")
     if (agent.get("workspace") or {}).get("protected_modified"):
         note("protected_files_modified", "info", "agent edited platform-owned build files (restored before build)")
     if (agent.get("egress") or {}).get("denied_connects"):

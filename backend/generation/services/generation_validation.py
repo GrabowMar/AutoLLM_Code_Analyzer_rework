@@ -25,6 +25,7 @@ _IMAGE_DIR = Path(__file__).resolve().parent.parent / "images" / "frontend-valid
 _FRONTEND_EXTS = (".js", ".jsx", ".ts", ".tsx")
 _LOADER_BY_EXT = {".js": "jsx", ".jsx": "jsx", ".ts": "tsx", ".tsx": "tsx"}
 EXEC_TIMEOUT_SECONDS = 20
+REPAIR_BLOCK_SLUG = "repair-instructions"
 
 
 class ValidationResult:
@@ -121,11 +122,17 @@ def _parse_esbuild_errors(output: str) -> list[str]:
 
 
 def build_repair_prompt(filename: str, code: str, errors: list[str]) -> str:
-    """Render the repair round's user message from the ``repair-instructions`` block."""
-    from backend.generation.services.profile_resolver import get_content_block
+    """Render the repair round's user message from the ``repair-instructions`` block.
+
+    Uses the latest system version: the seeder adds a new version whenever
+    ``data/blocks/validation/repair-instructions.yaml`` changes.
+    """
+    from backend.generation.models import ContentBlock
     from backend.generation.services.prompt_renderer import PromptRenderer
 
-    block = get_content_block("repair-instructions", 1)
+    block = ContentBlock.objects.filter(slug=REPAIR_BLOCK_SLUG, is_system=True).order_by("-version").first()
+    if block is None:
+        raise ContentBlock.DoesNotExist(ContentBlock, {"slug": REPAIR_BLOCK_SLUG})
     return PromptRenderer().render_template(
         block.content,
         {"filename": filename, "code": code, "errors": errors},

@@ -11,15 +11,21 @@ from django.db import transaction
 from backend.generation.models import Experiment
 from backend.generation.models import GenerationBatch
 from backend.generation.models import GenerationJob
+from backend.generation.services.agent.snapshot import agent_stack_slug
 from backend.generation.services.agent.snapshot import apply_agent_snapshot_to_job
 from backend.generation.services.agent.snapshot import reseed_agent_snapshot
+from backend.generation.services.profile_resolver import DEFAULT_CONTINUATION_LIMIT
+from backend.generation.services.profile_resolver import DEFAULT_ENABLE_REPAIR
 from backend.generation.services.profile_resolver import apply_snapshot_to_job
+from backend.generation.services.profile_resolver import attach_rendered_backend_prompts
 from backend.generation.services.profile_resolver import batch_cell_seed
 from backend.generation.services.profile_resolver import build_custom_snapshot
 from backend.generation.services.profile_resolver import bundle_key_from_snapshot
 from backend.generation.services.profile_resolver import experiment_cell_seed
 from backend.generation.services.profile_resolver import generation_options
 from backend.generation.services.profile_resolver import run_fingerprint
+from backend.runtime.services.scaffolding import canonical_stack_slug
+from backend.runtime.services.scaffolding import get_stack_row
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
@@ -78,6 +84,140 @@ def _batch_cell_seed(original: GenerationJob) -> int | None:
         return None
     app = original.app_requirement
     return batch_cell_seed(request["base_seed"], app.slug if app else None, original.repeat_index)
+
+
+def library_pins(source: GenerationJob, stack_slug: str, snapshot: dict | None = None) -> dict:
+    """What a re-resolved snapshot keeps from *source*'s frozen one: spec content and stack version.
+
+    Spec rows are updated in place and builtin stacks gain versions when the
+    library changes, so re-resolving from the job's fields alone would run a
+    retried experiment cell on newer spec text and a newer skeleton than its
+    siblings, under the same ``app_requirement_id``. Everything else is
+    re-resolved as before (the current harness, images and procedure).
+
+    Returns ``{"app_requirement": dict | None, "stack": dict | None,
+    "brief": dict | None, "record": dict}``. ``app_requirement`` is
+    *source*'s frozen app dict, verbatim (a snapshot from before spec
+    versions were embedded has no ``version``/``content_hash``; its siblings
+    have none either). ``stack`` is *source*'s pinned ``{slug, version,
+    content_hash}`` when that exact version still exists on *stack_slug*;
+    otherwise None (the latest version is used) and ``record`` says why.
+    ``brief`` (agent jobs) is *source*'s frozen brief section when both the
+    task and the stack are kept: the brief describes the skeleton
+    (``stacks.yaml`` is per stack, not per version), so one re-rendered over
+    an older pinned skeleton would state the newer stack's runtimes.
+    ``record`` is stored in the new snapshot as ``library_pin`` (provenance
+    only; it enters no key). *snapshot* overrides ``source.resolved_bundle``
+    (the frozen snapshot read before *source* itself is re-resolved).
+    """
+    if snapshot is None:
+        snapshot = source.resolved_bundle
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+    record: dict = {"source_job_id": str(source.id)}
+    pins: dict = {"app_requirement": None, "stack": None, "brief": None, "record": record}
+
+    app = snapshot.get("app_requirement")
+    if source.app_requirement_id is None:
+        record["app_requirement"] = "none"
+    elif isinstance(app, dict) and app and app.get("id") == source.app_requirement_id:
+        pins["app_requirement"] = copy.deepcopy(app)
+        record["app_requirement"] = "pinned"
+        record["app_requirement_version"] = app.get("version")
+        record["app_requirement_content_hash"] = app.get("content_hash")
+    else:
+        # The source never froze a snapshot (it failed before), so there is no
+        # older content to keep.
+        record["app_requirement"] = "live"
+        record["app_requirement_reason"] = "the source job froze no spec"
+
+    stack = snapshot.get("stack")
+    if not (isinstance(stack, dict) and stack.get("slug") and stack.get("version") is not None):
+        record["stack"] = "latest"
+        record["stack_reason"] = "the source job pinned no stack version"
+        return pins
+    record["stack_pinned"] = {k: stack.get(k) for k in ("slug", "version", "content_hash")}
+    row = get_stack_row(stack["slug"], version=stack["version"])
+    if canonical_stack_slug(stack["slug"]) != stack_slug:
+        record["stack"] = "latest"
+        record["stack_reason"] = f"the job now resolves to the {stack_slug} stack"
+    elif row is None or (stack.get("content_hash") and row.content_hash != stack["content_hash"]):
+        record["stack"] = "latest"
+        record["stack_reason"] = "the pinned stack version no longer exists with that content"
+    else:
+        pins["stack"] = {"slug": row.slug, "version": row.version, "content_hash": row.content_hash}
+        record["stack"] = "pinned"
+    brief = snapshot.get("brief")
+    if (
+        pins["stack"] is not None
+        and record["app_requirement"] != "live"
+        and isinstance(brief, dict)
+        and brief.get("text")
+        and brief.get("sha256")
+    ):
+        pins["brief"] = copy.deepcopy(brief)
+        record["brief"] = "pinned"
+    return pins
+
+
+def apply_pinned_snapshot(
+    job: GenerationJob,
+    source: GenerationJob,
+    *,
+    continuation_limit: int = DEFAULT_CONTINUATION_LIMIT,
+    enable_repair: bool = DEFAULT_ENABLE_REPAIR,
+    save: bool = True,
+    keep_brief: bool = True,
+) -> GenerationJob:
+    """Re-resolve *job*'s snapshot (agent or scaffolding mode) keeping *source*'s spec and stack.
+
+    *source* is the job being replaced (a retry), *job* itself when a
+    pending job is re-frozen, or a sibling cell's job when an experiment
+    top-up fills a cell (see ``experiments.launch_experiment``). See
+    :func:`library_pins`. ``keep_brief=False`` re-renders an agent brief
+    instead of keeping *source*'s (a sibling of another condition, whose
+    brief states that condition's budget). A scaffolding snapshot also keeps
+    *source*'s frontend-context procedure: one frozen before it was versioned
+    stays on version 1. ``save=False`` leaves *job* unsaved (bulk creation).
+    """
+    if job.mode == GenerationJob.Mode.AGENT:
+        pins = library_pins(source, agent_stack_slug(job.stack_slug, job.profile))
+        if not keep_brief and pins["brief"] is not None:
+            pins["brief"] = None
+            pins["record"].pop("brief", None)
+        return apply_agent_snapshot_to_job(job, save=save, pins=pins)
+    # Read the frozen snapshot first: when *source* is *job*, re-resolving
+    # overwrites it.
+    frozen = copy.deepcopy(source.resolved_bundle) if isinstance(source.resolved_bundle, dict) else {}
+    apply_snapshot_to_job(job, save=False, continuation_limit=continuation_limit, enable_repair=enable_repair)
+    snapshot = job.resolved_bundle
+    pins = library_pins(source, snapshot["scaffolding_slug"], snapshot=frozen)
+    if pins["app_requirement"] is not None:
+        snapshot["app_requirement"] = pins["app_requirement"]
+    if pins["stack"] is not None:
+        snapshot["stack"] = pins["stack"]
+    if frozen.get("app_requirement") and "frontend_context_version" not in frozen:
+        snapshot.pop("frontend_context_version", None)
+    snapshot["library_pin"] = pins["record"]
+    # Re-render the backend prompts from the kept spec (pre-rendered ones
+    # would be reused as they are); this also recomputes prompt_hash and
+    # run_fingerprint (which cover the spec and the stack hash).
+    snapshot["prompts"] = {k: v for k, v in (snapshot.get("prompts") or {}).items() if k != "backend"}
+    snapshot = attach_rendered_backend_prompts(snapshot, None)
+    job.resolved_bundle = snapshot
+    job.prompt_hash = snapshot.get("prompt_hash") or ""
+    if not save:
+        return job
+    job.save(
+        update_fields=[
+            "experiment_seed",
+            "resolved_bundle",
+            "prompt_hash",
+            "bundle_key",
+            "updated_at",
+        ],
+    )
+    return job
 
 
 class CellTakenError(Exception):
@@ -161,7 +301,10 @@ def clone_job(
     have changed since — the copy preserves the original prompt material);
     ``False`` re-resolves the bundle from the job's own fields, which carry
     every applied preset value (llm_params, agent_config, harness_options),
-    so a retry runs the same configuration (same ``config_fingerprint``).
+    so a retry runs the same configuration under the current procedure. The
+    spec content and stack version are the exceptions: they are kept from
+    the original's snapshot (:func:`library_pins`), since the library may
+    have been updated in place since the original was frozen.
     ``new_seed`` controls whether a reused snapshot keeps the original
     sampling seed (exact replay) or draws a fresh one (an additional trial
     of the same configuration).
@@ -247,11 +390,11 @@ def clone_job(
                 new_job.experiment_seed = cell_seed(original)
                 new_job.save(update_fields=["experiment_seed", "updated_at"])
             if original.mode == GenerationJob.Mode.AGENT:
-                apply_agent_snapshot_to_job(new_job)
+                apply_pinned_snapshot(new_job, original)
             elif original.mode == GenerationJob.Mode.SCAFFOLDING and original.app_requirement:
                 # Keep the original's continuation/repair options (an experiment's).
                 limit, repair = generation_options(original.resolved_bundle)
-                apply_snapshot_to_job(new_job, continuation_limit=limit, enable_repair=repair)
+                apply_pinned_snapshot(new_job, original, continuation_limit=limit, enable_repair=repair)
             elif original.mode == GenerationJob.Mode.CUSTOM:
                 # Execution reads the frozen llm section; without it a retry
                 # would fall back to the legacy columns and drop llm_params.

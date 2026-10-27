@@ -17,6 +17,7 @@ from django.utils import timezone
 from backend.analysis.models import AnalysisRun
 from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import Finding
+from backend.analysis.models import ToolResult
 from backend.generation.models import AppRequirementTemplate
 from backend.generation.models import GenerationJob
 from backend.llm_models.models import LLMModel
@@ -73,9 +74,13 @@ def _job_summary(jobs_qs) -> dict[str, Any]:
     }
 
 
-def _latest_run_ids(jobs_qs) -> list:
-    """Latest finished run per job — see AnalysisRun.latest_ids_per_job."""
-    return AnalysisRun.latest_ids_per_job(jobs_qs.values_list("id", flat=True))
+def _latest_result_ids(jobs_qs) -> list:
+    """Latest result per (job, tool) — see ToolResult.latest_ids_per_job.
+
+    Picking the latest *run* instead would drop every tool a later partial
+    re-analysis (one tool, or only the AI reviewer) did not re-run.
+    """
+    return ToolResult.latest_ids_per_job(jobs_qs.values_list("id", flat=True))
 
 
 def _stat(values: list[float]) -> dict[str, float]:
@@ -114,19 +119,19 @@ def _experiment_stats(jobs_qs, *, exclude_truncated: bool = True) -> dict[str, A
     # blend results from different templates and the reader needs to know.
     prompt_hashes = sorted({j.prompt_hash for j in trials if j.prompt_hash})
 
-    run_ids = AnalysisRun.latest_ids_per_job(trial_ids)
-    run_to_job = dict(
-        AnalysisRun.objects.filter(id__in=run_ids).values_list("id", "generation_job_id"),
+    result_ids = ToolResult.latest_ids_per_job(trial_ids)
+    result_to_job = dict(
+        ToolResult.objects.filter(id__in=result_ids).values_list("id", "run__generation_job_id"),
     )
     ai_slugs = AnalyzerTool.ai_slugs()
     sev_by_job: dict[Any, dict[str, int]] = {}
     ai_by_job: dict[Any, dict[str, int]] = {}
     for row in (
-        Finding.objects.filter(result__run_id__in=run_ids)
-        .values("result__run_id", "result__tool_slug", "severity")
+        Finding.objects.filter(result_id__in=result_ids)
+        .values("result_id", "result__tool_slug", "severity")
         .annotate(n=Count("id"))
     ):
-        job_id = run_to_job.get(row["result__run_id"])
+        job_id = result_to_job.get(row["result_id"])
         bucket = ai_by_job if row["result__tool_slug"] in ai_slugs else sev_by_job
         sev = (row["severity"] or "").lower()
         per_job = bucket.setdefault(job_id, {})
@@ -137,7 +142,13 @@ def _experiment_stats(jobs_qs, *, exclude_truncated: bool = True) -> dict[str, A
         for entry in loc_for_jobs(GenerationJob.objects.filter(id__in=trial_ids)).get("per_job", [])
     }
 
-    analyzed_ids = set(run_to_job.values())
+    # Analyzed = at least one non-AI tool completed; an app whose tools all
+    # failed has unknown counts and must not enter the stats as zero findings.
+    analyzed_ids = set(
+        ToolResult.objects.filter(id__in=result_ids, status=ToolResult.Status.COMPLETED)
+        .exclude(tool_slug__in=ai_slugs)
+        .values_list("run__generation_job_id", flat=True),
+    )
     totals, crit_high, weighted, per_kloc = [], [], [], []
     ai_totals, ai_crit_high = [], []
     costs, durations, tokens = [], [], []
@@ -145,7 +156,7 @@ def _experiment_stats(jobs_qs, *, exclude_truncated: bool = True) -> dict[str, A
 
     for job in trials:
         metrics = job.metrics if isinstance(job.metrics, dict) else {}
-        if metrics.get("cost"):
+        if metrics.get("cost") is not None:
             costs.append(float(metrics["cost"]))
         duration = metrics.get("total_duration") or metrics.get("duration_seconds")
         if duration:
@@ -207,25 +218,26 @@ def _dedup_totals(jobs_qs) -> dict[str, Any]:
         "unique_issues",
         "duplicate_findings",
         "mean_unique_per_app",
+        "code_unique",
         "unique_per_kloc",
         "security_unique",
+        "dependency_unique",
+        "dependency_added",
     )
     return {k: totals.get(k) for k in keys}
 
 
 def _findings_for_jobs(jobs_qs):
     return Finding.objects.filter(
-        result__run_id__in=_latest_run_ids(jobs_qs),
+        result_id__in=_latest_result_ids(jobs_qs),
     )
 
 
 def _tools_for_jobs(jobs_qs) -> list[dict[str, Any]]:
-    """Per-tool breakdown derived from AnalysisResult rows."""
-
-    from backend.analysis.models import ToolResult
+    """Per-tool breakdown derived from each job's latest result per tool."""
 
     rows = (
-        ToolResult.objects.filter(run_id__in=_latest_run_ids(jobs_qs))
+        ToolResult.objects.filter(id__in=_latest_result_ids(jobs_qs))
         .values("tool_slug")
         .annotate(n=Count("id"))
         .order_by("-n")
@@ -299,9 +311,7 @@ def generate_model_analysis(config: dict[str, Any]) -> dict[str, Any]:
     findings = all_findings.exclude(result__tool_slug__in=ai_slugs)
     ai_findings = all_findings.filter(result__tool_slug__in=ai_slugs)
 
-    from backend.analysis.models import ToolResult
-
-    tool_results = ToolResult.objects.filter(run_id__in=_latest_run_ids(jobs))
+    tool_results = ToolResult.objects.filter(id__in=_latest_result_ids(jobs))
 
     return {
         "model": {
@@ -489,8 +499,6 @@ def generate_tool_analysis(config: dict[str, Any]) -> dict[str, Any]:
         bucket["total"] += row["n"]
         if sev in bucket["by_severity"]:
             bucket["by_severity"][sev] += row["n"]
-
-    from backend.analysis.models import ToolResult
 
     tool_results = ToolResult.objects.filter(run__in=tasks)
     if tool_name:

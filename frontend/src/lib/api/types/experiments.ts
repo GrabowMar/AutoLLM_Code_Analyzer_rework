@@ -571,7 +571,13 @@ export interface LeaderboardRow {
   timing_endpoint_slug: string | null;
   terminations: Record<string, number>;
   validity: { ok: number; warn: number; invalid: number };
-  mixed_fingerprints: { count: number; majority_share: number } | null;
+  /** replicates of one app that ran under different configurations */
+  mixed_fingerprints: {
+    count: number;
+    apps?: number;
+    minority_cells?: number;
+    majority_share: number;
+  } | null;
 }
 
 export interface ResultsMatrixRun {
@@ -604,8 +610,12 @@ export interface PairedRow {
   ties: number;
   sign_test_p: number | null;
   wilcoxon_p: number | null;
-  /** null while interim */
+  /** Holm-adjusted Wilcoxon p; null while interim */
   p_holm: number | null;
+  /** adjusted as the analysis plan says (`paired.correction`); null while interim */
+  p_adjusted: number | null;
+  /** p_adjusted < paired.alpha; null while interim or untested */
+  significant: boolean | null;
 }
 
 export interface ExperimentResults {
@@ -626,6 +636,11 @@ export interface ExperimentResults {
   paired: {
     baseline_condition_id: number | null;
     pairing: "app_blocked";
+    /** confirmatory: the frozen analysis plan declares this metric and baseline */
+    status: "confirmatory" | "exploratory";
+    correction: "holm" | "bh" | "none";
+    alpha: number;
+    alternative: "two-sided" | "greater" | "less";
     n_apps: number;
     rows: PairedRow[];
   };

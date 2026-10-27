@@ -2,84 +2,155 @@
   "slug": "finance_expense_list",
   "name": "Expense Tracker",
   "category": "Finance",
-  "description": "Track your expenses",
+  "description": "Record personal expenses and see where the money goes by category and period",
   "difficulty": "standard",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only expense summaries; require auth for personal expense CRUD",
-    "1. Expense model: id, amount (decimal, required), category (required), description, date",
-    "2. GET /api/expenses - list expenses",
-    "3. POST /api/expenses - add expense",
-    "4. DELETE /api/expenses/:id - delete expense",
-    "5. GET /api/expenses/total - return sum of expenses"
+    "Access control: require auth for every expense endpoint; each signed-in user sees and changes only their own expenses; admin endpoints are restricted to the admin account",
+    "Expense validation: amount is a number greater than 0 and at most 1000000, stored with 2 decimal places; category is one of food, transport, housing, utilities, entertainment, health, other; description, when given, is at most 500 characters; date is a required date (YYYY-MM-DD) no later than today",
+    "GET /api/expenses returns the user's active expenses, newest date first; ?category= keeps one category, ?start_date= and ?end_date= keep expenses dated within that inclusive range, ?page= and ?page_size= page the result (page_size default 25, at most 100); total counts every matching expense and total_amount sums their amounts",
+    "GET /api/expenses/summary returns, for the same ?category=, ?start_date= and ?end_date= filters, total_amount, count and by_category (the amount per category, every category present with 0 when it has none), all amounts rounded to 2 decimals",
+    "PUT /api/expenses/:id replaces amount, category, description and date (an omitted description is cleared); DELETE /api/expenses/:id removes the expense permanently",
+    "Deactivated expenses (is_active false) are left out of the owner's lists and summary and answer 404 on the expense endpoints; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input or an end_date before start_date, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "HomePage displays ALL content in read-only mode for public users",
-    "Public users see \"Sign in to track expenses\" CTAs instead of action buttons",
-    "Logged-in users see same content plus create/edit/delete functionality",
-    "1. Expense list showing date, amount, category, description (visible to all)",
-    "2. Total amount card (visible to all)",
-    "3. Add expense form with validation (logged-in only)",
-    "4. Delete button per expense (logged-in only)",
-    "5. Filter by category (visible to all)"
+    "Visitors see a short description of the app and a 'Sign in to track your expenses' prompt; the expense views are for signed-in users",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "A total card and a per-category breakdown (amounts and share of the total) for the current filters",
+    "Expense list: date, category, description and amount, with a category filter, a period filter ('This month', 'Last month', custom dates) and previous/next paging",
+    "Add and edit expense forms (amount, category, date defaulting to today, optional description) that show the API's validation messages; delete asks for confirmation first"
+  ],
+  "admin_requirements": [
+    "Admin overview: every user's expenses, active or not, with the owner's username and total, active and inactive counts",
+    "Toggle an expense's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/expenses",
-      "description": "List expenses",
+      "description": "List the signed-in user's active expenses, newest date first, filtered and paged",
+      "auth": "user",
+      "query": {
+        "category": "Only this category",
+        "start_date": "Earliest expense date to include (YYYY-MM-DD, inclusive)",
+        "end_date": "Latest expense date to include (YYYY-MM-DD, inclusive)",
+        "page": "1-based page number (default 1)",
+        "page_size": "Expenses per page (default 25, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "amount": 19.99,
-            "category": "string",
-            "description": "string",
-            "date": "YYYY-MM-DD"
+            "amount": 42.8,
+            "category": "food",
+            "description": "Weekly groceries",
+            "date": "2026-01-15",
+            "created_at": "2026-01-15T18:20:00Z"
           }
         ],
-        "total": 1
+        "total": 1,
+        "total_amount": 42.8,
+        "page": 1,
+        "page_size": 25
       }
     },
     {
       "method": "POST",
       "path": "/api/expenses",
-      "description": "Create expense",
+      "description": "Record an expense for the signed-in user",
+      "auth": "user",
+      "success_status": 201,
       "request": {
-        "amount": 19.99,
-        "category": "string",
-        "description": "string",
+        "amount": "number",
+        "category": "string (food|transport|housing|utilities|entertainment|health|other)",
+        "description": "string (optional)",
         "date": "YYYY-MM-DD"
       },
       "response": {
         "id": 1,
-        "amount": 19.99,
-        "category": "string",
-        "description": "string",
+        "amount": 42.8,
+        "category": "food",
+        "description": "Weekly groceries",
+        "date": "2026-01-15",
+        "created_at": "2026-01-15T18:20:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/expenses/summary",
+      "description": "Totals per category for the signed-in user's filtered expenses",
+      "auth": "user",
+      "query": {
+        "category": "Only this category",
+        "start_date": "Earliest expense date to include (YYYY-MM-DD, inclusive)",
+        "end_date": "Latest expense date to include (YYYY-MM-DD, inclusive)"
+      },
+      "request": null,
+      "response": {
+        "total_amount": 120.5,
+        "count": 4,
+        "by_category": {
+          "food": 62.3,
+          "transport": 18.2,
+          "housing": 0,
+          "utilities": 40.0,
+          "entertainment": 0,
+          "health": 0,
+          "other": 0
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/expenses/:id",
+      "description": "One of the signed-in user's expenses",
+      "auth": "user",
+      "request": null,
+      "response": {
+        "id": 1,
+        "amount": 42.8,
+        "category": "food",
+        "description": "Weekly groceries",
+        "date": "2026-01-15",
+        "created_at": "2026-01-15T18:20:00Z"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/expenses/:id",
+      "description": "Replace an expense's fields (amount, category and date required; an omitted description is cleared)",
+      "auth": "user",
+      "request": {
+        "amount": "number",
+        "category": "string (food|transport|housing|utilities|entertainment|health|other)",
+        "description": "string (optional)",
         "date": "YYYY-MM-DD"
+      },
+      "response": {
+        "id": 1,
+        "amount": 42.8,
+        "category": "food",
+        "description": "Weekly groceries",
+        "date": "2026-01-15",
+        "created_at": "2026-01-15T18:20:00Z"
       }
     },
     {
       "method": "DELETE",
       "path": "/api/expenses/:id",
-      "description": "Delete expense",
+      "description": "Delete an expense",
+      "auth": "user",
+      "success_status": 204,
       "request": null,
-      "response": {}
-    },
-    {
-      "method": "GET",
-      "path": "/api/expenses/total",
-      "description": "Get total expenses",
-      "request": null,
-      "response": {
-        "total": 120.5
-      }
+      "response": null
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -87,43 +158,54 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Expense",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "amount": "decimal (required, min 0)",
-      "category": "string (required)",
-      "description": "text (optional)",
-      "date": "date (required)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Expense",
+      "description": "One expense of one user",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who owns it)",
+        "amount": "decimal (required, > 0, at most 1000000, 2 decimal places; a number in JSON)",
+        "category": "string (one of: food, transport, housing, utilities, entertainment, health, other)",
+        "description": "string (optional, max 500 chars)",
+        "date": "date (required, YYYY-MM-DD, not in the future)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the expense from its owner)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any expense"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/expenses",
-      "description": "Admin overview: list all expenses and counts",
+      "description": "Admin overview: every user's expenses with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "username": "alice",
+            "amount": 42.8,
+            "category": "food",
+            "date": "2026-01-15",
+            "is_active": true
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/expenses/:id/toggle",
-      "description": "Toggle expense active status",
+      "description": "Flip an expense's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

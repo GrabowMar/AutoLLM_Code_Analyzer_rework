@@ -2,8 +2,10 @@
 	import { untrack } from 'svelte';
 	/**
 	 * SpecEditor — the whole app spec, including the graded contract (data
-	 * model, API and admin endpoints) the hidden conformance suite checks.
+	 * models, API and admin endpoints) the hidden conformance suite checks.
 	 * Form and JSON views edit the same draft; JSON accepts a seeded spec file.
+	 * Schema v3 specs list any number of models; a legacy spec (one
+	 * `data_model`) loads as a one-model list and keeps its shape on save.
 	 *
 	 * Props: `initial` (null = new), `copy` (duplicate `initial` under a new
 	 * slug), `readonly` (catalog spec for non-staff: view + Duplicate),
@@ -31,13 +33,17 @@
 	import EndpointListEditor from './EndpointListEditor.svelte';
 	import {
 		DIFFICULTIES,
+		SPEC_SCHEMA_VERSION,
+		SPEC_SCHEMA_VERSIONS,
 		draftToJson,
 		draftToPayload,
 		emptyField,
+		emptyModel,
 		jsonToDraft,
 		specIssues,
 		specSlugFromName,
 		specToDraft,
+		type ModelDraft,
 		type SpecPayload,
 	} from './spec';
 
@@ -84,6 +90,10 @@
 	const problem = (field: string) => (attempted ? (byField.get(field) ?? '') : '');
 
 	const difficultyItems = DIFFICULTIES.map((d) => ({ value: d, label: d[0].toUpperCase() + d.slice(1) }));
+	const schemaItems = [...SPEC_SCHEMA_VERSIONS].reverse().map((v) => ({
+		value: String(v),
+		label: v === SPEC_SCHEMA_VERSION ? `v${v} (current)` : `v${v} (legacy)`,
+	}));
 	const categoryListId = `spec-categories-${Math.random().toString(36).slice(2, 8)}`;
 
 	function setView(next: 'form' | 'json') {
@@ -120,8 +130,12 @@
 		onSave(draftToPayload(draft), isNew);
 	}
 
-	function patchField(key: number, change: { name?: string; type?: string }) {
-		draft.fields = draft.fields.map((f) => (f.key === key ? { ...f, ...change } : f));
+	function patchModel(key: number, change: Partial<ModelDraft>) {
+		draft.models = draft.models.map((m) => (m.key === key ? { ...m, ...change } : m));
+	}
+
+	function patchField(model: ModelDraft, key: number, change: { name?: string; type?: string }) {
+		patchModel(model.key, { fields: model.fields.map((f) => (f.key === key ? { ...f, ...change } : f)) });
 	}
 
 	const title = $derived(readonly ? draft.name || 'App spec' : isNew ? (copy ? 'Duplicate app spec' : 'New app spec') : `Edit ${initial?.name ?? 'app spec'}`);
@@ -229,6 +243,19 @@
 							onValueChange={(v) => (draft.difficulty = v as AppSpecDifficulty)}
 						/>
 					</div>
+					<div class="space-y-1.5">
+						<Label for="spec-schema" class="text-xs">Spec format</Label>
+						<Select.Simple
+							id="spec-schema"
+							value={String(draft.schemaVersion)}
+							items={schemaItems}
+							disabled={readonly}
+							onValueChange={(v) => (draft.schemaVersion = Number(v) || SPEC_SCHEMA_VERSION)}
+						/>
+						{#if draft.schemaVersion < SPEC_SCHEMA_VERSION}
+							<p class="text-[11px] text-muted-foreground">Legacy format: only the schema is checked, not the v{SPEC_SCHEMA_VERSION} conventions.</p>
+						{/if}
+					</div>
 					<div class="space-y-1.5 sm:col-span-2">
 						<Label for="spec-desc" class="text-xs">Description</Label>
 						<Textarea id="spec-desc" bind:value={draft.description} readonly={readonly} rows={2} placeholder="What the app is for, in a sentence or two" class="text-xs leading-relaxed" />
@@ -242,7 +269,16 @@
 				<div class="grid gap-3 sm:grid-cols-2">
 					<div class="space-y-1.5">
 						<Label for="spec-backend" class="text-xs">Backend</Label>
-						<Textarea id="spec-backend" bind:value={draft.backend} readonly={readonly} rows={6} placeholder={'Book model: id, title, author\nSearch with ?query='} class="bg-muted/20 font-mono text-[11px] leading-normal" />
+						<Textarea
+							id="spec-backend"
+							bind:value={draft.backend}
+							readonly={readonly}
+							rows={6}
+							aria-invalid={!!problem('spec-backend')}
+							placeholder={'Access control: anyone may read books; require auth for creating, updating and deleting them\nGET /api/books filters by ?query= on title and author'}
+							class="bg-muted/20 font-mono text-[11px] leading-normal"
+						/>
+						{#if problem('spec-backend')}<p class="text-[11px] text-danger-fg">{problem('spec-backend')}</p>{/if}
 					</div>
 					<div class="space-y-1.5">
 						<Label for="spec-frontend" class="text-xs">Frontend</Label>
@@ -255,63 +291,116 @@
 				</div>
 			</section>
 
-			<!-- Data model -->
+			<!-- Data models -->
 			<section class="space-y-3" aria-labelledby="spec-model">
-				<SectionHeading id="spec-model" size="sm" level={3} title="Data model" />
-				<div class="space-y-1.5 sm:w-1/2">
-					<Label for="spec-model-name" class="text-xs">Model name</Label>
-					<Input id="spec-model-name" bind:value={draft.modelName} readonly={readonly} aria-invalid={!!problem('spec-model-name')} placeholder="e.g. Book" class="h-9 text-xs" />
-					{#if problem('spec-model-name')}<p class="text-[11px] text-danger-fg">{problem('spec-model-name')}</p>{/if}
-				</div>
-				<div class="space-y-2">
-					{#each draft.fields as f, i (f.key)}
-						{@const nameProblem = problem(`field-${f.key}-name`)}
-						{@const typeProblem = problem(`field-${f.key}-type`)}
+				<SectionHeading
+					id="spec-model"
+					size="sm"
+					level={3}
+					title="Data models"
+					count={draft.models.length}
+					lead="Primary model first. Field types are free text, e.g. string (required, max 255 chars)."
+				/>
+				{#if draft.models.length === 0}
+					<p class="rounded-md border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">No data models.</p>
+				{/if}
+				{#each draft.models as m, mi (m.key)}
+					{@const modelProblem = problem(`model-${m.key}-name`)}
+					<div class="space-y-3 rounded-md border border-border bg-muted/10 p-3">
 						<div class="flex items-start gap-2">
-							<div class="flex-1 space-y-1">
-								<Input
-									value={f.name}
-									readonly={readonly}
-									aria-label="Field {i + 1} name"
-									aria-invalid={!!nameProblem}
-									placeholder="title"
-									class="h-8 font-mono text-xs"
-									oninput={(ev) => patchField(f.key, { name: ev.currentTarget.value })}
-								/>
-								{#if nameProblem}<p class="text-[11px] text-danger-fg">{nameProblem}</p>{/if}
-							</div>
-							<div class="flex-[2] space-y-1">
-								<Input
-									value={f.type}
-									readonly={readonly}
-									aria-label="Field {i + 1} type"
-									aria-invalid={!!typeProblem}
-									placeholder="string (required, max 200)"
-									class="h-8 text-xs"
-									oninput={(ev) => patchField(f.key, { type: ev.currentTarget.value })}
-								/>
-								{#if typeProblem}<p class="text-[11px] text-danger-fg">{typeProblem}</p>{/if}
+							<div class="grid flex-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+								<div class="space-y-1">
+									<Label for="model-{m.key}-name" class="text-xs">Model {mi + 1} name</Label>
+									<Input
+										id="model-{m.key}-name"
+										value={m.name}
+										readonly={readonly}
+										aria-invalid={!!modelProblem}
+										placeholder={mi === 0 ? 'e.g. Book' : 'e.g. Review'}
+										class="h-8 text-xs"
+										oninput={(ev) => patchModel(m.key, { name: ev.currentTarget.value })}
+									/>
+									{#if modelProblem}<p class="text-[11px] text-danger-fg">{modelProblem}</p>{/if}
+								</div>
+								<div class="space-y-1">
+									<Label for="model-{m.key}-desc" class="text-xs">Description <span class="font-normal text-muted-foreground">(optional)</span></Label>
+									<Input
+										id="model-{m.key}-desc"
+										value={m.description}
+										readonly={readonly}
+										placeholder="What one record is"
+										class="h-8 text-xs"
+										oninput={(ev) => patchModel(m.key, { description: ev.currentTarget.value })}
+									/>
+								</div>
 							</div>
 							{#if !readonly}
 								<Button
 									variant="ghost"
 									size="sm"
-									class="size-8 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-danger-fg"
-									aria-label="Remove field {i + 1}"
-									title="Remove"
-									onclick={() => (draft.fields = draft.fields.filter((x) => x.key !== f.key))}
+									class="mt-5 size-8 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-danger-fg"
+									aria-label="Remove model {mi + 1}"
+									title="Remove model"
+									onclick={() => (draft.models = draft.models.filter((x) => x.key !== m.key))}
 								>
 									<Trash2 />
 								</Button>
 							{/if}
 						</div>
-					{/each}
-					{#if !readonly}
-						<Button variant="outline" size="sm" onclick={() => (draft.fields = [...draft.fields, emptyField()])}><Plus /> Add field</Button>
-					{:else if draft.fields.length === 0}
-						<p class="text-xs text-muted-foreground">No fields.</p>
-					{/if}
-				</div>
+						<div class="space-y-2">
+							{#each m.fields as f, i (f.key)}
+								{@const nameProblem = problem(`field-${f.key}-name`)}
+								{@const typeProblem = problem(`field-${f.key}-type`)}
+								<div class="flex items-start gap-2">
+									<div class="flex-1 space-y-1">
+										<Input
+											value={f.name}
+											readonly={readonly}
+											aria-label="Model {mi + 1} field {i + 1} name"
+											aria-invalid={!!nameProblem}
+											placeholder="title"
+											class="h-8 font-mono text-xs"
+											oninput={(ev) => patchField(m, f.key, { name: ev.currentTarget.value })}
+										/>
+										{#if nameProblem}<p class="text-[11px] text-danger-fg">{nameProblem}</p>{/if}
+									</div>
+									<div class="flex-[2] space-y-1">
+										<Input
+											value={f.type}
+											readonly={readonly}
+											aria-label="Model {mi + 1} field {i + 1} type"
+											aria-invalid={!!typeProblem}
+											placeholder="string (required, max 200 chars)"
+											class="h-8 text-xs"
+											oninput={(ev) => patchField(m, f.key, { type: ev.currentTarget.value })}
+										/>
+										{#if typeProblem}<p class="text-[11px] text-danger-fg">{typeProblem}</p>{/if}
+									</div>
+									{#if !readonly}
+										<Button
+											variant="ghost"
+											size="sm"
+											class="size-8 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-danger-fg"
+											aria-label="Remove model {mi + 1} field {i + 1}"
+											title="Remove field"
+											onclick={() => patchModel(m.key, { fields: m.fields.filter((x) => x.key !== f.key) })}
+										>
+											<Trash2 />
+										</Button>
+									{/if}
+								</div>
+							{/each}
+							{#if !readonly}
+								<Button variant="outline" size="sm" onclick={() => patchModel(m.key, { fields: [...m.fields, emptyField()] })}><Plus /> Add field</Button>
+							{:else if m.fields.length === 0}
+								<p class="text-xs text-muted-foreground">No fields.</p>
+							{/if}
+						</div>
+					</div>
+				{/each}
+				{#if !readonly}
+					<Button variant="outline" size="sm" onclick={() => (draft.models = [...draft.models, emptyModel()])}><Plus /> Add model</Button>
+				{/if}
 			</section>
 
 			<!-- Endpoints -->

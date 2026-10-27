@@ -9,6 +9,13 @@ brief, so default runs keep pooling with every run made before presets.
 A failure here means default runs changed identity. Only recapture on purpose
 (a deliberate BRIEF/CONTRACT/SANDBOX version bump or a harness release bump),
 never to make an unrelated change pass.
+
+Recaptured once, deliberately, for the generation-library modernization:
+BRIEF_VERSION 4 (current stack runtimes in the summaries, JSON blocks no
+longer HTML-escaped), the agent-base move to Node 24 / Python 3.13, the
+modernized flask-react skeleton (Vite base ``/``, flask-sock, JSON 404s) and
+the spec ``content_hash`` in the run fingerprint. The agent, gateway and harness
+sections were unchanged by it; runs from before it form separate conditions.
 """
 
 from __future__ import annotations
@@ -52,13 +59,13 @@ ADMIN_API_ENDPOINTS = [
     },
 ]
 
-_PROMPT_HASH = "31a2239b3b7ac055"
-_BRIEF_SHA256 = "afb0c8baaaef008166a19e8e39d09103ade0128bd7b3e7be0aa9e82b2608961f"
+_PROMPT_HASH = "c79c0562d20d7f16"
+_BRIEF_SHA256 = "7c0f44e07eb487c5a478df1efbdddb0b0c723103188e9785afe1d45fb441333a"
 _GATEWAY = "fe9f848f79c51ae6baea1ad9ecacbc1d435b035e1d6119162c07276ff5cb1872"
 GOLDEN: dict[str, dict[str, str]] = {
     "opencode": {
         "prompt_hash": _PROMPT_HASH,
-        "run_fingerprint": "fa52831fad364f89",
+        "run_fingerprint": "30a9c7c0aa736270",
         "brief_sha256": _BRIEF_SHA256,
         "agent": "cd524fc38b85a1ce8569d68d93a8243bde793b685ad3289a6870c742640fcff3",
         "gateway": _GATEWAY,
@@ -66,7 +73,7 @@ GOLDEN: dict[str, dict[str, str]] = {
     },
     "mini-swe-agent": {
         "prompt_hash": _PROMPT_HASH,
-        "run_fingerprint": "419e2ba9e61a5dbd",
+        "run_fingerprint": "20073c1dd853953e",
         "brief_sha256": _BRIEF_SHA256,
         "agent": "4a949a3b01eec4a8097c5ec28b8d024bbbb3e31eb76c02e646b211d97ec656b1",
         "gateway": _GATEWAY,
@@ -74,7 +81,7 @@ GOLDEN: dict[str, dict[str, str]] = {
     },
     "aider": {
         "prompt_hash": _PROMPT_HASH,
-        "run_fingerprint": "cc7d66ca57d60cb9",
+        "run_fingerprint": "24efee6d0b548cfe",
         "brief_sha256": _BRIEF_SHA256,
         "agent": "fd5eb9b752f3a3cbe71262bbe6a918f5f0b9d73ccf35769102dcafa8a214e82e",
         "gateway": _GATEWAY,

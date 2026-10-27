@@ -216,6 +216,37 @@ class TestInfraRetry:
         job.refresh_from_db()
         assert (job.status, job.lease_owner) == (S.CANCELLED, "")
 
+    def test_requeue_keeps_the_spend_of_wiped_attempts(self, user):
+        experiment = running_experiment(user, infra_retries=3)
+        job = _running(user, experiment=experiment, metrics={"cost": 0.25, "total_tokens": 1000})
+        assert infra_retry(job, transitions.REASON_INFRA_INTERRUPTED, "429") is True
+        job.refresh_from_db()
+        assert job.metrics == {}
+        assert job.execution["attempts"][0]["cost"] == 0.25
+        assert job.execution["prior_attempts_cost"] == 0.25
+        assert job.execution["prior_attempts_total_tokens"] == 1000
+        assert "requeued_at" in job.execution
+        GenerationJob.objects.filter(id=job.id).update(
+            status=S.RUNNING,
+            lease_owner=OWNER,
+            metrics={"cost": 0.5, "total_tokens": 10},
+        )
+        job.refresh_from_db()
+        assert infra_retry(job, transitions.REASON_INFRA_INTERRUPTED, "429") is True
+        job.refresh_from_db()
+        assert job.execution["prior_attempts_cost"] == 0.75
+        assert job.execution["prior_attempts_total_tokens"] == 1010
+
+    def test_exhausted_attempt_keeps_its_metrics_and_is_not_double_counted(self, user):
+        experiment = running_experiment(user, infra_retries=0)
+        job = _running(user, experiment=experiment, metrics={"cost": 0.25})
+        job.metrics = {"cost": 0.25}
+        assert infra_retry(job, transitions.REASON_INFRA_INTERRUPTED, "429") is False
+        job.refresh_from_db()
+        assert job.metrics["cost"] == 0.25
+        assert job.execution["attempts"][0]["cost"] == 0.25
+        assert "prior_attempts_cost" not in job.execution
+
     def test_infra_failures_feed_the_circuit_breaker(self, user):
         from backend.execution.breaker import breaker
 

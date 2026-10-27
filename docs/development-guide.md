@@ -74,7 +74,7 @@ Other settings read from the environment, with their defaults (`config/settings/
 | `LLMLAB_PUBLIC_URL` | request host | Base URL the relay install commands point at |
 | `TRUSTED_PROXY_CIDRS` | empty | Proxies whose `X-Forwarded-For` hop is trusted for relay client IPs |
 | `STACK_REQUIRE_APPROVAL` | `False` | Non-staff stacks need staff approval |
-| `STACK_ALLOWED_PYTHON_IMAGES`, `STACK_ALLOWED_NODE_IMAGES` | `python:3.11-slim,python:3.12-slim`, `node:20-alpine,node:22-alpine` | Base-image allowlist for user stacks |
+| `STACK_ALLOWED_PYTHON_IMAGES`, `STACK_ALLOWED_NODE_IMAGES` | `python:3.11-slim,python:3.12-slim,python:3.13-slim,python:3.14-slim`, `node:20-alpine,node:22-alpine,node:24-alpine` | Base-image allowlist for user stacks (the builtin stacks use `python:3.13-slim` and `node:24-alpine`; older tags stay listed so existing stacks and packages validate) |
 
 The compose file sets the apps daemon wiring itself (`APPS_DOCKER_HOST=tcp://apps-dind:2376`, `APPS_DOCKER_CERT_PATH`, `APPS_UPSTREAM_HOST=apps-dind`, `APPS_PROXY_PATH=True`) and the executor's LLM proxy (`LLM_PROXY_BIND`, `LLM_PROXY_UPSTREAM`). It interpolates these from your shell or a root `.env` file:
 
@@ -114,12 +114,12 @@ Scoring constants live in one place: `backend/rankings/services/constants.py` de
 
 ### Seed data and management commands
 
-Seeds sync after every `migrate` through `post_migrate` handlers; a seeding error is logged, never raised. Data files: `backend/analysis/data/tools/*.yaml` (tool catalog), `backend/generation/data/` (library), `backend/runtime/scaffolding/` (stacks).
+Seeds sync after every `migrate` through `post_migrate` handlers; a seeding error is logged, never raised. Data files: `backend/analysis/data/tools/*.yaml` (tool catalog), `backend/generation/data/` (library), `backend/runtime/scaffolding/` (stacks). Seeding is idempotent by content hash: an edited app spec file updates its row in place with the next `version`, and an edited skeleton or `manifest.json` entry becomes a new stack version, so job snapshots (which embed both) always name the content they ran on.
 
 | Command | Purpose |
 | --- | --- |
 | `seed_analysis_tools`, `seed_generation_templates` | Re-run a seeder by hand |
-| `lint_generation_data` | Validate the generation library data files |
+| `lint_generation_data` | Validate the generation library data files (app specs against `schema.json` and the v3 conventions; warnings are printed but do not fail it) |
 | `enrich_models` | Attach models.dev / Hugging Face metadata to the catalog |
 | `seed_benchmarks` | Load benchmark results from a JSON fixture |
 | `run_executor`, `executor drain\|resume\|status`, `wait_for_migrations` | Executor process and control ([Execution engine](/docs/EXECUTION)) |

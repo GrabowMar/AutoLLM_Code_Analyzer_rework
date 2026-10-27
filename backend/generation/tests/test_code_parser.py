@@ -174,6 +174,44 @@ class TestInferPythonDependencies:
         deps = infer_python_dependencies(code)
         assert "flask" in deps
 
+    def test_modern_fastapi_auth_deps(self) -> None:
+        code = (
+            "from fastapi import FastAPI\n"
+            "from pydantic import EmailStr\n"
+            "from pwdlib import PasswordHash\n"
+            "from argon2 import PasswordHasher\n"
+            "from jose import jwt\n"
+            "import multipart\n"
+            "from pydantic_settings import BaseSettings\n"
+            "import email_validator\n"
+        )
+        deps = infer_python_dependencies(code)
+        assert deps == [
+            "argon2-cffi",
+            "email-validator",
+            "fastapi",
+            "pwdlib",
+            "pydantic",
+            "pydantic-settings",
+            "python-jose",
+            "python-multipart",
+        ]
+
+    def test_full_stdlib_list(self) -> None:
+        # Modules a hand-written list missed (tomllib, zoneinfo, graphlib,
+        # __future__) and ones removed by 3.13 never become packages.
+        code = (
+            "from __future__ import annotations\n"
+            "import tomllib, zoneinfo, graphlib, ipaddress, concurrent.futures\n"
+            "import cgi\n"
+        )
+        assert infer_python_dependencies(code) == []
+
+    def test_local_modules_and_relative_imports(self) -> None:
+        code = "from database import Base\nfrom .schemas import Item\nimport routers.items\nimport httpx\n"
+        deps = infer_python_dependencies(code, local_modules=frozenset({"database", "routers"}))
+        assert deps == ["httpx"]
+
 
 class TestParseResultToStructured:
     """Tests for parse_result_to_structured()."""

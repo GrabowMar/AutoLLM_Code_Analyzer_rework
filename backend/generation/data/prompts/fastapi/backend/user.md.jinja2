@@ -3,33 +3,43 @@
 {{ description }}
 
 ## Task
-Generate `app.py` as a **feature-rich FastAPI application** with clear structure, typed schemas, and production-grade route handling.
+Generate `app.py`: the complete FastAPI backend for this application. Implement every requirement and every endpoint below completely, with the request and response shapes shown.
 
 ## Requirements
 
 ### Features
-{% for req in backend_requirements %}
+{% for req in backend_requirements -%}
 - {{ req }}
 {% endfor %}
-
 ### Admin Features
-{% for req in admin_requirements %}
+{% for req in admin_requirements -%}
 - {{ req }}
 {% endfor %}
-
-### Data Model Context
+### Data Model
 {{ data_model }}
 
-### API Endpoints (Minimum required)
+### API Endpoints
 {{ api_endpoints }}
-
+{% if admin_api_endpoints %}
 {{ admin_api_endpoints }}
-
-## Implementation Requirements
-- Use `BaseModel` schemas for request and response bodies.
-- Build domain-specific public summary endpoints in addition to CRUD.
-- Support search plus at least 2 meaningful filters on the main list endpoint.
-- Include auth dependencies for user and admin flows.
-- Add realistic seeded data with varied statuses, timestamps, and owners.
-
-**START GENERATION NOW.**
+{% endif %}
+## Runtime contract
+The platform builds the app, starts it with `uvicorn app:app --host 0.0.0.0 --port 8000` and checks the following automatically.
+- `GET {{ contract.health_path }}` returns HTTP 200 with a JSON body.
+- All API routes live under `/api/`, and the server listens on `0.0.0.0:8000`.
+- The built frontend is copied to `./static` and requests its assets under `/static/`: mount `./static` at `/static`, and serve `index.html` for `/` and for every other non-API path (client-side routes).
+- Data lives in SQLite at `/app/data/app.db`; the app starts from an empty `data/` directory, so it creates its schema (and any seed data) at startup.
+{% if contract.accounts %}
+### Accounts
+{% if contract.spec_defines_auth -%}
+- Implement the register and login endpoints listed above. Login returns the token in a top-level `token` field.
+{% else -%}
+- `POST {{ contract.register_path }}` with JSON `{"{{ contract.identity_field }}": string, "password": string}` creates an account (HTTP 201).
+- `POST {{ contract.login_path }}` with the same JSON body returns HTTP 200 and `{"token": string}` (a top-level `token` field). Both take JSON, not form data.
+{% endif -%}
+- Authenticated requests send `Authorization: Bearer <token>`.{% if contract.writes_require_auth %} Endpoints the requirements reserve for signed-in users answer HTTP 401 without a valid token.{% endif %}
+{% if contract.admin -%}
+- Endpoints under `/api/admin/` require an admin account. At startup, make sure an admin account `{{ contract.admin_identity }}` exists whose password is the value of the environment variable `{{ contract.admin_password_env }}` (use `"{{ contract.admin_password_default }}"` if it is unset); it signs in through the same login endpoint.
+{% endif -%}
+{% endif %}
+**Return the complete `app.py` now.**

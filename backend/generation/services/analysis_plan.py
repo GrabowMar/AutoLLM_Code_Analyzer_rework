@@ -24,7 +24,7 @@ METRICS: dict[str, str] = {
     "pass_rate": "Mean conformance pass rate (0..1) over evaluated apps",
     "functional_passed": "Share of evaluated apps passing every conformance check",
     "unique_issues_per_app": "Deduplicated static issues per analyzed app",
-    "issues_per_kloc": "Deduplicated static issues per 1,000 lines",
+    "issues_per_kloc": "Deduplicated static code issues per 1,000 source lines (dependency advisories excluded)",
     "security_per_app": "Deduplicated security/secret issues per analyzed app",
     "cost_per_app": "Generation cost per app (USD)",
 }

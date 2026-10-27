@@ -120,9 +120,13 @@ class MiniSweAgentHarness(Harness):
         }
 
     def command(self, section: dict[str, Any]) -> str:
+        # ``-o`` explicitly: mini's CLI always merges its own ``--output``
+        # default (~/.config/.../last_mini_run.traj.json) over the config's
+        # ``agent.output_path``, so without it no trajectory reaches /out.
+        # The command is not part of the snapshot: run identity is unchanged.
         return (
             f"{MINI} -c {section['base_config']} -c {OUTPUT_DIR}/mini-llmlab.yaml "
-            f"-c {OUTPUT_DIR}/mini-task.yaml --exit-immediately"
+            f"-c {OUTPUT_DIR}/mini-task.yaml --exit-immediately -o {TRAJECTORY}"
         )
 
     def parse_report(self, outputs: dict[str, bytes]) -> HarnessSummary:

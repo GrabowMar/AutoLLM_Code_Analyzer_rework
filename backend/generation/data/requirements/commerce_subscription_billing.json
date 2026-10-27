@@ -2,75 +2,395 @@
   "slug": "commerce_subscription_billing",
   "name": "Subscription Billing Console",
   "category": "Commerce",
-  "description": "Manage customers, plans, invoices, renewals, and delinquency recovery.",
-  "difficulty": "basic",
-  "spec_schema_version": 2,
+  "description": "Manage customer subscriptions, invoices, renewals and the recovery of failed payments",
+  "difficulty": "advanced",
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Customer subscription model with plan_name, lifecycle_status, renewal_date, monthly_amount, failed_payment_count, and account_owner",
-    "Invoice model with issued_at, due_at, paid_at, amount_due, balance_remaining, and retry_state",
-    "GET /api/subscriptions with lifecycle, plan, owner, and delinquent filters plus search and pagination",
-    "POST /api/subscriptions and PUT /api/subscriptions/:id with validation for billing amounts and renewal dates",
-    "GET /api/subscriptions/:id/invoices and POST /api/invoices/:id/retry for collections workflows",
-    "GET /api/public/stats and GET /api/public/featured for MRR, churn-risk, and recent recovery summaries"
+    "Access control: anyone may read the public summaries; require auth for every subscription and invoice endpoint (any signed-in team member may read and change any subscription); admin endpoints are restricted to the admin account",
+    "Subscription validation: customer_name is a required non-empty string of at most 200 characters; plan_name is one of starter, growth, enterprise; monthly_amount is a number above 0 and at most 100000 with at most two decimals; renewal_date is YYYY-MM-DD and, when created or changed, today or later; lifecycle_status is one of trial, active, past_due, cancelled (default trial); account_owner, when given, is at most 150 characters and defaults to the creator's username",
+    "PATCH /api/subscriptions/:id changes only the fields it is given, under the same rules; a cancelled subscription accepts no changes except back to trial or active",
+    "Invoices: POST /api/subscriptions/:id/invoices issues an invoice with amount_due (default the subscription's monthly_amount, above 0) and due_at (default 14 days after issue, not before the issue day); a cancelled subscription cannot be invoiced (409); a new invoice is open, with balance_remaining equal to amount_due and retry_state none",
+    "Collection attempts: POST /api/subscriptions/:id/retry records the outcome of one collection run over the subscription's open invoices; 'failed' adds 1 to each open invoice's retry_count (retry_state scheduled, or escalated from the third failure on), adds 1 to failed_payment_count and sets an active or trial subscription to past_due; 'succeeded' marks every open invoice paid (paid_at now, balance_remaining 0), resets failed_payment_count to 0 and, if the subscription was past_due, sets it to active and records recovered_at; without open invoices it changes nothing and answers 200 with retried 0",
+    "A subscription is delinquent when it is past_due or has an open invoice whose due_at has passed; churn_risk is high when it is past_due or failed_payment_count is 2 or more, medium when failed_payment_count is 1 or it is a trial renewing within 7 days, low otherwise, and null for cancelled subscriptions",
+    "MRR is the sum of monthly_amount over active and past_due subscriptions; trial and cancelled subscriptions do not count",
+    "GET /api/subscriptions returns active subscriptions, newest first; ?query= matches customer_name case-insensitively, ?lifecycle_status=, ?plan_name= and ?account_owner= filter exactly, ?delinquent=true keeps delinquent ones, ?sort= is one of -created_at (default), renewal_date, -monthly_amount, customer_name, ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every matching subscription",
+    "GET /api/public/stats returns MRR, counts per lifecycle_status, the churn_risk breakdown, renewals in the next 30 days and recoveries in the last 30 days; GET /api/public/featured returns the five most recent recoveries",
+    "Deactivated subscriptions (is_active false) are left out of every list, summary and MRR and answer 404 on the subscription endpoints; the admin overview still lists them; subscriptions and invoices are never deleted",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids, 409 for a change the subscription's state does not allow"
   ],
   "frontend_requirements": [
-    "Landing page with MRR, renewal, and delinquency stat cards",
-    "Browse page with lifecycle tabs, plan filters, and invoice health indicators",
-    "Subscription detail page with invoice history and retry actions",
-    "Dashboard with owner queues, upcoming renewals, and failed payment alerts",
-    "Admin panel for pricing oversight and delinquent account review"
+    "Visitors see the landing page only, with a 'Sign in to open the console' prompt; signed-in team members get the subscription browser, details, dashboard and every edit, invoice and retry control",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Landing page: stat cards for MRR, active, trial and past-due subscriptions, renewals in the next 30 days, a churn-risk breakdown, and the recent recoveries from /api/public/featured",
+    "Subscription browser: lifecycle tabs, plan and owner filters, a 'delinquent only' switch, a customer search, sort controls and previous/next paging; each row shows customer, plan, monthly amount, renewal date, status, churn risk and an invoice-health indicator (open balance, failed payments)",
+    "Subscription detail: its fields with an edit form, the invoice history (issued, due, paid, amount due, balance, retry state) with an 'Issue invoice' form, and buttons to record a failed or successful collection run that show the updated invoices",
+    "Dashboard for the signed-in team member: their own accounts (?account_owner= with their username), split into upcoming renewals (?sort=renewal_date) and delinquent accounts with failed-payment alerts",
+    "Every form shows the API's validation messages next to the form"
+  ],
+  "admin_requirements": [
+    "Pricing overview: every subscription, active or not, with total, active and inactive counts, MRR, the number of delinquent accounts, the subscription count and MRR per plan and the churn-risk breakdown",
+    "Escalation queue: invoices whose retry_state is escalated (?retry_state=escalated), oldest due first, with the customer and balance; staff record further collection runs from the subscription detail",
+    "Toggle a subscription's active status from the overview"
   ],
   "api_endpoints": [
     {
+      "method": "POST",
+      "path": "/api/subscriptions",
+      "description": "Create a subscription",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "customer_name": "string",
+        "plan_name": "string (starter|growth|enterprise)",
+        "monthly_amount": 49.0,
+        "renewal_date": "YYYY-MM-DD",
+        "lifecycle_status": "string (trial|active|past_due|cancelled)",
+        "account_owner": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "customer_name": "Northwind Traders",
+        "plan_name": "growth",
+        "monthly_amount": 49.0,
+        "renewal_date": "2026-02-15",
+        "lifecycle_status": "trial",
+        "account_owner": "billing1",
+        "failed_payment_count": 0,
+        "balance_remaining": 0.0,
+        "delinquent": false,
+        "churn_risk": "low",
+        "recovered_at": null,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
       "method": "GET",
       "path": "/api/subscriptions",
-      "description": "List subscriptions with search, filters, sorting, and pagination",
+      "description": "List active subscriptions, searched, filtered, sorted and paged",
+      "auth": "user",
+      "query": {
+        "query": "Case-insensitive text matched against customer_name",
+        "lifecycle_status": "One of trial, active, past_due, cancelled",
+        "plan_name": "One of starter, growth, enterprise",
+        "account_owner": "Exact account owner",
+        "delinquent": "true keeps only delinquent subscriptions",
+        "sort": "One of -created_at (default), renewal_date, -monthly_amount, customer_name",
+        "page": "1-based page number (default 1)",
+        "page_size": "Subscriptions per page (default 20, at most 100)"
+      },
       "request": null,
       "response": {
-        "items": [],
-        "total": 0
+        "items": [
+          {
+            "id": 1,
+            "customer_name": "Northwind Traders",
+            "plan_name": "growth",
+            "monthly_amount": 49.0,
+            "renewal_date": "2026-02-15",
+            "lifecycle_status": "past_due",
+            "account_owner": "billing1",
+            "failed_payment_count": 1,
+            "balance_remaining": 49.0,
+            "delinquent": true,
+            "churn_risk": "high",
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/subscriptions/:id",
+      "description": "One active subscription",
+      "auth": "user",
+      "request": null,
+      "response": {
+        "id": 1,
+        "customer_name": "Northwind Traders",
+        "plan_name": "growth",
+        "monthly_amount": 49.0,
+        "renewal_date": "2026-02-15",
+        "lifecycle_status": "past_due",
+        "account_owner": "billing1",
+        "failed_payment_count": 1,
+        "balance_remaining": 49.0,
+        "delinquent": true,
+        "churn_risk": "high",
+        "recovered_at": null,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/subscriptions/:id",
+      "description": "Change some of a subscription's fields; omitted fields keep their values",
+      "auth": "user",
+      "request": {
+        "plan_name": "string (starter|growth|enterprise)",
+        "monthly_amount": 99.0,
+        "renewal_date": "YYYY-MM-DD",
+        "lifecycle_status": "string (trial|active|past_due|cancelled)",
+        "account_owner": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "customer_name": "Northwind Traders",
+        "plan_name": "enterprise",
+        "monthly_amount": 99.0,
+        "renewal_date": "2026-02-15",
+        "lifecycle_status": "active",
+        "account_owner": "billing1",
+        "failed_payment_count": 0,
+        "balance_remaining": 0.0,
+        "delinquent": false,
+        "churn_risk": "low",
+        "recovered_at": null,
+        "created_at": "2026-01-15T10:30:00Z"
       }
     },
     {
       "method": "GET",
       "path": "/api/subscriptions/:id/invoices",
-      "description": "Return invoice history for a subscription",
+      "description": "Invoice history of a subscription, newest first",
+      "auth": "user",
       "request": null,
       "response": {
         "subscription_id": 1,
-        "items": []
+        "items": [
+          {
+            "id": 1,
+            "subscription_id": 1,
+            "status": "open",
+            "issued_at": "2026-01-15T10:30:00Z",
+            "due_at": "2026-01-29T10:30:00Z",
+            "paid_at": null,
+            "amount_due": 49.0,
+            "balance_remaining": 49.0,
+            "retry_count": 1,
+            "retry_state": "scheduled"
+          }
+        ],
+        "total": 1,
+        "balance_remaining": 49.0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/subscriptions/:id/invoices",
+      "description": "Issue an invoice for a subscription",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "amount_due": "number (optional)",
+        "due_at": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "subscription_id": 1,
+        "status": "open",
+        "issued_at": "2026-01-15T10:30:00Z",
+        "due_at": "2026-01-29T10:30:00Z",
+        "paid_at": null,
+        "amount_due": 49.0,
+        "balance_remaining": 49.0,
+        "retry_count": 0,
+        "retry_state": "none"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/subscriptions/:id/retry",
+      "description": "Record the outcome of a collection run over the subscription's open invoices",
+      "auth": "user",
+      "request": {
+        "outcome": "string (failed|succeeded)"
+      },
+      "response": {
+        "subscription_id": 1,
+        "outcome": "failed",
+        "retried": 1,
+        "lifecycle_status": "past_due",
+        "failed_payment_count": 1,
+        "items": [
+          {
+            "id": 1,
+            "status": "open",
+            "balance_remaining": 49.0,
+            "retry_count": 1,
+            "retry_state": "scheduled"
+          }
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/stats",
+      "description": "Aggregate billing figures for the landing page",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "mrr": 12840.0,
+        "by_lifecycle_status": {
+          "trial": 14,
+          "active": 220,
+          "past_due": 9,
+          "cancelled": 31
+        },
+        "churn_risk": {
+          "low": 205,
+          "medium": 22,
+          "high": 16
+        },
+        "renewals_next_30_days": 58,
+        "recoveries_last_30_days": 6
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/featured",
+      "description": "The five most recent payment recoveries",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "plan_name": "growth",
+            "monthly_amount": 49.0,
+            "recovered_at": "2026-01-20T14:05:00Z"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Health check",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "status": "healthy",
+        "service": "backend"
       }
     }
   ],
-  "data_model": {
-    "name": "Subscription",
-    "fields": {
-      "id": "integer primary key",
-      "customer_name": "string, required",
-      "plan_name": "string",
-      "lifecycle_status": "string (trial, active, past_due, cancelled)",
-      "renewal_date": "date",
-      "monthly_amount": "decimal",
-      "failed_payment_count": "integer",
-      "account_owner": "string",
-      "health_score": "integer",
-      "last_contacted_at": "datetime"
+  "data_models": [
+    {
+      "name": "Subscription",
+      "description": "A customer's subscription; balance_remaining, delinquent and churn_risk are computed from it and its invoices",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "customer_name": "string (required, max 200 chars)",
+        "plan_name": "string (one of: starter, growth, enterprise)",
+        "monthly_amount": "number (required, > 0, at most 100000, two decimals)",
+        "renewal_date": "date (YYYY-MM-DD)",
+        "lifecycle_status": "string (one of: trial, active, past_due, cancelled; default trial)",
+        "account_owner": "string (optional, max 150 chars; default the creator's username)",
+        "failed_payment_count": "integer (default 0)",
+        "recovered_at": "datetime (optional; set when a successful collection run ends past_due)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the subscription from lists, summaries and MRR)"
+      }
+    },
+    {
+      "name": "Invoice",
+      "description": "An amount billed to a subscription and its collection state",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "subscription_id": "integer (references Subscription.id)",
+        "status": "string (one of: open, paid; default open)",
+        "issued_at": "datetime (auto, ISO 8601 in JSON)",
+        "due_at": "datetime (default 14 days after issued_at; not before the issue day)",
+        "paid_at": "datetime (optional; set when the invoice is paid)",
+        "amount_due": "number (required, > 0, two decimals)",
+        "balance_remaining": "number (amount_due while open, 0 once paid)",
+        "retry_count": "integer (default 0; failed collection runs)",
+        "retry_state": "string (one of: none, scheduled, escalated; default none)"
+      }
     }
-  },
-  "admin_requirements": [
-    "Admin pricing dashboard with plan distribution and churn-risk breakdown",
-    "Manual retry and escalation queue for delinquent invoices"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/subscriptions",
-      "description": "Admin subscription revenue and risk dashboard",
+      "description": "Admin pricing overview: every subscription with revenue and risk metrics",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "mrr": 0,
-        "delinquent_accounts": 0
+        "items": [
+          {
+            "id": 1,
+            "customer_name": "Northwind Traders",
+            "plan_name": "growth",
+            "monthly_amount": 49.0,
+            "lifecycle_status": "past_due",
+            "churn_risk": "high",
+            "is_active": true
+          }
+        ],
+        "total": 1,
+        "active": 1,
+        "inactive": 0,
+        "mrr": 49.0,
+        "delinquent_accounts": 1,
+        "plans": {
+          "starter": {
+            "subscriptions": 0,
+            "mrr": 0.0
+          },
+          "growth": {
+            "subscriptions": 1,
+            "mrr": 49.0
+          },
+          "enterprise": {
+            "subscriptions": 0,
+            "mrr": 0.0
+          }
+        },
+        "churn_risk": {
+          "low": 0,
+          "medium": 0,
+          "high": 1
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/invoices",
+      "description": "Escalation queue: invoices filtered by retry state, oldest due first",
+      "auth": "admin",
+      "query": {
+        "retry_state": "One of none, scheduled, escalated (default escalated)"
+      },
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "subscription_id": 1,
+            "customer_name": "Northwind Traders",
+            "due_at": "2026-01-29T10:30:00Z",
+            "balance_remaining": 49.0,
+            "retry_count": 3,
+            "retry_state": "escalated"
+          }
+        ],
+        "total": 1
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/subscriptions/:id/toggle",
+      "description": "Flip a subscription's active status",
+      "auth": "admin",
+      "request": null,
+      "response": {
+        "id": 1,
+        "is_active": false
       }
     }
   ]

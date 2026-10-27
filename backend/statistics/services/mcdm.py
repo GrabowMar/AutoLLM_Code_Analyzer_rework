@@ -55,7 +55,7 @@ class Criterion:
 DEFAULT_CRITERIA: tuple[Criterion, ...] = (
     Criterion("deploy_rate", "Deploy rate", "benefit", 0.30),
     Criterion("pass_rate", "Functional pass rate", "benefit", 0.30),
-    Criterion("issues_per_kloc", "Unique issues / kLOC", "cost", 0.15),
+    Criterion("issues_per_kloc", "Code issues / kLOC", "cost", 0.15),
     Criterion("security_per_app", "Security issues / app", "cost", 0.15),
     Criterion("cost_per_app", "Cost / app (USD)", "cost", 0.10),
 )

@@ -91,6 +91,7 @@ from backend.generation.services.analysis_plan import PlanError
 from backend.generation.services.analysis_plan import normalize_analysis_plan
 from backend.generation.services.analysis_plan import plan_hash
 from backend.generation.services.batches import refresh_batch
+from backend.generation.services.job_cloning import apply_pinned_snapshot
 from backend.generation.services.llm_params import merge_llm_params
 from backend.generation.services.llm_params import validate_llm_params
 from backend.generation.services.openrouter_client import OpenRouterClient
@@ -1142,6 +1143,21 @@ def preview_experiment_v2(experiment: Experiment, user: AbstractUser) -> dict[st
     slots = _slots_for(experiment.mode, executor_settings)
 
     issues = _plan_issues(plans)
+    unpinned = sorted(
+        {p.row["model"] for p in plans if p.row is not None and p.row.get("provider_routing") == "default"},
+    )
+    if unpinned:
+        # OpenRouter picks the upstream provider per call; providers can serve
+        # different quantizations, so the served model is not held constant.
+        issues.append(
+            _issue(
+                "provider_unpinned",
+                f"OpenRouter chooses the upstream provider per call for {', '.join(unpinned)} (quantization and "
+                "serving stack may vary between runs); pin provider routing in the sampling preset "
+                "to hold it constant",
+                blocking=False,
+            ),
+        )
     issues += launch_issues(user, [c.model for c in conditions])
     issues += _model_issues(experiment, conditions)
     if experiment.status != Experiment.Status.DRAFT:
@@ -1456,8 +1472,15 @@ def _new_job(
     endpoint: LLMEndpoint,
     sequence: int,
     policy: str,
+    pin_source: GenerationJob | None = None,
 ) -> GenerationJob:
-    """An unsaved job for one cell, with its frozen snapshot (or FAILED when the snapshot cannot be built)."""
+    """An unsaved job for one cell, with its frozen snapshot (or FAILED when the snapshot cannot be built).
+
+    *pin_source* (a top-up, see :func:`_top_up_pin_sources`) is an earlier
+    job of the same app whose spec content and stack version the new cell
+    keeps (``job_cloning.apply_pinned_snapshot``), so refilled cells run on
+    what their siblings froze rather than on library content updated since.
+    """
     condition, app_req = cell.condition, cell.app_requirement
     is_agent = layers.is_agent
     job = GenerationJob(
@@ -1501,7 +1524,20 @@ def _new_job(
             repeat_index=cell.repeat_index,
         )
     try:
-        if is_agent:
+        if pin_source is not None:
+            apply_pinned_snapshot(
+                job,
+                pin_source,
+                continuation_limit=experiment.continuation_limit,
+                enable_repair=experiment.enable_repair,
+                save=False,
+                # A brief states its condition's budget: keep only a same-condition one.
+                keep_brief=pin_source.condition_id == condition.id,
+            )
+            record = job.resolved_bundle.get("library_pin")
+            if isinstance(record, dict):
+                record["via"] = "experiment_top_up"
+        elif is_agent:
             apply_agent_snapshot_to_job(job, save=False)
         else:
             # Template mode only: the agent harness has its own budget and
@@ -1518,6 +1554,38 @@ def _new_job(
         job.error_message = f"Snapshot build failed: {exc}"
         job.completed_at = timezone.now()
     return job
+
+
+def _top_up_pin_sources(experiment: Experiment) -> dict[tuple[int | None, int], GenerationJob]:
+    """The job each (condition, app) — and, under ``(None, app)``, each app — of a top-up pins to.
+
+    The earliest job of the experiment that froze a snapshot with a spec:
+    of the same condition and app when there is one, else of the same app
+    under any condition (a condition added after launch, so it runs on the
+    content its comparison partners ran on). Cells with no such job resolve
+    the live library like a first launch.
+    """
+    rows = (
+        experiment.jobs.filter(resolved_bundle__has_key="app_requirement")
+        .order_by("created_at", "id")
+        .values_list("id", "condition_id", "app_requirement_id")
+    )
+    chosen: dict[tuple[int | None, int], Any] = {}
+    for job_id, condition_id, app_id in rows:
+        if app_id is None:
+            continue
+        chosen.setdefault((condition_id, app_id), job_id)
+        chosen.setdefault((None, app_id), job_id)
+    jobs = GenerationJob.objects.in_bulk(set(chosen.values()))
+    return {key: jobs[job_id] for key, job_id in chosen.items() if job_id in jobs}
+
+
+def _pin_source(
+    sources: dict[tuple[int | None, int], GenerationJob],
+    cell: MatrixCell,
+) -> GenerationJob | None:
+    app_id = cell.app_requirement.id
+    return sources.get((cell.condition.id, app_id)) or sources.get((None, app_id))
 
 
 def launch_experiment(
@@ -1666,6 +1734,9 @@ def launch_experiment(
         )
 
         layers_by_condition = {p.condition.id: p.layers for p in targeted}
+        # Top-ups keep the spec content and stack version the experiment's
+        # existing cells froze (the library may have been updated in place).
+        pin_sources = {} if first or not pending_cells else _top_up_pin_sources(experiment)
         jobs = [
             _new_job(
                 experiment,
@@ -1676,6 +1747,7 @@ def launch_experiment(
                 endpoint=endpoint_of[cell.condition.id],
                 sequence=sequence[_cell_key(cell)],
                 policy=policies[endpoint_of[cell.condition.id].slug],
+                pin_source=_pin_source(pin_sources, cell),
             )
             for cell in pending_cells
         ]
@@ -2536,14 +2608,15 @@ def _refreeze_drifted(experiment: Experiment, user: AbstractUser, conditions: li
         )
         for job in jobs:
             # Same seed (job.experiment_seed), new weights: a new config_fingerprint.
-            if job.mode == GenerationJob.Mode.AGENT:
-                apply_agent_snapshot_to_job(job)
-            else:
-                apply_snapshot_to_job(
-                    job,
-                    continuation_limit=experiment.continuation_limit,
-                    enable_repair=experiment.enable_repair,
-                )
+            # The spec content and stack version the job froze are kept, so
+            # accepting a digest does not also move the cell to newer library
+            # content than its siblings.
+            apply_pinned_snapshot(
+                job,
+                job,
+                continuation_limit=experiment.continuation_limit,
+                enable_repair=experiment.enable_repair,
+            )
         _append_history(
             experiment,
             {
@@ -2770,7 +2843,10 @@ GROUP BY 1, 2, 3
 """
 _COST_DURATION_SQL = """
 SELECT experiment_id,
-       COALESCE(SUM(CASE WHEN jsonb_typeof(metrics->'cost') = 'number' THEN (metrics->>'cost')::float END), 0),
+       COALESCE(SUM(CASE WHEN jsonb_typeof(metrics->'cost') = 'number' THEN (metrics->>'cost')::float END), 0)
+       -- spend of earlier attempts of a requeued job (its metrics are reset on requeue)
+       + COALESCE(SUM(CASE WHEN jsonb_typeof(execution->'prior_attempts_cost') = 'number'
+                           THEN (execution->>'prior_attempts_cost')::float END), 0),
        percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_seconds)
            FILTER (WHERE status = 'completed' AND duration_seconds IS NOT NULL)
 FROM generation_generationjob
@@ -3088,6 +3164,7 @@ CURRENT_FIELDS = (
     "metrics__functional__passed",
     "metrics__cost",
     "metrics__total_tokens",
+    "execution__prior_attempts_cost",
     "result_data__agent__termination",
     "result_data__agent__validity",
     "result_data__backend_truncated",
@@ -3401,7 +3478,14 @@ def experiment_status_v2(experiment: Experiment, user: AbstractUser) -> dict[str
                 "pass_rate": round(sum(graded) / len(graded), 4) if graded else None,
                 "median_s": _median([float(d) for d in durations]),
                 "tokens": int(sum(_as_float(r["metrics__total_tokens"]) or 0 for r in mine)),
-                "cost_usd": round(sum(_as_float(r["metrics__cost"]) or 0.0 for r in mine), 4),
+                "cost_usd": round(
+                    sum(
+                        (_as_float(r["metrics__cost"]) or 0.0)
+                        + (_as_float(r["execution__prior_attempts_cost"]) or 0.0)
+                        for r in mine
+                    ),
+                    4,
+                ),
                 "last_activity_at": max(activity) if activity else None,
             },
         )

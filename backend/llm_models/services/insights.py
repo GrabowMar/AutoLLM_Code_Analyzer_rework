@@ -22,9 +22,9 @@ from django.core.cache import cache
 from django.db.models import Count
 from django.db.models import Min
 
-from backend.analysis.models import AnalysisRun
 from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import Finding
+from backend.analysis.models import ToolResult
 from backend.generation.models import GenerationJob
 from backend.llm_models.models import LLMModel
 from backend.rankings.models import BenchmarkResult
@@ -250,8 +250,9 @@ def _experiments(jobs) -> list[dict[str, Any]]:
 
 def _analysis_stats(jobs) -> dict[str, Any]:
     job_ids = list(jobs.values_list("id", flat=True))
-    latest = AnalysisRun.latest_ids_per_job(job_ids) if job_ids else []
-    findings = Finding.objects.filter(result__run_id__in=latest)
+    # Latest result per (job, tool): a partial re-analysis keeps the other tools' findings.
+    latest = ToolResult.latest_ids_per_job(job_ids) if job_ids else []
+    findings = Finding.objects.filter(result_id__in=latest)
     ai_slugs = AnalyzerTool.ai_slugs()
 
     static = dict.fromkeys(SEVERITIES, 0)
@@ -286,7 +287,7 @@ def _analysis_stats(jobs) -> dict[str, Any]:
     ]
 
     return {
-        "analyzed_jobs": len(latest),
+        "analyzed_jobs": ToolResult.objects.filter(id__in=latest).values("run__generation_job_id").distinct().count(),
         "findings_static": static,
         "findings_ai": ai,
         "by_tool": sorted(by_tool.values(), key=lambda t: -t["total"]),

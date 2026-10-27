@@ -298,3 +298,294 @@ assets:
 
     assert errors
     assert all("app spec 'half_spec'" in e for e in errors)
+
+
+# ── spec schema v3 ────────────────────────────────────────────────────
+
+
+def _v3_spec(**overrides) -> dict:
+    """A minimal v3 spec that meets every convention (tests break one at a time)."""
+    spec = {
+        "slug": "crud_thing_list",
+        "name": "Things",
+        "category": "CRUD",
+        "description": "Track things",
+        "spec_schema_version": 3,
+        "backend_requirements": [
+            "Access control: anyone may list things; require auth for creating and deleting things",
+            "GET /api/things filters by ?tag= and returns newest first",
+        ],
+        "frontend_requirements": ["A list of things with a tag filter"],
+        "api_endpoints": [
+            {
+                "method": "GET",
+                "path": "/api/things",
+                "description": "List things",
+                "auth": "public",
+                "query": {"tag": "Only things with this tag"},
+                "request": None,
+                "response": {"items": [{"id": 1, "name": "Lamp"}], "total": 1},
+            },
+            {
+                "method": "POST",
+                "path": "/api/things",
+                "description": "Create a thing",
+                "auth": "user",
+                "success_status": 201,
+                "request": {"name": "string", "tag": "string (optional)", "size": "integer (optional)"},
+                "response": {"id": 1, "name": "Lamp"},
+            },
+            {
+                "method": "DELETE",
+                "path": "/api/things/:id",
+                "description": "Delete a thing",
+                "auth": "user",
+                "success_status": 204,
+                "request": None,
+                "response": None,
+            },
+            {
+                "method": "GET",
+                "path": "/api/health",
+                "description": "Health check",
+                "auth": "public",
+                "request": None,
+                "response": {"status": "healthy"},
+            },
+        ],
+        "admin_api_endpoints": [
+            {
+                "method": "GET",
+                "path": "/api/admin/things",
+                "description": "Admin overview",
+                "auth": "admin",
+                "request": None,
+                "response": {"items": [], "total": 0, "active": 0, "inactive": 0},
+            },
+        ],
+        "data_models": [
+            {"name": "Thing", "description": "A thing", "fields": {"id": "integer", "name": "string"}},
+            {"name": "Tag", "fields": {"id": "integer"}},
+        ],
+    }
+    spec.update(overrides)
+    return spec
+
+
+def _endpoint(spec: dict, path: str, method: str = "GET") -> dict:
+    return next(
+        ep
+        for ep in spec["api_endpoints"] + spec.get("admin_api_endpoints", [])
+        if ep["path"] == path and ep["method"] == method
+    )
+
+
+def test_v3_spec_with_data_models_is_valid():
+    spec = _v3_spec()
+    assert data_lint.app_spec_errors(spec) == []
+    assert data_lint.app_spec_warnings(spec) == []
+
+
+def test_legacy_v2_spec_still_validates_and_skips_the_v3_conventions():
+    legacy = {
+        "slug": "old_app",
+        "name": "Old",
+        "category": "Test",
+        "description": "d",
+        "spec_schema_version": 2,
+        "backend_requirements": ["anything at all, GET /api/nowhere"],
+        "frontend_requirements": ["x"],
+        "api_endpoints": [{"method": "GET", "path": "/api/x", "description": "d", "response": [1]}],
+        "data_model": {"name": "Thing", "fields": {"id": "integer"}},
+    }
+    assert data_lint.app_spec_errors(legacy) == []
+    assert data_lint.spec_convention_issues(legacy) == ([], [])
+    # No version at all reads as v1.
+    assert data_lint.app_spec_errors({k: v for k, v in legacy.items() if k != "spec_schema_version"}) == []
+
+
+def test_a_spec_needs_data_model_or_data_models():
+    spec = _v3_spec()
+    del spec["data_models"]
+    errors = data_lint.app_spec_errors(spec)
+    assert errors
+    assert any("data_model" in e for e in errors)
+    # Empty values (an API body's defaults) count as absent.
+    assert data_lint.app_spec_errors({**spec, "data_model": {}, "data_models": []})
+
+
+def test_data_models_items_are_strict():
+    bad = _v3_spec(data_models=[{"name": "Thing", "fields": {}, "extra": 1}])
+    errors = data_lint.app_spec_errors(bad)
+    assert any("fields" in e for e in errors)
+    assert any("extra" in e for e in errors)
+    assert data_lint.app_spec_errors(_v3_spec(spec_schema_version=4))
+
+
+def test_endpoint_auth_query_and_success_status_are_typed():
+    spec = _v3_spec()
+    _endpoint(spec, "/api/things")["auth"] = "anyone"
+    _endpoint(spec, "/api/things", "POST")["success_status"] = 500
+    _endpoint(spec, "/api/things")["query"] = {"tag": 1}
+    errors = data_lint.app_spec_errors(spec)
+    assert any("auth" in e for e in errors)
+    assert any("success_status" in e for e in errors)
+    assert any("query" in e for e in errors)
+
+
+def _convention_errors(spec: dict) -> list[str]:
+    assert data_lint.app_spec_errors({**spec, "spec_schema_version": 2}) == [], "the schema itself must pass"
+    return data_lint.spec_convention_issues(spec)[0]
+
+
+def test_v3_uses_data_models_and_unique_model_names():
+    spec = _v3_spec(data_model={"name": "Thing", "fields": {"id": "integer"}})
+    assert any("data_models" in e for e in _convention_errors(spec))
+    dup = _v3_spec(data_models=[{"name": "Thing", "fields": {"id": "integer"}}] * 2)
+    assert any("listed twice" in e for e in _convention_errors(dup))
+
+
+def test_v3_endpoints_are_unique_per_method_and_path():
+    spec = _v3_spec()
+    spec["api_endpoints"].append({**_endpoint(spec, "/api/things/:id", "DELETE"), "path": "/api/things/{thing_id}"})
+    errors = _convention_errors(spec)
+    assert any("DELETE /api/things/{thing_id} is already api_endpoints[2]" in e for e in errors)
+
+
+def test_v3_endpoints_declare_auth():
+    spec = _v3_spec()
+    del _endpoint(spec, "/api/things")["auth"]
+    assert any("auth is required" in e for e in _convention_errors(spec))
+
+
+def test_v3_needs_a_public_health_endpoint():
+    spec = _v3_spec()
+    spec["api_endpoints"] = [ep for ep in spec["api_endpoints"] if ep["path"] != "/api/health"]
+    assert any("/api/health is required" in e for e in _convention_errors(spec))
+    spec = _v3_spec()
+    _endpoint(spec, "/api/health")["auth"] = "user"
+    assert any("must be public" in e for e in _convention_errors(spec))
+
+
+def test_v3_access_control_line_comes_first_and_restricts_something():
+    spec = _v3_spec()
+    spec["backend_requirements"].reverse()
+    assert any("backend_requirements[0]" in e for e in _convention_errors(spec))
+    spec = _v3_spec()
+    spec["backend_requirements"][0] = "Access control: everything is public"
+    assert any("must say what it restricts" in e for e in _convention_errors(spec))
+
+
+def test_v3_anonymous_write_target_must_require_a_user():
+    spec = _v3_spec()
+    _endpoint(spec, "/api/things", "POST")["auth"] = "public"
+    assert any("sends anonymously" in e for e in _convention_errors(spec))
+
+
+def test_v3_admin_endpoints_live_under_api_admin():
+    spec = _v3_spec()
+    _endpoint(spec, "/api/admin/things")["path"] = "/api/overview"
+    assert any("start with /api/admin/" in e for e in _convention_errors(spec))
+    spec = _v3_spec()
+    spec["api_endpoints"].append(
+        {"method": "GET", "path": "/api/admin/stats", "description": "d", "auth": "admin", "response": {}},
+    )
+    errors = _convention_errors(spec)
+    assert any("belong in admin_api_endpoints" in e for e in errors)
+    spec = _v3_spec()
+    _endpoint(spec, "/api/admin/things")["auth"] = "user"
+    assert any("have auth 'admin'" in e for e in _convention_errors(spec))
+
+
+def test_v3_list_endpoints_use_the_items_total_envelope():
+    for response, needle in (
+        ([{"id": 1}], "envelope"),
+        ({"things": [{"id": 1}]}, 'under "items"'),
+        ({"items": [{"id": 1}]}, '"total"'),
+        ({"items": [], "total": "1"}, '"total"'),
+    ):
+        spec = _v3_spec()
+        _endpoint(spec, "/api/things")["response"] = response
+        assert any(needle in e for e in _convention_errors(spec)), response
+    # Extra keys are fine; item endpoints and non-list GETs are not list endpoints.
+    spec = _v3_spec()
+    _endpoint(spec, "/api/things")["response"] = {"items": [], "total": 0, "page": 1}
+    spec["api_endpoints"].append(
+        {"method": "GET", "path": "/api/stats", "description": "d", "auth": "public", "response": {"count": 1}},
+    )
+    assert _convention_errors(spec) == []
+
+
+def test_v3_prose_mentions_only_listed_endpoints_and_query_params():
+    spec = _v3_spec()
+    spec["backend_requirements"].append("PUT /api/things/:id updates; GET /api/things/:id/history lists changes.")
+    spec["frontend_requirements"].append("Search box sends ?search= to /api/things")
+    spec["admin_requirements"] = ["Sign in at /api/auth/login, then use /api/admin/things"]
+    errors = _convention_errors(spec)
+    assert any("backend_requirements[2]: mentions PUT /api/things/:id" in e for e in errors)
+    assert any("mentions GET /api/things/:id/history" in e for e in errors)
+    assert any("query parameter 'search'" in e for e in errors)
+    assert not any("admin_requirements" in e for e in errors)
+    assert len(errors) == 3
+
+
+def test_v3_204_has_no_body():
+    spec = _v3_spec()
+    _endpoint(spec, "/api/things/:id", "DELETE")["response"] = {"ok": True}
+    assert any("204" in e for e in _convention_errors(spec))
+
+
+def test_v3_warns_about_request_values_the_tester_sends_verbatim():
+    spec = _v3_spec()
+    _endpoint(spec, "/api/things", "POST")["request"] = {
+        "name": "string",
+        "due": "datetime",
+        "kind": "enum: small, large",
+        "notes": "text, optional",
+        "colour": "red",  # a literal example value: fine
+        "starts_at": "datetime",  # the tester synthesises *_at keys: fine
+        "size": "integer (1-5)",  # a descriptor the tester types: fine
+        "nested": {"when": "date (YYYY-MM-DD)"},
+    }
+    errors, warnings = data_lint.spec_convention_issues(spec)
+    assert errors == []
+    flagged = sorted(w.split(":", 1)[0] for w in warnings)
+    assert flagged == [
+        "api_endpoints[1].request.due",
+        "api_endpoints[1].request.kind",
+        "api_endpoints[1].request.nested.when",
+        "api_endpoints[1].request.notes",
+    ]
+    assert data_lint.app_spec_warnings(spec) == [f"app spec: {w}" for w in warnings]
+    # Warnings never block a save.
+    assert data_lint.app_spec_errors(spec) == []
+
+
+def test_v3_redirect_success_status_warns():
+    spec = _v3_spec()
+    spec["api_endpoints"].append(
+        {"method": "GET", "path": "/api/r/:code", "description": "Redirect", "auth": "public", "success_status": 302},
+    )
+    errors, warnings = data_lint.spec_convention_issues(spec)
+    assert errors == []
+    assert any("302" in w for w in warnings)
+
+
+def test_lint_requirement_specs_applies_v3_conventions_and_file_names(tmp_path, monkeypatch):
+    bad = _v3_spec()
+    bad["api_endpoints"] = [ep for ep in bad["api_endpoints"] if ep["path"] != "/api/health"]
+    directory = _write_spec(tmp_path, "crud_thing_list.json", json.dumps(bad))
+    (directory / "renamed.json").write_text(json.dumps(_v3_spec()), encoding="utf-8")
+    monkeypatch.setattr(data_lint, "REQUIREMENTS_DIR", directory)
+
+    errors = data_lint.lint_requirement_specs()
+
+    assert any(e.startswith("crud_thing_list.json:") and "/api/health" in e for e in errors)
+    assert any(e.startswith("renamed.json:") and "file name" in e for e in errors)
+
+
+def test_shipped_reference_spec_is_v3_and_warning_free():
+    data = json.loads((data_lint.REQUIREMENTS_DIR / "crud_book_library.json").read_text(encoding="utf-8"))
+    assert data["spec_schema_version"] == 3
+    assert "data_model" not in data
+    assert data_lint.spec_convention_issues(data) == ([], [])

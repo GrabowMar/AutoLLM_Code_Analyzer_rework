@@ -2,109 +2,140 @@
   "slug": "workflow_task_board",
   "name": "Kanban Board",
   "category": "Workflow",
-  "description": "Visual task workflow",
+  "description": "A shared kanban board where tasks move through To Do, In Progress and Done",
   "difficulty": "standard",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "1. Task model: id, title (required), description, status (todo/in_progress/done), priority",
-    "2. CRUD endpoints: GET /api/tasks, POST, PUT, DELETE",
-    "3. Update status: PUT /api/tasks/:id/status with {status: 'done'}",
-    "4. Filter by status: ?status=todo",
-    "5. Validate: status must be one of todo/in_progress/done, priority must be low/medium/high",
-    "Access control: allow public read-only board view; require auth for create/update/delete"
+    "Access control: anyone may view the board; require auth for creating, updating, moving and deleting tasks; admin endpoints are restricted to the admin account",
+    "Tasks: any signed-in user may create, update, move and delete any task; DELETE /api/tasks/:id removes the task permanently",
+    "Task validation: title is a required non-empty string of at most 200 characters; description, when given, is at most 2000 characters; status is one of todo, in_progress, done (default todo); priority is one of low, medium, high (default medium)",
+    "Ordering: position is a task's 1-based place within its status column, and each column's active tasks always hold positions 1 to n without gaps; a new task goes to the end of its column, and deleting or deactivating a task closes the gap",
+    "PATCH /api/tasks/:id changes only the fields it is given; a new status without a position moves the task to the end of the new column; a position places the task there within its (new) column and shifts the others, and a position past the end places it last",
+    "GET /api/tasks returns active tasks ordered by column (todo, in_progress, done) and then position; ?status= and ?priority= filter exactly; total counts every matching task and counts gives the number of active tasks per status",
+    "Deactivated tasks (is_active false) are left out of GET /api/tasks and answer 404 on the public task endpoints; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "1. Three columns: To Do, In Progress, Done",
-    "2. Task cards showing title and description",
-    "3. Button to move task to next column",
-    "4. Add task form with title, description, priority",
-    "5. Delete button per task",
-    "Public guest view for board with CTA to sign in for full workflow"
+    "Everyone sees the board read-only; signed-in users also get the add, edit, move and delete controls, and visitors see a 'Sign in to edit the board' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Three columns, To Do, In Progress and Done, each headed with its task count and listing its tasks by position",
+    "Task cards showing title, a priority badge and the start of the description; selecting a card opens its full details",
+    "Signed-in users move cards between columns and reorder them within a column by drag and drop, with keyboard-accessible move controls as an alternative; the board updates in place and reverts if the API rejects the move",
+    "Add and edit forms for title, description, priority and status that show the API's validation messages; delete asks for confirmation first; a priority filter narrows the board"
+  ],
+  "admin_requirements": [
+    "Admin overview: every task, active or not, with total, active and inactive counts",
+    "Toggle a task's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/tasks",
-      "description": "List all tasks (supports ?status= filter)",
+      "description": "Active tasks ordered by column and position, with per-status counts",
+      "auth": "public",
+      "query": {
+        "status": "Exact status: todo, in_progress or done",
+        "priority": "Exact priority: low, medium or high"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "title": "string",
-            "description": "string",
-            "status": "todo",
-            "priority": "medium",
-            "created_at": "ISO8601"
+            "title": "Draft release notes",
+            "description": "Cover the new export feature.",
+            "status": "in_progress",
+            "priority": "high",
+            "position": 1,
+            "created_at": "2026-07-01T10:00:00Z",
+            "updated_at": "2026-07-02T09:00:00Z"
           }
         ],
-        "total": 1
+        "total": 1,
+        "counts": {
+          "todo": 0,
+          "in_progress": 1,
+          "done": 0
+        }
       }
     },
     {
       "method": "POST",
       "path": "/api/tasks",
-      "description": "Create new task",
+      "description": "Create a task at the end of its column",
+      "auth": "user",
+      "success_status": 201,
       "request": {
         "title": "string",
         "description": "string (optional)",
-        "priority": "string (optional)"
+        "status": "string (todo|in_progress|done)",
+        "priority": "string (medium|low|high)"
       },
       "response": {
         "id": 1,
-        "title": "string",
-        "description": "string",
+        "title": "Draft release notes",
+        "description": "Cover the new export feature.",
         "status": "todo",
         "priority": "medium",
-        "created_at": "ISO8601"
+        "position": 1,
+        "created_at": "2026-07-01T10:00:00Z",
+        "updated_at": "2026-07-02T09:00:00Z"
       }
     },
     {
-      "method": "PUT",
+      "method": "GET",
       "path": "/api/tasks/:id",
-      "description": "Update task",
+      "description": "One active task",
+      "auth": "public",
+      "request": null,
+      "response": {
+        "id": 1,
+        "title": "Draft release notes",
+        "description": "Cover the new export feature.",
+        "status": "in_progress",
+        "priority": "high",
+        "position": 1,
+        "created_at": "2026-07-01T10:00:00Z",
+        "updated_at": "2026-07-02T09:00:00Z"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/tasks/:id",
+      "description": "Change some of a task's fields, including moving it to another column or position",
+      "auth": "user",
       "request": {
         "title": "string (optional)",
         "description": "string (optional)",
-        "status": "string (optional)",
-        "priority": "string (optional)"
+        "status": "string (in_progress|todo|done)",
+        "priority": "string (high|medium|low)",
+        "position": "integer (optional)"
       },
       "response": {
         "id": 1,
-        "title": "string",
-        "description": "string",
+        "title": "Draft release notes",
+        "description": "Cover the new export feature.",
         "status": "in_progress",
         "priority": "high",
-        "created_at": "ISO8601"
-      }
-    },
-    {
-      "method": "PUT",
-      "path": "/api/tasks/:id/status",
-      "description": "Update task status (accepts {status: 'todo'|'in_progress'|'done'})",
-      "request": {
-        "status": "string (todo|in_progress|done)"
-      },
-      "response": {
-        "id": 1,
-        "title": "string",
-        "description": "string",
-        "status": "done",
-        "priority": "medium",
-        "created_at": "ISO8601"
+        "position": 1,
+        "created_at": "2026-07-01T10:00:00Z",
+        "updated_at": "2026-07-02T09:00:00Z"
       }
     },
     {
       "method": "DELETE",
       "path": "/api/tasks/:id",
-      "description": "Delete task",
+      "description": "Delete a task",
+      "auth": "user",
+      "success_status": 204,
       "request": null,
-      "response": {}
+      "response": null
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -112,43 +143,54 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Task",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "title": "string (required, max 255 chars)",
-      "description": "text (optional)",
-      "status": "string (todo, in_progress, done - default: todo)",
-      "priority": "string (low, medium, high - default: medium)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Task",
+      "description": "A card on the shared board",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "title": "string (required, max 200 chars)",
+        "description": "string (optional, max 2000 chars)",
+        "status": "string (one of: todo, in_progress, done; default todo)",
+        "priority": "string (one of: low, medium, high; default medium)",
+        "position": "integer (1-based place within its status column; no gaps)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "updated_at": "datetime (auto, changes on every update, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the task from public endpoints)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any task"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/tasks",
-      "description": "Admin overview: list all tasks and counts",
+      "description": "Admin overview: every task with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "title": "Draft release notes",
+            "status": "in_progress",
+            "is_active": true,
+            "created_at": "2026-07-01T10:00:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/tasks/:id/toggle",
-      "description": "Toggle task active status",
+      "description": "Flip a task's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

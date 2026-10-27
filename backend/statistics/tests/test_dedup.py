@@ -116,7 +116,14 @@ def test_vulnerable_package_from_several_scanners_is_one_issue():
     base = {"run_id": "r", "severity": "medium", "category": "dependency", "line": None, "package": "Jinja2"}
     findings = [
         {**base, "id": 1, "tool": "pip-audit", "rule_id": "PYSEC-2024-1", "file_path": "requirements.txt"},
-        {**base, "id": 2, "tool": "osv-scanner", "rule_id": "GHSA-xxxx", "file_path": "requirements.txt"},
+        {
+            **base,
+            "id": 2,
+            "tool": "osv-scanner",
+            "rule_id": "GHSA-xxxx",
+            "aliases": ["CVE-2024-1", "PYSEC-2024-1"],
+            "file_path": "requirements.txt",
+        },
         {**base, "id": 3, "tool": "trivy", "rule_id": "CVE-2024-1", "file_path": "requirements.txt"},
         {
             **base,
@@ -137,6 +144,34 @@ def test_vulnerable_package_from_several_scanners_is_one_issue():
     ]
     clusters = cluster_findings(findings)
     assert sorted(len(c.members) for c in clusters) == [2, 3]
+
+
+def test_different_advisories_of_one_package_stay_apart():
+    """Package alone is not enough: two scanners reporting different advisories are two issues."""
+    base = {"run_id": "r", "severity": "", "category": "dependency", "line": None, "package": "pyjwt"}
+    findings = [
+        {**base, "id": 1, "tool": "osv-scanner", "rule_id": "PYSEC-1", "aliases": ["CVE-1"], "file_path": "r.txt"},
+        {**base, "id": 2, "tool": "pip-audit", "rule_id": "PYSEC-2", "aliases": ["CVE-2"], "file_path": "r.txt"},
+        {**base, "id": 3, "tool": "trivy", "rule_id": "CVE-1", "file_path": "r.txt"},
+    ]
+    assert sorted(len(c.members) for c in cluster_findings(findings)) == [1, 2]
+
+
+def test_file_level_findings_naming_different_packages_stay_apart():
+    base = {"run_id": "r", "severity": "", "category": "dependency", "line": None, "file_path": "requirements.txt"}
+    findings = [
+        {**base, "id": i, "tool": "deptry", "rule_id": "DEP002", "title": f"'{p}' defined but not used", "package": p}
+        for i, p in enumerate(["flask-cors", "gunicorn", "requests"])
+    ]
+    assert len(cluster_findings(findings)) == 3
+
+
+def test_semgrep_classes_match_whole_tokens():
+    assert (
+        issue_class("semgrep", "python.lang.security.audit.md5-used-as-password.md5-used-as-password") == "weak-hash"
+    )
+    assert issue_class("semgrep", "x.app-run-param-config.avoid_app_run_with_bad_host") == "bind-all-interfaces"
+    assert not issue_class("semgrep", "python.foo.retrieval.retrieval-step").startswith("eval")
 
 
 def test_dast_scanners_reporting_one_missing_header_is_one_issue():

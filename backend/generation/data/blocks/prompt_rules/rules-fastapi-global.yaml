@@ -6,10 +6,12 @@ description: Shared FastAPI generation guardrails for single-container scaffoldi
 content: |
   ## FastAPI Runtime Rules
   - Prefix every API endpoint with `/api/`.
-  - Keep `app = FastAPI(title="Generated App")` at module scope.
+  - Keep `app = FastAPI(title="Generated App", lifespan=lifespan)` at module scope; it is started with `uvicorn app:app --host 0.0.0.0 --port 8000`.
   - Include a health endpoint at `GET /api/health`.
-  - Use SQLAlchemy 2 style session access and explicit Pydantic schemas.
-  - Serve the built SPA from `/static`: mount `app.mount("/static", StaticFiles(directory="static"), name="static")` and return `FileResponse("static/index.html")` from a catch-all fallback route (so deep links / refreshes work). The frontend build is copied to `./static` and Vite uses `base: "/static/"`, so do NOT mount the SPA at `/` or hardcode `/assets`.
+  - Do startup work (schema, admin account, seed data) in the `lifespan` handler, not `@app.on_event`.
+  - SQLite URI: `sqlite:////app/data/app.db` (absolute path of the writable `data/` directory).
+  - Use SQLAlchemy 2 style (`Mapped`/`mapped_column`, `select()`) and Pydantic v2 schemas (`model_config`, `model_dump`).
+  - Serve the built SPA from `/static`: mount `app.mount("/static", StaticFiles(directory="static"), name="static")` and return `FileResponse("static/index.html")` from a catch-all fallback route declared after every API route (so deep links / refreshes work). The frontend build is copied to `./static` and Vite uses `base: "/static/"`, so do NOT mount the SPA at `/` or hardcode `/assets`.
 metadata:
   stack: fastapi
   stage: backend

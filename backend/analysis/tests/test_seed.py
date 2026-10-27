@@ -92,3 +92,19 @@ def test_release_binary_downloads_are_checksummed():
         install = (data.get("install_cmd") if isinstance(data, dict) else "") or ""
         if "/releases/download/" in install:
             assert "sha256sum -c" in install, path.name
+
+
+def test_run_commands_cover_jsx_and_unpackaged_python():
+    """Regressions: lizard skipped .jsx/.tsx, pylint skipped dirs without __init__.py,
+    jscpd scanned .jsx as three token streams."""
+    import yaml
+
+    from backend.analysis.seeding import DATA_DIR
+
+    def run_cmd(slug: str) -> str:
+        return yaml.safe_load((DATA_DIR / f"{slug}.yaml").read_text())["run_cmd"]
+
+    assert "-l jsx" in run_cmd("lizard")
+    assert "-l tsx" in run_cmd("lizard")
+    assert "--recursive=y" in run_cmd("pylint")
+    assert "--formats-exts" in run_cmd("jscpd")

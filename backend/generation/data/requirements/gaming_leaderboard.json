@@ -2,64 +2,98 @@
   "slug": "gaming_leaderboard",
   "name": "Leaderboard",
   "category": "Gaming",
-  "description": "Track player scores",
+  "description": "Submit game scores and rank players by their best score, all-time or for recent periods",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only leaderboard; require auth for score submissions",
-    "1. Score model: id, player_name (required), score (integer, required), achieved_at",
-    "2. POST /api/scores - submit new score",
-    "3. GET /api/leaderboard - return top 10 scores sorted descending",
-    "4. GET /api/leaderboard?player=name - get player's rank and best score",
-    "5. Input validation: player_name required (max 50 chars), score must be non-negative"
+    "Access control: anyone may read the leaderboard; require auth for submitting scores and for the personal score history (a score always belongs to the signed-in user who submits it, shown under their username); admin endpoints are restricted to the admin account",
+    "Score validation: score is a required whole number from 0 to 1000000000; achieved_at is set by the server when the score is submitted",
+    "GET /api/leaderboard ranks players by their best active score in the period: ?period= is all (default), week (the last 7 days) or today (since midnight UTC); each player appears once with that best score (id is the score's id), ties go to the earlier achieved_at, and ranks run 1, 2, 3 without gaps",
+    "GET /api/leaderboard returns the top ?limit= players (default 10, at most 100); ?player= returns only that username's row with its rank in the period (empty items when they have no score in it); total counts every ranked player in the period, not just the returned rows",
+    "POST /api/scores stores the score and returns it with the player's all-time rank and personal_best (true when it is now their best score)",
+    "GET /api/scores returns the signed-in user's own submissions, newest first, with best_score (their highest active score, null without scores)",
+    "Deactivated scores (is_active false) are left out of the leaderboard, ranks and best scores; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input or an unknown period, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "Public guest view of leaderboard with CTA to sign in for submitting scores",
-    "1. Leaderboard table: rank, player name, score, date",
-    "2. Top 3 highlighted with gold/silver/bronze",
-    "3. Submit score form with player name and score",
-    "4. Filter to show all-time or today's scores",
-    "5. 'Refresh' button to update"
+    "Everyone sees the leaderboard; signed-in users also get the submit form and their own history, and visitors see a 'Sign in to submit a score' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Leaderboard table: rank, player, score and date, with the top three marked gold, silver and bronze and the signed-in user's own row highlighted",
+    "Period tabs for All time, This week and Today, a player search that shows one player's rank, and a 'Refresh' button",
+    "Submit form with just the score, which shows the new rank and a 'New personal best!' message when it applies, and the API's validation messages",
+    "My scores: the user's recent submissions and best score"
+  ],
+  "admin_requirements": [
+    "Admin overview: every score, active or not, newest first, with player and total, active and inactive counts",
+    "Toggle a score's active status from the overview, for example to hide an implausible score"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/leaderboard",
-      "description": "Get top players sorted by score",
+      "description": "Players ranked by best score in a period",
+      "auth": "public",
+      "query": {
+        "period": "all (default), week or today",
+        "limit": "Number of top players to return (default 10, at most 100)",
+        "player": "A username: return only that player's row"
+      },
       "request": null,
       "response": {
         "items": [
           {
-            "id": 1,
-            "player_name": "string",
-            "score": 9999,
             "rank": 1,
-            "achieved_at": "ISO8601"
+            "id": 7,
+            "username": "pixelqueen",
+            "score": 98450,
+            "achieved_at": "2026-01-15T21:04:00Z"
           }
         ],
-        "total": 10
+        "total": 1,
+        "period": "all"
       }
     },
     {
       "method": "POST",
       "path": "/api/scores",
-      "description": "Submit new score",
+      "description": "Submit a score as the signed-in user",
+      "auth": "user",
+      "success_status": 201,
       "request": {
-        "player_name": "string",
         "score": 1234
       },
       "response": {
-        "id": 1,
-        "player_name": "string",
+        "id": 7,
+        "username": "pixelqueen",
         "score": 1234,
-        "rank": 1,
-        "achieved_at": "ISO8601"
+        "achieved_at": "2026-01-15T21:04:00Z",
+        "rank": 3,
+        "personal_best": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/scores",
+      "description": "The signed-in user's submissions, newest first",
+      "auth": "user",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 7,
+            "score": 1234,
+            "achieved_at": "2026-01-15T21:04:00Z"
+          }
+        ],
+        "total": 1,
+        "best_score": 1234
       }
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -67,41 +101,50 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Score",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "player_name": "string (required, max 50 chars)",
-      "score": "integer (required, min 0)",
-      "achieved_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Score",
+      "description": "One submitted score; ranks and best scores are computed from active scores",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who submitted it)",
+        "score": "integer (required, 0 to 1000000000)",
+        "achieved_at": "datetime (set by the server on submission, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false leaves the score out of the leaderboard)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any score"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/scores",
-      "description": "Admin overview: list all scores and counts",
+      "description": "Admin overview: every score with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 7,
+            "username": "pixelqueen",
+            "score": 98450,
+            "is_active": true,
+            "achieved_at": "2026-01-15T21:04:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/scores/:id/toggle",
-      "description": "Toggle score active status",
+      "description": "Flip a score's active status",
+      "auth": "admin",
       "request": null,
       "response": {
-        "id": 1,
-        "is_active": true
+        "id": 7,
+        "is_active": false
       }
     }
   ]

@@ -14,7 +14,10 @@ docs_url: https://pylint.readthedocs.io/
 install_cmd: "pip install --user --upgrade pylint"
 verify_cmd: "pylint --version"
 uninstall_cmd: "pip uninstall -y pylint"
-run_cmd: "pylint {target} -f json --exit-zero --disable={config:disable}"
+# --recursive=y: without it pylint only lints {target} as one package, so
+# modules in directories without __init__.py (the usual generated-app layout)
+# are never checked. node_modules can hold .py files (node-gyp), so skip it.
+run_cmd: "pylint {target} --recursive=y --ignore=node_modules,.venv,venv -f json --exit-zero --disable={config:disable}"
 parser_key: pylint
 file_patterns: ["*.py"]
 run_timeout: 180

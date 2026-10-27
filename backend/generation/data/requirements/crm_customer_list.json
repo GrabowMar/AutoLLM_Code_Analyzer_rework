@@ -2,40 +2,155 @@
   "slug": "crm_customer_list",
   "name": "Customer Directory",
   "category": "CRM",
-  "description": "Manage customer contacts",
+  "description": "A shared team directory of customer contacts with a log of calls, emails and meetings per customer",
   "difficulty": "standard",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only customer listings; require auth for create/update/delete",
-    "1. Customer model: id, name (required), email (required, unique), phone, company, notes",
-    "2. CRUD endpoints: GET /api/customers, POST, PUT, DELETE",
-    "3. Search customers: ?query=text searches name, email, company",
-    "4. Email validation on create/update",
-    "5. JSON responses with proper status codes (200, 201, 400, 404, 409 for duplicate email)"
+    "Access control: require auth for every customer and interaction endpoint, reading included (the directory is shared by all signed-in users); admin endpoints are restricted to the admin account",
+    "Customers: any signed-in user may create, update and delete any customer; DELETE /api/customers/:id removes the customer and its interactions permanently",
+    "Customer validation: name is a required non-empty string of at most 100 characters; email is required, a valid email address of at most 255 characters, and unique among customers ignoring case (a duplicate answers 409); phone (at most 30 characters), company (at most 100 characters) and notes (at most 2000 characters) are optional",
+    "GET /api/customers returns active customers sorted by name; ?query= matches name, email or company case-insensitively, ?company= keeps customers of exactly that company (ignoring case), ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every matching customer",
+    "PUT /api/customers/:id replaces the customer's fields: name and email are required, and an omitted phone, company or notes is cleared",
+    "Every customer in a response carries interaction_count and last_contacted_at (the occurred_at of its latest interaction, null without interactions)",
+    "Interactions: POST /api/customers/:id/interactions logs a contact with kind (one of call, email, meeting), a required summary of at most 500 characters and an optional occurred_at (default now) for the signed-in user; GET /api/customers/:id/interactions lists them newest first",
+    "Deactivated customers (is_active false) are left out of GET /api/customers and answer 404 on the other customer endpoints; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids, 409 for a duplicate email"
   ],
   "frontend_requirements": [
-    "Public guest view of customers with CTA to sign in for management",
-    "1. Customer list table: name, email, phone, company",
-    "2. Add customer form with validation",
-    "3. Click customer to view/edit details",
-    "4. Delete button with confirmation",
-    "5. Search box to filter customers"
+    "Visitors see only a sign-in screen with a short description of the directory; every other view is for signed-in users",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Customer list: a table with name, email, phone, company and last contacted date, a search box, a company filter and previous/next paging",
+    "Customer detail view: all of the customer's fields with edit and delete actions, its interaction log (kind, summary, date, who logged it) and a form to log a new interaction",
+    "Add and edit customer forms that show the API's validation messages next to the form, including the duplicate-email message; delete asks for confirmation first"
+  ],
+  "admin_requirements": [
+    "Admin overview: every customer, active or not, with total, active and inactive counts",
+    "Toggle a customer's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/customers",
-      "description": "List all customers",
+      "description": "List active customers sorted by name, filtered and paged",
+      "auth": "user",
+      "query": {
+        "query": "Case-insensitive text matched against name, email and company",
+        "company": "Exact company name, ignoring case",
+        "page": "1-based page number (default 1)",
+        "page_size": "Customers per page (default 20, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "name": "string",
-            "email": "string",
-            "phone": "string",
-            "company": "string",
-            "created_at": "ISO8601"
+            "name": "Dana Whitfield",
+            "email": "dana.whitfield@northwind.example",
+            "phone": "+1 555 0142",
+            "company": "Northwind Traders",
+            "notes": "Prefers email in the morning.",
+            "interaction_count": 3,
+            "last_contacted_at": "2026-02-03T14:00:00Z",
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/customers",
+      "description": "Create a customer",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "name": "string",
+        "email": "string",
+        "phone": "string (optional)",
+        "company": "string (optional)",
+        "notes": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "name": "Dana Whitfield",
+        "email": "dana.whitfield@northwind.example",
+        "phone": "+1 555 0142",
+        "company": "Northwind Traders",
+        "notes": "Prefers email in the morning.",
+        "interaction_count": 0,
+        "last_contacted_at": null,
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/customers/:id",
+      "description": "One active customer",
+      "auth": "user",
+      "request": null,
+      "response": {
+        "id": 1,
+        "name": "Dana Whitfield",
+        "email": "dana.whitfield@northwind.example",
+        "phone": "+1 555 0142",
+        "company": "Northwind Traders",
+        "notes": "Prefers email in the morning.",
+        "interaction_count": 3,
+        "last_contacted_at": "2026-02-03T14:00:00Z",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/customers/:id",
+      "description": "Replace a customer's fields (name and email required; an omitted phone, company or notes is cleared)",
+      "auth": "user",
+      "request": {
+        "name": "string",
+        "email": "string",
+        "phone": "string (optional)",
+        "company": "string (optional)",
+        "notes": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "name": "Dana Whitfield",
+        "email": "dana.whitfield@northwind.example",
+        "phone": "+1 555 0142",
+        "company": "Northwind Traders",
+        "notes": "Prefers email in the morning.",
+        "interaction_count": 3,
+        "last_contacted_at": "2026-02-03T14:00:00Z",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/customers/:id",
+      "description": "Delete a customer and its interactions",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/customers/:id/interactions",
+      "description": "Interactions with a customer, newest first",
+      "auth": "user",
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "customer_id": 1,
+            "kind": "call",
+            "summary": "Discussed the spring order volume.",
+            "occurred_at": "2026-02-03T14:00:00Z",
+            "username": "sales1",
+            "created_at": "2026-02-03T14:20:00Z"
           }
         ],
         "total": 1
@@ -43,57 +158,30 @@
     },
     {
       "method": "POST",
-      "path": "/api/customers",
-      "description": "Create customer",
+      "path": "/api/customers/:id/interactions",
+      "description": "Log an interaction with a customer as the signed-in user",
+      "auth": "user",
+      "success_status": 201,
       "request": {
-        "name": "string",
-        "email": "string",
-        "phone": "string",
-        "company": "string",
-        "notes": "string"
+        "kind": "string (call|email|meeting)",
+        "summary": "string",
+        "occurred_at": "ISO8601 (optional)"
       },
       "response": {
         "id": 1,
-        "name": "string",
-        "email": "string",
-        "phone": "string",
-        "company": "string",
-        "notes": "string",
-        "created_at": "ISO8601"
+        "customer_id": 1,
+        "kind": "call",
+        "summary": "Discussed the spring order volume.",
+        "occurred_at": "2026-02-03T14:00:00Z",
+        "username": "sales1",
+        "created_at": "2026-02-03T14:20:00Z"
       }
-    },
-    {
-      "method": "PUT",
-      "path": "/api/customers/:id",
-      "description": "Update customer",
-      "request": {
-        "name": "string",
-        "email": "string",
-        "phone": "string",
-        "company": "string",
-        "notes": "string"
-      },
-      "response": {
-        "id": 1,
-        "name": "string",
-        "email": "string",
-        "phone": "string",
-        "company": "string",
-        "notes": "string",
-        "created_at": "ISO8601"
-      }
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/customers/:id",
-      "description": "Delete customer",
-      "request": null,
-      "response": {}
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -101,44 +189,68 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Customer",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "name": "string (required, max 100 chars)",
-      "email": "string (required, unique)",
-      "phone": "string (optional)",
-      "company": "string (optional)",
-      "notes": "text (optional)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Customer",
+      "description": "A customer contact; interaction_count and last_contacted_at are computed from its interactions",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "name": "string (required, max 100 chars)",
+        "email": "string (required, max 255 chars, unique ignoring case)",
+        "phone": "string (optional, max 30 chars)",
+        "company": "string (optional, max 100 chars)",
+        "notes": "text (optional, max 2000 chars)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the customer from the non-admin endpoints)"
+      }
+    },
+    {
+      "name": "Interaction",
+      "description": "One logged call, email or meeting with a customer",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "customer_id": "integer (references Customer.id; deleted with the customer)",
+        "user_id": "integer (references the signed-in user who logged it)",
+        "kind": "string (one of: call, email, meeting)",
+        "summary": "string (required, max 500 chars)",
+        "occurred_at": "datetime (default now, ISO 8601 in JSON)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any customer"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/customers",
-      "description": "Admin overview: list all customers and counts",
+      "description": "Admin overview: every customer with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "name": "Dana Whitfield",
+            "email": "dana.whitfield@northwind.example",
+            "company": "Northwind Traders",
+            "is_active": true,
+            "interaction_count": 3,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/customers/:id/toggle",
-      "description": "Toggle customer active status",
+      "description": "Flip a customer's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

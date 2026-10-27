@@ -2,95 +2,156 @@
   "slug": "healthcare_appointments",
   "name": "Appointments",
   "category": "Healthcare",
-  "description": "Schedule and manage appointments",
+  "description": "Book, reschedule and cancel clinic appointments and see how busy each day is",
   "difficulty": "standard",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public read-only appointment listings; require auth for create/update/delete",
-    "1. Appointment model: id, patient_name (required), date, time, reason, status",
-    "2. GET /api/appointments - list appointments",
-    "3. POST /api/appointments - create appointment",
-    "4. PUT /api/appointments/:id - update appointment",
-    "5. DELETE /api/appointments/:id - cancel appointment"
+    "Access control: anyone may read the clinic schedule; require auth for every appointment endpoint, and each signed-in user sees and changes only the appointments they booked; admin endpoints are restricted to the admin account",
+    "Appointment validation: patient_name is a required non-empty string of at most 100 characters, date a calendar date (YYYY-MM-DD), time a 24-hour time (HH:MM), reason an optional string of at most 500 characters; new appointments start with status scheduled",
+    "GET /api/appointments lists the signed-in user's active appointments by date and time, earliest first; ?status= filters by status, ?start_date= and ?end_date= keep appointments on or between those dates (inclusive), ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts every matching appointment",
+    "PATCH /api/appointments/:id changes any of patient_name, date, time, reason and status (scheduled, completed or cancelled); cancelling is a PATCH to status cancelled, and a cancelled appointment cannot be changed again (409)",
+    "DELETE /api/appointments/:id removes the appointment permanently",
+    "Several appointments may share the same date and time (the clinic has several rooms); there is no per-slot limit",
+    "GET /api/schedule shows how busy a day is: for ?date= (default today) it lists each time that has scheduled appointments with the number booked, earliest first; cancelled and inactive appointments are not counted",
+    "Deactivated appointments (is_active false) are left out of GET /api/appointments and GET /api/schedule and answer 404 on GET /api/appointments/:id; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids, 409 for changing a cancelled appointment"
   ],
   "frontend_requirements": [
-    "HomePage displays ALL content in read-only mode for public users",
-    "Public users see \"Sign in to book appointments\" CTAs instead of action buttons",
-    "Logged-in users see same content plus create/edit/delete functionality",
-    "1. Appointment list with date, time, patient name, status (visible to all)",
-    "2. Create appointment form (logged-in only)",
-    "3. Edit appointment modal (logged-in only)",
-    "4. Cancel appointment button (visible to all)",
-    "5. Filter by date (visible to all)"
+    "Everyone sees the clinic schedule: a date picker and the booked times of that day with how many appointments each has; signed-in users also get their own appointments and the booking controls, and visitors see a 'Sign in to book appointments' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "My appointments: a list with date, time, patient name, reason and a status badge, filters for status and a date range, and previous/next paging",
+    "A booking form (patient name, date, time, optional reason) and a reschedule form for an existing appointment, both showing the API's validation messages next to the form",
+    "Each scheduled appointment offers 'Mark completed' and 'Cancel' (cancel asks for confirmation); cancelled appointments are shown greyed out without edit controls, and a delete control removes an appointment after confirmation"
+  ],
+  "admin_requirements": [
+    "Admin overview: every appointment of every user, active or not, with total, active and inactive counts and a count per status",
+    "Toggle an appointment's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "GET",
       "path": "/api/appointments",
-      "description": "List appointments",
+      "description": "The signed-in user's active appointments, earliest first, filtered and paged",
+      "auth": "user",
+      "query": {
+        "status": "Only appointments with this status (scheduled, completed or cancelled)",
+        "start_date": "Only appointments on or after this date (YYYY-MM-DD)",
+        "end_date": "Only appointments on or before this date (YYYY-MM-DD)",
+        "page": "1-based page number (default 1)",
+        "page_size": "Appointments per page (default 20, at most 100)"
+      },
       "request": null,
       "response": {
         "items": [
           {
             "id": 1,
-            "patient_name": "string",
-            "date": "YYYY-MM-DD",
-            "time": "HH:MM",
-            "status": "scheduled"
+            "patient_name": "Maria Lopez",
+            "date": "2026-02-03",
+            "time": "09:30",
+            "reason": "Annual check-up",
+            "status": "scheduled",
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/appointments",
+      "description": "Book an appointment for the signed-in user",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "patient_name": "string",
+        "date": "YYYY-MM-DD",
+        "time": "HH:MM",
+        "reason": "string (optional)"
+      },
+      "response": {
+        "id": 1,
+        "patient_name": "Maria Lopez",
+        "date": "2026-02-03",
+        "time": "09:30",
+        "reason": "Annual check-up",
+        "status": "scheduled",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/appointments/:id",
+      "description": "One of the signed-in user's appointments",
+      "auth": "user",
+      "request": null,
+      "response": {
+        "id": 1,
+        "patient_name": "Maria Lopez",
+        "date": "2026-02-03",
+        "time": "09:30",
+        "reason": "Annual check-up",
+        "status": "scheduled",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/appointments/:id",
+      "description": "Change some fields of an appointment (every field optional; status cancelled cancels it)",
+      "auth": "user",
+      "request": {
+        "patient_name": "string (optional)",
+        "date": "YYYY-MM-DD",
+        "time": "HH:MM",
+        "reason": "string (optional)",
+        "status": "string (scheduled|completed|cancelled)"
+      },
+      "response": {
+        "id": 1,
+        "patient_name": "Maria Lopez",
+        "date": "2026-02-04",
+        "time": "11:00",
+        "reason": "Annual check-up",
+        "status": "scheduled",
+        "created_at": "2026-01-15T10:30:00Z"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/appointments/:id",
+      "description": "Delete an appointment permanently",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/schedule",
+      "description": "Booked times of one day with the number of scheduled appointments at each, no patient details",
+      "auth": "public",
+      "query": {
+        "date": "The day to show (YYYY-MM-DD, default today)"
+      },
+      "request": null,
+      "response": {
+        "date": "2026-02-03",
+        "items": [
+          {
+            "time": "09:30",
+            "booked": 2
           }
         ],
         "total": 1
       }
     },
     {
-      "method": "POST",
-      "path": "/api/appointments",
-      "description": "Create appointment",
-      "request": {
-        "patient_name": "string",
-        "date": "YYYY-MM-DD",
-        "time": "HH:MM",
-        "reason": "string"
-      },
-      "response": {
-        "id": 1,
-        "patient_name": "string",
-        "date": "YYYY-MM-DD",
-        "time": "HH:MM",
-        "reason": "string",
-        "status": "scheduled"
-      }
-    },
-    {
-      "method": "PUT",
-      "path": "/api/appointments/:id",
-      "description": "Update appointment",
-      "request": {
-        "date": "YYYY-MM-DD",
-        "time": "HH:MM",
-        "reason": "string",
-        "status": "scheduled|completed|cancelled"
-      },
-      "response": {
-        "id": 1,
-        "patient_name": "string",
-        "date": "YYYY-MM-DD",
-        "time": "HH:MM",
-        "reason": "string",
-        "status": "scheduled"
-      }
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/appointments/:id",
-      "description": "Cancel appointment",
-      "request": null,
-      "response": {}
-    },
-    {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -98,44 +159,62 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Appointment",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "patient_name": "string (required, max 100 chars)",
-      "date": "date (required)",
-      "time": "string (required, HH:MM)",
-      "reason": "text (optional)",
-      "status": "string (scheduled, completed, cancelled - default: scheduled)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Appointment",
+      "description": "One booked visit, owned by the user who booked it",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who booked it)",
+        "patient_name": "string (required, max 100 chars)",
+        "date": "date (required, YYYY-MM-DD)",
+        "time": "string (required, HH:MM, 24-hour)",
+        "reason": "string (optional, max 500 chars)",
+        "status": "string (one of: scheduled, completed, cancelled; default scheduled)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the appointment from its owner and the schedule)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any appointment"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/appointments",
-      "description": "Admin overview: list all appointments and counts",
+      "description": "Admin overview: every appointment with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
-        "inactive": 0
+        "items": [
+          {
+            "id": 1,
+            "username": "patient1",
+            "patient_name": "Maria Lopez",
+            "date": "2026-02-03",
+            "time": "09:30",
+            "status": "scheduled",
+            "is_active": true,
+            "created_at": "2026-01-15T10:30:00Z"
+          }
+        ],
+        "total": 1,
+        "active": 1,
+        "inactive": 0,
+        "by_status": {
+          "scheduled": 1,
+          "completed": 0,
+          "cancelled": 0
+        }
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/appointments/:id/toggle",
-      "description": "Toggle appointment active status",
+      "description": "Flip an appointment's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

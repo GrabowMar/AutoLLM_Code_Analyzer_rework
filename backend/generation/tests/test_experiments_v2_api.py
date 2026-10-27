@@ -880,13 +880,37 @@ class TestResults:
         assert results_svc.NOTE_POST_HOC in res["notes"]
         assert len(res["paired"]["rows"]) == 2  # N-1 rows, never all pairs
         board = {row["condition_id"]: row for row in res["leaderboard"]}
-        assert board[b.id]["mixed_fingerprints"] == {"count": 2, "majority_share": 0.5}
+        assert board[b.id]["mixed_fingerprints"] == {
+            "count": 2,
+            "apps": 2,
+            "minority_cells": 2,
+            "majority_share": 0.5,
+        }
         assert board[a.id]["mixed_fingerprints"] is None
         majority = compute(experiment, None, ResultFilters(fingerprint="majority"), user)
         mb = {row["condition_id"]: row for row in majority["leaderboard"]}[b.id]
         assert mb["n_missing"]["excluded_invalid"] == 2
         with pytest.raises(ValueError, match="not part"):
             compute(experiment, 999_999, ResultFilters(), user)
+
+    def test_fingerprints_differ_per_app_without_drift(self, user):
+        """The fingerprint covers the app spec: one per app is not drift, and majority keeps every app."""
+        experiment, (a, b), apps = _design(user, n_apps=3, repeats=2)
+        for app in apps:
+            for r in range(2):
+                for cond in (a, b):
+                    _graded(
+                        experiment,
+                        cond,
+                        app,
+                        r,
+                        1.0,
+                        resolved_bundle={"config_fingerprint": f"f{cond.id}-{app.id}"},
+                    )
+        for filters in (ResultFilters(), ResultFilters(fingerprint="majority")):
+            board = {row["condition_id"]: row for row in compute(experiment, None, filters, user)["leaderboard"]}
+            assert board[a.id]["mixed_fingerprints"] is None
+            assert (board[a.id]["n_apps"], board[a.id]["n_graded"]) == (3, 6)
 
     def test_results_endpoint(self, api, user):
         experiment, (a, b), apps = _design(user, n_apps=1, repeats=1)
@@ -1096,3 +1120,87 @@ def test_executor_state_flags_a_leader_on_older_code():
     leader.code_version = capacity.code_version()
     leader.save()
     assert svc.executor_state()["code_stale"] is False
+
+
+class TestResultsAccounting:
+    """Agent truncation, retry spend, run time and the plan's test settings on the Results tab."""
+
+    def test_agent_truncation_excludes_only_a_truncated_final_state(self, user):
+        experiment, (a, b), apps = _design(user, n_apps=2, repeats=1)
+        for app in apps:
+            _graded(experiment, a, app, 0, 1.0)
+        mid = {"agent": {"truncated_calls": 3, "final_response_truncated": False}}
+        final = {"agent": {"truncated_calls": 1, "final_response_truncated": True}}
+        _graded(experiment, b, apps[0], 0, 0.5, result_data=mid)
+        _graded(experiment, b, apps[1], 0, 0.0, result_data=final)
+        res = compute(experiment, None, ResultFilters(), user)
+        board = {row["condition_id"]: row for row in res["leaderboard"]}
+        assert board[b.id]["n_missing"]["excluded_truncated"] == 1
+        assert board[b.id]["n_graded"] == 1
+        assert board[b.id]["truncated_call_runs"] == 2
+        runs = {c["app_id"]: c["runs"][0] for c in res["matrix"]["cells"] if c["condition_id"] == b.id}
+        assert (runs[apps[0].id]["truncated"], runs[apps[0].id]["truncated_calls"]) == (False, 3)
+        assert runs[apps[1].id]["truncated"] is True
+
+    def test_cost_includes_retried_attempts_and_time_is_the_sandbox_clock(self, user):
+        experiment, (a, b), apps = _design(user, n_apps=1, repeats=1)
+        _graded(experiment, a, apps[0], 0, 1.0, duration_seconds=900.0)
+        job = _graded(
+            experiment,
+            b,
+            apps[0],
+            0,
+            1.0,
+            duration_seconds=900.0,
+            result_data={"agent": {"wall_seconds": 120.0}},
+            execution={"prior_attempts_cost": 0.3, "prior_attempts_total_tokens": 500},
+        )
+        GenerationJob.objects.filter(id=job.id).update(
+            metrics={"functional": {"pass_rate": 1.0, "passed": True}, "cost": 0.2, "total_tokens": 100},
+        )
+        board = {r["condition_id"]: r for r in compute(experiment, None, ResultFilters(), user)["leaderboard"]}
+        assert board[b.id]["cost_usd"] == pytest.approx(0.5)
+        assert board[b.id]["retry_cost_usd"] == pytest.approx(0.3)
+        assert board[b.id]["tokens_total"] == 600
+        assert board[b.id]["median_seconds"] == 120.0
+        assert board[a.id]["median_seconds"] == 900.0  # no agent clock: the job duration
+
+    def _six_wins(self, user):
+        experiment, (a, b), apps = _design(user, n_apps=6, repeats=1)
+        for app in apps:
+            _graded(experiment, a, app, 0, 0.5)
+            _graded(experiment, b, app, 0, 1.0)
+        return experiment, b
+
+    def test_without_a_plan_p_values_are_exploratory_holm(self, user):
+        experiment, _b = self._six_wins(user)
+        paired = compute(experiment, None, ResultFilters(), user)["paired"]
+        assert (paired["status"], paired["correction"], paired["alpha"]) == ("exploratory", "holm", 0.05)
+        assert paired["rows"][0]["p_adjusted"] == paired["rows"][0]["p_holm"]
+
+    def test_frozen_plan_sets_correction_alpha_and_direction(self, user):
+        experiment, b = self._six_wins(user)
+        Experiment.objects.filter(id=experiment.id).update(
+            analysis_plan={
+                "primary_metric": "pass_rate",
+                "alpha": 0.01,
+                "correction": "none",
+                "research_questions": [{"id": "RQ1", "question": "q", "metric": "pass_rate", "direction": "greater"}],
+            },
+            analysis_plan_frozen_at=timezone.now(),
+        )
+        experiment.refresh_from_db()
+        paired = compute(experiment, None, ResultFilters(), user)["paired"]
+        assert (paired["status"], paired["correction"], paired["alpha"], paired["alternative"]) == (
+            "confirmatory",
+            "none",
+            0.01,
+            "greater",
+        )
+        (row,) = paired["rows"]
+        assert row["wilcoxon_p"] == pytest.approx(1 / 64)  # one-sided
+        assert row["p_adjusted"] == row["wilcoxon_p"]
+        assert row["significant"] is False  # 1/64 > 0.01
+        # A post-hoc baseline is never confirmatory.
+        other = compute(experiment, b.id, ResultFilters(), user)["paired"]
+        assert other["status"] == "exploratory"

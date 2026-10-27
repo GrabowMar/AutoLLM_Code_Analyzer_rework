@@ -8,74 +8,42 @@ Merges multi-file Python output into a single app.py and infers dependencies.
 import ast
 import logging
 import re
+import sys
 
 logger = logging.getLogger(__name__)
 
-# Standard library modules that shouldn't be in requirements.txt
-PYTHON_STDLIB = frozenset(
+# Standard library modules that shouldn't be in requirements.txt: the running
+# interpreter's own list (Python >= 3.10), plus a few names newer Pythons
+# dropped so code written for older ones is not "fixed" with a bogus package.
+PYTHON_STDLIB = frozenset(sys.stdlib_module_names) | frozenset(
     {
-        "abc",
-        "argparse",
-        "asyncio",
-        "base64",
-        "bisect",
-        "calendar",
-        "collections",
-        "contextlib",
-        "copy",
-        "csv",
-        "dataclasses",
-        "datetime",
-        "decimal",
-        "difflib",
-        "email",
-        "enum",
-        "functools",
-        "glob",
-        "hashlib",
-        "heapq",
-        "hmac",
-        "html",
-        "http",
-        "importlib",
-        "inspect",
-        "io",
-        "itertools",
-        "json",
-        "logging",
-        "math",
-        "mimetypes",
-        "operator",
-        "os",
-        "pathlib",
-        "pickle",
-        "platform",
-        "pprint",
-        "queue",
-        "random",
-        "re",
-        "secrets",
-        "shutil",
-        "signal",
-        "socket",
-        "sqlite3",
-        "statistics",
-        "string",
-        "struct",
-        "subprocess",
-        "sys",
-        "tempfile",
-        "textwrap",
-        "threading",
-        "time",
-        "traceback",
-        "typing",
-        "unittest",
-        "urllib",
-        "uuid",
-        "warnings",
-        "xml",
-        "zipfile",
+        # removed in 3.12
+        "asynchat",
+        "asyncore",
+        "distutils",
+        "imp",
+        "smtpd",
+        # removed in 3.13 (PEP 594)
+        "aifc",
+        "audioop",
+        "cgi",
+        "cgitb",
+        "chunk",
+        "crypt",
+        "imghdr",
+        "lib2to3",
+        "mailcap",
+        "msilib",
+        "nis",
+        "nntplib",
+        "ossaudiodev",
+        "pipes",
+        "sndhdr",
+        "spwd",
+        "sunau",
+        "telnetlib",
+        "uu",
+        "xdrlib",
     },
 )
 
@@ -89,9 +57,32 @@ IMPORT_TO_PACKAGE = {
     "flask_jwt_extended": "flask-jwt-extended",
     "flask_mail": "flask-mail",
     "flask_wtf": "flask-wtf",
+    "flask_bcrypt": "flask-bcrypt",
+    "flask_limiter": "flask-limiter",
+    "flask_socketio": "flask-socketio",
     "sqlalchemy": "sqlalchemy",
     "werkzeug": "werkzeug",
     "jwt": "pyjwt",
+    "jose": "python-jose",
+    "joserfc": "joserfc",
+    "passlib": "passlib[bcrypt]",
+    "pwdlib": "pwdlib",
+    "argon2": "argon2-cffi",
+    "bcrypt": "bcrypt",
+    "multipart": "python-multipart",
+    "python_multipart": "python-multipart",
+    "email_validator": "email-validator",
+    "pydantic_settings": "pydantic-settings",
+    "socketio": "python-socketio",
+    "dateutil": "python-dateutil",
+    "slugify": "python-slugify",
+    "magic": "python-magic",
+    "docx": "python-docx",
+    "Crypto": "pycryptodome",
+    "OpenSSL": "pyopenssl",
+    "fitz": "pymupdf",
+    "attr": "attrs",
+    "typing_extensions": "typing-extensions",
     "PIL": "pillow",
     "cv2": "opencv-python",
     "bs4": "beautifulsoup4",
@@ -101,7 +92,6 @@ IMPORT_TO_PACKAGE = {
     "requests": "requests",
     "celery": "celery",
     "redis": "redis",
-    "bcrypt": "bcrypt",
     "marshmallow": "marshmallow",
     "stripe": "stripe",
     "boto3": "boto3",
@@ -226,31 +216,48 @@ def extract_frontend_code(raw_content: str) -> str:
 _FEATURE_DEPENDENCIES: tuple[tuple[str, str], ...] = ((r"\bEmailStr\b", "email-validator"),)
 
 
+# passlib 1.7.4 (its last release) breaks on bcrypt >= 4.1: its backend
+# self-test raises "password cannot be longer than 72 bytes", so the classic
+# ``CryptContext(schemes=["bcrypt"])`` fails on the first hash. Code that uses
+# passlib gets the last compatible bcrypt with it. A template that already
+# pins bcrypt (flask-react: 5.0.0) keeps its pin, where passlib's bcrypt
+# scheme still fails (scaffolding._patch_requirements compares by name).
+_PASSLIB_BCRYPT_PIN = "bcrypt==4.0.1"
+
+
 def _add_feature_dependencies(code: str, packages: set[str]) -> None:
     for marker, package in _FEATURE_DEPENDENCIES:
         if re.search(marker, code):
             packages.add(package)
+    if "passlib[bcrypt]" in packages:
+        packages.discard("bcrypt")
+        packages.add(_PASSLIB_BCRYPT_PIN)
 
 
-def infer_python_dependencies(code: str) -> list[str]:
-    """Infer PyPI packages from Python import statements using AST."""
+def infer_python_dependencies(code: str, *, local_modules: frozenset[str] = frozenset()) -> list[str]:
+    """Infer PyPI packages from Python import statements using AST.
+
+    *local_modules* are top-level names the project's own files provide
+    (``db`` for ``db.py``); importing them never adds a package. Relative
+    imports (``from .models import X``) are always local.
+    """
     packages: set[str] = set()
 
     try:
         tree = ast.parse(code)
     except SyntaxError:
         # Fallback to regex if AST fails
-        packages.update(_regex_infer_deps(code))
+        packages.update(_regex_infer_deps(code, local_modules))
     else:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     top = alias.name.split(".")[0]
-                    _map_import(top, packages)
+                    _map_import(top, packages, local_modules)
             elif isinstance(node, ast.ImportFrom):
-                if node.module:
+                if node.module and not node.level:
                     top = node.module.split(".")[0]
-                    _map_import(top, packages)
+                    _map_import(top, packages, local_modules)
 
     _add_feature_dependencies(code, packages)
     return sorted(packages)
@@ -518,9 +525,9 @@ def _looks_like_python(content: str) -> bool:
     return matches >= 2
 
 
-def _map_import(top_module: str, packages: set[str]) -> None:
+def _map_import(top_module: str, packages: set[str], local_modules: frozenset[str] = frozenset()) -> None:
     """Map a top-level import name to PyPI package name."""
-    if top_module in PYTHON_STDLIB:
+    if top_module in PYTHON_STDLIB or top_module in local_modules:
         return
     if top_module in IMPORT_TO_PACKAGE:
         packages.add(IMPORT_TO_PACKAGE[top_module])
@@ -530,7 +537,7 @@ def _map_import(top_module: str, packages: set[str]) -> None:
         packages.add(top_module)
 
 
-def _regex_infer_deps(code: str) -> list[str]:
+def _regex_infer_deps(code: str, local_modules: frozenset[str] = frozenset()) -> list[str]:
     """Fallback regex-based dependency inference."""
     packages: set[str] = set()
     for match in re.finditer(
@@ -538,7 +545,7 @@ def _regex_infer_deps(code: str) -> list[str]:
         code,
         re.MULTILINE,
     ):
-        _map_import(match.group(1), packages)
+        _map_import(match.group(1), packages, local_modules)
     return sorted(packages)
 
 

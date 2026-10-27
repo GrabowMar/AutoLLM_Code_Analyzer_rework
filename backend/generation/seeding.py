@@ -35,6 +35,8 @@ from django.db import DEFAULT_DB_ALIAS
 from django.db import transaction
 from django.db.models import Max
 
+from backend.generation.services.spec_models import requirement_content_hash
+from backend.generation.services.spec_models import stored_data_model
 from backend.generation.services.versioning import content_hash
 
 logger = logging.getLogger(__name__)
@@ -73,25 +75,16 @@ def _read_prompt_file(relative_path: str) -> str:
     return ""
 
 
-def _requirement_hash_payload(data: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "category": data.get("category", ""),
-        "description": data.get("description", ""),
-        "backend_requirements": data.get("backend_requirements", []),
-        "frontend_requirements": data.get("frontend_requirements", []),
-        "admin_requirements": data.get("admin_requirements", []),
-        "api_endpoints": data.get("api_endpoints", []),
-        "data_model": data.get("data_model", {}),
-        "admin_api_endpoints": data.get("admin_api_endpoints", []),
-        "difficulty": data.get("difficulty", ""),
-    }
-
-
 def seed_requirements(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, int]:
     """Upsert ``AppRequirementTemplate`` rows from ``data/requirements/*.json``.
 
     One mutable row per slug; ``version`` bumps when the spec content changes
-    so a snapshot's embedded ``app_requirement.version`` stays meaningful.
+    (:func:`~backend.generation.services.spec_models.requirement_content_hash`),
+    and job snapshots embed the row's ``version`` and ``content_hash`` in
+    ``app_requirement`` (``profile_resolver.app_requirement_to_dict``), so a
+    snapshot names exactly the spec content it was built from. The
+    ``data_model`` column holds the spec's own form: a v3 ``data_models``
+    list, or the legacy single object.
     """
     from backend.generation.models import AppRequirementTemplate
 
@@ -111,7 +104,7 @@ def seed_requirements(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, 
             continue
 
         slug = data.get("slug", json_path.stem)
-        new_hash = content_hash(_requirement_hash_payload(data))
+        new_hash = requirement_content_hash(data)
         existing = AppRequirementTemplate.objects.using(using).filter(slug=slug).first()
 
         prior_version = existing.version if existing else 1
@@ -130,7 +123,7 @@ def seed_requirements(*, using: str = DEFAULT_DB_ALIAS, log=None) -> tuple[int, 
                 "frontend_requirements": data.get("frontend_requirements", []),
                 "admin_requirements": data.get("admin_requirements", []),
                 "api_endpoints": data.get("api_endpoints", []),
-                "data_model": data.get("data_model", {}),
+                "data_model": stored_data_model(data),
                 "admin_api_endpoints": data.get("admin_api_endpoints", []),
                 "difficulty": data.get("difficulty", ""),
                 "spec_schema_version": data.get("spec_schema_version", 1),

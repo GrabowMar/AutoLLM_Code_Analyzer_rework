@@ -10,7 +10,9 @@ always be explained (and replayed) from its own row:
   routing,
 * ``gateway`` -- what the gateway forces / strips on every request,
 * ``agent`` -- harness choice, budgets, sampling and network policy, caps,
-* ``stack`` -- the exact skeleton version the workspace is seeded from.
+* ``stack`` -- the exact skeleton version the workspace is seeded from,
+* ``app_requirement`` -- the spec content, with the row's ``version`` and
+  ``content_hash`` (spec rows are updated in place by the seeder).
 
 Keys:
 
@@ -30,7 +32,9 @@ Keys:
 
 ``presets`` records which run presets the job was created from (id, slug,
 version, content hash, name). It is provenance only and enters no key: the
-values the presets stood for are already in the sections above.
+values the presets stood for are already in the sections above. So is
+``library_pin`` on a retry: what it kept from the job it replaces (see
+``job_cloning.library_pins``).
 
 :func:`resolve_agent_run` is the single resolution path; the job-creation
 preview and experiment comparability use it too, so what they report is
@@ -69,8 +73,10 @@ from backend.inference.snapshot import effective_num_ctx
 from backend.inference.snapshot import endpoint_section
 from backend.inference.snapshot import is_local
 from backend.inference.snapshot import llm_source
+from backend.runtime.services.scaffolding import _row_config
 from backend.runtime.services.scaffolding import canonical_stack_slug
 from backend.runtime.services.scaffolding import get_stack_config
+from backend.runtime.services.scaffolding import get_stack_row
 from backend.runtime.services.scaffolding import stack_snapshot_entry
 
 if TYPE_CHECKING:
@@ -383,6 +389,13 @@ def method_key(
     return key
 
 
+def agent_stack_slug(stack_slug: str | None, profile: GenerationProfile | None) -> str:
+    """The canonical stack an agent job runs on: its own slug, else the profile's, else the default."""
+    return canonical_stack_slug(
+        stack_slug or (profile.scaffolding_slug if profile else settings.GENERATION_DEFAULT_STACK),
+    )
+
+
 def build_agent_snapshot(
     *,
     app_requirement: AppRequirementTemplate | None,
@@ -396,7 +409,16 @@ def build_agent_snapshot(
     agent_overrides: dict[str, Any] | None = None,
     harness_options: dict[str, Any] | None = None,
     presets: dict[str, Any] | None = None,
+    pins: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Resolve and freeze one agent run (see the module docstring).
+
+    *pins* (a retry, see ``job_cloning.library_pins``) replaces the live spec
+    with ``pins["app_requirement"]`` (a frozen app dict), the latest stack
+    with ``pins["stack"]`` (an existing ``{slug, version, content_hash}``) and
+    the rendered brief with ``pins["brief"]`` (a frozen brief section), and
+    is recorded as ``library_pin`` from ``pins["record"]``.
+    """
     if model is None:
         msg = "Agent runs need a model"
         raise ValueError(msg)
@@ -404,9 +426,8 @@ def build_agent_snapshot(
         msg = "Agent runs need an app spec or a task description"
         raise ValueError(msg)
 
-    stack_slug = canonical_stack_slug(
-        stack_slug or (profile.scaffolding_slug if profile else settings.GENERATION_DEFAULT_STACK),
-    )
+    pins = pins or {}
+    stack_slug = agent_stack_slug(stack_slug, profile)
     # Reproducibility seed for the run, not a crypto value.
     seed = experiment_seed if experiment_seed is not None else random.randint(0, 2_147_483_647)  # noqa: S311
     run = resolve_agent_run(
@@ -421,14 +442,34 @@ def build_agent_snapshot(
     agent_config = run["agent"]
     section = run["harness_section"]
 
-    app_dict = app_requirement_to_dict(app_requirement) if app_requirement else None
-    brief_text = brief_mod.render_brief(
-        app=app_dict,
-        description=description,
-        stack_slug=stack_slug,
-        stack_config=run["stack_config"],
-        agent_config=agent_config,
-    )
+    if pins.get("app_requirement") is not None:
+        app_dict = json.loads(json.dumps(pins["app_requirement"]))
+    else:
+        app_dict = app_requirement_to_dict(app_requirement) if app_requirement else None
+    stack_entry = pins.get("stack") or stack_snapshot_entry(stack_slug)
+    if pins.get("brief"):
+        brief = json.loads(json.dumps(pins["brief"]))
+    else:
+        stack_config = run["stack_config"]
+        if pins.get("stack"):
+            # The brief states the pinned version's contract, not the latest one's.
+            row = get_stack_row(stack_entry["slug"], version=stack_entry["version"])
+            if row is not None:
+                stack_config = _row_config(row)
+        brief_text = brief_mod.render_brief(
+            app=app_dict,
+            description=description,
+            stack_slug=stack_slug,
+            stack_config=stack_config,
+            agent_config=agent_config,
+        )
+        brief = {
+            "version": brief_mod.BRIEF_VERSION,
+            "contract_version": contract_mod.CONTRACT_VERSION,
+            "text": brief_text,
+            "sha256": brief_mod.sha256_text(brief_text),
+            "protected_files": list(brief_mod.PROTECTED_FILES),
+        }
     plan = harness_image_plan(harness.image, harness.build_args(section["version"]))
     endpoint = endpoint_section(model)
     images = {
@@ -463,18 +504,14 @@ def build_agent_snapshot(
         # Already rendered into the harness section; kept as provenance.
         "harness_options": run["harness_options"],
         "images": images,
-        "brief": {
-            "version": brief_mod.BRIEF_VERSION,
-            "contract_version": contract_mod.CONTRACT_VERSION,
-            "text": brief_text,
-            "sha256": brief_mod.sha256_text(brief_text),
-            "protected_files": list(brief_mod.PROTECTED_FILES),
-        },
+        "brief": brief,
         "contract": contract_mod.describe(app_dict),
         "presets": {kind: (presets or {}).get(kind) for kind in PRESET_KINDS},
     }
-    if stack_entry := stack_snapshot_entry(stack_slug):
+    if stack_entry:
         snapshot["stack"] = stack_entry
+    if pins.get("record"):
+        snapshot["library_pin"] = pins["record"]
     if endpoint:
         snapshot["endpoint"] = endpoint
     snapshot["prompt_hash"] = agent_prompt_hash(snapshot)
@@ -510,6 +547,11 @@ def _fingerprint_inputs(snapshot: dict[str, Any]) -> dict[str, Any]:
         "stack_content_hash": (snapshot.get("stack") or {}).get("content_hash"),
         "scaffolding_slug": snapshot["scaffolding_slug"],
     }
+    # The spec content behind the brief (the brief hash covers what the agent
+    # reads; this also covers what only the evaluation reads). Absent from
+    # app dicts frozen before it existed, so their fingerprints stay stable.
+    if app_hash := (snapshot.get("app_requirement") or {}).get("content_hash"):
+        inputs["app_content_hash"] = app_hash
     # Local models only: which weights on which server flavour (absent for OpenRouter).
     if src := llm_source(snapshot):
         inputs["llm_source"] = src
@@ -564,8 +606,16 @@ def presets_provenance(job: GenerationJob) -> dict[str, Any]:
     }
 
 
-def apply_agent_snapshot_to_job(job: GenerationJob, *, save: bool = True) -> GenerationJob:
-    """Build the snapshot from the job's own fields and store it with its slicing keys."""
+def apply_agent_snapshot_to_job(
+    job: GenerationJob,
+    *,
+    save: bool = True,
+    pins: dict[str, Any] | None = None,
+) -> GenerationJob:
+    """Build the snapshot from the job's own fields and store it with its slicing keys.
+
+    *pins*: see :func:`build_agent_snapshot` (retries keep the original's spec and stack).
+    """
     snapshot = build_agent_snapshot(
         app_requirement=job.app_requirement,
         description=job.task_description,
@@ -578,6 +628,7 @@ def apply_agent_snapshot_to_job(job: GenerationJob, *, save: bool = True) -> Gen
         agent_overrides=job.agent_config or {},
         harness_options=job.harness_options or {},
         presets=presets_provenance(job),
+        pins=pins,
     )
     job.stack_slug = snapshot["scaffolding_slug"]
     job.experiment_seed = snapshot["seed"]

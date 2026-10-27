@@ -2,52 +2,115 @@
   "slug": "utility_base64_tool",
   "name": "Base64 Converter",
   "category": "Utility",
-  "description": "Encode and decode base64",
+  "description": "Encode text to base64 and decode it back, with a personal history for signed-in users",
   "difficulty": "basic",
-  "spec_schema_version": 2,
+  "spec_schema_version": 3,
   "backend_requirements": [
-    "Access control: allow public encode/decode; restrict saved history to authenticated users",
-    "1. POST /api/base64/encode - accept {text: string}, return {encoded: string}",
-    "2. POST /api/base64/decode - accept {encoded: string}, return {text: string}",
-    "3. Handle decode errors for invalid base64",
-    "4. Support UTF-8 encoding",
-    "5. Store each conversion in SQLite (Conversion) with direction, input_preview, output_preview, created_at, is_active"
+    "Access control: anyone may encode and decode without saving; require auth for saving conversions and for reading or deleting the conversion history; restrict each user's history to that user; admin endpoints are restricted to the admin account",
+    "Encoding takes the text as UTF-8 and produces standard base64 with padding; text may be empty and is at most 100000 characters",
+    "Decoding ignores surrounding whitespace and line breaks and accepts missing padding; input that is not valid base64, or that decodes to bytes that are not valid UTF-8, answers 400; encoded input is at most 140000 characters",
+    "POST /api/base64/encode and POST /api/base64/decode convert without storing anything",
+    "POST /api/conversions converts like the endpoints above (direction encode or decode) and also saves the conversion to the signed-in user's history, storing only the first 200 characters of the input and of the output; it returns the full output",
+    "GET /api/conversions returns the signed-in user's active conversions newest first; ?page= and ?page_size= page the result (page_size default 20, at most 100), and total counts all of them",
+    "DELETE /api/conversions/:id removes one of the signed-in user's conversions permanently",
+    "Deactivated conversions (is_active false) are left out of the owner's history; the admin overview still lists them",
+    "Errors answer with a JSON object {\"detail\": \"<message>\"}: 400 for invalid input, 401 without a valid token, 403 for a non-admin on admin endpoints, 404 for unknown ids"
   ],
   "frontend_requirements": [
-    "Public guest tool view with CTA to sign in for saved history",
-    "1. Two textareas: input and output",
-    "2. 'Encode' button converts input to base64 in output",
-    "3. 'Decode' button converts base64 input to text in output",
-    "4. Swap button to switch input/output",
-    "5. Copy to clipboard button for output"
+    "Everyone can use the converter; signed-in users also get a 'Save to history' switch and a history panel, and visitors see a 'Sign in to keep a history' prompt in their place",
+    "Sign-in and registration forms that call /api/auth/login and /api/auth/register; keep the token for later requests, show the signed-in username and offer sign-out",
+    "Two text areas, input and output, with Encode and Decode buttons; with 'Save to history' on the conversion goes through /api/conversions, otherwise through /api/base64/encode or /api/base64/decode",
+    "Decode errors from the API appear next to the input, and the output is cleared",
+    "A swap button that moves the output into the input, and a copy button that copies the output to the clipboard and confirms it",
+    "History panel: the user's conversions with direction, input and output previews and time, previous/next paging, a delete control per entry, and selecting an entry loads its input preview into the input"
+  ],
+  "admin_requirements": [
+    "Admin overview: every saved conversion, active or not, with its user and total, active and inactive counts",
+    "Toggle a conversion's active status from the overview"
   ],
   "api_endpoints": [
     {
       "method": "POST",
+      "path": "/api/conversions",
+      "description": "Convert and save the conversion to the signed-in user's history",
+      "auth": "user",
+      "success_status": 201,
+      "request": {
+        "direction": "string (encode|decode)",
+        "input": "string"
+      },
+      "response": {
+        "id": 1,
+        "direction": "encode",
+        "input_preview": "Hello, world",
+        "output_preview": "SGVsbG8sIHdvcmxk",
+        "created_at": "2026-06-03T11:00:00Z",
+        "output": "SGVsbG8sIHdvcmxk"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversions",
+      "description": "The signed-in user's conversion history, newest first, paged",
+      "auth": "user",
+      "query": {
+        "page": "1-based page number (default 1)",
+        "page_size": "Conversions per page (default 20, at most 100)"
+      },
+      "request": null,
+      "response": {
+        "items": [
+          {
+            "id": 1,
+            "direction": "encode",
+            "input_preview": "Hello, world",
+            "output_preview": "SGVsbG8sIHdvcmxk",
+            "created_at": "2026-06-03T11:00:00Z"
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 20
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/conversions/:id",
+      "description": "Delete one of your saved conversions",
+      "auth": "user",
+      "success_status": 204,
+      "request": null,
+      "response": null
+    },
+    {
+      "method": "POST",
       "path": "/api/base64/encode",
-      "description": "Encode text to base64",
+      "description": "Encode UTF-8 text to base64 (not saved)",
+      "auth": "public",
       "request": {
         "text": "string"
       },
       "response": {
-        "encoded": "string (base64)"
+        "encoded": "SGVsbG8sIHdvcmxk"
       }
     },
     {
       "method": "POST",
       "path": "/api/base64/decode",
-      "description": "Decode base64 to text",
+      "description": "Decode base64 to UTF-8 text (not saved)",
+      "auth": "public",
       "request": {
         "encoded": "string (base64)"
       },
       "response": {
-        "text": "string"
+        "text": "Hello, world"
       }
     },
     {
       "method": "GET",
       "path": "/api/health",
-      "description": "Health check endpoint",
+      "description": "Health check",
+      "auth": "public",
       "request": null,
       "response": {
         "status": "healthy",
@@ -55,42 +118,54 @@
       }
     }
   ],
-  "data_model": {
-    "name": "Conversion",
-    "fields": {
-      "id": "integer (primary key, auto-increment)",
-      "direction": "string (required: 'encode' or 'decode')",
-      "input_preview": "text (required, first 200 chars)",
-      "output_preview": "text (required, first 200 chars)",
-      "created_at": "datetime (auto, ISO 8601 format in JSON)",
-      "is_active": "boolean (default: true, for soft delete)"
+  "data_models": [
+    {
+      "name": "Conversion",
+      "description": "One saved conversion in a user's history (previews only)",
+      "fields": {
+        "id": "integer (primary key, auto-increment)",
+        "user_id": "integer (references the signed-in user who saved it)",
+        "direction": "string (one of: encode, decode)",
+        "input_preview": "string (first 200 chars of the input)",
+        "output_preview": "string (first 200 chars of the output)",
+        "created_at": "datetime (auto, ISO 8601 in JSON)",
+        "is_active": "boolean (default true; false hides the conversion from its owner's history)"
+      }
     }
-  },
-  "admin_requirements": [
-    "1. Admin overview list with total/active/inactive counts",
-    "2. Toggle active status for any conversion"
   ],
   "admin_api_endpoints": [
     {
       "method": "GET",
       "path": "/api/admin/conversions",
-      "description": "Admin overview: list all conversions and counts",
+      "description": "Admin overview: every conversion with counts",
+      "auth": "admin",
       "request": null,
       "response": {
-        "items": [],
-        "total": 0,
-        "active": 0,
+        "items": [
+          {
+            "id": 1,
+            "direction": "encode",
+            "input_preview": "Hello, world",
+            "output_preview": "SGVsbG8sIHdvcmxk",
+            "created_at": "2026-06-03T11:00:00Z",
+            "username": "lee",
+            "is_active": true
+          }
+        ],
+        "total": 1,
+        "active": 1,
         "inactive": 0
       }
     },
     {
       "method": "POST",
       "path": "/api/admin/conversions/:id/toggle",
-      "description": "Toggle conversion active status",
+      "description": "Flip a conversion's active status",
+      "auth": "admin",
       "request": null,
       "response": {
         "id": 1,
-        "is_active": true
+        "is_active": false
       }
     }
   ]

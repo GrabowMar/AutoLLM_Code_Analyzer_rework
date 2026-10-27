@@ -1,5 +1,5 @@
 app_slug: crud_todo_list
-name: Todo list (standard bundle)
-description: CRUD todo app using the default comprehensive scaffolding bundle
+name: Todo List (standard profile)
+description: Private per-user todo list on the standard scaffolding profile with no extra blocks
 base_profile_slug: system-scaffolding-standard
 extra_block_refs: []
