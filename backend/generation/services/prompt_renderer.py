@@ -74,7 +74,7 @@ def templates_state_contract(prompt_templates: dict[str, Any] | None) -> bool:
     the job was actually given.
     """
     stage = (prompt_templates or {}).get("backend") or {}
-    env = jinja2.Environment(autoescape=False)
+    env = jinja2.Environment(autoescape=jinja2.select_autoescape(enabled_extensions=(), default_for_string=False))
     for role in ("system", "user"):
         source = stage.get(role) or ""
         if not source:
@@ -92,7 +92,8 @@ class PromptRenderer:
 
     def __init__(self) -> None:
         self.env = jinja2.Environment(
-            autoescape=False,
+            # Prompts are Markdown, not HTML: never escape.
+            autoescape=jinja2.select_autoescape(enabled_extensions=(), default_for_string=False),
             undefined=jinja2.StrictUndefined,
         )
 

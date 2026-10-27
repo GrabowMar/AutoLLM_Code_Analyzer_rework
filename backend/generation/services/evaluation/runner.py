@@ -194,7 +194,7 @@ class Evaluation:
         app = self.client.containers.create(
             self.image_tag,
             name=f"llmlab-eval-app-{self.short}",
-            environment={contract_mod.ADMIN_PASSWORD_ENV: admin_password},
+            environment={contract_mod.ADMIN_PW_ENV: admin_password},
             network=self.network.name,
             labels=self.labels,
             mem_limit=APP_MEM_LIMIT,

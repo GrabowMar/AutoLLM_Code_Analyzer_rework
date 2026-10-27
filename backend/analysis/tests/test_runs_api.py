@@ -202,7 +202,8 @@ def test_rerun_with_everything_measured_is_refused(api_client, user, no_dispatch
 def test_active_runs_are_not_deleted(api_client, user):
     running = AnalysisRunFactory(created_by=user, status="running")
     done = AnalysisRunFactory(created_by=user, status="completed")
-    assert api_client.delete(f"/api/analysis/runs/{running.id}/").status_code == 409
+    response = api_client.delete(f"/api/analysis/runs/{running.id}/")
+    assert response.status_code == 409
 
     body = _post(api_client, "/runs/bulk/", {"action": "delete", "ids": [str(running.id), str(done.id)]}).json()
     assert body == {"affected": 1, "skipped": 1}
