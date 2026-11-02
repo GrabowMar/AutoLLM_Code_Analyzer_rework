@@ -15,18 +15,22 @@
 	import type { LLMModelDetail, LLMModelSummary, ModelInsights } from '$lib/api/client';
 	import ModelComparisonChart from './ModelComparisonChart.svelte';
 	import PercentileMeter from './PercentileMeter.svelte';
+	import ModelHfEcosystem from './ModelHfEcosystem.svelte';
+	import InheritedNote from './InheritedNote.svelte';
 	import {
 		compactNumber,
+		fmtActiveParams,
 		fmtCI,
 		fmtParams,
 		fmtRate,
+		fmtSpaces,
 		formatPrice,
 		formatTokens,
 		getArchitecture,
 		getCaps,
-		getHuggingFace,
-		getModelsDev,
 		isoDay,
+		knownTokenLimit,
+		metadataView,
 		stripMarkdown,
 	} from './helpers';
 
@@ -44,9 +48,12 @@
 
 	const caps = $derived(getCaps(model));
 	const arch = $derived(getArchitecture(model));
-	const md = $derived(getModelsDev(model));
-	const hf = $derived(getHuggingFace(model));
-	const hfId = $derived((caps.hugging_face_id as string | undefined) || hf?.id || '');
+	// A local endpoint model shows its catalog twin's external metadata (flagged as inherited).
+	const view = $derived(metadataView(model));
+	const md = $derived(view.md);
+	const hf = $derived(view.hf);
+	const params = $derived(view.params);
+	const hfId = $derived((view.caps.hugging_face_id as string | undefined) || hf?.id || '');
 	const expiration = $derived(isoDay(caps.expiration_date));
 	const aliasTarget = $derived((caps.alias_target as string | undefined) || '');
 	const topProvider = $derived((caps.top_provider || {}) as Record<string, unknown>);
@@ -54,6 +61,9 @@
 	const outputMods = $derived((arch.output_modalities as string[] | undefined) ?? md?.modalities?.output ?? []);
 	const released = $derived(md?.release_date || isoDay(caps.created));
 	const knowledge = $derived(md?.knowledge || isoDay(caps.knowledge_cutoff));
+	// 0 = not reported (local endpoint models): shown as "—", never compared with the catalog.
+	const contextWindow = $derived(knownTokenLimit(model.context_window));
+	const maxOutput = $derived(knownTokenLimit(model.max_output_tokens));
 
 	interface Fact {
 		label: string;
@@ -61,6 +71,8 @@
 		mono?: boolean;
 		href?: string;
 		title?: string;
+		/** Unknown value: the "—" renders muted. */
+		muted?: boolean;
 	}
 
 	const facts = $derived.by<Fact[]>(() => {
@@ -71,18 +83,27 @@
 			released ? { label: 'Released', value: released, mono: true, title: md?.release_date ? 'models.dev' : 'Added to OpenRouter' } : null,
 			knowledge ? { label: 'Knowledge cutoff', value: knowledge, mono: true } : null,
 			md?.last_updated ? { label: 'Last updated', value: md.last_updated, mono: true } : null,
-			md?.open_weights != null || hfId
-				? { label: 'Weights', value: hfId ? `Open · ${hfId}` : md?.open_weights ? 'Open' : 'Closed (API only)', mono: !!hfId, href: hfId ? `https://huggingface.co/${hfId}` : undefined }
-				: null,
+			md?.open_weights != null || hfId ? weightsFact() : null,
 			hf?.license ? { label: 'License', value: hf.license_name || hf.license, mono: true } : null,
-			hf?.parameters ? { label: 'Parameters', value: fmtParams(hf.parameters), mono: true, title: Object.entries(hf.parameters_by_dtype).map(([k, v]) => `${k}: ${fmtParams(v)}`).join(', ') } : null,
+			hf?.parameters
+				? {
+						label: 'Checkpoint parameters',
+						value: fmtParams(hf.parameters),
+						mono: true,
+						title: `Every tensor stored in the repo (safetensors count). ${Object.entries(hf.parameters_by_dtype).map(([k, v]) => `${k}: ${fmtParams(v)}`).join(', ')}`,
+					}
+				: null,
+			params?.reported_total ? { label: 'Reported total', value: fmtParams(params.reported_total), mono: true, title: params.active_note ?? undefined } : null,
+			params ? { label: 'Active parameters', value: fmtActiveParams(params), mono: true, title: params.active_note ?? 'Unknown: no curated figure, name pattern or covered architecture' } : null,
 			hf?.architectures.length ? { label: 'Architecture', value: hf.architectures.join(', '), mono: true } : null,
 			hf?.base_models.length ? { label: 'Base model', value: hf.base_models.join(', '), mono: true } : null,
 			{ label: 'Modalities', value: `${inputMods.join(', ') || 'text'} → ${outputMods.join(', ') || 'text'}` },
 			arch.tokenizer ? { label: 'Tokenizer', value: String(arch.tokenizer), mono: true } : null,
 			arch.instruct_type ? { label: 'Instruct format', value: String(arch.instruct_type), mono: true } : null,
-			{ label: 'Context', value: `${model.context_window.toLocaleString()} tokens` },
-			model.max_output_tokens ? { label: 'Max output', value: `${model.max_output_tokens.toLocaleString()} tokens` } : null,
+			contextWindow != null
+				? { label: 'Context', value: `${contextWindow.toLocaleString()} tokens` }
+				: { label: 'Context', value: '—', muted: true, title: 'Context window not reported by the source' },
+			maxOutput != null ? { label: 'Max output', value: `${maxOutput.toLocaleString()} tokens` } : null,
 			{ label: 'Moderation', value: topProvider.is_moderated ? 'Moderated by the provider' : 'Unmoderated' },
 			model.quantization ? { label: 'Quantization', value: model.quantization, mono: true } : null,
 			model.parameter_size ? { label: 'Size', value: model.parameter_size, mono: true } : null,
@@ -90,6 +111,21 @@
 		];
 		return rows.filter((r): r is Fact => r !== null);
 	});
+
+	/** Open only when models.dev does not say otherwise: OpenRouter links some API models to an open sibling repo. */
+	function weightsFact(): Fact {
+		if (hfId && md?.open_weights === false) {
+			return {
+				label: 'Weights',
+				value: `Closed (API model) · linked repo ${hfId} may differ`,
+				mono: true,
+				href: `https://huggingface.co/${hfId}`,
+				title: 'models.dev lists this model as closed-weights; OpenRouter links an open repo (often a sibling release)',
+			};
+		}
+		if (hfId) return { label: 'Weights', value: `Open · ${hfId}`, mono: true, href: `https://huggingface.co/${hfId}` };
+		return { label: 'Weights', value: md?.open_weights ? 'Open' : 'Closed (API only)' };
+	}
 
 	const gen = $derived(insights?.generation);
 	const pos = $derived(insights?.ranking?.positions);
@@ -146,8 +182,9 @@
 					{#if hf}
 						<p class="header-stats">
 							<span class="header-stat"><b>{compactNumber(hf.downloads)}</b> downloads / 30 d</span>
+							{#if hf.downloads_all_time != null}<span class="header-stat"><b>{compactNumber(hf.downloads_all_time)}</b> all-time</span>{/if}
 							<span class="header-stat"><b>{compactNumber(hf.likes)}</b> likes</span>
-							{#if hf.spaces_count}<span class="header-stat"><b>{compactNumber(hf.spaces_count)}</b> Spaces</span>{/if}
+							{#if hf.spaces_count}<span class="header-stat" title={hf.spaces_count_capped ? 'The Hub lists at most 100 Spaces' : undefined}><b>{fmtSpaces(hf)}</b> Spaces</span>{/if}
 							{#if hf.gated}<Badge variant="outline" class="h-5 px-1.5 text-[11px]">Gated</Badge>{/if}
 						</p>
 					{/if}
@@ -157,14 +194,15 @@
 			<Card.Root>
 				<Card.Header class="pb-0">
 					<Card.Title class="text-base">Model card</Card.Title>
-					<Card.Description class="text-xs">OpenRouter catalog{md ? ', models.dev' : ''}{hf ? ', Hugging Face Hub' : ''}</Card.Description>
+					<Card.Description class="text-xs">{model.is_local ? 'Endpoint inventory' : 'OpenRouter catalog'}{md ? ', models.dev' : ''}{hf ? ', Hugging Face Hub' : ''}</Card.Description>
+					<InheritedNote from={view.inheritedFrom} slug={view.inheritedSlug} source={view.twin?.link.source ?? null} />
 				</Card.Header>
 				<Card.Content>
 					<dl class="grid gap-x-6 gap-y-2.5 text-sm sm:grid-cols-2">
 						{#each facts as fact (fact.label)}
 							<div class="grid min-w-0 grid-cols-[7.5rem_minmax(0,1fr)] gap-2" title={fact.title}>
 								<dt class="text-muted-foreground">{fact.label}</dt>
-								<dd class="min-w-0 break-words {fact.mono ? 'font-mono text-xs leading-5' : ''}">
+								<dd class="min-w-0 break-words {fact.mono ? 'font-mono text-xs leading-5' : ''} {fact.muted ? 'text-muted-foreground' : ''}">
 									{#if fact.href}
 										<a href={fact.href} target={fact.href.startsWith('http') ? '_blank' : undefined} rel="noopener noreferrer" class="text-primary hover:underline">{fact.value}</a>
 									{:else}{fact.value}{/if}
@@ -174,6 +212,10 @@
 					</dl>
 				</Card.Content>
 			</Card.Root>
+
+			{#if hf}
+				<ModelHfEcosystem {hf} inheritedFrom={view.inheritedFrom} inheritedSlug={view.inheritedSlug} />
+			{/if}
 		</div>
 
 		<div class="min-w-0 space-y-4">
@@ -245,16 +287,23 @@
 								hint={percentileHint(cat.output_price.percentile, cat.output_price.n, 'Pricier than', 'Cheaper than')}
 							/>
 						{/if}
-						<PercentileMeter
-							label="Context window"
-							value={formatTokens(model.context_window)}
-							percentile={cat.context_window.percentile}
-							hint={percentileHint(cat.context_window.percentile, cat.context_window.n, 'Larger than', 'Smaller than')}
-						/>
-						{#if model.max_output_tokens}
+						{#if contextWindow != null}
+							<PercentileMeter
+								label="Context window"
+								value={formatTokens(contextWindow)}
+								percentile={cat.context_window.percentile}
+								hint={percentileHint(cat.context_window.percentile, cat.context_window.n, 'Larger than', 'Smaller than')}
+							/>
+						{:else}
+							<div class="flex items-baseline justify-between gap-3" title="Context window not reported by the source; not placed in the catalog">
+								<span class="text-xs text-muted-foreground">Context window</span>
+								<span class="font-mono text-sm text-muted-foreground">—</span>
+							</div>
+						{/if}
+						{#if maxOutput != null}
 							<PercentileMeter
 								label="Max output"
-								value={formatTokens(model.max_output_tokens)}
+								value={formatTokens(maxOutput)}
 								percentile={cat.max_output_tokens.percentile}
 								hint={percentileHint(cat.max_output_tokens.percentile, cat.max_output_tokens.n, 'Longer than', 'Shorter than')}
 							/>

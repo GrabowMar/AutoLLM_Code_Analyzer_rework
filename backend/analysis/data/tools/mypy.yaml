@@ -19,7 +19,9 @@ uninstall_cmd: "pip uninstall -y mypy"
 # --cache-dir: keep the cache out of /work, where detect-secrets/jscpd would scan it.
 # --explicit-package-bases from the app root: multi-module apps (routers/admin.py)
 # otherwise abort with "source file found twice under different module names".
-run_cmd: "cd {target} && mypy . --explicit-package-bases --cache-dir /tmp/mypy-cache --no-error-summary --no-color-output --show-error-codes --ignore-missing-imports --no-pretty"
+# --config-file= (empty): a mypy.ini/setup.cfg/pyproject.toml the app ships must
+# not change what is measured for that app only (like ESLint's --no-eslintrc).
+run_cmd: "cd {target} && mypy . --config-file= --explicit-package-bases --cache-dir /tmp/mypy-cache --no-error-summary --no-color-output --show-error-codes --ignore-missing-imports --no-pretty"
 parser_key: mypy
 file_patterns: ["*.py"]
 run_timeout: 180

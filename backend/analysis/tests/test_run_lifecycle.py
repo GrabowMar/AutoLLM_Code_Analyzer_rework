@@ -9,6 +9,7 @@ import pytest
 from django.utils import timezone
 
 from backend.analysis.models import AnalysisRun
+from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import ToolResult
 from backend.analysis.services import runner
 from backend.analysis.tests.factories import AnalysisRunFactory
@@ -173,3 +174,49 @@ def test_failed_preparation_drops_the_phase(monkeypatch, user, events):
     assert run.error_message == "workspace down"
     assert "phase" not in run.summary
     assert run.duration_seconds is not None
+
+
+def test_a_crashing_tool_streams_its_failure_and_the_run_goes_on(monkeypatch, user, events):
+    run = _run_with_tools(monkeypatch, user, ruff_output=RUFF_OUTPUT)
+    # The second tool applies too this time.
+    AnalyzerTool.objects.filter(slug="fixture-html").update(file_patterns=["*.py"])
+    real = runner._run_container_tool
+
+    def flaky(tool, *args, **kwargs):
+        if tool.slug == "fixture-ruff":
+            msg = "unexpected report"
+            raise ValueError(msg)
+        return real(tool, *args, **kwargs)
+
+    monkeypatch.setattr(runner, "_run_container_tool", flaky)
+    runner.execute(run)
+    run.refresh_from_db()
+
+    results = [(e["result"]["tool_slug"], e["result"]["status"]) for _, e in events if e["type"] == "result"]
+    assert results == [
+        ("fixture-ruff", "running"),
+        ("fixture-ruff", "failed"),
+        ("fixture-html", "running"),
+        ("fixture-html", "completed"),
+    ]
+    assert run.status == AnalysisRun.Status.PARTIAL
+    assert not run.results.filter(status__in=["pending", "running"]).exists()
+
+
+def test_an_error_outside_the_tools_leaves_no_result_running(monkeypatch, user, events):
+    run = _run_with_tools(monkeypatch, user, ruff_output=RUFF_OUTPUT)
+    published = []
+
+    def publish_then_break(result):
+        published.append(result.status)
+        if len(published) == 1:  # right after the first tool's "running" result was created
+            msg = "broker down"
+            raise RuntimeError(msg)
+
+    monkeypatch.setattr(runner, "_publish_result", publish_then_break)
+    # The caller (runner._execute, the experiment post-run) fails the run itself.
+    with pytest.raises(RuntimeError, match="broker down"):
+        runner.execute(run)
+    result = run.results.get()
+    assert result.status == ToolResult.Status.FAILED
+    assert result.error_message == "Internal error during analysis"

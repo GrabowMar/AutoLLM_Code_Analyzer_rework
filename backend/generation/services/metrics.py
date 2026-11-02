@@ -56,3 +56,48 @@ class JobMetrics(BaseModel):
     def dump(self) -> dict:
         """Serialize for the JSONField, dropping unset optional fields."""
         return self.model_dump(exclude_none=True)
+
+
+def _count(value: object) -> int | None:
+    """A token count from a response, or ``None`` when absent or not a number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value)
+
+
+def served_summary(calls: list[tuple[str, dict | None]]) -> dict:
+    """Template-mode served summary in agent mode's :class:`JobMetrics` keys.
+
+    ``calls`` is every LLM call of the job as ``(stage, response)`` --
+    ``response`` is ``None`` for a call that failed. Returns ``llm_calls``
+    (all calls), ``providers`` (``{response.provider: successful calls}``) and
+    ``reasoning_tokens`` / ``cached_tokens`` summed over the same calls as the
+    job's token totals (every stage but ``*_repair``). A key is ``None`` when
+    no response reported it (unknown, not 0), so ``dump()`` leaves it out.
+    """
+    providers: dict[str, int] = {}
+    reasoning: int | None = None
+    cached: int | None = None
+    for stage, response in calls:
+        if not isinstance(response, dict):
+            continue
+        provider = str(response.get("provider") or "unknown")
+        providers[provider] = providers.get(provider, 0) + 1
+        if stage.endswith("_repair"):
+            continue
+        usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
+        completion_details = usage.get("completion_tokens_details")
+        if (
+            isinstance(completion_details, dict)
+            and (n := _count(completion_details.get("reasoning_tokens"))) is not None
+        ):
+            reasoning = (reasoning or 0) + n
+        prompt_details = usage.get("prompt_tokens_details")
+        if isinstance(prompt_details, dict) and (n := _count(prompt_details.get("cached_tokens"))) is not None:
+            cached = (cached or 0) + n
+    return {
+        "llm_calls": len(calls) or None,
+        "providers": providers or None,
+        "reasoning_tokens": reasoning,
+        "cached_tokens": cached,
+    }

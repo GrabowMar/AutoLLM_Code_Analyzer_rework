@@ -18,6 +18,7 @@ You pick an app spec and a set of models, from OpenRouter or from your own Ollam
 | [Architecture](/docs/ARCHITECTURE) | How the pieces fit: apps, auth, where work runs, the Docker sandbox |
 | [Generation process](/docs/GENERATION_PROCESS) | Agent and template modes, harnesses, run presets, grading, healing, identity keys, the job lifecycle |
 | [Experiments](/docs/EXPERIMENTS) | Designed runs: conditions, comparability, launch, monitor, results, schedules, post-run, export |
+| [Human evaluation](/docs/HUMAN_EVALUATION) | Manual testing studies: task design, participants and the evaluation portal, hosting apps for testers, blinded results, exports |
 | [Execution](/docs/EXECUTION) | The executor: leases, pools and lanes, fair-share ordering, blocked reasons, capacity settings, drain |
 | [Analysis pipeline](/docs/ANALYSIS_PIPELINE) | Analyzer workspaces, tool execution, result statuses, the AI reviewer, measurement rules |
 | [Background services](/docs/BACKGROUND_SERVICES) | Executor, web-process threads, Celery, and the SSE event stream |

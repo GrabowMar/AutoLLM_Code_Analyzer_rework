@@ -44,7 +44,7 @@ def install(workspace: AnalyzerWorkspace, tool: AnalyzerTool, *, update: bool = 
 
     if tool.kind == "ai" or not tool.install_cmd:
         installed.status = InstalledTool.Status.INSTALLED
-        installed.installed_version = tool.version or ""
+        installed.installed_version = _preinstalled_version(workspace, tool)
         installed.catalog_version = tool.version or ""
         installed.install_log = "No container install required."
         installed.save(
@@ -99,13 +99,74 @@ def install_many(workspace: AnalyzerWorkspace, tools: list[AnalyzerTool], *, upd
             ).update(status=InstalledTool.Status.FAILED, install_log="Unexpected error during install.")
 
 
+def _preinstalled_version(workspace: AnalyzerWorkspace, tool: AnalyzerTool) -> str:
+    """The build of a container tool that ships with the image (no install command, e.g. npm audit).
+
+    Recorded from its verify command when the workspace is running, so results
+    name the build that produced them; else the catalog pin. Never provisions.
+    """
+    if tool.kind == "ai" or not tool.verify_cmd or workspace.container is None:
+        return tool.version or ""
+    try:
+        if not workspace_service.is_running(workspace):
+            return tool.version or ""
+        return _detect_version(workspace.container.name, tool)
+    except Exception:  # noqa: BLE001 - version detection is best effort
+        logger.warning("Could not detect the version of %s", tool.slug, exc_info=True)
+        return tool.version or ""
+
+
 def _detect_version(container_name: str, tool: AnalyzerTool) -> str:
+    """The installed build as the verify command prints it.
+
+    The first line naming a version (one with a digit): some tools print a
+    banner first ("ShellCheck - shell script analysis tool" / "version: 0.10.0").
+    """
     if not tool.verify_cmd:
         return tool.version or ""
     result = docker_manager.exec_in(container_name, tool.verify_cmd, timeout_s=30)
-    if result.get("exit_code") == 0:
-        return (result.get("output") or "").strip().splitlines()[0][:100] if result.get("output") else ""
-    return tool.version or ""
+    if result.get("exit_code") != 0:
+        return tool.version or ""
+    return _version_line(result.get("output") or "")
+
+
+def _version_line(output: str) -> str:
+    """The first output line with a digit (the version), else the first line; "" for no output."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return next((line for line in lines if any(c.isdigit() for c in line)), lines[0])[:100]
+
+
+def redetect_versions(workspace: AnalyzerWorkspace) -> dict[str, tuple[str, str]]:
+    """Record again, from its verify command, the build of every installed container tool.
+
+    Installs recorded before the version detection skipped banner lines keep
+    the banner (shellcheck), a host tool's version (perflint) or the catalog
+    pin (npm audit) as their version, and every result names that version
+    until the tool is reinstalled. Run this once before re-analysing instead.
+    Needs the workspace container running (never provisions it). A tool whose
+    verify command fails keeps its recorded version. Returns
+    ``{slug: (old, new)}`` for the versions that changed.
+    """
+    if workspace.container is None or not workspace_service.is_running(workspace):
+        msg = "The analyzer workspace is not running; start it first."
+        raise RuntimeError(msg)
+    container_name = workspace.container.name
+    changed: dict[str, tuple[str, str]] = {}
+    installed = workspace.installed_tools.select_related("tool").filter(status=InstalledTool.Status.INSTALLED)
+    with _lock_for(workspace):
+        for it in installed:
+            tool = it.tool
+            if tool.kind == "ai" or not tool.verify_cmd:
+                continue
+            result = docker_manager.exec_in(container_name, tool.verify_cmd, timeout_s=30)
+            version = _version_line(result.get("output") or "") if result.get("exit_code") == 0 else ""
+            if version and version != it.installed_version:
+                changed[tool.slug] = (it.installed_version, version)
+                it.installed_version = version
+                it.save(update_fields=["installed_version", "updated_at"])
+    return changed
 
 
 def uninstall(workspace: AnalyzerWorkspace, tool: AnalyzerTool) -> str:

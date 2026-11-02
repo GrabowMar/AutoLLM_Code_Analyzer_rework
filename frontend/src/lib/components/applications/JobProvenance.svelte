@@ -15,6 +15,7 @@
 	import { harnessOptionChips, summarizeBudget, summarizeLLMParams } from '$lib/components/generator';
 	import { batchHref } from '$lib/components/generator/batches';
 	import SectionHeading from '$lib/components/SectionHeading.svelte';
+	import GenerationInputs from './insights/GenerationInputs.svelte';
 	import { copyText } from './utils';
 	import Copy from '@lucide/svelte/icons/copy';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
@@ -200,6 +201,8 @@
 				<dd class="min-w-0">{@render hashValue(job.prompt_hash || null, 'Prompt hash')}</dd>
 			</div>
 		</dl>
+
+		<GenerationInputs {job} />
 
 		<div class="space-y-2 pt-1">
 			<SectionHeading size="sm" level={3} title="Reproduce" />

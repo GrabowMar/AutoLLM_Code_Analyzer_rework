@@ -43,11 +43,14 @@ class TestExtractJsonArray:
 
 @pytest.mark.django_db
 class TestRun:
-    def _run_with_response(self, content: str, finish_reason: str = "stop"):
-        tool = AnalyzerToolFactory(slug="llm_review", kind="ai", parser_key="")
+    def _run_with_response(self, content: str | None, finish_reason: str = "stop"):
         response = {
             "choices": [{"message": {"content": content}, "finish_reason": finish_reason}],
         }
+        return self._run_with_raw(response)
+
+    def _run_with_raw(self, response, code=None):
+        tool = AnalyzerToolFactory(slug="llm_review", kind="ai", parser_key="")
         with (
             mock.patch.object(ai_runner, "DEFAULT_MODEL", "test/model"),
             mock.patch(
@@ -59,7 +62,7 @@ class TestRun:
                 return_value=response,
             ),
         ):
-            return ai_runner.run(tool, {"backend": "print('x')"}, {}, None)
+            return ai_runner.run(tool, code or {"backend": "print('x')"}, {}, None)
 
     def test_valid_review_produces_findings(self) -> None:
         output = self._run_with_response('[{"severity": "high", "title": "Bug"}]')
@@ -88,6 +91,47 @@ class TestRun:
         assert not output.has_error
         assert len(output.findings) == 1
         assert output.summary["truncated"] is True
+        # Visibly incomplete: the UI shows warnings, not summary.truncated.
+        assert any("truncated" in w for w in output.warnings)
+
+    def test_null_content_is_an_error_not_a_crash_or_a_clean_review(self) -> None:
+        output = self._run_with_response(None, finish_reason="length")
+        assert output.has_error
+        assert "no content" in output.error
+        assert "length" in output.error
+        assert output.findings == []
+
+    def test_empty_content_is_an_error(self) -> None:
+        output = self._run_with_response("", finish_reason="stop")
+        assert output.has_error
+        assert "no content" in output.error
+
+    def test_error_body_without_choices_is_an_error(self) -> None:
+        output = self._run_with_raw({"error": {"message": "Provider returned error", "code": 502}})
+        assert output.has_error
+        assert "provider error: Provider returned error" in output.error
+
+    def test_array_without_finding_objects_is_an_error(self) -> None:
+        output = self._run_with_response('["looks fine", "no issues"]')
+        assert output.has_error
+        assert "no finding objects" in output.error
+
+    def test_no_file_fitting_the_budget_is_an_error_naming_the_files(self) -> None:
+        big = {"frontend/src/App.jsx": "x" * (ai_runner.MAX_CODE_CHARS + 1)}
+        output = self._run_with_raw({"choices": []}, code=big)
+        assert output.has_error
+        assert "frontend/src/App.jsx" in output.error
+        assert output.summary["files_not_reviewed"] == ["frontend/src/App.jsx"]
+
+
+def test_reviewable_files_leave_out_lockfiles_minified_and_empty_files():
+    code = {"app.py": "x", "pkg/__init__.py": "", "package-lock.json": "{}", "vendor.min.js": "x", "README.md": "r"}
+    assert sorted(ai_runner.reviewable_files(code)) == ["README.md", "app.py"]
+
+
+def test_prompt_fingerprint_is_stable():
+    assert ai_runner.prompt_fingerprint() == ai_runner.prompt_fingerprint()
+    assert len(ai_runner.prompt_fingerprint()) == 12
 
 
 def test_review_bundle_skips_lockfiles_and_puts_source_first(monkeypatch):

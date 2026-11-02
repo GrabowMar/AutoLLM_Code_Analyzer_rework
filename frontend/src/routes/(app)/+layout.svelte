@@ -7,12 +7,45 @@
 	import AppFooter from '$lib/components/AppFooter.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import { onMount } from 'svelte';
+	import { getMe } from '$lib/api/users';
+	import { onMount, untrack } from 'svelte';
 
 	let { children } = $props();
 	const auth = getAuth();
 	const prefs = getPreferences();
 	let loadingTooLong = $state(false);
+
+	// Restricted evaluator accounts only use the evaluation portal: check the
+	// role once per signed-in user and send evaluators to /eval without
+	// rendering the shell (its widgets call APIs evaluators may not use).
+	let roleCheckedFor = $state<string | null>(null);
+	let isEvaluator = $state(false);
+	let roleCheckingFor: string | null = null;
+	const userKey = $derived(auth.user?.email ?? '');
+	const roleKnown = $derived(auth.isAuthenticated && roleCheckedFor === userKey);
+	const waiting = $derived(auth.isLoading || (auth.isAuthenticated && (!roleKnown || isEvaluator)));
+
+	$effect(() => {
+		if (auth.isLoading || !auth.isAuthenticated) return;
+		const key = userKey;
+		untrack(() => {
+			if (roleCheckedFor === key || roleCheckingFor === key) return;
+			roleCheckingFor = key;
+			getMe()
+				.then((me) => {
+					if (roleCheckingFor !== key) return;
+					isEvaluator = me.is_evaluator === true;
+					roleCheckedFor = key;
+					if (isEvaluator) void goto('/eval', { replaceState: true });
+				})
+				.catch(() => {
+					if (roleCheckingFor !== key) return;
+					// Fail open to the researcher shell: the server still scopes evaluator accounts.
+					isEvaluator = false;
+					roleCheckedFor = key;
+				});
+		});
+	});
 
 	// Desktop sidebar widths — kept in sync with AppSidebar widths.
 	// Returns "0px" on mobile via media query (handled by responsive padding below).
@@ -20,7 +53,7 @@
 
 	onMount(() => {
 		const timer = setTimeout(() => {
-			if (auth.isLoading) {
+			if (waiting) {
 				loadingTooLong = true;
 			}
 		}, 5000);
@@ -38,7 +71,7 @@
 	});
 </script>
 
-{#if auth.isLoading}
+{#if waiting}
 	<div class="flex min-h-dvh items-center justify-center bg-background">
 		{#if loadingTooLong}
 			<div class="flex flex-col items-center gap-4 text-center">

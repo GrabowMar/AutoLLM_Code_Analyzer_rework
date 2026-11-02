@@ -54,6 +54,14 @@
 	const raw = $derived(detail?.raw_output ?? {});
 	const config = $derived(Object.entries((detail?.summary?.config ?? {}) as Record<string, unknown>));
 	const stdout = $derived(typeof raw.stdout === 'string' ? raw.stdout : '');
+	// Container results say when stdout was cut; older ones only show it by length.
+	const stdoutCut = $derived(raw.stdout_truncated === true || stdout.length >= 30000);
+	/** The instrument's fingerprints (command, parser, path patterns): equal hashes mean the same measurement. */
+	const fingerprints = $derived(
+		(['command_sha', 'parser_sha', 'patterns_sha'] as const)
+			.map((k) => [k.replace('_sha', ''), detail?.summary?.[k]] as const)
+			.filter((e): e is readonly [string, string] => typeof e[1] === 'string' && e[1] !== '')
+	);
 
 	async function copy(text: string) {
 		try {
@@ -101,6 +109,14 @@
 						<dt class="text-muted-foreground">Version</dt>
 						<dd class="font-mono">{detail.summary.tool_version}</dd>
 					{/if}
+					{#if fingerprints.length > 0}
+						<dt class="text-muted-foreground" title="Hashes of what defines the measurement: results with equal hashes were measured the same way">Fingerprint</dt>
+						<dd class="flex flex-wrap gap-1">
+							{#each fingerprints as [k, v] (k)}
+								<span class="rounded bg-muted px-1.5 py-px font-mono text-[11px]" title="{k} sha">{k} {v.slice(0, 12)}</span>
+							{/each}
+						</dd>
+					{/if}
 					{#if config.length > 0}
 						<dt class="text-muted-foreground">Options</dt>
 						<dd class="flex flex-wrap gap-1">
@@ -128,7 +144,7 @@
 
 				<div>
 					<div class="mb-1 flex items-center justify-between">
-						<p class="section-label">Output{stdout.length >= 30000 ? ' (first 30,000 characters)' : ''}</p>
+						<p class="section-label">Output{stdoutCut ? ' (cut off: the first 30,000 characters)' : ''}</p>
 						{#if stdout}<Button variant="ghost" size="sm" class="h-6 px-2 text-xs" onclick={() => copy(stdout)}><Copy class="size-3" />Copy</Button>{/if}
 					</div>
 					{#if stdout}

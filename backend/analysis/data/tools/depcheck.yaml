@@ -15,10 +15,12 @@ install_cmd: "npm install -g depcheck@1.4"
 verify_cmd: "depcheck --version"
 uninstall_cmd: "npm uninstall -g depcheck"
 # Build tooling referenced only from config files reads as unused; ignore it.
+# The same goes for test tooling wired up through the vitest config
+# (environment: "jsdom", setupFiles: ["@testing-library/jest-dom"]).
 run_cmd: |
   cd {target} && find . -name package.json -not -path '*/node_modules/*' | sort | while IFS= read -r f; do
     echo "### ${f#./}"
-    depcheck "$(dirname "$f")" --json --ignores='tailwindcss,postcss,autoprefixer,@types/*,eslint*,prettier*,typescript,@vitejs/*,vite' 2>/dev/null
+    depcheck "$(dirname "$f")" --json --ignores='tailwindcss,postcss,autoprefixer,@types/*,eslint*,prettier*,typescript,@vitejs/*,vite,vitest,@vitest/*,jsdom,happy-dom,@testing-library/*' 2>/dev/null
     echo
   done
 parser_key: depcheck

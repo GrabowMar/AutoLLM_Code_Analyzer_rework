@@ -7,6 +7,7 @@ import Wrench from '@lucide/svelte/icons/wrench';
 import CircleCheck from '@lucide/svelte/icons/circle-check';
 import type { GenerationJob } from '$lib/api/client';
 import { jobDisplayStatus, jobPhaseTones } from '$lib/components/generator/batches';
+import type { CodeProfile } from '$lib/api/job-insights';
 import {
 	fmt,
 	fmtDur,
@@ -20,10 +21,18 @@ interface Props {
 	job: GenerationJob;
 	provider: string;
 	codeFootprint: CodeFootprint | null;
+	/** Server-side code profile (source LOC as the study tables count it); null while loading. */
+	codeProfile?: CodeProfile | null;
+	profileLoading?: boolean;
 	fixesData: FixesData;
 }
 
-let { job, provider, codeFootprint, fixesData }: Props = $props();
+let { job, provider, codeFootprint, codeProfile = null, profileLoading = false, fixesData }: Props = $props();
+
+// Languages by source LOC (backend + frontend source; tests, lockfiles and scratch dirs apart).
+const sourceLangs = $derived((codeProfile?.languages ?? []).filter((l) => l.source_loc > 0));
+const sourceLangTotal = $derived(sourceLangs.reduce((n, l) => n + l.source_loc, 0) || 1);
+const sourceLoc = $derived(codeProfile?.loc.total_loc ?? null);
 
 // Fix counts only exist for the legacy copilot loop; other modes have nothing to show.
 const showFixes = $derived(job.mode === 'copilot');
@@ -57,43 +66,66 @@ const showFixes = $derived(job.mode === 'copilot');
 		</Card.Content>
 	</Card.Root>
 
-	<!-- Code footprint: totals + language share -->
+	<!-- Code footprint: source LOC (study denominator) + language share; all lines as a secondary reference -->
 	<Card.Root>
 		<Card.Header class="pb-0"><Card.Title class="text-base">Code footprint</Card.Title></Card.Header>
 		<Card.Content>
-			{#if codeFootprint && codeFootprint.totalLines > 0}
-				{@const langs = Object.entries(codeFootprint.languages).sort((x, y) => y[1] - x[1])}
-				{@const langTotal = langs.reduce((n, [, c]) => n + c, 0) || 1}
-				<div class="flex items-baseline gap-6">
-					<div>
-						<div class="font-mono text-2xl font-medium tabular-nums">{fmt(codeFootprint.totalLines, 0)}</div>
-						<div class="section-label">Lines</div>
+			{#if codeProfile && sourceLoc != null}
+				<div class="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+					<div title={codeProfile.definitions.source_loc}>
+						<div class="font-mono text-2xl font-medium tabular-nums">{fmt(sourceLoc, 0)}</div>
+						<div class="section-label">Source LOC</div>
 					</div>
 					<div>
-						<div class="font-mono text-2xl font-medium tabular-nums">{codeFootprint.fileCount}</div>
-						<div class="section-label">Files</div>
+						<div class="font-mono text-2xl font-medium tabular-nums">{codeProfile.loc.source_files ?? '—'}</div>
+						<div class="section-label">Source files</div>
+					</div>
+					<div title="Test code the model wrote, counted apart from source LOC">
+						<div class="font-mono text-2xl font-medium tabular-nums">{codeProfile.loc.test_loc == null ? '—' : fmt(codeProfile.loc.test_loc, 0)}</div>
+						<div class="section-label">Test LOC</div>
 					</div>
 				</div>
-				{#if langs.length}
-					<div class="mt-4 flex h-2 w-full gap-px overflow-hidden rounded-full bg-muted" role="img" aria-label="Lines by language: {langs.map(([l, c]) => `${l} ${c}`).join(', ')}">
-						{#each langs as [lang, count], i (lang)}
-							<span class="h-full" style:width="{(count / langTotal) * 100}%" style:background-color="var(--chart-{(i % 5) + 1})" title="{lang}: {count} lines"></span>
+				<p class="mt-1.5 text-[11px] text-muted-foreground" title={codeProfile.definitions.all_lines}>
+					All lines incl. lockfiles/scratch: <span class="font-mono tabular-nums">{fmt(codeProfile.all_lines, 0)}</span> in {codeProfile.all_files} files{#if codeProfile.all_lines_ratio && codeProfile.all_lines_ratio >= 1.5}&nbsp;({codeProfile.all_lines_ratio}× source){/if}
+				</p>
+				{#if sourceLangs.length}
+					<div class="mt-3 flex h-2 w-full gap-px overflow-hidden rounded-full bg-muted" role="img" aria-label="Source LOC by language: {sourceLangs.map((l) => `${l.language} ${l.source_loc}`).join(', ')}">
+						{#each sourceLangs as lang, i (lang.language)}
+							<span class="h-full" style:width="{(lang.source_loc / sourceLangTotal) * 100}%" style:background-color="var(--chart-{(i % 5) + 1})" title="{lang.language}: {lang.source_loc} source LOC"></span>
 						{/each}
 					</div>
 					<ul class="mt-2.5 space-y-1 text-xs">
-						{#each langs as [lang, count], i (lang)}
+						{#each sourceLangs as lang, i (lang.language)}
 							<li class="flex items-center gap-2">
 								<span class="size-2 shrink-0 rounded-sm" style:background-color="var(--chart-{(i % 5) + 1})" aria-hidden="true"></span>
-								<span class="text-foreground">{lang}</span>
-								<span class="ml-auto font-mono tabular-nums text-muted-foreground">{fmt(count, 0)}</span>
-								<span class="w-10 text-right font-mono tabular-nums text-muted-foreground">{Math.round((count / langTotal) * 100)}%</span>
+								<span class="text-foreground">{lang.language}</span>
+								<span class="text-muted-foreground">· {lang.files} {lang.files === 1 ? 'file' : 'files'}</span>
+								<span class="ml-auto font-mono tabular-nums text-muted-foreground">{fmt(lang.source_loc, 0)}</span>
+								<span class="w-10 text-right font-mono tabular-nums text-muted-foreground">{Math.round((lang.source_loc / sourceLangTotal) * 100)}%</span>
 							</li>
 						{/each}
 					</ul>
 				{/if}
-				{#if codeFootprint.truncated}
+				{#if codeFootprint?.truncated}
 					<p class="mt-2 text-xs text-warning-fg">Output truncated</p>
 				{/if}
+			{:else if codeProfile && codeProfile.all_lines != null}
+				<!-- No file map (one raw response): source LOC is unmeasured, not 0. -->
+				<div class="font-mono text-2xl font-medium tabular-nums">—</div>
+				<div class="section-label">Source LOC (not measured)</div>
+				<p class="mt-1.5 text-[11px] text-muted-foreground">
+					All lines: <span class="font-mono tabular-nums">{fmt(codeProfile.all_lines, 0)}</span>. {codeProfile.notes[0] ?? ''}
+				</p>
+			{:else if !codeProfile && profileLoading && codeFootprint && codeFootprint.totalLines > 0}
+				<div class="font-mono text-2xl font-medium tabular-nums text-muted-foreground">…</div>
+				<div class="section-label">Source LOC (loading)</div>
+				<p class="mt-1.5 text-[11px] text-muted-foreground">
+					All lines incl. lockfiles/scratch: <span class="font-mono tabular-nums">{fmt(codeFootprint.totalLines, 0)}</span> in {codeFootprint.fileCount} files
+				</p>
+			{:else if !codeProfile && codeFootprint && codeFootprint.totalLines > 0}
+				<div class="font-mono text-2xl font-medium tabular-nums">{fmt(codeFootprint.totalLines, 0)}</div>
+				<div class="section-label">All lines (incl. lockfiles/scratch)</div>
+				<p class="mt-1.5 text-[11px] text-muted-foreground">Source LOC could not be loaded; this is the raw line count of every stored file.</p>
 			{:else}
 				<p class="text-sm text-muted-foreground">No code generated</p>
 			{/if}

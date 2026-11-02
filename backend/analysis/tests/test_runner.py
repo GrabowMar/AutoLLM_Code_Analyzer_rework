@@ -5,6 +5,7 @@ import json
 import pytest
 
 from backend.analysis.models import AnalysisRun
+from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import Finding
 from backend.analysis.services import runner
 from backend.analysis.tests.factories import AnalysisRunFactory
@@ -530,3 +531,444 @@ def test_execute_records_a_heartbeat(monkeypatch, user):
     runner.execute(run)
     run.refresh_from_db()
     assert run.heartbeat_at is not None
+
+
+# --- robustness: one tool's crash, unsavable output -----------------------------
+
+
+def _stub_container(monkeypatch, exec_result):
+    monkeypatch.setattr(runner.workspace_service, "require_ready_container", lambda ws: "cname")
+    monkeypatch.setattr(runner.docker_manager, "copy_files_in", lambda *a, **k: {"status": "ok"})
+    monkeypatch.setattr(
+        runner.docker_manager,
+        "exec_in",
+        lambda name, cmd, **k: {"exit_code": 0, "output": ""} if cmd.startswith("find ") else exec_result,
+    )
+
+
+RUFF_ONE = json.dumps([{"code": "F401", "message": "unused", "filename": "/work/app.py", "location": {"row": 1}}])
+
+
+def test_a_crashing_tool_fails_alone_and_the_next_tool_still_runs(monkeypatch, user):
+    AnalyzerToolFactory(slug="fixture-ai", kind="ai", parser_key="")
+    AnalyzerToolFactory(slug="fixture-ruff", kind="container", parser_key="ruff", run_cmd="ruff {target}")
+    run = AnalysisRunFactory(
+        created_by=user,
+        workspace=AnalyzerWorkspaceFactory(user=user),
+        tool_slugs=["fixture-ai", "fixture-ruff"],
+        source_code={"app.py": "import os\n"},
+    )
+    _stub_container(monkeypatch, {"exit_code": 1, "output": RUFF_ONE})
+
+    def broken_review(*args, **kwargs):
+        # e.g. a provider response the client did not expect
+        msg = "'NoneType' object has no attribute 'strip'"
+        raise AttributeError(msg)
+
+    monkeypatch.setattr(runner.ai_runner, "run", broken_review)
+    runner.execute(run)
+    run.refresh_from_db()
+
+    results = {r.tool_slug: r for r in run.results.all()}
+    assert results["fixture-ai"].status == "failed"
+    assert results["fixture-ai"].error_message.startswith("Internal error: AttributeError")
+    assert results["fixture-ai"].duration_seconds is not None
+    assert results["fixture-ruff"].status == "completed"
+    assert run.status == AnalysisRun.Status.PARTIAL
+    assert (run.summary["tools_completed"], run.summary["tools_failed"]) == (1, 1)
+    assert run.summary["total_findings"] == 1
+
+
+def test_a_failed_save_leaves_no_findings_on_the_failed_result(monkeypatch, user):
+    run, result = _container_run(
+        monkeypatch,
+        user,
+        {"parser_key": "ruff", "run_cmd": "ruff {target}"},
+        {"exit_code": 1, "output": RUFF_ONE},
+    )
+    assert result.status == "completed"  # control: the same run without the crash
+
+    def boom(findings):
+        msg = "db hiccup"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(runner, "_reported_counts", boom)
+    rerun = AnalysisRunFactory(
+        created_by=user,
+        workspace=run.workspace,
+        tool_slugs=["fixture-tool"],
+        source_code={"app.py": "import os\n"},
+    )
+    runner.execute(rerun)
+    rerun.refresh_from_db()
+    failed = rerun.results.get()
+    assert failed.status == "failed"
+    assert "db hiccup" in failed.error_message
+    # Findings and status are written together: nothing half-stored.
+    assert failed.findings.count() == 0
+    assert rerun.status == AnalysisRun.Status.FAILED
+
+
+def test_nul_bytes_in_tool_output_are_stored_replaced(monkeypatch, user):
+    # A JSON "\u0000" escape becomes a real NUL once parsed; Postgres rejects it.
+    hit = {
+        "code": "S105",
+        "message": "SQLite format 3\u0000 exposed",
+        "filename": "/work/app.py",
+        "location": {"row": 1},
+    }
+    out = json.dumps([hit])
+    run, result = _container_run(
+        monkeypatch,
+        user,
+        {"parser_key": "ruff", "run_cmd": "ruff {target}"},
+        {"exit_code": 1, "output": out + "\x00"},
+    )
+    assert result.status == "completed"
+    finding = result.findings.get()
+    assert "\x00" not in finding.title + finding.description
+    assert "�" in finding.title + finding.description
+    assert "\x00" not in result.raw_output["stdout"]
+    assert run.status == AnalysisRun.Status.COMPLETED
+
+
+def test_scrub_replaces_nul_in_nested_values():
+    assert runner._scrub({"a\x00": ["x\x00y", {"k": "\x00"}], "n": 1}) == {
+        "a�": ["x�y", {"k": "�"}],
+        "n": 1,
+    }
+
+
+# --- exit codes ------------------------------------------------------------------
+
+
+def test_exit_127_without_a_shell_message_is_the_tools_own_error(monkeypatch, user):
+    # osv-scanner exits 127 for its own "general error"; with stderr discarded
+    # nothing says "not found", so do not claim the binary is missing.
+    _, result = _container_run(
+        monkeypatch,
+        user,
+        {"parser_key": "ruff", "run_cmd": "ruff {target} 2>/dev/null"},
+        {"exit_code": 127, "output": ""},
+    )
+    assert result.status == "failed"
+    assert result.error_message.startswith("Exited with code 127")
+    assert "reinstall" not in result.error_message
+    assert "Verify" in result.error_message
+
+
+def test_early_sigkill_is_not_reported_as_a_timeout():
+    tool = AnalyzerToolFactory.build(run_timeout=1200)
+    early = runner._exit_error(tool, 137, "", elapsed=0.4)
+    assert "after 0.4s, before its 1200s timeout" in early
+    assert "Killed after 1200s" in runner._exit_error(tool, 137, "", elapsed=1200.2)
+
+
+# --- provenance ---------------------------------------------------------------
+
+
+def test_results_record_command_and_parser_fingerprints(monkeypatch, user):
+    _, result = _container_run(
+        monkeypatch,
+        user,
+        {"parser_key": "ruff", "run_cmd": "ruff {target}"},
+        {"exit_code": 1, "output": RUFF_ONE},
+    )
+    assert result.summary["command_sha"] == runner.command_fingerprint("ruff /work")
+    assert result.summary["parser_sha"] == runner.parser_fingerprint("ruff")
+    assert len(result.summary["parser_sha"]) == 12
+
+
+def test_failed_results_keep_their_provenance(monkeypatch, user):
+    _, result = _container_run(
+        monkeypatch,
+        user,
+        {"parser_key": "ruff", "run_cmd": "ruff --bad {target}", "file_patterns": ["*.py"]},
+        {"exit_code": 2, "output": "ruff: error: bad flag"},
+    )
+    assert result.status == "failed"
+    assert result.summary["command_sha"] == runner.command_fingerprint("ruff --bad /work")
+    assert result.summary["config"] == {}
+    patterns = AnalyzerToolFactory.build(file_patterns=["*.py"])
+    assert result.summary["patterns_sha"] == runner.patterns_fingerprint(patterns)
+
+
+def test_file_patterns_are_part_of_the_provenance_of_measured_and_not_applicable_results(monkeypatch, user):
+    tool = AnalyzerToolFactory.build(file_patterns=["*.py", "*.pyi"])
+    assert runner.patterns_fingerprint(tool) == runner.patterns_fingerprint(
+        AnalyzerToolFactory.build(file_patterns=["*.pyi", "*.py"]),
+    )
+    assert runner.patterns_fingerprint(tool) != runner.patterns_fingerprint(
+        AnalyzerToolFactory.build(file_patterns=["*.py"]),
+    )
+    # Dynamic tools scan the running app whatever its files.
+    assert runner.patterns_fingerprint(AnalyzerToolFactory.build(analysis_mode="dynamic", file_patterns=["*"])) == ""
+
+    first, measured = _container_run(
+        monkeypatch,
+        user,
+        {"parser_key": "ruff", "run_cmd": "ruff {target}", "file_patterns": ["*.py", "*.pyi"]},
+        {"exit_code": 1, "output": RUFF_ONE},
+    )
+    assert measured.summary["patterns_sha"] == runner.patterns_fingerprint(tool)
+
+    AnalyzerToolFactory(slug="fixture-hadolint", kind="container", parser_key="ruff", file_patterns=["Dockerfile"])
+    run = AnalysisRunFactory(
+        created_by=user,
+        workspace=first.workspace,
+        tool_slugs=["fixture-hadolint"],
+        source_code={"app.py": "import os\n"},
+    )
+    runner.execute(run)
+    skipped = run.results.get()
+    assert (skipped.status, skipped.summary["skip_reason"]) == ("skipped", "not_applicable")
+    assert skipped.summary["patterns_sha"] == runner.patterns_fingerprint(
+        AnalyzerToolFactory.build(file_patterns=["Dockerfile"]),
+    )
+    # The build does not decide applicability: no version on a not-applicable skip.
+    assert "tool_version" not in skipped.summary
+
+
+def test_stored_stdout_says_when_it_was_cut(monkeypatch):
+    tool = AnalyzerToolFactory.build(parser_key="ruff", run_cmd="ruff {target}")
+    outputs = iter(["x" * (runner._STDOUT_STORE_LIMIT + 1), RUFF_ONE])
+    monkeypatch.setattr(runner.docker_manager, "exec_in", lambda *a, **k: {"exit_code": 1, "output": next(outputs)})
+    cut = runner._run_container_tool(tool, "cname")
+    assert len(cut.raw_output["stdout"]) == runner._STDOUT_STORE_LIMIT
+    assert cut.raw_output["stdout_truncated"] is True
+    assert runner._run_container_tool(tool, "cname").raw_output["stdout_truncated"] is False
+
+
+def test_failed_ai_review_keeps_the_files_it_could_not_fit(monkeypatch, user):
+    from backend.analysis.services.base import AnalyzerOutput
+
+    AnalyzerToolFactory(slug="fixture-review", kind="ai", parser_key="")
+    run = AnalysisRunFactory(
+        created_by=user,
+        tool_slugs=["fixture-review"],
+        source_code={"frontend/src/App.jsx": "x = 1\n"},
+    )
+    monkeypatch.setattr(
+        runner.ai_runner,
+        "run",
+        lambda *a, **k: AnalyzerOutput(
+            error="No reviewable file fits the prompt budget: frontend/src/App.jsx",
+            summary={"files_not_reviewed": ["frontend/src/App.jsx"], "model": "m"},
+        ),
+    )
+    runner.execute(run)
+    result = run.results.get()
+    assert result.status == "failed"
+    assert result.summary["files_not_reviewed"] == ["frontend/src/App.jsx"]
+    assert result.summary["model"] == "m"
+
+
+def test_command_fingerprint_ignores_the_per_app_url_and_sees_command_changes():
+    one = runner.command_fingerprint("nuclei -u http://172.17.0.5:8000 -silent", "http://172.17.0.5:8000")
+    other = runner.command_fingerprint("nuclei -u http://llm-app9:8000 -silent", "http://llm-app9:8000")
+    assert one == other
+    assert one != runner.command_fingerprint("nuclei -u http://llm-app9:8000 -silent -as", "http://llm-app9:8000")
+    assert runner.parser_fingerprint("no-such-parser") == ""
+
+
+# --- summary counters -----------------------------------------------------------
+
+
+def test_summary_counts_code_findings_apart_from_advisories_and_skips(user):
+    from backend.analysis.tests.factories import FindingFactory
+    from backend.analysis.tests.factories import ToolResultFactory
+
+    AnalyzerToolFactory(slug="dast-counter", analysis_mode="dynamic")
+    run = AnalysisRunFactory(created_by=user, status="running")
+    osv = ToolResultFactory(run=run, tool_slug="osv-scanner", category="dependencies")
+    FindingFactory(result=osv, category="dependency", rule_id="GHSA-1")
+    FindingFactory(result=osv, category="dependency", rule_id="GHSA-2")
+    # P2: every dependency finding of a vulnerability scanner is an advisory,
+    # a package the model invented too (the study tables attribute it to the model).
+    FindingFactory(result=osv, category="dependency", rule_id="nonexistent-package")
+    deptry = ToolResultFactory(run=run, tool_slug="deptry", category="dependencies")
+    FindingFactory(result=deptry, category="dependency", rule_id="DEP002")  # manifest hygiene: code
+    FindingFactory(result=ToolResultFactory(run=run, tool_slug="bandit"), category="security")
+    FindingFactory(result=ToolResultFactory(run=run, tool_slug="dast-counter"), category="security")
+    ToolResultFactory(run=run, tool_slug="hadolint", status="skipped", summary={"skip_reason": "not_applicable"})
+    ToolResultFactory(run=run, tool_slug="zap", status="skipped", summary={"skip_reason": "app_not_running"})
+    ToolResultFactory(run=run, tool_slug="ghost", status="skipped", summary={"skip_reason": "unavailable"})
+
+    runner._finalize(run, ["completed"] * 4 + ["skipped"] * 3)
+    run.refresh_from_db()
+    s = run.summary
+    assert s["total_findings"] == 6
+    assert (s["code_findings"], s["dependency_findings"], s["runtime_findings"]) == (2, 3, 1)
+    assert (s["tools_not_applicable"], s["tools_unmeasured"]) == (1, 2)
+    # Nothing failed: still completed, but the summary says two tools measured nothing.
+    assert run.status == AnalysisRun.Status.COMPLETED
+
+
+def test_a_scope_no_tool_measured_is_none_not_zero(user):
+    from backend.analysis.tests.factories import FindingFactory
+    from backend.analysis.tests.factories import ToolResultFactory
+
+    AnalyzerToolFactory(slug="dast-unmeasured", analysis_mode="dynamic")
+    assert "dast-unmeasured" in AnalyzerTool.dynamic_slugs()
+    assert "bandit" not in AnalyzerTool.dynamic_slugs()
+    run = AnalysisRunFactory(created_by=user, status="running")
+    ToolResultFactory(run=run, tool_slug="bandit")  # measured code: a clean zero
+    # The only vulnerability scanner failed and the DAST tool found the app down.
+    ToolResultFactory(run=run, tool_slug="pip-audit", category="dependencies", status="failed")
+    ToolResultFactory(
+        run=run,
+        tool_slug="dast-unmeasured",
+        status="skipped",
+        summary={"skip_reason": "app_not_running"},
+    )
+    runner._finalize(run, ["completed", "failed", "skipped"])
+    run.refresh_from_db()
+    s = run.summary
+    assert (s["code_findings"], s["dependency_findings"], s["runtime_findings"]) == (0, None, None)
+
+    # A scope that has findings shows them, even if they sit on a failed result;
+    # not applicable is a measurement (a true zero).
+    other = AnalysisRunFactory(created_by=user, status="running")
+    failed = ToolResultFactory(run=other, tool_slug="osv-scanner", category="dependencies", status="failed")
+    FindingFactory(result=failed, category="dependency", rule_id="nonexistent-package")
+    ToolResultFactory(run=other, tool_slug="semgrep", status="skipped", summary={"skip_reason": "not_applicable"})
+    counts = runner.run_scope_counts([other.id, str(run.id)])
+    assert counts[other.id]["dependency_findings"] == 1
+    assert counts[other.id]["code_findings"] == 0
+    assert counts[other.id]["runtime_findings"] is None
+    assert counts[str(run.id)]["dependency_findings"] is None
+
+
+# --- the analyzed tree ----------------------------------------------------------
+
+
+def test_empty_package_files_are_analyzed_but_never_make_a_tool_applicable(monkeypatch, user):
+    from backend.generation.tests.factories import GenerationJobFactory
+
+    job = GenerationJobFactory(
+        created_by=user,
+        result_data={"files": {"pkg/__init__.py": "", "pkg/a.py": "from .b import x\n", "requirements.txt": ""}},
+    )
+    AnalyzerToolFactory(slug="fixture-ruff", kind="container", parser_key="ruff", run_cmd="ruff {target}")
+    AnalyzerToolFactory(
+        slug="fixture-audit",
+        kind="container",
+        parser_key="ruff",
+        run_cmd="audit {target}",
+        file_patterns=["requirements*.txt"],
+    )
+    run = AnalysisRunFactory(
+        created_by=user,
+        workspace=AnalyzerWorkspaceFactory(user=user),
+        generation_job=job,
+        source_code=None,
+        tool_slugs=["fixture-ruff", "fixture-audit"],
+    )
+    copied = {}
+    monkeypatch.setattr(runner.workspace_service, "require_ready_container", lambda ws: "cname")
+    monkeypatch.setattr(runner.docker_manager, "copy_files_in", lambda name, files, **k: copied.update(files) or {})
+    monkeypatch.setattr(runner.docker_manager, "exec_in", lambda name, cmd, **k: {"exit_code": 0, "output": "[]"})
+    runner.execute(run)
+
+    # The package marker reaches /work: the tools see the tree the app runs with.
+    assert copied == {"pkg/__init__.py": "", "pkg/a.py": "from .b import x\n", "requirements.txt": ""}
+    results = {r.tool_slug: r for r in run.results.all()}
+    assert results["fixture-ruff"].status == "completed"
+    # An empty manifest gives the audit nothing to read.
+    assert results["fixture-audit"].status == "skipped"
+    assert results["fixture-audit"].summary["skip_reason"] == runner.SKIP_NOT_APPLICABLE
+
+
+def test_files_in_dependency_or_scratch_dirs_are_left_out_of_the_analyzed_tree(monkeypatch, user):
+    from backend.generation.tests.factories import GenerationJobFactory
+
+    files = {
+        "app.py": "x = 1\n",
+        ".tmp/rr/package/package.json": '{"name": "react-router"}',
+        ".tmp/rr/package/README.md": "docs",
+        "frontend/node_modules/x/index.js": "y",
+    }
+    job = GenerationJobFactory(created_by=user, result_data={"files": files})
+    AnalyzerToolFactory(slug="fixture-ruff", kind="container", parser_key="ruff", run_cmd="ruff {target}")
+    run = AnalysisRunFactory(
+        created_by=user,
+        workspace=AnalyzerWorkspaceFactory(user=user),
+        generation_job=job,
+        source_code=None,
+        tool_slugs=["fixture-ruff"],
+    )
+    copied = {}
+    monkeypatch.setattr(runner.workspace_service, "require_ready_container", lambda ws: "cname")
+    monkeypatch.setattr(runner.docker_manager, "copy_files_in", lambda name, f, **k: copied.update(f) or {})
+    monkeypatch.setattr(runner.docker_manager, "exec_in", lambda name, cmd, **k: {"exit_code": 0, "output": "[]"})
+    runner.execute(run)
+
+    assert copied == {"app.py": "x = 1\n"}
+    run.refresh_from_db()
+    assert run.summary["excluded_paths"]["count"] == 3
+    assert ".tmp/rr/package/package.json" in run.summary["excluded_paths"]["sample"]
+
+
+def test_non_zero_exit_whose_errors_were_all_deliberately_not_counted_is_a_measurement(monkeypatch, user):
+    """mypy exits 1 because of ORM-model errors the parser does not count: it ran, so 0 counted findings is real."""
+    AnalyzerToolFactory(slug="fixture-mypy", kind="container", parser_key="mypy", run_cmd="mypy {target}")
+    run = AnalysisRunFactory(
+        created_by=user,
+        workspace=AnalyzerWorkspaceFactory(user=user),
+        tool_slugs=["fixture-mypy"],
+        source_code={"app.py": "x = 1\n"},
+    )
+    raw = 'app.py:33: error: Name "db.Model" is not defined  [name-defined]\nFound 1 error in 1 file\n'
+    monkeypatch.setattr(runner.workspace_service, "require_ready_container", lambda ws: "cname")
+    monkeypatch.setattr(runner.docker_manager, "copy_files_in", lambda *a, **k: {})
+
+    def exec_in(name, cmd, **k):
+        is_mypy = "mypy" in (cmd if isinstance(cmd, str) else " ".join(cmd))
+        return {"exit_code": 1, "output": raw} if is_mypy else {"exit_code": 0, "output": ""}
+
+    monkeypatch.setattr(runner.docker_manager, "exec_in", exec_in)
+    runner.execute(run)
+
+    run.refresh_from_db()
+    assert run.status == "completed", (run.status, run.error_message)
+    result = run.results.get()
+    assert result.status == "completed"
+    assert result.findings.count() == 0
+    assert "Not counted: 1 error(s) on ORM model classes" in result.summary["warnings"][0]
+
+
+def test_materialize_keeps_real_paths_and_drops_empty_blobs():
+    files = runner._materialize(
+        {"Dockerfile": "FROM python", "backend/Makefile": "all:", "pkg/__init__.py": "", "backend_code": " "},
+    )
+    assert files == {"Dockerfile": "FROM python", "backend/Makefile": "all:", "pkg/__init__.py": ""}
+
+
+def test_ai_tool_without_reviewable_files_is_not_applicable(monkeypatch, user):
+    AnalyzerToolFactory(slug="fixture-ai", kind="ai", parser_key="")
+    run = AnalysisRunFactory(
+        created_by=user,
+        tool_slugs=["fixture-ai"],
+        source_code={"frontend/package-lock.json": "{}", "app.min.js": "x"},
+    )
+    monkeypatch.setattr(runner.ai_runner, "run", lambda *a, **k: pytest.fail("nothing to review"))
+    runner.execute(run)
+    result = run.results.get()
+    assert result.status == "skipped"
+    assert result.summary["skip_reason"] == runner.SKIP_NOT_APPLICABLE
+
+
+def test_truncated_agent_output_is_flagged_like_the_reports_do(monkeypatch, user):
+    from backend.analysis.services.base import AnalyzerOutput
+    from backend.generation.services.experiment_results import output_truncated
+    from backend.generation.tests.factories import GenerationJobFactory
+
+    AnalyzerToolFactory(slug="llm_review", kind="ai", parser_key="")
+    data = {"files": {"app.py": "x = 1\n"}, "agent": {"final_response_truncated": True}}
+    job = GenerationJobFactory(created_by=user, result_data=data)
+    run = AnalysisRunFactory(created_by=user, tool_slugs=["llm_review"], source_code=None, generation_job=job)
+    monkeypatch.setattr(runner.ai_runner, "run", lambda *a, **k: AnalyzerOutput(findings=[]))
+    runner.execute(run)
+    run.refresh_from_db()
+    assert output_truncated(data) is True
+    assert run.summary["truncated_inputs"] == ["agent"]

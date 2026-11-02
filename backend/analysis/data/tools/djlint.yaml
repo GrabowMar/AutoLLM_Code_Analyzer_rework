@@ -2,8 +2,9 @@ slug: djlint
 name: djLint
 description: >-
   Linter for HTML templates — Jinja (Flask) and Django templates as well as
-  plain HTML. Flags accessibility gaps, missing attributes, unsafe inline
-  markup and malformed template tags.
+  plain HTML (.html, .jinja, .jinja2, .j2). Flags accessibility gaps, missing
+  attributes, unsafe inline markup and malformed template tags. The SEO hints
+  H030/H031 (meta description, meta keywords) are not reported.
 category: lint
 kind: container
 target_language: html
@@ -21,7 +22,18 @@ install_cmd: >-
 verify_cmd: "djlint --version"
 uninstall_cmd: "rm -rf /home/analyzer/.local/opt/djlint /home/analyzer/.local/bin/djlint"
 # A machine-readable line format; the progress bar lines are ignored by the parser.
-run_cmd: "djlint {target} --lint --profile={config:profile} --linter-output-format '{filename}:{line}:{code}:{message}' 2>/dev/null"
+# djLint lints one extension per run (default html), so one pass per
+# template extension present (newer djLint exits 1 on "No files to check!").
+# A pass whose files djLint itself excludes prints that and exits 0 (1.36):
+# the parser fails the result when no pass linted anything. Exit 1 means
+# lint errors; a pass exiting higher crashed (an llmlab-warning line).
+run_cmd: >-
+  rc=0; for ext in html jinja jinja2 j2; do
+  [ -n "$(find {target} -name "*.$ext" -not -path '*/node_modules/*' -print -quit)" ] || continue;
+  djlint {target} --extension=$ext --lint --profile={config:profile} --ignore=H030,H031
+  --linter-output-format '{filename}:{line}:{code}:{message}' 2>/dev/null;
+  r=$?; [ $r -le 1 ] || echo "llmlab-warning: djlint --extension=$ext exited with code $r";
+  [ $r -le $rc ] || rc=$r; done; exit $rc
 parser_key: djlint
 file_patterns: ["*.html", "*.jinja", "*.jinja2", "*.j2"]
 run_timeout: 120

@@ -79,7 +79,7 @@ Schedules fire inside the executor (checked every 30 s), not through Celery beat
 
 ### An analysis run is stuck in "running"
 
-Interactive analysis runs execute on threads inside the django container. Restarting it, or a `uvicorn --reload` after a backend edit, kills them. A live run refreshes a heartbeat every 30 seconds, so within about 5 minutes of the restart the orphaned run is marked `failed` ("Interrupted: …") the next time runs are listed or opened, or when staff use **System → Maintenance → Clear Stuck Analysis Tasks**. Start a new run. Cancelling stops a live run before its next tool and kills the tool in flight. Post-run analyses of experiments run in the executor and are re-claimed after a restart.
+Interactive analysis runs execute on threads inside the django container. Restarting it, or a `uvicorn --reload` after a backend edit, kills them. A live run refreshes a heartbeat every 30 seconds, so within about 5 minutes of the restart the orphaned run is marked `failed` ("Interrupted: …") the next time runs are listed or opened, or when staff use **System → Maintenance → Clear Stuck Analysis Tasks**. Start a new run. Cancelling stops a live run before its next tool and kills the tool in flight. Post-run analyses of experiments run in the executor and are re-claimed after a restart: the run the dead executor left `running` is failed as interrupted once its heartbeat is 60 seconds old, and its job is analyzed again.
 
 ### Analysis runs fail to start
 

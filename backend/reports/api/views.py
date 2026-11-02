@@ -7,6 +7,7 @@ from ninja import Router
 
 from backend.reports import services
 from backend.reports.models import Report
+from backend.reports.services.report_service import reap_stale_reports
 
 from .schema import GenerateReportIn
 from .schema import GenericResponse
@@ -14,6 +15,7 @@ from .schema import ReportDataResponse
 from .schema import ReportDetailSchema
 from .schema import ReportListResponse
 from .schema import ReportSummarySchema
+from .schema import ReportTablesResponse
 
 router = Router(tags=["reports"])
 
@@ -68,6 +70,8 @@ def generate_report(request, payload: GenerateReportIn):
 
 @router.get("/{report_id}/", response=ReportDetailSchema)
 def get_report(request, report_id: str):
+    # The detail page polls while a report is pending; one whose thread died must end, not spin forever.
+    reap_stale_reports()
     return get_object_or_404(Report, report_id=report_id, created_by=request.auth)
 
 
@@ -89,6 +93,41 @@ def get_report_data(request, report_id: str):
         "status": report.status,
         "progress": report.progress_percent,
         "data": report.report_data,
+    }
+
+
+@router.get(
+    "/{report_id}/tables/",
+    response={200: ReportTablesResponse, 400: GenericResponse},
+)
+def get_report_tables(request, report_id: str):
+    """The report's curated tables (those of the Markdown/LaTeX export) as JSON, cells formatted alike."""
+    from backend.reports.services.renderers import _MAX_ROWS
+    from backend.reports.services.renderers import _flatten
+    from backend.reports.services.renderers import _fmt
+    from backend.reports.services.renderers import report_tables
+
+    report = get_object_or_404(Report, report_id=report_id, created_by=request.auth)
+    if report.status != Report.Status.COMPLETED:
+        return 400, {
+            "success": False,
+            "message": f"Report not ready (status: {report.status})",
+        }
+    tables = [
+        {
+            "title": table.title,
+            "columns": [{"key": key, "header": header} for key, header in table.columns],
+            "rows": [{key: _fmt(_flatten(row, key)) for key, _ in table.columns} for row in table.rows[:_MAX_ROWS]],
+            "note": table.note,
+            "total_rows": len(table.rows),
+        }
+        for table in report_tables(report)
+    ]
+    return 200, {
+        "report_id": report.report_id,
+        "report_type": report.report_type,
+        "title": report.title,
+        "tables": tables,
     }
 
 

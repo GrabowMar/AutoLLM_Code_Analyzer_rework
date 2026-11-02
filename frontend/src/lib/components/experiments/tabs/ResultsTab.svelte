@@ -2,9 +2,11 @@
 	/**
 	 * ResultsTab — §3 Results (one server computation, `GET /results/`): the
 	 * analysis specification (baseline and exclusions, with a way back to the
-	 * pre-registered analysis), 3.1 Table 1 the ranked conditions with
+	 * pre-registered analysis; confirmatory or exploratory as the server
+	 * decides, with its deviations from the plan), 3.1 Table 1 the ranked conditions with
 	 * cluster-bootstrap CIs, 3.2 Figure 3 the paired differences against the
-	 * baseline (forest plot), 3.3 Table 2 the condition × app matrix, and the
+	 * baseline (forest plot), 3.3 Table 2 the condition × app matrix, 3.4 the
+	 * run-to-run variation of repeats (`VariabilitySection`, self-fetching), and the
 	 * server's notes as footnotes. Options live in the URL (`baseline`,
 	 * `common`, `invalid`, `truncated`, `fingerprint`, `transpose`). Refetched
 	 * on state changes, and on ticks at most every 30 s while running.
@@ -32,9 +34,10 @@
 	import Trophy from '@lucide/svelte/icons/trophy';
 	import Leaderboard from '../Leaderboard.svelte';
 	import PairedDeltas from '../PairedDeltas.svelte';
-	import { CORRECTION_LABEL, MIN_APPS_FOR_CI, conditionName, isTerminal } from '../format';
+	import { CORRECTION_LABEL, MIN_APPS_FOR_CI, analysisStatus, conditionName, frozenPlan, isTerminal } from '../format';
 	import StudyFigure from '../study/StudyFigure.svelte';
 	import StudySection from '../study/StudySection.svelte';
+	import VariabilitySection from '../VariabilitySection.svelte';
 	import { ResultsFeed } from '../study/results.svelte';
 
 	interface Props {
@@ -45,7 +48,7 @@
 
 	let { experiment, refreshSignal = 0, tickSignal = 0 }: Props = $props();
 
-	const OPTION_KEYS = ['baseline', 'common', 'invalid', 'truncated', 'fingerprint'];
+	const OPTION_KEYS = ['baseline', 'common', 'invalid', 'truncated', 'fingerprint', 'planned'];
 
 	const params = $derived(page.url.searchParams);
 	const flag = (key: string, fallback: boolean) => {
@@ -57,8 +60,10 @@
 		baseline: baselineParam ? Number(baselineParam) : undefined,
 		common_cells: flag('common', true),
 		exclude_invalid: flag('invalid', false),
-		exclude_truncated: flag('truncated', true),
+		// Unset: the server applies the frozen plan's truncation rule.
+		exclude_truncated: params.has('truncated') ? flag('truncated', true) : undefined,
 		fingerprint: params.get('fingerprint') === 'majority' ? 'majority' : 'all',
+		planned_only: flag('planned', true),
 	});
 	const transpose = $derived(flag('transpose', experiment.conditions.length > 15));
 	const customised = $derived(OPTION_KEYS.some((k) => params.has(k)));
@@ -114,9 +119,20 @@
 		}))
 	);
 	const currentBaseline = $derived(String(results?.baseline_condition_id ?? baselineParam ?? experiment.baseline_condition_id ?? ''));
+	/** The plan's truncation rule, as the server applied it to a query without one. */
+	let planTruncated = $state<boolean | null>(null);
+	$effect(() => {
+		if (results && query.exclude_truncated === undefined) planTruncated = results.exclude_truncated;
+	});
+	const truncatedDefault = $derived(planTruncated ?? results?.exclude_truncated ?? true);
+	const excludeTruncated = $derived(query.exclude_truncated ?? truncatedDefault);
+	const extended = $derived(!!results && results.planned_repeats < experiment.repeats);
 	const toggles = $derived([
 		{ key: 'common', label: 'Common cells only', on: query.common_cells !== false, def: true, title: 'Compare every condition on the same graded (app, repeat) cells' },
-		{ key: 'truncated', label: 'Exclude truncated', on: query.exclude_truncated !== false, def: true, title: 'Drop runs that hit a budget or wall-clock limit (for every condition)' },
+		{ key: 'truncated', label: 'Exclude truncated', on: excludeTruncated, def: truncatedDefault, title: 'Drop runs whose final output was cut off (for every condition); the default is the analysis plan’s rule' },
+		...(extended || query.planned_only === false
+			? [{ key: 'planned', label: 'Planned repeats only', on: query.planned_only !== false, def: true, title: 'Count only the repeats planned at launch; repeats added later are exploratory' }]
+			: []),
 		{ key: 'invalid', label: 'Exclude invalid', on: !!query.exclude_invalid, def: false, title: 'Drop runs whose validity is “exclude” (for every condition)' },
 		{ key: 'fingerprint', label: 'Majority fingerprint only', on: query.fingerprint === 'majority', def: false, title: 'Keep only runs with the condition’s most common configuration fingerprint' },
 	]);
@@ -125,12 +141,16 @@
 	const specification = $derived.by(() => {
 		const parts = [
 			query.common_cells !== false ? 'common cells only' : 'all graded cells',
-			query.exclude_truncated !== false ? 'truncated runs excluded' : 'truncated runs kept',
+			excludeTruncated ? 'truncated runs excluded' : 'truncated runs kept',
 			query.exclude_invalid ? 'invalid runs excluded' : 'invalid runs kept',
 		];
 		if (query.fingerprint === 'majority') parts.push('majority fingerprint only');
 		return parts.join(' · ');
 	});
+
+	// Confirmatory or not is the server's verdict (paired.status and its deviations), never the URL options.
+	const plan = $derived(frozenPlan(experiment));
+	const status = $derived(results ? analysisStatus(results, plan) : null);
 
 	// The interim banner already says this.
 	const notes = $derived((results?.notes ?? []).filter((note) => !(results?.interim && /^interim\b/i.test(note))));
@@ -147,19 +167,21 @@
 			<div class="min-w-0 space-y-0.5">
 				<p class="section-label" id="analysis-title">Analysis</p>
 				<p class="text-sm">
-					{#if customised || results?.baseline_source === 'post_hoc'}
-						<span class="inline-flex items-center gap-1 font-medium text-warning-fg"><TriangleAlert class="size-3.5" aria-hidden="true" />Exploratory</span>
-						<span class="text-muted-foreground">— differs from the pre-registered analysis:</span>
+					{#if !status}
+						<span class="text-muted-foreground">{specification}.</span>
+					{:else if status.kind === 'exploratory'}
+						<span class="inline-flex items-center gap-1 font-medium text-warning-fg"><TriangleAlert class="size-3.5" aria-hidden="true" />{status.label}</span>
+						<span class="text-muted-foreground">— {status.reasons.join('; ')}:</span>
+						<span class="text-muted-foreground">{specification}.</span>
 					{:else}
-						<span class="font-medium">Pre-registered</span>
-						<span class="text-muted-foreground">—</span>
+						<span class="font-medium" title={status.kind === 'confirmatory' ? 'The frozen analysis plan’s confirmatory analysis' : undefined}>{status.label}</span>
+						<span class="text-muted-foreground">— {status.kind === 'plan' ? `${status.reasons.join('; ')} · ` : 'confirmatory · '}{specification}.</span>
 					{/if}
-					<span class="text-muted-foreground">{specification}.</span>
 				</p>
 			</div>
 			<div class="flex flex-wrap items-center gap-2">
 				{#if customised}
-					<Button variant="ghost" size="sm" onclick={resetAnalysis}><RotateCcw />Pre-registered analysis</Button>
+					<Button variant="ghost" size="sm" onclick={resetAnalysis}><RotateCcw />{plan ? 'Pre-registered analysis' : 'Default analysis'}</Button>
 				{/if}
 				<Button variant="outline" size="sm" href="/reports/create?type=experiment_report&experiment_id={experiment.id}"><FileText />Generate report</Button>
 			</div>
@@ -265,6 +287,21 @@
 					</StudyFigure>
 				</StudySection>
 			{/if}
+
+			<VariabilitySection
+				experimentId={experiment.id}
+				status={experiment.status}
+				number={matrix ? '3.4' : '3.3'}
+				query={{
+					common_cells: query.common_cells,
+					exclude_invalid: query.exclude_invalid,
+					exclude_truncated: query.exclude_truncated,
+					fingerprint: query.fingerprint,
+					planned_only: query.planned_only,
+				}}
+				{labelOf}
+				{refreshSignal}
+			/>
 		{/if}
 
 		{#if notes.length > 0}

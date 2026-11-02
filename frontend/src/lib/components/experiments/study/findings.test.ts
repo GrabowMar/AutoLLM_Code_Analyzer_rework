@@ -99,6 +99,9 @@ function results(
     exclude_truncated: true,
     common_cells: true,
     fingerprint_filter: "all",
+    planned_only: true,
+    planned_repeats: 1,
+    stopped_early: false,
     baseline_condition_id: 1,
     baseline_source: "preregistered",
     interim: false,
@@ -206,6 +209,48 @@ describe("keyFindings", () => {
     expect(text(findings[1])).not.toContain("p =");
   });
 
+  it("says every paired app tied instead of blaming the app count (ceiling)", () => {
+    // f170be08: 2 apps per condition, all at 100%; the backend returns no p for all-tie rows.
+    const tie = (id: number): PairedRow => ({
+      condition_id: id,
+      n_pairs: 2,
+      mean_delta: 0,
+      ci95: null,
+      wins: 0,
+      losses: 0,
+      ties: 2,
+      sign_test_p: null,
+      wilcoxon_p: null,
+      p_holm: null,
+      p_adjusted: null,
+      significant: false,
+      untested_reason: "all_ties",
+    });
+    const findings = keyFindings(
+      results(
+        [
+          row(1, 1, 1, { n_apps: 2 }),
+          row(2, 1, 1, { n_apps: 2 }),
+          row(3, 1, 1, { n_apps: 2 }),
+        ],
+        [tie(2), tie(3)],
+        {
+          notes: [
+            "Every graded cell scored 1: the outcome does not discriminate between conditions (ceiling/floor effect); use harder apps or another metric",
+          ],
+        },
+      ),
+      labelOf,
+    );
+    const effect = text(findings[1]);
+    expect(findings[1].kind).toBe("null");
+    expect(effect).toContain(
+      "Every paired app scored the same as Condition 1 (4 ties)",
+    );
+    expect(effect).toContain("ceiling or floor");
+    expect(effect).not.toContain("Too few apps");
+  });
+
   it("calls out ties for first place", () => {
     const findings = keyFindings(
       results([row(1, 1, 0.5), row(2, 1, 0.5)], []),
@@ -244,6 +289,31 @@ describe("keyFindings", () => {
       "1 condition mixes configuration fingerprints",
     );
     expect(caveats[2]).toContain("With 1 app per condition");
+  });
+
+  it("names repeats added after launch apart from missing cells", () => {
+    const findings = keyFindings(
+      results(
+        [
+          row(1, 1, 0.5, {
+            n_missing: {
+              failed: 0,
+              ungraded: 0,
+              excluded_invalid: 0,
+              excluded_truncated: 0,
+              not_common: 0,
+              beyond_plan: 2,
+            },
+          }),
+        ],
+        [],
+      ),
+      labelOf,
+    );
+    const caveats = findings.filter((f) => f.kind === "caveat").map(text);
+    expect(caveats).toHaveLength(1);
+    expect(caveats[0]).toContain("2 runs added after launch");
+    expect(caveats[0]).not.toContain("no usable grade");
   });
 });
 

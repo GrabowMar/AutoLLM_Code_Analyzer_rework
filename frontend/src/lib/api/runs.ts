@@ -63,7 +63,9 @@ export interface RunToolResult {
   status: ToolResultStatus;
   /**
    * `finding_count`, `severity_counts` (normalized — don't display), `tool_version`,
-   * `config`, `warnings`, `skip_reason`.
+   * `config`, `warnings`, `skip_reason`; the instrument's fingerprints
+   * `command_sha`, `parser_sha` and `patterns_sha` (static tools; a
+   * not-applicable skip has `patterns_sha` but no `tool_version`).
    */
   summary: Record<string, any>;
   /** Aggregate tool metrics, e.g. radon's { average_complexity, rank_distribution }. */
@@ -84,11 +86,32 @@ export interface ToolResultDetail extends RunToolResult {
 /**
  * Run summary. Finished runs: `total_findings`, `reported_severity_counts`
  * (levels as the tools printed them, case-folded), `unrated_findings`,
- * `tools_run` / `tools_completed` / `tools_failed`, `truncated_inputs`,
- * `metrics_by_tool` (detail only). `severity_counts` is a normalization kept for
- * aggregate statistics — never display it.
+ * `tools_run` / `tools_completed` / `tools_failed`, `tools_not_applicable`
+ * (nothing to read: measured, a true zero) / `tools_unmeasured` (app not
+ * running, tool unavailable, cancelled: measured nothing), `code_findings` /
+ * `dependency_findings` (known-vulnerability advisories) / `runtime_findings`
+ * (dynamic tools) — each `null` when no tool of that scope measured the run
+ * (unmeasured, not zero) —, `truncated_inputs` (`backend`, `frontend`,
+ * `agent`: the agent's final response), `metrics_by_tool` (detail only).
+ * `severity_counts` is a normalization kept for aggregate statistics — never
+ * display it.
  */
 export type RunSummary = Record<string, any>;
+
+/** Code findings outside / inside test files; null when no code tool measured the run. */
+export interface CodeParts {
+  source: number | null;
+  tests: number | null;
+  /** Code findings in non-source dirs (node_modules, .tmp/ …) of runs from before the exclusion rule. */
+  excluded?: number | null;
+}
+
+/** The run's findings split by scope; a scope no tool of the run measured is null. */
+export interface ScopeCounts {
+  code: number | null;
+  dependencies: number | null;
+  runtime: number | null;
+}
 
 export interface AnalysisRunListItem {
   id: string;
@@ -136,6 +159,11 @@ export interface RunFinding {
   duplicates?: RunFinding[];
   /** With `group`: the issue's cross-tool class (e.g. `vulnerable-dependency:pyjwt`). */
   issue_class?: string;
+  /**
+   * A code finding located in test code (tests/, *.test.*, conftest.py, smoke
+   * scripts — the study's `is_test_path`): counted apart from the app's code.
+   */
+  in_tests?: boolean;
 }
 
 export interface Paginated<T> {
@@ -165,6 +193,13 @@ export interface FindingFacets {
   levels: { value: string; count: number; rank: number }[];
   /** Findings of tools that rate nothing. */
   unrated: number;
+  /**
+   * Over all of the run's findings: code findings, dependency advisories,
+   * dynamic tools' findings; null for a scope no tool of the run measured.
+   */
+  scopes?: ScopeCounts;
+  /** The code findings split by test files (counted apart, as in the study); null when code is unmeasured. */
+  code_parts?: CodeParts;
   categories: FacetValue[];
   files: FacetValue[];
   files_total: number;
@@ -222,7 +257,9 @@ export interface ListRunsParams {
     | "created_asc"
     | "name_asc"
     | "duration_desc"
-    | "findings_desc";
+    | "findings_desc"
+    /** Code findings (advisories and dynamic tools' findings left out). */
+    | "code_findings_desc";
 }
 
 export interface FindingsParams {
@@ -238,7 +275,16 @@ export interface FindingsParams {
   sort?: "severity" | "file" | "tool" | "rule";
   /** One item per issue: findings of several tools that report the same thing collapse. */
   group?: boolean;
+  /**
+   * code (what the model wrote) | dependencies (known-vulnerability advisories) |
+   * runtime (dynamic tools) | source / tests (code findings outside / inside test files); "" = all.
+   */
+  scope?: FindingScope | CodePart | "";
 }
+
+export type FindingScope = "code" | "dependencies" | "runtime";
+/** The two parts of the code scope: the app's own source, and test code (counted apart). */
+export type CodePart = "source" | "tests";
 
 interface RequestOptions {
   signal?: AbortSignal;
@@ -386,7 +432,7 @@ export async function getRunFindings(
 
 export async function getFindingFacets(
   runId: string,
-  params?: { tool_slug?: string },
+  params?: { tool_slug?: string; scope?: FindingScope | CodePart | "" },
   options?: RequestOptions,
 ): Promise<FindingFacets> {
   const res = await apiFetch(
@@ -413,4 +459,122 @@ export async function getAllRunFindings(
     if (page >= data.pages) break;
   }
   return all.slice(0, limit);
+}
+
+// --- Context ------------------------------------------------------------------------
+
+/** The generation setup behind an analyzed app (its design cell and method). */
+export interface RunSetup {
+  id: string;
+  mode: string;
+  status: string;
+  /** LLMModel primary key (model pages), id string, display name, URL slug. */
+  model_pk: number | null;
+  model_id: string;
+  model_name: string;
+  model_slug: string;
+  app_id: number | null;
+  app_slug: string;
+  app_name: string;
+  stack_slug: string;
+  batch_id: string | null;
+  experiment_id: string | null;
+  experiment_name: string;
+  condition_id: number | null;
+  condition_label: string;
+  /** 0-based trial within the (condition, app) cell. */
+  repeat_index: number | null;
+  /** Repeats per cell planned at launch. */
+  planned_repeats: number | null;
+  harness: string | null;
+  bundle_key: string;
+  config_fingerprint: string | null;
+}
+
+/** Source size by the study's definition: non-empty, non-comment lines of source files. */
+export interface SourceLoc {
+  total: number;
+  files: number;
+  /** `tests` is null when the code has no paths (unknown, not zero). */
+  by_layer: {
+    backend: number | null;
+    frontend: number | null;
+    tests: number | null;
+  };
+  test_files: number | null;
+  /** Stored files that are not source (manifests, lockfiles, docs, configs). */
+  other_files: number | null;
+  /**
+   * Stored files in dependency / cache / scratch directories (not the app's source, never
+   * in the LOC). `left_out`: this run's tools left them out (true), read them because the
+   * run predates that rule (false: `findings_in_excluded` of its findings lie in them),
+   * or unknown (null: no tool ran, or the run did not finish).
+   */
+  excluded_paths: {
+    count: number;
+    sample: string[];
+    dirs: Record<string, number>;
+    left_out?: boolean | null;
+    findings_in_excluded?: number;
+  };
+}
+
+export interface CodeSplitRow {
+  tool: string;
+  findings_in_tests: number;
+  findings_in_source: number;
+  /** Findings in excluded non-source dirs (pre-rule runs only); neither tests nor source. */
+  findings_in_excluded?: number;
+}
+
+/** How common one of the run's rules is across the corpus (per-tool latest results). */
+export interface RulePrevalence {
+  tool: string;
+  rule_id: string;
+  rule_name: string;
+  title: string;
+  /** The rule's one cross-tool class in this run; "" when its findings span several classes. */
+  issue_class: string;
+  scope: FindingScope;
+  count_in_run: number;
+  /** Apps whose latest result of the tool reports the rule / apps that tool measured. */
+  apps_with_rule: number;
+  apps_measured: number;
+  /** The same for this model's apps; null without a model (pasted code). */
+  model_apps_with_rule: number | null;
+  model_apps_measured: number | null;
+}
+
+export type ContextScope = "experiment" | "mine";
+
+export interface RunContext {
+  run_id: string;
+  /** The corpus rule prevalence is counted over; null when there is none. */
+  scope: ContextScope | null;
+  scopes_available: ContextScope[];
+  scope_label: string;
+  /** Analyzed apps in the corpus / of this model. */
+  n: number;
+  model_n: number | null;
+  self_in_corpus: boolean;
+  /** The experiment corpus while the experiment still runs: the counts are interim. */
+  interim?: boolean;
+  job: RunSetup | null;
+  source_loc: SourceLoc | null;
+  test_split: CodeSplitRow[];
+  rule_prevalence: RulePrevalence[];
+  notes: string[];
+}
+
+/** Setup line, source LOC by layer, test-code split and rule prevalence of a run. */
+export async function getRunContext(
+  runId: string,
+  scope: ContextScope | "" = "",
+  options?: RequestOptions,
+): Promise<RunContext> {
+  const res = await apiFetch(
+    `/analysis/runs/${runId}/context/${query({ scope })}`,
+    { signal: options?.signal },
+  );
+  return res.json();
 }

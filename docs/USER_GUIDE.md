@@ -14,7 +14,7 @@ The sidebar groups pages in workflow order. The breadcrumb's first, unlinked cru
 | --- | --- | --- |
 | Overview | Dashboard | Activity across the lab at a glance |
 | Generate | Models, Endpoints, Library, Sample Generator, Experiments | Choose models and where they run, define what to build, start runs |
-| Evaluate | Applications, Analysis, Analyzers, Runtime | Inspect generated apps, run analyzers, manage containers |
+| Evaluate | Applications, Analysis, Human eval, Analyzers, Runtime | Inspect generated apps, run analyzers, run studies with human testers, manage containers |
 | Insights | Rankings, Statistics, Reports | Compare models and export results |
 | Help | Docs | This documentation |
 | Admin (staff only) | System | Host, worker and database health, maintenance |
@@ -54,7 +54,7 @@ flowchart LR
 
 ### First app: keys, models, generate, run, analyze, compare
 
-1. **Add your keys.** Open Settings → **API keys** and click **Add key** for OpenRouter (and optionally Hugging Face, for model metadata). Keys are checked with the provider, stored encrypted and never shown again. Until you add one, jobs use the deployment-wide key if there is one. The Sample Generator shows a banner when no usable OpenRouter key exists.
+1. **Add your keys.** Open Settings → **API keys** and click **Add key** for OpenRouter (and optionally Hugging Face: when a staff user syncs or refreshes the catalog, their Hugging Face key fetches the model metadata, with a higher rate limit than anonymous access). Keys are checked with the provider, stored encrypted and never shown again. Until you add one, jobs use the deployment-wide key if there is one. The Sample Generator shows a banner when no usable OpenRouter key exists.
 2. **Sync the model catalog.** On **Models**, click **Sync**. Staff also find **Sync models** in the Dashboard's maintenance menu.
 3. **Generate an app.** Open **Sample Generator**, keep the **Agent** mode, pick one or more app specs under **Task**, pick models, keep the default harness preset and click **Start N runs**. Every combination of task, model, harness and trial becomes one run in a batch.
 4. **Follow the batch.** You land on the batch page. Its **Results** matrix fills in as runs finish. Open a run to get its application page.
@@ -70,7 +70,7 @@ More detail: [Generation process](/docs/GENERATION_PROCESS), [Execution](/docs/E
 2. Watch the **Plan** rail on the right. It shows conditions, cells, where they run, cost, bottleneck and a **Comparability** table. Problems that block launch are listed there.
 3. Pick the **Pre-registered baseline** in the **Harness presets** (or **Prompt profiles**) section. Results compare every condition against it.
 4. Click **Save draft** to keep the design, or **Launch** once the plan is ready.
-5. The experiment page reads like a paper. **Abstract** summarises the design, the progress of data collection and the key findings (with limitations), and plots the pass rate per condition. **Method** lists the factors, conditions, what is held constant and the comparability check. **Results** has the leaderboard, the comparison with the baseline (forest plot) and the per-app table. **Data** lists every run (open or retry one) and downloads the dataset. **Operations** shows endpoints, activity, execution limits and automation.
+5. The experiment page reads like a paper. **Abstract** summarises the design, the progress of data collection and the key findings (with limitations), and plots the pass rate per condition. **Method** lists the factors, conditions, what is held constant, the comparability check and the analysis plan (or says that none was registered). **Results** has the leaderboard, the comparison with the baseline (forest plot) and the per-app table. **Data** lists every run (open or retry one) and downloads the dataset. **Operations** shows endpoints, activity, execution limits and automation.
 6. When it finishes, you can **Top up failed** cells, **Clone** the design, **Archive** it, or click **Generate report** in the Results section.
 
 More detail: [Experiments](/docs/EXPERIMENTS).
@@ -97,6 +97,19 @@ More detail: [Local models](/docs/LOCAL_MODELS).
 
 More detail: [Study tables](/docs/STUDY_TABLES).
 
+### Running a human evaluation
+
+1. Make sure apps are reachable for participants: the instance needs subdomain routing. The task's **Overview** warns when it is missing.
+2. **Human eval** → **New task**. Pick a preset under **Start from** (for example **App grading** or **A/B comparison**), write the title and the participant instructions, and choose the apps under **App pool**: an experiment's current attempts or single completed jobs.
+3. Check the **Design** (blocks, consent, questions and the pre-registered primary metric) and the **Settings**. Decide isolation and per-assignment reset now: they freeze when the task opens. Click **Create draft**.
+4. On the task page, fix anything under **Before this task can open**, then click **Open**. The design is frozen, the apps get blinded labels and the items are built.
+5. Click **Preview** and go through one app as a participant, then reset the preview from **Overview**.
+6. On **Participants**, create an invite link, generate access codes or add evaluator accounts, and send them out. On **Apps**, **Start all** pre-starts the apps; otherwise they start when a participant opens them.
+7. Watch progress on **Overview** and the answers on **Responses**. Exclude participants or assignments only for reasons you set out in advance.
+8. Click **Close** when data collection ends. **Results** then shows the final, non-provisional numbers, and **Export** downloads the CSVs, the codebook and the de-blinding key.
+
+More detail: [Human evaluation](/docs/HUMAN_EVALUATION).
+
 ## Overview
 
 ### Dashboard (`/`)
@@ -120,19 +133,23 @@ The catalog of models you can generate with.
 - **Filters**:
   - **Quick** filters: **Free**, **Vision**, **Functions**, **128K+ Context**, **Efficient**, **Used in Apps**.
   - Capability, **Price**, **Context** and **Provider** filters, and **Sort**.
-- **Actions**: **Sync** refreshes the catalog from OpenRouter, **Export** downloads it, **Import** opens the import page, **Rankings** opens Rankings.
+- **Actions**: **Sync** refreshes the catalog from OpenRouter, **Export** downloads it, **Covariates CSV** downloads one row of research covariates per model used in your jobs, **Import** opens the import page, **Rankings** opens Rankings.
 - **Compare**: tick models in the table, then click **Compare (N)**.
 
 **Model detail** (`/models/<slug>`) has these tabs:
 
-- **Overview**: about, links to OpenRouter, models.dev and Hugging Face, and how this model has done on this platform.
+- **Overview**: about, links to OpenRouter, models.dev and Hugging Face, and how this model has done on this platform. The facts list separates **Checkpoint parameters** (every tensor in the linked repo), **Reported total** and **Active parameters**, each with its source; an API model that models.dev lists as closed weights says the linked repo may differ from what is served. The **Hugging Face** card shows the repo as an ecosystem: downloads (30 days and all time), likes, trending, Spaces, derived repos and the base-model relation, license and gating, weight size and format, native quantization, Hugging Face inference providers, papers, and the commit and date fetched.
 - **Results**: ranking, resource use, code findings by tool, results per app spec, and the experiments it was part of.
-- **Benchmarks** and **Capabilities**.
+- **Generation data**: what this platform recorded about how the model generates, over your runs: **Agent behaviour** per harness, **Providers and calls** (per-provider latency, throughput, cache hits, retries and errors), and **Same-setup variability** between runs that share a setup. Every figure shows its n; `—` or n/a means not measured.
+- **Benchmarks**: Artificial Analysis and Design Arena scores, then **external covariates** from Epoch AI (reported and active parameters, training compute and data, with Epoch's notes) and LMArena (rating with its interval on the leaderboard's range, rank of n, votes; the agent arena is a score, not Elo), each with a match badge (exact, variant, assumed), the curator's note and CC-BY attribution, and **Self-reported evaluations** from the Hugging Face repo, labelled self-reported and never normalized or ranked.
+- **Capabilities**: besides the capability flags, **Sampling defaults** (the authors' recommended sampling from `generation_config.json`, OpenRouter's defaults, and what your runs actually sent, with n) and **Architecture & size** (dense or MoE, layers, width, heads and KV heads, attention variant, experts per token, native and extended context, vocabulary, native precision, the parameter counts with their sources, and the weight files).
 - **Pricing & providers**.
 - **Applications**: apps generated with this model, and usage.
 - **Raw data**: **Copy JSON** and **Export**.
 
-The header has **Copy model ID**, a link to OpenRouter, export as JSON, **Refresh metadata from OpenRouter** (staff only), **Compare** and **Generate app**. A notice appears when OpenRouter plans to retire the model.
+For a model on your own endpoint, cards that show its catalog twin's data (Hugging Face, architecture, external covariates) say "inherited from <twin>": the weights are assumed to be the same, and the twin's runs are never mixed into this model's statistics.
+
+The header has **Copy model ID**, a link to OpenRouter, export as JSON, **Refresh metadata from OpenRouter** (staff only), **Compare** and **Generate app**. Its size stat reads active / total parameters, with their sources in the tooltip. A notice appears when OpenRouter plans to retire the model.
 
 **Compare** (`/models/compare`) puts the selected models side by side.
 
@@ -241,10 +258,12 @@ Designed model comparisons, run in parallel across your endpoints.
 - **Overview**: endpoint lanes, a cell grid (one square per run), and **Activity**.
 - **Results**:
   - Choose a **Baseline**. Picking one other than the pre-registered baseline is labelled exploratory.
+  - The analysis header states the server's verdict: **Pre-registered** (confirmatory), **Plan's analysis** (p-values exploratory here because the plan corrects across several metrics) or **Exploratory**, with the reasons.
   - Toggles: **Common cells only**, **Exclude invalid**, **Exclude truncated**.
   - Views: **Leaderboard**, **Against the baseline**, **Per app**.
+  - **Run-to-run variation**: how much repeats of one condition on one app differ (spread per cell, variance shares, ICC, pass@k, code similarity, finding overlap, rank intervals, and a precision planner once the experiment has finished). Descriptive only; marked interim while the experiment runs. **Per-cell CSV** downloads it.
   - **Generate report**.
-- **Runs**: every run with filters (**Current attempts only**, **Retried only**), plus **Launch history**.
+- **Runs**: every run with filters (**Current attempts only**, **Retried only**), plus **Launch history**. The dataset downloads include **Per-call telemetry .csv** (one row per LLM call: timing, provider, tokens, cost; no message content).
 - **Design**: the frozen design, conditions grouped by endpoint, **Comparability** and **Execution**.
 - **Automation**: **Post-run** (analysis and report after all cells finish, with history) and **Schedules** (**Add schedule** with the actions **Top up failed cells**, **Add replicates** or **Clone and run** on a cron expression).
 
@@ -270,20 +289,28 @@ Every generated application (generation job).
 
 - **Header actions**: **Cancel**, **Retry**, **Re-generate** (a new batch with this run's settings), download code, export the run as JSON, **Export to GitHub**, delete, **Copy job ID**.
 - **Container controls**: **Build**, **Open**, **Start**, **Stop**, **Restart**, **Rebuild**, **Remove**.
+- **Header**: besides status and model, a **src LOC** figure (source lines by the study's definition: tests, lockfiles, docs and scratch folders left out; the tooltip gives the all-lines count), the experiment cell (experiment › condition › trial k/N, linked), and for subscription-billed runs a **list-price equiv.** next to the billed $0. A failed or cancelled job shows unknown tokens and cost as —, not 0.
 - **Tabs**:
-  - **Overview**.
-  - **Agent Run** (agent jobs): wall time, calls, cost, platform evaluation with **Evaluate** or **Re-evaluate**, validity notes and reproducibility data.
-  - **Prompts**.
-  - **Files & Code**: file explorer and key artifacts.
-  - **Container**: status, image and ports.
+  - **Overview**:
+    - **Code footprint**: source LOC, source files and test LOC, with the all-lines count (lockfiles and scratch included) as a secondary figure and a language bar by source LOC.
+    - **Phase timeline**: queue, generation (LLM time against tool time, from the agent trajectory), waiting and evaluation as a bar and a step list, each with its source; derived or approximate segments are marked. Below it, the execution record (lane, endpoint, attempts, run order, retries, earlier attempts' errors and spend).
+    - **Platform evaluation** (every mode): status and pass count, checks by category, build attempts, image size (context, not quality), healing, log tails, the grader's identity, and **Evaluate** / **Re-evaluate**. It says when the contract was not stated in the prompt, and when the stored result is only the generation-time smoke check.
+    - **Complexity & duplication**: lizard, radon and jscpd figures from each tool's latest result, with the tool version and the run they came from; "not measured" when a tool has no result, with **Analyze**.
+    - **Code profile**: source and test LOC by layer, who wrote each file (scaffold, added, modified; agent runs), deleted or protected scaffold files, structure counts (models, routes, components; ≈ approximate) and what is not counted as source.
+    - **What shaped this generation**: the frozen inputs from the run's snapshot, verbatim: app spec and stack versions with hashes, prompt or brief, contract, model limits and frozen prices, endpoint, harness and images, gateway policy (forced, stripped and dropped params), presets, served vs requested model.
+  - **Agent Run** (agent jobs): wall time, calls, cost (with the list-price equivalent of subscription runs), platform evaluation with **Evaluate** or **Re-evaluate**, validity notes and reproducibility data. Tool calls and steps fall back to the gateway's count, marked "(gateway)", when the harness reported none. **Behaviour** summarises what the agent did (actions by category, failed and killed actions, builds, servers, HTTP probes, tests, context growth, LLM vs tool time, files rewritten, first draft vs final, and the rule table behind the categories). **Trajectory** lists every LLM call with its tool calls, categories and outcomes; filter **All**, **With failures** or **Auxiliary**, and expand a row to load the full call. The categories are heuristics: compare them within one harness.
+  - **Prompts**: for agent jobs also the **Observed inputs** (system prompt and tool-spec hashes, prompt size, tools offered) and the system prompt as the model received it.
+  - **Files & Code**: file explorer and key artifacts, with origin badges per file (scaffold, added, modified).
+  - **Container**: status, image and ports, and the runtime smoke check (labelled as not the conformance suite).
   - **Tools**: **API Tester**, **Quick Commands**, **Environment**.
   - **Analyses**: this app's runs, with **New Analysis**.
   - **Logs**.
   - **API Scan** (scaffolding jobs with a backend scan).
-  - **Dependencies**.
-  - **Artifacts**: stored LLM requests and responses.
+  - **Dependencies**: declared packages and who chose them (scaffold, model-added, re-pinned, dropped), and the Python packages the evaluated build resolved.
+  - **Same setup**: every run of yours with the same configuration (config fingerprint): replicates, replays and reruns with their metrics and code similarity to this run, a mean/SD/min/max/CV summary, and for seeded replays the first LLM call where they diverged.
+  - **Artifacts**: stored LLM requests and responses. Each call shows its telemetry: duration, provider, time to first token and decode speed (OpenRouter calls), cached and reasoning tokens, retries, finish reason, served model, list cost.
   - **Copilot Iterations** (legacy copilot jobs).
-  - **Cost & Metrics**.
+  - **Cost & Metrics**: nested metrics as key/value rows, output tokens per LLM-second next to end-to-end tokens per second, mean LLM call time, the per-call stages folded into one **LLM calls (n)** row, and the list-price equivalent.
 
 A failed job links to **Failure Details** (`/applications/<id>/failure`). It shows the error message, generation errors, build output, request artifacts, a timeline, and **Re-generate**.
 
@@ -293,7 +320,7 @@ Reference: [Execution](/docs/EXECUTION).
 
 Runs your analyzer workspace's tools on generated apps and shows their results live.
 
-- **List**: every run with what it analyzed (app · model · stack), **Status** (with a progress bar and the running tool while active), **Findings** (total, plus the levels the tools reported), **Tools** (measured / total), **Duration** and **Created**. Filter by status (counts on each chip), search by name, app, model, stack or ID, and sort by findings, duration or date. Select rows to cancel or delete them in bulk; re-run a finished run from its row. Links scope the list to a batch (`?batch=`), an app (`?job=`) or a tool (`?tool=`). Active runs update live.
+- **List**: every run with what it analyzed (app · model · stack), **Status** (with a progress bar and the running tool while active), **Findings** (total, plus the levels the tools reported; — when no tool measured anything), **Tools** (measured / total, with how many were n/a, failed or not measured), **Duration** and **Created**. Filter by status (counts on each chip), search by name, app, model, stack or ID, and sort by findings, duration or date. Select rows to cancel or delete them in bulk; re-run a finished run from its row. Links scope the list to a batch (`?batch=`), an app (`?job=`) or a tool (`?tool=`). Active runs update live.
 - **Header buttons**: **Analyzers** and **New analysis**.
 
 **New analysis** (`/analysis/create`) is one page:
@@ -306,15 +333,46 @@ The **Run summary** shows apps × tools = tool runs, how many would be skipped, 
 
 **Run detail** (`/analysis/<id>`):
 
+- Under the title, the **setup line** of the analyzed app: experiment › condition › repeat k/N · model · harness · app, linked to the experiment, model and application pages.
 - While running: a progress strip (one segment per tool, the running tool and its clock, findings so far, live-connection state) and **Cancel run**.
-- **Overview**: findings, tools measured, code size and duration; what needs attention (failed tools, dynamic tools skipped because the app was down, truncated generated code); findings by the level each tool reported and by tool; most affected files and most frequent rules (each opens the filtered findings); metrics of complexity and duplication tools.
-- **Findings**: filters by tool, level as reported, category, file and rule, plus search and sort. A row expands into everything the tool said: description, its suggested fix, code, location, rule documentation, CWE / OWASP, references, the vulnerable package and fixed versions, the HTTP request a scanner flagged, duplicates. **CSV** / **JSON** export the filtered findings.
+- **Overview**: findings (split into code findings, dependency advisories and runtime findings), tools measured, code size and duration; what needs attention (failed tools, dynamic tools skipped because the app was down, truncated generated code); findings by the level each tool reported and by tool; most affected files and most frequent rules (each opens the filtered findings); metrics of complexity and duplication tools.
+  - **Code** is the app's source LOC by the study's definition (backend, frontend, tests apart). A note lists stored files in dependency, cache or scratch directories that the analysis leaves out; for a run from before that rule it says how many findings lie in them.
+  - **Code findings** counts the app's own source; findings in test files are listed apart (+ N in test files). Clicking it filters to the app's source.
+  - **Most frequent rules** shows each rule's prevalence: in how many analyzed apps that tool reported it, out of the apps the tool measured, and the same for this model ("12/12 apps · 4/4 of this model"). A switch picks the corpus (**Experiment** or **All my apps**), and the card states n and any caveats (interim while the experiment runs; this run's results that are not the ones counted).
+  - **Same setup**: for a finished job, the runs that share its configuration, findings first ([Run-to-run variation](/docs/EXPERIMENTS#run-to-run-variation)).
+- **Findings**: filters by tool, level as reported, category, file and rule, a **Scope** facet (Code, with **App source** and **Test files** under it / Dependency advisories / Runtime) when the run has advisories, dynamic-tool or test-file findings, plus search and sort. Test-file rows get a **test file** chip, merged rows show their issue class, and a finding's detail shows its code part, issue class and prevalence. A row expands into everything the tool said: description, its suggested fix, code, location, rule documentation, CWE / OWASP, references, the vulnerable package and fixed versions, the HTTP request a scanner flagged, duplicates. **CSV** / **JSON** export the filtered findings. Levels are ordered by the tool's own word; a CVSS score printed as the level ranks by its band. The CSV export prefixes an apostrophe to text that a spreadsheet would run as a formula (starting with =, +, -, @, tab or CR), leaves numbers alone, and writes an empty level as unrated. A trivy advisory link is shown as rule documentation, not as a flagged request.
 - **Tools**: each tool in execution order with state, time, version, findings, warnings and errors; **Output** shows the command, exit code and raw output.
 - **Re-run**: all tools, or only those that measured nothing.
 
 Levels are shown only as the tools printed them. A tool that rates nothing (ruff, flake8, pip-audit, …) gets no level; the normalized severity used by statistics is never displayed here.
 
 Reference: [Analysis pipeline](/docs/ANALYSIS_PIPELINE).
+
+### Human eval (`/human-eval`)
+
+Manual testing studies in which human participants use and grade your generated apps on a separate evaluation portal.
+
+- **List**: your tasks with mode, status, apps, participants and progress toward the target number of ratings. Filter by status or search; **New task** opens the wizard.
+- **New task** (`/human-eval/new`) has six numbered sections:
+  1. **Start from**: a preset (App grading, Requirements audit, Security assessment, Usability test, A/B comparison, Full evaluation), or **From scratch**.
+  2. **Basics**: title, description, instructions in Markdown, and the mode (single app or A/B pairs).
+  3. **App pool**: an experiment and/or completed jobs.
+  4. **Design**: blocks, consent, pre/post questions and the analysis plan.
+  5. **Settings**: blinding, allocation, pairing, access, hosting and quality.
+  6. **Review and create**: saves a private draft.
+
+  The design is checked as you type.
+- **Task page** (`/human-eval/<id>`): **Open**, **Pause**, **Close**, **Reopen**, **Archive**, **Preview** (once open), **Duplicate** and **Delete** in the header. Seven tabs:
+  - **Overview**: blockers, validity warnings, progress, the record and the protocol log.
+  - **Design**: frozen after the first open.
+  - **Apps**: the de-blinded pool and hosting: start, stop, pin, rebuild, open, **Start all** / **Stop all**.
+  - **Participants**: invite links, **Generate codes**, **Add accounts**, and the participant table with quality flags and exclusion.
+  - **Responses**: assignments, reports with screenshots, and the HTTP log.
+  - **Results**: group by condition, model or app; include excluded data.
+  - **Export**: CSVs, the bundle and the results JSON.
+- **Evaluation portal** (`/eval`): what participants see. It has no sidebar. Participants join from an invite link (`/eval/join/<token>`, which shows their access code once), continue with an access code, or sign in with an evaluator account. The task page has instructions, consent, the "About you" questions, **Evaluate apps** and **Finish** (completion code). The workbench shows the app beside the form, which saves as they go. Evaluator accounts only ever see the portal.
+
+Reference: [Human evaluation](/docs/HUMAN_EVALUATION).
 
 ### Analyzers (`/analyzers`)
 
@@ -358,9 +416,10 @@ Puts empirical quality measured on this platform next to the metadata-based **MS
 Platform-wide analytics.
 
 - **Analysis Trends** and **Severity Distribution**.
-- **Model Comparison**: apps, success %, smoke pass, empirical score, MSS and composite.
-- **Tool Effectiveness**: scans, findings, average per scan and top rule.
-- **Top Findings**, **Code Generation Stats** and **Recent Activity**.
+- **Model Comparison**: apps, success % (completed of finished generations; pending, running and cancelled jobs are not outcomes), smoke pass, empirical score, MSS and composite.
+- **Tool Effectiveness**: scans (executions that measured the app: completed or not applicable), not measured (failed, cancelled, app not running), findings, average per measured scan (empty when none) and top rule.
+- **Top Findings** (one row per title, tool and the level that tool printed, `unrated` when it prints none; dependency advisories are marked dependency advisory, since they are package vulnerabilities, not code issues), **Code Generation Stats** (success rate over finished jobs; Source lines is source LOC; average times show — until something completed) and **Recent Activity**.
+- **Severity Distribution** is the platform's normalized level, labelled "normalized (heuristic)", not the tools' own labels.
 
 ### Reports (`/reports`)
 
@@ -372,12 +431,14 @@ Lists generated reports, with filters for **Type** and **Status**, **Sort**, and
 | --- | --- |
 | **Model Analysis** | Model |
 | **Template Comparison** | Template |
-| **Tool Analysis** | Tool name (blank aggregates all tools) |
+| **Tool Analysis** | Tool name (blank aggregates all tools; an unknown name is rejected) and an optional window in days (blank: all runs) |
 | **Generation Analytics** / **Comprehensive** | Window (days) |
 | **Experiment Report** | Experiment: leaderboard and paired comparisons against its baseline |
 | **Study Report** | Optional experiment, random seed, bootstrap and AI-finding options. Produces paper-ready tables. |
 
-**Report detail** (`/reports/<id>`) shows a **Summary**, **Details** and one card per data section. A completed report downloads as **Markdown**, **LaTeX** or **JSON**.
+Reports cover your own jobs and analyses (staff: everyone's). In **Comprehensive**, generation and tool analytics cover the window; the ranking sensitivity and platform totals are all-time.
+
+**Report detail** (`/reports/<id>`) shows a **Summary** and the report's curated tables, one card per table, exactly as the Markdown and LaTeX downloads have them. Tables have labelled columns, condition names, p-values with their interim/withheld/untested state, and '—' for values that were not measured. Reports with more than three tables get a table index. In the Summary an experiment report whose conditions tie for the top mean pass rate, or a study report whose models (or conditions) tie for TOPSIS rank 1, names no leader and reads 'Tie: N … share the top' (re-read from the report's leaderboard or ranking, so reports stored before ties were detected read right too), and unmeasured values read '—', never 0. The tables come from `GET /api/reports/<id>/tables/`, the same tables as the Markdown and LaTeX downloads; a table cut at 500 rows says so in its note. A completed report downloads as **Markdown**, **LaTeX** or **JSON**. Reports without curated tables render every field: nested objects become their own tables, wide tables are split into parts, and severity buckets are labelled as the platform's normalized severity (a heuristic), not the tools' own levels. Fields holding the levels the tools printed (`reported_levels`) are shown as printed, in one cell, and never labelled normalized.
 
 Reference: [Study tables](/docs/STUDY_TABLES).
 

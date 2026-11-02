@@ -154,8 +154,9 @@
 		const v = model.variance;
 		const parts = [`${model.n_trials} completed trial${model.n_trials === 1 ? 's — single runs are anecdotes' : 's'}`];
 		if (v?.density_per_kloc_mean != null) {
-			parts.push(`weighted findings density ${v.density_per_kloc_mean.toFixed(1)}/KLOC` +
-				(v.density_per_kloc_stdev != null ? ` (±${v.density_per_kloc_stdev.toFixed(1)} between trials)` : ''));
+			const spread = v.n_apps != null ? `between apps, n = ${v.n_apps}` : 'between trials';
+			parts.push(`weighted code-issue density ${v.density_per_kloc_mean.toFixed(1)}/KLOC` +
+				(v.density_per_kloc_stdev != null ? ` (±${v.density_per_kloc_stdev.toFixed(1)} ${spread})` : ''));
 		}
 		if (model.functional_pass_rate != null) {
 			parts.push(`smoke pass rate ${(model.functional_pass_rate * 100).toFixed(0)}%` +
@@ -336,7 +337,7 @@
 								<th class="border-l border-border" rowspan="2"><span class="block text-right" title="Applications generated with this model here">Apps</span></th>
 							</tr>
 							<tr>
-								<SortableTh label="Empirical" field="empirical" sortBy={sortBy} sortDir={sortAsc ? 'asc' : 'desc'} onSort={(f) => toggleSort(f as SortKey)} align="right" help="Severity-weighted findings per KLOC blended with the smoke pass rate" class="border-l border-border" />
+								<SortableTh label="Empirical" field="empirical" sortBy={sortBy} sortDir={sortAsc ? 'asc' : 'desc'} onSort={(f) => toggleSort(f as SortKey)} align="right" help="Severity-weighted code issues per KLOC (no dependency advisories, DAST or test code) blended with the smoke pass rate" class="border-l border-border" />
 								{#each metaCols as col, ci (col.key)}
 									<SortableTh label={col.label} field={col.key} sortBy={sortBy} sortDir={sortAsc ? 'asc' : 'desc'} onSort={(f) => toggleSort(f as SortKey)} align="right" help={col.help} class={ci === 0 ? 'border-l border-border' : ''} />
 								{/each}
@@ -471,9 +472,11 @@
 				<div class="space-y-2">
 					<p class="section-label text-foreground">Measurement — Empirical quality</p>
 					<p>
-						Measured on this platform: severity-weighted findings from the <strong>deterministic analysis
-						tools only</strong> (AI-reviewer findings are tracked separately and never enter this score),
-						normalized per KLOC of generated code, blended 60/40 with the <strong>smoke pass rate</strong>.
+						Measured on this platform: severity-weighted <strong>code issues</strong> from the deterministic
+						analysis tools that measured every compared app (AI-reviewer findings are tracked separately and
+						never enter this score). Dependency advisories, dynamic-scanner (DAST) findings and issues in test
+						code are left out; the density is per KLOC of non-test source code, each app's repeats are averaged
+						before models are compared, and it is blended 60/40 with the <strong>smoke pass rate</strong>.
 						The smoke test probes <code>/api/health</code> plus the template's declared GET endpoints —
 						it shows the app runs, not that it is functionally correct. Scores come with the number of
 						trials (n) and between-trial spread; treat n=1 as an anecdote, not a result.

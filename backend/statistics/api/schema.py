@@ -15,14 +15,20 @@ class OverviewSchema(Schema):
     apps_failed: int
     apps_running: int
     apps_pending: int
-    apps_success_rate: float
+    apps_cancelled: int = 0
+    # completed / (completed + failed); None until something finished.
+    apps_success_rate: float | None = None
     total_analyses: int
     analyses_completed: int
+    analyses_partial: int = 0
     analyses_failed: int
     analyses_running: int
     analyses_pending: int
-    analyses_success_rate: float
-    avg_analysis_duration_seconds: float
+    analyses_cancelled: int = 0
+    # completed / (completed + partial + failed); None until something finished.
+    analyses_success_rate: float | None = None
+    # Mean over completed analyses; None until one completed.
+    avg_analysis_duration_seconds: float | None = None
     total_findings: int
 
 
@@ -60,30 +66,42 @@ class ModelComparisonRowSchema(Schema):
     provider: str
     apps: int
     apps_completed: int
-    success_rate: float
-    avg_duration_seconds: float
+    apps_failed: int = 0
+    # Over finished generations (completed + failed); None when none finished.
+    success_rate: float | None = None
+    # Mean over completed generations; None when none completed.
+    avg_duration_seconds: float | None = None
     mss: float
     empirical_quality: float | None = None
     composite: float
     smoke_pass_rate: float | None = None
     n_trials: int = 0
-    findings: dict[str, int]
+    # Code issues the empirical score counts; None when no app of the model was measured.
+    findings: dict[str, int] | None = None
     ai_findings: dict[str, int]
 
 
 class ToolRowSchema(Schema):
     name: str
     type: str
+    # Executions that measured the app (completed, or skipped as not applicable).
     scans: int
+    # Failed, cancelled or app-not-running executions: they measured nothing.
+    not_measured: int = 0
     findings: int
-    avg_per_scan: float
+    # findings / scans; None when no execution measured anything.
+    avg_per_scan: float | None = None
     top_rule: str
 
 
 class TopFindingSchema(Schema):
     title: str
-    severity: str
+    tool: str = ""
+    # The level exactly as the tool printed it; "" when the tool rates nothing.
+    tool_severity: str = ""
     count: int
+    # A known-vulnerability advisory about a package, not a code issue (P2).
+    dependency_advisory: bool = False
 
 
 class ActivityItemSchema(Schema):
@@ -99,10 +117,16 @@ class CodeGenerationSchema(Schema):
     completed: int
     failed: int
     running: int
-    success_rate: float
-    avg_duration_seconds: float
+    pending: int = 0
+    cancelled: int = 0
+    # completed / (completed + failed); None until something finished.
+    success_rate: float | None = None
+    # Mean over completed generations; None until one completed.
+    avg_duration_seconds: float | None = None
     total_tokens: int
     total_cost_usd: float
+    # Source LOC (reports.services.loc), the study tables' denominator; legacy
+    # jobs without stored code fall back to metrics.lines_of_code.
     total_lines_of_code: int
     unique_templates: int
 

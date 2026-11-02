@@ -20,6 +20,7 @@ import LoadingState from '$lib/components/LoadingState.svelte';
 import EmptyState from '$lib/components/EmptyState.svelte';
 import type { Snippet } from 'svelte';
 import type { LLMModelSummary, PaginatedModels } from '$lib/api/client';
+import { knownTokenLimit } from './helpers';
 
 type SortableColumn = {
 	key: string;
@@ -185,8 +186,8 @@ function formatTokens(n: number): string {
 										</div>
 									</td>
 									<td class="whitespace-nowrap text-muted-foreground">{modelNamePrefix(model.model_name) || model.provider}</td>
-									<td class="num">{model.context_window_display}</td>
-									<td class="num text-muted-foreground">{model.max_output_tokens ? formatTokens(model.max_output_tokens) : '—'}</td>
+									<td class="num">{#if knownTokenLimit(model.context_window) != null}{model.context_window_display}{:else}<span class="text-muted-foreground" title="Not reported by the source">—</span>{/if}</td>
+									<td class="num text-muted-foreground">{#if knownTokenLimit(model.max_output_tokens) != null}{formatTokens(model.max_output_tokens)}{:else}<span title="Not reported by the source">—</span>{/if}</td>
 									<td class="num">
 										{#if model.input_price_per_million === 0}<span class="text-success-fg">Free</span>{:else}{formatPrice(model.input_price_per_million)}{/if}
 									</td>
@@ -273,8 +274,8 @@ function formatTokens(n: number): string {
 									</div>
 									<p class="mt-0.5 truncate text-[11px] text-muted-foreground">{modelNamePrefix(model.model_name) || model.provider}</p>
 									<dl class="mt-2 grid grid-cols-4 gap-2 text-[11px]">
-										<div><dt class="text-muted-foreground">Context</dt><dd class="font-mono text-xs tabular-nums">{model.context_window_display}</dd></div>
-										<div><dt class="text-muted-foreground">Max out</dt><dd class="font-mono text-xs tabular-nums">{model.max_output_tokens ? formatTokens(model.max_output_tokens) : '—'}</dd></div>
+										<div><dt class="text-muted-foreground">Context</dt><dd class="font-mono text-xs tabular-nums">{#if knownTokenLimit(model.context_window) != null}{model.context_window_display}{:else}<span class="text-muted-foreground">—</span>{/if}</dd></div>
+										<div><dt class="text-muted-foreground">Max out</dt><dd class="font-mono text-xs tabular-nums">{#if knownTokenLimit(model.max_output_tokens) != null}{formatTokens(model.max_output_tokens)}{:else}<span class="text-muted-foreground">—</span>{/if}</dd></div>
 										<div><dt class="text-muted-foreground">In $/1M</dt><dd class="font-mono text-xs tabular-nums {model.input_price_per_million === 0 ? 'text-success-fg' : ''}">{model.input_price_per_million === 0 ? 'Free' : formatPrice(model.input_price_per_million)}</dd></div>
 										<div><dt class="text-muted-foreground">Out $/1M</dt><dd class="font-mono text-xs tabular-nums {model.output_price_per_million === 0 ? 'text-success-fg' : ''}">{model.output_price_per_million === 0 ? 'Free' : formatPrice(model.output_price_per_million)}</dd></div>
 									</dl>

@@ -7,7 +7,8 @@
 	 * Props: `experimentId`, `mode`, `data` (`GET /post-run/`; live-patched by
 	 * `post_run` events), `onchange()`, `readonly` (archived: settings are
 	 * shown but cannot be saved), `canRun` (false until a run completed:
-	 * there is nothing to analyse yet).
+	 * there is nothing to analyse yet), `planTruncated` (the analysis plan's
+	 * truncation rule, or null).
 	 */
 	import { untrack } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -33,9 +34,11 @@
 		onchange: () => void;
 		readonly?: boolean;
 		canRun?: boolean;
+		/** The analysis plan's truncation rule (the report applies it instead of its own setting); null without a plan. */
+		planTruncated?: boolean | null;
 	}
 
-	let { experimentId, mode, data, onchange, readonly = false, canRun = true }: Props = $props();
+	let { experimentId, mode, data, onchange, readonly = false, canRun = true, planTruncated = null }: Props = $props();
 
 	let value = $state<PostRunSpec>(untrack(() => structuredClone($state.snapshot(data.config))));
 	let saved = $state(untrack(() => stableKey(data.config)));
@@ -110,7 +113,7 @@
 		{#if readonly}
 			<p class="text-xs text-muted-foreground">This experiment is archived: its post-run settings can no longer be changed.</p>
 		{/if}
-		<PostRunEditor bind:value {mode} disabled={readonly} idPrefix="post-run-card" />
+		<PostRunEditor bind:value {mode} disabled={readonly} {planTruncated} idPrefix="post-run-card" />
 
 		<div class="space-y-2 pt-2">
 			<SectionHeading size="sm" level={3} title="History" />

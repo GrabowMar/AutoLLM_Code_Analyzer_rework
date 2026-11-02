@@ -27,12 +27,30 @@ import StatusBadge from '$lib/components/StatusBadge.svelte';
 import LoadingState from '$lib/components/LoadingState.svelte';
 import EmptyState from '$lib/components/EmptyState.svelte';
 import { copyText } from '$lib/components/applications/utils';
+import PhaseTimeline from '$lib/components/applications/insights/PhaseTimeline.svelte';
+import { getJobTimeline, type JobTimeline } from '$lib/api/job-insights';
+import { formatApiError } from '$lib/api/core';
 
 const jobId = $derived(page.params.id ?? '');
 let loading = $state(true);
 let job = $state<GenerationJob | null>(null);
 let artifacts = $state<GenerationArtifact[]>([]);
 let iterations = $state<CopilotIteration[]>([]);
+let timeline = $state<JobTimeline | null>(null);
+let timelineLoading = $state(true);
+let timelineError = $state('');
+
+async function loadTimeline() {
+timelineLoading = true;
+try {
+timeline = await getJobTimeline(jobId);
+timelineError = '';
+} catch (e) {
+timelineError = formatApiError(e, 'Could not load the timeline.');
+} finally {
+timelineLoading = false;
+}
+}
 
 const failedIterations = $derived(iterations.filter((it) => !it.build_success));
 const allErrors = $derived.by(() => {
@@ -62,7 +80,10 @@ loading = false;
 }
 }
 
-onMount(fetchData);
+onMount(() => {
+fetchData();
+loadTimeline();
+});
 </script>
 
 {#if loading}
@@ -151,6 +172,9 @@ Open API credentials
 {/if}
 </Card.Content>
 </Card.Root>
+
+<!-- Phases, execution record (attempts, infra errors) -->
+<PhaseTimeline {timeline} loading={timelineLoading} error={timelineError} onretry={loadTimeline} />
 
 <!-- Generation Errors List (from copilot iterations) -->
 {#if allErrors.length > 0}

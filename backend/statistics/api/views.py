@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
+
 from ninja import Query
 from ninja import Router
+from ninja.errors import HttpError
 
 from backend.statistics import services
 from backend.statistics.api.schema import ActivityItemSchema
@@ -18,6 +21,16 @@ from backend.statistics.api.schema import TopFindingSchema
 from backend.statistics.api.schema import TrendsSchema
 
 router = Router(tags=["statistics"])
+
+
+def _uuid_param(value: str | None, name: str) -> str | None:
+    """*value* as a canonical UUID string; a malformed id is the caller's error (400), not a server error."""
+    if not value:
+        return None
+    try:
+        return str(uuid.UUID(value))
+    except ValueError as exc:
+        raise HttpError(400, f"{name} must be a UUID") from exc
 
 
 @router.get("/dashboard/", response=DashboardSchema)
@@ -54,7 +67,7 @@ def get_models(
         limit=limit,
         prompt_hash=prompt_hash,
         bundle_key=bundle_key,
-        experiment_id=experiment_id,
+        experiment_id=_uuid_param(experiment_id, "experiment_id"),
     )
 
 
@@ -89,7 +102,11 @@ def get_analyzer_health(request):
 def _study_scope(request, experiment_id: str | None, batch_id: str | None):
     from backend.statistics.services.study import study_jobs
 
-    return study_jobs(request.auth, experiment_id=experiment_id, batch_id=batch_id)
+    return study_jobs(
+        request.auth,
+        experiment_id=_uuid_param(experiment_id, "experiment_id"),
+        batch_id=_uuid_param(batch_id, "batch_id"),
+    )
 
 
 @router.get("/study/breakdowns/")

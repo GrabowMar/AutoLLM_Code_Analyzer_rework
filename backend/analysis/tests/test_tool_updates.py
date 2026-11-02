@@ -146,3 +146,70 @@ def test_uninstall_runs_uninstall_cmd_when_running(ws, monkeypatch):
     assert tool_installer.uninstall(ws, tool) == "Package removed."
     assert ran == ["pip uninstall -y ruff"]
     assert not InstalledTool.objects.filter(workspace=ws, tool=tool).exists()
+
+
+def test_detected_version_skips_a_banner_line(monkeypatch):
+    tool = AnalyzerToolFactory.build(slug="shop-shellcheck", verify_cmd="shellcheck --version", version="0.10")
+    banner = "ShellCheck - shell script analysis tool\nversion: 0.10.0\nlicense: GNU GPL, version 3\n"
+    monkeypatch.setattr(tool_installer.docker_manager, "exec_in", lambda *a, **k: {"exit_code": 0, "output": banner})
+    assert tool_installer._detect_version("c", tool) == "version: 0.10.0"
+    plain = {"exit_code": 0, "output": "ruff 0.6.9"}
+    monkeypatch.setattr(tool_installer.docker_manager, "exec_in", lambda *a, **k: plain)
+    assert tool_installer._detect_version("c", tool) == "ruff 0.6.9"
+
+
+def test_tool_without_install_records_the_shipped_build_when_the_workspace_runs(ws, monkeypatch):
+    # npm audit ships with the image's Node.js: nothing to install, but the build doing the audit is recorded.
+    tool = AnalyzerToolFactory(slug="shop-npm-audit", install_cmd="", verify_cmd="npm --version", version="10")
+    ws.container = ContainerInstance.objects.create(name="c", image="img")
+    ws.save()
+    monkeypatch.setattr(tool_installer.workspace_service, "is_running", lambda w: True)
+    npm = {"exit_code": 0, "output": "10.9.2\n"}
+    monkeypatch.setattr(tool_installer.docker_manager, "exec_in", lambda *a, **k: npm)
+    it = tool_installer.install(ws, tool)
+    assert (it.status, it.installed_version, it.catalog_version) == (InstalledTool.Status.INSTALLED, "10.9.2", "10")
+    assert not it.update_available
+
+    # A stopped workspace is never provisioned for this: the catalog pin stands in.
+    monkeypatch.setattr(tool_installer.workspace_service, "is_running", lambda w: False)
+    monkeypatch.setattr(tool_installer.docker_manager, "exec_in", lambda *a, **k: pytest.fail("must not exec"))
+    assert tool_installer.install(ws, tool, update=True).installed_version == "10"
+
+
+def test_redetect_versions_rerecords_existing_installs_from_verify(ws, monkeypatch):
+    # Installs recorded before banner lines were skipped keep the banner as their version.
+    shellcheck = AnalyzerToolFactory(slug="shop-redetect-sc", verify_cmd="shellcheck --version")
+    perflint = AnalyzerToolFactory(slug="shop-redetect-pf", verify_cmd="perflint --version")
+    broken = AnalyzerToolFactory(slug="shop-redetect-broken", verify_cmd="broken --version")
+    review = AnalyzerToolFactory(slug="shop-redetect-ai", kind="ai", verify_cmd="")
+    InstalledToolFactory(workspace=ws, tool=shellcheck, installed_version="ShellCheck - shell script analysis tool")
+    InstalledToolFactory(workspace=ws, tool=perflint, installed_version="perflint 0.8.1")
+    InstalledToolFactory(workspace=ws, tool=broken, installed_version="1.0")
+    InstalledToolFactory(workspace=ws, tool=review, installed_version="")
+    banner = "ShellCheck - shell script analysis tool\nversion: 0.10.0\n"
+    outputs = {
+        "shellcheck --version": {"exit_code": 0, "output": banner},
+        "perflint --version": {"exit_code": 0, "output": "perflint 0.8.1\n"},
+        "broken --version": {"exit_code": 127, "output": "sh: broken: not found"},
+    }
+    ran = []
+    monkeypatch.setattr(tool_installer.workspace_service, "is_running", lambda w: True)
+    monkeypatch.setattr(
+        tool_installer.docker_manager,
+        "exec_in",
+        lambda name, cmd, **k: ran.append((name, cmd)) or outputs[cmd],
+    )
+    ws.container = ContainerInstance.objects.create(name="ws-c", image="img")
+    ws.save()
+
+    changed = tool_installer.redetect_versions(ws)
+    assert changed == {"shop-redetect-sc": ("ShellCheck - shell script analysis tool", "version: 0.10.0")}
+    assert {cmd for _, cmd in ran} == set(outputs)  # the AI tool has no container build
+    versions = dict(InstalledTool.objects.filter(workspace=ws).values_list("tool__slug", "installed_version"))
+    assert versions["shop-redetect-sc"] == "version: 0.10.0"
+    assert versions["shop-redetect-broken"] == "1.0"  # a failed verify keeps what was recorded
+
+    # Never provisions a stopped workspace.
+    monkeypatch.setattr(tool_installer.workspace_service, "is_running", lambda w: False)
+    with pytest.raises(RuntimeError, match="not running"):
+        tool_installer.redetect_versions(ws)

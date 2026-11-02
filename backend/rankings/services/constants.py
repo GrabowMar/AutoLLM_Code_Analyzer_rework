@@ -67,10 +67,15 @@ DOCS_SCORES = {
 }
 
 # Empirical quality (from this platform's own measurements): a weighted
-# findings-per-KLOC density is squashed to 0..1, then blended with the
+# code-issue-per-KLOC density is squashed to 0..1, then blended with the
 # functional smoke-test pass rate. EMPIRICAL_DENSITY_CAP is the density that
-# scores zero — our 4-model URL-shortener experiment measured ~48-132/KLOC
-# with the full 7-tool set, so 150 spreads observed models across the scale.
+# scores zero. The density counts code issues only (no dependency advisories,
+# dynamic-tool or test-code findings) over source LOC: real experiments
+# measure ~6-10/KLOC per model with a 13-tool set (per app up to ~14) and
+# ~32/KLOC with a 29-tool set, so 50 spreads models across the scale without
+# flooring the wider instrument sets. (150 was tuned on all-category
+# densities of ~48-132/KLOC, which advisories dominated; on code-only
+# densities it squeezed every model into 0.94-0.97.)
 SEVERITY_WEIGHTS = {"critical": 10, "high": 5, "medium": 2, "low": 1, "info": 0}
 
 # Alternative severity weightings for the rank-stability sensitivity analysis:
@@ -84,7 +89,7 @@ SEVERITY_WEIGHT_SCHEMES = {
     "info_included": {"critical": 10, "high": 5, "medium": 2, "low": 1, "info": 1},
 }
 
-EMPIRICAL_DENSITY_CAP = 150.0
+EMPIRICAL_DENSITY_CAP = 50.0
 EMPIRICAL_FUNCTIONAL_WEIGHT = 0.4  # rest goes to findings density
 
 # When local measurements exist, composite blends them with the metadata-based

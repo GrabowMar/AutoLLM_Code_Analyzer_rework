@@ -26,7 +26,7 @@ The browser only talks to the SvelteKit server, which proxies `/api/`, `/_allaut
 
 ## Backend apps
 
-Eighteen Django apps under `backend/` (plus `backend/contrib/sites` and the non-app helpers in `backend/common/`):
+Nineteen Django apps under `backend/` (plus `backend/contrib/sites` and the non-app helpers in `backend/common/`):
 
 | App | Role |
 | --- | --- |
@@ -38,6 +38,7 @@ Eighteen Django apps under `backend/` (plus `backend/contrib/sites` and the non-
 | `execution` | The executor process: scheduler, lanes, pools, leases, reconciliation, capacity — see [Execution](/docs/EXECUTION) |
 | `generation` | Jobs (agent, scaffolding, custom; legacy copilot), templates, stacks, blocks, profiles, packages, presets, evaluation, experiments with their schedules and post-runs — see [Generation process](/docs/GENERATION_PROCESS), [Experiments](/docs/EXPERIMENTS) |
 | `analysis` | Analyzer tool catalog, per-user workspaces, runs, findings — see [Analysis pipeline](/docs/ANALYSIS_PIPELINE) |
+| `human_eval` | Human-evaluation tasks over generated apps: design, participants (invite links, access codes, restricted evaluator accounts), allocation, the participant portal, hosting apps for testers, results and exports — see [Human evaluation](/docs/HUMAN_EVALUATION) |
 | `statistics` | Dashboard and study aggregates — see [Study tables](/docs/STUDY_TABLES) |
 | `rankings` | Model scores, benchmarks, severity-weight sensitivity |
 | `reports` | Saved reports (`rpt_` public IDs) |
@@ -74,13 +75,13 @@ Views raise ninja `HttpError`; services raise `backend.common.exceptions.*`, whi
 | LLM calls to direct endpoints (one pump thread per concurrency slot), the internal LLM proxy for agent gateways | `executor` | `backend/inference/pump.py`, `backend/inference/proxy_server.py` |
 | LLM calls to relay endpoints | Queued as `LLMRequest` rows. The relay on the GPU box claims them by long-polling `/api/relay/v1/poll` on `django` | `backend/inference/relay/` |
 | Interactive analysis runs, workspace provisioning and tool installs, container build/start/stop actions, report generation | Daemon threads inside the `django` process (`backend/common/threading.py:dispatch_in_thread`) | `analysis/services/runner.py`, `analysis/api/views/workspace.py`, `analysis/api/views/installed.py`, `runtime/services/container_service.py`, `reports/services/report_service.py` |
-| Webhook delivery and the 60 s webhook sweep, Hugging Face catalog enrichment | Celery worker, beat (`django_celery_beat` database scheduler) | `backend/integrations/tasks.py`, `backend/llm_models/tasks.py` |
+| Webhook delivery and the 60 s webhook sweep, Hugging Face catalog enrichment, OpenRouter per-call stats after a run | Celery worker, beat (`django_celery_beat` database scheduler) | `backend/integrations/tasks.py`, `backend/llm_models/tasks.py`, `backend/generation/tasks.py` |
 
 Consequences:
 
 - The web process never runs a generation job. If the executor is down, jobs stay queued (the UI shows the executor as offline) and resume when it returns. Exactly one executor runs. It holds a Postgres advisory lock, uses leases so jobs survive restarts, and has no autoreload: restart it to pick up backend changes, draining first. See [Execution](/docs/EXECUTION).
-- Thread-dispatched work dies with the `django` container: a restart or autoreload during an interactive analysis run or a report kills it. The system page has maintenance actions to clear stuck runs.
-- Celery is only needed for notifications and enrichment. Without a worker, webhooks queue up and the Hugging Face pass is skipped.
+- Thread-dispatched work dies with the `django` container: a restart or autoreload during an interactive analysis run or a report kills it. A report's generation thread starts only once its row is committed. A report left pending for 10 minutes or generating for 1 hour is marked failed ("Interrupted…") the next time reports are listed or opened. The system page has maintenance actions to clear stuck runs.
+- Celery is only needed for notifications, enrichment and the post-run OpenRouter stats fetch. Without a worker, webhooks and stats fetches queue up and the Hugging Face pass is skipped.
 
 Details of each service are in [Background services](/docs/BACKGROUND_SERVICES).
 
@@ -114,11 +115,11 @@ An experiment generates an app per model, evaluates it, analyzes it and compares
 
 Rankings keep two kinds of numbers apart (`backend/rankings/services/`):
 
-- **Empirical quality (measured).** Severity-weighted findings from the deterministic container tools only, normalized per KLOC of generated code and blended with the functional pass rate. Findings from AI-kind tools (`AnalyzerTool.kind == "ai"`, e.g. the LLM reviewer) are opinions with their own run-to-run variance. They never enter this score and are reported separately as `ai_findings`. Each score carries `n_trials` and between-trial spread (stdev of per-job findings density and pass rate). A single completed trial is an anecdote, not a result.
+- **Empirical quality (measured).** Severity-weighted code issues per KLOC of source code, blended with the functional pass rate. Counted: each compared job's latest result per tool, only from tools that measured every compared app (`instrument_set`), excluding dependency advisories of the known-vulnerability scanners (`dependency_findings`), dynamic-tool findings (`runtime_findings`) and findings in test code (`test_findings`); repeats of an app in one condition are averaged before the per-model aggregate. Findings from AI-kind tools (`AnalyzerTool.kind == "ai"`, e.g. the LLM reviewer) are opinions with their own run-to-run variance. They never enter this score and are reported separately as `ai_findings`. Each score carries `n_trials` and spread over apps (stdev of per-app mean density and pass rate, `variance.n_apps`). The weighted density is squashed to 0..1 against `EMPIRICAL_DENSITY_CAP` = 50 weighted code issues per KLOC (that density scores 0). It was 150 while densities still counted dependency advisories (~48-132/KLOC), which squeezed code-only densities (~6-32/KLOC) into 0.94-0.97. The order by density is unchanged, but because the pass rate is blended in, models whose density and pass rate disagree can change places. Counts nothing measured are null, not 0: `findings`, `dependency_findings`, `runtime_findings` and `test_findings` of a model with no measured app, `dependency_findings` when no advisory scanner is in the instrument set, and `runtime_findings` when no dynamic tool is. `avg_duration` is null when no generation completed. `conditions_pooled` counts the experiment conditions a model's row pools, and `pooling_note` flags rows that mix several (harness or prompt-profile arms); the study reports compare conditions separately. These counting rules are bug fixes to the metric's definition; stored results are unchanged until recomputed. A single completed trial is an anecdote, not a result.
 - **MSS (decision aid).** An opinionated composite of model metadata (adoption, public benchmarks, cost, accessibility) with asserted weights. It helps when picking a model but is not a measurement made here. **Composite** blends MSS with empirical quality when local measurements exist.
 
 The baseline severity weights (`SEVERITY_WEIGHTS` in `rankings/services/constants.py`) are asserted, not derived. To account for that, the platform reports a sensitivity analysis: the empirical ranking is recomputed under the alternative schemes in `SEVERITY_WEIGHT_SCHEMES` and compared with Kendall's tau and the list of rank swaps (`GET /api/rankings/sensitivity/`, also embedded in template-comparison and comprehensive reports). Tau near 1.0 across schemes means the ordering does not hinge on the weight choice.
 
 The functional pass rate is `metrics.functional.pass_rate`. Evaluation writes it from the conformance suite. A manual re-probe (`POST /api/runtime/jobs/{job_id}/smoke/`, `/api/health` plus the template's declared GET endpoints) overwrites it with the weaker smoke result. The statistics page's model comparison uses the same rankings aggregation, so the two pages cannot disagree.
 
-Every job also carries `prompt_hash`/`bundle_key`, and rankings, statistics and reports accept them as optional filters. A comparison across models is only valid if every model was generated from the same prompt version. Without an explicit filter, jobs from different template edits on the same app are pooled together. See [Experiments](/docs/EXPERIMENTS) for running a designed, apples-to-apples comparison.
+Every job also carries `prompt_hash`/`bundle_key`. Rankings and the statistics model comparison accept them as optional filters; among the reports only the template comparison does (the others report the prompt hashes they saw and flag mixed versions). A comparison across models is only valid if every model was generated from the same prompt version. Without an explicit filter, jobs from different template edits on the same app are pooled together. See [Experiments](/docs/EXPERIMENTS) for running a designed, apples-to-apples comparison.

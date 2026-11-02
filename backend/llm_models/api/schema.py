@@ -38,6 +38,37 @@ def endpoint_ref(obj: LLMModel, online_cache: dict[int, bool] | None = None) -> 
     }
 
 
+# What a local model's page may inherit from its catalog twin.
+TWIN_METADATA_KEYS = ("models_dev", "huggingface", "params", "epoch", "lmarena")
+TWIN_CAPABILITY_KEYS = ("hugging_face_id", "reasoning", "default_parameters", "architecture", "benchmarks")
+
+
+def twin_payload(obj: LLMModel) -> dict | None:
+    """``{link, model, metadata, capabilities}`` of the catalog twin named in ``metadata.catalog_twin``."""
+    link = (obj.metadata or {}).get("catalog_twin")
+    if obj.endpoint_id is None or not isinstance(link, dict) or not link.get("model_id"):
+        return None
+    row = LLMModel.objects.filter(endpoint__isnull=True, model_id=link["model_id"]).first()
+    if row is None:
+        return {"link": link, "model": None, "metadata": {}, "capabilities": {}}
+    meta = row.metadata or {}
+    caps = row.capabilities_json or {}
+    return {
+        "link": link,
+        "model": {
+            "id": row.pk,
+            "model_id": row.model_id,
+            "canonical_slug": row.canonical_slug,
+            "model_name": row.model_name,
+            "provider": row.provider,
+            "context_window": row.context_window,
+            "max_output_tokens": row.max_output_tokens,
+        },
+        "metadata": {k: meta[k] for k in TWIN_METADATA_KEYS if k in meta},
+        "capabilities": {k: caps[k] for k in TWIN_CAPABILITY_KEYS if k in caps},
+    }
+
+
 class LLMModelSchema(ModelSchema):
     """Full model representation for list and detail views."""
 
@@ -51,6 +82,9 @@ class LLMModelSchema(ModelSchema):
     quantization: str = ""
     parameter_size: str = ""
     is_local: bool = False
+    # Local endpoint model linked to a catalog row (metadata.catalog_twin): that row's
+    # metadata, shown as inherited ("assumed same weights"). Never merged or pooled.
+    twin: dict | None = None
 
     class Meta:
         model = LLMModel
@@ -88,6 +122,10 @@ class LLMModelSchema(ModelSchema):
     @staticmethod
     def resolve_is_local(obj: LLMModel) -> bool:
         return obj.is_local
+
+    @staticmethod
+    def resolve_twin(obj: LLMModel) -> dict | None:
+        return twin_payload(obj)
 
     @staticmethod
     def resolve_input_price_per_million(obj: LLMModel) -> float:

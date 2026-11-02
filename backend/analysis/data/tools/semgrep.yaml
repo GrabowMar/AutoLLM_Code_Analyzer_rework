@@ -17,14 +17,32 @@ verify_cmd: "semgrep --version"
 uninstall_cmd: "pip uninstall -y semgrep"
 # Explicit rule packs (py + js/jsx) instead of `--config auto`, which semgrep
 # refuses when metrics are disabled. Packs are fetched from the registry once.
-run_cmd: "semgrep --config p/python --config p/javascript --json --quiet --metrics off --disable-version-check {target}"
+# --x-ignore-semgrepignore-files: without it semgrep applies its built-in
+# default .semgrepignore, which silently skips test/ and tests/ directories
+# (and would honour a .semgrepignore the app ships). Every other tool scans
+# test code; the statistics classify it at read time, so semgrep must see the
+# same files. node_modules/virtualenvs stay excluded, as for the other tools.
+# exclude_rules: like bandit's B104 skip, the 0.0.0.0 bind the generation
+# template requires (app.run(host="0.0.0.0")) would add one identical finding
+# to almost every Flask app.
+run_cmd: |
+  set -f; set --
+  for r in $(printf '%s' {config:exclude_rules} | tr ',' ' '); do set -- "$@" --exclude-rule "$r"; done
+  semgrep --config p/python --config p/javascript --json --quiet --metrics off --disable-version-check --x-ignore-semgrepignore-files --exclude node_modules --exclude .venv --exclude venv --exclude '*.min.js' "$@" {target}
 parser_key: semgrep
 file_patterns: ["*.py", "*.js", "*.jsx", "*.ts", "*.tsx"]
 run_timeout: 300
 install_timeout: 600
 display_order: 20
-config_schema: []
-default_config: {}
+config_schema:
+  - name: exclude_rules
+    type: string
+    label: Excluded rules
+    description: Comma-separated Semgrep rule ids to leave out.
+    default: python.flask.security.audit.app-run-param-config.avoid_app_run_with_bad_host
+    placeholder: python.flask.security.audit.app-run-param-config.avoid_app_run_with_bad_host
+default_config:
+  exclude_rules: python.flask.security.audit.app-run-param-config.avoid_app_run_with_bad_host
 sample_code: |
   import subprocess
 

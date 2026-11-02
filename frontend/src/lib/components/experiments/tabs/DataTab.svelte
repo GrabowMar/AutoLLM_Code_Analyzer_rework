@@ -5,7 +5,7 @@
 	 * attempts only (default) or retried runs only, paged on the server;
 	 * "Retry failed" tops up failed and cancelled cells. 4.2 the collection
 	 * log (every launch, top-up and scheduled batch) and 4.3 the dataset
-	 * downloads (JSON research export, CSV of runs).
+	 * downloads (JSON research export, CSV of runs, per-call telemetry CSV).
 	 *
 	 * Props: `experiment`, `appName(id)`, `onlaunched()` (after a top-up),
 	 * `counts` (live rollups, so "Retry failed" follows the run), `exporting`
@@ -32,6 +32,7 @@
 	import type { ProgressCounts } from '$lib/api/types/experiments';
 	import { experimentErrorBody, launchExperiment, listBatches, type ExperimentDetail } from '$lib/api/experiments';
 	import { formatApiError } from '$lib/api/core';
+	import { callsCsvUrl } from '$lib/api/telemetry';
 	import { formatDateTime } from '$lib/utils/formatters';
 	import Braces from '@lucide/svelte/icons/braces';
 	import Download from '@lucide/svelte/icons/download';
@@ -40,6 +41,7 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import Sheet from '@lucide/svelte/icons/sheet';
+	import Timer from '@lucide/svelte/icons/timer';
 	import { conditionName, isTerminal, plural } from '../format';
 	import StudyFigure from '../study/StudyFigure.svelte';
 	import StudySection from '../study/StudySection.svelte';
@@ -301,8 +303,13 @@
 		{/if}
 	</StudySection>
 
-	<StudySection id="data-downloads" number="4.3" title="Dataset" lead="Downloads for analysis elsewhere. Both include every attempt, not just the current one.">
-		<div class="grid gap-3 sm:grid-cols-2">
+	<StudySection
+		id="data-downloads"
+		number="4.3"
+		title="Dataset"
+		lead="Downloads for analysis elsewhere. The research export and runs table include every attempt, not just the current one."
+	>
+		<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
 			<button
 				type="button"
 				class="group flex cursor-pointer items-start gap-3 rounded-md border border-border bg-card p-4 text-left shadow-[var(--shadow-card)] transition-colors duration-150 hover:border-primary/50 hover:bg-primary/[0.03] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-wait disabled:opacity-60"
@@ -337,6 +344,22 @@
 				</span>
 				<Download class="ml-auto size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 			</button>
+			<a
+				href={callsCsvUrl({ experiment: experiment.id })}
+				download
+				class="group flex items-start gap-3 rounded-md border border-border bg-card p-4 text-left shadow-[var(--shadow-card)] transition-colors duration-150 hover:border-primary/50 hover:bg-primary/[0.03] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+			>
+				<span class="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground group-hover:text-primary">
+					<Timer class="size-4" />
+				</span>
+				<span class="min-w-0 space-y-0.5">
+					<span class="flex items-center gap-1.5 font-medium">Per-call telemetry <span class="font-mono text-xs text-muted-foreground">.csv</span></span>
+					<span class="block text-xs leading-relaxed text-muted-foreground">
+						One row per recorded LLM call: duration, retries, served provider and model version, TTFT and decode speed (OpenRouter calls), token breakdown, cost and list price. No prompts or outputs; unmeasured values are empty.
+					</span>
+				</span>
+				<Download class="ml-auto size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+			</a>
 		</div>
 		<p class="text-xs text-muted-foreground">{plural(experiment.total_cells, 'cell')} in the design; the statistics in §3 can also be written up as a report from the Results tab.</p>
 	</StudySection>

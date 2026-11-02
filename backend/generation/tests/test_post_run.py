@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from backend.analysis.models import AnalysisRun
 from backend.analysis.models import AnalyzerTool
+from backend.analysis.models import ToolResult
 from backend.execution.models import ExecutorSettings
 from backend.generation.models import Experiment
 from backend.generation.models import ExperimentPostRun
@@ -140,8 +141,15 @@ class TestAdvance:
             "report": {"enabled": True, "exclude_truncated": True},
         }
         experiment, jobs = _completed_experiment(user, post_run=config)
-        already = next(iter(jobs.values()))
-        AnalysisRun.objects.create(created_by=user, generation_job=already, status=AnalysisRun.Status.COMPLETED)
+        already, bare, _ = (j for j in jobs.values() if j.status == S.COMPLETED)
+        measured = AnalysisRun.objects.create(
+            created_by=user,
+            generation_job=already,
+            status=AnalysisRun.Status.COMPLETED,
+        )
+        ToolResult.objects.create(run=measured, tool_slug="bandit", status="completed")
+        # A finished run without any bandit result measured nothing: that job is analyzed again.
+        AnalysisRun.objects.create(created_by=user, generation_job=bare, status=AnalysisRun.Status.COMPLETED)
         post_run = automation.on_experiment_completed(experiment)
 
         with mock.patch(EXECUTE, side_effect=_fake_execute()) as execute:
@@ -149,8 +157,11 @@ class TestAdvance:
         assert done.id == post_run.id
         post_run.refresh_from_db()
         assert post_run.status == ExperimentPostRun.Status.COMPLETED, post_run.error
-        # Three completed current jobs, one already analyzed; the failed job is skipped.
+        # Three completed current jobs, one already measured by bandit; the failed job is skipped.
         assert execute.call_count == 2
+        analyzed = {call.args[0].generation_job_id for call in execute.call_args_list}
+        assert already.id not in analyzed
+        assert bare.id in analyzed
         assert post_run.progress == {"analysis_done": 2, "analysis_total": 2, "analysis_failed": 0}
         assert len(post_run.analysis_run_ids) == 2
         assert (post_run.lease_owner, post_run.lease_expires_at) == ("", None)

@@ -1,8 +1,8 @@
 slug: deptry
 name: deptry
 description: >-
-  Finds Python dependency problems: modules imported but missing from
-  requirements (the app crashes at import time), declared but unused
+  Finds Python dependency problems: modules imported but provided by no
+  declared package (the app crashes at import time), declared but unused
   packages, and transitive or misplaced dependencies.
 category: dependencies
 kind: container
@@ -16,12 +16,23 @@ install_cmd: "pip install --user --upgrade 'deptry==0.23.*'"
 verify_cmd: "deptry --version"
 uninstall_cmd: "pip uninstall -y deptry"
 # Dependencies aren't installed in the workspace, so deptry can't read their
-# metadata: map distributions whose import name differs from the package name.
+# metadata: map distributions whose import name differs from the package name
+# (the parser inverts these entries: keep extra_parsers._DEPTRY_IMPORT_PACKAGES
+# in step). A framework also provides the modules it installs (werkzeug and
+# itsdangerous come with Flask, pydantic and starlette with FastAPI): without
+# those entries a direct `from werkzeug.security import ...` is reported as a
+# missing dependency that crashes at import, although the app runs. deptry
+# looks keys up by the name exactly as the requirements file spells it, hence
+# the spelling variants.
+# --per-rule-ignores DEP002: packages an app needs but never imports (ASGI/WSGI
+# servers started from the command line, framework backends such as
+# python-multipart, email-validator, bcrypt for passlib, simple-websocket for
+# flask-sock, database drivers): "declared but unused" is always wrong there.
 run_cmd: |
   cd {target} && find . -name 'requirements*.txt' -not -path '*/node_modules/*' -not -path '*/.venv/*' -exec dirname {} \; | sort -u | while IFS= read -r d; do
     echo "### ${d#./}"
     rm -f /tmp/deptry.json
-    (cd "$d" && deptry . --json-output /tmp/deptry.json --package-module-name-map 'PyJWT=jwt,python-dotenv=dotenv,Pillow=PIL,beautifulsoup4=bs4,PyYAML=yaml,scikit-learn=sklearn,python-jose=jose,psycopg2-binary=psycopg2,opencv-python=cv2,python-dateutil=dateutil,python-multipart=multipart|python_multipart,argon2-cffi=argon2,pwdlib=pwdlib,email-validator=email_validator,pymongo=pymongo|bson,dnspython=dns,protobuf=google.protobuf' >/dev/null 2>&1; cat /tmp/deptry.json 2>/dev/null)
+    (cd "$d" && deptry . --json-output /tmp/deptry.json --package-module-name-map 'PyJWT=jwt,python-dotenv=dotenv,Pillow=PIL,beautifulsoup4=bs4,PyYAML=yaml,scikit-learn=sklearn,python-jose=jose,psycopg2-binary=psycopg2,opencv-python=cv2,python-dateutil=dateutil,python-multipart=multipart|python_multipart,argon2-cffi=argon2,pwdlib=pwdlib,email-validator=email_validator,pymongo=pymongo|bson,dnspython=dns,protobuf=google.protobuf,Flask=flask|werkzeug|itsdangerous|jinja2|click|blinker|markupsafe,flask=flask|werkzeug|itsdangerous|jinja2|click|blinker|markupsafe,Flask-SQLAlchemy=flask_sqlalchemy|sqlalchemy,flask-sqlalchemy=flask_sqlalchemy|sqlalchemy,fastapi=fastapi|starlette|pydantic|typing_extensions,FastAPI=fastapi|starlette|pydantic|typing_extensions' --per-rule-ignores 'DEP002=uvicorn|gunicorn|hypercorn|python-multipart|email-validator|bcrypt|simple-websocket|psycopg2|psycopg2-binary|pymysql|PyMySQL' >/dev/null 2>&1; cat /tmp/deptry.json 2>/dev/null)
     echo
   done
 parser_key: deptry

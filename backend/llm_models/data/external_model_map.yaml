@@ -1,0 +1,613 @@
+# Curated mapping: our LLMModel.model_id -> exact model names in external sources.
+#
+# Used by `python manage.py import_external_covariates` (services/external_sources.py),
+# which copies the matched rows into LLMModel.metadata["epoch"] / metadata["lmarena"].
+#
+# Sources (both CC-BY 4.0; attribution is stored with every imported value):
+#   epoch    exact "Model" column of the Epoch AI "All AI models" CSV
+#            (https://epoch.ai/data/all_ai_models.csv)
+#   lmarena  exact "model_name" of the Hugging Face dataset lmarena-ai/leaderboard-dataset,
+#            per dataset config: webdev (also used for webdev-html / webdev-react),
+#            text (overall and coding categories), agent (agent arena, a different score scale)
+#
+# Rules
+#   * Names are matched EXACTLY. Nothing is fuzzy-matched at import time; run the
+#     command with --suggest to see candidates while curating this file.
+#   * null = no matching entry in that source (or no confident match). The import then
+#     removes a stale value; it never guesses.
+#   * Reasoning effort matters. None of our runs sets an effort, so a run gets the
+#     provider default (OpenRouter `reasoning.default_effort` for catalog models; unknown
+#     for subscription endpoints). Arena entries are per effort ("(Max)", "(High)", ...):
+#     we pick the entry labelled with the provider default when one exists, otherwise the
+#     only entry for the model, and say so in `note`.
+#   * match:
+#       exact    same model and the default configuration we call
+#       variant  same weights/version, but the external source measured a different
+#                reasoning effort or release date than the one we call
+#       assumed  identity is an assumption (subscription endpoint whose served model and
+#                effort are not disclosed, or a disputed catalog link); read the note
+#   * twin: for local endpoint rows, the OpenRouter catalog row assumed to serve the same
+#     weights (models.dev "opencode-go" provider mapping unless the note says otherwise).
+#     The covariates endpoint prefers metadata.catalog_twin when enrichment has set it.
+#
+# Curated 2026-11-02 against Epoch "All AI models" (last modified 2026-10-29) and the
+# LMArena "latest" split published 2026-10-28.
+
+models:
+  # ── Models with generation jobs (OpenRouter catalog) ─────────────────────
+  deepseek/deepseek-v4.1-flash:
+    epoch: DeepSeek V4.1 Flash
+    lmarena:
+      webdev: DeepSeek-V4.1-Flash-20260910 (Max)
+      text: DeepSeek-V4.1-Flash-20260910 (Max)
+      agent: DeepSeek-V4.1-Flash-20260910 (Max)
+    match: variant
+    note: >-
+      OpenRouter canonical slug deepseek-v4.1-flash-20260910 matches the arena release date.
+      Arena measured effort Max; our runs send no effort (OpenRouter default_effort 'high').
+      No default-effort arena entry exists. The 20261017 update is a different arena row.
+
+  z-ai/glm-5.3-flash:
+    epoch: GLM-5.3-Flash
+    lmarena:
+      webdev: GLM-5.3-Flash
+      text: GLM-5.3-Flash
+      agent: GLM-5.3-Flash
+    match: exact
+    note: >-
+      Reasoning is mandatory with OpenRouter default_effort 'max'; the arena lists one
+      unlabelled entry for this model.
+
+  google/gemma-4-31b-it:free:
+    epoch: Gemma 4 31B IT
+    lmarena:
+      webdev: Gemma 4 31B
+      text: Gemma 4 31B
+      agent: null
+    match: exact
+    note: >-
+      ':free' is OpenRouter's free route to the same weights (google/gemma-4-31b-it-20260402).
+      Reasoning is off by default on OpenRouter; the arena entry carries no effort label.
+      Not on the agent arena.
+
+  qwen/qwen3.8-flash:
+    epoch: null
+    lmarena:
+      webdev: Qwen3.8-Flash-Next
+      text: null
+      agent: Qwen3.8-Flash-Next
+    match: assumed
+    note: >-
+      Epoch has no Qwen3.8 Flash row (Qwen3.8-2.4T-A95B and Qwen 3.8 27B are other models).
+      The arena has no 'Qwen3.8 Flash'; OpenRouter links this model to the Hugging Face repo
+      Qwen/Qwen3.8-Flash-Next, so 'Qwen3.8-Flash-Next' is assumed to be the same model.
+      Disputed: models.dev marks qwen3.8-flash as closed weights.
+
+  # ── OpenCode Go subscription endpoint (local rows) ───────────────────────
+  # Served names are undated and the endpoint does not disclose the reasoning effort it
+  # applies, so every entry here is `assumed`.
+  local-opencode-go/deepseek-v4.1-flash:
+    twin: deepseek/deepseek-v4.1-flash
+    epoch: DeepSeek V4.1 Flash
+    lmarena:
+      webdev: DeepSeek-V4.1-Flash-20260910 (Max)
+      text: DeepSeek-V4.1-Flash-20260910 (Max)
+      agent: DeepSeek-V4.1-Flash-20260910 (Max)
+    match: assumed
+    note: >-
+      models.dev maps opencode-go 'deepseek-v4.1-flash' to deepseek/deepseek-v4.1-flash
+      (release 2026-09-10), so the 20260910 arena entry is assumed; the endpoint may serve
+      the 20261017 update instead. Effort unknown (arena: Max).
+
+  local-opencode-go/deepseek-v4-pro:
+    twin: deepseek/deepseek-v4-pro-0813
+    epoch: DeepSeek V4 Pro 0813
+    lmarena:
+      webdev: DeepSeek-V4-Pro (High, 20260813)
+      text: DeepSeek-V4-Pro (High, 20260813)
+      agent: DeepSeek-V4-Pro (High, 20260813)
+    match: assumed
+    note: >-
+      models.dev maps opencode-go 'deepseek-v4-pro' to the undated deepseek/deepseek-v4-pro
+      but names it 'DeepSeek V4 Pro (New)' with efforts high/max, which match the 0813
+      release (OpenRouter deepseek-v4-pro-0813: max/high/low/none) rather than the April
+      release (xhigh/high/none). The 0813 entries are therefore assumed. Counter-evidence:
+      the same models.dev opencode-go record gives release_date and last_updated 2026-04-24,
+      the endpoint answers with the undated name 'deepseek-v4-pro', and enrichment links the
+      April row as metadata.catalog_twin, so this route's covariate row takes release date,
+      Hugging Face and params from April and only Epoch / LMArena from 0813. Epoch parameters
+      and compute are identical for both releases; the arena rating is not (April
+      'DeepSeek-V4-Pro' webdev 1447 vs 0813 1582, separate rows). Undecided: confirm with
+      the user before using this route's arena rating.
+
+  local-opencode-go/glm-5.3-flash:
+    twin: z-ai/glm-5.3-flash
+    epoch: GLM-5.3-Flash
+    lmarena:
+      webdev: GLM-5.3-Flash
+      text: GLM-5.3-Flash
+      agent: GLM-5.3-Flash
+    match: assumed
+    note: Same names as the catalog twin; endpoint effort unknown (efforts low/high/max).
+
+  local-opencode-go/qwen3.8-flash:
+    twin: qwen/qwen3.8-flash
+    epoch: null
+    lmarena:
+      webdev: Qwen3.8-Flash-Next
+      text: null
+      agent: Qwen3.8-Flash-Next
+    match: assumed
+    note: >-
+      Same names as the catalog twin qwen/qwen3.8-flash (see its note: the
+      Flash / Flash-Next identity is itself an assumption).
+
+  local-opencode-go/glm-5.2:
+    twin: z-ai/glm-5.2
+    epoch: GLM-5.2
+    lmarena:
+      webdev: GLM-5.2 (Max)
+      text: GLM-5.2 (Max)
+      agent: GLM-5.2 (Max)
+    match: assumed
+    note: Arena lists only the Max entry; endpoint effort unknown (efforts high/max).
+
+  local-opencode-go/glm-5.3:
+    twin: z-ai/glm-5.3
+    epoch: GLM-5.3
+    lmarena:
+      webdev: GLM-5.3 (Max)
+      text: GLM-5.3 (Max)
+      agent: GLM-5.3 (Max)
+    match: assumed
+    note: Arena lists only the Max entry (OpenRouter default effort is also max).
+
+  local-opencode-go/beam-free:
+    twin: reflection/beam-1.0-501b-a23b
+    epoch: null
+    lmarena:
+      webdev: Beam 1.0 501B A23B
+      text: Beam 1.0 501B A23B
+      agent: Beam 1.0 501B A23B
+    match: assumed
+    note: >-
+      models.dev maps opencode-go 'beam-free' to reflection/beam-1.0-501b-a23b (free tier).
+      No Epoch row.
+
+  local-opencode-go/claude-haiku-5-5:
+    twin: anthropic/claude-haiku-5.5
+    epoch: Claude Haiku 5.5
+    lmarena:
+      webdev: Claude Haiku 5.5 (High)
+      text: Claude Haiku 5.5 (High)
+      agent: Claude Haiku 5.5 (High)
+    match: assumed
+    note: Arena lists only the High entry; OpenRouter default effort is medium.
+
+  local-opencode-go/gemini-4-argon:
+    twin: google/gemini-4-argon
+    epoch: Gemini 4 Argon
+    lmarena:
+      webdev: Gemini 4 Argon (High)
+      text: Gemini 4 Argon (High)
+      agent: Gemini 4 Argon (High)
+    match: assumed
+    note: Arena lists only the High entry; OpenRouter default effort is medium.
+
+  local-opencode-go/gpt-5.6-luna:
+    twin: openai/gpt-5.6-luna
+    epoch: GPT-5.6 Luna
+    lmarena:
+      webdev: GPT-5.6 Luna (xHigh, Codex Harness)
+      text: GPT-5.6 Luna (xHigh)
+      agent: null
+    match: assumed
+    note: >-
+      The only webdev entry was run inside the Codex harness (a different scaffold);
+      text entry is xHigh; OpenRouter default effort is medium. Not on the agent arena.
+
+  local-opencode-go/gpt-6-luna:
+    twin: openai/gpt-6-luna
+    epoch: GPT-6 Luna
+    lmarena:
+      webdev: GPT-6 Luna (Max)
+      text: GPT-6 Luna (Max)
+      agent: GPT-6 Luna (Medium)
+    match: assumed
+    note: >-
+      Agent arena has a Medium entry (OpenRouter default effort); webdev and text list
+      only Max. 'GPT-6 Luna Decisions' in Epoch is a different model.
+
+  local-opencode-go/grok-4.7:
+    twin: x-ai/grok-4.7
+    epoch: Grok 4.7
+    lmarena:
+      webdev: Grok 4.7 (xHigh)
+      text: Grok 4.7 (xHigh)
+      agent: Grok 4.7 (xHigh)
+    match: assumed
+    note: >-
+      Arena lists only xHigh; OpenRouter default effort is high. Epoch's Parameters value
+      for Grok 4.7 is 2.1e9 while its note says "the 2.1T model" — likely a unit error in
+      the source; check before using it.
+
+  local-opencode-go/hy3:
+    twin: tencent/hy3
+    epoch: Tencent Hy3
+    lmarena:
+      webdev: Hy3
+      text: Hy3
+      agent: Hy3
+    match: assumed
+    note: Not the April 'Hy3 preview' (separate rows in both sources).
+
+  local-opencode-go/hy4-preview:
+    twin: tencent/hy4-preview
+    epoch: Tencent Hy4 preview
+    lmarena:
+      webdev: Hy4 preview
+      text: null
+      agent: Hy4 preview
+    match: assumed
+    note: Not on the text arena.
+
+  local-opencode-go/iceman-contributor-free:
+    twin: null
+    epoch: null
+    lmarena: null
+    match: assumed
+    note: Undisclosed model (models.dev has no canonical id for it); no external match.
+
+  local-opencode-go/kimi-k2.7-code:
+    twin: moonshotai/kimi-k2.7-code
+    epoch: Kimi K2.7 Code
+    lmarena:
+      webdev: Kimi K2.7 Code
+      text: null
+      agent: null
+    match: assumed
+    note: Only on the webdev arena.
+
+  local-opencode-go/kimi-k3:
+    twin: moonshotai/kimi-k3
+    epoch: Kimi K3
+    lmarena:
+      webdev: Kimi K3 (Max)
+      text: Kimi K3 (Max)
+      agent: Kimi K3 (Max)
+    match: assumed
+    note: Endpoint offers only effort max, matching the arena entry.
+
+  local-opencode-go/kimi-k3.1-pro:
+    twin: null
+    epoch: Kimi K3.1 Pro
+    lmarena:
+      webdev: Kimi K3.1 Pro (Max)
+      text: null
+      agent: Kimi K3.1 Pro (Max)
+    match: assumed
+    note: >-
+      models.dev maps it to moonshotai/kimi-k3.1-pro, which is not in our OpenRouter catalog.
+      Arena lists only Max; not on the text arena.
+
+  local-opencode-go/longcat-2.0:
+    twin: meituan/longcat-2.0
+    epoch: LongCat-2.0
+    lmarena: null
+    match: assumed
+    note: Not on the arena ('LongCat-Flash-Chat' is a different model).
+
+  local-opencode-go/mimo-v2.6-flash:
+    twin: xiaomi/mimo-v2.6-flash
+    epoch: null
+    lmarena:
+      webdev: MiMo-V2.6-Flash
+      text: MiMo-V2.6-Flash
+      agent: MiMo-V2.6-Flash
+    match: assumed
+    note: No Epoch row for MiMo-V2.6.
+
+  local-opencode-go/mimo-v2.6-pro:
+    twin: xiaomi/mimo-v2.6-pro
+    epoch: null
+    lmarena:
+      webdev: MiMo-V2.6-Pro
+      text: MiMo-V2.6-Pro
+      agent: MiMo-V2.6-Pro
+    match: assumed
+    note: No Epoch row for MiMo-V2.6.
+
+  local-opencode-go/minimax-m3:
+    twin: minimax/minimax-m3
+    epoch: MiniMax-M3
+    lmarena:
+      webdev: MiniMax-M3
+      text: MiniMax-M3
+      agent: MiniMax-M3
+    match: assumed
+    note: Same names as the catalog twin.
+
+  local-opencode-go/minimax-m3.1-flash:
+    twin: minimax/minimax-m3.1-flash:free
+    epoch: null
+    lmarena:
+      webdev: MiniMax-M3.1-Flash
+      text: null
+      agent: MiniMax-M3.1-Flash
+    match: assumed
+    note: No Epoch row; not on the text arena.
+
+  local-opencode-go/muse-spark-1.2-contributor:
+    twin: meta/muse-spark-1.2
+    epoch: Muse Spark 1.2
+    lmarena:
+      webdev: Muse Spark 1.2 (xHigh)
+      text: Muse Spark 1.2 (xHigh)
+      agent: Muse Spark 1.2 (xHigh)
+    match: assumed
+    note: >-
+      'contributor' route of Muse Spark 1.2 (models.dev canonical meta/muse-spark-1.2).
+      Arena lists only xHigh; OpenRouter default effort is medium.
+
+  local-opencode-go/muse-spark-1.3-contributor:
+    twin: meta/muse-spark-1.3
+    epoch: Muse Spark 1.3
+    lmarena:
+      webdev: Muse Spark 1.3 (xHigh)
+      text: Muse Spark 1.3 (Max)
+      agent: Muse Spark 1.3 (Max)
+    match: assumed
+    note: >-
+      The endpoint's efforts top out at xhigh, so the webdev xHigh entry is used; text and
+      agent arenas list only Max. OpenRouter default effort is medium.
+
+  local-opencode-go/qwen3.7-plus:
+    twin: qwen/qwen3.7-plus
+    epoch: Qwen3.7-Plus
+    lmarena:
+      webdev: null
+      text: Qwen3.7-Plus
+      agent: Qwen3.7-Plus
+    match: assumed
+    note: Not on the webdev arena.
+
+  local-opencode-go/qwen3.8-max:
+    twin: null
+    epoch: Qwen 3.8 Max
+    lmarena:
+      webdev: Qwen3.8-Max
+      text: Qwen3.8-Max
+      agent: Qwen3.8-Max
+    match: assumed
+    note: >-
+      models.dev maps it to alibaba/qwen3.8-max (release 2026-08-03), so the undated
+      'Qwen3.8-Max' arena entry is used, not 'Qwen3.8-Max (0902)'. OpenRouter lists only
+      the 0902 and prime variants, so there is no catalog twin.
+
+  local-opencode-go/step-5-preview:
+    twin: stepfun/step-5-preview
+    epoch: Step 5 Preview
+    lmarena:
+      webdev: Step 5 Preview (High)
+      text: Step 5 Preview
+      agent: Step 5 Preview
+    match: assumed
+    note: Webdev lists only High; text and agent entries are unlabelled. OpenRouter default effort is medium.
+
+  # ── Catalog twins of the OpenCode Go rows (OpenRouter catalog, no jobs yet) ──
+  # Same external names as the local rows above; here the OpenRouter default effort is
+  # known, so `match` says whether the arena entry measured that effort.
+  deepseek/deepseek-v4-pro:
+    epoch: DeepSeek-V4-Pro
+    lmarena:
+      webdev: DeepSeek-V4-Pro
+      text: DeepSeek-V4-Pro
+      agent: null
+    match: exact
+    note: >-
+      April release (canonical deepseek-v4-pro-20260423). The arena's unlabelled
+      'DeepSeek-V4-Pro' entry is used; the 0813 update and the Preview are separate rows.
+      Not on the agent arena.
+
+  deepseek/deepseek-v4-pro-0813:
+    epoch: DeepSeek V4 Pro 0813
+    lmarena:
+      webdev: DeepSeek-V4-Pro (High, 20260813)
+      text: DeepSeek-V4-Pro (High, 20260813)
+      agent: DeepSeek-V4-Pro (High, 20260813)
+    match: exact
+    note: Arena effort High equals the OpenRouter default effort.
+
+  z-ai/glm-5.2:
+    epoch: GLM-5.2
+    lmarena:
+      webdev: GLM-5.2 (Max)
+      text: GLM-5.2 (Max)
+      agent: GLM-5.2 (Max)
+    match: variant
+    note: Arena lists only Max; OpenRouter default effort is high (efforts xhigh/high/none).
+
+  z-ai/glm-5.3:
+    epoch: GLM-5.3
+    lmarena:
+      webdev: GLM-5.3 (Max)
+      text: GLM-5.3 (Max)
+      agent: GLM-5.3 (Max)
+    match: exact
+    note: Reasoning mandatory with default effort max, matching the arena entry.
+
+  reflection/beam-1.0-501b-a23b:
+    epoch: null
+    lmarena:
+      webdev: Beam 1.0 501B A23B
+      text: Beam 1.0 501B A23B
+      agent: Beam 1.0 501B A23B
+    match: exact
+    note: Arena entry carries no effort label (OpenRouter default effort max). No Epoch row.
+
+  anthropic/claude-haiku-5.5:
+    epoch: Claude Haiku 5.5
+    lmarena:
+      webdev: Claude Haiku 5.5 (High)
+      text: Claude Haiku 5.5 (High)
+      agent: Claude Haiku 5.5 (High)
+    match: variant
+    note: Arena lists only High; OpenRouter default effort is medium.
+
+  google/gemini-4-argon:
+    epoch: Gemini 4 Argon
+    lmarena:
+      webdev: Gemini 4 Argon (High)
+      text: Gemini 4 Argon (High)
+      agent: Gemini 4 Argon (High)
+    match: variant
+    note: Arena lists only High; OpenRouter default effort is medium.
+
+  openai/gpt-5.6-luna:
+    epoch: GPT-5.6 Luna
+    lmarena:
+      webdev: GPT-5.6 Luna (xHigh, Codex Harness)
+      text: GPT-5.6 Luna (xHigh)
+      agent: null
+    match: variant
+    note: >-
+      Webdev entry ran inside the Codex harness; text entry is xHigh; OpenRouter default
+      effort is medium. Not on the agent arena.
+
+  openai/gpt-6-luna:
+    epoch: GPT-6 Luna
+    lmarena:
+      webdev: GPT-6 Luna (Max)
+      text: GPT-6 Luna (Max)
+      agent: GPT-6 Luna (Medium)
+    match: variant
+    note: >-
+      Agent entry is Medium (the OpenRouter default); webdev and text list only Max.
+      'GPT-6 Luna Decisions' in Epoch is a different model.
+
+  x-ai/grok-4.7:
+    epoch: Grok 4.7
+    lmarena:
+      webdev: Grok 4.7 (xHigh)
+      text: Grok 4.7 (xHigh)
+      agent: Grok 4.7 (xHigh)
+    match: variant
+    note: >-
+      Arena lists only xHigh; OpenRouter default effort is high. Epoch's Parameters value
+      (2.1e9) contradicts its own note ("the 2.1T model"); check before using it.
+
+  tencent/hy3:
+    epoch: Tencent Hy3
+    lmarena:
+      webdev: Hy3
+      text: Hy3
+      agent: Hy3
+    match: exact
+    note: Not the April 'Hy3 preview' (separate rows in both sources).
+
+  tencent/hy4-preview:
+    epoch: Tencent Hy4 preview
+    lmarena:
+      webdev: Hy4 preview
+      text: null
+      agent: Hy4 preview
+    match: exact
+    note: Not on the text arena.
+
+  moonshotai/kimi-k2.7-code:
+    epoch: Kimi K2.7 Code
+    lmarena:
+      webdev: Kimi K2.7 Code
+      text: null
+      agent: null
+    match: exact
+    note: Only on the webdev arena.
+
+  moonshotai/kimi-k3:
+    epoch: Kimi K3
+    lmarena:
+      webdev: Kimi K3 (Max)
+      text: Kimi K3 (Max)
+      agent: Kimi K3 (Max)
+    match: exact
+    note: OpenRouter default effort max matches the arena entry.
+
+  meituan/longcat-2.0:
+    epoch: LongCat-2.0
+    lmarena: null
+    match: exact
+    note: Not on the arena ('LongCat-Flash-Chat' is a different model).
+
+  xiaomi/mimo-v2.6-flash:
+    epoch: null
+    lmarena:
+      webdev: MiMo-V2.6-Flash
+      text: MiMo-V2.6-Flash
+      agent: MiMo-V2.6-Flash
+    match: exact
+    note: No Epoch row for MiMo-V2.6.
+
+  xiaomi/mimo-v2.6-pro:
+    epoch: null
+    lmarena:
+      webdev: MiMo-V2.6-Pro
+      text: MiMo-V2.6-Pro
+      agent: MiMo-V2.6-Pro
+    match: exact
+    note: No Epoch row for MiMo-V2.6.
+
+  minimax/minimax-m3:
+    epoch: MiniMax-M3
+    lmarena:
+      webdev: MiniMax-M3
+      text: MiniMax-M3
+      agent: MiniMax-M3
+    match: exact
+    note: Single unlabelled arena entry.
+
+  minimax/minimax-m3.1-flash:free:
+    epoch: null
+    lmarena:
+      webdev: MiniMax-M3.1-Flash
+      text: null
+      agent: MiniMax-M3.1-Flash
+    match: exact
+    note: Free route to the same model; no Epoch row; not on the text arena.
+
+  meta/muse-spark-1.2:
+    epoch: Muse Spark 1.2
+    lmarena:
+      webdev: Muse Spark 1.2 (xHigh)
+      text: Muse Spark 1.2 (xHigh)
+      agent: Muse Spark 1.2 (xHigh)
+    match: variant
+    note: Arena lists only xHigh; OpenRouter default effort is medium.
+
+  meta/muse-spark-1.3:
+    epoch: Muse Spark 1.3
+    lmarena:
+      webdev: Muse Spark 1.3 (xHigh)
+      text: Muse Spark 1.3 (Max)
+      agent: Muse Spark 1.3 (Max)
+    match: variant
+    note: >-
+      OpenRouter default effort is medium; arena entries are xHigh (webdev) and Max
+      (webdev, text, agent). The xHigh webdev entry is used, as for the OpenCode Go route.
+
+  qwen/qwen3.7-plus:
+    epoch: Qwen3.7-Plus
+    lmarena:
+      webdev: null
+      text: Qwen3.7-Plus
+      agent: Qwen3.7-Plus
+    match: exact
+    note: Not on the webdev arena.
+
+  stepfun/step-5-preview:
+    epoch: Step 5 Preview
+    lmarena:
+      webdev: Step 5 Preview (High)
+      text: Step 5 Preview
+      agent: Step 5 Preview
+    match: variant
+    note: Webdev lists only High (OpenRouter default effort medium); text and agent entries are unlabelled.

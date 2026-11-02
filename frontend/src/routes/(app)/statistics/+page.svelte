@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { severityColors } from '$lib/constants/colors';
+	import LevelBadge from '$lib/components/analysis/LevelBadge.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -96,8 +96,9 @@
 	});
 	const isBest = (key: ScoreKey, v: number | null | undefined) => v != null && leaders[key] === v;
 
-	function fmtDuration(seconds: number): string {
-		if (!seconds) return '—';
+	/** null until something completed: unmeasured, shown as "—". */
+	function fmtDuration(seconds: number | null | undefined): string {
+		if (seconds == null) return '—';
 		if (seconds < 60) return `${seconds.toFixed(0)}s`;
 		const m = Math.floor(seconds / 60);
 		const s = Math.round(seconds - m * 60);
@@ -106,6 +107,11 @@
 
 	function fmtNumber(n: number): string {
 		return n.toLocaleString();
+	}
+
+	/** A percent the server leaves null until something finished: unmeasured, not 0%. */
+	function fmtPct(p: number | null | undefined): string {
+		return p == null ? '—' : `${p}%`;
 	}
 
 	function fmtCost(usd: number): string {
@@ -130,7 +136,7 @@
 		<div class="header-stats">
 			<span class="header-stat"><b>{fmtNumber(o.total_analyses)}</b> analyses</span>
 			<span class="header-stat"><b>{fmtNumber(o.analyses_completed)}</b> completed</span>
-			<span class="header-stat" title="Apps: {o.apps_success_rate}% success"><b>{o.analyses_success_rate}%</b> success</span>
+			<span class="header-stat" title="Analyses that completed, of those that finished (partial and failed count against). Apps: {fmtPct(o.apps_success_rate)} of finished generations completed."><b>{fmtPct(o.analyses_success_rate)}</b> success</span>
 			<span class="header-stat"><b>{fmtDuration(o.avg_analysis_duration_seconds)}</b> avg per analysis</span>
 			<span class="header-stat" title="{new Set(data.models.map((m) => m.provider)).size} providers"><b>{fmtNumber(o.models_in_use)}</b> active models</span>
 			<span class="header-stat"><b>{data.analyzer_health.online}/{data.analyzer_health.total}</b> analyzers online</span>
@@ -209,8 +215,13 @@
 				<Card.Header>
 					<div class="flex items-center gap-2">
 						<PieChart class="h-5 w-5 text-muted-foreground" />
-						<Card.Title>Severity Distribution</Card.Title>
+						<Card.Title>Severity distribution</Card.Title>
+						<span class="text-xs text-muted-foreground">normalized (heuristic)</span>
 					</div>
+					<Card.Description class="text-xs">
+						The platform's normalized level: a heuristic mapping that also places findings whose tool printed no level. Not the tools' own
+						labels; for those, open an analysis run.
+					</Card.Description>
 				</Card.Header>
 				<Card.Content>
 					<div class="space-y-3">
@@ -256,7 +267,7 @@
 								<tr>
 									<th class="whitespace-nowrap">Model</th>
 									<th class="num">Apps</th>
-									<th class="num" title="Share of generated apps that completed">Success %</th>
+									<th class="num" title="Share of finished generations (completed or failed) that completed; pending, running and cancelled jobs have no outcome yet">Success %</th>
 									<th class="num">Smoke pass</th>
 									<th class="num" title="Measured quality over n trials">Empirical (measured)</th>
 									<th class="num">MSS (meta)</th>
@@ -279,7 +290,7 @@
 											{#if provider}<span class="cell-sub block truncate text-[11px] text-muted-foreground">{provider}</span>{/if}
 										</td>
 										<td class="num text-xs">{m.apps}</td>
-										<ScoreCell value={m.success_rate / 100} best={isBest('success', m.success_rate)} />
+										<ScoreCell value={m.success_rate == null ? null : m.success_rate / 100} best={isBest('success', m.success_rate)} />
 										<ScoreCell value={m.smoke_pass_rate} best={isBest('smoke', m.smoke_pass_rate)} />
 										<ScoreCell value={m.empirical_quality} strong best={isBest('empirical', m.empirical_quality)} sub={m.empirical_quality != null ? `n=${m.n_trials}` : undefined} />
 										<ScoreCell value={m.mss} best={isBest('mss', m.mss)} />
@@ -310,9 +321,10 @@
 										<tr>
 											<th>Tool</th>
 											<th>Type</th>
-											<th class="num">Scans</th>
+											<th class="num" title="Executions that measured the app (completed, or nothing to read)">Scans</th>
+											<th class="num" title="Failed, cancelled or app-not-running executions: they measured nothing">Not measured</th>
 											<th class="num">Findings</th>
-											<th class="num">Avg/Scan</th>
+											<th class="num" title="Findings per measured scan">Avg/Scan</th>
 											<th>Top Rule</th>
 										</tr>
 									</thead>
@@ -324,8 +336,9 @@
 													<Badge variant="secondary" class="text-[11px] capitalize">{t.type}</Badge>
 												</td>
 												<td class="num text-xs">{t.scans}</td>
+												<td class="num text-xs {t.not_measured ? 'text-warning-fg' : 'text-muted-foreground'}">{t.not_measured ?? '—'}</td>
 												<td class="num text-xs">{t.findings}</td>
-												<td class="num text-xs">{t.avg_per_scan.toFixed(1)}</td>
+												<td class="num text-xs">{#if t.avg_per_scan == null}<span class="text-muted-foreground">—</span>{:else}{t.avg_per_scan.toFixed(1)}{/if}</td>
 												<td class="font-mono text-[11px] text-muted-foreground">{t.top_rule || '—'}</td>
 											</tr>
 										{/each}
@@ -343,20 +356,22 @@
 						<AlertTriangle class="h-4 w-4 text-muted-foreground" />
 						<Card.Title>Top Findings</Card.Title>
 					</div>
+					<Card.Description class="text-xs">Most frequent findings, one row per tool and the level it printed.</Card.Description>
 				</Card.Header>
 				<Card.Content class="space-y-3">
 					{#if data.top_findings.length === 0}
 						<EmptyState compact title="No findings yet" />
 					{:else}
-						{#each data.top_findings as f}
+						{#each data.top_findings as f, i (`${f.title}:${f.tool}:${f.tool_severity}:${i}`)}
+							<!-- Only the level the tool printed; the normalized severity is never a finding's level. -->
 							<div class="flex items-start gap-2">
-								<Badge
-									variant="outline"
-									class="shrink-0 text-[11px] {severityColors[f.severity] ?? ''}"
-								>
-									{f.severity}
-								</Badge>
-								<div class="flex-1 text-xs">{f.title}</div>
+								<LevelBadge label={f.tool_severity} fallback="unrated" class="shrink-0" />
+								<div class="min-w-0 flex-1 text-xs">
+									<span class="break-words">{f.title}</span>
+									<span class="block text-[11px] text-muted-foreground">
+										{#if f.tool}<span class="font-mono">{f.tool}</span>{/if}{#if f.dependency_advisory}{f.tool ? ' · ' : ''}<span title="A known vulnerability in a package version (mostly the scaffold's pins), not an issue in the generated code">dependency advisory</span>{/if}
+									</span>
+								</div>
 								<span class="shrink-0 font-mono text-xs text-muted-foreground">{f.count}</span>
 							</div>
 						{/each}
@@ -378,7 +393,7 @@
 					<Card.Content class="p-0">
 						{@const cg = data.code_generation}
 						<dl class="grid grid-cols-2 gap-x-4 gap-y-2 px-4 py-3 sm:grid-cols-3">
-							{#each [{ label: 'Apps generated', value: fmtNumber(cg.total_apps) }, { label: 'Success rate', value: `${cg.success_rate}%` }, { label: 'Avg gen time', value: fmtDuration(cg.avg_duration_seconds) }, { label: 'Lines of code', value: fmtNumber(cg.total_lines_of_code) }, { label: 'Tokens', value: fmtNumber(cg.total_tokens) }, { label: 'Cost', value: fmtCost(cg.total_cost_usd) }] as stat}
+							{#each [{ label: 'Apps generated', value: fmtNumber(cg.total_apps) }, { label: 'Success rate', value: fmtPct(cg.success_rate) }, { label: 'Avg gen time', value: fmtDuration(cg.avg_duration_seconds) }, { label: 'Source lines', value: fmtNumber(cg.total_lines_of_code) }, { label: 'Tokens', value: fmtNumber(cg.total_tokens) }, { label: 'Cost', value: fmtCost(cg.total_cost_usd) }] as stat}
 								<div>
 									<dt class="kpi-label">{stat.label}</dt>
 									<dd class="font-mono text-base font-medium tabular-nums">{stat.value}</dd>

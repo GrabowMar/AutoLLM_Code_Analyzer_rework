@@ -41,6 +41,18 @@ onMount(() => {
 	poll = setInterval(refresh, 5000);
 });
 onDestroy(() => { if (poll) clearInterval(poll); });
+
+// The runtime's own smoke check of the running container (not the conformance suite).
+interface SmokeCheck { ok?: boolean; path?: string; method?: string; status?: number | null; probed?: string; admin?: boolean }
+const smoke = $derived.by(() => {
+	const raw = container?.metadata?.smoke;
+	return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, any>) : null;
+});
+const smokeChecks = $derived((Array.isArray(smoke?.checks) ? smoke.checks : []) as SmokeCheck[]);
+const healing = $derived.by(() => {
+	const raw = container?.metadata?.healing;
+	return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, any>) : null;
+});
 </script>
 
 <section id="container" class="space-y-4">
@@ -116,6 +128,40 @@ onDestroy(() => { if (poll) clearInterval(poll); });
 						</table>
 					</div>
 				</div>
+
+				{#if smoke}
+					<div class="space-y-1.5">
+						<div class="flex flex-wrap items-center gap-2">
+							<h3 class="section-label">Runtime smoke check</h3>
+							<StatusBadge status={smoke.passed ? 'passed' : 'failed'} />
+							<span class="font-mono text-xs tabular-nums">{smoke.endpoints_ok ?? '—'}/{smoke.endpoints_checked ?? '—'} endpoints</span>
+						</div>
+						{#if smokeChecks.length}
+							<div class="overflow-x-auto">
+								<table class="text-xs">
+									<thead><tr><th>Request</th><th class="num">Status</th><th>Result</th></tr></thead>
+									<tbody>
+										{#each smokeChecks as check, i (i)}
+											<tr>
+												<td class="font-mono">{check.method ?? 'GET'} {check.probed ?? check.path ?? ''}{check.admin ? ' (admin)' : ''}</td>
+												<td class="num">{check.status ?? '—'}</td>
+												<td><StatusBadge status={check.ok ? 'passed' : 'failed'} label={check.ok ? 'ok' : 'failed'} /></td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						{/if}
+						{#if healing}
+							<p class="text-xs text-muted-foreground">
+								Build healing <span class="font-mono">{healing.mode ?? '—'}</span>:
+								{#if healing.changed}<span class="text-warning-fg">patched {Array.isArray(healing.patches) && healing.patches.length ? healing.patches.join(', ') : ''}</span>{:else}nothing patched{/if}
+								{#if Array.isArray(healing.added_requirements) && healing.added_requirements.length} · added requirements <span class="font-mono">{healing.added_requirements.join(', ')}</span>{/if}
+							</p>
+						{/if}
+						<p class="text-[11px] text-muted-foreground">The runtime's quick probe of this container, not the hidden conformance suite (see the Overview's evaluation).</p>
+					</div>
+				{/if}
 
 				{#if container.last_error}
 					<div class="rounded border border-destructive/30 bg-destructive/10 p-2 font-mono text-xs text-danger-fg">

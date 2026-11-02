@@ -232,3 +232,145 @@ def test_eslint_security_and_semgrep_eval_is_one_issue():
     )
     assert len(clusters) == 1
     assert clusters[0].tools == ["eslint-security", "semgrep"]
+
+
+def test_one_tool_reporting_one_advisory_under_two_ids_is_one_issue():
+    """pip-audit prints CVE-2024-49767 for werkzeug as PYSEC-2026-1860 and PYSEC-2026-3417 (linked aliases)."""
+    base = {"run_id": "r", "severity": "medium", "category": "dependency", "line": None, "package": "werkzeug"}
+    findings = [
+        {
+            **base,
+            "id": 1,
+            "tool": "pip-audit",
+            "rule_id": "PYSEC-2026-1860",
+            "aliases": ["CVE-2024-49767", "PYSEC-2026-3417"],
+            "file_path": "requirements.txt",
+        },
+        {**base, "id": 2, "tool": "pip-audit", "rule_id": "PYSEC-2026-3417", "file_path": "requirements.txt"},
+        {**base, "id": 3, "tool": "osv-scanner", "rule_id": "PYSEC-2026-3417", "file_path": "requirements.txt"},
+        {**base, "id": 4, "tool": "trivy", "rule_id": "CVE-2024-49767", "file_path": "requirements.txt"},
+        # Another advisory of the same package stays its own issue.
+        {**base, "id": 5, "tool": "pip-audit", "rule_id": "PYSEC-2099-1", "file_path": "requirements.txt"},
+    ]
+    clusters = cluster_findings(findings)
+    assert sorted(len(c.members) for c in clusters) == [1, 4]
+
+
+def test_cluster_membership_does_not_depend_on_input_order():
+    from itertools import permutations
+
+    base = {"run_id": "r", "severity": "medium", "category": "dependency", "line": None, "package": "werkzeug"}
+    findings = [
+        {**base, "id": i, "tool": tool, "rule_id": rule, "aliases": aliases, "file_path": "requirements.txt"}
+        for i, (tool, rule, aliases) in enumerate(
+            [
+                ("pip-audit", "PYSEC-1", ["CVE-1"]),
+                ("pip-audit", "PYSEC-2", ["CVE-2"]),
+                ("osv-scanner", "GHSA-1", ["CVE-1", "CVE-2"]),
+                ("trivy", "CVE-2", []),
+                ("bandit", "B105", []),
+            ],
+        )
+    ]
+
+    def memberships(items):
+        return sorted(sorted(m["id"] for m in c.members) for c in cluster_findings(items))
+
+    expected = memberships(findings)
+    assert all(memberships(list(order)) == expected for order in permutations(findings))
+
+
+def test_cluster_dict_names_the_job_and_the_levels_tools_printed():
+    clusters = cluster_findings(
+        [
+            _f("bandit", "B105", 10, run="job-1", severity="low", tool_severity="LOW"),
+            _f("gitleaks", "generic-api-key", 10, run="job-1", severity="high", category="secrets"),
+        ],
+    )
+    d = clusters[0].to_dict()
+    assert d["job_id"] == "job-1"
+    assert "run_id" not in d
+    assert d["reported_levels"] == ["bandit:LOW", "gitleaks:unrated"]
+    assert d["severity"] == "high"  # normalized maximum
+
+
+def test_only_vulnerability_scanner_clusters_are_advisories():
+    deptry = cluster_findings(
+        [_f("deptry", "DEP001", None, path="app.py", category="dependency", title="'werkzeug' imported but missing")],
+    )[0]
+    osv = cluster_findings([_f("osv-scanner", "GHSA-1", None, path="requirements.txt", category="dependency",
+                               package="flask")])[0]  # fmt: skip
+    assert not deptry.is_advisory
+    assert osv.is_advisory
+
+
+def test_finding_record_carries_level_and_fixed_versions():
+    from backend.statistics.services.dedup import finding_record
+
+    row = {
+        "id": 1,
+        "result__tool_slug": "trivy",
+        "rule_id": "CVE-1",
+        "severity": "high",
+        "category": "dependency",
+        "file_path": "requirements.txt",
+        "line_number": None,
+        "tool_specific_data": {"package": "PyJWT", "fixed_version": "2.10.0, 3.0.1", "installed_version": "2.8.0"},
+        "title": "PyJWT",
+        "tool_severity": "CRITICAL",
+    }
+    record = finding_record(row, "job")
+    assert record["tool_severity"] == "CRITICAL"
+    assert record["fixed_versions"] == ["2.10.0", "3.0.1"]
+    assert finding_record({**row, "tool_specific_data": {}}, "job")["fixed_versions"] is None
+
+
+def test_advisory_split_follows_the_shared_p2_definition():
+    """``IssueCluster.is_advisory`` is ``base.is_dependency_advisory``, as in the run views."""
+    from backend.analysis.services.base import is_dependency_advisory
+
+    invented = cluster_findings(
+        [_f("pip-audit", "nonexistent-package", None, path="requirements.txt", category="dependency",
+            package="flask-superauth")],
+    )[0]  # fmt: skip
+    # A package that does not exist is never merged by advisory id with vulnerability findings.
+    assert invented.issue_class == "pip-audit:nonexistent-package"
+    assert invented.is_advisory == is_dependency_advisory("pip-audit", "dependency", "nonexistent-package")
+    secret = cluster_findings([_f("trivy", "aws-key", 3, category="secrets")])[0]
+    assert not secret.is_advisory
+
+
+def test_one_unparsable_file_reported_by_several_linters_is_one_issue():
+    clusters = cluster_findings(
+        [
+            _f("ruff", "syntax-error", 12, category="quality"),
+            _f("flake8", "E999", 12, category="quality"),
+            _f("pylint", "E0001", 12, category="quality"),
+            _f("mypy", "syntax", 12, category="quality"),
+        ],
+    )
+    assert len(clusters) == 1
+    assert clusters[0].issue_class == "syntax-error"
+    assert issue_class("pylint", "syntax-error") == issue_class("ruff", "E999") == "syntax-error"
+
+
+def test_finding_record_carries_the_installed_version_and_deptrys_declared_package():
+    from backend.statistics.services.dedup import finding_record
+
+    row = {
+        "id": 1,
+        "result__tool_slug": "pip-audit",
+        "rule_id": "PYSEC-1",
+        "severity": "medium",
+        "category": "dependency",
+        "file_path": "requirements.txt",
+        "line_number": None,
+        "tool_specific_data": {"package": "flask", "version": "3.0.3"},
+        "title": "flask 3.0.3: PYSEC-1",
+        "tool_severity": "",
+    }
+    assert finding_record(row, "job")["installed_version"] == "3.0.3"  # the legacy key
+    deptry = {**row, "result__tool_slug": "deptry", "rule_id": "DEP002", "tool_specific_data": {"module": "uvicorn"}}
+    assert finding_record(deptry, "job")["package"] == "uvicorn"  # stored before parsers recorded ``package``
+    # For an import rule ``module`` is an import name, not a declared package.
+    assert finding_record({**deptry, "rule_id": "DEP001"}, "job")["package"] == ""

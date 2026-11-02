@@ -48,6 +48,8 @@ HF_RECORD = {
 
 def _response(payload):
     resp = Mock()
+    resp.status_code = 200
+    resp.headers = {}
     resp.raise_for_status.return_value = None
     resp.json.return_value = payload
     return resp
@@ -88,7 +90,8 @@ def test_enrich_model_stores_models_dev_and_hf(mock_get):
 
     written = enrich_model(model)
 
-    assert written == {"models_dev": True, "huggingface": True}
+    assert written["models_dev"] is True
+    assert written["huggingface"] is True
     model.refresh_from_db()
     assert model.metadata["models_dev"]["release_date"] == "2026-02-17"
     assert model.metadata["huggingface"]["downloads"] == 1234
@@ -102,7 +105,9 @@ def test_enrich_model_survives_unreachable_sources(mock_get):
     model = LLMModelFactory(model_id="acme/coder-1", capabilities_json={"hugging_face_id": "acme/Coder-1"})
     mock_get.side_effect = requests.ConnectionError("offline")
 
-    assert enrich_model(model) == {"models_dev": False, "huggingface": False}
+    written = enrich_model(model)
+    assert written["models_dev"] is False
+    assert written["huggingface"] is False
 
 
 @pytest.mark.django_db

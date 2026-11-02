@@ -49,7 +49,7 @@
 	import RunFindingsCell from '$lib/components/analysis/RunFindingsCell.svelte';
 	import { RunWatcher } from '$lib/components/analysis/live.svelte';
 	import { loadTools, toolIndex } from '$lib/components/analysis/tools';
-	import { formatSpan, isActive, runDisplayName, targetLines } from '$lib/components/analysis/format';
+	import { formatSpan, isActive, runDisplayName, runToolCounts, targetLines } from '$lib/components/analysis/format';
 	import { formatDate } from '$lib/utils/formatters';
 
 	// ── URL state ─────────────────────────────────────────────────────
@@ -58,7 +58,8 @@
 		'created:desc': 'created_desc',
 		'created:asc': 'created_asc',
 		'duration:desc': 'duration_desc',
-		'findings:desc': 'findings_desc',
+		// The column shows code findings: it sorts by them (advisories and runtime findings left out).
+		'findings:desc': 'code_findings_desc',
 		'name:asc': 'name_asc',
 	};
 
@@ -319,11 +320,15 @@
 		return tools.get(slug)?.name ?? slug;
 	}
 
-	function toolsCell(run: AnalysisRunListItem): { text: string; sub: string } {
-		const s = run.summary ?? {};
-		if (isActive(run.status) || s.tools_run == null) return { text: String(run.tool_slugs.length), sub: '' };
-		const failed = (s.tools_failed as number) ?? 0;
-		return { text: `${(s.tools_completed as number) ?? 0}/${run.tool_slugs.length}`, sub: failed ? `${failed} failed` : '' };
+	/** Tools that measured the code (completed, or nothing to read: a true zero) / tools in the run, as on the run page. */
+	function toolsCell(run: AnalysisRunListItem): { text: string; notes: { text: string; cls: string; title: string }[] } {
+		const c = runToolCounts(run);
+		if (!c) return { text: String(run.tool_slugs.length), notes: [] };
+		const notes = [];
+		if (c.notApplicable) notes.push({ text: `${c.notApplicable} n/a`, cls: 'text-muted-foreground', title: 'Nothing to read (measured: zero findings is the truth)' });
+		if (c.failed) notes.push({ text: `${c.failed} failed`, cls: 'text-danger-fg', title: 'Failed: measured nothing' });
+		if (c.unmeasured) notes.push({ text: `${c.unmeasured} not measured`, cls: 'text-warning-fg', title: 'Skipped (app not running, tool unavailable, cancelled): measured nothing' });
+		return { text: `${c.measured}/${c.total}`, notes };
 	}
 
 	const resultsText = $derived(
@@ -419,8 +424,8 @@
 								</th>
 								<SortableTh label="Analysis" field="name" {sortBy} {sortDir} onSort={toggleSort} ascOnly />
 								<th>Status</th>
-								<SortableTh label="Findings" field="findings" {sortBy} {sortDir} onSort={toggleSort} align="right" help="Total findings; chips show levels exactly as the tools reported them" />
-								<th class="num" title="Tools that produced a result / tools in the run">Tools</th>
+								<SortableTh label="Findings" field="findings" {sortBy} {sortDir} onSort={toggleSort} align="right" help="Code findings, with dependency advisories and dynamic tools' findings counted apart underneath; chips show levels exactly as the tools reported them, over all findings" />
+								<th class="num" title="Tools that measured the code (completed, or had nothing to read) / tools in the run">Tools</th>
 								<SortableTh label="Duration" field="duration" {sortBy} {sortDir} onSort={toggleSort} align="right" />
 								<SortableTh label="Created" field="created" {sortBy} {sortDir} onSort={toggleSort} />
 								<th><span class="sr-only">Actions</span></th>
@@ -448,7 +453,7 @@
 									<td class="num"><RunFindingsCell {run} /></td>
 									<td class="num">
 										{tc.text}
-										{#if tc.sub}<span class="cell-sub block text-[11px] text-danger-fg">{tc.sub}</span>{/if}
+										{#each tc.notes as note (note.text)}<span class="cell-sub block text-[11px] {note.cls}" title={note.title}>{note.text}</span>{/each}
 									</td>
 									<td class="num text-muted-foreground">{isActive(run.status) ? '—' : formatSpan(run.duration_seconds)}</td>
 									<td class="whitespace-nowrap text-xs text-muted-foreground">{formatDate(run.created_at)}</td>

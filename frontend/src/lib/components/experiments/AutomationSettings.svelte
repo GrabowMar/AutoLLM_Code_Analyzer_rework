@@ -6,7 +6,7 @@
 	 *
 	 * Props:
 	 * - `postRun` (bindable), `schedule` (bindable; null = none), `mode`.
-	 * - `scheduleInvalid` (bindable output).
+	 * - `scheduleInvalid` (bindable output); `planTruncated` (the analysis plan's truncation rule, or null).
 	 */
 	import { Switch } from '$lib/components/ui/switch';
 	import type { PostRunSpec, ScheduleSpec } from '$lib/api/types/experiments';
@@ -19,9 +19,11 @@
 		schedule: ScheduleSpec | null;
 		mode: 'agent' | 'scaffolding';
 		scheduleInvalid?: boolean;
+		/** The analysis plan's truncation rule (it overrides the report's setting); null without a plan. */
+		planTruncated?: boolean | null;
 	}
 
-	let { postRun = $bindable(), schedule = $bindable(), mode, scheduleInvalid = $bindable(false) }: Props = $props();
+	let { postRun = $bindable(), schedule = $bindable(), mode, scheduleInvalid = $bindable(false), planTruncated = null }: Props = $props();
 
 	let scheduleValue = $state<ScheduleSpec>(schedule ?? defaultSchedule());
 	let editorInvalid = $state(false);
@@ -37,7 +39,7 @@
 <div class="space-y-5">
 	<div class="space-y-2">
 		<p class="section-label">After the run</p>
-		<PostRunEditor bind:value={postRun} {mode} idPrefix="composer-post" />
+		<PostRunEditor bind:value={postRun} {mode} {planTruncated} idPrefix="composer-post" />
 	</div>
 	<div class="space-y-3 border-t border-border/60 pt-4">
 		<div class="flex items-start gap-3">

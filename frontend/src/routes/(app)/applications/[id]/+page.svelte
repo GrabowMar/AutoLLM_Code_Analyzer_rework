@@ -28,6 +28,12 @@ import {
 	type JobPhase,
 } from '$lib/api/generation';
 import { formatApiError } from '$lib/api/core';
+import {
+	getJobCodeProfile,
+	getJobTimeline,
+	type CodeProfile,
+	type JobTimeline,
+} from '$lib/api/job-insights';
 import { subscribe } from '$lib/api/sse';
 import { isNotFoundError } from '$lib/components/generator/batches';
 import { toast } from 'svelte-sonner';
@@ -44,6 +50,7 @@ import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
 import Server from '@lucide/svelte/icons/server';
 import Wrench from '@lucide/svelte/icons/wrench';
 import FileText from '@lucide/svelte/icons/file-text';
+import Copy from '@lucide/svelte/icons/copy';
 
 import ApplicationHeader from '$lib/components/applications/ApplicationHeader.svelte';
 import ApplicationOverview from '$lib/components/applications/ApplicationOverview.svelte';
@@ -60,6 +67,11 @@ import ApplicationAnalyses from '$lib/components/applications/ApplicationAnalyse
 import ApplicationLogs from '$lib/components/applications/ApplicationLogs.svelte';
 import AgentRunSummary from '$lib/components/applications/AgentRunSummary.svelte';
 import JobProvenance from '$lib/components/applications/JobProvenance.svelte';
+import PhaseTimeline from '$lib/components/applications/insights/PhaseTimeline.svelte';
+import CodeProfileCard from '$lib/components/applications/insights/CodeProfileCard.svelte';
+import EvaluationCard from '$lib/components/applications/insights/EvaluationCard.svelte';
+import QualityMetricsCard from '$lib/components/applications/insights/QualityMetricsCard.svelte';
+import SameSetupPanel from '$lib/components/applications/SameSetupPanel.svelte';
 import GitHubExportDialog from '$lib/components/integrations/GitHubExportDialog.svelte';
 import { jobDescription } from '$lib/components/applications/utils';
 import {
@@ -83,6 +95,15 @@ let deleting = $state(false);
 let cloneBusy = $state<string | null>(null);
 let seq = 0;
 
+// Server-side insights (code profile, phase timeline): fetched per job and
+// again when its status/phase changes, not on every live refresh.
+let profile = $state<CodeProfile | null>(null);
+let profileLoading = $state(false);
+let profileError = $state('');
+let timeline = $state<JobTimeline | null>(null);
+let timelineLoading = $state(false);
+let timelineError = $state('');
+
 function sectionsFor(j: GenerationJob | null): { id: string; label: string; icon: any }[] {
 	return [
 		{ id: 'overview', label: 'Overview', icon: Eye },
@@ -97,6 +118,7 @@ function sectionsFor(j: GenerationJob | null): { id: string; label: string; icon
 			? { id: 'scan', label: 'API Scan', icon: Shield }
 			: null,
 		{ id: 'dependencies', label: 'Dependencies', icon: Package },
+		{ id: 'same-setup', label: 'Same setup', icon: Copy },
 		{ id: 'artifacts', label: 'Artifacts', icon: Database },
 		j?.mode === 'copilot' ? { id: 'iterations', label: 'Copilot Iterations', icon: Bot } : null,
 		{ id: 'metrics', label: 'Cost & Metrics', icon: ChartBar },
@@ -116,8 +138,8 @@ const codeFootprint = $derived.by<CodeFootprint | null>(() => {
 	const files: VirtualFile[] = [];
 
 	const fileMap = rd.files && typeof rd.files === 'object' ? (rd.files as Record<string, string>) : null;
-	if (job.mode === 'agent' && fileMap) {
-		// Agent runs: the whole collected workspace, path for path.
+	if (fileMap && Object.keys(fileMap).length > 0) {
+		// A per-file map (agent workspace, newer template runs): path for path.
 		const langByExt: Record<string, [string, string]> = {
 			py: ['Python', 'python'], js: ['JavaScript', 'javascript'], jsx: ['JavaScript', 'javascript'],
 			ts: ['TypeScript', 'typescript'], tsx: ['TypeScript', 'typescript'], vue: ['Vue', 'html'],
@@ -204,8 +226,15 @@ const costData = $derived.by(() => {
 
 	const totalTokens = totalPrompt + totalCompletion;
 	const tokensPerSec = job?.duration_seconds ? totalTokens / job.duration_seconds : 0;
+	// Nothing recorded (a job that failed or was cancelled before any LLM call was logged):
+	// tokens and cost are unknown, not 0 / "Free".
+	const known =
+		artifacts.length > 0 ||
+		typeof job?.metrics?.cost === 'number' ||
+		typeof job?.metrics?.prompt_tokens === 'number' ||
+		typeof job?.metrics?.completion_tokens === 'number';
 
-	return { totalCost, totalPrompt, totalCompletion, totalTokens, tokensPerSec, byStage };
+	return { totalCost, totalPrompt, totalCompletion, totalTokens, tokensPerSec, byStage, known };
 });
 
 const fixesData = $derived.by(() => {
@@ -255,11 +284,57 @@ $effect(() => {
 		job = null;
 		artifacts = [];
 		iterations = [];
+		profile = null;
+		profileError = '';
+		timeline = null;
+		timelineError = '';
 		loading = true;
 		notFound = false;
 		loadError = '';
 		deleteOpen = false;
 		fetchData(id);
+	});
+});
+
+async function loadProfile(id: string) {
+	profileLoading = true;
+	try {
+		const p = await getJobCodeProfile(id);
+		if (id !== jobId) return;
+		profile = p;
+		profileError = '';
+	} catch (e) {
+		if (id === jobId) profileError = formatApiError(e, 'Could not load the code profile.');
+	} finally {
+		if (id === jobId) profileLoading = false;
+	}
+}
+
+async function loadTimeline(id: string) {
+	timelineLoading = true;
+	try {
+		const t = await getJobTimeline(id);
+		if (id !== jobId) return;
+		timeline = t;
+		timelineError = '';
+	} catch (e) {
+		if (id === jobId) timelineError = formatApiError(e, 'Could not load the timeline.');
+	} finally {
+		if (id === jobId) timelineLoading = false;
+	}
+}
+
+// Insights follow the job's lifecycle (status / phase / evaluation), not every live refresh.
+const insightKey = $derived(
+	job ? `${job.id}|${job.status}|${job.phase ?? ''}|${job.result_data?.evaluation?.status ?? ''}|${job.completed_at ?? ''}` : ''
+);
+$effect(() => {
+	const key = insightKey;
+	if (!key) return;
+	const id = key.split('|')[0];
+	untrack(() => {
+		void loadProfile(id);
+		void loadTimeline(id);
 	});
 });
 
@@ -419,8 +494,11 @@ async function handleClone(kind: 'replay' | 'rerun') {
 			{job}
 			{provider}
 			{codeFootprint}
-			totalTokens={costData.totalTokens}
-			totalCost={costData.totalCost}
+			codeProfile={profile}
+			codeProfileError={profileError}
+			experimentCell={timeline?.experiment ?? null}
+			totalTokens={costData.known ? costData.totalTokens : null}
+			totalCost={costData.known ? costData.totalCost : null}
 			onCancel={handleCancel}
 			onRetry={handleRetry}
 			onExport={handleExport}
@@ -432,7 +510,23 @@ async function handleClone(kind: 'replay' | 'rerun') {
 
 		<Tabs.Content value="overview" class="pt-0">
 			<div class="space-y-4">
-				<ApplicationOverview {job} {provider} {codeFootprint} {fixesData} />
+				<ApplicationOverview {job} {provider} {codeFootprint} codeProfile={profile} {profileLoading} {fixesData} />
+				<PhaseTimeline
+					{timeline}
+					loading={timelineLoading}
+					error={timelineError}
+					onretry={() => job && loadTimeline(job.id)}
+				/>
+				<div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+					<EvaluationCard {job} />
+					<QualityMetricsCard jobId={job.id} refreshKey={insightKey} canAnalyze={job.status === 'completed'} />
+				</div>
+				<CodeProfileCard
+					{profile}
+					loading={profileLoading}
+					error={profileError}
+					onretry={() => job && loadProfile(job.id)}
+				/>
 				<JobProvenance
 					{job}
 					busy={cloneBusy}
@@ -442,10 +536,24 @@ async function handleClone(kind: 'replay' | 'rerun') {
 			</div>
 		</Tabs.Content>
 		{#if job.mode === 'agent'}
-			<Tabs.Content value="agent" class="pt-0"><AgentRunSummary {job} /></Tabs.Content>
+			<Tabs.Content value="agent" class="pt-0">
+				{#if job.result_data?.agent}
+					<AgentRunSummary {job} />
+				{:else}
+					<!-- AgentRunSummary renders nothing without a run record: say why instead of a blank tab. -->
+					<EmptyState
+						compact
+						icon={Bot}
+						title="No agent run record"
+						description={job.status === 'pending' || job.status === 'running'
+							? 'The run record appears when the agent finishes.'
+							: `The job ${job.status === 'cancelled' ? 'was cancelled' : 'ended'} before the agent stored a run record.`}
+					/>
+				{/if}
+			</Tabs.Content>
 		{/if}
 		<Tabs.Content value="prompts" class="pt-0"><ApplicationPrompts {job} {artifacts} /></Tabs.Content>
-		<Tabs.Content value="files" class="pt-0"><ApplicationFiles files={virtualFiles} /></Tabs.Content>
+		<Tabs.Content value="files" class="pt-0"><ApplicationFiles files={virtualFiles} origins={profile?.origins.known ? profile.origins.per_file : null} /></Tabs.Content>
 		<Tabs.Content value="container" class="pt-0"><ApplicationContainer jobId={job.id} jobStatus={job.status} /></Tabs.Content>
 		<Tabs.Content value="tools" class="pt-0"><ApplicationTools jobId={job.id} /></Tabs.Content>
 		<Tabs.Content value="analyses" class="pt-0"><ApplicationAnalyses jobId={job.id} /></Tabs.Content>
@@ -453,7 +561,19 @@ async function handleClone(kind: 'replay' | 'rerun') {
 		{#if backendScan}
 			<Tabs.Content value="scan" class="pt-0"><ApplicationApiScan scan={backendScan} /></Tabs.Content>
 		{/if}
-		<Tabs.Content value="dependencies" class="pt-0"><ApplicationDependencies deps={backendDeps} mode={job.mode} /></Tabs.Content>
+		<Tabs.Content value="dependencies" class="pt-0">
+			<ApplicationDependencies
+				deps={backendDeps}
+				mode={job.mode}
+				dependencies={profile?.dependencies ?? null}
+				loading={profileLoading}
+				error={profileError}
+				onretry={() => job && loadProfile(job.id)}
+			/>
+		</Tabs.Content>
+		<Tabs.Content value="same-setup" class="pt-0">
+			{#if activeSection === 'same-setup'}<SameSetupPanel jobId={job.id} />{/if}
+		</Tabs.Content>
 		<Tabs.Content value="artifacts" class="pt-0"><ApplicationArtifacts {artifacts} /></Tabs.Content>
 		{#if job.mode === 'copilot'}
 			<Tabs.Content value="iterations" class="pt-0"><ApplicationIterations {iterations} /></Tabs.Content>

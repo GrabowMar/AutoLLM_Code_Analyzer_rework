@@ -412,10 +412,11 @@ def results(
     experiment_id: str,
     baseline: int | None = None,
     exclude_invalid: bool = False,
-    exclude_truncated: bool = True,
+    exclude_truncated: bool | None = None,
     common_cells: bool = True,
     fingerprint: str = "all",
     metric: str = "pass_rate",
+    planned_only: bool = True,
 ):
     experiment = _owned_experiment_or_404(request.auth, experiment_id)
     filters = ResultFilters(
@@ -424,6 +425,7 @@ def results(
         exclude_truncated=exclude_truncated,
         common_cells=common_cells,
         fingerprint=fingerprint,
+        planned_only=planned_only,
     )
     try:
         return Status(200, compute_results(experiment, baseline, filters, request.auth))
@@ -518,7 +520,9 @@ def run_schedule_now(request, experiment_id: str, schedule_id: int):
 def _post_run_config(experiment: Experiment) -> dict:
     return {
         "config": svc.effective_post_run(experiment),
-        "runs": [svc.post_run_out(r) for r in experiment.post_runs.order_by("-created_at")[:20]],
+        "runs": [
+            svc.post_run_out(r) for r in experiment.post_runs.select_related("report").order_by("-created_at")[:20]
+        ],
     }
 
 

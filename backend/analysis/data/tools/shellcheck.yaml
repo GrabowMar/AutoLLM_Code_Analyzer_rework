@@ -12,7 +12,9 @@ icon: terminal
 version: "0.10"
 docs_url: https://www.shellcheck.net/
 install_cmd: "pip install --user --upgrade 'shellcheck-py==0.10.*'"
-verify_cmd: "shellcheck --version"
+# The first line of `shellcheck --version` is a banner; the build is "version: X".
+# grep (not sed) so a missing binary still fails the check.
+verify_cmd: "shellcheck --version | grep '^version:'"
 uninstall_cmd: "pip uninstall -y shellcheck-py"
 run_cmd: "find {target} -type f \\( -name '*.sh' -o -name '*.bash' \\) -not -path '*/node_modules/*' -print0 | xargs -0 -r shellcheck -f json 2>/dev/null"
 parser_key: shellcheck

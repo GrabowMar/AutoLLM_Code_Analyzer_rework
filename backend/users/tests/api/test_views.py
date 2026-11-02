@@ -80,6 +80,7 @@ def test_list_users_as_authenticated_user(client: Client, user: User):
             "name": user.name,
             "url": f"/api/users/{user.pk}/",
             "is_staff": user.is_staff,
+            "is_evaluator": False,
         },
     ]
 
@@ -97,6 +98,7 @@ def test_retrieve_current_user(client: Client, user: User):
         "name": user.name,
         "url": f"/api/users/{user.pk}/",
         "is_staff": user.is_staff,
+        "is_evaluator": False,
     }
 
 
@@ -113,6 +115,7 @@ def test_retrieve_user(client: Client, user: User):
         "name": user.name,
         "url": f"/api/users/{user.pk}/",
         "is_staff": user.is_staff,
+        "is_evaluator": False,
     }
 
 
@@ -144,6 +147,7 @@ def test_update_current_user(client: Client):
         "name": "New Name",
         "url": f"/api/users/{user.pk}/",
         "is_staff": user.is_staff,
+        "is_evaluator": False,
     }
 
 
@@ -163,6 +167,7 @@ def test_update_user(client: Client):
         "name": "New Name",
         "url": f"/api/users/{user.pk}/",
         "is_staff": user.is_staff,
+        "is_evaluator": False,
     }
 
 

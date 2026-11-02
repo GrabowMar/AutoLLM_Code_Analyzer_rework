@@ -1,14 +1,16 @@
 slug: retire
 name: Retire.js
 description: >-
-  Finds JavaScript libraries with known vulnerabilities, including copies
-  vendored or bundled into static files (old jQuery, Angular, Bootstrap…)
-  that package-manifest audits miss.
+  Finds JavaScript libraries with known vulnerabilities in the app's .js
+  files, including copies vendored or bundled into static files (old jQuery,
+  Angular, Bootstrap…) that package-manifest audits miss. Reads .js files and
+  bower.json only: a library loaded from a CDN by a script tag, and
+  package.json dependencies, are not checked.
 category: dependencies
 kind: container
 target_language: javascript
 analysis_mode: static
-technologies: [javascript, html, npm]
+technologies: [javascript]
 icon: history
 version: "5"
 docs_url: https://retirejs.github.io/retire.js/
@@ -17,12 +19,14 @@ verify_cmd: "retire --version"
 uninstall_cmd: "npm uninstall -g retire"
 run_cmd: "retire --path {target} --outputformat json --exitwith 0 --ignore node_modules 2>/dev/null"
 parser_key: retire
-file_patterns: ["*.js", "*.html", "package.json"]
+# Retire.js 5 reads only *.js files (its --ext default) and bower.json.
+file_patterns: ["*.js", "bower.json"]
 run_timeout: 180
 install_timeout: 300
 display_order: 30
 config_schema: []
 default_config: {}
-sample_filename: index.html
+# The file name alone identifies the library to retire's extractors.
+sample_filename: jquery-1.8.3.min.js
 sample_code: |
-  <script src="https://code.jquery.com/jquery-1.8.3.min.js"></script>
+  /*! jQuery v1.8.3 jquery.com | jquery.org/license */

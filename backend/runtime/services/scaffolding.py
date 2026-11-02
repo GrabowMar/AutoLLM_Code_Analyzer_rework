@@ -277,7 +277,8 @@ def apply_scaffold(
     is_v2 = phase == ScaffoldPhase.BUILD and result.get("result_schema_version") == 2
     if is_v2 and isinstance(files, dict) and result.get("materialize") == "verbatim":
         report.applicable = False
-        _materialize_verbatim(dest_path, files)
+        workspace = (result.get("agent") or {}).get("workspace") or {}
+        _materialize_verbatim(dest_path, files, deleted=workspace.get("deleted_scaffold_files") or [])
     elif is_v2 and isinstance(files, dict) and files:
         _materialize_files(dest_path, stack, files, result, report)
     else:
@@ -290,14 +291,28 @@ def apply_scaffold(
 _PROTECTED_BUILD_FILES = frozenset({"Dockerfile", ".dockerignore", "docker-compose.yml"})
 
 
-def _materialize_verbatim(dest_path: Path, files: dict[str, str]) -> None:
+def _materialize_verbatim(
+    dest_path: Path,
+    files: dict[str, str],
+    *,
+    deleted: list[str] | tuple[str, ...] = (),
+) -> None:
     """Write an agent run's workspace over the skeleton exactly as the agent left it.
 
     No entry renaming, code patching or dependency inference: the agent saw
     the same skeleton and contract, so what gets built is what it wrote. The
-    stack's build files stay the platform's.
+    stack's build files stay the platform's. Skeleton files the agent deleted
+    (``agent.workspace.deleted_scaffold_files``) are removed again, or a config
+    the agent dropped on purpose (say ``postcss.config.js`` after removing its
+    plugin from ``package.json``) would come back and break the build.
     """
     root = dest_path.resolve()
+    for rel in deleted:
+        if not isinstance(rel, str) or rel in _PROTECTED_BUILD_FILES or rel in files:
+            continue
+        target = (dest_path / rel).resolve()
+        if root in target.parents and target.is_file():
+            target.unlink()
     for rel, content in files.items():
         if rel in _PROTECTED_BUILD_FILES or not isinstance(content, str):
             continue

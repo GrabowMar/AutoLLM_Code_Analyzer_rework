@@ -7,6 +7,8 @@
 	 * Props:
 	 * - `value` (bindable `PostRunSpec`): replaced, never mutated.
 	 * - `mode`: 'agent' | 'scaffolding'. `idPrefix`, `disabled`, `onchange()`.
+	 * - `planTruncated`: the analysis plan's truncation rule, which the report
+	 *   applies instead of its own setting; null (default) when there is no plan.
 	 */
 	import { onMount } from 'svelte';
 	import { Checkbox } from '$lib/components/ui/checkbox';
@@ -22,9 +24,10 @@
 		idPrefix?: string;
 		disabled?: boolean;
 		onchange?: (value: PostRunSpec) => void;
+		planTruncated?: boolean | null;
 	}
 
-	let { value = $bindable(), mode, idPrefix = 'post-run', disabled = false, onchange }: Props = $props();
+	let { value = $bindable(), mode, idPrefix = 'post-run', disabled = false, onchange, planTruncated = null }: Props = $props();
 
 	let tools = $state<AnalyzerTool[] | null>(null);
 	let toolsError = $state('');
@@ -162,14 +165,25 @@
 			</div>
 		</div>
 		{#if value.report.enabled}
-			<label class="ml-12 flex items-center gap-2 text-xs">
-				<Checkbox
-					checked={value.report.exclude_truncated}
-					{disabled}
-					onCheckedChange={(v) => update({ ...value, report: { ...value.report, exclude_truncated: v === true } })}
-				/>
-				Exclude truncated runs (budget or wall clock hit)
-			</label>
+			{#if planTruncated != null}
+				<!-- The report uses the frozen plan's rule; the stored setting is kept but does not apply. -->
+				<div class="ml-12 space-y-0.5 text-xs">
+					<label class="flex items-center gap-2 text-muted-foreground">
+						<Checkbox checked={planTruncated} disabled />
+						Exclude truncated runs (budget or wall clock hit)
+					</label>
+					<p class="text-muted-foreground">Set by the analysis plan: truncated runs are {planTruncated ? 'excluded' : 'kept'}.</p>
+				</div>
+			{:else}
+				<label class="ml-12 flex items-center gap-2 text-xs">
+					<Checkbox
+						checked={value.report.exclude_truncated}
+						{disabled}
+						onCheckedChange={(v) => update({ ...value, report: { ...value.report, exclude_truncated: v === true } })}
+					/>
+					Exclude truncated runs (budget or wall clock hit)
+				</label>
+			{/if}
 		{/if}
 	</div>
 	{#if mode === 'agent'}

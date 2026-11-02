@@ -19,7 +19,9 @@ from django.db.models import F
 from django.db.models import FloatField
 from django.db.models import IntegerField
 from django.db.models import Min
+from django.db.models import OuterRef
 from django.db.models import Q
+from django.db.models import Subquery
 from django.db.models import Value
 from django.db.models import When
 from django.db.models.fields.json import KeyTextTransform
@@ -50,10 +52,12 @@ from backend.analysis.models import Finding
 from backend.analysis.models import ToolResult
 from backend.analysis.services import runner
 from backend.analysis.services import workspace_service
+from backend.analysis.services.base import is_non_source_path
 from backend.analysis.services.serialize import iso
 from backend.analysis.services.serialize import serialize_result
 from backend.common.pagination import paginate_queryset
 from backend.generation.models import GenerationJob
+from backend.reports.services.loc import is_test_path
 from backend.statistics.services.dedup import RECORD_FIELDS
 from backend.statistics.services.dedup import cluster_findings
 from backend.statistics.services.dedup import finding_record
@@ -69,16 +73,78 @@ _RUN_SORTS = {
     "name_asc": ("name", "-created_at"),
     "duration_desc": (F("duration_seconds").desc(nulls_last=True), "-created_at"),
     "findings_desc": (F("findings_total").desc(nulls_last=True), "-created_at"),
+    # Code findings only (no dependency advisories, no dynamic tools' findings).
+    "code_findings_desc": (F("code_total").desc(nulls_last=True), "-created_at"),
 }
 
-_SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-# Rated findings ordered by their (mapped) level, then those the tool did not rate.
+# Rank (0 = most severe) of a tool's own level word, the same table the UI
+# sorts by (frontend analysis/format.ts LEVEL_WORDS): findings and levels are
+# ordered by the label the user reads, never by the normalized heuristic.
+LEVEL_RANKS = {
+    "critical": 0,
+    "blocker": 0,
+    "fatal": 1,
+    "error": 1,
+    "high": 1,
+    "severe": 1,
+    "major": 2,
+    "medium": 2,
+    "moderate": 2,
+    "warning": 2,
+    "warn": 2,
+    "low": 3,
+    "minor": 3,
+    "refactor": 4,
+    "convention": 4,
+    "style": 4,
+    "note": 4,
+    "info": 5,
+    "informational": 5,
+    "unknown": 6,
+}
+_OTHER_LEVEL_RANK = 7
+_UNRATED_RANK = 9
+# Some tools print a CVSS score as the level ("7.0"): ranked by its CVSS band.
+_CVSS_BANDS = (
+    (r"^\s*(9(\.[0-9]+)?|10(\.0+)?)\s*$", 0),
+    (r"^\s*[78](\.[0-9]+)?\s*$", 1),
+    (r"^\s*[456](\.[0-9]+)?\s*$", 2),
+    (r"^\s*([123](\.[0-9]+)?|0\.0*[1-9][0-9]*)\s*$", 3),
+    (r"^\s*0(\.0+)?\s*$", 5),
+)
+
+
+def level_rank(label: str) -> int:
+    """Rank of a tool's own level word (0 = most severe; CVSS scores by band; unknown words 7)."""
+    word = (label or "").strip().lower()
+    if not word:
+        return _UNRATED_RANK
+    if word in LEVEL_RANKS:
+        return LEVEL_RANKS[word]
+    try:
+        score = float(word)
+    except ValueError:
+        return _OTHER_LEVEL_RANK
+    if score <= 0:
+        return LEVEL_RANKS["info"]
+    return next((rank for floor, rank in ((9.0, 0), (7.0, 1), (4.0, 2)) if score >= floor), 3)
+
+
+# Rated findings ordered by the rank of the level the tool printed, then those it did not rate.
 _LEVEL_ORDER = Case(
-    When(tool_severity="", then=Value(9)),
-    *[When(severity=sev, then=Value(rank)) for sev, rank in _SEVERITY_RANK.items()],
-    default=Value(8),
+    When(tool_severity="", then=Value(_UNRATED_RANK)),
+    *[When(tool_severity__iexact=word, then=Value(rank)) for word, rank in LEVEL_RANKS.items()],
+    *[When(tool_severity__regex=pattern, then=Value(rank)) for pattern, rank in _CVSS_BANDS],
+    default=Value(_OTHER_LEVEL_RANK),
     output_field=IntegerField(),
 )
+# Finding scopes (``scope`` filter, facet counts): what the model wrote, the
+# dependency advisories, and what dynamic tools saw in the running app.
+_SCOPES = ("code", "dependencies", "runtime")
+# The two parts of the code scope, as the study counts them: the app's own
+# source, and test code (``reports.services.loc.is_test_path``), whose findings
+# are counted apart (``code_unique_tests``).
+_CODE_PARTS = ("source", "tests")
 _FINDING_SORTS = {
     "severity": (_LEVEL_ORDER, "file_path", "line_number"),
     "file": ("file_path", "line_number", _LEVEL_ORDER),
@@ -164,6 +230,23 @@ def _progress(runs: list[AnalysisRun]) -> dict[str, dict[str, Any]]:
     return progress
 
 
+def _fill_summary_counts(runs: list[AnalysisRun]) -> None:
+    """Compute the summary counters of finished runs from their rows at read time (never saved).
+
+    ``code_findings`` / ``dependency_findings`` / ``runtime_findings`` (None
+    for a scope no tool measured) and ``tools_not_applicable`` /
+    ``tools_unmeasured`` (see ``runner.run_scope_counts``). Recomputed for every
+    finished run, so runs stored under earlier rules (no counters, or a 0 for
+    an unmeasured scope) read the same as new ones.
+    """
+    finished = [r for r in runs if r.status not in ACTIVE_STATUSES and "total_findings" in (r.summary or {})]
+    if not finished:
+        return
+    counters = runner.run_scope_counts([r.id for r in finished])
+    for run in finished:
+        run.summary = {**run.summary, **counters[run.id]}
+
+
 def serialize_run_list(run: AnalysisRun, progress: dict[str, Any] | None = None) -> dict[str, Any]:
     data = _base(run)
     # Per-tool metrics (function lists, duplication blocks) belong to the detail view.
@@ -172,16 +255,44 @@ def serialize_run_list(run: AnalysisRun, progress: dict[str, Any] | None = None)
 
 
 def serialize_run(run: AnalysisRun) -> dict[str, Any]:
+    _fill_summary_counts([run])
     data = _base(run)
     data["progress"] = _progress([run]).get(str(run.id))
     data["results"] = [serialize_result(r) for r in run.results.all()]
     # The files the tools see (pasted code, or the generated app's code), without contents.
     files = runner._materialize(run.get_code_for_analysis())  # noqa: SLF001
-    data["source_files"] = [{"path": path, "lines": content.count("\n") + 1} for path, content in files.items()]
+    data["source_files"] = [{"path": path, "lines": len(content.splitlines())} for path, content in files.items()]
     return data
 
 
-def _serialize_finding(f: Finding) -> dict[str, Any]:
+def code_finding_parts(findings) -> tuple[set, set]:
+    """Ids of the code findings among *findings* (a Finding queryset) in test files, and in excluded directories.
+
+    Code findings only (``runner.finding_scope_q("code")``: not dependency
+    advisories, not dynamic tools' findings, whose paths are manifests and
+    URLs), classified by ``reports.services.loc.is_test_path`` in Python, so
+    the rule is the study's own and never a drifting SQL mirror. A file in
+    ``NON_SOURCE_DIRS`` (``is_non_source_path``: scratch, dependency and cache
+    directories, read by runs finalized before the exclusion rule) is neither
+    test code nor the app's source: its findings are in the second set only.
+    """
+    rows = findings.filter(runner.finding_scope_q("code")).exclude(file_path="").values_list("id", "file_path")
+    in_tests: set = set()
+    excluded: set = set()
+    for finding_id, path in rows:
+        if is_non_source_path(path):
+            excluded.add(finding_id)
+        elif is_test_path(path):
+            in_tests.add(finding_id)
+    return in_tests, excluded
+
+
+def test_code_finding_ids(findings) -> set:
+    """Ids of the code findings among *findings* in test files (excluded directories left out)."""
+    return code_finding_parts(findings)[0]
+
+
+def _serialize_finding(f: Finding, test_ids: set | frozenset = frozenset()) -> dict[str, Any]:
     return {
         "id": str(f.id),
         "severity": f.severity,
@@ -198,6 +309,7 @@ def _serialize_finding(f: Finding) -> dict[str, Any]:
         "rule_id": f.rule_id,
         "tool_slug": f.result.tool_slug,
         "tool_specific_data": f.tool_specific_data or {},
+        "in_tests": f.id in test_ids,
     }
 
 
@@ -319,9 +431,20 @@ def list_runs(
         qs = qs.filter(q)
     if sort == "findings_desc":
         qs = qs.annotate(findings_total=Cast(KeyTextTransform("total_findings", "summary"), FloatField()))
+    elif sort == "code_findings_desc":
+        # Counted from the findings, so runs from before the summary counter sort too.
+        code = (
+            Finding.objects.filter(result__run=OuterRef("pk"))
+            .filter(runner.finding_scope_q("code"))
+            .values("result__run")
+            .annotate(n=Count("id"))
+            .values("n")
+        )
+        qs = qs.annotate(code_total=Subquery(code, output_field=IntegerField()))
     qs = qs.order_by(*_RUN_SORTS.get(sort, _RUN_SORTS["created_desc"]))
     page_qs, total, page, pages = paginate_queryset(qs, page, per_page)
     runs = list(page_qs)
+    _fill_summary_counts(runs)
     progress = _progress(runs)
     return {
         "items": [serialize_run_list(r, progress.get(str(r.id))) for r in runs],
@@ -437,7 +560,7 @@ def preview_runs(request, payload: RunPreviewRequestSchema):
                     "job_id": str(job.id),
                     "label": _target(AnalysisRun(generation_job=job))["label"],
                     "files": len(files),
-                    "lines": sum(c.count("\n") + 1 for c in files.values()),
+                    "lines": sum(len(c.splitlines()) for c in files.values()),
                     "app_running": app_running,
                 },
             )
@@ -450,7 +573,7 @@ def preview_runs(request, payload: RunPreviewRequestSchema):
                 "job_id": None,
                 "label": "Pasted code",
                 "files": len(files),
-                "lines": sum(c.count("\n") + 1 for c in files.values()),
+                "lines": sum(len(c.splitlines()) for c in files.values()),
                 "app_running": False,
             },
         )
@@ -476,7 +599,7 @@ def preview_runs(request, payload: RunPreviewRequestSchema):
                 continue
             if tool.analysis_mode == "dynamic" and not app_running:
                 row["app_not_running"] += 1
-            elif not runner.applicable_files(tool, files):
+            elif runner.not_applicable_reason(tool, files):
                 row["not_applicable"] += 1
             else:
                 row["runs"] += 1
@@ -490,7 +613,7 @@ def preview_runs(request, payload: RunPreviewRequestSchema):
     unknown = [r["slug"] for r in tool_rows if not r["known"]]
     if unknown:
         warnings.append(f"Unknown tool(s): {', '.join(unknown)}.")
-    empty = [t["label"] for t in targets if t["files"] == 0]
+    empty = [t["label"] for t, files in zip(targets, file_maps, strict=True) if not runner.nonempty_files(files)]
     if empty:
         warnings.append(f"No code to analyze for: {', '.join(empty[:5])}{'…' if len(empty) > 5 else ''}.")
     return {
@@ -600,6 +723,23 @@ def get_result(request, run_id: str, result_id: str):
 # --- Findings ---------------------------------------------------------------------
 
 
+def _scope_q(scope: str, run: AnalysisRun | None = None) -> Q | None:
+    """Filter for a ``scope`` query value; None for all findings; 400 for an unknown scope.
+
+    ``source`` / ``tests`` split the code scope of *run* by test files
+    (:func:`code_finding_parts`); findings in excluded directories are in neither.
+    """
+    if not scope:
+        return None
+    if scope in _CODE_PARTS and run is not None:
+        tests_ids, excluded_ids = code_finding_parts(Finding.objects.filter(result__run=run))
+        in_tests = Q(id__in=tests_ids)
+        return runner.finding_scope_q("code") & (in_tests if scope == "tests" else ~in_tests & ~Q(id__in=excluded_ids))
+    if scope not in _SCOPES:
+        raise HttpError(400, f"scope must be one of: {', '.join((*_SCOPES, *_CODE_PARTS))}.")
+    return runner.finding_scope_q(scope)
+
+
 def _findings_qs(
     run: AnalysisRun,
     *,
@@ -610,8 +750,11 @@ def _findings_qs(
     file_path: str = "",
     rule_id: str = "",
     search: str = "",
+    scope: str = "",
 ):
     qs = Finding.objects.filter(result__run=run).select_related("result")
+    if (scope_q := _scope_q(scope, run)) is not None:
+        qs = qs.filter(scope_q)
     if tool_slug:
         qs = qs.filter(result__tool_slug=tool_slug)
     if tool_severity == "unrated":
@@ -651,10 +794,17 @@ def list_findings(
     file_path: str = Query(""),
     rule_id: str = Query(""),
     search: str = Query(""),
+    scope: str = Query(
+        "",
+        description="code (what the model wrote) | dependencies (known-vulnerability advisories) | "
+        "runtime (dynamic tools) | source / tests (code findings outside / inside test files); "
+        "empty: all findings.",
+    ),
     sort: str = Query("severity"),
     group: bool = Query(default=False, description="Collapse findings of one issue (several tools) into one item."),
 ):
     run = _get_run(request, run_id, related=False)
+    test_ids = test_code_finding_ids(Finding.objects.filter(result__run=run))
     qs = _findings_qs(
         run,
         tool_slug=tool_slug,
@@ -664,12 +814,13 @@ def list_findings(
         file_path=file_path,
         rule_id=rule_id,
         search=search,
+        scope=scope,
     ).order_by(*_FINDING_SORTS.get(sort, _FINDING_SORTS["severity"]), "id")
     if group:
-        return _grouped_findings(qs, page, per_page)
+        return _grouped_findings(qs, page, per_page, test_ids)
     page_qs, total, page, pages = paginate_queryset(qs, page, per_page)
     return {
-        "items": [_serialize_finding(f) for f in page_qs],
+        "items": [_serialize_finding(f, test_ids) for f in page_qs],
         "total": total,
         "page": page,
         "per_page": per_page,
@@ -677,7 +828,7 @@ def list_findings(
     }
 
 
-def _grouped_findings(qs, page: int, per_page: int) -> dict[str, Any]:
+def _grouped_findings(qs, page: int, per_page: int, test_ids: set | frozenset = frozenset()) -> dict[str, Any]:
     """One item per issue: its first finding in *qs* order, the rest as ``duplicates``.
 
     Issues are the cross-tool clusters of the study statistics, built from the
@@ -698,8 +849,8 @@ def _grouped_findings(qs, page: int, per_page: int) -> dict[str, Any]:
         members = sorted((by_id[m["id"]] for m in c.members), key=lambda f: position[f.id])
         items.append(
             {
-                **_serialize_finding(members[0]),
-                "duplicates": [_serialize_finding(f) for f in members[1:]],
+                **_serialize_finding(members[0], test_ids),
+                "duplicates": [_serialize_finding(f, test_ids) for f in members[1:]],
                 "issue_class": c.issue_class,
             },
         )
@@ -714,31 +865,41 @@ def _grouped_findings(qs, page: int, per_page: int) -> dict[str, Any]:
 
 
 @router.get("/runs/{run_id}/findings/facets/", response=FindingFacetsSchema)
-def finding_facets(request, run_id: str, tool_slug: str = Query("")):
+def finding_facets(request, run_id: str, tool_slug: str = Query(""), scope: str = Query("")):
     """Counts for the findings explorer: per tool, reported level, category, file and rule.
 
-    Levels are the tools' own labels (case-folded), ordered by their mapped
-    rank; findings of tools that rate nothing are counted as ``unrated``.
-    With ``tool_slug`` every facet but ``tools`` is limited to that tool.
+    Levels are the tools' own labels (case-folded), ordered by the rank of
+    the word itself (``level_rank``); findings of tools that rate nothing are
+    counted as ``unrated``. ``scopes`` counts code findings, dependency
+    advisories and runtime (dynamic tool) findings; a scope no tool of the
+    run measured, and with no findings, is None (unmeasured, not zero); ``code_parts``
+    splits the code findings into ``source`` and ``tests`` (test files: the study counts
+    test code apart; None when code is unmeasured), and ``excluded`` (files in excluded
+    directories that a run finalized before the exclusion rule read: neither). With ``scope`` every
+    facet but ``scopes`` is limited to that scope; with ``tool_slug`` every
+    facet but ``tools`` and ``scopes`` is limited to that tool.
     """
     run = _get_run(request, run_id, related=False)
     every = Finding.objects.filter(result__run=run)
-    scoped = every.filter(result__tool_slug=tool_slug) if tool_slug else every
+    in_scope = every.filter(scope_q) if (scope_q := _scope_q(scope, run)) is not None else every
+    scoped = in_scope.filter(result__tool_slug=tool_slug) if tool_slug else in_scope
 
     def rows(qs, field, *, limit=None):
         data = list(qs.values(field).annotate(n=Count("id")).order_by("-n", field))
         return [{"value": r[field] or "", "count": r["n"]} for r in (data[:limit] if limit else data)], len(data)
 
-    tools, _ = rows(every, "result__tool_slug")
-    levels = list(
-        scoped.exclude(tool_severity="")
-        .annotate(label=Lower("tool_severity"))
-        .values("label")
-        .annotate(
-            n=Count("id"),
-            rank=Min(Case(*[When(severity=s, then=Value(r)) for s, r in _SEVERITY_RANK.items()], default=Value(5))),
-        )
-        .order_by("rank", "-n"),
+    tools, _ = rows(in_scope, "result__tool_slug")
+    measured = runner.measured_scopes(run.results.values_list("tool_slug", "status", "summary__skip_reason"))
+    scope_counts = runner.finding_scope_counts(every, measured)
+    levels = sorted(
+        (
+            {"label": r["label"], "n": r["n"], "rank": level_rank(r["label"])}
+            for r in scoped.exclude(tool_severity="")
+            .annotate(label=Lower("tool_severity"))
+            .values("label")
+            .annotate(n=Count("id"))
+        ),
+        key=lambda r: (r["rank"], -r["n"], r["label"]),
     )
     categories, _ = rows(scoped.exclude(category=""), "category")
     files, files_total = rows(scoped.exclude(file_path=""), "file_path", limit=_FACET_LIMIT)
@@ -752,11 +913,29 @@ def finding_facets(request, run_id: str, tool_slug: str = Query("")):
     )
     for r in rules:
         r["label"] = titles.get(r["value"], "")
+    code = scope_counts["code_findings"]
+    # Code findings in test files are counted apart, as in the study, and those in excluded
+    # directories (read by a run finalized before the exclusion rule) are neither (unmeasured code: None).
+    tests_ids, excluded_ids = code_finding_parts(every) if code is not None else (None, None)
+    in_tests = len(tests_ids) if tests_ids is not None else None
+    in_excluded = len(excluded_ids) if excluded_ids is not None else None
     return {
         "total": scoped.count(),
         "tools": tools,
         "levels": [{"value": r["label"], "count": r["n"], "rank": r["rank"]} for r in levels],
         "unrated": scoped.filter(tool_severity="").count(),
+        "scopes": {
+            "code": code,
+            "dependencies": scope_counts["dependency_findings"],
+            "runtime": scope_counts["runtime_findings"],
+        },
+        "code_parts": {
+            "source": code - in_tests - in_excluded
+            if code is not None and in_tests is not None and in_excluded is not None
+            else None,
+            "tests": in_tests,
+            "excluded": in_excluded,
+        },
         "categories": categories,
         "files": files,
         "files_total": files_total,

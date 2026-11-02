@@ -3,6 +3,11 @@
 		tool: string;
 		/** A tool-reported level (case-folded) or "unrated". */
 		level: string;
+		/**
+		 * code | dependencies (known-vulnerability advisories) | runtime (dynamic tools) |
+		 * source / tests (code findings outside / inside test files, counted apart as in the study); "" = all.
+		 */
+		scope: '' | 'code' | 'dependencies' | 'runtime' | 'source' | 'tests';
 		category: string;
 		file: string;
 		rule: string;
@@ -15,6 +20,7 @@
 	export const EMPTY_FILTERS: FindingFilters = {
 		tool: '',
 		level: '',
+		scope: '',
 		category: '',
 		file: '',
 		rule: '',
@@ -26,8 +32,9 @@
 
 <script lang="ts">
 	/**
-	 * FindingsExplorer — a run's findings: facet rail (tool, level as the tool
-	 * reported it, category, file, rule — with counts), search, sort, a table
+	 * FindingsExplorer — a run's findings: facet rail (scope — code, dependency
+	 * advisories, runtime —, tool, level as the tool reported it, category,
+	 * file, rule — with counts), search, sort, a table
 	 * whose rows expand into `FindingDetail`, pagination and CSV/JSON export of
 	 * the current filter. With `filters.merge` one row is one issue: findings of
 	 * several tools that report the same thing (the study's cross-tool dedup)
@@ -36,7 +43,9 @@
 	 *
 	 * Props: `runId`, `tools` (slug → catalog tool, for names/icons), `filters`
 	 * (bindable; the page keeps it in the URL), `refreshKey` (bump to refetch, e.g.
-	 * when a tool finishes during a live run), `live` (a run still adding findings).
+	 * when a tool finishes during a live run), `live` (a run still adding findings),
+	 * `prevalence` / `scopeLabel` (the run context's rule prevalence and its corpus,
+	 * shown in each finding's detail).
 	 */
 	import { untrack } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
@@ -66,6 +75,7 @@
 		getRunFindings,
 		type FindingFacets,
 		type FindingsParams,
+		type RulePrevalence,
 		type RunFinding,
 	} from '$lib/api/runs';
 	import type { AnalyzerTool } from '$lib/api/analyzers';
@@ -73,7 +83,7 @@
 	import LevelBadge from './LevelBadge.svelte';
 	import FindingDetail from './FindingDetail.svelte';
 	import { locationText } from './finding-data';
-	import { downloadText, toCsv } from './format';
+	import { downloadText, issueClassLabel, prevalenceIndex, prevalenceKey, sortLevels, toCsv } from './format';
 
 	interface Props {
 		runId: string;
@@ -81,9 +91,16 @@
 		filters: FindingFilters;
 		refreshKey?: number;
 		live?: boolean;
+		prevalence?: RulePrevalence[];
+		scopeLabel?: string;
 	}
 
-	let { runId, tools, filters = $bindable(), refreshKey = 0, live = false }: Props = $props();
+	let { runId, tools, filters = $bindable(), refreshKey = 0, live = false, prevalence = [], scopeLabel = '' }: Props = $props();
+
+	const prevalenceByToolRule = $derived(prevalenceIndex(prevalence).byToolRule);
+	function rulePrevalence(f: RunFinding): RulePrevalence | null {
+		return f.rule_id ? (prevalenceByToolRule.get(prevalenceKey(f.tool_slug, f.rule_id)) ?? null) : null;
+	}
 
 	const PER_PAGE = 50;
 	let page = $state(1);
@@ -115,8 +132,27 @@
 			rule_id: filters.rule,
 			search: filters.search,
 			sort: filters.sort,
+			scope: filters.scope,
 		};
 	}
+
+	const SCOPES: { value: 'code' | 'dependencies' | 'runtime'; label: string; title: string }[] = [
+		{ value: 'code', label: 'Code', title: 'Findings about the code itself' },
+		{ value: 'dependencies', label: 'Dependency advisories', title: 'Known vulnerabilities in package versions (pip-audit, npm-audit, osv-scanner, trivy, retire): not code issues' },
+		{ value: 'runtime', label: 'Runtime (dynamic tools)', title: 'What dynamic scanners saw in the running app' },
+	];
+	// The code scope's two parts, as the study counts them (test code apart).
+	const CODE_PARTS: { value: 'source' | 'tests'; label: string; title: string }[] = [
+		{ value: 'source', label: 'App source', title: "Code findings outside test files: the app's own code issues" },
+		{ value: 'tests', label: 'Test files', title: 'Code findings in tests/, *.test.*, *.spec.*, conftest.py and smoke scripts: counted apart, as in the study' },
+	];
+	/** Code findings outside / inside test files (null when code is unmeasured). */
+	const codeParts = $derived(facets?.code_parts ?? null);
+	const SCOPE_LABELS: Record<string, string> = {
+		...Object.fromEntries(SCOPES.map((sc) => [sc.value, sc.label])),
+		source: 'Code · app source',
+		tests: 'Code · test files',
+	};
 
 	/** Distinct tools of a row: its own, then those of its duplicates. */
 	function rowTools(f: RunFinding): string[] {
@@ -149,7 +185,7 @@
 		const ctl = new AbortController();
 		facetsCtl = ctl;
 		try {
-			facets = await getFindingFacets(runId, { tool_slug: filters.tool }, { signal: ctl.signal });
+			facets = await getFindingFacets(runId, { tool_slug: filters.tool, scope: filters.scope }, { signal: ctl.signal });
 		} catch (e) {
 			if (isAbortError(e) && ctl.signal.aborted) return;
 			// Facets are a convenience: the table still works without them.
@@ -173,6 +209,7 @@
 	});
 	$effect(() => {
 		void filters.tool;
+		void filters.scope;
 		void runId;
 		untrack(() => void loadFacets());
 	});
@@ -207,8 +244,8 @@
 
 	function setFilter<K extends keyof FindingFilters>(key: K, value: FindingFilters[K]) {
 		const next = { ...filters, [key]: filters[key] === value ? '' : value };
-		// Levels, files and rules are counted within the selected tool.
-		if (key === 'tool') {
+		// Levels, files and rules are counted within the selected scope and tool.
+		if (key === 'tool' || key === 'scope') {
 			next.level = '';
 			next.file = '';
 			next.rule = '';
@@ -237,6 +274,7 @@
 
 	const activeChips = $derived(
 		[
+			filters.scope && { key: 'scope' as const, label: SCOPE_LABELS[filters.scope] ?? filters.scope },
 			filters.tool && { key: 'tool' as const, label: `Tool: ${toolName(filters.tool)}` },
 			filters.level && {
 				key: 'level' as const,
@@ -274,18 +312,19 @@
 				const data = rows.map(({ severity: _severity, ...rest }) => rest);
 				downloadText(`findings-${stamp}.json`, JSON.stringify(data, null, 2), 'application/json');
 			} else {
-				const header = ['tool', 'level_reported', 'rule', 'title', 'file', 'line', 'column', 'category', 'description', 'suggestion', 'cwe', 'package', 'installed_version', 'fixed_versions', 'docs_url'];
+				const header = ['tool', 'level_reported', 'rule', 'title', 'file', 'line', 'column', 'in_tests', 'category', 'description', 'suggestion', 'cwe', 'package', 'installed_version', 'fixed_versions', 'docs_url'];
 				const body = rows.map((f) => {
 					const d = f.tool_specific_data ?? {};
 					const fixed = d.fixed_versions ?? d.fix_versions ?? d.fixed_version ?? '';
 					return [
 						f.tool_slug,
-						f.tool_severity,
+						f.tool_severity || 'unrated',
 						f.rule_id,
 						f.title,
 						f.file_path,
 						f.line_number,
 						f.column_number,
+						f.in_tests ? 'yes' : 'no',
 						f.category,
 						f.description,
 						f.suggestion,
@@ -326,6 +365,25 @@
 {#snippet facetRail()}
 	{#if facets}
 		<div class="space-y-4">
+			{#if facets.scopes && ((facets.scopes.dependencies ?? 0) > 0 || (facets.scopes.runtime ?? 0) > 0 || (codeParts?.tests ?? 0) > 0 || (codeParts?.excluded ?? 0) > 0)}
+				{@const scopes = facets.scopes}
+				<div>
+					<p class="section-label mb-1 px-2" title="Dependency advisories and runtime findings are not code issues; test code is counted apart">Scope</p>
+					<!-- A scope no tool measured (null) has no findings to filter to. -->
+					{#each SCOPES.filter((sc) => (scopes[sc.value] ?? 0) > 0) as sc (sc.value)}
+						{#snippet scopeName()}<span>{sc.label}</span>{/snippet}
+						{@render facetButton(filters.scope === sc.value, () => setFilter('scope', sc.value), scopes[sc.value] ?? 0, scopeName, sc.title)}
+						{#if sc.value === 'code' && codeParts && ((codeParts.tests ?? 0) > 0 || (codeParts.excluded ?? 0) > 0)}
+							<div class="ml-3 border-l border-border pl-1">
+								{#each CODE_PARTS as part (part.value)}
+									{#snippet partName()}<span>{part.label}</span>{/snippet}
+									{@render facetButton(filters.scope === part.value, () => setFilter('scope', part.value), codeParts[part.value] ?? 0, partName, part.title)}
+								{/each}
+							</div>
+						{/if}
+					{/each}
+				</div>
+			{/if}
 			<div>
 				<p class="section-label mb-1 px-2">Tool</p>
 				{#each facets.tools as t (t.value)}
@@ -342,7 +400,7 @@
 			{#if facets.levels.length > 0 || facets.unrated > 0}
 				<div>
 					<p class="section-label mb-1 px-2" title="Levels exactly as the tools printed them">Level (as reported)</p>
-					{#each facets.levels as l (l.value)}
+					{#each sortLevels(facets.levels) as l (l.value)}
 						{#snippet label()}<LevelBadge label={l.value} />{/snippet}
 						{@render facetButton(filters.level === l.value, () => setFilter('level', l.value), l.count, label)}
 					{/each}
@@ -495,6 +553,7 @@
 						{#each findings as f (f.id)}
 							{@const open = expanded.has(f.id)}
 							{@const slugs = rowTools(f)}
+							{@const cls = issueClassLabel(f.issue_class, f.tool_slug, f.rule_id)}
 							<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the expand button is the keyboard path) -->
 							<tr class="row-link align-top" data-selected={open} onclick={() => toggle(f.id)}>
 								<td class="w-8 pr-0">
@@ -514,12 +573,17 @@
 										<LevelBadge label={f.tool_severity} class="mt-0.5" />
 										<div class="min-w-0">
 											<p class="font-medium leading-5 [overflow-wrap:anywhere]">{f.title}</p>
-											{#if f.rule_id}<p class="cell-sub truncate font-mono text-[11px] text-muted-foreground">{f.rule_id}</p>{/if}
+											{#if f.rule_id || cls}
+												<p class="cell-sub truncate font-mono text-[11px] text-muted-foreground">
+													{f.rule_id}{#if cls}<span title="Issue class: the cross-tool unit the study deduplicates on">{`${f.rule_id ? ' · ' : ''}${cls}`}</span>{/if}
+												</p>
+											{/if}
 										</div>
 									</div>
 								</td>
 								<td class="max-w-0 w-[22%] font-mono text-xs text-muted-foreground">
 									{#if f.file_path}<span class="block truncate" title={locationText(f)} dir="rtl">&lrm;{locationText(f)}</span>{:else}—{/if}
+									{#if f.in_tests}<span class="cell-sub mt-0.5 block text-right"><span class="inline-block rounded border border-border px-1 font-sans text-[11px]" title="Test code: counted apart from the app's code issues, as in the study">test file</span></span>{/if}
 								</td>
 								<td class="whitespace-nowrap text-xs">
 									<span class="inline-flex items-center gap-1.5" title={slugs.map(toolName).join(', ')}>
@@ -540,7 +604,7 @@
 									<td colspan="3" class="py-3">
 										<!-- width 0 / min-width 100%: long code lines scroll inside instead of widening the table -->
 										<div class="@container w-0 min-w-full">
-											<FindingDetail finding={f} toolName={toolName(f.tool_slug)} />
+											<FindingDetail finding={f} toolName={toolName(f.tool_slug)} prevalence={rulePrevalence(f)} {scopeLabel} />
 											{#if f.duplicates?.length}
 												<div class="mt-4 border-t border-border pt-3">
 													<p class="section-label mb-1.5">Also reported by</p>
@@ -569,7 +633,7 @@
 																</button>
 																{#if dOpen}
 																	<div class="py-2 pl-6" id="finding-{d.id}">
-																		<FindingDetail finding={d} toolName={toolName(d.tool_slug)} />
+																		<FindingDetail finding={d} toolName={toolName(d.tool_slug)} prevalence={rulePrevalence(d)} {scopeLabel} issueClass={f.issue_class ?? ''} />
 																	</div>
 																{/if}
 															</li>

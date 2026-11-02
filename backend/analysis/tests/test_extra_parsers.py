@@ -564,3 +564,121 @@ def test_pip_audit_aliases_include_its_own_id():
     report = {"dependencies": [{"name": "flask", "version": "1", "vulns": [vuln]}]}
     [f] = parsers.parse("pip_audit", f"### requirements.txt\n{json.dumps(report)}\n").findings
     assert f.tool_specific_data["aliases"] == ["PYSEC-1", "GHSA-x", "CVE-2026-1"]
+
+
+# --- Sections that hold something other than a report -----------------------
+
+# What npm 10 prints (exit 1) with --json when the advisory endpoint is unreachable.
+_NPM_REQUEST_FAILED = {
+    "message": (
+        "request to http://127.0.0.1:9/-/npm/v1/security/audits/quick failed, reason: connect ECONNREFUSED 127.0.0.1:9"
+    ),
+    "error": {"summary": "", "detail": ""},
+}
+
+
+def test_npm_audit_endpoint_failure_is_not_a_clean_manifest():
+    raw = f"### frontend/package.json\n{json.dumps(_NPM_REQUEST_FAILED, indent=2)}\n"
+    parsed = parsers.parse("npm_audit", raw)
+    assert parsed.findings == []
+    assert parsed.error.startswith("No manifest could be analyzed — frontend/package.json: request to ")
+    assert "ECONNREFUSED" in parsed.error
+
+    good = {"auditReportVersion": 2, "vulnerabilities": {}, "metadata": {}}
+    raw = f"### package.json\n{json.dumps(good)}\n### frontend/package.json\n{json.dumps(_NPM_REQUEST_FAILED)}\n"
+    parsed = parsers.parse("npm_audit", raw)
+    assert parsed.error is None
+    assert parsed.warnings == [f"Not analyzed: frontend/package.json: {_NPM_REQUEST_FAILED['message']}"]
+
+
+def test_dependency_tools_reject_json_that_is_not_their_report():
+    # An error object (npm 7+ ENOLOCK shape), or a report of the wrong shape.
+    enolock = {"error": {"code": "ENOLOCK", "summary": "This command requires an existing lockfile.", "detail": ""}}
+    parsed = parsers.parse("npm_audit", f"### package.json\n{json.dumps(enolock)}\n")
+    assert parsed.error == "No manifest could be analyzed — package.json: This command requires an existing lockfile."
+    assert parsers.parse("pip_audit", '### requirements.txt\n{"error": "x"}\n').error is not None
+    assert parsers.parse("deptry", '### .\n{"error": "x"}\n').error is not None
+    assert parsers.parse("depcheck", '### package.json\n["x"]\n').error is not None
+
+
+def test_cut_off_manifest_report_was_not_analyzed():
+    vuln = {"id": "PYSEC-1", "fix_versions": ["2"], "aliases": ["CVE-2026-1"], "description": "d"}
+    report = json.dumps({"dependencies": [{"name": "flask", "version": "1", "vulns": [vuln]}] * 3}, indent=2)
+    parsed = parsers.parse("pip_audit", f"### requirements.txt\n{report[: len(report) // 2]}\n")
+    assert parsed.findings == []
+    assert parsed.error.startswith("No manifest could be analyzed — requirements.txt")
+
+
+# --- pip-audit: one advisory returned as two aliasing OSV records ------------
+
+
+def test_pip_audit_merges_records_of_one_advisory():
+    # pip-audit 2.10 on Werkzeug==3.0.1 (25 stored results hold both records).
+    first = {
+        "id": "PYSEC-2026-1860",
+        "fix_versions": ["3.0.6"],
+        "aliases": ["CVE-2024-49767", "PYSEC-2026-3417", "GHSA-q34m-jh98-gwm2"],
+        "description": "Werkzeug multipart form parsing DoS",
+    }
+    second = {
+        "id": "PYSEC-2026-3417",
+        "fix_versions": ["3.0.6", "3.1.0"],
+        "aliases": ["GHSA-q34m-jh98-gwm2", "CVE-2024-49767"],
+        "description": "same advisory",
+    }
+    other = {"id": "PYSEC-2026-9", "fix_versions": [], "aliases": ["CVE-2026-9"], "description": "another one"}
+    report = {"dependencies": [{"name": "werkzeug", "version": "3.0.1", "vulns": [first, second, other]}]}
+    findings = parsers.parse("pip_audit", f"### requirements.txt\n{json.dumps(report)}\n").findings
+    merged, separate = findings
+    assert (merged.rule_id, merged.title) == ("PYSEC-2026-1860", "werkzeug 3.0.1: CVE-2024-49767")
+    assert merged.tool_specific_data["aliases"] == [
+        "PYSEC-2026-1860",
+        "CVE-2024-49767",
+        "PYSEC-2026-3417",
+        "GHSA-q34m-jh98-gwm2",
+    ]
+    assert merged.tool_specific_data["fixed_versions"] == ["3.0.6", "3.1.0"]
+    assert merged.tool_specific_data["fix_versions"] == ["3.0.6", "3.1.0"]  # legacy key follows
+    assert merged.suggestion == "Upgrade werkzeug to 3.0.6 or 3.1.0"
+    assert merged.description == "Werkzeug multipart form parsing DoS"
+    # A different advisory of the same package stays its own finding.
+    assert separate.rule_id == "PYSEC-2026-9"
+
+
+# --- deptry: the package a violation is about --------------------------------
+
+
+def test_deptry_findings_name_their_package():
+    items = [
+        {"error": {"code": "DEP001", "message": "'yaml' imported but missing"}, "module": "yaml", "location": {}},
+        {"error": {"code": "DEP001", "message": "'requests' imported but missing"}, "module": "requests"},
+        {"error": {"code": "DEP002", "message": "'Werkzeug' defined but not used"}, "module": "Werkzeug"},
+    ]
+    found = parsers.parse("deptry", f"### .\n{json.dumps(items)}\n").findings
+    assert [f.tool_specific_data for f in found] == [
+        {"module": "yaml", "package": "PyYAML"},
+        {"module": "requests", "package": "requests"},
+        {"module": "Werkzeug", "package": "Werkzeug"},
+    ]
+
+
+def test_deptry_import_names_match_the_run_command_map():
+    """extra_parsers inverts deptry.yaml's --package-module-name-map; keep the two in step."""
+    import re
+
+    import yaml
+
+    from backend.analysis.seeding import DATA_DIR
+    from backend.analysis.services.extra_parsers import _DEPTRY_IMPORT_PACKAGES
+
+    run_cmd = yaml.safe_load((DATA_DIR / "deptry.yaml").read_text())["run_cmd"]
+    mapping = re.search(r"--package-module-name-map '([^']+)'", run_cmd).group(1)
+    # Framework entries map the modules a framework installs to it (werkzeug
+    # comes with Flask): a missing werkzeug is still the Werkzeug package.
+    frameworks = {"flask", "flask-sqlalchemy", "fastapi"}
+    for entry in mapping.split(","):
+        package, modules = entry.split("=", 1)
+        if package.lower() in frameworks:
+            continue
+        for module in modules.split("|"):
+            assert _DEPTRY_IMPORT_PACKAGES.get(module, module) == package, (module, package)

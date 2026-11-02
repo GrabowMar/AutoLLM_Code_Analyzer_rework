@@ -176,6 +176,11 @@ class AnalyzerTool(models.Model):
         """Slugs of AI-kind tools, whose findings are opinions, not measurements."""
         return set(cls.objects.filter(kind=ToolKind.AI).values_list("slug", flat=True))
 
+    @classmethod
+    def dynamic_slugs(cls) -> set[str]:
+        """Slugs of dynamic tools (DAST scanners probing the running app): their findings are runtime issues."""
+        return set(cls.objects.filter(analysis_mode=AnalysisMode.DYNAMIC).values_list("slug", flat=True))
+
 
 class AnalyzerWorkspace(models.Model):
     """A per-user, long-lived analyzer container."""
@@ -353,11 +358,14 @@ class AnalysisRun(models.Model):
 
     @classmethod
     def latest_ids_per_job(cls, job_ids=None) -> list:
-        """The most recent finished run per generation job.
+        """The most recent completed/partial run per generation job.
 
-        A job re-analyzed N times has N sets of findings for the same code;
-        aggregations that describe the code (reports, rankings) must count
-        each job's latest completed/partial run only, or they double-count.
+        Run-level "latest" only: after a re-run of some tools (``rerun
+        only_unmeasured``, one tool, the AI reviewer) the latest run holds just
+        those tools, and a re-run in which every tool was skipped still counts.
+        It is therefore not the job's measurement set: aggregations over
+        findings or tools (reports, rankings, samples, accounting) must use
+        :meth:`ToolResult.latest_ids_per_job` (per job and tool) instead.
         """
         qs = cls.objects.filter(
             generation_job__isnull=False,
@@ -378,10 +386,12 @@ class AnalysisRun(models.Model):
             if isinstance(data, dict):
                 # Copilot jobs carry a real per-file map ({relpath: content}) under
                 # "files"; prefer it so files keep their true paths/extensions.
+                # Empty files stay: an empty __init__.py makes a package, and the
+                # tools must see the tree the app runs with.
                 files = data.get("files")
                 if isinstance(files, dict):
-                    file_map = {k: v for k, v in files.items() if isinstance(v, str) and v.strip()}
-                    if file_map:
+                    file_map = {k: v for k, v in files.items() if isinstance(v, str)}
+                    if any(v.strip() for v in file_map.values()):
                         return file_map
                 # Scaffolding/custom jobs: top-level string blobs
                 # (backend_code/frontend_code/content). Other string fields are

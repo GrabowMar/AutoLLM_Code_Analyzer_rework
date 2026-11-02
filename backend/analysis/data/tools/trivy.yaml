@@ -23,7 +23,19 @@ install_cmd: >-
   trivy fs --quiet --download-db-only
 verify_cmd: "trivy --version | head -1"
 uninstall_cmd: "rm -rf /home/analyzer/.local/bin/trivy /home/analyzer/.cache/trivy"
-run_cmd: "trivy fs --quiet --format json --scanners {config:scanners} --skip-dirs '**/node_modules' --exit-code 0 {target} 2>/dev/null"
+# Trivy reads npm dependencies only from a lockfile: with vulnerability
+# scanning on, each package.json without one gets an llmlab-warning line (a
+# coverage gap on the result).
+run_cmd: >-
+  trivy fs --quiet --format json --scanners {config:scanners} --skip-dirs '**/node_modules'
+  --exit-code 0 {target} 2>/dev/null; rc=$?;
+  case {config:scanners} in *vuln*) echo;
+  (cd {target} && find . -name package.json -not -path '*/node_modules/*') | while IFS= read -r p; do
+  d=$(dirname "$p");
+  [ -e "$d/package-lock.json" ] || [ -e "$d/yarn.lock" ] || [ -e "$d/pnpm-lock.yaml" ] ||
+  echo "llmlab-warning: ${p#./} has no lockfile beside it, so its npm dependencies were not scanned";
+  done;;
+  esac; exit $rc
 parser_key: trivy
 run_timeout: 300
 install_timeout: 900

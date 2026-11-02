@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import uuid
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
@@ -20,6 +21,11 @@ from ninja.files import UploadedFile  # noqa: TC002 - ninja resolves the annotat
 from backend.analysis.models import AnalysisRun
 from backend.analysis.models import Finding
 from backend.export import services
+from backend.export.services.findings import UNRATED
+from backend.export.services.findings import ExportContext
+from backend.export.services.findings import export_context
+from backend.export.services.findings import finding_csv_row
+from backend.export.services.findings import finding_rows_queryset
 from backend.generation.models import GenerationJob
 from backend.reports.models import Report
 
@@ -52,15 +58,17 @@ _FINDINGS = ExportSpec(
     owner_field="result__run__created_by",
     filters={
         "task_id": "result__run_id",
+        "generation_job_id": "result__run__generation_job_id",
+        "experiment_id": "result__run__generation_job__experiment_id",
         "analyzer": "result__tool_slug",
-        "severity": "severity",
+        "normalized_severity": "severity",
     },
-    select_related=("result__run",),
 )
 _JOBS = ExportSpec(
     model=GenerationJob,
     owner_field="created_by",
-    filters={"status": "status", "model_id": "model_id"},
+    # The model slug (e.g. "deepseek/deepseek-v4.1-flash"), as everywhere else in the API.
+    filters={"status": "status", "model_id": "model__model_id"},
 )
 _TASKS = ExportSpec(
     model=AnalysisRun,
@@ -77,9 +85,8 @@ _REPORTS = ExportSpec(
 def _build_qs(
     spec: ExportSpec,
     request: object,
-    params: dict[str, str],
+    params: dict[str, object],
     since: datetime | None,
-    limit: int,
 ) -> QuerySet:
     user = request.user  # type: ignore[attr-defined]
     qs = spec.model.objects.all()
@@ -92,101 +99,197 @@ def _build_qs(
             qs = qs.filter(**{lookup: params[name]})
     if since:
         qs = qs.filter(created_at__gte=since)
-    return qs[: min(limit, _HARD_CAP)]
+    # Newest first with a unique tiebreak: a cut by ``limit`` drops the oldest
+    # rows, never one severity bucket (the model's default ordering is alphabetical).
+    return qs.order_by("-created_at", "-pk")
 
 
-def _csv_response(content: str, filename: str) -> HttpResponse:
-    resp = HttpResponse(content, content_type="text/csv")
-    resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+@dataclass(frozen=True)
+class Window:
+    """The rows one export returns, and how many matched before the limit."""
+
+    qs: QuerySet
+    total: int
+    cap: int
+
+    @property
+    def truncated(self) -> bool:
+        return self.total > self.cap
+
+
+def _window(qs: QuerySet, limit: int) -> Window:
+    cap = min(limit, _HARD_CAP)
+    return Window(qs=qs[:cap], total=qs.count(), cap=cap)
+
+
+def _mark(resp: HttpResponse | StreamingHttpResponse, window: Window):
+    """Say whether ``limit`` cut the export: rows are never dropped silently."""
+    resp["X-Total-Count"] = str(window.total)
+    resp["X-Truncated"] = "true" if window.truncated else "false"
     return resp
 
 
-def _json_response(data: object) -> HttpResponse:
-    return HttpResponse(json.dumps(data, default=str), content_type="application/json")
+def _csv_response(content: str, filename: str, window: Window) -> HttpResponse:
+    resp = HttpResponse(content, content_type="text/csv")
+    resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return _mark(resp, window)
+
+
+def _json_response(data: object, window: Window) -> HttpResponse:
+    return _mark(HttpResponse(json.dumps(data, default=str), content_type="application/json"), window)
 
 
 # ── Findings ─────────────────────────────────────────────────────────────────
 
 
-def _finding_row(f: object) -> list[object]:
-    return [
-        str(f.id),  # type: ignore[attr-defined]
-        str(f.result.run_id),  # type: ignore[attr-defined]
-        f.result.tool_slug,  # type: ignore[attr-defined]
-        f.severity,  # type: ignore[attr-defined]
-        f.file_path,  # type: ignore[attr-defined]
-        f.line_number or "",  # type: ignore[attr-defined]
-        f.rule_id,  # type: ignore[attr-defined]
-        f.title,  # type: ignore[attr-defined]
-        f.tool_specific_data.get("cwe", "") if f.tool_specific_data else "",  # type: ignore[attr-defined]
-        f.created_at.isoformat(),  # type: ignore[attr-defined]
-    ]
+def _findings_window(
+    request: object,
+    *,
+    task_id: uuid.UUID | None,
+    generation_job_id: uuid.UUID | None,
+    experiment_id: uuid.UUID | None,
+    analyzer: str,
+    tool_severity: str,
+    normalized_severity: str,
+    latest_only: bool,
+    since: datetime | None,
+    limit: int,
+) -> tuple[Window, ExportContext]:
+    """The findings one export returns, and what its rows share (counted results, the apps they describe)."""
+    params = {
+        "task_id": task_id,
+        "generation_job_id": generation_job_id,
+        "experiment_id": experiment_id,
+        "analyzer": analyzer,
+        "normalized_severity": normalized_severity,
+    }
+    qs = _build_qs(_FINDINGS, request, params, since)
+    label = tool_severity.strip()
+    if label.lower() == UNRATED:
+        qs = qs.filter(tool_severity="")
+    elif label:
+        qs = qs.filter(tool_severity__iexact=label)
+    job_ids = qs.order_by().values_list("result__run__generation_job_id", flat=True).distinct()
+    ctx = export_context(job_ids)
+    if latest_only:
+        qs = qs.filter(result_id__in=ctx.latest_ids)
+    return _window(qs, limit), ctx
 
 
-def _stream_findings_csv(qs: object):
+def _stream_findings_csv(qs: QuerySet, ctx: ExportContext, *, spreadsheet_safe: bool):
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(services.FINDING_HEADERS)
     yield buf.getvalue()
-    for f in qs:
+    for f in finding_rows_queryset(qs).iterator(chunk_size=2000):
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(_finding_row(f))
+        writer.writerow(finding_csv_row(f, ctx, spreadsheet_safe=spreadsheet_safe))
         yield buf.getvalue()
 
 
 @router.get("/findings.csv", auth=None, include_in_schema=True)
 def findings_csv(
     request,
-    task_id: str = Query(""),
+    task_id: uuid.UUID | None = None,
+    generation_job_id: uuid.UUID | None = None,
+    experiment_id: uuid.UUID | None = None,
     analyzer: str = Query(""),
-    severity: str = Query(""),
+    tool_severity: str = Query(""),
+    normalized_severity: str = Query(""),
+    severity: str = Query("", deprecated=True, description="Alias of normalized_severity."),
+    latest_only: bool = False,
+    spreadsheet_safe: bool = True,
     since: datetime | None = None,
-    limit: int = Query(_DEFAULT_LIMIT),
+    limit: int = Query(_DEFAULT_LIMIT, ge=0),
 ):
     if not _auth_check(request):
         return HttpResponse(status=401)
-    params = {"task_id": task_id, "analyzer": analyzer, "severity": severity}
-    qs = _build_qs(_FINDINGS, request, params, since, limit)
+    window, ctx = _findings_window(
+        request,
+        task_id=task_id,
+        generation_job_id=generation_job_id,
+        experiment_id=experiment_id,
+        analyzer=analyzer,
+        tool_severity=tool_severity,
+        normalized_severity=normalized_severity or severity,
+        latest_only=latest_only,
+        since=since,
+        limit=limit,
+    )
 
-    if min(limit, _HARD_CAP) > _DEFAULT_LIMIT:
-        resp = StreamingHttpResponse(_stream_findings_csv(qs), content_type="text/csv")
+    if window.cap > _DEFAULT_LIMIT:
+        resp = StreamingHttpResponse(
+            _stream_findings_csv(window.qs, ctx, spreadsheet_safe=spreadsheet_safe),
+            content_type="text/csv",
+        )
         resp["Content-Disposition"] = 'attachment; filename="findings.csv"'
-        return resp
+        return _mark(resp, window)
 
-    return _csv_response(services.findings_csv(qs), "findings.csv")
+    content = services.findings_csv(window.qs, ctx, spreadsheet_safe=spreadsheet_safe)
+    return _csv_response(content, "findings.csv", window)
 
 
 @router.get("/findings.json", auth=None, include_in_schema=True)
 def findings_json(
     request,
-    task_id: str = Query(""),
+    task_id: uuid.UUID | None = None,
+    generation_job_id: uuid.UUID | None = None,
+    experiment_id: uuid.UUID | None = None,
     analyzer: str = Query(""),
-    severity: str = Query(""),
+    tool_severity: str = Query(""),
+    normalized_severity: str = Query(""),
+    severity: str = Query("", deprecated=True, description="Alias of normalized_severity."),
+    latest_only: bool = False,
     since: datetime | None = None,
-    limit: int = Query(_DEFAULT_LIMIT),
+    limit: int = Query(_DEFAULT_LIMIT, ge=0),
 ):
     if not _auth_check(request):
         return HttpResponse(status=401)
-    params = {"task_id": task_id, "analyzer": analyzer, "severity": severity}
-    qs = _build_qs(_FINDINGS, request, params, since, limit)
-    return _json_response(services.findings_json(qs))
+    window, ctx = _findings_window(
+        request,
+        task_id=task_id,
+        generation_job_id=generation_job_id,
+        experiment_id=experiment_id,
+        analyzer=analyzer,
+        tool_severity=tool_severity,
+        normalized_severity=normalized_severity or severity,
+        latest_only=latest_only,
+        since=since,
+        limit=limit,
+    )
+    return _json_response(services.findings_json(window.qs, ctx), window)
 
 
 @router.get("/findings.sarif", auth=None, include_in_schema=True)
 def findings_sarif(
     request,
-    task_id: str = Query(""),
+    task_id: uuid.UUID | None = None,
+    generation_job_id: uuid.UUID | None = None,
+    experiment_id: uuid.UUID | None = None,
     analyzer: str = Query(""),
-    severity: str = Query(""),
+    tool_severity: str = Query(""),
+    normalized_severity: str = Query(""),
+    severity: str = Query("", deprecated=True, description="Alias of normalized_severity."),
+    latest_only: bool = False,
     since: datetime | None = None,
-    limit: int = Query(_DEFAULT_LIMIT),
+    limit: int = Query(_DEFAULT_LIMIT, ge=0),
 ):
     if not _auth_check(request):
         return HttpResponse(status=401)
-    params = {"task_id": task_id, "analyzer": analyzer, "severity": severity}
-    qs = _build_qs(_FINDINGS, request, params, since, limit)
-    resp = _json_response(services.findings_sarif(qs))
+    window, ctx = _findings_window(
+        request,
+        task_id=task_id,
+        generation_job_id=generation_job_id,
+        experiment_id=experiment_id,
+        analyzer=analyzer,
+        tool_severity=tool_severity,
+        normalized_severity=normalized_severity or severity,
+        latest_only=latest_only,
+        since=since,
+        limit=limit,
+    )
+    resp = _json_response(services.findings_sarif(window.qs, ctx, total=window.total), window)
     resp["Content-Disposition"] = 'attachment; filename="findings.sarif"'
     return resp
 
@@ -198,28 +301,30 @@ def findings_sarif(
 def generation_jobs_csv(
     request,
     status: str = Query(""),
-    model_id: str = Query(""),
+    model_id: str = Query("", description="Model slug, e.g. deepseek/deepseek-v4.1-flash."),
+    spreadsheet_safe: bool = True,
     since: datetime | None = None,
-    limit: int = Query(_DEFAULT_LIMIT),
+    limit: int = Query(_DEFAULT_LIMIT, ge=0),
 ):
     if not _auth_check(request):
         return HttpResponse(status=401)
-    qs = _build_qs(_JOBS, request, {"status": status, "model_id": model_id}, since, limit)
-    return _csv_response(services.generation_jobs_csv(qs), "generation-jobs.csv")
+    window = _window(_build_qs(_JOBS, request, {"status": status, "model_id": model_id}, since), limit)
+    content = services.generation_jobs_csv(window.qs, spreadsheet_safe=spreadsheet_safe)
+    return _csv_response(content, "generation-jobs.csv", window)
 
 
 @router.get("/generation-jobs.json", auth=None, include_in_schema=True)
 def generation_jobs_json(
     request,
     status: str = Query(""),
-    model_id: str = Query(""),
+    model_id: str = Query("", description="Model slug, e.g. deepseek/deepseek-v4.1-flash."),
     since: datetime | None = None,
-    limit: int = Query(_DEFAULT_LIMIT),
+    limit: int = Query(_DEFAULT_LIMIT, ge=0),
 ):
     if not _auth_check(request):
         return HttpResponse(status=401)
-    qs = _build_qs(_JOBS, request, {"status": status, "model_id": model_id}, since, limit)
-    return _json_response(services.generation_jobs_json(qs))
+    window = _window(_build_qs(_JOBS, request, {"status": status, "model_id": model_id}, since), limit)
+    return _json_response(services.generation_jobs_json(window.qs), window)
 
 
 # ── Analysis tasks ────────────────────────────────────────────────────────────
@@ -229,13 +334,15 @@ def generation_jobs_json(
 def analysis_tasks_csv(
     request,
     status: str = Query(""),
+    spreadsheet_safe: bool = True,
     since: datetime | None = None,
-    limit: int = Query(_DEFAULT_LIMIT),
+    limit: int = Query(_DEFAULT_LIMIT, ge=0),
 ):
     if not _auth_check(request):
         return HttpResponse(status=401)
-    qs = _build_qs(_TASKS, request, {"status": status}, since, limit)
-    return _csv_response(services.analysis_tasks_csv(qs), "analysis-tasks.csv")
+    window = _window(_build_qs(_TASKS, request, {"status": status}, since), limit)
+    content = services.analysis_tasks_csv(window.qs, spreadsheet_safe=spreadsheet_safe)
+    return _csv_response(content, "analysis-tasks.csv", window)
 
 
 @router.get("/analysis-tasks.json", auth=None, include_in_schema=True)
@@ -243,12 +350,12 @@ def analysis_tasks_json(
     request,
     status: str = Query(""),
     since: datetime | None = None,
-    limit: int = Query(_DEFAULT_LIMIT),
+    limit: int = Query(_DEFAULT_LIMIT, ge=0),
 ):
     if not _auth_check(request):
         return HttpResponse(status=401)
-    qs = _build_qs(_TASKS, request, {"status": status}, since, limit)
-    return _json_response(services.analysis_tasks_json(qs))
+    window = _window(_build_qs(_TASKS, request, {"status": status}, since), limit)
+    return _json_response(services.analysis_tasks_json(window.qs), window)
 
 
 # ── Reports ───────────────────────────────────────────────────────────────────
@@ -259,13 +366,15 @@ def reports_csv(
     request,
     status: str = Query(""),
     report_type: str = Query(""),
+    spreadsheet_safe: bool = True,
     since: datetime | None = None,
-    limit: int = Query(_DEFAULT_LIMIT),
+    limit: int = Query(_DEFAULT_LIMIT, ge=0),
 ):
     if not _auth_check(request):
         return HttpResponse(status=401)
-    qs = _build_qs(_REPORTS, request, {"status": status, "report_type": report_type}, since, limit)
-    return _csv_response(services.reports_csv(qs), "reports.csv")
+    window = _window(_build_qs(_REPORTS, request, {"status": status, "report_type": report_type}, since), limit)
+    content = services.reports_csv(window.qs, spreadsheet_safe=spreadsheet_safe)
+    return _csv_response(content, "reports.csv", window)
 
 
 @router.get("/reports.json", auth=None, include_in_schema=True)
@@ -274,12 +383,12 @@ def reports_json(
     status: str = Query(""),
     report_type: str = Query(""),
     since: datetime | None = None,
-    limit: int = Query(_DEFAULT_LIMIT),
+    limit: int = Query(_DEFAULT_LIMIT, ge=0),
 ):
     if not _auth_check(request):
         return HttpResponse(status=401)
-    qs = _build_qs(_REPORTS, request, {"status": status, "report_type": report_type}, since, limit)
-    return _json_response(services.reports_json(qs))
+    window = _window(_build_qs(_REPORTS, request, {"status": status, "report_type": report_type}, since), limit)
+    return _json_response(services.reports_json(window.qs), window)
 
 
 # ── Manual review sample ─────────────────────────────────────────────────────
@@ -288,8 +397,8 @@ def reports_json(
 @router.get("/review-sample.zip")
 def review_sample_zip(
     request,
-    experiment_id: str | None = None,
-    batch_id: str | None = None,
+    experiment_id: uuid.UUID | None = None,
+    batch_id: uuid.UUID | None = None,
     size: int = Query(30, ge=1, le=500),
     per_stratum: int | None = Query(None, ge=1, le=100),
     stratify: str = Query("model", pattern="^(|model|template|model,template)$"),
@@ -300,7 +409,11 @@ def review_sample_zip(
     from backend.export.services.review_sample import build_review_sample
     from backend.statistics.services.study import study_jobs
 
-    jobs = study_jobs(request.auth, experiment_id=experiment_id, batch_id=batch_id)
+    jobs = study_jobs(
+        request.auth,
+        experiment_id=str(experiment_id) if experiment_id else None,
+        batch_id=str(batch_id) if batch_id else None,
+    )
     data, _manifest = build_review_sample(
         jobs,
         size=size,

@@ -4,10 +4,12 @@
 	 * elapsed clocks; SSE with a polling fallback), then its results — Overview
 	 * (coverage, attention items, levels as reported, top files/rules, metrics),
 	 * Findings (faceted explorer with full per-finding detail and export) and
-	 * Tools (state, time, version, errors, raw output of every tool).
+	 * Tools (state, time, version, errors, raw output of every tool). The header's
+	 * setup line and the Overview's source LOC, test-code split, rule prevalence
+	 * and replicate context come from the run's context (`runs/{id}/context/`).
 	 *
 	 * URL: `?tab=overview|findings|tools` and the findings filters
-	 * (`tool`, `level`, `cat`, `file`, `rule`, `q`, `sort`, `merge=0`), so views can be linked.
+	 * (`scope`, `tool`, `level`, `cat`, `file`, `rule`, `q`, `sort`, `merge=0`), so views can be linked.
 	 */
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import { goto, replaceState } from '$app/navigation';
@@ -35,9 +37,12 @@
 		deleteRun,
 		getFindingFacets,
 		getRun,
+		getRunContext,
 		rerunRun,
 		type AnalysisRunDetail,
+		type ContextScope,
 		type FindingFacets,
+		type RunContext,
 		type RunToolResult,
 	} from '$lib/api/runs';
 	import type { SseEvent } from '$lib/api/sse';
@@ -57,6 +62,7 @@
 		resultState,
 		runDisplayName,
 		runStatusLabel,
+		setupItems,
 		targetLines,
 	} from '$lib/components/analysis/format';
 	import { formatDate } from '$lib/utils/formatters';
@@ -82,6 +88,7 @@
 		return {
 			tool: p.get('tool') ?? '',
 			level: p.get('level') ?? '',
+			scope: ((s) => (s === 'code' || s === 'dependencies' || s === 'runtime' || s === 'source' || s === 'tests' ? s : ''))(p.get('scope')),
 			category: p.get('cat') ?? '',
 			file: p.get('file') ?? '',
 			rule: p.get('rule') ?? '',
@@ -103,6 +110,7 @@
 		set('tab', tab, 'overview');
 		set('tool', filters.tool);
 		set('level', filters.level);
+		set('scope', filters.scope);
 		set('cat', filters.category);
 		set('file', filters.file);
 		set('rule', filters.rule);
@@ -170,6 +178,38 @@
 		if (run) untrack(() => void refreshFacets());
 	});
 
+	// ── context: setup line, source LOC, test split, rule prevalence ──
+	let context = $state<RunContext | null>(null);
+	let contextLoading = $state(false);
+	let contextError = $state('');
+	/** The prevalence corpus the user picked; '' = the server's default (the experiment, else all my apps). */
+	let contextScope = $state<ContextScope | ''>('');
+	let contextCtl: AbortController | null = null;
+
+	async function refreshContext() {
+		contextCtl?.abort();
+		const ctl = new AbortController();
+		contextCtl = ctl;
+		contextLoading = true;
+		try {
+			context = await getRunContext(runId, contextScope, { signal: ctl.signal });
+			contextError = '';
+		} catch (e) {
+			if (ctl.signal.aborted) return;
+			contextError = formatApiError(e, 'Could not load how common these rules are.');
+		} finally {
+			if (contextCtl === ctl) contextLoading = false;
+		}
+	}
+
+	// Prevalence and test split describe finished findings: load once the run has finished, and again when they change.
+	const finished = $derived(!!run && !isActive(run.status));
+	$effect(() => {
+		void findingsKey;
+		void contextScope;
+		if (finished) untrack(() => void refreshContext());
+	});
+
 	let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 	function refreshSoon(delay = 600) {
 		clearTimeout(refreshTimer);
@@ -211,6 +251,9 @@
 			loadedId = id;
 			run = null;
 			facets = null;
+			context = null;
+			contextError = '';
+			contextScope = '';
 			loading = true;
 			loadError = '';
 			tabChosen = TABS.includes(page.url.searchParams.get('tab') as Tab);
@@ -233,6 +276,7 @@
 	onDestroy(() => {
 		watcher.destroy();
 		clearTimeout(refreshTimer);
+		contextCtl?.abort();
 	});
 
 	// ── actions ───────────────────────────────────────────────────────
@@ -301,6 +345,8 @@
 	}
 
 	const target = $derived(targetLines(run?.target));
+	/** experiment › condition › repeat k/N · model · harness · app (null until the context loads). */
+	const setup = $derived(context?.job ? setupItems(context.job) : null);
 	const findingsTotal = $derived(
 		active ? (run?.progress?.findings ?? 0) : ((run?.summary?.total_findings as number | undefined) ?? facets?.total ?? 0)
 	);
@@ -374,7 +420,19 @@
 		{/snippet}
 		{#if run}
 			<div class="header-stats">
-				{#if run.target.kind === 'job' && run.target.job_id}
+				{#if setup}
+					<span class="inline-flex min-w-0 flex-wrap items-baseline gap-x-1.5" aria-label="Generation setup">
+						{#each setup.cell as item, i (i)}
+							{#if i > 0}<span aria-hidden="true">›</span>{/if}
+							{#if item.href}<a href={item.href} class="font-medium text-foreground hover:underline" title={item.title}>{item.label}</a>{:else}<span class="text-foreground" title={item.title}>{item.label}</span>{/if}
+						{/each}
+						{#each setup.method as item, i (i)}
+							{#if i > 0 || setup.cell.length > 0}<span aria-hidden="true">·</span>{/if}
+							{#if item.href}<a href={item.href} class="hover:text-foreground hover:underline" title={item.title}>{item.label}</a>{:else}<span title={item.title}>{item.label}</span>{/if}
+						{/each}
+					</span>
+					<a href="/analysis?job={run.target.job_id}" class="hover:text-foreground hover:underline">all analyses of this app</a>
+				{:else if run.target.kind === 'job' && run.target.job_id}
 					<a href="/applications/{run.target.job_id}" class="header-stat min-w-0 hover:text-foreground" title="Open the app">
 						<b class="truncate font-sans">{target.title}</b>{#if target.sub}<span class="truncate">{target.sub}</span>{/if}
 					</a>
@@ -418,11 +476,24 @@
 				ontab={setTab}
 				onrerununmeasured={() => handleRerun(true)}
 				rerunning={busy === 'rerun'}
+				{context}
+				{contextLoading}
+				{contextError}
+				oncontextscope={(sc) => (contextScope = sc)}
+				onretrycontext={() => void refreshContext()}
 			/>
 		</Tabs.Content>
 
 		<Tabs.Content value="findings" class="pt-0">
-			<FindingsExplorer runId={run.id} {tools} bind:filters refreshKey={findingsKey} live={active} />
+			<FindingsExplorer
+				runId={run.id}
+				{tools}
+				bind:filters
+				refreshKey={findingsKey}
+				live={active}
+				prevalence={context?.rule_prevalence ?? []}
+				scopeLabel={context?.scope_label ?? ''}
+			/>
 		</Tabs.Content>
 
 		<Tabs.Content value="tools" class="pt-0">

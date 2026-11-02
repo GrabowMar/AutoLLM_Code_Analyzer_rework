@@ -1,4 +1,6 @@
 <script lang="ts">
+	// Findings of every analysis by the platform's normalized severity: an
+	// aggregate heuristic, labelled as such, never a finding's own level.
 	import * as Card from '$lib/components/ui/card';
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
 	import SeverityDonut from '$lib/components/charts/SeverityDonut.svelte';
@@ -18,8 +20,12 @@
 	<Card.Header>
 		<div class="flex min-w-0 items-center gap-2">
 			<ShieldAlert class="h-4 w-4 shrink-0 text-muted-foreground" />
-			<Card.Title>Finding Severity</Card.Title>
-			<span class="truncate text-xs text-muted-foreground">all analyses</span>
+			<Card.Title>Finding severity</Card.Title>
+			<span
+				class="truncate text-xs text-muted-foreground"
+				title="The platform's normalized level, a heuristic that also places findings whose tool printed no level; not the tools' own labels"
+				>normalized (heuristic) · all analyses</span
+			>
 		</div>
 	</Card.Header>
 	<Card.Content>

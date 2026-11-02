@@ -42,7 +42,7 @@
 	import SchedulesCard from '../SchedulesCard.svelte';
 	import { cellIndex, endpointGroupKey } from '../cells';
 	import { MAX_REPEATS } from '../composer';
-	import { isTerminal, priorityBucket } from '../format';
+	import { isTerminal, planTruncationRule, priorityBucket } from '../format';
 	import type { ExperimentLive } from '../live.svelte';
 	import StudySection from '../study/StudySection.svelte';
 
@@ -319,7 +319,7 @@
 		{/if}
 		<SchedulesCard experimentId={experiment.id} {schedules} {readonly} onchange={loadSchedules} {onlaunched} />
 		{#if postRun}
-			<PostRunCard experimentId={experiment.id} mode={experiment.mode} data={postRun} {readonly} canRun={hasCompleted} onchange={loadPostRun} />
+			<PostRunCard experimentId={experiment.id} mode={experiment.mode} data={postRun} {readonly} canRun={hasCompleted} planTruncated={planTruncationRule(experiment)} onchange={loadPostRun} />
 		{:else if !automationError}
 			<LoadingState label="loading post-run" class="py-8" />
 		{/if}

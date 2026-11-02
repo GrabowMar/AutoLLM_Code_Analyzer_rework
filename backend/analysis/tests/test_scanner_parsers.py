@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from backend.analysis.services import parsers
 
 
@@ -70,8 +72,11 @@ def test_zap_collapses_systemic_alerts_and_strips_html():
     assert sqli.confidence == "medium"
 
 
-def test_zap_without_report_is_empty():
-    assert _parse("zap", "") == []
+def test_zap_without_report_is_an_error():
+    # The run_cmd prints the report file: no output is no scan, not a clean one.
+    parsed = parsers.parse("zap", "")
+    assert parsed.findings == []
+    assert parsed.error == "ZAP wrote no report"
 
 
 def test_nuclei_jsonl():
@@ -564,14 +569,15 @@ def test_osv_reads_label_and_cwe_from_every_record_of_a_group():
         "https://github.com/pallets/flask/commit/089cb86",
         "https://nvd.nist.gov/vuln/detail/CVE-2026-27205",
     ]
+    # Relative, like file_path and the other scanners' manifests.
     assert (data["vuln_id"], data["fixed_versions"], data["manifest"]) == (
         "PYSEC-2026-2151",
         ["3.1.3"],
-        "/work/requirements.txt",
+        "requirements.txt",
     )
 
 
-def test_osv_without_label_falls_back_to_its_cvss_column():
+def test_osv_without_label_is_unrated_and_keeps_its_cvss_score():
     package = {
         "package": {"name": "jinja2", "version": "2.10", "ecosystem": "PyPI"},
         "vulnerabilities": [{"id": "PYSEC-1", "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N"}]}],
@@ -584,7 +590,13 @@ def test_osv_without_label_falls_back_to_its_cvss_column():
     }
     report = {"results": [{"source": {"path": "requirements.txt"}, "packages": [package, unrated]}]}
     scored, plain = _parse("osv_scanner", json.dumps(report))
-    assert (scored.tool_severity, scored.tool_specific_data["cvss_vector"]) == ("8.6", "CVSS:3.1/AV:N")
+    # A CVSS number is not a label the tool printed: unrated, with the score
+    # in cvss_score and the normalized level from it.
+    assert (scored.tool_severity, scored.severity) == ("", "high")
+    assert (scored.tool_specific_data["cvss_score"], scored.tool_specific_data["cvss_vector"]) == (
+        8.6,
+        "CVSS:3.1/AV:N",
+    )
     assert (plain.tool_severity, plain.suggestion) == ("", "")
     assert "cvss_score" not in plain.tool_specific_data
 
@@ -750,3 +762,345 @@ def test_vulnerability_aliases_hold_every_advisory_id():
     }
     [o] = _parse("osv_scanner", json.dumps(osv))
     assert o.tool_specific_data["aliases"] == ["PYSEC-9", "CVE-2026-9", "GHSA-bbbb"]
+
+
+# --- Audit fixes: scope, severity labels, noise and silent zeros -------------
+
+
+def _osv_report(packages: list[dict], path: str = "/work/frontend/package-lock.json") -> str:
+    return json.dumps({"results": [{"source": {"path": path, "type": "lockfile"}, "packages": packages}]})
+
+
+def _osv_package(name, version, ghsa, *, groups=None, ranges=None, label="MODERATE", max_severity="5.3"):
+    record = {
+        "id": ghsa,
+        "database_specific": {"severity": label} if label else {},
+        "affected": [{"package": {"name": name}, "ranges": ranges or []}],
+    }
+    package = {
+        "package": {"name": name, "version": version, "ecosystem": "npm"},
+        "vulnerabilities": [record],
+        "groups": [{"ids": [ghsa], "aliases": [ghsa], "max_severity": max_severity}],
+    }
+    if groups is not None:
+        package["dependency_groups"] = groups
+    return package
+
+
+def test_osv_leaves_out_packages_only_dev_dependencies_reach():
+    report = _osv_report(
+        [
+            _osv_package("vite", "5.4.21", "GHSA-vite", groups=["dev"]),
+            # Lockfile v2+: a dev tool's platform binary *or* npm's devOptional
+            # (which can ship as an optional dep of a production package);
+            # osv prints both the same way, so it is kept, tagged.
+            _osv_package("@esbuild/linux-x64", "0.21.5", "GHSA-esb", groups=["dev", "optional"]),
+            _osv_package("uuid", "9.0.1", "GHSA-uuid"),
+            _osv_package("fsevents", "2.3.2", "GHSA-fse", groups=["optional"]),
+        ],
+    )
+    parsed = parsers.parse("osv_scanner", report)
+    assert [f.tool_specific_data["package"] for f in parsed.findings] == ["@esbuild/linux-x64", "uuid", "fsevents"]
+    esbuild, uuid, fsevents = parsed.findings
+    assert esbuild.tool_specific_data["dependency_groups"] == ["dev", "optional"]
+    assert fsevents.tool_specific_data["dependency_groups"] == ["optional"]
+    assert "dependency_groups" not in uuid.tool_specific_data
+    assert parsed.metrics == {"dev_only_advisories_skipped": 1, "dev_only_packages_skipped": {"vite@5.4.21": 1}}
+    assert parsed.error is None
+
+
+def test_osv_with_only_dev_advisories_is_a_measurement_not_an_empty_report():
+    parsed = parsers.parse("osv_scanner", _osv_report([_osv_package("vite", "5.4.21", "GHSA-v", groups=["dev"])]))
+    assert (parsed.findings, parsed.error) == ([], None)
+    assert parsed.metrics["dev_only_advisories_skipped"] == 1
+
+
+def test_osv_clean_report_counts_zero_left_out():
+    # The key is on every parsed report: averages over results include the
+    # scans that left nothing out (absent = not measured).
+    clean = json.dumps({"results": [], "experimental_config": {"licenses": {"summary": False, "allowlist": None}}})
+    parsed = parsers.parse("osv_scanner", clean)
+    assert (parsed.findings, parsed.error, parsed.metrics) == ([], None, {"dev_only_advisories_skipped": 0})
+
+
+@pytest.mark.parametrize(
+    ("raw", "error"),
+    [
+        ("", "printed no report"),
+        # Only the run_cmd's lines: osv itself printed nothing (exit 127/128).
+        ("\nllmlab-warning: web/package.json has no lockfile beside it\n", "printed no report"),
+        ("[]", "no results list"),
+        ('{"experimental_config": {}}', "no results list"),
+    ],
+)
+def test_osv_output_without_a_report_is_not_a_clean_scan(raw, error):
+    # The run_cmd turns exit 1 ("vulnerabilities found") into 0, so the
+    # exit code no longer flags a missing report: the parser must.
+    parsed = parsers.parse("osv_scanner", raw)
+    assert error in parsed.error
+    assert (parsed.findings, parsed.metrics) == ([], {})
+    if "llmlab-warning" in raw:
+        assert parsed.warnings == ["web/package.json has no lockfile beside it"]
+
+
+def test_osv_normalized_severity_follows_the_advisory_label_not_the_max_cvss():
+    # Real shape (uuid 9.0.1): GitHub rates it MODERATE, NVD's CVSS 3.1 is 7.5.
+    package = _osv_package("uuid", "9.0.1", "GHSA-w5hq-g745-h8pq", label="MODERATE", max_severity="7.5")
+    [f] = _parse("osv_scanner", _osv_report([package]))
+    assert (f.tool_severity, f.severity, f.tool_specific_data["cvss_score"]) == ("MODERATE", "medium", 7.5)
+    unknown_word = _osv_package("x", "1.0.0", "GHSA-x", label="SEVERE", max_severity="9.1")
+    [g] = _parse("osv_scanner", _osv_report([unknown_word]))
+    # A label osv printed is kept verbatim; a word we cannot map falls back to CVSS.
+    assert (g.tool_severity, g.severity) == ("SEVERE", "critical")
+
+
+def test_osv_suggests_the_fix_of_the_installed_release_line():
+    ranges = [
+        {"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "4.5.6"}]},
+        {"type": "SEMVER", "events": [{"introduced": "5.0.0"}, {"fixed": "5.4.12"}]},
+        {"type": "SEMVER", "events": [{"introduced": "6.0.0"}, {"fixed": "6.0.9"}]},
+        {"type": "GIT", "events": [{"introduced": "0"}, {"fixed": "3f2a1b9c0d"}]},
+    ]
+    [vite] = _parse("osv_scanner", _osv_report([_osv_package("vite", "5.4.11", "GHSA-vite", ranges=ranges)]))
+    assert vite.suggestion == "Upgrade vite to 5.4.12"
+    # Every release line's fix stays listed, in version order (no commit hashes).
+    assert vite.tool_specific_data["fixed_versions"] == ["4.5.6", "5.4.12", "6.0.9"]
+
+    axios_ranges = [
+        {"type": "SEMVER", "events": [{"introduced": "1.0.0"}, {"fixed": "1.15.1"}]},
+        {"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "0.31.1"}]},
+    ]
+    [axios] = _parse("osv_scanner", _osv_report([_osv_package("axios", "1.6.8", "GHSA-ax", ranges=axios_ranges)]))
+    assert axios.suggestion == "Upgrade axios to 1.15.1"
+    assert axios.tool_specific_data["fixed_versions"] == ["0.31.1", "1.15.1"]
+
+    # No range holds the installed version: the lowest fix above it.
+    loose = [{"events": [{"fixed": "2.0.0"}]}, {"events": [{"introduced": "3.0.0"}, {"fixed": "3.1.0"}]}]
+    [pkg] = _parse("osv_scanner", _osv_report([_osv_package("p", "2.5.0", "GHSA-p", ranges=loose)]))
+    assert pkg.suggestion == "Upgrade p to 3.1.0"
+
+    # Unparsable installed version: every fix, as before.
+    [odd] = _parse("osv_scanner", _osv_report([_osv_package("q", "git+abc", "GHSA-q", ranges=ranges[:2])]))
+    assert odd.suggestion == "Upgrade q to 4.5.6 or 5.4.12"
+
+
+_LINE_SEPARATOR = chr(0x2028)
+
+
+def test_osv_lockfile_gap_lines_become_warnings_and_keep_the_report():
+    # A raw U+2028 inside a JSON string must survive the marker stripping.
+    package = _osv_package("uuid", "9.0.1", "GHSA-uuid")
+    package["vulnerabilities"][0]["summary"] = f"line{_LINE_SEPARATOR}separator"
+    raw = (
+        json.dumps({"results": [{"source": {"path": "/work/api/package-lock.json"}, "packages": [package]}]})
+        + "\n\nllmlab-warning: web/package.json has no lockfile beside it, so its npm dependencies were not scanned\n"
+    )
+    parsed = parsers.parse("osv_scanner", raw.replace("\\u2028", _LINE_SEPARATOR))
+    assert parsed.error is None
+    [f] = parsed.findings
+    assert f.title == f"uuid 9.0.1: GHSA-uuid — line{_LINE_SEPARATOR}separator"
+    assert (f.file_path, f.tool_specific_data["manifest"]) == ("api/package-lock.json", "api/package-lock.json")
+    assert parsed.warnings == [
+        "web/package.json has no lockfile beside it, so its npm dependencies were not scanned",
+    ]
+
+
+def test_trivy_lockfile_gap_lines_become_warnings():
+    raw = json.dumps({"Results": []}) + "\n\nllmlab-warning: package.json has no lockfile beside it\n"
+    parsed = parsers.parse("trivy", raw)
+    assert (parsed.findings, parsed.error, parsed.warnings) == ([], None, ["package.json has no lockfile beside it"])
+
+
+def _nuclei_hit(template, matcher="", severity="info", url="http://172.17.0.6:8000"):
+    return {
+        "template-id": template,
+        "matcher-name": matcher,
+        "matched-at": url,
+        "info": {"name": template, "severity": severity, "tags": ["misconfig"]},
+    }
+
+
+def _jsonl(*hits) -> str:
+    return "\n".join(json.dumps(h) for h in hits) + "\n"
+
+
+def test_nuclei_info_hits_are_best_practice_except_cors_and_hsts_over_http_is_dropped():
+    raw = _jsonl(
+        _nuclei_hit("http-missing-security-headers", "referrer-policy"),
+        _nuclei_hit("http-missing-security-headers", "strict-transport-security"),
+        _nuclei_hit("http-missing-security-headers", "strict-transport-security", url="https://app.example"),
+        _nuclei_hit("cors-misconfig", "arbitrary-origin"),
+        _nuclei_hit("git-config", severity="medium", url="http://172.17.0.6:8000/.git/config"),
+    )
+    parsed = parsers.parse("nuclei", raw)
+    assert parsed.error is None
+    assert [(f.tool_specific_data.get("issue_key", f.rule_id), f.category) for f in parsed.findings] == [
+        ("missing-header:referrer-policy", "best_practice"),
+        # HSTS is only meaningful over https.
+        ("missing-header:strict-transport-security", "best_practice"),
+        ("cors-misconfiguration", "security"),
+        ("git-config", "security"),
+    ]
+    assert parsed.findings[1].tool_specific_data["url"] == "https://app.example"
+
+
+def test_nuclei_info_header_merges_with_a_zap_medium_hit_into_a_security_issue():
+    from backend.statistics.services.dedup import cluster_findings
+
+    [nuclei] = _parse("nuclei", _jsonl(_nuclei_hit("http-missing-security-headers", "content-security-policy")))
+    zap_report = {
+        "site": [
+            {
+                "@name": "http://172.17.0.6:8000",
+                "alerts": [
+                    _zap_alert(
+                        "10038",
+                        "2",
+                        [{"uri": "http://172.17.0.6:8000/", "method": "GET"}],
+                        name="Content Security Policy (CSP) Header Not Set",
+                        systemic=True,
+                    ),
+                ],
+            },
+        ],
+    }
+    [zap] = _parse("zap", json.dumps(zap_report))
+    assert (nuclei.category, zap.category) == ("best_practice", "security")
+    records = [
+        {
+            "id": i,
+            "run_id": "r",
+            "tool": tool,
+            "rule_id": f.rule_id,
+            "severity": f.severity,
+            "category": f.category,
+            "file_path": f.file_path,
+            "line": None,
+            "issue_key": f.tool_specific_data.get("issue_key", ""),
+        }
+        for i, (tool, f) in enumerate([("nuclei", nuclei), ("zap", zap)])
+    ]
+    [cluster] = cluster_findings(records)
+    assert (cluster.tools, cluster.category) == (["nuclei", "zap"], "security")
+
+
+def test_nuclei_printing_nothing_is_not_a_clean_scan():
+    # No hit and no completion line: nuclei never ran to its end.
+    assert parsers.parse("nuclei", "").error is not None
+    assert parsers.parse("nuclei", "\n\n").error is not None
+    # The run_cmd's completion line after a silent scan: a real zero.
+    clean = parsers.parse("nuclei", "\nllmlab-done: nuclei exited with code 0\n")
+    assert (clean.findings, clean.error, clean.warnings) == ([], None, [])
+    # Hits without the completion line (an older run_cmd) still count.
+    assert parsers.parse("nuclei", _jsonl(_nuclei_hit("git-config", severity="medium"))).error is None
+
+
+def test_wapiti_info_level_is_best_practice_except_cors_and_empty_output_is_an_error():
+    report = {
+        "classifications": {},
+        "vulnerabilities": {
+            "Content Security Policy Configuration": [{"path": "/", "info": "CSP is not set", "level": 0}],
+            "CORS": [{"path": "/api", "info": "CORS misconfiguration: any origin allowed", "level": 0}],
+            "Clickjacking Protection": [{"path": "/", "info": "X-Frame-Options is not set", "level": 1}],
+        },
+    }
+    findings = _parse("wapiti", json.dumps(report))
+    assert [(f.tool_specific_data.get("issue_key"), f.category, f.tool_severity) for f in findings] == [
+        ("missing-header:content-security-policy", "best_practice", "0"),
+        ("cors-misconfiguration", "security", "0"),
+        ("missing-header:x-frame-options", "security", "1"),
+    ]
+    assert parsers.parse("wapiti", "").error == "Wapiti wrote no report"
+
+
+def test_zap_spa_fallback_with_several_comments_is_one_finding_showing_every_comment():
+    # Real alert shape (ZAP 10027 on a Flask + React app): two suspicious
+    # comments in index.html, served again for /robots.txt and /sitemap.xml.
+    base = "http://172.17.0.8:8000"
+    comments = [
+        ("username", 'detected in likely comment: "// {username, is_admin}"'),
+        ("Admin", 'detected in likely comment: "<!-- Admin (admin only) -->"'),
+    ]
+    instances = [
+        {"uri": f"{base}{path}", "method": "GET", "param": "", "attack": "", "evidence": ev, "otherinfo": info}
+        for ev, info in comments
+        for path in ("/", "/robots.txt", "/sitemap.xml")
+    ]
+    report = {"site": [{"@name": base, "alerts": [_zap_alert("10027", "0", instances)]}]}
+    [f] = _parse("zap", json.dumps(report))
+    data = f.tool_specific_data
+    assert f.file_path == "/"
+    assert data["urls"] == [f"{base}/", f"{base}/robots.txt", f"{base}/sitemap.xml"]
+    assert (f.code_snippet, data["evidence"]) == ("username\nAdmin", "username\nAdmin")
+    assert data["other_info"] == "\n".join(info for _, info in comments)
+    assert data["instances"] == 6
+
+
+def test_zap_alert_split_into_findings_counts_each_findings_own_instances():
+    base = "http://app:8000"
+    instances = [
+        {"uri": f"{base}/a?q=1", "method": "GET", "param": "q", "attack": "'", "evidence": "SQL error"},
+        {"uri": f"{base}/a?q=1", "method": "POST", "param": "q", "attack": "'", "evidence": "SQL error"},
+        {"uri": f"{base}/b?q=1", "method": "GET", "param": "q", "attack": "'", "evidence": "SQL error"},
+    ]
+    alert = {**_zap_alert("40018", "3", instances), "count": "9"}
+    a, b = _parse("zap", json.dumps({"site": [{"@name": base, "alerts": [alert]}]}))
+    assert (a.file_path, a.tool_specific_data["instances"]) == ("/a", 2)
+    assert (b.file_path, b.tool_specific_data["instances"]) == ("/b", 1)
+
+
+def test_zap_drops_missing_hsts_on_plain_http_only():
+    alert = _zap_alert(
+        "10035",
+        "1",
+        [{"uri": "http://app:8000/", "method": "GET"}, {"uri": "https://app.example/", "method": "GET"}],
+        name="Strict-Transport-Security Header Not Set",
+    )
+    [f] = _parse("zap", json.dumps({"site": [{"@name": "http://app:8000", "alerts": [alert]}]}))
+    assert f.tool_specific_data["url"] == "https://app.example/"
+    only_http = {**alert, "instances": alert["instances"][:1]}
+    assert _parse("zap", json.dumps({"site": [{"@name": "http://app:8000", "alerts": [only_http]}]})) == []
+
+
+def test_zap_build_bundle_rule_spares_hand_written_files():
+    base = "http://app:8000"
+    hand_written = f"{base}/static/js/todo-ListView.js"
+    report = {
+        "site": [
+            {
+                "@name": base,
+                "alerts": [
+                    # The model's own script: an informational hit is kept…
+                    _zap_alert("10027", "0", [{"uri": hand_written, "method": "GET", "evidence": "TODO admin"}]),
+                    # …and a real issue there is not labelled build output.
+                    _zap_alert("10003", "1", [{"uri": hand_written, "method": "GET", "evidence": "x"}]),
+                    # A Vite lazy chunk is build output: dropped.
+                    _zap_alert("10027", "0", [{"uri": f"{base}/assets/TodoList-Ab12Cd34.js", "evidence": "from"}]),
+                    # A Vite hash without a digit is still a hash.
+                    _zap_alert("10027", "0", [{"uri": f"{base}/static/assets/index-BKBQyzMV.css", "evidence": "a"}]),
+                    # CRA chunk.
+                    _zap_alert("10027", "0", [{"uri": f"{base}/static/js/2.3f2a1b9c.chunk.js", "evidence": "b"}]),
+                ],
+            },
+        ],
+    }
+    comment, library = _parse("zap", json.dumps(report))
+    assert (comment.file_path, comment.category) == ("/static/js/todo-ListView.js", "best_practice")
+    assert library.file_path == "/static/js/todo-ListView.js"
+    assert "build_asset" not in library.tool_specific_data
+
+
+def test_djlint_output_that_linted_nothing_is_an_error():
+    no_files = parsers.parse("djlint", "No files to check! 😢\n")
+    assert no_files.findings == []
+    assert "No files to check" in no_files.error
+    assert parsers.parse("djlint", "").error is not None
+    clean = parsers.parse("djlint", "\n\nLinted 1 file, found 0 errors.\n\nNo files to check! 😢\n")
+    assert (clean.findings, clean.error) == ([], None)
+    crashed_pass = parsers.parse(
+        "djlint",
+        "templates/a.jinja2:1:0:H005:Html tag should have lang attribute.\n"
+        "llmlab-warning: djlint --extension=html exited with code 2\n",
+    )
+    assert len(crashed_pass.findings) == 1
+    assert crashed_pass.warnings == ["djlint --extension=html exited with code 2"]

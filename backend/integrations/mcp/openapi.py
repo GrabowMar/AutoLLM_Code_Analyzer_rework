@@ -18,8 +18,9 @@ HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 MAX_REF_DEPTH = 8
 MAX_DESCRIPTION_CHARS = 200
 # Operations an MCP client must never reach: the MCP endpoint itself, token
-# minting (session-only anyway) and first-run bootstrap.
-EXCLUDED_PATH_PREFIXES = ("/api/mcp", "/api/tokens/", "/api/users/bootstrap-")
+# minting (session-only anyway), first-run bootstrap and the human-evaluation
+# participant portal (cookie sessions of anonymous participants).
+EXCLUDED_PATH_PREFIXES = ("/api/mcp", "/api/tokens/", "/api/users/bootstrap-", "/api/human-eval/portal/")
 
 
 @dataclass(frozen=True)

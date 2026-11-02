@@ -9,7 +9,10 @@ from backend.generation.tests.factories import GenerationJobFactory
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.rankings import services
 from backend.rankings.models import BenchmarkResult
+from backend.rankings.services.constants import EMPIRICAL_DENSITY_CAP
 from backend.users.tests.factories import UserFactory
+
+CAP = EMPIRICAL_DENSITY_CAP
 
 pytestmark = pytest.mark.django_db
 
@@ -245,15 +248,29 @@ def test_compute_empirical_quality_blends_density_and_functional():
     entry = {
         "apps_completed": 1,
         "local_loc": 1000,
-        # weighted = 2*5 + 5*1 = 15 → density 15/KLOC → density_score 0.9 (cap 150)
+        # weighted = 2*5 + 5*1 = 15 → density 15/KLOC → density_score 1 - 15/cap
         "findings": {"critical": 0, "high": 2, "medium": 0, "low": 5, "info": 0},
         "functional_pass_rate": 1.0,
     }
-    # 0.6 * 0.9 + 0.4 * 1.0
-    assert compute_empirical_quality(entry) == pytest.approx(0.94)
+    density_score = 1 - 15 / CAP
+    assert compute_empirical_quality(entry) == pytest.approx(0.6 * density_score + 0.4 * 1.0, abs=1e-4)
 
     entry["functional_pass_rate"] = None
-    assert compute_empirical_quality(entry) == pytest.approx(0.9)
+    assert compute_empirical_quality(entry) == pytest.approx(density_score, abs=1e-4)
+
+
+def test_density_cap_is_calibrated_for_code_only_densities():
+    """Code-only densities are ~5-30/KLOC: the scale must spread them, not squeeze them near 1."""
+    from backend.rankings.services.scoring import compute_empirical_quality
+
+    def score(weighted_per_kloc):
+        entry = {"apps_completed": 1, "local_loc": 1000, "findings": {"low": weighted_per_kloc}}
+        return compute_empirical_quality(entry)
+
+    # 10/KLOC (a typical 13-tool code-only density) and 30/KLOC (a 29-tool one).
+    assert score(10) == pytest.approx(0.8)
+    assert score(30) == pytest.approx(0.4)
+    assert score(80) == 0.0
 
 
 def test_compute_composite_blend_and_fallback():
@@ -389,8 +406,8 @@ def test_compute_empirical_quality_custom_weights():
         "functional_pass_rate": None,
     }
     flat = {"critical": 1, "high": 1, "medium": 1, "low": 1, "info": 0}
-    # weighted = 7 → density 7/KLOC → 1 - 7/150
-    assert compute_empirical_quality(entry, severity_weights=flat) == pytest.approx(1 - 7 / 150, abs=1e-4)
+    # weighted = 7 → density 7/KLOC → 1 - 7/cap
+    assert compute_empirical_quality(entry, severity_weights=flat) == pytest.approx(1 - 7 / CAP, abs=1e-4)
 
 
 def test_compute_weight_sensitivity_detects_adjacent_swap():
@@ -540,3 +557,253 @@ def test_aggregate_rankings_skips_ungraded_pass_rate():
         )
     row = next(r for r in services.aggregate_rankings() if r["model_id"] == model.model_id)
     assert row["functional_pass_rate"] == 0.8
+
+
+# ── empirical density: code issues only, one instrument set, app units ─────
+
+
+def _analyzed_job(user, model, findings_by_tool, *, app=None, files=None, metrics=None):
+    """A completed job with one analysis run; findings_by_tool = {tool: [(severity, category, file_path), ...]}."""
+    from backend.analysis.models import AnalysisRun
+    from backend.analysis.models import Finding
+    from backend.analysis.tests.factories import AnalysisRunFactory
+    from backend.analysis.tests.factories import ToolResultFactory
+
+    job = GenerationJobFactory(
+        created_by=user,
+        model=model,
+        status=GenerationJob.Status.COMPLETED,
+        app_requirement=app,
+        result_data={"files": files or {"app.py": "x = 1\n" * 1000}},
+        metrics=metrics or {},
+    )
+    run = AnalysisRunFactory(
+        created_by=user,
+        generation_job=job,
+        status=AnalysisRun.Status.COMPLETED,
+        tool_slugs=list(findings_by_tool),
+    )
+    for tool, findings in findings_by_tool.items():
+        result = ToolResultFactory(run=run, tool_slug=tool)
+        for severity, category, path in findings:
+            Finding.objects.create(result=result, severity=severity, category=category, file_path=path, title="f")
+    return job
+
+
+def _row(model, **scope):
+    return next(r for r in services.aggregate_rankings(**scope) if r["model_id"] == model.model_id)
+
+
+def test_empirical_density_leaves_out_dependency_advisories_but_not_manifest_hygiene():
+    user = UserFactory()
+    model = LLMModelFactory(model_id="dep/model")
+    _analyzed_job(
+        user,
+        model,
+        {
+            "bandit": [("high", "security", "app.py")],
+            # Scaffold-pinned packages: advisories about packages, not the model's code.
+            "pip-audit": [("high", "dependency", "requirements.txt")] * 20,
+            # A missing/unused dependency is the app's own manifest issue.
+            "deptry": [("low", "dependency", "requirements.txt")],
+        },
+    )
+
+    row = _row(model)
+
+    assert row["findings"] == {"critical": 0, "high": 1, "medium": 0, "low": 1, "info": 0}
+    assert row["dependency_findings"] == 20
+    # 1 high (5) + 1 low (1) over 1000 source LOC = 6/KLOC -> 1 - 6/cap, blended with no smoke data.
+    assert row["empirical_quality_score"] == pytest.approx(1 - 6 / CAP, abs=1e-4)
+
+
+def test_empirical_density_counts_only_tools_that_measured_every_app():
+    user = UserFactory()
+    model_a = LLMModelFactory(model_id="a/model")
+    model_b = LLMModelFactory(model_id="b/model")
+    _analyzed_job(
+        user,
+        model_a,
+        {"bandit": [("high", "security", "app.py")], "ruff": [("low", "lint", "app.py")] * 30},
+    )
+    # ruff never ran on b's app: counting it would make a look worse for being measured more.
+    _analyzed_job(user, model_b, {"bandit": [("high", "security", "app.py")]})
+
+    a, b = _row(model_a), _row(model_b)
+
+    assert a["findings"]["low"] == 0
+    assert a["empirical_quality_score"] == b["empirical_quality_score"]
+    assert a["instrument_set"]["tools_counted"] == ["bandit"]
+    assert a["instrument_set"]["tools_left_out"] == ["ruff"]
+
+
+def test_empirical_density_leaves_out_test_code_and_dynamic_tools():
+    from backend.analysis.tests.factories import AnalyzerToolFactory
+
+    AnalyzerToolFactory(slug="zap", analysis_mode="dynamic", category="security")
+    user = UserFactory()
+    model = LLMModelFactory(model_id="t/model")
+    files = {"app.py": "x = 1\n" * 1000, "tests/test_app.py": "assert True\n" * 500}
+    _analyzed_job(
+        user,
+        model,
+        {
+            "bandit": [("high", "security", "app.py"), ("high", "security", "tests/test_app.py")],
+            "zap": [("medium", "security", "http://localhost/")] * 4,
+        },
+        files=files,
+    )
+
+    row = _row(model)
+
+    assert row["findings"]["high"] == 1
+    assert row["test_findings"] == 1
+    assert row["runtime_findings"] == 4
+    # The denominator is source LOC without the test file.
+    assert row["local_loc"] == 1000
+    assert row["empirical_quality_score"] == pytest.approx(1 - 5 / CAP, abs=1e-4)
+
+
+def test_empirical_density_uses_source_loc_not_metrics_lines():
+    user = UserFactory()
+    model = LLMModelFactory(model_id="loc/model")
+    files = {"app.py": "x = 1\n" * 1000, "frontend/package-lock.json": "{}\n" * 9000}
+    _analyzed_job(
+        user,
+        model,
+        {"bandit": [("high", "security", "app.py")] * 3},
+        files=files,
+        metrics={"lines_of_code": 10000},
+    )
+
+    row = _row(model)
+
+    assert row["local_loc"] == 1000
+    assert row["empirical_quality_score"] == pytest.approx(1 - 15 / CAP, abs=1e-4)
+
+
+def test_repeats_collapse_to_app_means_before_the_model_aggregate():
+    from backend.generation.tests.factories import AppRequirementTemplateFactory
+
+    user = UserFactory()
+    model = LLMModelFactory(model_id="rep/model")
+    noisy, clean = AppRequirementTemplateFactory(slug="noisy"), AppRequirementTemplateFactory(slug="clean")
+    # Three repeats of an app with 10 highs (50/KLOC) and one of an app with none.
+    for _ in range(3):
+        _analyzed_job(user, model, {"bandit": [("high", "security", "app.py")] * 10}, app=noisy)
+    _analyzed_job(user, model, {"bandit": []}, app=clean)
+
+    row = _row(model)
+
+    assert row["findings"]["high"] == 30  # the job-level rollup still counts every run
+    assert row["variance"]["n_jobs"] == 4
+    assert row["variance"]["n_apps"] == 2
+    assert row["variance"]["density_per_kloc_mean"] == pytest.approx(25.0)
+    # (mean 10 highs + 0) x 5 over (1000 + 1000) LOC = 25/KLOC, not 150/4000 = 37.5/KLOC.
+    assert row["empirical_quality_score"] == pytest.approx(1 - 25 / CAP, abs=1e-4)
+
+
+def test_scope_without_a_common_tool_has_no_empirical_score():
+    user = UserFactory()
+    model = LLMModelFactory(model_id="none/model")
+    _analyzed_job(user, model, {"bandit": [("high", "security", "app.py")]})
+    _analyzed_job(user, model, {"ruff": [("low", "lint", "app.py")]})
+
+    row = _row(model)
+
+    assert row["empirical_quality_score"] is None
+    # No app was measured with one instrument set: unknown counts, not zero (P8).
+    assert row["findings"] is None
+    assert (row["dependency_findings"], row["runtime_findings"], row["test_findings"]) == (None, None, None)
+    assert row["composite_score"] == row["mss_score"]
+
+
+# ── P8: what nothing measured is None, not 0 ─────
+
+
+def test_counts_no_counted_tool_can_report_are_unmeasured_not_zero():
+    user = UserFactory()
+    model = LLMModelFactory(model_id="p8/model")
+    # bandit only: no advisory scanner, no dynamic tool in the instrument set.
+    _analyzed_job(user, model, {"bandit": [("high", "security", "app.py")]})
+
+    row = _row(model)
+
+    assert row["findings"]["high"] == 1
+    assert row["test_findings"] == 0  # bandit reads test files too: a measured zero
+    assert row["dependency_findings"] is None
+    assert row["runtime_findings"] is None
+
+
+def test_unmeasured_model_counts_are_none_while_measured_ones_are_counted():
+    user = UserFactory()
+    measured = LLMModelFactory(model_id="measured/model")
+    unmeasured = LLMModelFactory(model_id="unmeasured/model")
+    _analyzed_job(user, measured, {"bandit": [], "pip-audit": [("high", "dependency", "requirements.txt")]})
+    # Completed but never analyzed.
+    GenerationJobFactory(created_by=user, model=unmeasured, status=GenerationJob.Status.COMPLETED)
+    never_ran = LLMModelFactory(model_id="never/ran")
+
+    rows = {r["model_id"]: r for r in services.aggregate_rankings()}
+
+    assert rows["measured/model"]["findings"] == {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    assert rows["measured/model"]["dependency_findings"] == 1
+    for model_id in (unmeasured.model_id, never_ran.model_id):
+        row = rows[model_id]
+        assert row["findings"] is None
+        assert (row["dependency_findings"], row["runtime_findings"], row["test_findings"]) == (None, None, None)
+        assert row["empirical_quality_score"] is None
+
+
+def test_avg_duration_is_none_when_nothing_completed():
+    user = UserFactory()
+    model = LLMModelFactory(model_id="slow/model")
+    GenerationJobFactory(created_by=user, model=model, status=GenerationJob.Status.FAILED, duration_seconds=12)
+    timed = LLMModelFactory(model_id="timed/model")
+    GenerationJobFactory(created_by=user, model=timed, status=GenerationJob.Status.COMPLETED, duration_seconds=30)
+
+    assert _row(model)["avg_duration"] is None
+    assert _row(timed)["avg_duration"] == 30.0
+    assert _row(LLMModelFactory(model_id="idle/model"))["avg_duration"] is None
+
+
+# ── P6: several conditions of one model pooled into one row are flagged ─────
+
+
+def test_rows_report_how_many_experiment_conditions_they_pool():
+    from backend.generation.tests.factories import ExperimentConditionFactory
+    from backend.generation.tests.factories import ExperimentFactory
+
+    user = UserFactory()
+    model = LLMModelFactory(model_id="arms/model")
+    single = LLMModelFactory(model_id="single/model")
+    experiment = ExperimentFactory(created_by=user)
+    for m in (model, model, single):
+        condition = ExperimentConditionFactory(experiment=experiment, model=m)
+        GenerationJobFactory(
+            created_by=user,
+            model=m,
+            experiment=experiment,
+            condition=condition,
+            status=GenerationJob.Status.COMPLETED,
+        )
+
+    pooled = _row(model, experiment_id=str(experiment.id))
+    alone = _row(single, experiment_id=str(experiment.id))
+
+    assert pooled["conditions_pooled"] == 2
+    assert "2 experiment conditions" in pooled["pooling_note"]
+    assert alone["conditions_pooled"] == 1
+    assert alone["pooling_note"] is None
+
+
+def test_rankings_count_failed_generations():
+    user = UserFactory()
+    model = LLMModelFactory(model_id="fail/model")
+    GenerationJobFactory(created_by=user, model=model, status=GenerationJob.Status.COMPLETED)
+    GenerationJobFactory(created_by=user, model=model, status=GenerationJob.Status.FAILED)
+    GenerationJobFactory(created_by=user, model=model, status=GenerationJob.Status.CANCELLED)
+
+    row = _row(model)
+
+    assert (row["apps"], row["apps_completed"], row["apps_failed"]) == (3, 1, 1)

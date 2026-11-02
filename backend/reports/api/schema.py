@@ -85,6 +85,29 @@ class GenericResponse(Schema):
     message: str = ""
 
 
+class ReportTableColumn(Schema):
+    key: str
+    header: str
+
+
+class ReportTableSchema(Schema):
+    """One curated table, cells formatted as in the Markdown export ("-": unmeasured)."""
+
+    title: str
+    columns: list[ReportTableColumn]
+    rows: list[dict[str, str]]
+    note: str = ""
+    # Rows in the table before the row cap (the note says when rows were cut).
+    total_rows: int
+
+
+class ReportTablesResponse(Schema):
+    report_id: str
+    report_type: str
+    title: str
+    tables: list[ReportTableSchema]
+
+
 __all__ = [
     "GenerateReportIn",
     "GenericResponse",
@@ -92,6 +115,9 @@ __all__ = [
     "ReportDetailSchema",
     "ReportListResponse",
     "ReportSummarySchema",
+    "ReportTableColumn",
+    "ReportTableSchema",
+    "ReportTablesResponse",
 ]
 
 

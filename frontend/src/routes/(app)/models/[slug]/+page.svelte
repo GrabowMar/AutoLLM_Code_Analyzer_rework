@@ -25,6 +25,7 @@
 	import DollarSign from '@lucide/svelte/icons/dollar-sign';
 	import AppWindow from '@lucide/svelte/icons/app-window';
 	import Braces from '@lucide/svelte/icons/braces';
+	import Activity from '@lucide/svelte/icons/activity';
 	import ModelHeader from '$lib/components/models/ModelHeader.svelte';
 	import ModelOverviewTab from '$lib/components/models/ModelOverviewTab.svelte';
 	import ModelResultsTab from '$lib/components/models/ModelResultsTab.svelte';
@@ -34,6 +35,7 @@
 	import ModelDataTab from '$lib/components/models/ModelDataTab.svelte';
 	import ModelApplicationsSection from '$lib/components/models/ModelApplicationsSection.svelte';
 	import ModelUsageSection from '$lib/components/models/ModelUsageSection.svelte';
+	import ModelGenerationDataTab from '$lib/components/models/ModelGenerationDataTab.svelte';
 	import { costEfficiencyGrade } from '$lib/components/models/helpers';
 
 	const slug = $derived($page.params.slug ?? '');
@@ -41,6 +43,7 @@
 	const sections = [
 		{ id: 'overview', label: 'Overview', icon: Info },
 		{ id: 'results', label: 'Results', icon: FlaskConical },
+		{ id: 'generation', label: 'Generation data', icon: Activity },
 		{ id: 'benchmarks', label: 'Benchmarks', icon: Trophy },
 		{ id: 'capabilities', label: 'Capabilities', icon: Zap },
 		{ id: 'pricing', label: 'Pricing & providers', icon: DollarSign },
@@ -168,11 +171,18 @@
 		<Tabs.Content value="results">
 			<ModelResultsTab {insights} error={insightsError} onRetry={loadInsights} {slug} />
 		</Tabs.Content>
+		<Tabs.Content value="generation">
+			<ModelGenerationDataTab
+				modelId={model.id}
+				twinModelId={model.is_local ? (model.twin?.model?.model_id ?? null) : null}
+				twinSlug={model.is_local ? (model.twin?.model?.canonical_slug ?? null) : null}
+			/>
+		</Tabs.Content>
 		<Tabs.Content value="benchmarks">
 			<ModelBenchmarksTab {model} {insights} />
 		</Tabs.Content>
 		<Tabs.Content value="capabilities">
-			<ModelCapabilitiesTab {model} />
+			<ModelCapabilitiesTab {model} {slug} />
 		</Tabs.Content>
 		<Tabs.Content value="pricing">
 			<ModelPricingTab {model} {slug} {insights} />

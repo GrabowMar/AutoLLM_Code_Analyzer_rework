@@ -29,6 +29,9 @@ from dataclasses import field
 from itertools import combinations
 from typing import Any
 
+from backend.analysis.services.base import ADVISORY_TOOLS
+from backend.analysis.services.base import is_dependency_advisory
+
 SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 DEFAULT_LINE_TOLERANCE = 2
 
@@ -99,6 +102,14 @@ _LINT_CLASSES: dict[str, str] = {
     "eslint-security:security/detect-non-literal-regexp": "redos",
     "eslint-security:security/detect-unsafe-regex": "redos",
     "eslint-security:security/detect-non-literal-fs-filename": "path-traversal",
+    # A file the linter could not parse: several linters report the one broken file.
+    "ruff:syntax-error": "syntax-error",
+    "ruff:invalid-syntax": "syntax-error",
+    "ruff:E999": "syntax-error",
+    "flake8:E999": "syntax-error",
+    "pylint:syntax-error": "syntax-error",
+    "pylint:E0001": "syntax-error",
+    "mypy:syntax": "syntax-error",
 }
 
 # Semgrep check ids are dotted paths; the last segments name the rule.
@@ -155,11 +166,13 @@ _CWE_CLASSES: dict[str, str] = {
 }
 
 _SECRET_TOOLS = frozenset({"detect-secrets", "detect_secrets", "gitleaks"})
-# Known-vulnerability scanners. They name one advisory differently (PYSEC /
-# GHSA / CVE ids) and point at different manifests of one project
-# (requirements.txt, package.json vs package-lock.json), so their findings
-# match on the vulnerable package within the project directory instead.
-_VULN_TOOLS = frozenset({"pip-audit", "npm-audit", "osv-scanner", "trivy", "retire"})
+# Known-vulnerability scanners (``base.ADVISORY_TOOLS``, the one P2 definition
+# the run views use too). They name one advisory differently (PYSEC / GHSA /
+# CVE ids) and point at different manifests of one project (requirements.txt,
+# package.json vs package-lock.json), so their findings match on the
+# vulnerable package within the project directory instead.
+VULN_TOOLS = ADVISORY_TOOLS
+_VULN_TOOLS = VULN_TOOLS
 _VULN_PREFIX = "vulnerable-dependency:"
 _RUFF_BANDIT_RE = re.compile(r"^S(\d{3})$")
 _TOKEN_SPLIT_RE = re.compile(r"[._\-]+")
@@ -169,6 +182,11 @@ def _has_tokens(tokens: list[str], needle: list[str]) -> bool:
     """Whether *needle* occurs as a contiguous run of whole tokens in *tokens*."""
     n = len(needle)
     return any(tokens[i : i + n] == needle for i in range(len(tokens) - n + 1))
+
+
+def reported_level(label: Any) -> str:
+    """A finding's level as its tool printed it (``Finding.tool_severity``), ``"unrated"`` when it printed none."""
+    return str(label or "").strip() or "unrated"
 
 
 def advisory_ids(finding: dict[str, Any]) -> set[str]:
@@ -195,7 +213,8 @@ def issue_class(  # noqa: PLR0911
     if issue_key:
         return issue_key
     rule = (rule_id or "").strip()
-    if tool in _VULN_TOOLS and category == "dependency" and package and not rule.startswith("nonexistent-"):
+    if package and is_dependency_advisory(tool, category, rule) and not rule.startswith("nonexistent-"):
+        # A package that does not exist has no advisory ids to match across tools.
         return _VULN_PREFIX + package.strip().lower()
     if tool == "bandit" and rule in _BANDIT_CLASSES:
         return _BANDIT_CLASSES[rule]
@@ -223,7 +242,10 @@ def issue_class(  # noqa: PLR0911
 
 @dataclass
 class IssueCluster:
-    """One deduplicated issue: every finding (from one or more tools) that reports it."""
+    """One deduplicated issue: every finding (from one or more tools) that reports it.
+
+    ``run_id`` is the app (generation job) the findings describe.
+    """
 
     run_id: str
     issue_class: str
@@ -237,7 +259,27 @@ class IssueCluster:
 
     @property
     def severity(self) -> str:
+        """The members' highest *normalized* severity (a heuristic for tools that rate nothing)."""
         return max((m["severity"] for m in self.members), key=lambda s: SEVERITY_RANK.get(s, 0))
+
+    @property
+    def reported_levels(self) -> list[str]:
+        """``tool:level`` for every level the members' tools printed (``unrated`` when a tool printed none)."""
+        return sorted({f"{m['tool']}:{reported_level(m.get('tool_severity'))}" for m in self.members})
+
+    @property
+    def is_advisory(self) -> bool:
+        """A known-vulnerability advisory (pip-audit, npm audit, osv-scanner, Trivy, retire.js).
+
+        Decided per member by ``base.is_dependency_advisory``, the one P2
+        definition the run views use too. deptry/depcheck findings share
+        category ``dependency`` but report the app's own manifest mistakes (an
+        import it never declared, an unused dependency): they are code issues,
+        not advisories.
+        """
+        return any(
+            is_dependency_advisory(m["tool"], m.get("category") or "", m.get("rule_id") or "") for m in self.members
+        )
 
     @property
     def category(self) -> str:
@@ -249,11 +291,13 @@ class IssueCluster:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "run_id": self.run_id,
+            # The generation job: per-app tables' ``run_id`` is the AnalysisRun.
+            "job_id": self.run_id,
             "issue_class": self.issue_class,
             "file_path": self.file_path,
             "line": self.line,
             "severity": self.severity,
+            "reported_levels": self.reported_levels,
             "category": self.category,
             "tools": self.tools,
             "n_findings": len(self.members),
@@ -285,7 +329,11 @@ def _fits(cluster: IssueCluster, f: dict[str, Any], tolerance: int) -> bool:
         m_line = m.get("line")
         if m["tool"] == f["tool"]:
             # Same tool: only an exact duplicate merges; any other report by
-            # that tool is a distinct issue it found.
+            # that tool is a distinct issue it found. An advisory the tool
+            # printed twice under two linked ids (pip-audit's PYSEC pairs for
+            # one CVE) is one advisory.
+            if cluster.issue_class.startswith(_VULN_PREFIX) and advisory_ids(m) & advisory_ids(f):
+                continue
             if not _same_report(m, f):
                 return False
             continue
@@ -311,7 +359,30 @@ RECORD_FIELDS = (
     "line_number",
     "tool_specific_data",
     "title",
+    "tool_severity",
 )
+
+
+def _fixed_versions(extra: dict[str, Any]) -> list[str] | None:
+    """The fixed versions a vulnerability finding names (``[]``: no fix exists, ``None``: not said)."""
+    found: list[str] | None = None
+    for key in ("fixed_versions", "fix_versions"):
+        value = extra.get(key)
+        if isinstance(value, list):
+            found = [*(found or []), *(str(v) for v in value if v)]
+    if isinstance(extra.get("fixed_version"), str):
+        found = [*(found or []), *(v.strip() for v in extra["fixed_version"].split(",") if v.strip())]
+    return found
+
+
+def _deptry_declared(tool: str, rule: str, extra: dict[str, Any]) -> str:
+    """The declared package of a deptry DEP002/DEP005 finding stored before parsers recorded ``package``.
+
+    For those rules deptry's ``module`` is the declared dependency's name.
+    """
+    if tool == "deptry" and rule in ("DEP002", "DEP005") and isinstance(extra.get("module"), str):
+        return extra["module"]
+    return ""
 
 
 def finding_record(row: dict[str, Any], run_id: str) -> dict[str, Any]:
@@ -328,11 +399,15 @@ def finding_record(row: dict[str, Any], run_id: str) -> dict[str, Any]:
         "line": row["line_number"],
         "end_line": extra.get("end_line") or extra.get("endline"),
         "cwe": extra.get("cwe") or "",
-        "package": extra.get("package") or "",
+        "package": extra.get("package") or _deptry_declared(row["result__tool_slug"], row["rule_id"], extra),
         "vuln_id": extra.get("vuln_id") or "",
         "aliases": extra.get("aliases") or [],
         "issue_key": extra.get("issue_key") or "",
         "title": row["title"],
+        "tool_severity": row.get("tool_severity") or "",
+        "fixed_versions": _fixed_versions(extra),
+        # The version the scanner found installed (vulnerability scanners), "" when not said.
+        "installed_version": str(extra.get("installed_version") or extra.get("version") or ""),
     }
 
 
@@ -364,8 +439,17 @@ def cluster_findings(
         buckets[(str(f["run_id"]), path, cls)].append(f)
 
     clusters: list[IssueCluster] = []
-    for (run_id, path, cls), items in buckets.items():
-        items.sort(key=lambda f: (f.get("line") is None, f.get("line") or 0, f["tool"]))
+    # Sorted, so membership never depends on the order the (unordered) query returned.
+    for (run_id, path, cls), items in sorted(buckets.items()):
+        items.sort(
+            key=lambda f: (
+                f.get("line") is None,
+                f.get("line") or 0,
+                f["tool"],
+                f.get("rule_id") or "",
+                str(f.get("id")),
+            ),
+        )
         open_clusters: list[IssueCluster] = []
         for f in items:
             target = next((c for c in open_clusters if _fits(c, f, line_tolerance)), None)

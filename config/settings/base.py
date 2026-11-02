@@ -99,6 +99,7 @@ LOCAL_APPS = [
     "backend.inference",
     "backend.execution",
     "backend.integrations",
+    "backend.human_eval",
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -162,6 +163,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "allauth.account.middleware.AccountMiddleware",
+    "backend.human_eval.middleware.EvaluatorScopeMiddleware",
     "backend.users.middleware.RememberMeMiddleware",
     "backend.users.middleware.ForceCsrfCookieMiddleware",
 ]
@@ -476,6 +478,23 @@ HEADLESS_FRONTEND_URLS = build_headless_frontend_urls(
     FRONTEND_PUBLIC_ORIGIN or f"https://{DJANGO_DOMAIN}",
 )
 
+# Human evaluation (backend/human_eval, docs/HUMAN_EVALUATION.md)
+# ------------------------------------------------------------------------------
+# Server-wide cap on task-started sample apps running at once (each task also has
+# its own hosting.max_running_apps), and on concurrent image builds for them.
+HUMAN_EVAL_MAX_RUNNING_APPS = env.int("HUMAN_EVAL_MAX_RUNNING_APPS", default=4)
+HUMAN_EVAL_MAX_CONCURRENT_BUILDS = env.int("HUMAN_EVAL_MAX_CONCURRENT_BUILDS", default=1)
+# Largest screenshot a participant may attach to a report.
+HUMAN_EVAL_ATTACHMENT_MAX_BYTES = env.int("HUMAN_EVAL_ATTACHMENT_MAX_BYTES", default=5 * 1024 * 1024)
+# A participant's portal session (cookie) ends after this long without activity.
+HUMAN_EVAL_SESSION_IDLE_HOURS = env.int("HUMAN_EVAL_SESSION_IDLE_HOURS", default=24)
+# Portal cookies are Secure, and __Host- prefixed (Path=/, no Domain) so app
+# subdomains cannot overwrite them, whenever the public origin is https. This
+# follows the origin, not DEBUG (dev1 runs DEBUG over https).
+HUMAN_EVAL_COOKIE_SECURE = FRONTEND_PUBLIC_ORIGIN.lower().startswith("https://")
+HUMAN_EVAL_COOKIE_NAME = "__Host-llml_eval" if HUMAN_EVAL_COOKIE_SECURE else "llml_eval"
+HUMAN_EVAL_DEVICE_COOKIE_NAME = "__Host-llml_eval_device" if HUMAN_EVAL_COOKIE_SECURE else "llml_eval_device"
+
 OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/models"
 OPENROUTER_HTTP_REFERER = env(
@@ -489,6 +508,7 @@ OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK = env.bool(
     "OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK",
     default=True,
 )
+HUGGINGFACE_API_TOKEN = env("HUGGINGFACE_API_TOKEN", default="")  # model-metadata enrichment fallback token
 
 # Hostname used to build public URLs for generated sample-app containers.
 # Only used when TRAEFIK_DYNAMIC_DIR is NOT set (local dev / non-Traefik).

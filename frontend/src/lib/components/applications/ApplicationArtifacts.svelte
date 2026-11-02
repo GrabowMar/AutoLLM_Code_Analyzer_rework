@@ -8,6 +8,8 @@ import ChevronRight from '@lucide/svelte/icons/chevron-right';
 import type { GenerationArtifact } from '$lib/api/client';
 import { fmt, fmtCost, fmtDate } from './utils';
 import { tableFrame } from '$lib/components/table';
+import AgentCallArtifact from './agent/AgentCallArtifact.svelte';
+import CallTelemetry from './agent/CallTelemetry.svelte';
 
 interface Props {
 	artifacts: GenerationArtifact[];
@@ -23,6 +25,10 @@ function toggleArtifact(id: number) {
 	else next.add(id);
 	expandedArtifacts = next;
 }
+
+// Agent runs store one compact artifact per LLM call (no messages/choices).
+const isAgentCall = (art: GenerationArtifact) => art.stage.startsWith('agent_call_');
+const agentCalls = $derived(artifacts.filter(isAgentCall).length);
 </script>
 
 <section id="artifacts" class="space-y-4">
@@ -36,7 +42,10 @@ function toggleArtifact(id: number) {
 		<Card.Root class="gap-0 overflow-clip py-0">
 			<Card.Header class="border-b border-border py-3">
 				<Card.Title>LLM artifacts</Card.Title>
-				<Card.Description>Stored request/response payloads per stage. Click a row to expand.</Card.Description>
+				<Card.Description>
+					Stored request/response payloads per stage. Click a row to expand.
+					{#if agentCalls}{agentCalls} agent LLM calls (compact copies; the full trajectory is in the Agent Run tab).{/if}
+				</Card.Description>
 			</Card.Header>
 			<Card.Content class="p-0">
 				<div class="table-frame" {@attach tableFrame}>
@@ -81,6 +90,10 @@ function toggleArtifact(id: number) {
 								{#if expandedArtifacts.has(art.id)}
 									<tr>
 										<td colspan="7" class="bg-muted/20 p-4">
+											{#if isAgentCall(art)}
+												<AgentCallArtifact {art} />
+											{:else}
+											<CallTelemetry telemetry={(art as GenerationArtifact & { telemetry?: unknown }).telemetry} />
 											<!-- Token bar -->
 											{#if (art.prompt_tokens ?? 0) + (art.completion_tokens ?? 0) > 0}
 												{@const total = (art.prompt_tokens ?? 0) + (art.completion_tokens ?? 0)}
@@ -121,6 +134,7 @@ function toggleArtifact(id: number) {
 														<pre class="p-3 text-xs font-mono whitespace-pre-wrap break-all max-h-48 overflow-auto">{art.response_payload.choices[0]?.message?.content ?? '(empty)'}</pre>
 													</div>
 												</div>
+											{/if}
 											{/if}
 										</td>
 									</tr>

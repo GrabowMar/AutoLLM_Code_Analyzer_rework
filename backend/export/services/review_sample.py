@@ -7,13 +7,22 @@ specs plus blank label sheets into a ZIP, and later scores the filled
 sheets against the automated verdicts:
 
 * AI-reviewer and (deduplicated) static findings: precision with a 95%
-  Wilson interval, per severity, category and tool,
+  Wilson interval, per normalized severity, category and tool; dependency
+  advisories on their own sheet, also per origin (model-added, scaffold,
+  transitive); runtime issues (reported by dynamic scanners only) on their
+  own sheet, one row per issue class per app,
 * app-level functional verdict vs the conformance outcome: Cohen's kappa,
 * per-app requirement compliance vs the conformance pass rate: Spearman rho.
 
 With ``blind=True`` (default) sample folders are ``S001``… and model,
 template and automated outcomes live only in ``key.csv``, which the
 reviewer should not open until labelling is done.
+
+Findings come from each app's latest result per tool
+(``ToolResult.latest_ids_per_job``), the results the study tables count, so
+a partial re-run does not shrink the sample to the re-run tools. Issues are
+split the way the study tables split them: ``static_issues`` holds the
+app's code issues (``code_unique``); issues in test code are not sampled.
 """
 
 from __future__ import annotations
@@ -32,12 +41,25 @@ from typing import Any
 
 from django.utils import timezone
 
-from backend.analysis.models import AnalysisRun
 from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import Finding
+from backend.analysis.models import ToolResult
+from backend.analysis.services.base import ADVISORY_TOOLS
+from backend.analysis.services.base import is_dependency_advisory
+from backend.export.services.csv_safe import safe_cell
+from backend.export.services.findings import dynamic_tool_slugs
 from backend.generation.models import GenerationJob
+from backend.reports.services.loc import is_test_path
 from backend.reports.services.loc import loc_from_job
+from backend.statistics.services.dedup import RECORD_FIELDS
+from backend.statistics.services.dedup import SEVERITY_RANK
+from backend.statistics.services.dedup import IssueCluster
 from backend.statistics.services.dedup import cluster_findings
+from backend.statistics.services.dedup import finding_record
+from backend.statistics.services.dependencies import DependencyOwnership
+from backend.statistics.services.dependencies import cluster_package
+from backend.statistics.services.dependencies import dependency_ownership
+from backend.statistics.services.dependencies import dependency_scope
 from backend.statistics.services.inference import cohens_kappa
 from backend.statistics.services.inference import spearman
 from backend.statistics.services.inference import wilson_interval
@@ -45,15 +67,25 @@ from backend.statistics.services.inference import wilson_interval
 if TYPE_CHECKING:
     from django.db.models import QuerySet
 
-SAMPLE_FORMAT_VERSION = 1
+# 2: tool_severity columns, severity -> normalized_severity, dependency_issues.csv,
+#    key.csv analysis_run_ids (findings may come from several runs).
+# 3: runtime_issues.csv (dynamic-scanner issues); static_issues holds code
+#    issues only (no test code, no runtime issues).
+SAMPLE_FORMAT_VERSION = 3
 STRATIFY_KEYS = ("model", "template")
+UNRATED = "unrated"
+# What a deduplicated issue describes, as the study tables classify it.
+CODE, TEST, RUNTIME, DEPENDENCY = "code", "test", "runtime", "dependency"
+# A runtime row lists at most this many of the URL paths its issue class was seen on.
+_MAX_RUNTIME_PATHS = 10
 
 AI_FINDING_COLUMNS = [
     "sample_id",
     "finding_id",
     "file_path",
     "line",
-    "severity",
+    "tool_severity",
+    "normalized_severity",
     "category",
     "rule_id",
     "title",
@@ -67,9 +99,38 @@ STATIC_ISSUE_COLUMNS = [
     "issue_id",
     "file_path",
     "line",
-    "severity",
+    "tool_severity",
+    "normalized_severity",
     "category",
     "issue_class",
+    "tools",
+    "rule_ids",
+    "title",
+    "human_verdict",  # TP | FP | unsure
+    "notes",
+]
+DEPENDENCY_ISSUE_COLUMNS = [
+    "sample_id",
+    "issue_id",
+    "file_path",
+    "package",
+    "installed_version",
+    "advisories",
+    "origin",  # model | scaffold | transitive
+    "tool_severity",
+    "normalized_severity",
+    "tools",
+    "title",
+    "human_verdict",  # TP | FP | unsure
+    "notes",
+]
+RUNTIME_ISSUE_COLUMNS = [
+    "sample_id",
+    "issue_id",
+    "issue_class",
+    "url_paths",
+    "tool_severity",
+    "normalized_severity",
     "tools",
     "rule_ids",
     "title",
@@ -88,7 +149,7 @@ KEY_COLUMNS = [
     "conformance_status",
     "conformance_pass_rate",
     "deployed",
-    "analysis_run_id",
+    "analysis_run_ids",
 ]
 
 _README = """# Manual review sample
@@ -105,9 +166,25 @@ Each `apps/<sample_id>/` folder holds the generated code and
 |---|---|---|
 | ai_findings.csv | human_verdict | TP (real issue), FP (not an issue), unsure |
 | static_issues.csv | human_verdict | TP, FP, unsure |
+| dependency_issues.csv | human_verdict | TP (the installed version is affected), FP, unsure |
+| runtime_issues.csv | human_verdict | TP (the running app has the issue), FP, unsure |
 | requirements.csv | human_met | yes, partial, no |
 | apps.csv | human_functional | works, partial, broken |
 | apps.csv | human_quality | 1 (poor) .. 5 (excellent) |
+
+`tool_severity` is the level exactly as each tool printed it (`tool:LABEL`
+per tool for a merged issue; `unrated` when the tool rates nothing).
+`normalized_severity` is a heuristic 5-level bucket, used only to group
+the scores. `static_issues.csv` holds issues in the app's code (issues
+in test code are left out); `dependency_issues.csv` holds
+known-vulnerability advisories about its packages, with `origin` saying
+who chose the vulnerable version: `model` (the app added the package, or
+changed the scaffold's version to an affected one), `scaffold` (the stack
+template's own version spec) or `transitive` (no manifest declares it).
+`runtime_issues.csv` holds what only the dynamic scanners (ZAP, Nuclei,
+Wapiti) reported against the running app, one row per kind of issue with
+the URL paths it was seen on; judge it from the code (does the app set
+that header, escape that parameter?).
 
 Leave a cell empty to skip it. Score the filled sheets with
 `manage.py score_review_sample <this folder or zip>` or
@@ -246,12 +323,149 @@ def _requirements_md(job: GenerationJob, reqs: list[tuple[str, str, str]]) -> st
 
 
 def _csv(columns: list[str], rows: list[dict[str, Any]]) -> str:
+    """A label sheet; the sheets are opened in a spreadsheet, so formula-like cells are neutralized."""
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()
     for row in rows:
-        writer.writerow(row)
+        writer.writerow({k: safe_cell(v) for k, v in row.items()})
     return buf.getvalue()
+
+
+def _scope_ownerships(jobs: list[GenerationJob], memo: dict) -> dict[str, DependencyOwnership]:
+    """Every eligible job's ownership, linked on the population's advisory evidence.
+
+    The study tables judge a changed scaffold spec on what every app of the
+    scope installed (:func:`dependency_scope`); the review sample links the
+    population it was drawn from the same way, so both attribute an advisory
+    to the same party.
+    """
+    ownerships = {str(j.id): dependency_ownership(j, memo) for j in jobs}
+    if not ownerships:
+        return ownerships
+    result_ids = ToolResult.latest_ids_per_job([j.id for j in jobs])
+    rows = (
+        Finding.objects.filter(
+            result_id__in=result_ids,
+            result__status=ToolResult.Status.COMPLETED,
+            result__tool_slug__in=ADVISORY_TOOLS,
+            category="dependency",
+        )
+        .order_by("id")
+        .values("result__run__generation_job_id", "tool_severity", "description", *RECORD_FIELDS)
+    )
+    by_job: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        job_id = str(row["result__run__generation_job_id"])
+        by_job[job_id].append(_static_record(row, job_id))
+    clusters = [c for records in by_job.values() for c in cluster_findings(records)]
+    dependency_scope(ownerships, clusters)
+    return ownerships
+
+
+def _dependency_origins(advisories: list[IssueCluster], ownership: DependencyOwnership) -> dict[int, str]:
+    """Per advisory (by ``id()``), who chose the vulnerable version: the model, the scaffold, or neither.
+
+    ``model`` is the study's attribution (package and version,
+    :meth:`DependencyOwnership.is_models`, judged on the scope's evidence);
+    otherwise ``scaffold`` when a manifest declares the package (with the
+    scaffold's spec) and ``transitive`` when nothing declares it.
+    """
+    if not advisories:
+        return {}
+    origins = {}
+    for c in advisories:
+        package = cluster_package(c)
+        if ownership.is_models(c):
+            origins[id(c)] = "model"
+        elif package and (package in ownership.app or package in ownership.scaffold):
+            origins[id(c)] = "scaffold"
+        else:
+            origins[id(c)] = "transitive"
+    return origins
+
+
+def issue_kind(cluster: IssueCluster, dynamic: set[str]) -> str:
+    """``dependency``, ``runtime``, ``test`` or ``code``: the study tables' split of deduplicated issues.
+
+    A dependency advisory (a known-vulnerability scanner's report about a
+    package, by the analyzer's one rule :func:`is_dependency_advisory`) is
+    about a package, a runtime issue (every member from a dynamic scanner)
+    about the running app, and a test-code issue (:func:`is_test_path`)
+    about code that is not the delivered app.
+    """
+    members = cluster.members
+    if any(is_dependency_advisory(m["tool"], m.get("category") or "", m.get("rule_id") or "") for m in members):
+        return DEPENDENCY
+    if members and all(m["tool"] in dynamic for m in members):
+        return RUNTIME
+    if is_test_path(cluster.file_path):
+        return TEST
+    return CODE
+
+
+def _tool_labels(clusters: list[IssueCluster]) -> str:
+    """The level each member tool printed, as ``tool:LABEL`` (a merged issue has no single label)."""
+    return ";".join(sorted({f"{m['tool']}:{m.get('tool_severity') or UNRATED}" for c in clusters for m in c.members}))
+
+
+def _runtime_rows(clusters: list[IssueCluster]) -> list[list[IssueCluster]]:
+    """Runtime clusters grouped per issue class: one missing header is one issue, on however many URLs."""
+    by_class: dict[str, list[IssueCluster]] = defaultdict(list)
+    for c in clusters:
+        by_class[c.issue_class].append(c)
+    return [by_class[k] for k in sorted(by_class)]
+
+
+def _url_paths(group: list[IssueCluster]) -> str:
+    paths = sorted({m.get("file_path") or "/" for c in group for m in c.members})
+    more = len(paths) - _MAX_RUNTIME_PATHS
+    return ";".join(paths[:_MAX_RUNTIME_PATHS]) + (f";(+{more} more)" if more > 0 else "")
+
+
+def _member_paths(cluster: IssueCluster) -> str:
+    """The files the issue's findings name (one advisory can name several manifests)."""
+    return ";".join(sorted({m.get("file_path") or "" for m in cluster.members} - {""}))
+
+
+def _sample_clusters(
+    clusters: list[Any],
+    cap: int,
+    rng: random.Random,
+    *,
+    first: list[Any] | None = None,
+) -> list[Any]:
+    """Up to *cap* clusters (or groups of clusters) drawn with *rng*; the *first* ones are taken before the rest."""
+    if len(clusters) <= cap:
+        return clusters
+    first = first or []
+    if len(first) >= cap:
+        return rng.sample(first, cap)
+    taken = {id(c) for c in first}
+    rest = [c for c in clusters if id(c) not in taken]
+    return first + rng.sample(rest, cap - len(first))
+
+
+def _job_findings(job_ids: list) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[str]]]:
+    """Per job, its findings from the latest completed result per tool, and the runs those results came from."""
+    result_ids = ToolResult.latest_ids_per_job(job_ids)
+    results = ToolResult.objects.filter(id__in=result_ids, status=ToolResult.Status.COMPLETED)
+    runs_by_job: dict[str, set[str]] = defaultdict(set)
+    for run_id, job_id in results.values_list("run_id", "run__generation_job_id"):
+        runs_by_job[str(job_id)].add(str(run_id))
+    fields = dict.fromkeys(("result__run__generation_job_id", "tool_severity", "description", *RECORD_FIELDS))
+    rows = Finding.objects.filter(result__in=results).order_by("file_path", "line_number", "id").values(*fields)
+    by_job: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        by_job[str(row["result__run__generation_job_id"])].append(row)
+    return by_job, {job: sorted(runs) for job, runs in runs_by_job.items()}
+
+
+def _static_record(row: dict[str, Any], job_id: str) -> dict[str, Any]:
+    """A dedup record (keyed by the app, so its results from several runs cluster together) plus sheet fields."""
+    extra = row["tool_specific_data"] if isinstance(row["tool_specific_data"], dict) else {}
+    installed = extra.get("installed_version") or extra.get("version") or ""
+    return finding_record(row, job_id) | {"tool_severity": row["tool_severity"], "installed_version": str(installed)}
 
 
 def build_review_sample(
@@ -263,8 +477,16 @@ def build_review_sample(
     seed: int = 0,
     blind: bool = True,
     max_static_per_app: int = 25,
+    max_dependency_per_app: int = 10,
+    max_runtime_per_app: int = 10,
 ) -> tuple[bytes, dict[str, Any]]:
-    """The review ZIP for a sample of *jobs*, and its manifest."""
+    """The review ZIP for a sample of *jobs*, and its manifest.
+
+    Issues in the app's code, dependency advisories and runtime issues go on
+    separate sheets with their own per-app caps; advisories about packages
+    the model added itself are drawn before scaffold-pinned and transitive
+    ones. Issues in test code are counted in the manifest, not sampled.
+    """
     selected, selection = select_sample(jobs, size=size, per_stratum=per_stratum, stratify=stratify, seed=seed)
     rng = random.Random(seed)  # noqa: S311 - reproducible sampling, not crypto
     # Shuffled sample ids: their order must not reveal the stratum.
@@ -274,15 +496,17 @@ def build_review_sample(
     if not blind:
         sample_ids = {j.id: str(j.id) for j in selected}
 
-    run_by_job = dict(
-        AnalysisRun.objects.filter(id__in=AnalysisRun.latest_ids_per_job([j.id for j in selected])).values_list(
-            "generation_job_id",
-            "id",
-        ),
-    )
+    findings_by_job, runs_by_job = _job_findings([j.id for j in selected])
     ai_slugs = AnalyzerTool.ai_slugs()
+    dynamic = dynamic_tool_slugs()
+    stack_memo: dict = {}
+    population = [j for j in jobs if j.status == GenerationJob.Status.COMPLETED and _has_code(j)]
+    ownerships = _scope_ownerships(population, stack_memo)
+    test_issues = 0
     ai_rows: list[dict[str, Any]] = []
     static_rows: list[dict[str, Any]] = []
+    dependency_rows: list[dict[str, Any]] = []
+    runtime_rows: list[dict[str, Any]] = []
     req_rows: list[dict[str, Any]] = []
     app_rows: list[dict[str, Any]] = []
     key_rows: list[dict[str, Any]] = []
@@ -299,67 +523,89 @@ def build_review_sample(
             req_rows += [{"sample_id": sid, "requirement_id": r, "kind": k, "requirement": t} for r, k, t in reqs]
             app_rows.append({"sample_id": sid, "files": len(files), "loc": loc_from_job(job)["total_loc"]})
 
-            run_id = run_by_job.get(job.id)
-            findings = (
-                list(
-                    Finding.objects.filter(result__run_id=run_id)
-                    .select_related("result")
-                    .order_by("file_path", "line_number"),
-                )
-                if run_id
-                else []
-            )
+            findings = findings_by_job.get(str(job.id), [])
             for f in findings:
-                if f.result.tool_slug in ai_slugs:
+                if f["result__tool_slug"] in ai_slugs:
                     ai_rows.append(
                         {
                             "sample_id": sid,
-                            "finding_id": str(f.id),
-                            "file_path": f.file_path,
-                            "line": f.line_number or "",
-                            "severity": f.severity,
-                            "category": f.category,
-                            "rule_id": f.rule_id,
-                            "title": f.title,
-                            "description": f.description[:2000],
+                            "finding_id": str(f["id"]),
+                            "file_path": f["file_path"],
+                            "line": f["line_number"] or "",
+                            "tool_severity": f["tool_severity"] or UNRATED,
+                            "normalized_severity": f["severity"],
+                            "category": f["category"],
+                            "rule_id": f["rule_id"],
+                            "title": f["title"],
+                            "description": f["description"][:2000],
                         },
                     )
-            static = [
-                {
-                    "id": f.id,
-                    "run_id": str(run_id),
-                    "tool": f.result.tool_slug,
-                    "rule_id": f.rule_id,
-                    "severity": f.severity,
-                    "category": f.category,
-                    "file_path": f.file_path,
-                    "line": f.line_number,
-                    "end_line": (f.tool_specific_data or {}).get("end_line"),
-                    "cwe": (f.tool_specific_data or {}).get("cwe") or "",
-                    "package": (f.tool_specific_data or {}).get("package") or "",
-                    "issue_key": (f.tool_specific_data or {}).get("issue_key") or "",
-                    "title": f.title,
-                }
-                for f in findings
-                if f.result.tool_slug not in ai_slugs
-            ]
-            clusters = cluster_findings(static)
-            if len(clusters) > max_static_per_app:
-                clusters = rng.sample(clusters, max_static_per_app)
-            for n, c in enumerate(sorted(clusters, key=lambda c: (c.file_path, c.line or 0)), start=1):
+            # The study's own dedup records (advisory ids and aliases link one
+            # advisory across scanners); every result of the app clusters together.
+            static = [_static_record(f, str(job.id)) for f in findings if f["result__tool_slug"] not in ai_slugs]
+            by_kind: dict[str, list[IssueCluster]] = defaultdict(list)
+            for c in cluster_findings(static):
+                by_kind[issue_kind(c, dynamic)].append(c)
+            code, advisories = by_kind[CODE], by_kind[DEPENDENCY]
+            test_issues += len(by_kind[TEST])
+            code = _sample_clusters(code, max_static_per_app, rng)
+            ownership = ownerships.get(str(job.id)) or dependency_ownership(job, stack_memo)
+            origin = _dependency_origins(advisories, ownership)
+            advisories = _sample_clusters(
+                advisories,
+                max_dependency_per_app,
+                rng,
+                first=[c for c in advisories if origin[id(c)] == "model"],
+            )
+            runtime = _sample_clusters(_runtime_rows(by_kind[RUNTIME]), max_runtime_per_app, rng)
+            for n, c in enumerate(sorted(code, key=lambda c: (c.file_path, c.line or 0)), start=1):
                 d = c.to_dict()
                 static_rows.append(
                     {
                         "sample_id": sid,
                         "issue_id": f"{sid}-I{n:03d}",
-                        "file_path": d["file_path"],
+                        "file_path": _member_paths(c),
                         "line": d["line"] or "",
-                        "severity": d["severity"],
+                        "tool_severity": _tool_labels([c]),
+                        "normalized_severity": d["severity"],
                         "category": d["category"],
                         "issue_class": d["issue_class"],
                         "tools": ";".join(d["tools"]),
                         "rule_ids": ";".join(d["rule_ids"]),
                         "title": c.members[0]["title"][:300],
+                    },
+                )
+            for n, c in enumerate(sorted(advisories, key=lambda c: (cluster_package(c), c.issue_class)), start=1):
+                d = c.to_dict()
+                versions = {m["installed_version"] for m in c.members if m.get("installed_version")}
+                dependency_rows.append(
+                    {
+                        "sample_id": sid,
+                        "issue_id": f"{sid}-D{n:03d}",
+                        "file_path": _member_paths(c),
+                        "package": cluster_package(c),
+                        "installed_version": ";".join(sorted(versions)),
+                        "advisories": ";".join(sorted({m.get("rule_id") or "" for m in c.members} - {""})),
+                        "origin": origin[id(c)],
+                        "tool_severity": _tool_labels([c]),
+                        "normalized_severity": d["severity"],
+                        "tools": ";".join(d["tools"]),
+                        "title": c.members[0]["title"][:300],
+                    },
+                )
+            for n, group in enumerate(runtime, start=1):
+                members = [m for c in group for m in c.members]
+                runtime_rows.append(
+                    {
+                        "sample_id": sid,
+                        "issue_id": f"{sid}-R{n:03d}",
+                        "issue_class": group[0].issue_class,
+                        "url_paths": _url_paths(group),
+                        "tool_severity": _tool_labels(group),
+                        "normalized_severity": max((c.severity for c in group), key=lambda s: SEVERITY_RANK.get(s, 0)),
+                        "tools": ";".join(sorted({m["tool"] for m in members})),
+                        "rule_ids": ";".join(sorted({f"{m['tool']}:{m.get('rule_id') or ''}" for m in members})),
+                        "title": members[0]["title"][:300],
                     },
                 )
 
@@ -377,7 +623,7 @@ def build_review_sample(
                     "conformance_status": status,
                     "conformance_pass_rate": (evaluation.get("summary") or {}).get("pass_rate", ""),
                     "deployed": "" if not status else int(status in ("passed", "failed")),
-                    "analysis_run_id": str(run_id) if run_id else "",
+                    "analysis_run_ids": ";".join(runs_by_job.get(str(job.id), [])),
                 },
             )
 
@@ -387,12 +633,23 @@ def build_review_sample(
             "blind": blind,
             "size": len(selected),
             **selection,
+            "findings_source": "latest result per (app, tool) (ToolResult.latest_ids_per_job), completed only",
             "counts": {
                 "ai_findings": len(ai_rows),
                 "static_issues": len(static_rows),
+                "dependency_issues": len(dependency_rows),
+                "runtime_issues": len(runtime_rows),
+                "test_code_issues_not_sampled": test_issues,
                 "requirements": len(req_rows),
                 "max_static_per_app": max_static_per_app,
+                "max_dependency_per_app": max_dependency_per_app,
+                "max_runtime_per_app": max_runtime_per_app,
             },
+            "issue_split": (
+                "as the study tables: static_issues = code issues (code_unique); dependency advisories, "
+                "runtime issues (dynamic scanners only, one row per issue class) and test-code issues apart"
+            ),
+            "dependency_sampling": "advisories about model-added packages first, then a seeded random draw",
         }
         zf.writestr(
             "README.md",
@@ -402,6 +659,8 @@ def build_review_sample(
         zf.writestr("key.csv", _csv(KEY_COLUMNS, key_rows))
         zf.writestr("labels/ai_findings.csv", _csv(AI_FINDING_COLUMNS, ai_rows))
         zf.writestr("labels/static_issues.csv", _csv(STATIC_ISSUE_COLUMNS, static_rows))
+        zf.writestr("labels/dependency_issues.csv", _csv(DEPENDENCY_ISSUE_COLUMNS, dependency_rows))
+        zf.writestr("labels/runtime_issues.csv", _csv(RUNTIME_ISSUE_COLUMNS, runtime_rows))
         zf.writestr("labels/requirements.csv", _csv(REQUIREMENT_COLUMNS, req_rows))
         zf.writestr("labels/apps.csv", _csv(APP_COLUMNS, app_rows))
     return buf.getvalue(), manifest
@@ -415,6 +674,8 @@ def _read_sheets(source: Path | bytes) -> dict[str, list[dict[str, str]]]:
         "key.csv",
         "labels/ai_findings.csv",
         "labels/static_issues.csv",
+        "labels/dependency_issues.csv",
+        "labels/runtime_issues.csv",
         "labels/requirements.csv",
         "labels/apps.csv",
     )
@@ -435,6 +696,13 @@ def _read_sheets(source: Path | bytes) -> dict[str, list[dict[str, str]]]:
             if path.is_file():
                 sheets[name] = list(csv.DictReader(io.StringIO(path.read_text(encoding="utf-8-sig"))))
     return sheets
+
+
+def _sheet_value(row: dict[str, str], key: str) -> str:
+    if key == "normalized_severity":
+        # Format-1 sheets named the (normalized) column "severity".
+        return row.get("normalized_severity") or row.get("severity") or ""
+    return row.get(key) or ""
 
 
 def _precision(rows: list[dict[str, str]], group_keys: tuple[str, ...]) -> dict[str, Any]:
@@ -458,7 +726,7 @@ def _precision(rows: list[dict[str, str]], group_keys: tuple[str, ...]) -> dict[
     for key in group_keys:
         groups: dict[str, list] = defaultdict(list)
         for r in labelled:
-            values = (r.get(key) or "").split(";") if key == "tools" else [r.get(key) or ""]
+            values = _sheet_value(r, key).split(";") if key == "tools" else [_sheet_value(r, key)]
             for v in values:
                 groups[v].append(r)
         out[f"by_{key}"] = {k: block(v) for k, v in sorted(groups.items())}
@@ -499,10 +767,18 @@ def score_review_labels(source: Path | bytes) -> dict[str, Any]:
 
     quality = [int(r["human_quality"]) for r in apps if (r.get("human_quality") or "").strip().isdigit()]
     return {
-        "ai_findings": _precision(sheets.get("labels/ai_findings.csv", []), ("severity", "category")),
+        "ai_findings": _precision(sheets.get("labels/ai_findings.csv", []), ("normalized_severity", "category")),
         "static_issues": _precision(
             sheets.get("labels/static_issues.csv", []),
-            ("severity", "category", "tools", "issue_class"),
+            ("normalized_severity", "category", "tools", "issue_class"),
+        ),
+        "dependency_issues": _precision(
+            sheets.get("labels/dependency_issues.csv", []),
+            ("origin", "normalized_severity", "tools"),
+        ),
+        "runtime_issues": _precision(
+            sheets.get("labels/runtime_issues.csv", []),
+            ("normalized_severity", "tools", "issue_class"),
         ),
         "functional": {
             "labelled": len(functional_pairs),

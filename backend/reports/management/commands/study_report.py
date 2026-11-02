@@ -69,7 +69,9 @@ class Command(BaseCommand):
         except ValueError as exc:
             raise CommandError(str(exc)) from exc
 
-        scope = opts["experiment"] or opts["batch"] or "all apps"
+        # The experiment's name, not its uuid, when the report covers one.
+        scope = ((data.get("protocol") or {}).get("experiment") or {}).get("name")
+        scope = scope or opts["experiment"] or opts["batch"] or "all apps"
         report = Report(
             report_type=Report.Type.STUDY_REPORT,
             title=f"Study report: {scope}",

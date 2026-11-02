@@ -13,6 +13,7 @@ import csv
 import io
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 from backend.analysis.services.base import FindingData
@@ -21,26 +22,40 @@ from backend.analysis.services.parsers import _advisory_ids
 from backend.analysis.services.parsers import _compact
 from backend.analysis.services.parsers import _float
 from backend.analysis.services.parsers import _label
-from backend.analysis.services.parsers import _loads
 from backend.analysis.services.parsers import _pyflakes_severity
 from backend.analysis.services.parsers import failure_lines
 from backend.analysis.services.parsers import parse_eslint
 from backend.analysis.services.parsers import parse_pylint
 from backend.analysis.services.parsers import register
+from backend.analysis.services.parsers import report_with
 from backend.analysis.services.parsers import section_bodies
+from backend.analysis.services.parsers import section_report
 
 _CWE_RE = re.compile(r"CWE-(\d+)", re.IGNORECASE)
 
 
-def _sections(raw: str) -> list[tuple[str, Any]]:
-    """``[(path, parsed_json)]`` for ``### path`` sections; unparsable bodies are dropped
+def _sections(raw: str, report: Callable[[Any], bool] | None = None) -> list[tuple[str, Any]]:
+    """``[(path, report)]`` for ``### path`` sections; bodies without a report are dropped
     (``parsers.parse`` reports them as manifests that were not analyzed)."""
     out: list[tuple[str, Any]] = []
     for path, body in section_bodies(raw):
-        data = _loads(body)
+        data = section_report(body, report)
         if data is not None:
             out.append((path, data))
     return out
+
+
+# What each multi-manifest tool's report looks like (any one key suffices:
+# fixtures and old versions carry only some). Other JSON in a section, such as
+# npm's ``{"message": "request to ... failed", "error": {...}}`` when the
+# advisory endpoint is unreachable, means the manifest was not analyzed.
+_PIP_AUDIT_REPORT = report_with("dependencies")
+_NPM_AUDIT_REPORT = report_with("auditReportVersion", "vulnerabilities")
+_DEPCHECK_REPORT = report_with("dependencies", "devDependencies", "missing")
+
+
+def _deptry_report(data: Any) -> bool:
+    return isinstance(data, list)
 
 
 # pip / npm resolution errors the audit commands echo as "!! " lines.
@@ -135,70 +150,92 @@ def _cwe(value: Any) -> dict[str, str]:
 # --- Dependency vulnerabilities ---------------------------------------------
 
 
-@register("pip_audit", sectioned=True)
+def _merge_pip_audit_record(finding: FindingData, ids: list[str], fixes: list[str]) -> None:
+    """Fold another OSV record of *finding*'s advisory into it: every id and fixed version, once."""
+    data = finding.tool_specific_data
+    data["aliases"] = _advisory_ids(data.get("aliases") or [], ids)
+    merged = _advisory_ids(data.get("fixed_versions") or [], fixes)
+    if merged:
+        data["fixed_versions"] = data["fix_versions"] = merged
+        name = data.get("package", "?")
+        finding.suggestion = f"Upgrade {name} to {' or '.join(merged)}"
+
+
+@register("pip_audit", sectioned=True, report=_PIP_AUDIT_REPORT)
 def parse_pip_audit(raw: str) -> list[FindingData]:
-    """``pip-audit -f json``: ``{"dependencies": [{name, version, vulns: [...]}]}``."""
+    """``pip-audit -f json``: ``{"dependencies": [{name, version, vulns: [...]}]}``.
+
+    pip-audit repeats a vuln once per requirement that pulls it in, and may
+    return one advisory as two OSV records that alias each other (werkzeug
+    3.0.1: PYSEC-2026-1860 and PYSEC-2026-3417, both CVE-2024-49767). Records
+    of a package sharing any id are one finding carrying all their ids.
+    """
     findings: list[FindingData] = _resolution_findings(raw, "PyPI")
-    for path, data in _sections(raw):
-        if not isinstance(data, dict):
-            continue
-        seen: set[tuple[str, str]] = set()
+    for path, data in _sections(raw, _PIP_AUDIT_REPORT):
+        # (package, every id seen so far for that finding, the finding)
+        kept: list[tuple[str, set[str], FindingData]] = []
         for dep in data.get("dependencies") or []:
+            if not isinstance(dep, dict):
+                continue
             name, version = dep.get("name", "?"), dep.get("version", "")
             for vuln in dep.get("vulns") or []:
-                vid = vuln.get("id", "")
-                # pip-audit repeats a vuln once per requirement that pulls it in.
-                if (name, vid) in seen:
+                if not isinstance(vuln, dict):
                     continue
-                seen.add((name, vid))
-                aliases = vuln.get("aliases") or []
-                cve = next((a for a in aliases if a.startswith("CVE-")), "")
+                vid = vuln.get("id", "")
+                aliases = [a for a in vuln.get("aliases") or [] if isinstance(a, str)]
                 fixes = vuln.get("fix_versions") or []
+                ids = _advisory_ids(vid, aliases)
+                same = next((k for k in kept if k[0] == name and k[1] & set(ids)), None)
+                if same is not None:
+                    same[1].update(ids)
+                    _merge_pip_audit_record(same[2], ids, fixes)
+                    continue
+                cve = next((a for a in aliases if a.startswith("CVE-")), "")
                 description = vuln.get("description") or ""
-                findings.append(
-                    FindingData(
-                        # The OSV records pip-audit returns carry no severity
-                        # or CVSS score: ``tool_severity`` stays empty.
-                        severity="medium",
-                        category="dependency",
-                        title=f"{name} {version}: {cve or vid}",
-                        description=description,
-                        suggestion=f"Upgrade {name} to {' or '.join(fixes)}" if fixes else "",
-                        file_path=path,
-                        rule_id=vid,
-                        confidence="high",
-                        tool_specific_data=_compact(
-                            {
-                                "package": name,
-                                "installed_version": version,
-                                "fixed_versions": fixes,
-                                "vuln_id": vid,
-                                "aliases": _advisory_ids(vid, aliases),
-                                "manifest": path,
-                                # Legacy keys.
-                                "version": version,
-                                "fix_versions": fixes,
-                            },
-                        ),
+                finding = FindingData(
+                    # The OSV records pip-audit returns carry no severity
+                    # or CVSS score: ``tool_severity`` stays empty.
+                    severity="medium",
+                    category="dependency",
+                    title=f"{name} {version}: {cve or vid}",
+                    description=description,
+                    suggestion=f"Upgrade {name} to {' or '.join(fixes)}" if fixes else "",
+                    file_path=path,
+                    rule_id=vid,
+                    confidence="high",
+                    tool_specific_data=_compact(
+                        {
+                            "package": name,
+                            "installed_version": version,
+                            "fixed_versions": fixes,
+                            "vuln_id": vid,
+                            "aliases": ids,
+                            "manifest": path,
+                            # Legacy keys.
+                            "version": version,
+                            "fix_versions": fixes,
+                        },
                     ),
                 )
+                kept.append((name, set(ids), finding))
+                findings.append(finding)
     return findings
 
 
 _NPM_SEVERITY = {"critical": "critical", "high": "high", "moderate": "medium", "low": "low", "info": "info"}
 
 
-@register("npm_audit", sectioned=True)
+@register("npm_audit", sectioned=True, report=_NPM_AUDIT_REPORT)
 def parse_npm_audit(raw: str) -> list[FindingData]:
     """``npm audit --json`` (report v2): one finding per advisory.
 
     Entries whose ``via`` holds only package names are inherited from another
-    vulnerable package and are already reported through that package.
+    vulnerable package and are already reported through that package. A
+    section holding npm's error object instead of a report (the advisory
+    endpoint was unreachable) was not analyzed.
     """
     findings: list[FindingData] = _resolution_findings(raw, "npm")
-    for path, data in _sections(raw):
-        if not isinstance(data, dict):
-            continue
+    for path, data in _sections(raw, _NPM_AUDIT_REPORT):
         seen: set[Any] = set()
         for pkg, entry in (data.get("vulnerabilities") or {}).items():
             fix = entry.get("fixAvailable")
@@ -254,52 +291,85 @@ def parse_npm_audit(raw: str) -> list[FindingData]:
 # --- Dependency hygiene -----------------------------------------------------
 
 _DEPTRY_SEVERITY = {
-    "DEP001": "high",  # imported but not declared: ImportError at runtime
+    # Imported but no declared package provides it: ImportError at runtime.
+    # (The run command maps the modules a framework installs, werkzeug for
+    # Flask, pydantic for FastAPI, to that framework, so those never land here.)
+    "DEP001": "high",
     "DEP002": "low",  # declared but unused
     "DEP003": "low",  # transitive dependency imported directly
     "DEP004": "medium",  # dev dependency imported in app code
     "DEP005": "info",  # stdlib module declared as a dependency
 }
+# Rules whose ``module`` is an import name (the others name the declared package).
+_DEPTRY_IMPORT_RULES = frozenset({"DEP001", "DEP003", "DEP004"})
+# Import name -> the distribution that provides it, where the two differ: the
+# distribution-own entries of deptry.yaml's --package-module-name-map, inverted
+# (test_extra_parsers keeps the two in step).
+_DEPTRY_IMPORT_PACKAGES = {
+    "jwt": "PyJWT",
+    "dotenv": "python-dotenv",
+    "PIL": "Pillow",
+    "bs4": "beautifulsoup4",
+    "yaml": "PyYAML",
+    "sklearn": "scikit-learn",
+    "jose": "python-jose",
+    "psycopg2": "psycopg2-binary",
+    "cv2": "opencv-python",
+    "dateutil": "python-dateutil",
+    "multipart": "python-multipart",
+    "python_multipart": "python-multipart",
+    "argon2": "argon2-cffi",
+    "email_validator": "email-validator",
+    "bson": "pymongo",
+    "dns": "dnspython",
+    "google.protobuf": "protobuf",
+}
 
 
-@register("deptry", sectioned=True)
+def _deptry_package(code: str, module: str) -> str:
+    """The package a deptry violation is about (statistics match it against declared packages)."""
+    if code in _DEPTRY_IMPORT_RULES:
+        return _DEPTRY_IMPORT_PACKAGES.get(module, module)
+    return module
+
+
+@register("deptry", sectioned=True, report=_deptry_report)
 def parse_deptry(raw: str) -> list[FindingData]:
     """``deptry --json-output``: ``[{error: {code, message}, module, location}]``."""
     findings: list[FindingData] = []
-    for directory, data in _sections(raw):
-        if not isinstance(data, list):
-            continue
+    for directory, data in _sections(raw, _deptry_report):
         prefix = "" if directory in ("", ".") else directory.rstrip("/") + "/"
         for item in data:
+            if not isinstance(item, dict):
+                continue
             error = item.get("error") or {}
             code = error.get("code", "")
             loc = item.get("location") or {}
             message = error.get("message", "")
+            module = str(item.get("module") or "")
             findings.append(
                 FindingData(
                     # deptry rates nothing: ``tool_severity`` stays empty.
                     severity=_DEPTRY_SEVERITY.get(code, "low"),
                     category="dependency",
-                    title=message or f"{code} {item.get('module', '')}",
+                    title=message or f"{code} {module}",
                     description=message,
                     file_path=prefix + str(loc.get("file") or ""),
                     line_number=loc.get("line"),
                     column_number=loc.get("column"),
                     rule_id=code,
                     confidence="medium",
-                    tool_specific_data={"module": item.get("module", "")},
+                    tool_specific_data=_compact({"module": module, "package": _deptry_package(code, module)}),
                 ),
             )
     return findings
 
 
-@register("depcheck", sectioned=True)
+@register("depcheck", sectioned=True, report=_DEPCHECK_REPORT)
 def parse_depcheck(raw: str) -> list[FindingData]:
     """``depcheck --json``: unused ``dependencies``/``devDependencies`` and ``missing``."""
     findings: list[FindingData] = []
-    for manifest, data in _sections(raw):
-        if not isinstance(data, dict):
-            continue
+    for manifest, data in _sections(raw, _DEPCHECK_REPORT):
         root = manifest.rsplit("/", 1)[0] + "/" if "/" in manifest else ""
         for pkg, files in (data.get("missing") or {}).items():
             first = str((files or [""])[0])

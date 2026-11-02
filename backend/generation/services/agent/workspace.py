@@ -46,6 +46,11 @@ SKIP_DIRS = frozenset(
         ".ruff_cache",
         ".local",
         ".config",
+        # Scratch space an agent unpacks downloads into (e.g. an npm tarball to
+        # read a package's docs): not app code.
+        ".tmp",
+        ".temp",
+        "tmp",
     },
 )
 # Runtime state the app writes, not code the agent authored (data/ is also

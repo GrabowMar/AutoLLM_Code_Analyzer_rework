@@ -3,6 +3,7 @@ from ninja import NinjaAPI
 from ninja.security import SessionAuth
 
 from backend.common.exceptions import APIError
+from backend.human_eval.services.errors import HumanEvalServiceError
 from backend.tokens.auth import TokenAuth
 
 api = NinjaAPI(
@@ -26,6 +27,13 @@ def handle_api_error(request, exc: APIError):
     )
 
 
+# The human-eval services' structured errors (TS HumanEvalError). Registered
+# separately so the more specific class wins over APIError (ninja walks the MRO).
+@api.exception_handler(HumanEvalServiceError)
+def handle_human_eval_error(request, exc: HumanEvalServiceError):
+    return api.create_response(request, exc.payload(), status=exc.status)
+
+
 api.add_router("/users/", "backend.users.api.views.router")
 api.add_router("/tokens/", "backend.tokens.api.views.router")
 api.add_router("/credentials/", "backend.credentials.api.views.router")
@@ -43,5 +51,9 @@ api.add_router("/system/", "backend.system.api.views.router")
 api.add_router("/inference/", "backend.inference.api.views.router")
 api.add_router("/execution/", "backend.execution.api_views.router")
 api.add_router("/integrations/", "backend.integrations.api.views.router")
+# Human evaluation: the participant portal is mounted before the researcher
+# router so /human-eval/portal/... never reaches researcher patterns.
+api.add_router("/human-eval/portal/", "backend.human_eval.api.views.portal_router")
+api.add_router("/human-eval/", "backend.human_eval.api.views.router")
 # The /automation/ router is unmounted (spec §F.4/§H): schedules and post-runs
 # live on experiments now. backend.automation keeps its app, tables and code.

@@ -18,9 +18,12 @@ install_cmd: >-
   /home/analyzer/.venvs/perflint/bin/pip install --upgrade 'perflint==0.8.*' &&
   mkdir -p /home/analyzer/.local/bin &&
   ln -sf /home/analyzer/.venvs/perflint/bin/perflint /home/analyzer/.local/bin/perflint
-verify_cmd: "perflint --version"
+# `perflint --version` prints the bundled pylint's banner: record perflint's own build.
+verify_cmd: >-
+  perflint --version >/dev/null &&
+  /home/analyzer/.venvs/perflint/bin/python -c "import importlib.metadata as m; print('perflint', m.version('perflint'))"
 uninstall_cmd: "rm -rf /home/analyzer/.venvs/perflint /home/analyzer/.local/bin/perflint"
-run_cmd: "perflint {target} --output-format=json --exit-zero --ignore=node_modules,.venv 2>/dev/null"
+run_cmd: "perflint {target} --rcfile=/dev/null --output-format=json --exit-zero --ignore=node_modules,.venv 2>/dev/null"
 parser_key: perflint
 file_patterns: ["*.py"]
 run_timeout: 180

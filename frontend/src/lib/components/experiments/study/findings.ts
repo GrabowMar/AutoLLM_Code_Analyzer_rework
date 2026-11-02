@@ -107,6 +107,16 @@ function missingTotal(row: LeaderboardRow): number {
   );
 }
 
+/** Every graded condition has the same mean, or the server noted a ceiling/floor effect. */
+function atCeiling(results: ExperimentResults): boolean {
+  const means = results.leaderboard
+    .map((r) => r.pass_rate_mean)
+    .filter((m): m is number => m != null);
+  const equal =
+    means.length > 1 && means.every((m) => Math.abs(m - means[0]) < 1e-9);
+  return equal || results.notes.some((n) => /ceiling\/floor effect/i.test(n));
+}
+
 /** Highest (and, with ≥ 3 conditions, lowest) mean pass rate. */
 function leaderFindings(rows: LeaderboardRow[]): Finding[] {
   const scored = rows
@@ -197,13 +207,35 @@ function effectFindings(
     ];
   }
   if (rows.every((r) => pOf(r) == null)) {
+    // A p-value is missing only when nothing differs: few apps give a large p, not none.
+    const allTies = rows.every(
+      (r) => r.untested_reason === "all_ties" || r.wins + r.losses === 0,
+    );
+    if (allTies) {
+      const ties = rows.reduce((sum, r) => sum + r.ties, 0);
+      return [
+        {
+          kind: "null",
+          parts: [
+            "Every paired app scored the same as ",
+            { strong: baseline },
+            ` (${plural(ties, "tie")}): there is no difference to test.`,
+            ...(atCeiling(results)
+              ? [
+                  " The metric is at a ceiling or floor: use harder apps or another metric.",
+                ]
+              : []),
+          ],
+        },
+      ];
+    }
     return [
       {
         kind: "null",
         parts: [
-          "Too few apps graded alongside ",
+          "No test could be run against ",
           { strong: baseline },
-          " to test differences. ",
+          ". ",
           ...largestParts("Largest observed difference: ", false),
         ],
       },
@@ -260,6 +292,19 @@ function caveatFindings(results: ExperimentResults): Finding[] {
       ],
     });
   }
+  const beyond = rows.reduce(
+    (sum, r) => sum + (r.n_missing.beyond_plan ?? 0),
+    0,
+  );
+  if (beyond > 0 && results.planned_only !== false) {
+    out.push({
+      kind: "caveat",
+      parts: [
+        { strong: plural(beyond, "run") },
+        " added after launch (repeats beyond the plan) are outside the planned sample and left out; counting them is exploratory.",
+      ],
+    });
+  }
   const mixed = rows.filter((r) => r.mixed_fingerprints).length;
   if (mixed > 0) {
     out.push({
@@ -284,6 +329,23 @@ function caveatFindings(results: ExperimentResults): Finding[] {
       kind: "caveat",
       parts: [
         "The baseline was chosen after the fact: comparisons are exploratory.",
+      ],
+    });
+  }
+  if (results.stopped_early) {
+    out.push({
+      kind: "caveat",
+      parts: [
+        "Planned cells were cancelled before they ran, so the planned sample was not collected: comparisons are exploratory until a top-up completes the design.",
+      ],
+    });
+  }
+  const changed = results.paired.sensitivity?.changed ?? [];
+  if (changed.length > 0) {
+    out.push({
+      kind: "caveat",
+      parts: [
+        `${plural(changed.length, "comparison")} change direction or significance when truncated output is ${results.paired.sensitivity?.exclude_truncated ? "excluded" : "kept"}: read them with the truncation rule in mind.`,
       ],
     });
   }

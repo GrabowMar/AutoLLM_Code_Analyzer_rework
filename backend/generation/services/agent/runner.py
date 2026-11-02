@@ -65,6 +65,7 @@ from backend.generation.services.agent.sandbox import SandboxError
 from backend.generation.services.agent.sandbox import tar_bytes
 from backend.generation.services.agent.snapshot import AGENT_SNAPSHOT_SCHEMA_VERSION
 from backend.generation.services.agent.snapshot import apply_agent_snapshot_to_job
+from backend.generation.services.agent.trajectory import attach_trajectory
 from backend.generation.services.agent.workspace import collect
 from backend.generation.services.agent.workspace import seed_files
 from backend.generation.services.generation_validation import ValidationResult
@@ -427,6 +428,16 @@ class AgentRunner:
         ).dump()
         # Part of ``cost`` already; kept apart so billed-but-failed spend is visible.
         job.metrics["failed_call_cost"] = failed_call_cost
+        # Derived trajectory analytics (agent.trajectory, metrics.behaviour,
+        # metrics.list_cost): additive, and an analytics error is stored as
+        # agent.trajectory_error instead of failing or changing the run.
+        attach_trajectory(
+            job,
+            calls,
+            events_text=result.outputs.get("events.jsonl"),
+            mini_traj=result.outputs.get("traj.json"),
+            gateway_events=gateway_events,
+        )
         self._write_call_artifacts(calls)
 
     @staticmethod
@@ -504,9 +515,17 @@ class AgentRunner:
         return record
 
     def _write_call_artifacts(self, calls: list[dict]) -> None:
-        """One compact artifact per LLM call (full requests stay in the run record)."""
+        """One compact artifact per LLM call (full requests stay in the run record).
+
+        ``telemetry``: the call's normalized timing/provider/token record
+        (``services.call_telemetry``, contract C1), plus the proxy's LLMRequest
+        timings for calls that went through the executor proxy.
+        """
+        from backend.generation.services.call_telemetry import telemetry_for_calls
+
+        telemetry = telemetry_for_calls(self.job, calls)
         rows = []
-        for call in calls:
+        for call, call_record in zip(calls, telemetry, strict=True):
             request = call.get("request") or {}
             response = call.get("response") or {}
             usage = response.get("usage") or {}
@@ -544,6 +563,7 @@ class AgentRunner:
                     prompt_tokens=int(usage.get("prompt_tokens") or 0),
                     completion_tokens=int(usage.get("completion_tokens") or 0),
                     total_cost=float(usage.get("cost") or 0.0),
+                    telemetry=call_record,
                 ),
             )
         GenerationArtifact.objects.bulk_create(rows, batch_size=200)
@@ -751,6 +771,14 @@ def assess_validity(
         note("protected_files_modified", "info", "agent edited platform-owned build files (restored before build)")
     if (agent.get("egress") or {}).get("denied_connects"):
         note("egress_denied", "info", "blocked egress attempts: " + ", ".join(agent["egress"]["denied_connects"]))
+    denials = (agent.get("trajectory") or {}).get("policy_denials")
+    if denials:
+        note(
+            "harness_policy_denials",
+            "info",
+            f"{denials} tool calls were refused by the harness's own permission rules (sandbox policy, "
+            "not a model error): count them apart from the agent's failed actions",
+        )
     if evaluation is None:
         note("not_evaluated", "warn", "no platform evaluation yet")
     elif evaluation.get("status") == "infra_error":

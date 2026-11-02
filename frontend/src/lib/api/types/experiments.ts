@@ -340,6 +340,11 @@ export interface ExperimentDetail extends ExperimentListItem {
   batches: ExperimentBatchRef[];
   schedules: ScheduleOut[];
   latest_post_run: PostRunOut | null;
+  /** the pre-registered analysis plan ({} without one); frozen at launch */
+  analysis_plan?: AnalysisPlan | Record<string, never>;
+  /** sha256 of the frozen plan; "" until launch freezes it */
+  analysis_plan_hash?: string;
+  analysis_plan_frozen_at?: string | null;
 }
 
 export interface LaunchResult {
@@ -542,9 +547,12 @@ export interface ResultsQuery {
   common_cells?: boolean;
   fingerprint?: "all" | "majority";
   metric?: "pass_rate";
+  /** only the repeats planned at launch (default true) */
+  planned_only?: boolean;
 }
 
 export interface LeaderboardRow {
+  /** competition rank by mean pass rate: equal means share a rank (1-1-3), ungraded conditions share the last */
   rank: number;
   condition_id: number;
   label: string;
@@ -561,6 +569,8 @@ export interface LeaderboardRow {
     excluded_invalid: number;
     excluded_truncated: number;
     not_common: number;
+    /** repeats added after launch, outside the planned sample */
+    beyond_plan?: number;
   };
   pass_rate_mean: number | null;
   /** cluster bootstrap over apps */
@@ -616,14 +626,32 @@ export interface PairedRow {
   p_adjusted: number | null;
   /** p_adjusted < paired.alpha; null while interim or untested */
   significant: boolean | null;
+  /** why there is no p-value: no app graded in both conditions, or every paired app tied */
+  untested_reason?: "no_pairs" | "all_ties" | null;
 }
+
+/** backend experiment_results.DEVIATIONS */
+export type PairedDeviation =
+  | "exclusions_differ"
+  | "invalid_excluded"
+  | "common_cells_off"
+  | "fingerprint_filter"
+  | "design_extended"
+  | "stopped_early"
+  | "multiplicity_family";
 
 export interface ExperimentResults {
   metric: string;
   exclude_invalid: boolean;
+  /** the rule applied: the query's, else the frozen plan's */
   exclude_truncated: boolean;
   common_cells: boolean;
   fingerprint_filter: string;
+  planned_only: boolean;
+  /** repeats per (condition, app) planned at launch */
+  planned_repeats: number;
+  /** planned cells were cancelled: the planned sample was not collected */
+  stopped_early: boolean;
   baseline_condition_id: number | null;
   baseline_source: "preregistered" | "post_hoc";
   interim: boolean;
@@ -636,13 +664,24 @@ export interface ExperimentResults {
   paired: {
     baseline_condition_id: number | null;
     pairing: "app_blocked";
-    /** confirmatory: the frozen analysis plan declares this metric and baseline */
+    /** confirmatory: the frozen plan declares this metric and baseline, and the view is the plan's analysis */
     status: "confirmatory" | "exploratory";
+    /** how this view departs from the plan's analysis (why it is exploratory); [] without a frozen plan */
+    deviations?: PairedDeviation[];
     correction: "holm" | "bh" | "none";
     alpha: number;
     alternative: "two-sided" | "greater" | "less";
     n_apps: number;
     rows: PairedRow[];
+    /** the same comparison under the other truncation rule; null when no graded output was truncated */
+    sensitivity?: {
+      exclude_truncated: boolean;
+      rows: (Omit<PairedRow, "ci95"> & {
+        direction_changed: boolean;
+        significance_changed: boolean | null;
+      })[];
+      changed: number[];
+    } | null;
   };
   notes: string[];
   generated_at: string;
@@ -659,6 +698,7 @@ export type PlanMetric =
 
 /** backend/generation/services/analysis_plan.py */
 export interface AnalysisPlan {
+  version?: number;
   research_questions?: {
     id?: string;
     question: string;
@@ -670,13 +710,19 @@ export interface AnalysisPlan {
   secondary_metrics?: PlanMetric[];
   alpha?: number;
   correction?: "holm" | "bh" | "none";
+  /**
+   * one correction over every declared metric's tests ("all", the default for
+   * new plans) or one per metric; a plan frozen without the key corrects per metric
+   */
+  multiplicity?: "all" | "per_metric";
   ranking_criteria?: {
     key: PlanMetric;
     direction: "benefit" | "cost";
     weight: number;
     label?: string;
   }[];
-  exclusions?: { truncated?: boolean };
+  /** infra_errors is always true (an infrastructure error says nothing about the sample) */
+  exclusions?: { truncated?: boolean; infra_errors?: boolean };
   min_apps_per_condition?: number;
   notes?: string;
 }

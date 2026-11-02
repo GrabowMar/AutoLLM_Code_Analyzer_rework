@@ -778,6 +778,7 @@ class GenerationArtifactSchema(ModelSchema):
             "prompt_tokens",
             "completion_tokens",
             "total_cost",
+            "telemetry",
             "created_at",
         ]
 

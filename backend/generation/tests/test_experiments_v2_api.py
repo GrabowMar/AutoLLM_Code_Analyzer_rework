@@ -810,6 +810,7 @@ class TestResults:
             "excluded_invalid": 0,
             "excluded_truncated": 1,
             "not_common": 0,
+            "beyond_plan": 0,
         }
         # A keeps only the cell B also has, symmetric with B's exclusions.
         assert board[a.id]["n_graded"] == 1
@@ -1204,3 +1205,243 @@ class TestResultsAccounting:
         # A post-hoc baseline is never confirmatory.
         other = compute(experiment, b.id, ResultFilters(), user)["paired"]
         assert other["status"] == "exploratory"
+
+
+class TestResearchDesignGate:
+    """The plan's p-values are confirmatory only for the analysis and sample the plan fixed."""
+
+    @staticmethod
+    def _freeze(experiment, **plan):
+        from backend.generation.services.analysis_plan import normalize_analysis_plan
+
+        Experiment.objects.filter(id=experiment.id).update(
+            analysis_plan=normalize_analysis_plan({"primary_metric": "pass_rate", **plan}),
+            analysis_plan_frozen_at=timezone.now(),
+        )
+        experiment.refresh_from_db()
+
+    @staticmethod
+    def _launch_batch(experiment, trials):
+        from backend.generation.models import GenerationBatch
+
+        GenerationBatch.objects.create(
+            name="launch",
+            mode=experiment.mode,
+            created_by=experiment.created_by,
+            experiment=experiment,
+            kind=GenerationBatch.Kind.LAUNCH,
+            request={"trials": trials},
+        )
+
+    def _six(self, user, repeats=1):
+        experiment, (a, b), apps = _design(user, n_apps=6, repeats=repeats)
+        for app in apps:
+            for r in range(repeats):
+                _graded(experiment, a, app, r, 0.5)
+                _graded(experiment, b, app, r, 1.0)
+        return experiment, a, b, apps
+
+    def test_plan_analysis_is_confirmatory(self, user):
+        experiment, *_ = self._six(user)
+        self._freeze(experiment)
+        res = compute(experiment, None, ResultFilters(), user)
+        assert (res["paired"]["status"], res["paired"]["deviations"]) == ("confirmatory", [])
+        assert res["exclude_truncated"] is True  # the plan's rule when the query leaves it unset
+
+    def test_filters_that_depart_from_the_plan_are_exploratory(self, user):
+        experiment, *_ = self._six(user)
+        self._freeze(experiment, exclusions={"truncated": False})
+        assert compute(experiment, None, ResultFilters(), user)["exclude_truncated"] is False
+        for filters, code in (
+            (ResultFilters(exclude_truncated=True), "exclusions_differ"),
+            (ResultFilters(common_cells=False), "common_cells_off"),
+            (ResultFilters(fingerprint="majority"), "fingerprint_filter"),
+        ):
+            res = compute(experiment, None, filters, user)
+            assert res["paired"]["status"] == "exploratory"
+            assert code in res["paired"]["deviations"]
+            assert any(n.startswith(results_svc.NOTE_DEVIATIONS_PREFIX) for n in res["notes"])
+
+    def test_repeats_added_after_launch_are_outside_the_planned_sample(self, user):
+        experiment, a, _b, _apps = self._six(user, repeats=2)
+        self._launch_batch(experiment, trials=1)
+        self._freeze(experiment)
+        res = compute(experiment, None, ResultFilters(), user)
+        board = {row["condition_id"]: row for row in res["leaderboard"]}
+        assert (res["planned_repeats"], board[a.id]["n_graded"], board[a.id]["n_cells"]) == (1, 6, 6)
+        assert board[a.id]["n_missing"]["beyond_plan"] == 6
+        assert res["paired"]["status"] == "confirmatory"
+        everything = compute(experiment, None, ResultFilters(planned_only=False), user)
+        assert {r["condition_id"]: r["n_graded"] for r in everything["leaderboard"]}[a.id] == 12
+        assert everything["paired"]["status"] == "exploratory"
+        assert "design_extended" in everything["paired"]["deviations"]
+
+    def test_cancelled_planned_cells_mean_stopped_early(self, user):
+        experiment, (a, b), apps = _design(user, n_apps=7, repeats=1, status=Experiment.Status.CANCELLED)
+        for app in apps[:6]:
+            _graded(experiment, a, app, 0, 0.5)
+            _graded(experiment, b, app, 0, 1.0)
+        _graded(experiment, a, apps[6], 0, None, status=S.CANCELLED)
+        _graded(experiment, b, apps[6], 0, None, status=S.CANCELLED)
+        self._freeze(experiment)
+        res = compute(experiment, None, ResultFilters(), user)
+        assert res["stopped_early"] is True
+        assert res["paired"]["status"] == "exploratory"
+        assert res["paired"]["deviations"] == ["stopped_early"]
+        assert res["paired"]["rows"][0]["wilcoxon_p"] is not None  # shown, but not as the planned test
+        Experiment.objects.filter(id=experiment.id).update(analysis_plan={}, analysis_plan_frozen_at=None)
+        experiment.refresh_from_db()
+        assert results_svc.NOTE_STOPPED_EARLY in compute(experiment, None, ResultFilters(), user)["notes"]
+
+    def test_a_plan_correcting_across_metrics_is_left_to_the_study_report(self, user):
+        experiment, *_ = self._six(user)
+        self._freeze(experiment, secondary_metrics=["deploy_rate"])
+        paired = compute(experiment, None, ResultFilters(), user)["paired"]
+        assert (paired["status"], paired["deviations"]) == ("exploratory", ["multiplicity_family"])
+        self._freeze(experiment, secondary_metrics=["deploy_rate"], multiplicity="per_metric")
+        assert compute(experiment, None, ResultFilters(), user)["paired"]["status"] == "confirmatory"
+
+    def test_truncation_sensitivity_flags_a_direction_change(self, user):
+        experiment, (a, b), apps = _design(user, n_apps=6, repeats=1)
+        for i, app in enumerate(apps):
+            _graded(experiment, a, app, 0, 0.5)
+            if i < 2:
+                _graded(experiment, b, app, 0, 0.6)
+            else:  # B's truncated output scores 0: excluding it hides B's failures
+                _graded(experiment, b, app, 0, 0.0, result_data={"backend_truncated": True})
+        res = compute(experiment, None, ResultFilters(exclude_truncated=True), user)
+        assert res["paired"]["rows"][0]["mean_delta"] == pytest.approx(0.1)
+        sens = res["paired"]["sensitivity"]
+        assert sens["exclude_truncated"] is False
+        assert sens["rows"][0]["mean_delta"] == pytest.approx((0.1 * 2 - 0.5 * 4) / 6, abs=1e-4)
+        assert sens["rows"][0]["direction_changed"] is True
+        assert sens["changed"] == [b.id]
+        assert any(n.startswith(results_svc.NOTE_SENSITIVITY_PREFIX[:30]) for n in res["notes"])
+        # No truncated output: nothing to compare.
+        clean, *_ = self._six(user)
+        assert compute(clean, None, ResultFilters(), user)["paired"]["sensitivity"] is None
+
+
+class TestSignificanceCheck:
+    def test_attainable_significance(self):
+        from backend.generation.services.analysis_plan import min_attainable_p
+        from backend.generation.services.analysis_plan import significance_check
+
+        assert min_attainable_p(5) == pytest.approx(2 / 32)
+        assert min_attainable_p(5, "greater") == pytest.approx(1 / 32)
+        # Five apps, one comparison, two-sided: 0.0625 can never be below 0.05.
+        check = significance_check(5, 1, {})
+        assert (check["apps_needed"], check["family_size"]) == (6, 1)
+        assert significance_check(6, 1, {}) is None
+        # Holm over two comparisons doubles the floor.
+        assert significance_check(6, 2, {})["apps_needed"] == 7
+        # A plan correcting across two metrics doubles the family again; BH does not multiply.
+        plan = {"primary_metric": "pass_rate", "secondary_metrics": ["deploy_rate"], "multiplicity": "all"}
+        assert significance_check(7, 2, plan)["family_size"] == 4
+        assert significance_check(7, 2, {**plan, "correction": "bh"}) is None
+        assert significance_check(10, 0, {}) is None
+
+    def test_preview_flags_a_design_that_cannot_reach_significance(self, user):
+        experiment, _conditions = _scaffolding_experiment(user, n_conditions=2, n_apps=3)
+        codes = {i["code"]: i for i in svc.preview_experiment_v2(experiment, user)["issues"]}
+        issue = codes["significance_unreachable"]
+        assert issue["blocking"] is False
+        assert "at least 6 apps" in issue["detail"]
+
+
+class TestResultsReporting:
+    """Ranks, untested rows, plan deviations and the plan/post-run fields the experiment pages read."""
+
+    def test_tied_means_share_a_rank(self, user):
+        experiment, (a, b, c), apps = _design(user, n_apps=2, repeats=1, n_conditions=3)
+        for app in apps:
+            _graded(experiment, a, app, 0, 1.0)
+            _graded(experiment, b, app, 0, 1.0)
+            _graded(experiment, c, app, 0, 0.5)
+        board = {
+            row["condition_id"]: row["rank"] for row in compute(experiment, None, ResultFilters(), user)["leaderboard"]
+        }
+        assert board == {a.id: 1, b.id: 1, c.id: 3}
+
+    def test_rows_without_a_test_say_why(self, user):
+        experiment, (a, b, c), apps = _design(user, n_apps=3, repeats=1, n_conditions=3)
+        for app in apps:
+            _graded(experiment, a, app, 0, 1.0)
+            _graded(experiment, b, app, 0, 1.0)  # every paired app ties with the baseline
+            _graded(experiment, c, app, 0, None, status=S.FAILED)  # nothing to pair
+        rows = {r["condition_id"]: r for r in compute(experiment, None, ResultFilters(), user)["paired"]["rows"]}
+        assert (rows[b.id]["untested_reason"], rows[b.id]["wilcoxon_p"], rows[b.id]["significant"]) == (
+            "all_ties",
+            None,
+            False,
+        )
+        # No paired app: nothing was tested, which is not "not significant".
+        assert (rows[c.id]["n_pairs"], rows[c.id]["untested_reason"], rows[c.id]["significant"]) == (
+            0,
+            "no_pairs",
+            None,
+        )
+
+    def test_excluding_invalid_runs_departs_from_the_plan(self, user):
+        experiment, (a, b), apps = _design(user, n_apps=6, repeats=1)
+        for app in apps:
+            _graded(experiment, a, app, 0, 0.5)
+            _graded(experiment, b, app, 0, 1.0)
+        TestResearchDesignGate._freeze(experiment)
+        assert compute(experiment, None, ResultFilters(), user)["paired"]["status"] == "confirmatory"
+        res = compute(experiment, None, ResultFilters(exclude_invalid=True), user)
+        assert (res["paired"]["status"], res["paired"]["deviations"]) == ("exploratory", ["invalid_excluded"])
+        assert any(results_svc.DEVIATIONS["invalid_excluded"] in n for n in res["notes"])
+
+    def test_bh_decides_on_unrounded_q(self, user):
+        """q = 1/1024 = 0.0009765625 is below alpha 0.00097657; rounded to 4 digits (0.0009766) it was not."""
+        experiment, (a, b), apps = _design(user, n_apps=10, repeats=1)
+        for app in apps:
+            _graded(experiment, a, app, 0, 0.5)
+            _graded(experiment, b, app, 0, 1.0)
+        TestResearchDesignGate._freeze(
+            experiment,
+            alpha=0.00097657,
+            correction="bh",
+            research_questions=[{"id": "RQ1", "question": "q", "metric": "pass_rate", "direction": "greater"}],
+        )
+        (row,) = compute(experiment, None, ResultFilters(), user)["paired"]["rows"]
+        assert row["wilcoxon_p"] == pytest.approx(1 / 1024, abs=1e-6)  # stored rounded to 6 places
+        assert row["significant"] is True
+
+    def test_detail_returns_the_frozen_plan(self, api, user):
+        experiment, _ = _scaffolding_experiment(user)
+        body = api.get(f"{API}/experiments/{experiment.id}/").json()
+        assert (body["analysis_plan"], body["analysis_plan_hash"], body["analysis_plan_frozen_at"]) == ({}, "", None)
+        TestResearchDesignGate._freeze(experiment)
+        Experiment.objects.filter(id=experiment.id).update(analysis_plan_hash="abc123")
+        body = api.get(f"{API}/experiments/{experiment.id}/").json()
+        assert body["analysis_plan"]["primary_metric"] == "pass_rate"
+        assert body["analysis_plan_hash"] == "abc123"
+        assert body["analysis_plan_frozen_at"] is not None
+
+    def test_post_run_links_the_reports_public_id(self, api, user):
+        from backend.generation.models import ExperimentPostRun
+        from backend.reports.models import Report
+
+        experiment, _ = _scaffolding_experiment(user)
+        report = Report.objects.create(
+            report_type=Report.Type.EXPERIMENT_REPORT,
+            title="R",
+            created_by=user,
+            status=Report.Status.COMPLETED,
+            report_data={},
+        )
+        ExperimentPostRun.objects.create(
+            experiment=experiment,
+            trigger=ExperimentPostRun.Trigger.MANUAL,
+            status=ExperimentPostRun.Status.COMPLETED,
+            config={},
+            report=report,
+        )
+        runs = api.get(f"{API}/experiments/{experiment.id}/post-run/").json()["runs"]
+        assert runs[0]["report_id"] == report.report_id
+        assert runs[0]["report_id"].startswith("rpt_")
+        detail = api.get(f"{API}/experiments/{experiment.id}/").json()
+        assert detail["latest_post_run"]["report_id"] == report.report_id
+        assert api.get(f"/api/reports/{runs[0]['report_id']}/").status_code == 200
