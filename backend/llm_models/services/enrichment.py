@@ -357,8 +357,8 @@ def fetch_hf_info(
         status["generation_config"], gen, commit = _fetch_file(client, hf_id, rev, "generation_config.json", present)
         record["generation_config"] = hf_metadata.parse_generation_config(gen, commit=commit or record.get("sha"))
 
-        status["tokenizer_config"], tok, _ = _fetch_file(client, hf_id, rev, "tokenizer_config.json", present)
-        record["tokenizer"] = hf_metadata.parse_tokenizer(tok, info.get("config"))
+        status["tokenizer_config"], tcfg, _ = _fetch_file(client, hf_id, rev, "tokenizer_config.json", present)
+        record["tokenizer"] = hf_metadata.parse_tokenizer(tcfg, info.get("config"))
 
         status["papers"], record["papers"] = _fetch_papers(client, record.get("arxiv") or [], paper_cache)
         # A transient failure keeps what the last good fetch stored.

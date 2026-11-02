@@ -443,32 +443,32 @@ def _chat_template_text(value: Any) -> str | None:
     return None
 
 
-def parse_tokenizer(tok: Any, api_config: dict | None = None) -> dict[str, Any] | None:
+def parse_tokenizer(cfg: Any, api_config: dict | None = None) -> dict[str, Any] | None:
     """Tokenizer facts from ``tokenizer_config.json``, falling back to the Hub record's ``config``.
 
     The chat template is fingerprinted (sha256), never stored: it is what
     formats every agent turn, so its revision is provenance.
     """
-    tok = tok if isinstance(tok, dict) else {}
+    cfg = cfg if isinstance(cfg, dict) else {}
     api_config = api_config if isinstance(api_config, dict) else {}
-    api_tok = api_config.get("tokenizer_config") if isinstance(api_config.get("tokenizer_config"), dict) else {}
-    if not tok and not api_tok and not api_config.get("chat_template_jinja"):
+    hub_cfg = api_config.get("tokenizer_config") if isinstance(api_config.get("tokenizer_config"), dict) else {}
+    if not cfg and not hub_cfg and not api_config.get("chat_template_jinja"):
         return None
-    template, source = _chat_template_text(tok.get("chat_template")), "tokenizer_config.json"
+    template, source = _chat_template_text(cfg.get("chat_template")), "tokenizer_config.json"
     if template is None:
-        template, source = _chat_template_text(api_tok.get("chat_template")), "hub_config"
+        template, source = _chat_template_text(hub_cfg.get("chat_template")), "hub_config"
     if template is None:
         template, source = _chat_template_text(api_config.get("chat_template_jinja")), "chat_template.jinja"
-    max_len = _int(tok.get("model_max_length"))
+    max_len = _int(cfg.get("model_max_length"))
     return {
-        "tokenizer_class": _str(tok.get("tokenizer_class")) or _str(api_tok.get("tokenizer_class")),
+        "tokenizer_class": _str(cfg.get("tokenizer_class")) or _str(hub_cfg.get("tokenizer_class")),
         "model_max_length": max_len if max_len and max_len < _NO_LIMIT_SENTINEL else None,
         "has_chat_template": template is not None,
         "chat_template_sha256": hashlib.sha256(template.encode("utf-8")).hexdigest() if template else None,
         "chat_template_source": source if template else None,
-        "bos_token": _token_text(tok.get("bos_token")) or _token_text(api_tok.get("bos_token")),
-        "eos_token": _token_text(tok.get("eos_token")) or _token_text(api_tok.get("eos_token")),
-        "source": "tokenizer_config.json" if tok else "hub_config",
+        "bos_token": _token_text(cfg.get("bos_token")) or _token_text(hub_cfg.get("bos_token")),
+        "eos_token": _token_text(cfg.get("eos_token")) or _token_text(hub_cfg.get("eos_token")),
+        "source": "tokenizer_config.json" if cfg else "hub_config",
     }
 
 
