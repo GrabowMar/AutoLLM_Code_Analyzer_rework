@@ -60,6 +60,59 @@ _FIELDS = (
 )
 
 
+# Fields that define the instrument: a row whose stored value differs from
+# its YAML still runs the old command / parser / install pin. The seed runs
+# only after ``migrate`` (container start) or by hand, while the parser code
+# reloads live, so a YAML change can sit unseeded next to new parsers.
+MEASUREMENT_FIELDS = (
+    "kind",
+    "analysis_mode",
+    "run_cmd",
+    "parser_key",
+    "output_kind",
+    "file_patterns",
+    "default_config",
+    "version",
+    "install_cmd",
+    "verify_cmd",
+)
+
+
+def _tool_definitions() -> list[tuple[str, dict]]:
+    """``(slug, yaml data)`` for every tool file in ``data/tools``."""
+    out: list[tuple[str, dict]] = []
+    for path in sorted(DATA_DIR.glob("*.yaml")):
+        if path == CATALOG_FILE:
+            continue
+        data = yaml.safe_load(path.read_text()) or {}
+        out.append((data.get("slug") or path.stem, data))
+    return out
+
+
+def stale_tools(*, using: str = DEFAULT_DB_ALIAS) -> dict[str, list[str]]:
+    """Seeded tools whose stored definition differs from their YAML.
+
+    Read-only. Maps slug -> the :data:`MEASUREMENT_FIELDS` that differ (a tool
+    with a YAML but no row maps to ``["missing"]``). Empty means the catalog
+    is in sync; otherwise ``manage.py seed_analysis_tools`` brings it in line.
+    """
+    from backend.analysis.models import AnalyzerTool
+
+    if not DATA_DIR.exists():
+        return {}
+    rows = {t.slug: t for t in AnalyzerTool.objects.using(using).all()}
+    stale: dict[str, list[str]] = {}
+    for slug, data in _tool_definitions():
+        row = rows.get(slug)
+        if row is None:
+            stale[slug] = ["missing"]
+            continue
+        fields = [f for f in MEASUREMENT_FIELDS if f in data and getattr(row, f) != data[f]]
+        if fields:
+            stale[slug] = fields
+    return stale
+
+
 def seed_tools(
     *,
     using: str = DEFAULT_DB_ALIAS,
@@ -80,11 +133,7 @@ def seed_tools(
 
     known_techs = {t["slug"] for t in load_catalog_meta().get("technologies", [])}
     created = updated = 0
-    for path in sorted(DATA_DIR.glob("*.yaml")):
-        if path == CATALOG_FILE:
-            continue
-        data = yaml.safe_load(path.read_text()) or {}
-        slug = data.get("slug") or path.stem
+    for slug, data in _tool_definitions():
         defaults = {f: data[f] for f in _FIELDS if f in data}
         defaults.setdefault("is_system", True)
         obj, was_created = AnalyzerTool.objects.using(using).update_or_create(

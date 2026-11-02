@@ -16,6 +16,7 @@ The relay script implements the same path allowlist for its side
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
 import socket
@@ -88,7 +89,31 @@ ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_UNSUPPORTED_PARAMS = ("temperature", "top_p", "top_k")
 
 
+# OpenCode Zen / Go (base URL https://opencode.ai/zen/go): requests must name
+# their client and carry a stable ``x-opencode-session`` per conversation, or
+# chat completions are refused ("MissingSessionID").
+OPENCODE_HOST = "opencode.ai"
+OPENCODE_USER_AGENT = "llmlab/1.0"
+
+
+def _opencode_session_id(body: Any) -> str:
+    """A stable id per conversation: the model plus its first two messages.
+
+    Continuations and repair rounds of one generation resend the same opening
+    messages, so they share a session (and its prompt cache); separate jobs differ.
+    """
+    head: Any = None
+    if isinstance(body, dict):
+        head = [body.get("model"), (body.get("messages") or [])[:2]]
+    digest = hashlib.sha256(json.dumps(head, sort_keys=True, default=str).encode()).hexdigest()
+    return f"llmlab-{digest[:32]}"
+
+
 def _provider_quirks(host: str, body: Any, headers: dict[str, str]) -> Any:
+    if host == OPENCODE_HOST:
+        headers["User-Agent"] = OPENCODE_USER_AGENT
+        headers["x-opencode-session"] = _opencode_session_id(body)
+        return body
     if host != ANTHROPIC_HOST:
         return body
     headers["anthropic-version"] = ANTHROPIC_VERSION

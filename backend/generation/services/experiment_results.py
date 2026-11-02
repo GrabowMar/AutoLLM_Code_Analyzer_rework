@@ -21,12 +21,37 @@ The single implementation behind the Results tab, ``ResultsMatrix`` (via
   declares ``pass_rate`` and the baseline is the pre-registered one
   (``paired.status = "confirmatory"``); otherwise Holm at 0.05 and
   ``paired.status = "exploratory"``. P-values are null while the experiment
-  is not terminal (``interim``).
+  is not terminal (``interim``). A row with no paired app has
+  ``significant`` null (nothing was tested); ``untested_reason`` says why a
+  row has no p-value (``no_pairs``, or ``all_ties`` when every paired app
+  scored the same as the baseline).
+* **Ranks:** the leaderboard ranks by mean pass rate with competition
+  ranking: equal means share a rank (1-1-3), ungraded conditions share the
+  last.
 * **Usable cells:** a cell counts when its current attempt is COMPLETED and
   graded (``metrics.functional.pass_rate`` not null). Exclusions (invalid,
   truncated, minority fingerprint) remove the (app, repeat) cell for every
   condition through the common-cells rule (default on), so they never select
   on one condition's outcome.
+* **Confirmatory gate:** the plan's p-values are confirmatory only for the
+  analysis the plan fixed: its truncation rule (the default when the query
+  leaves ``exclude_truncated`` unset), no invalid-run exclusion (not a plan
+  exclusion), common cells on, every fingerprint, the sample planned at
+  launch, a design run to the end, and a correction family the Results tab
+  can compute. Anything else is listed in
+  ``paired.deviations`` and the p-values are exploratory (Holm at 0.05).
+* **Planned sample:** ``planned_only`` (default on) counts only the repeats
+  planned at launch (the launch batch's ``trials``); repeats added later
+  (raising ``repeats``, ``add_replicates``) are ``beyond_plan``. A design
+  extended after its data were visible is data-dependent stopping, so with
+  ``planned_only`` off the comparison is exploratory.
+* **Stopped early:** a planned cell whose current attempt was cancelled (the
+  experiment or its pending jobs cancelled) means the planned sample was not
+  collected; the comparison is exploratory until a top-up fills the cells.
+* **Sensitivity:** ``paired.sensitivity`` repeats the paired comparison under
+  the other truncation rule (intention-to-treat vs excluding truncated
+  output) and a note names the conditions whose direction or significance
+  changes.
 * **Truncation:** ``exclude_truncated`` drops a cell whose *final output* is
   truncated: single-shot (scaffolding) output cut at the output cap
   (``backend_truncated`` / ``frontend_truncated``), or an agent run that ended
@@ -88,6 +113,23 @@ NOTE_CEILING = (
     "Every graded cell scored {value:g}: the outcome does not discriminate between conditions "
     "(ceiling/floor effect); use harder apps or another metric"
 )
+NOTE_STOPPED_EARLY = (
+    "Stopped early: planned cells were cancelled before they ran, so the planned sample was not collected; "
+    "top up to complete the design"
+)
+NOTE_DEVIATIONS_PREFIX = "Not the pre-registered analysis, p-values exploratory: "
+NOTE_SENSITIVITY_PREFIX = (
+    "Sensitive to the truncation rule (direction or significance changes when truncated output is {}): "
+)
+DEVIATIONS = {
+    "exclusions_differ": "truncation rule differs from the plan's",
+    "common_cells_off": "common cells off",
+    "fingerprint_filter": "fingerprint filter applied",
+    "design_extended": "repeats added after launch are counted",
+    "stopped_early": "planned cells were cancelled (stopped early)",
+    "multiplicity_family": "the plan corrects across several metrics (see the study report)",
+    "invalid_excluded": "invalid runs excluded (not one of the plan's exclusions)",
+}
 NOTE_PROVIDERS_PREFIX = (
     "Served by more than one upstream provider (quantization and serving stacks can differ; "
     "pin provider routing to hold it constant): "
@@ -99,9 +141,10 @@ _TERMINAL = (Experiment.Status.COMPLETED, Experiment.Status.CANCELLED, Experimen
 class ResultFilters:
     metric: str = "pass_rate"
     exclude_invalid: bool = False
-    exclude_truncated: bool = True
+    exclude_truncated: bool | None = None  # None: the frozen plan's rule, else True
     common_cells: bool = True
     fingerprint: str = "all"  # "all" | "majority"
+    planned_only: bool = True  # only the repeats planned at launch
 
 
 @dataclass
@@ -125,7 +168,7 @@ class _Cell:
     seconds: float | None
     providers: tuple[str, ...]
     terminal: bool
-    excluded: str = ""  # "", "invalid", "truncated", "fingerprint"
+    excluded: str = ""  # "" or "fingerprint" (minority configuration); the other reasons follow the filters
 
 
 # ── statistics (pure) ─────────────────────────────────────────────────
@@ -344,6 +387,17 @@ _EXTRA_FIELDS = (
 )
 
 
+def output_truncated(result_data: Any) -> bool:
+    """Whether a job's *final output* is truncated (see the module docstring), from its ``result_data``."""
+    data = result_data if isinstance(result_data, dict) else {}
+    agent = data.get("agent") if isinstance(data.get("agent"), dict) else {}
+    return bool(
+        data.get("backend_truncated")
+        or data.get("frontend_truncated")
+        or agent.get("final_response_truncated") is True,
+    )
+
+
 def _seconds(row: dict[str, Any]) -> float | None:
     """The run's own time: the sandbox wall clock for agent runs (job duration adds eval queue + grading)."""
     wall = _float(row.get("result_data__agent__wall_seconds"))
@@ -398,13 +452,34 @@ def _cells(experiment: Experiment, now) -> list[_Cell]:
     return cells
 
 
-def _test_plan(experiment: Experiment, baseline_source: str) -> dict[str, Any]:
+def frozen_plan(experiment: Experiment) -> dict[str, Any]:
+    """The experiment's pre-registered analysis plan ({} when none was frozen at launch)."""
+    plan = experiment.analysis_plan if isinstance(experiment.analysis_plan, dict) else {}
+    return plan if plan and experiment.analysis_plan_frozen_at is not None else {}
+
+
+def planned_repeats(experiment: Experiment) -> int:
+    """Repeats per (condition, app) planned at launch (the launch batch's ``trials``), else the current value."""
+    from backend.generation.models import GenerationBatch
+
+    request = (
+        experiment.batches.filter(kind=GenerationBatch.Kind.LAUNCH)
+        .order_by("created_at")
+        .values_list("request", flat=True)
+        .first()
+    )
+    trials = request.get("trials") if isinstance(request, dict) else None
+    if isinstance(trials, int) and not isinstance(trials, bool) and 0 < trials <= experiment.repeats:
+        return trials
+    return experiment.repeats
+
+
+def _test_plan(experiment: Experiment, baseline_source: str, deviations: list[str]) -> dict[str, Any]:
     """How the paired p-values are adjusted and read (see the module docstring)."""
     from backend.generation.services.analysis_plan import declared_metrics
 
-    plan = experiment.analysis_plan if isinstance(experiment.analysis_plan, dict) else {}
-    frozen = bool(plan) and experiment.analysis_plan_frozen_at is not None
-    if frozen and "pass_rate" in declared_metrics(plan) and baseline_source == "preregistered":
+    plan = frozen_plan(experiment)
+    if plan and "pass_rate" in declared_metrics(plan) and baseline_source == "preregistered" and not deviations:
         directions = {
             q.get("direction") for q in plan.get("research_questions") or [] if q.get("metric") == "pass_rate"
         }
@@ -414,15 +489,57 @@ def _test_plan(experiment: Experiment, baseline_source: str) -> dict[str, Any]:
             "correction": plan.get("correction", "holm"),
             "alpha": float(plan.get("alpha", 0.05)),
             "alternative": alternative if alternative in ("two-sided", "greater", "less") else "two-sided",
+            "deviations": [],
         }
-    return {"status": "exploratory", "correction": "holm", "alpha": 0.05, "alternative": "two-sided"}
+    return {
+        "status": "exploratory",
+        "correction": "holm",
+        "alpha": 0.05,
+        "alternative": "two-sided",
+        "deviations": deviations if plan else [],
+    }
+
+
+def _deviations(
+    plan: dict[str, Any],
+    filters: ResultFilters,
+    exclude_truncated: bool,
+    *,
+    extended: bool,
+    stopped_early: bool,
+) -> list[str]:
+    """How this view departs from the analysis the frozen plan fixed (empty without a plan)."""
+    from backend.generation.services.analysis_plan import declared_metrics
+    from backend.generation.services.analysis_plan import plan_excludes_truncated
+    from backend.generation.services.analysis_plan import plan_multiplicity
+
+    if not plan:
+        return []
+    out = []
+    if exclude_truncated != plan_excludes_truncated(plan):
+        out.append("exclusions_differ")
+    if filters.exclude_invalid:
+        # The plan's exclusions are truncation and infra errors only: dropping invalid runs changes its sample.
+        out.append("invalid_excluded")
+    if not filters.common_cells:
+        out.append("common_cells_off")
+    if filters.fingerprint != "all":
+        out.append("fingerprint_filter")
+    if extended and not filters.planned_only:
+        out.append("design_extended")
+    if stopped_early:
+        out.append("stopped_early")
+    if plan_multiplicity(plan) == "all" and len(declared_metrics(plan)) > 1:
+        out.append("multiplicity_family")
+    return out
 
 
 def _adjust(p_values: list[float | None], correction: str) -> list[float | None]:
     if correction == "bh":
         from backend.statistics.services.inference import benjamini_hochberg
 
-        return benjamini_hochberg(p_values)
+        # Unrounded: significance is decided on these, and they are rounded only for display.
+        return benjamini_hochberg(p_values, digits=None)
     if correction == "none":
         return list(p_values)
     return holm(p_values)
@@ -475,16 +592,31 @@ def compute(
         msg = "fingerprint must be 'all' or 'majority'"
         raise ValueError(msg)
 
+    from backend.generation.services.analysis_plan import plan_excludes_truncated
+
     now = timezone.now()
     conditions = list(experiment.conditions.select_related("model__endpoint").order_by("id"))
     apps = list(experiment.app_requirements.order_by("id"))
     base_condition, baseline_source, notes = _resolve_baseline(experiment, conditions, baseline)
     interim = experiment.status not in _TERMINAL
+    plan = frozen_plan(experiment)
+    exclude_truncated = (
+        filters.exclude_truncated
+        if filters.exclude_truncated is not None
+        else (plan_excludes_truncated(plan) if plan else True)
+    )
+    planned = planned_repeats(experiment)
+    extended = experiment.repeats > planned
     condition_ids = {c.id for c in conditions}
-    cells = [c for c in _cells(experiment, now) if c.condition_id in condition_ids]
+    all_cells = [c for c in _cells(experiment, now) if c.condition_id in condition_ids]
+    # Repeats added after launch are outside the planned sample (``beyond_plan``).
+    cells = [c for c in all_cells if c.repeat < planned] if filters.planned_only else all_cells
     by_condition: dict[int, list[_Cell]] = defaultdict(list)
     for cell in cells:
         by_condition[cell.condition_id].append(cell)
+    beyond_plan = Counter(c.condition_id for c in all_cells if c.repeat >= planned) if filters.planned_only else {}
+    # Planned cells whose current attempt was cancelled: the planned sample was not collected.
+    stopped_early = any(c.code == "k" for c in all_cells if c.repeat < planned)
 
     # Mixed fingerprints per condition; ``majority`` drops the minority cells.
     # ``config_fingerprint`` covers the app spec too (every app of a condition
@@ -522,43 +654,49 @@ def compute(
             else None
         )
 
-    for cell in cells:
+    def exclusion(cell: _Cell, truncated_rule: bool) -> str:
         if cell.excluded or cell.value is None:
-            continue
+            return cell.excluded
         if filters.exclude_invalid and cell.valid is False:
-            cell.excluded = "invalid"
-        elif filters.exclude_truncated and cell.truncated:
-            cell.excluded = "truncated"
+            return "invalid"
+        if truncated_rule and cell.truncated:
+            return "truncated"
+        return ""
 
-    def usable(cell: _Cell) -> bool:
-        return cell.value is not None and not cell.excluded
+    def select(truncated_rule: bool) -> tuple[Callable[[_Cell], bool], Callable[[_Cell], bool], dict, list]:
+        """``usable``, ``kept``, per (condition, app) values of the kept cells, conditions without usable cells."""
 
-    usable_keys = {
-        condition.id: {(c.app_id, c.repeat) for c in by_condition[condition.id] if usable(c)}
-        for condition in conditions
-    }
-    key_sets = list(usable_keys.values())
+        def usable(cell: _Cell) -> bool:
+            return cell.value is not None and not exclusion(cell, truncated_rule)
+
+        usable_keys = {
+            condition.id: {(c.app_id, c.repeat) for c in by_condition[condition.id] if usable(c)}
+            for condition in conditions
+        }
+        # A condition with no usable cell at all (a dead model, or one that has
+        # not started yet) would empty the intersection and blank every other
+        # condition; it is left out of the common cells and named in a note.
+        empty = [c for c in conditions if not usable_keys[c.id]]
+        populated = [usable_keys[c.id] for c in conditions if usable_keys[c.id]]
+        common = set.intersection(*populated) if populated else set()
+
+        def kept(cell: _Cell) -> bool:
+            return usable(cell) and (not filters.common_cells or (cell.app_id, cell.repeat) in common)
+
+        values: dict[int, dict[int, list[float]]] = {c.id: defaultdict(list) for c in conditions}
+        for cell in cells:
+            if kept(cell):
+                values[cell.condition_id][cell.app_id].append(cell.value)
+        return usable, kept, values, empty
+
+    usable, kept, app_values, empty_conditions = select(exclude_truncated)
+    key_sets = [{(c.app_id, c.repeat) for c in by_condition[cond.id] if usable(c)} for cond in conditions]
     balanced = bool(key_sets) and all(ks == key_sets[0] for ks in key_sets)
-    # A condition with no usable cell at all (a dead model, or one that has not
-    # started yet) would empty the intersection and blank every other
-    # condition; it is left out of the common cells and named in a note.
-    empty_conditions = [c for c in conditions if not usable_keys[c.id]]
-    populated = [usable_keys[c.id] for c in conditions if usable_keys[c.id]]
-    common = set.intersection(*populated) if populated else set()
-    if filters.common_cells and empty_conditions and populated:
+    if filters.common_cells and empty_conditions and len(empty_conditions) < len(conditions):
         names = ", ".join(condition_label(c) for c in empty_conditions)
         notes.append(f"{NOTE_NO_USABLE_PREFIX}{names}")
     if not filters.common_cells:
         notes.append(NOTE_ONE_SIDED)
-
-    def kept(cell: _Cell) -> bool:
-        return usable(cell) and (not filters.common_cells or (cell.app_id, cell.repeat) in common)
-
-    # Per (condition, app) values of the kept cells.
-    app_values: dict[int, dict[int, list[float]]] = {c.id: defaultdict(list) for c in conditions}
-    for cell in cells:
-        if kept(cell):
-            app_values[cell.condition_id][cell.app_id].append(cell.value)
 
     seed = experiment.id.int % (2**32)
     endpoints_used = {condition_endpoint_slug(c) for c in conditions}
@@ -574,9 +712,10 @@ def compute(
         missing = {
             "failed": sum(1 for c in mine if c.code in ("x", "k")),
             "ungraded": sum(1 for c in mine if c.code == "u"),
-            "excluded_invalid": sum(1 for c in mine if c.excluded in ("invalid", "fingerprint")),
-            "excluded_truncated": sum(1 for c in mine if c.excluded == "truncated"),
+            "excluded_invalid": sum(1 for c in mine if exclusion(c, exclude_truncated) in ("invalid", "fingerprint")),
+            "excluded_truncated": sum(1 for c in mine if exclusion(c, exclude_truncated) == "truncated"),
             "not_common": sum(1 for c in mine if usable(c) and not kept(c)),
+            "beyond_plan": beyond_plan.get(condition.id, 0),
         }
         seconds = sorted(c.seconds for c in kept_cells if c.seconds is not None)
         validity = {"ok": 0, "warn": 0, "invalid": 0}
@@ -601,7 +740,7 @@ def compute(
                 "harness": condition.harness,
                 "n_apps": len(app_means),
                 "repeats_per_app": round(len(kept_cells) / len(app_means), 2) if app_means else 0,
-                "n_cells": len(apps) * experiment.repeats,
+                "n_cells": len(apps) * (planned if filters.planned_only else experiment.repeats),
                 "n_graded": len(kept_cells),
                 "k_passed": sum(1 for c in kept_cells if c.passed),
                 "n_missing": missing,
@@ -623,40 +762,54 @@ def compute(
             },
         )
     ranked = sorted(leaderboard, key=lambda r: (r["pass_rate_mean"] is None, -(r["pass_rate_mean"] or 0.0)))
-    for rank, row in enumerate(ranked, start=1):
-        row["rank"] = rank
+    # Competition ranking (1-1-3): equal means (already rounded) share a rank; ungraded conditions share the last.
+    for position, row in enumerate(ranked, start=1):
+        previous = ranked[position - 2] if position > 1 else None
+        tied = previous is not None and previous["pass_rate_mean"] == row["pass_rate_mean"]
+        row["rank"] = previous["rank"] if tied else position
 
-    test_plan = _test_plan(experiment, baseline_source)
-    paired_rows = []
-    if base_condition is not None:
-        base_values = app_values[base_condition.id]
+    deviations = _deviations(plan, filters, exclude_truncated, extended=extended, stopped_early=stopped_early)
+    test_plan = _test_plan(experiment, baseline_source, deviations)
+    if test_plan["deviations"]:
+        notes.append(NOTE_DEVIATIONS_PREFIX + "; ".join(DEVIATIONS[d] for d in test_plan["deviations"]))
+    elif stopped_early:
+        notes.append(NOTE_STOPPED_EARLY)
+
+    def paired_comparison(values_by_condition: dict, *, with_ci: bool) -> list[dict[str, Any]]:
+        if base_condition is None:
+            return []
+        rows = []
+        base_values = values_by_condition[base_condition.id]
         for condition in conditions:
             if condition.id == base_condition.id:
                 continue
-            values = app_values[condition.id]
+            values = values_by_condition[condition.id]
             pairs = {a: (values[a], base_values[a]) for a in values if values[a] and base_values.get(a)}
             deltas = [sum(t) / len(t) - sum(b) / len(b) for t, b in pairs.values()]
             wins = sum(1 for d in deltas if d > 0)
             losses = sum(1 for d in deltas if d < 0)
-            paired_rows.append(
-                {
-                    "condition_id": condition.id,
-                    "n_pairs": len(pairs),
-                    "mean_delta": round(_mean(deltas), 4) if deltas else None,
-                    "ci95": _bootstrap(paired_bootstrap_ci, pairs, seed ^ (condition.id << 16) ^ base_condition.id),
-                    "wins": wins,
-                    "losses": losses,
-                    "ties": len(deltas) - wins - losses,
-                    "sign_test_p": sign_test_p(wins, losses),
-                    "wilcoxon_p": wilcoxon_p(deltas, test_plan["alternative"]),
-                },
-            )
-        raw = [r["wilcoxon_p"] for r in paired_rows]
+            row = {
+                "condition_id": condition.id,
+                # Why no test could run: no app graded in both, or every paired app scored the same.
+                "untested_reason": "no_pairs" if not pairs else "all_ties" if wins + losses == 0 else None,
+                "n_pairs": len(pairs),
+                "mean_delta": round(_mean(deltas), 4) if deltas else None,
+                "wins": wins,
+                "losses": losses,
+                "ties": len(deltas) - wins - losses,
+                "sign_test_p": sign_test_p(wins, losses),
+                "wilcoxon_p": wilcoxon_p(deltas, test_plan["alternative"]),
+            }
+            if with_ci:
+                row["ci95"] = _bootstrap(paired_bootstrap_ci, pairs, seed ^ (condition.id << 16) ^ base_condition.id)
+            rows.append(row)
+        raw = [r["wilcoxon_p"] for r in rows]
         adjusted = _adjust(raw, test_plan["correction"])
-        for row, p_holm, p_adj in zip(paired_rows, holm(raw), adjusted, strict=True):
+        for row, p_holm, p_adj in zip(rows, holm(raw), adjusted, strict=True):
             row["p_holm"] = p_holm
             row["p_adjusted"] = p_adj
-            row["significant"] = p_adj is not None and p_adj < test_plan["alpha"]
+            # No paired app: nothing was tested, which is not "not significant".
+            row["significant"] = p_adj is not None and p_adj < test_plan["alpha"] if row["n_pairs"] else None
             for key in ("sign_test_p", "wilcoxon_p", "p_holm", "p_adjusted"):
                 if interim:
                     row[key] = None
@@ -664,6 +817,36 @@ def compute(
                     row[key] = round(row[key], 6)
             if interim:
                 row["significant"] = None
+        return rows
+
+    paired_rows = paired_comparison(app_values, with_ci=True)
+
+    # Sensitivity to the truncation rule: truncation is caused by the condition
+    # (its verbosity against the output cap), so excluding it conditions on a
+    # post-treatment event; keeping it is the intention-to-treat analysis.
+    sensitivity = None
+    if base_condition is not None and any(c.truncated and c.value is not None for c in cells):
+        alt_rows = paired_comparison(select(not exclude_truncated)[2], with_ci=False)
+        main = {r["condition_id"]: r for r in paired_rows}
+        changed = []
+        for row in alt_rows:
+            ref = main[row["condition_id"]]
+            a, b = ref["mean_delta"], row["mean_delta"]
+            row["direction_changed"] = a is not None and b is not None and a * b < 0
+            row["significance_changed"] = (
+                None
+                if interim or ref["significant"] is None or row["significant"] is None
+                else ref["significant"] != row["significant"]
+            )
+            if row["direction_changed"] or row["significance_changed"]:
+                changed.append(row["condition_id"])
+        sensitivity = {"exclude_truncated": not exclude_truncated, "rows": alt_rows, "changed": changed}
+        if changed:
+            labels = {c.id: condition_label(c) for c in conditions}
+            notes.append(
+                NOTE_SENSITIVITY_PREFIX.format("kept" if exclude_truncated else "excluded")
+                + ", ".join(labels[cid] for cid in changed),
+            )
 
     n_apps = len({c.app_id for c in cells if kept(c)})
     kept_values = {c.value for c in cells if kept(c) and c.value is not None}
@@ -715,7 +898,10 @@ def compute(
     return {
         "metric": filters.metric,
         "exclude_invalid": filters.exclude_invalid,
-        "exclude_truncated": filters.exclude_truncated,
+        "exclude_truncated": exclude_truncated,
+        "planned_only": filters.planned_only,
+        "planned_repeats": planned,
+        "stopped_early": stopped_early,
         "common_cells": filters.common_cells,
         "fingerprint_filter": filters.fingerprint,
         "baseline_condition_id": base_condition.id if base_condition is not None else None,
@@ -730,6 +916,7 @@ def compute(
             **test_plan,
             "n_apps": n_apps,
             "rows": paired_rows,
+            "sensitivity": sensitivity,
         },
         "notes": notes,
         "generated_at": now,

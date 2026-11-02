@@ -5,7 +5,11 @@
  */
 import type { GenerationBatchCounts } from "$lib/api/generation";
 import type {
+  AnalysisPlan,
+  ExperimentResults,
   ExperimentStatusV2,
+  PairedDeviation,
+  PlanMetric,
   ProgressCounts,
   SchedulingPolicy,
 } from "$lib/api/types/experiments";
@@ -323,4 +327,125 @@ export function conditionName(c: {
   display_label?: string;
 }): string {
   return c.label || c.display_label || `Condition #${c.id}`;
+}
+
+// ── analysis plan and the confirmatory gate ───────────────────────────
+
+/** The experiment's analysis plan, frozen or not (a draft's), or null when it has none ({}). */
+export function experimentPlan(e: {
+  analysis_plan?: AnalysisPlan | Record<string, never>;
+}): AnalysisPlan | null {
+  const plan = e.analysis_plan;
+  return plan && "primary_metric" in plan ? (plan as AnalysisPlan) : null;
+}
+
+/** The experiment's frozen analysis plan, or null (none, or not frozen yet: a draft's plan). */
+export function frozenPlan(e: {
+  analysis_plan?: AnalysisPlan | Record<string, never>;
+  analysis_plan_frozen_at?: string | null;
+}): AnalysisPlan | null {
+  return e.analysis_plan_frozen_at ? experimentPlan(e) : null;
+}
+
+/**
+ * The truncation rule the experiment report applies: the plan's (a draft's
+ * plan freezes at launch, before any report), else null (the report's setting).
+ */
+export function planTruncationRule(e: {
+  analysis_plan?: AnalysisPlan | Record<string, never>;
+}): boolean | null {
+  const plan = experimentPlan(e);
+  return plan ? (plan.exclusions?.truncated ?? true) : null;
+}
+
+/** Plan metrics as the study report names them (backend `analysis_plan.METRICS`). */
+export const PLAN_METRIC_LABEL: Record<PlanMetric, string> = {
+  deploy_rate: "Deploy rate",
+  pass_rate: "Pass rate",
+  functional_passed: "Fully correct",
+  unique_issues_per_app: "Unique issues / app",
+  issues_per_kloc: "Code issues / kLOC",
+  security_per_app: "Security issues / app",
+  cost_per_app: "Cost / app (USD)",
+};
+
+export function planMetricLabel(metric: string): string {
+  return PLAN_METRIC_LABEL[metric as PlanMetric] ?? metric;
+}
+
+/** The plan's metrics that it makes confirmatory (primary, secondary, research questions). */
+export function declaredMetrics(plan: AnalysisPlan): PlanMetric[] {
+  return [
+    ...new Set([
+      plan.primary_metric,
+      ...(plan.secondary_metrics ?? []),
+      ...(plan.research_questions ?? []).map(
+        (q) => q.metric ?? plan.primary_metric,
+      ),
+    ]),
+  ];
+}
+
+/** Why a Results view is not the plan's confirmatory analysis (backend `experiment_results.DEVIATIONS`). */
+export const DEVIATION_LABEL: Record<PairedDeviation, string> = {
+  exclusions_differ: "truncation rule differs from the plan's",
+  invalid_excluded: "invalid runs excluded (not one of the plan's exclusions)",
+  common_cells_off: "common cells off",
+  fingerprint_filter: "fingerprint filter applied",
+  design_extended: "repeats added after launch are counted",
+  stopped_early: "planned cells were cancelled (stopped early)",
+  multiplicity_family:
+    "the plan corrects across several metrics (see the study report)",
+};
+
+export interface AnalysisStatus {
+  /**
+   * confirmatory: the server's verdict (`paired.status`); plan: the view is the
+   * plan's analysis but its p-values are exploratory here (the plan's
+   * correction family spans metrics the Results tab does not test);
+   * exploratory: anything else.
+   */
+  kind: "confirmatory" | "plan" | "exploratory";
+  label: string;
+  /** Why the view is exploratory (empty when confirmatory). */
+  reasons: string[];
+}
+
+/** The Results view's status, from the server's verdict and its deviations, never from the URL. */
+export function analysisStatus(
+  results: Pick<ExperimentResults, "baseline_source" | "paired">,
+  plan: AnalysisPlan | null,
+): AnalysisStatus {
+  if (results.paired.status === "confirmatory") {
+    return { kind: "confirmatory", label: "Pre-registered", reasons: [] };
+  }
+  const deviations = results.paired.deviations ?? [];
+  const reasons: string[] = [];
+  if (!plan) reasons.push("no frozen analysis plan");
+  if (results.baseline_source === "post_hoc") {
+    reasons.push("baseline chosen post hoc");
+  }
+  reasons.push(...deviations.map((d) => DEVIATION_LABEL[d] ?? d));
+  // Stays true after any reset: the plan never tests pass rate, so no view of it is the plan's analysis.
+  const declaresPassRate =
+    !!plan && declaredMetrics(plan).includes("pass_rate");
+  if (plan && !declaresPassRate) {
+    reasons.push("the plan does not declare pass rate");
+  }
+  if (
+    plan &&
+    declaresPassRate &&
+    results.baseline_source === "preregistered" &&
+    deviations.length === 1 &&
+    deviations[0] === "multiplicity_family"
+  ) {
+    return {
+      kind: "plan",
+      label: "Plan’s analysis",
+      reasons: [
+        "p-values exploratory here: the plan’s correction spans several metrics (see the study report)",
+      ],
+    };
+  }
+  return { kind: "exploratory", label: "Exploratory", reasons };
 }

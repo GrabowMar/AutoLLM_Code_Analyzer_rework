@@ -183,7 +183,8 @@ def test_radon_parser_findings_only_for_e_and_f_ranks():
             "broken.py": {"error": "invalid syntax"},
         },
     )
-    findings = parsers.parse("radon", raw).findings
+    parsed = parsers.parse("radon", raw)
+    findings = parsed.findings
     # The C-rank class is metric data, not a finding; only E/F blocks surface.
     assert len(findings) == 1
     f = findings[0]
@@ -191,6 +192,9 @@ def test_radon_parser_findings_only_for_e_and_f_ranks():
     assert f.severity == "critical"
     assert f.line_number == 3
     assert f.category == "performance"
+    # The file radon could not parse is a coverage gap, not silently dropped.
+    assert parsed.error is None
+    assert parsed.warnings == ["Not parsed (1 of 2 file(s)): broken.py: invalid syntax"]
 
 
 def test_radon_parser_metrics():
@@ -929,3 +933,275 @@ def test_jscpd_drops_clones_repeated_by_embedded_language_streams():
         "duplication_percentage": 1.57,
         "token_duplication_percentage": 1.57,
     }
+
+
+# --- Radon: real `cc -j` shape, unparsable files ------------------------------
+
+
+def _radon_block(kind: str, name: str, lineno: int, complexity: int, rank: str, **extra):
+    return {
+        "type": kind,
+        "name": name,
+        "lineno": lineno,
+        "col_offset": extra.pop("col_offset", 4 if kind == "method" else 0),
+        "endline": lineno + 5,
+        "complexity": complexity,
+        "rank": rank,
+        **extra,
+    }
+
+
+def test_radon_counts_each_method_once_although_radon_lists_it_twice():
+    # radon 6.0.1 `cc -j` (run on class Book{to_dict, other} + top(){inner}):
+    # every method appears inside its class's "methods" AND again at top
+    # level; a closure appears under both copies of its method.
+    inner = _radon_block("function", "inner", 4, 2, "A", col_offset=8, closures=[])
+    to_dict = _radon_block("method", "to_dict", 3, 35, "E", classname="Book", closures=[inner])
+    other = _radon_block("method", "other", 12, 1, "A", classname="Book", closures=[])
+    book = _radon_block("class", "Book", 1, 18, "C", methods=[to_dict, other])
+    top = _radon_block("function", "top", 20, 3, "A", closures=[])
+    raw = json.dumps({"/work/app.py": [book, to_dict, other, top]})
+    parsed = parsers.parse("radon", raw)
+    # Five real blocks: Book, to_dict, inner, other, top.
+    assert parsed.metrics["total_blocks"] == 5
+    assert parsed.metrics["average_complexity"] == round((18 + 35 + 2 + 1 + 3) / 5, 2)
+    assert parsed.metrics["rank_distribution"] == {"A": 3, "B": 0, "C": 1, "D": 0, "E": 1, "F": 0}
+    names = [b["name"] for b in parsed.metrics["top_functions"]]
+    assert sorted(names) == ["Book", "inner", "other", "to_dict", "top"]
+    [finding] = parsed.findings  # one E-rank finding, not two identical ones
+    assert finding.title == "method 'to_dict' has cyclomatic complexity 35 (rank E)"
+    assert finding.tool_specific_data["function"] == "Book.to_dict"
+
+
+def test_radon_that_could_parse_no_file_is_an_error():
+    # radon 6.0.1 on a directory whose only file is `def broken(:` (exit 0).
+    raw = json.dumps({"/work/only.py": {"error": "invalid syntax (<unknown>, line 1)"}})
+    parsed = parsers.parse("radon", raw)
+    assert parsed.findings == []
+    assert parsed.metrics == {}
+    assert parsed.error == "Radon could not parse any file — /work/only.py: invalid syntax (<unknown>, line 1)"
+
+
+# --- ESLint: unloaded rules, rule categories ---------------------------------
+
+
+def _eslint_report(*messages: dict) -> str:
+    return json.dumps([{"filePath": "/work/frontend/src/pages/HomePage.jsx", "messages": list(messages)}])
+
+
+# The exact message ESLint 8.57 stored for app cfa0d551 (HomePage.jsx:67): a
+# `// eslint-disable-next-line react-hooks/exhaustive-deps` directive while
+# the configuration does not load the react-hooks plugin.
+_RULE_NOT_FOUND = {
+    "ruleId": "react-hooks/exhaustive-deps",
+    "message": "Definition for rule 'react-hooks/exhaustive-deps' was not found.",
+    "line": 67,
+    "column": 5,
+    "endLine": 67,
+    "endColumn": 60,
+    "severity": 2,
+    "nodeType": None,
+}
+
+
+def test_eslint_directive_for_an_unloaded_rule_is_a_note_not_a_finding():
+    raw = _eslint_report(
+        _RULE_NOT_FOUND,
+        {**_RULE_NOT_FOUND, "line": 72},
+        {"ruleId": "no-unused-vars", "severity": 1, "message": "'x' is defined but never used.", "line": 9},
+    )
+    for key in ("eslint", "eslint_security"):
+        parsed = parsers.parse(key, raw)
+        assert [f.rule_id for f in parsed.findings] == ["no-unused-vars"], key
+        assert parsed.error is None
+        assert parsed.warnings == [
+            "Inline directives name rules this configuration does not load (not counted): "
+            "react-hooks/exhaustive-deps (2)",
+        ]
+    # The rules did run on the file: it is not an unparsed file, even when it is the only message.
+    only = parsers.parse("eslint", _eslint_report(_RULE_NOT_FOUND))
+    assert (only.findings, only.error) == ([], None)
+
+
+def test_eslint_security_relevant_and_cosmetic_react_rules():
+    raw = _eslint_report(
+        {"ruleId": "react/no-danger", "severity": 1, "message": "Do not use dangerouslySetInnerHTML", "line": 3},
+        {"ruleId": "react/jsx-no-target-blank", "severity": 2, "message": "Using target=_blank", "line": 4},
+        {"ruleId": "react/no-unescaped-entities", "severity": 2, "message": "`'` can be escaped", "line": 5},
+        {"ruleId": "no-undef", "severity": 2, "message": "'x' is not defined.", "line": 6},
+    )
+    danger, blank, entities, undef = parsers.parse("eslint", raw).findings
+    assert (danger.category, danger.severity, danger.tool_severity) == ("security", "medium", "warning")
+    assert (blank.category, blank.severity, blank.tool_severity) == ("security", "medium", "error")
+    # The tool's own label stays verbatim; only the heuristic level drops.
+    assert (entities.category, entities.severity, entities.tool_severity) == ("quality", "low", "error")
+    assert (undef.category, undef.severity) == ("quality", "high")
+
+
+# --- Secret scanners: heuristic detectors are not "high" ---------------------
+
+
+def test_heuristic_secret_detectors_rate_below_provider_specific_ones():
+    def _ds(secret_type: str) -> str:
+        item = {"type": secret_type, "filename": "app.py", "line_number": 1, "hashed_secret": "h"}
+        return json.dumps({"results": {"app.py": [item]}})
+
+    rated = {
+        t: parsers.parse("detect_secrets", _ds(t)).findings[0]
+        for t in (
+            "Secret Keyword",
+            "Base64 High Entropy String",
+            "Hex High Entropy String",
+            "Private Key",
+        )
+    }
+    assert {t: f.severity for t, f in rated.items()} == {
+        # Bandit rates the same keyword heuristic (B105/B106) LOW itself.
+        "Secret Keyword": "low",
+        "Base64 High Entropy String": "medium",
+        "Hex High Entropy String": "medium",
+        "Private Key": "high",
+    }
+    assert {f.tool_severity for f in rated.values()} == {""}  # the tool rates nothing
+
+    def _gl(rule: str) -> str:
+        return json.dumps([{"RuleID": rule, "Description": rule, "File": "a.jsx", "StartLine": 210, "Entropy": 3.5}])
+
+    [generic] = parsers.parse("gitleaks", _gl("generic-api-key")).findings
+    [aws] = parsers.parse("gitleaks", _gl("aws-access-token")).findings
+    assert (generic.severity, aws.severity) == ("medium", "high")
+    assert generic.tool_severity == ""
+
+
+# --- Ruff / Vulture: files they could not parse ------------------------------
+
+
+def test_ruff_syntax_error_is_one_high_finding_per_file_and_a_coverage_gap():
+    def _diag(code, message, row, filename="/work/bad.py"):
+        return {"code": code, "message": message, "filename": filename, "location": {"row": row, "column": 12}}
+
+    raw = json.dumps(
+        [
+            # ruff 0.6.9: code null; newer ruff: "invalid-syntax"; follow-up errors cascade.
+            _diag(None, "SyntaxError: Expected a parameter or the end of the parameter list", 1),
+            _diag(None, "SyntaxError: Expected ':', found newline", 1),
+            _diag("invalid-syntax", "Expected an indented block", 3, "/work/other.py"),
+            _diag("F401", "`os` imported but unused", 1, "/work/ok.py"),
+        ],
+    )
+    parsed = parsers.parse("ruff", raw)
+    assert [(f.file_path, f.rule_id, f.severity) for f in parsed.findings] == [
+        ("/work/bad.py", "syntax-error", "high"),
+        ("/work/other.py", "syntax-error", "high"),
+        ("/work/ok.py", "F401", "low"),
+    ]
+    assert parsed.error is None
+    assert parsed.warnings == [
+        "Not parsed (2 file(s), syntax error): "
+        "/work/bad.py:1: SyntaxError: Expected a parameter or the end of the parameter list; "
+        "/work/other.py:3: Expected an indented block",
+    ]
+
+
+def test_vulture_file_it_could_not_parse_is_a_coverage_gap():
+    # vulture 2.16 on broken.py (`def broken(:`) + models.py with dead code (exit 3).
+    raw = (
+        'broken.py:1: invalid syntax at "def broken(:"\n'
+        "models.py:4: unused function 'never_called' (60% confidence)\n"
+        "app.py:3: unterminated string literal (detected at line 3)\n"
+        # Python 3.12+ ast.parse warning on stderr: utils.py parsed, not a gap.
+        "/work/utils.py:2: SyntaxWarning: invalid escape sequence '\\.'\n"
+        '  EMAIL = re.compile("[^@]+@[^@]+\\.[^@]+")\n'
+        "utils.py:2: unused variable 'EMAIL' (60% confidence)\n"
+    )
+    parsed = parsers.parse("vulture", raw)
+    assert [(f.file_path, f.rule_id) for f in parsed.findings] == [
+        ("models.py", "unused-function"),
+        ("utils.py", "unused-variable"),
+    ]
+    assert parsed.error is None
+    assert parsed.warnings == [
+        'Not parsed (2 file(s)): broken.py:1: invalid syntax at "def broken(:"; '
+        "app.py:3: unterminated string literal (detected at line 3)",
+    ]
+
+
+# --- Mypy: errors that only arise because dependencies are not installed ------
+
+
+def test_mypy_drops_orm_base_class_errors_but_keeps_real_ones():
+    raw = (
+        # Flask-SQLAlchemy: `db = SQLAlchemy(app)` is Any without the package.
+        'app.py:33: error: Name "db.Model" is not defined  [name-defined]\n'
+        # declarative_base(): the valid-type + misc pair on one class line.
+        'app.py:50: error: Variable "app.Base" is not valid as a type  [valid-type]\n'
+        "app.py:50: note: See https://mypy.readthedocs.io/en/stable/common_issues.html#variables-vs-type-aliases\n"
+        'app.py:50: error: Invalid base class "Base"  [misc]\n'
+        # Real defects: a typo in a module attribute, a variable used as a type.
+        'app.py:60: error: Name "pathlib.Pathh" is not defined  [name-defined]\n'
+        'app.py:70: error: Variable "app.Alias" is not valid as a type  [valid-type]\n'
+        'app.py:456: error: Incompatible types in assignment (expression has type "str", variable has type "int")'
+        "  [assignment]\n"
+    )
+    parsed = parsers.parse("mypy", raw)
+    assert [(f.line_number, f.rule_id) for f in parsed.findings] == [
+        (60, "name-defined"),
+        (70, "valid-type"),
+        (456, "assignment"),
+    ]
+    assert parsed.error is None
+    assert parsed.warnings == [
+        "Not counted: 3 error(s) on ORM model classes (db.Model, declarative_base()) "
+        "that only arise because the app's dependencies are not installed",
+    ]
+
+
+def test_codespell_reason_is_not_part_of_the_fix():
+    raw = "/work/app.py:7: clas ==> class  | keyword\n/work/app.py:9: teh ==> the\n"
+    with_reason, plain = parsers.parse("codespell", raw).findings
+    assert with_reason.tool_specific_data == {"fix": "class", "reason": "keyword"}
+    assert with_reason.suggestion == "Replace 'clas' with 'class'"
+    assert with_reason.description.endswith(" keyword")
+    assert plain.tool_specific_data == {"fix": "the"}
+
+
+# --- Cut-off JSON reports ----------------------------------------------------
+
+
+def test_cut_off_report_is_an_error_not_an_empty_one():
+    # A cut-off pretty-printed report always holds some complete inner object;
+    # decoding that one would read as a report without results.
+    bandit = json.dumps(
+        {
+            "errors": [],
+            "results": [
+                {"filename": "/work/app.py", "issue_text": "md5", "test_id": "B303", "line_number": 3},
+                {"filename": "/work/app.py", "issue_text": "pickle", "test_id": "B301", "line_number": 9},
+            ],
+            "metrics": {"_totals": {"loc": 10}},
+        },
+        indent=2,
+    )
+    eslint = json.dumps(
+        [{"filePath": "/work/a.js", "messages": [{"ruleId": "no-undef", "severity": 2, "message": "x", "line": 1}]}]
+        * 3,
+    )
+    jscpd = json.dumps(
+        {"duplicates": [{"lines": 30, "firstFile": {"name": "a.py", "start": 1, "end": 30}}] * 2, "statistics": {}},
+        indent=2,
+    )
+    for key, report in (("bandit", bandit), ("eslint", eslint), ("jscpd", jscpd), ("semgrep", bandit)):
+        assert parsers.parse(key, report).error is None, key
+        for cut in (len(report) // 2, len(report) - 2, len(report) - 1):
+            parsed = parsers.parse(key, report[:cut])
+            assert parsed.findings == [], (key, cut)
+            assert parsed.error is not None, (key, cut)
+            assert "cut off" in parsed.error, (key, cut)
+
+
+def test_cut_off_inside_a_string_escape_or_literal_is_still_cut_off():
+    for tail in ('"caf\\u00', '"caf\\u00e9', '"emoji \\ud83d\\ude', "tru", "-1.5e", "nul", '"abc\\'):
+        raw = '{\n  "results": [\n    {"test_id": "B1", "x": 1},\n    {"y": ' + tail
+        parsed = parsers.parse("bandit", raw)
+        assert parsed.error is not None, tail
+        assert "cut off" in parsed.error, tail

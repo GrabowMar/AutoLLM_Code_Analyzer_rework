@@ -4,7 +4,8 @@
 	 * factors (manipulated, blocking, replication) with Table M1, 2.2 every
 	 * condition (Table M2: model, where it runs, variant, overrides, weights
 	 * digest, context), 2.3 what is held constant, 2.4 the comparability check
-	 * (Table M3) and 2.5 the procedure (run order, seeds, retries, post-run).
+	 * (Table M3), 2.5 the procedure (run order, seeds, retries, post-run) and
+	 * 2.6 the pre-registered analysis plan (frozen at launch) or its absence.
 	 * Read-only: drafts link to the composer; execution limits of a launched
 	 * experiment are edited under Operations.
 	 *
@@ -21,7 +22,17 @@
 	import { formatApiError } from '$lib/api/core';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import ComparabilityTable from '../ComparabilityTable.svelte';
-	import { POLICY_DESCRIPTIONS, conditionName, effectivePolicyLabel, plural, policyLabel } from '../format';
+	import {
+		CORRECTION_LABEL,
+		POLICY_DESCRIPTIONS,
+		conditionName,
+		effectivePolicyLabel,
+		experimentPlan,
+		planMetricLabel,
+		plural,
+		policyLabel,
+	} from '../format';
+	import { formatDateTime } from '$lib/utils/formatters';
 	import type { SchedulingPolicy } from '$lib/api/types/experiments';
 	import StudyFigure from '../study/StudyFigure.svelte';
 	import StudySection from '../study/StudySection.svelte';
@@ -183,6 +194,48 @@
 		);
 		return list;
 	});
+
+	// ── analysis plan ───────────────────────────────────────────────
+	const plan = $derived(experimentPlan(experiment));
+	const planFrozen = $derived(!!plan && !!experiment.analysis_plan_frozen_at);
+	const planFacts = $derived.by(() => {
+		if (!plan) return [];
+		const multiplicity = plan.multiplicity ?? 'per_metric';
+		const list: { label: string; value: string; mono?: boolean }[] = [
+			{
+				label: 'Status',
+				value: planFrozen
+					? `Frozen ${formatDateTime(experiment.analysis_plan_frozen_at ?? null)}`
+					: isDraft
+						? 'Draft: freezes at launch'
+						: 'Not frozen: its comparisons are exploratory',
+			},
+		];
+		if (experiment.analysis_plan_hash) list.push({ label: 'Plan hash (sha256)', value: experiment.analysis_plan_hash, mono: true });
+		list.push(
+			{ label: 'Primary metric', value: planMetricLabel(plan.primary_metric) },
+			{ label: 'Secondary metrics', value: (plan.secondary_metrics ?? []).map(planMetricLabel).join(', ') || 'None' },
+			{
+				label: 'Significance',
+				value: `α = ${plan.alpha ?? 0.05} · ${CORRECTION_LABEL[plan.correction ?? 'holm'] ?? plan.correction} correction · ${
+					multiplicity === 'all' ? 'one family over every declared metric' : 'one family per metric'
+				}`,
+			},
+			{
+				label: 'Exclusions',
+				value: `Truncated runs ${plan.exclusions?.truncated ?? true ? 'excluded' : 'kept (intention to treat)'} · infrastructure errors excluded`,
+			}
+		);
+		if (plan.ranking_criteria?.length) {
+			list.push({
+				label: 'Ranking criteria',
+				value: plan.ranking_criteria.map((c) => `${planMetricLabel(c.key)} (${c.direction}, weight ${c.weight})`).join(' · '),
+			});
+		}
+		if (plan.min_apps_per_condition) list.push({ label: 'Minimum apps per condition', value: String(plan.min_apps_per_condition) });
+		if (plan.notes) list.push({ label: 'Notes', value: plan.notes });
+		return list;
+	});
 </script>
 
 {#snippet definitionList(items: { label: string; value: string; mono?: boolean }[])}
@@ -331,5 +384,35 @@
 
 	<StudySection id="method-procedure" number="2.5" title="Procedure" lead="How cells are scheduled, seeded and graded. The run order is frozen at launch; limits can be changed under Operations.">
 		{@render definitionList(procedure)}
+	</StudySection>
+
+	<StudySection
+		id="method-plan"
+		number="2.6"
+		title="Analysis plan"
+		lead={plan
+			? 'What the experiment committed to test before launch. Results that follow this plan are confirmatory; any other view is exploratory.'
+			: 'No analysis plan was registered: every comparison is exploratory, and only the baseline was fixed in advance.'}
+	>
+		{#if plan}
+			{#if plan.research_questions?.length}
+				<ol class="space-y-2 overflow-clip rounded-md border border-border bg-card px-4 py-3 text-sm shadow-[var(--shadow-card)]">
+					{#each plan.research_questions as q, i (q.id ?? i)}
+						<li class="grid gap-x-3 sm:grid-cols-[4rem_minmax(0,1fr)]">
+							<span class="font-mono text-xs leading-5 text-muted-foreground">{q.id ?? `RQ${i + 1}`}</span>
+							<span class="min-w-0 space-y-0.5">
+								<span class="block break-words leading-5">{q.question}</span>
+								<span class="block text-xs text-muted-foreground">
+									{planMetricLabel(q.metric ?? plan.primary_metric)} · {q.direction ?? 'two-sided'}{q.hypothesis ? ` · hypothesis: ${q.hypothesis}` : ''}
+								</span>
+							</span>
+						</li>
+					{/each}
+				</ol>
+			{/if}
+			<div class={plan.research_questions?.length ? 'mt-3' : ''}>
+				{@render definitionList(planFacts)}
+			</div>
+		{/if}
 	</StudySection>
 </div>

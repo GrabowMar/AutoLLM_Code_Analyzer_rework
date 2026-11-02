@@ -16,6 +16,7 @@ from backend.execution import transitions
 from backend.execution.transitions import LeaseLost
 from backend.generation.models import GenerationArtifact
 from backend.generation.models import GenerationJob
+from backend.generation.services import call_telemetry
 from backend.generation.services import result_writer
 from backend.generation.services.agent.runner import AgentRunCancelled
 from backend.generation.services.agent.runner import AgentRunError
@@ -30,6 +31,7 @@ from backend.generation.services.generation_validation import validate_frontend_
 from backend.generation.services.generation_validation import validate_python_files
 from backend.generation.services.llm_params import sampling_params
 from backend.generation.services.metrics import JobMetrics
+from backend.generation.services.metrics import served_summary
 from backend.generation.services.openrouter_client import OpenRouterClient
 from backend.generation.services.openrouter_client import OpenRouterError
 from backend.generation.services.output_guard import call_with_continuations
@@ -103,6 +105,9 @@ class GenerationService:
         # one of them is no longer "nothing happened" (spec §C.7).
         self._ok_calls = 0
         self._access = None
+        # Every LLM call of the current attempt as (stage, response | None):
+        # the template-mode served summary (metrics.providers, ...).
+        self._calls: list[tuple[str, dict | None]] = []
 
     def _build_client_for(self, job: GenerationJob) -> _InferenceClient:
         """The chat client for ``job``: ``resolve_access(job.created_by, job.model)`` (raises ``LLMAccessError``)."""
@@ -129,6 +134,7 @@ class GenerationService:
         if job.status == GenerationJob.Status.RUNNING and not claimed:
             result_writer.publish_status(job)
         self._ok_calls = 0
+        self._calls = []
         outcome = transitions.OUTCOME_DONE
         retry: tuple[str, str] | None = None
         try:
@@ -169,6 +175,7 @@ class GenerationService:
             logger.exception("Job %s failed", job.id)
             job.status = GenerationJob.Status.FAILED
             job.error_message = str(exc)[:2000]
+        self._schedule_call_stats(job)
         if retry is not None:
             transitions.infra_retry(job, *retry)
             return
@@ -180,6 +187,16 @@ class GenerationService:
             # The sample is saved with the eval_queued transition; the eval pool picks it up.
             job.status = GenerationJob.Status.RUNNING
         transitions.finish_stage(job, outcome)
+
+    @staticmethod
+    def _schedule_call_stats(job: GenerationJob) -> None:
+        """Queue the OpenRouter per-call stats fetch for this attempt's calls (best effort, never raises)."""
+        try:
+            from backend.generation.services.openrouter_stats import schedule_for_job
+
+            schedule_for_job(job.id)
+        except Exception:  # noqa: BLE001 - never affects the job's outcome
+            logger.warning("Could not schedule call stats for job %s", job.id, exc_info=True)
 
     def evaluate(self, job: GenerationJob, *, finish: bool = True) -> None:
         """The evaluation stage (``phase=evaluating``): build, run, grade; then validity; then finish.
@@ -316,6 +333,7 @@ class GenerationService:
         }
         job.metrics = JobMetrics(
             **usage,
+            **served_summary(self._calls),
             duration_seconds=round(elapsed, 2),
             model=model_id,
             lines_of_code=content.count("\n") + 1 if isinstance(content, str) else 0,
@@ -423,6 +441,7 @@ class GenerationService:
         loc = sum(code.count("\n") + 1 for code in files.values() if isinstance(code, str))
         job.metrics = JobMetrics(
             **total_usage,
+            **served_summary(self._calls),
             backend_duration=round(backend_elapsed, 2),
             frontend_duration=round(frontend_elapsed, 2),
             total_duration=round(backend_elapsed + frontend_elapsed, 2),
@@ -526,32 +545,54 @@ class GenerationService:
         if seed is not None:
             request_payload["seed"] = seed
 
+        # Per-call telemetry (GenerationArtifact.telemetry): wall time around
+        # the client call (its own retries and backoff included) and, for
+        # OpenRouter, the attempts the client logged.
+        recorder = call_telemetry.OpenRouterAttemptRecorder()
+        started: float | None = None
+        is_openrouter = True
         try:
             client = self._build_client_for(job)
             access = self._access
             if access is not None and not access.is_openrouter:
+                is_openrouter = False
                 request_payload["_upstream"] = {
                     "endpoint": access.endpoint.slug,
                     "path": "/api/chat" if access.api_flavor == "native" else "/v1/chat/completions",
                 }
-            response = client.chat_completion(
-                model=model_id,
-                messages=messages,
-                temperature=params["temperature"],
-                max_tokens=params["max_tokens"],
-                seed=seed,
-                params=params,
-            )
-        except OpenRouterError:
+            started = time.time()
+            with recorder:
+                response = client.chat_completion(
+                    model=model_id,
+                    messages=messages,
+                    temperature=params["temperature"],
+                    max_tokens=params["max_tokens"],
+                    seed=seed,
+                    params=params,
+                )
+        except OpenRouterError as exc:
+            self._calls.append((stage, None))
             GenerationArtifact.objects.create(
                 job=job,
                 stage=stage,
                 request_payload=request_payload,
                 response_payload={"error": "API call failed"},
+                telemetry=call_telemetry.safe(
+                    call_telemetry.from_failed_call,
+                    started_at=started,
+                    ended_at=time.time() if started is not None else None,
+                    status=exc.status_code,
+                    message=str(exc),
+                    # No attempt counts when the call never started (access could not be resolved).
+                    attempts=recorder.attempts(succeeded=False, error=exc) if is_openrouter and started else None,
+                    failed_attempts=recorder.failed if is_openrouter else None,
+                ),
             )
             raise
+        ended = time.time()
 
         self._ok_calls += 1
+        self._calls.append((stage, response))
         usage = OpenRouterClient.extract_usage(response)
         GenerationArtifact.objects.create(
             job=job,
@@ -561,5 +602,14 @@ class GenerationService:
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
             total_cost=usage.get("cost", 0.0),
+            telemetry=call_telemetry.safe(
+                call_telemetry.from_chat_response,
+                response,
+                started_at=started,
+                ended_at=ended,
+                attempts=recorder.attempts(succeeded=True) if is_openrouter else None,
+                failed_attempts=recorder.failed if is_openrouter else None,
+                served=None if is_openrouter else getattr(client, "last_served", None),
+            ),
         )
         return response

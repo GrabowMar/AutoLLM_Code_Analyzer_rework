@@ -60,10 +60,10 @@ export class ResultsFeed {
   }
 }
 
-/** The pre-registered analysis: what the Results tab shows with no URL options. */
+/** The pre-registered analysis: what the Results tab shows with no URL options (truncation: the plan's rule). */
 export const DEFAULT_RESULTS_QUERY: ResultsQuery = {
   common_cells: true,
   exclude_invalid: false,
-  exclude_truncated: true,
   fingerprint: "all",
+  planned_only: true,
 };

@@ -22,6 +22,20 @@ if TYPE_CHECKING:
 EXACT_PERMUTATION_MAX_N = 8
 PERMUTATION_DRAWS = 10_000
 BOOTSTRAP_DRAWS = 2_000
+# Permuted statistics within this distance of the observed one count as
+# reaching it (float noise between equal rank arrangements is ~1e-16).
+_PERMUTATION_TOLERANCE = 1e-9
+
+
+def round_p(p: float | None, digits: int = 4) -> float | None:
+    """*p* to *digits* significant figures: a tiny p stays visible instead of rounding to 0.
+
+    Exact permutation p-values at n = 8 go down to 2/40320 (about 5e-5),
+    which four decimals would show as an impossible p = 0.
+    """
+    if p is None or p == 0:
+        return p
+    return round(p, digits - 1 - math.floor(math.log10(abs(p))))
 
 
 def wilson_interval(successes: int, n: int, z: float = 1.96) -> tuple[float, float] | None:
@@ -90,13 +104,19 @@ def spearman_permutation_p(
 
     Valid at any n without the t-approximation (which misbehaves at n = 10
     with ties). The Monte Carlo p counts the observed statistic, so it is
-    never 0.
+    never 0. The threshold is the unrounded rho (the rounded one that
+    :func:`spearman` returns for display can sit above the arrangements that
+    equal it, which made p too small). The p is rounded to 4 significant
+    figures, not 4 decimals, so a correction applied to it starts from the
+    real value.
     """
-    rho = spearman(xs, ys)
-    if rho is None:
+    if len(xs) < 3 or len(xs) != len(ys):
         return None
     rx, ry = ranks(xs), ranks(ys)
-    observed = abs(rho) - 1e-12
+    raw = _pearson(rx, ry)
+    if raw is None:
+        return None
+    observed = abs(raw) - _PERMUTATION_TOLERANCE
     n = len(rx)
     if n <= EXACT_PERMUTATION_MAX_N:
         hits = total = 0
@@ -104,7 +124,7 @@ def spearman_permutation_p(
             r = _pearson(rx, perm)
             total += 1
             hits += r is not None and abs(r) >= observed
-        return round(hits / total, 4)
+        return round_p(hits / total)
     rng = random.Random(seed)  # noqa: S311 - reproducible resampling, not crypto
     shuffled = list(ry)
     hits = 0
@@ -112,7 +132,7 @@ def spearman_permutation_p(
         rng.shuffle(shuffled)
         r = _pearson(rx, shuffled)
         hits += r is not None and abs(r) >= observed
-    return round((hits + 1) / (draws + 1), 4)
+    return round_p((hits + 1) / (draws + 1))
 
 
 def spearman_bootstrap_ci(
@@ -175,20 +195,39 @@ def percentile(values: Sequence[float], q: float) -> float | None:
     return _percentile(sorted(values), q) if values else None
 
 
-def holm(p_values: Sequence[float | None]) -> list[float | None]:
-    """Holm step-down adjusted p-values (None entries stay None and are not counted)."""
+def family_size(p_values: Sequence[float | None]) -> int:
+    """The number of tests :func:`holm` and :func:`benjamini_hochberg` correct over.
+
+    A test whose p is None (too few units, a constant variable) was not
+    performed: it is not counted in the correction's m, so a family size
+    reported next to adjusted p-values must not count it either.
+    """
+    return sum(1 for p in p_values if p is not None)
+
+
+def holm(p_values: Sequence[float | None], *, digits: int | None = 4) -> list[float | None]:
+    """Holm step-down adjusted p-values.
+
+    None entries stay None and are not counted in m (see :func:`family_size`).
+    Adjusted values are rounded to *digits* significant figures; pass
+    ``digits=None`` for the unrounded values a significance decision needs.
+    """
     indexed = sorted((p, i) for i, p in enumerate(p_values) if p is not None)
     m = len(indexed)
     adjusted: list[float | None] = [None] * len(p_values)
     running = 0.0
     for rank, (p, i) in enumerate(indexed):
         running = max(running, min(1.0, (m - rank) * p))
-        adjusted[i] = round(running, 4)
+        adjusted[i] = running if digits is None else round_p(running, digits)
     return adjusted
 
 
-def benjamini_hochberg(p_values: Sequence[float | None]) -> list[float | None]:
-    """Benjamini-Hochberg FDR-adjusted p-values (q-values)."""
+def benjamini_hochberg(p_values: Sequence[float | None], *, digits: int | None = 4) -> list[float | None]:
+    """Benjamini-Hochberg FDR-adjusted p-values (q-values).
+
+    None entries stay None and are not counted in m (see :func:`family_size`).
+    Rounded like :func:`holm`; ``digits=None`` returns unrounded values.
+    """
     indexed = sorted((p, i) for i, p in enumerate(p_values) if p is not None)
     m = len(indexed)
     adjusted: list[float | None] = [None] * len(p_values)
@@ -196,12 +235,44 @@ def benjamini_hochberg(p_values: Sequence[float | None]) -> list[float | None]:
     for rank in range(m - 1, -1, -1):
         p, i = indexed[rank]
         running = min(running, p * m / (rank + 1))
-        adjusted[i] = round(min(1.0, running), 4)
+        q = min(1.0, running)
+        adjusted[i] = q if digits is None else round_p(q, digits)
     return adjusted
 
 
+def kendall_tau_b(xs: Sequence[float], ys: Sequence[float]) -> float | None:
+    """Kendall's tau-b between two paired score (or rank) vectors, ties handled.
+
+    Tied pairs count as neither concordant nor discordant, and the
+    denominator discounts them, so two alphabetical tie-breaks of the same
+    scores cannot read as perfect agreement. None below two items or when
+    either vector is constant (nothing is ordered).
+    """
+    n = len(xs)
+    if n < 2 or n != len(ys):
+        return None
+    concordant = discordant = ties_x = ties_y = 0
+    for i, j in itertools.combinations(range(n), 2):
+        dx = xs[i] - xs[j]
+        dy = ys[i] - ys[j]
+        if dx == 0:
+            ties_x += 1
+        if dy == 0:
+            ties_y += 1
+        if dx and dy:
+            if (dx > 0) == (dy > 0):
+                concordant += 1
+            else:
+                discordant += 1
+    pairs = n * (n - 1) / 2
+    denom = math.sqrt((pairs - ties_x) * (pairs - ties_y))
+    if not denom:
+        return None
+    return round((concordant - discordant) / denom, 4)
+
+
 def kendall_tau(order_a: Sequence[str], order_b: Sequence[str]) -> float | None:
-    """Kendall's tau-a between two orderings of (mostly) the same items."""
+    """Kendall's tau-a between two orderings of (mostly) the same items (no ties; see :func:`kendall_tau_b`)."""
     common = [x for x in order_a if x in set(order_b)]
     pos_b = {x: i for i, x in enumerate(order_b)}
     n = len(common)

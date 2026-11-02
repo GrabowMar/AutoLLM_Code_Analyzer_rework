@@ -63,6 +63,22 @@ const statusTones: Record<string, Tone> = {
   offline: "danger",
   disabled: "neutral",
   standby: "neutral",
+  // Human evaluation: task lifecycle, participants, assignments, app hosting.
+  // A skipped / expired assignment or an unreachable app is missing data (warning).
+  draft: "neutral",
+  open: "success",
+  closed: "neutral",
+  archived: "neutral",
+  invited: "neutral",
+  withdrawn: "neutral",
+  assigned: "neutral",
+  submitted: "success",
+  skipped: "warning",
+  expired: "warning",
+  starting: "info",
+  stopping: "info",
+  idle: "neutral",
+  unavailable: "warning",
 };
 
 /** Statuses that represent work in flight; StatusBadge pulses their dot. */

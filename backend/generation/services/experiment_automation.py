@@ -15,8 +15,9 @@ recorded on the rows and never raised.
 * A post-run (``ExperimentPostRun``) is created once per completion
   (:func:`on_experiment_completed`, called by ``maybe_complete_experiment``
   only when its conditional UPDATE won) or by hand. It runs the configured
-  analyzers sequentially over the completed current-attempt jobs that have no
-  analysis yet (the analyzer workspace's ``/work`` is shared), then the
+  analyzers sequentially over the completed current-attempt jobs, each with
+  the configured analyzers that have not measured it yet (the analyzer
+  workspace's ``/work`` is shared), then the
   ``experiment_report``, publishing ``post_run`` events as it goes.
 """
 
@@ -506,9 +507,18 @@ def _save_progress(post_run: ExperimentPostRun, **fields: Any) -> None:
     _publish_post_run(post_run)
 
 
-def analysis_targets(experiment: Experiment, *, only_passing: bool) -> list[GenerationJob]:
-    """Completed current-attempt jobs of *experiment* that have no analysis run yet."""
-    from backend.analysis.models import AnalysisRun
+def analysis_targets(experiment: Experiment, *, only_passing: bool, tool_slugs=()) -> list[GenerationJob]:
+    """Completed current-attempt jobs of *experiment* that a configured analyzer has not measured yet.
+
+    A job counts as analyzed by a tool only when that tool *measured* it
+    (its latest result is completed, or skipped as not applicable:
+    ``ToolResult.latest_ids_per_job``). A failed or interrupted run, a tool
+    that failed, or an ad-hoc run of other tools leaves the job a target, so
+    every compared app ends up measured by the same instruments. Each job
+    carries ``missing_tool_slugs``: the configured tools (in configured
+    order) still to run on it.
+    """
+    from backend.analysis.models import ToolResult
     from backend.generation.services.experiments import current_jobs
 
     rows = current_jobs(experiment, ("id", "status", "metrics__functional__pass_rate"))
@@ -519,12 +529,21 @@ def analysis_targets(experiment: Experiment, *, only_passing: bool) -> list[Gene
             for r in rows
             if r["status"] == GenerationJob.Status.COMPLETED and r["metrics__functional__pass_rate"] == 1
         ]
-    analyzed = set(
-        AnalysisRun.objects.filter(generation_job_id__in=ids)
-        .exclude(status=AnalysisRun.Status.CANCELLED)
-        .values_list("generation_job_id", flat=True),
+    measured: dict[Any, set[str]] = {}
+    latest = ToolResult.objects.filter(id__in=ToolResult.latest_ids_per_job(ids)).filter(
+        Q(status=ToolResult.Status.COMPLETED)
+        | Q(status=ToolResult.Status.SKIPPED, summary__skip_reason="not_applicable"),
     )
-    return list(GenerationJob.objects.filter(id__in=[i for i in ids if i not in analyzed]).order_by("created_at"))
+    for job_id, slug in latest.values_list("run__generation_job_id", "tool_slug"):
+        measured.setdefault(job_id, set()).add(slug)
+    wanted = list(dict.fromkeys(tool_slugs or ()))
+    targets = []
+    for job in GenerationJob.objects.filter(id__in=ids).order_by("created_at"):
+        missing = [slug for slug in wanted if slug not in measured.get(job.id, set())]
+        if missing:
+            job.missing_tool_slugs = missing
+            targets.append(job)
+    return targets
 
 
 def _run_analyses(post_run: ExperimentPostRun, experiment: Experiment, config: dict[str, Any]) -> bool:
@@ -534,11 +553,17 @@ def _run_analyses(post_run: ExperimentPostRun, experiment: Experiment, config: d
     from backend.analysis.services import workspace_service
 
     analysis = config.get("analysis") or {}
-    targets = analysis_targets(experiment, only_passing=bool(analysis.get("only_passing")))
+    run_ids: list[str] = list(post_run.analysis_run_ids or [])
+    # Resumed after an executor restart: the run that executor was executing
+    # has no live thread any more. Fail it (and its in-flight tool) once its
+    # heartbeat has stopped, so its job is analyzed again below.
+    if run_ids:
+        runner.reap_stale_runs(timedelta(seconds=2 * runner.HEARTBEAT_INTERVAL_S), run_ids=run_ids)
+    tool_slugs = list(analysis.get("tool_slugs") or [])
+    targets = analysis_targets(experiment, only_passing=bool(analysis.get("only_passing")), tool_slugs=tool_slugs)
     user = experiment.created_by
     workspace = workspace_service.get_workspace(user)
     progress = {"analysis_done": 0, "analysis_total": len(targets), "analysis_failed": 0}
-    run_ids: list[str] = list(post_run.analysis_run_ids or [])
     _save_progress(post_run, progress=progress)
     for job in targets:
         if not _renew(post_run):
@@ -548,9 +573,12 @@ def _run_analyses(post_run: ExperimentPostRun, experiment: Experiment, config: d
             created_by=user,
             workspace=workspace,
             generation_job=job,
-            tool_slugs=list(analysis.get("tool_slugs") or []),
+            # Only what this job still lacks: tools that measured it already stand.
+            tool_slugs=job.missing_tool_slugs,
         )
         run_ids.append(str(run.id))
+        # Recorded before executing, so a resumed post-run can find it.
+        _save_progress(post_run, analysis_run_ids=run_ids)
         try:
             runner.execute(AnalysisRun.objects.select_related("created_by", "workspace").get(id=run.id))
             run.refresh_from_db(fields=["status"])
@@ -624,8 +652,9 @@ def run_post_run(post_run: ExperimentPostRun) -> ExperimentPostRun:
 def advance_post_runs(executor_id: str) -> ExperimentPostRun | None:
     """Claim one pending post-run (SKIP LOCKED, leased to ``executor_id``) and run it to completion.
 
-    Analyses run sequentially over completed current-attempt jobs without an
-    analysis (``only_passing`` → ``pass_rate == 1``), then the
+    Analyses run sequentially over completed current-attempt jobs, with the
+    configured analyzers that have not measured each job yet (``only_passing``
+    → ``pass_rate == 1``), then the
     ``experiment_report``; progress is published as ``post_run`` events.
     Deferred (returns None) while the memory rule needs the sandbox and
     evaluation lanes to drain first, and while draining. Returns the

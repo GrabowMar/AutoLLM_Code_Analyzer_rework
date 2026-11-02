@@ -83,6 +83,13 @@ def test_list_filters_and_sorts(api_client, user):
     assert set(ids("status=completed,failed")) == {str(few.id), str(many.id)}
     assert ids("tool_slug=semgrep") == [str(pending.id)]
     assert ids("sort=findings_desc")[:2] == [str(many.id), str(few.id)]
+    # By code findings: the run with more advisories but fewer code findings sorts after.
+    FindingFactory(result=ToolResultFactory(run=few, tool_slug="bandit"))
+    osv = ToolResultFactory(run=many, tool_slug="osv-scanner")
+    FindingFactory(result=osv, category="dependency", rule_id="GHSA-1")
+    by_code = ids("sort=code_findings_desc")
+    assert by_code[0] == str(few.id)
+    assert by_code.index(str(few.id)) < by_code.index(str(many.id))
 
 
 def test_stats_count_the_callers_runs(api_client, user):
@@ -108,7 +115,8 @@ def test_create_names_the_run_after_its_app(api_client, user, no_dispatch):
     job = _job(user)
     body = _post(api_client, "/runs/", {"tool_slugs": ["bandit"], "generation_job_id": str(job.id)}).json()
     assert body["name"] == body["target"]["label"]
-    assert body["source_files"] == [{"path": "app.py", "lines": 2}, {"path": "templates/index.html", "lines": 2}]
+    # One line each ("import os\n"): a trailing newline does not start another line.
+    assert body["source_files"] == [{"path": "app.py", "lines": 1}, {"path": "templates/index.html", "lines": 1}]
     assert no_dispatch == [[body["id"]]]
 
 
@@ -304,3 +312,112 @@ def test_facets_count_reported_levels_and_unrated(api_client, user):
     assert scoped["total"] == 1
     assert scoped["levels"] == []
     assert len(scoped["tools"]) == 2  # the tool facet itself stays unscoped
+
+
+def test_list_and_detail_fill_counters_older_runs_lack(api_client, user):
+    old = AnalysisRunFactory(created_by=user, status="completed", summary={"total_findings": 3, "tools_completed": 2})
+    osv = ToolResultFactory(run=old, tool_slug="osv-scanner", category="dependencies")
+    FindingFactory(result=osv, category="dependency", rule_id="GHSA-x")
+    FindingFactory(result=osv, category="dependency", rule_id="GHSA-y")
+    FindingFactory(result=ToolResultFactory(run=old, tool_slug="bandit"), category="security")
+    ToolResultFactory(run=old, tool_slug="hadolint", status="skipped", summary={"skip_reason": "not_applicable"})
+    ToolResultFactory(run=old, tool_slug="zap", status="skipped", summary={"skip_reason": "app_not_running"})
+    never = AnalysisRunFactory(created_by=user, status="failed", summary={})
+    # Stored by an earlier version with a 0 for scopes no tool measured.
+    zeros = {"code_findings": 0, "dependency_findings": 0, "runtime_findings": 0}
+    stored = AnalysisRunFactory(
+        created_by=user,
+        status="completed",
+        summary={"total_findings": 0, **zeros, "tools_not_applicable": 0, "tools_unmeasured": 0},
+    )
+    ToolResultFactory(run=stored, tool_slug="bandit")
+
+    items = {i["id"]: i for i in api_client.get("/api/analysis/runs/").json()["items"]}
+    summary = items[str(old.id)]["summary"]
+    # The DAST tool found the app down: no runtime measurement, so None, not 0.
+    assert (summary["code_findings"], summary["dependency_findings"], summary["runtime_findings"]) == (1, 2, None)
+    assert (summary["tools_not_applicable"], summary["tools_unmeasured"]) == (1, 1)
+    restated = items[str(stored.id)]["summary"]
+    assert [restated[k] for k in zeros] == [0, None, None]
+    # A run that measured nothing gets no invented zeros.
+    assert "code_findings" not in items[str(never.id)]["summary"]
+    detail = api_client.get(f"/api/analysis/runs/{old.id}/").json()["summary"]
+    assert detail["code_findings"] == 1
+    old.refresh_from_db()
+    assert "code_findings" not in old.summary  # computed at read time, never written back
+
+
+def _scoped_run(user):
+    run = AnalysisRunFactory(created_by=user, status="completed")
+    osv = ToolResultFactory(run=run, tool_slug="osv-scanner", category="dependencies")
+    FindingFactory(result=osv, severity="high", tool_severity="MODERATE", category="dependency", rule_id="GHSA-1")
+    FindingFactory(result=osv, severity="high", tool_severity="7.0", category="dependency", rule_id="GHSA-2")
+    FindingFactory(result=osv, severity="medium", tool_severity="HIGH", category="dependency", rule_id="GHSA-3")
+    bandit = ToolResultFactory(run=run, tool_slug="bandit")
+    FindingFactory(result=bandit, severity="low", tool_severity="LOW", category="security", rule_id="B101")
+    FindingFactory(result=bandit, severity="medium", tool_severity="warning", category="security", rule_id="B105")
+    AnalyzerToolFactory(slug="dast-scope", analysis_mode="dynamic")
+    dast = ToolResultFactory(run=run, tool_slug="dast-scope")
+    FindingFactory(result=dast, severity="medium", tool_severity="Medium")
+    return run
+
+
+def test_findings_scope_separates_code_from_advisories_and_runtime(api_client, user):
+    run = _scoped_run(user)
+    url = f"/api/analysis/runs/{run.id}/findings/"
+    assert {f["rule_id"] for f in api_client.get(f"{url}?scope=code").json()["items"]} == {"B101", "B105"}
+    assert api_client.get(f"{url}?scope=dependencies").json()["total"] == 3
+    assert [f["tool_slug"] for f in api_client.get(f"{url}?scope=runtime").json()["items"]] == ["dast-scope"]
+    assert api_client.get(f"{url}?scope=nonsense").status_code == 400
+
+    facets = api_client.get(f"{url}facets/").json()
+    assert facets["scopes"] == {"code": 2, "dependencies": 3, "runtime": 1}
+    code_only = api_client.get(f"{url}facets/?scope=code").json()
+    assert code_only["total"] == 2
+    assert {t["value"] for t in code_only["tools"]} == {"bandit"}
+    assert code_only["scopes"] == facets["scopes"]
+
+
+def test_facet_scopes_no_tool_measured_are_none(api_client, user):
+    run = AnalysisRunFactory(created_by=user, status="completed")
+    FindingFactory(result=ToolResultFactory(run=run, tool_slug="bandit"), category="security")
+    ToolResultFactory(run=run, tool_slug="pip-audit", category="dependencies", status="failed")
+    facets = api_client.get(f"/api/analysis/runs/{run.id}/findings/facets/").json()
+    assert facets["scopes"] == {"code": 1, "dependencies": None, "runtime": None}
+
+
+def test_levels_and_the_severity_sort_follow_the_tools_own_words(api_client, user):
+    run = _scoped_run(user)
+    url = f"/api/analysis/runs/{run.id}/findings/"
+    levels = [(lv["value"], lv["rank"]) for lv in api_client.get(f"{url}facets/").json()["levels"]]
+    # By the word itself (CVSS scores by band), not by the normalized heuristic
+    # that rates osv's MODERATE above its HIGH.
+    assert levels == [("7.0", 1), ("high", 1), ("medium", 2), ("moderate", 2), ("warning", 2), ("low", 3)]
+    ordered = [f["tool_severity"] for f in api_client.get(f"{url}?sort=severity").json()["items"]]
+    assert ordered.index("HIGH") < ordered.index("MODERATE")
+    assert ordered.index("7.0") < ordered.index("MODERATE")
+    assert ordered[-1] == "LOW"
+
+
+def test_level_rank_mirrors_the_ui_table():
+    from backend.analysis.api.views.runs import level_rank
+
+    assert [level_rank(w) for w in ("Critical", "error", "Moderate", "note", "info", "", "weird")] == [
+        0,
+        1,
+        2,
+        4,
+        5,
+        9,
+        7,
+    ]
+    assert [level_rank(s) for s in ("9.8", "7.0", "5.3", "0.5", "0.0")] == [0, 1, 2, 3, 5]
+
+
+def test_preview_does_not_count_empty_files_as_applicable(api_client, user):
+    AnalyzerToolFactory(slug="reqs", file_patterns=["requirements*.txt"])
+    job = _job(user, files={"app.py": "x = 1\n", "requirements.txt": "", "pkg/__init__.py": ""})
+    body = _post(api_client, "/runs/preview/", {"tool_slugs": ["reqs"], "generation_job_ids": [str(job.id)]}).json()
+    assert body["targets"][0]["files"] == 3
+    assert body["targets"][0]["lines"] == 1
+    assert (body["tools"][0]["runs"], body["tools"][0]["not_applicable"]) == (0, 1)

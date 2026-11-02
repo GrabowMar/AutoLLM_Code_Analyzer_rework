@@ -1049,6 +1049,15 @@ class GenerationArtifact(models.Model):
     prompt_tokens = models.PositiveIntegerField(_("prompt tokens"), default=0)
     completion_tokens = models.PositiveIntegerField(_("completion tokens"), default=0)
     total_cost = models.FloatField(_("estimated cost"), default=0.0)
+    telemetry = models.JSONField(
+        _("telemetry"),
+        default=dict,
+        blank=True,
+        help_text=(
+            "Normalized per-call telemetry (timing, served provider, token "
+            "breakdown, OpenRouter generation stats). Keys absent = unknown."
+        ),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
 

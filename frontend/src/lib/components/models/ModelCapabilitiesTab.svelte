@@ -1,8 +1,10 @@
 <script lang="ts">
 	/**
 	 * Capabilities tab: features, modalities, reasoning controls, every supported
-	 * request parameter, limits and defaults — from the OpenRouter payload, the
-	 * models.dev record and (local models) the Ollama inventory.
+	 * request parameter, limits, the repo architecture (config.json) and the
+	 * sampling defaults comparison (authors vs OpenRouter vs your runs) — from the
+	 * OpenRouter payload, the models.dev record, Hugging Face and (local models)
+	 * the endpoint inventory, with a local model's catalog-twin data marked.
 	 */
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
@@ -11,6 +13,8 @@
 	import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line';
 	import ArrowUpFromLine from '@lucide/svelte/icons/arrow-up-from-line';
 	import type { LLMModelDetail } from '$lib/api/client';
+	import ModelArchitectureCard from './ModelArchitectureCard.svelte';
+	import ModelSamplingDefaults from './ModelSamplingDefaults.svelte';
 	import {
 		formatNumber,
 		getArchitecture,
@@ -21,13 +25,16 @@
 		getPerRequestLimits,
 		getReasoning,
 		getSupportedParameters,
+		metadataView,
+		type ReasoningInfo,
 	} from './helpers';
 
 	interface Props {
 		model: LLMModelDetail;
+		slug: string;
 	}
 
-	let { model }: Props = $props();
+	let { model, slug }: Props = $props();
 
 	// What each OpenRouter request parameter controls, for the hover text.
 	const PARAM_HELP: Record<string, string> = {
@@ -68,6 +75,11 @@
 	const inputMods = $derived((arch.input_modalities as string[] | undefined) ?? md?.modalities?.input ?? []);
 	const outputMods = $derived((arch.output_modalities as string[] | undefined) ?? md?.modalities?.output ?? []);
 	const ollama = $derived((getMeta(model).ollama ?? null) as Record<string, unknown> | null);
+	// Repo architecture / authors' sampling: own, or a local model's catalog twin (marked inherited).
+	const view = $derived(metadataView(model));
+	// OpenRouter defaults only describe OpenRouter serving: a local endpoint model has none.
+	const orDefaults = $derived(model.is_local ? null : getDefaultParameters(model));
+	const orReasoning = $derived<ReasoningInfo | null>(model.is_local ? null : reasoning);
 	const voices = $derived((caps.supported_voices as string[] | null | undefined) ?? []);
 
 	const features = $derived.by(() => {
@@ -133,6 +145,10 @@
 						<dl class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2">
 							<dt class="text-muted-foreground">Always on</dt>
 							<dd>{reasoning.mandatory ? 'Yes — cannot be disabled' : 'No — optional'}</dd>
+							{#if !reasoning.mandatory && reasoning.default_enabled != null}
+								<dt class="text-muted-foreground">Default</dt>
+								<dd title="What a request without reasoning settings gets (provider_default agent runs)">{reasoning.default_enabled ? 'On unless disabled' : 'Off unless requested'}</dd>
+							{/if}
 							{#if reasoning.default_effort}
 								<dt class="text-muted-foreground">Default effort</dt>
 								<dd class="font-mono text-xs leading-5">{reasoning.default_effort}</dd>
@@ -204,6 +220,7 @@
 				{:else}
 					<p class="text-sm text-muted-foreground">Provider defaults (none published).</p>
 				{/if}
+				{#if md?.status}<p class="mt-2 text-xs text-muted-foreground">models.dev status: <span class="font-mono text-foreground">{md.status}</span></p>{/if}
 			</Card.Content>
 		</Card.Root>
 
@@ -214,4 +231,23 @@
 			</Card.Root>
 		{/if}
 	</div>
+
+	<ModelSamplingDefaults
+		{slug}
+		authors={view.hf?.generation_config ?? null}
+		authorsStatus={view.hf?.fetch_status?.generation_config ?? null}
+		hasRepo={!!view.hf || !!view.caps.hugging_face_id}
+		openrouterDefaults={orDefaults}
+		reasoning={orReasoning}
+		inheritedFrom={view.inheritedFrom}
+		inheritedSlug={view.inheritedSlug}
+	/>
+
+	<ModelArchitectureCard
+		hf={view.hf}
+		params={view.params}
+		hfId={(view.caps.hugging_face_id as string | undefined) ?? null}
+		inheritedFrom={view.inheritedFrom}
+		inheritedSlug={view.inheritedSlug}
+	/>
 </div>

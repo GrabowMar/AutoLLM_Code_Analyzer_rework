@@ -401,6 +401,7 @@ export async function getResults(
       common_cells: q.common_cells,
       fingerprint: q.fingerprint,
       metric: q.metric,
+      planned_only: q.planned_only,
     })}`,
     { signal: options.signal },
   );

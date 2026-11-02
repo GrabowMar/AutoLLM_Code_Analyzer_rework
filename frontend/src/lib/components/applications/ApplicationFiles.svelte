@@ -12,9 +12,23 @@ import { copyText, type VirtualFile } from './utils';
 
 interface Props {
 	files: VirtualFile[];
+	/** Per-file origin from the agent's workspace manifest (scaffold / added / modified); absent when unknown. */
+	origins?: Record<string, string> | null;
 }
 
-let { files }: Props = $props();
+let { files, origins = null }: Props = $props();
+
+// Neutral outline badges: origin is provenance, not a status.
+const ORIGIN_TEXT: Record<string, string> = { added: 'added', modified: 'modified', scaffold: 'scaffold', unknown: 'origin ?' };
+const originCounts = $derived.by(() => {
+	if (!origins) return null;
+	const counts: Record<string, number> = {};
+	for (const f of files) {
+		const o = origins[f.name] ?? 'unknown';
+		counts[o] = (counts[o] ?? 0) + 1;
+	}
+	return counts;
+});
 
 let selectedFileIdx = $state(0);
 
@@ -106,6 +120,9 @@ const extensionBreakdown = $derived.by(() => {
 				<Card.Title>File explorer</Card.Title>
 				<Card.Description>
 					{fileStats.totalFiles} files · {(fileStats.totalSize / 1024).toFixed(1)} KB · {fileStats.codeCount} code · {fileStats.configCount} config
+					{#if originCounts}
+						· {Object.entries(originCounts).map(([o, n]) => `${n} ${ORIGIN_TEXT[o] ?? o}`).join(' · ')}
+					{/if}
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="border-t p-0">
@@ -123,7 +140,13 @@ const extensionBreakdown = $derived.by(() => {
 								<FileCode class="h-4 w-4 text-muted-foreground shrink-0" />
 								<div class="min-w-0 flex-1">
 									<div class="font-medium truncate font-mono text-xs">{f.name}</div>
-									<div class="text-xs text-muted-foreground">{f.code.split('\n').length} lines · {(f.code.length / 1024).toFixed(1)} KB</div>
+									<div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+										<span>{f.code.split('\n').length} lines · {(f.code.length / 1024).toFixed(1)} KB</span>
+										{#if origins}
+											{@const origin = origins[f.name] ?? 'unknown'}
+											<Badge variant="outline" class="px-1.5 py-0 text-[11px] font-normal {origin === 'scaffold' ? 'text-muted-foreground' : ''}" title="File origin (workspace manifest)">{ORIGIN_TEXT[origin] ?? origin}</Badge>
+										{/if}
+									</div>
 								</div>
 							</button>
 						{/each}
@@ -133,6 +156,9 @@ const extensionBreakdown = $derived.by(() => {
 						<div class="flex items-center justify-between px-4 py-2 border-b bg-muted/20">
 							<span class="text-sm font-medium font-mono">{files[selectedFileIdx]?.name ?? ''}</span>
 							<div class="flex items-center gap-1">
+								{#if origins && files[selectedFileIdx]}
+									<Badge variant="outline" class="text-xs" title="File origin (workspace manifest)">{ORIGIN_TEXT[origins[files[selectedFileIdx].name] ?? 'unknown'] ?? origins[files[selectedFileIdx].name]}</Badge>
+								{/if}
 								<Badge variant="outline" class="text-xs">{files[selectedFileIdx]?.lang}</Badge>
 								<Button variant="ghost" size="sm" class="h-7" title="Copy file" aria-label="Copy file" onclick={() => copyText(files[selectedFileIdx]?.code ?? '', 'Copied file')}>
 									<Copy class="h-3.5 w-3.5" />

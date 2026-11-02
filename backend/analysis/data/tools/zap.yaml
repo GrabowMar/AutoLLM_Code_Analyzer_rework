@@ -3,8 +3,10 @@ name: OWASP ZAP
 description: >-
   Dynamic application security testing (DAST) against the running app: spiders
   its pages, then passively and actively scans them for missing security
-  headers, XSS, SQL injection, information leaks and misconfigurations.
-  Requires the app's container to be running.
+  headers, XSS, SQL injection, information leaks and misconfigurations. The
+  spider does not run JavaScript, so it reaches only what the start page links
+  to: the API endpoints of a single-page app are not attacked. Requires the
+  app's container to be running.
 category: security
 kind: container
 target_language: any
@@ -32,7 +34,8 @@ install_cmd: >-
 verify_cmd: 'v=$(zap -cmd -silent -dir /tmp/zap-verify -version 2>/dev/null | tail -1) && [ -n "$v" ] && echo "ZAP $v"'
 uninstall_cmd: "rm -rf /home/analyzer/.local/opt/zap /home/analyzer/.local/opt/zap-jre /home/analyzer/.local/bin/zap"
 # Quick scan = spider + active scan. A fresh -dir per run keeps no state
-# between apps; the JSON report is the only thing printed.
+# between apps; the JSON report is the only thing printed (no report, or an
+# empty one, fails the result).
 run_cmd: >-
   rm -rf /tmp/zap && mkdir -p /tmp/zap &&
   zap -cmd -silent -dir /tmp/zap/home

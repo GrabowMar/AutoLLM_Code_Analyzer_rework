@@ -312,6 +312,57 @@ describe("draftFromExperiment", () => {
     expect(d.slugTouched).toBe(false);
     expect(d.baseSeed).toEqual(expect.any(Number));
   });
+
+  it("copies the analysis plan into a clone's create body, never into an edit", () => {
+    const plan = {
+      primary_metric: "pass_rate",
+      research_questions: [
+        { id: "RQ1", question: "Q?", direction: "two-sided" },
+      ],
+      correction: "holm",
+      alpha: 0.05,
+      exclusions: { truncated: false, infra_errors: true },
+    };
+    const planned = {
+      ...exp,
+      analysis_plan: plan,
+      analysis_plan_hash: "c4cd7fc4",
+      analysis_plan_frozen_at: "2026-10-26T19:59:00Z",
+    } as unknown as ExperimentDetail;
+    const clone = draftFromExperiment(planned, { clone: true });
+    expect(clone.analysisPlan).toEqual(plan);
+    expect(buildCreateBody(clone).analysis_plan).toEqual(plan);
+    // The session copy keeps it; a plan-less experiment clones without one.
+    expect(
+      sanitizeDraft(JSON.parse(JSON.stringify(clone)))?.analysisPlan,
+    ).toEqual(plan);
+    const edit = draftFromExperiment(planned, { clone: false });
+    expect(edit.analysisPlan).toBeNull();
+    expect("analysis_plan" in buildCreateBody(edit)).toBe(false);
+    // An edit still knows the stored plan's truncation rule (display only), a clone carries the plan itself.
+    expect(edit.storedPlanTruncated).toBe(false);
+    expect(clone.storedPlanTruncated).toBeNull();
+    expect(JSON.stringify(buildCreateBody(edit))).not.toContain(
+      "storedPlanTruncated",
+    );
+    expect(
+      draftFromExperiment(
+        {
+          ...exp,
+          analysis_plan: { primary_metric: "pass_rate" },
+        } as unknown as ExperimentDetail,
+        { clone: false },
+      ).storedPlanTruncated,
+    ).toBe(true);
+    expect(
+      draftFromExperiment(exp, { clone: false }).storedPlanTruncated,
+    ).toBeNull();
+    const bare = draftFromExperiment(
+      { ...exp, analysis_plan: {} } as unknown as ExperimentDetail,
+      { clone: true },
+    );
+    expect(bare.analysisPlan).toBeNull();
+  });
 });
 
 describe("selection by endpoint", () => {

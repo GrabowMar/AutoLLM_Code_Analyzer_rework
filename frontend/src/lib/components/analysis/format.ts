@@ -9,12 +9,16 @@
 import type { Tone } from "$lib/constants/colors";
 import { toneClasses } from "$lib/constants/colors";
 import type {
+  RulePrevalence,
   RunPhase,
+  RunSetup,
   RunStatus,
   RunTarget,
   RunToolResult,
+  ScopeCounts,
   SkipReason,
 } from "$lib/api/runs";
+import { modelPathSegment } from "$lib/api/models";
 import { shortModelName } from "$lib/components/table";
 
 export const ACTIVE_STATUSES: ReadonlySet<string> = new Set([
@@ -39,7 +43,8 @@ export const RUN_STATUS_LABELS: Record<RunStatus, string> = {
 export const RUN_STATUS_HELP: Record<RunStatus, string> = {
   pending: "Waiting for its turn: runs of one workspace execute one at a time.",
   running: "Tools are running.",
-  completed: "Every tool measured the code (or had nothing to read).",
+  completed:
+    "No tool failed. Tools skipped because the app was down, the tool was unavailable or the run was cancelled measured nothing.",
   partial: "Some tools failed; the others' findings stand.",
   failed: "No tool produced a result.",
   cancelled: "Stopped before every tool ran.",
@@ -193,8 +198,30 @@ const LEVEL_INDEX = new Map(
   LEVEL_WORDS.map(([w, rank, tone]) => [w, { rank, tone }]),
 );
 
+/** Ranks of CVSS scores some tools print as the level ("7.0"): critical 9+, high 7+, medium 4+, else low. */
+function cvssRank(word: string): number | null {
+  if (!/^\d+(\.\d+)?$/.test(word)) return null;
+  const score = Number(word);
+  if (score <= 0) return 5;
+  return score >= 9 ? 0 : score >= 7 ? 1 : score >= 4 ? 2 : 3;
+}
+
+/** Rank of a tool's own level word, 0 = most severe (the server's `runs.level_rank` mirrors this). */
 export function levelRank(label: string): number {
-  return LEVEL_INDEX.get(label.trim().toLowerCase())?.rank ?? 7;
+  const word = label.trim().toLowerCase();
+  return LEVEL_INDEX.get(word)?.rank ?? cvssRank(word) ?? 7;
+}
+
+/** Levels (as the tools printed them) most severe first, then by count. */
+export function sortLevels<T extends { value: string; count: number }>(
+  levels: readonly T[],
+): T[] {
+  return [...levels].sort(
+    (a, b) =>
+      levelRank(a.value) - levelRank(b.value) ||
+      b.count - a.count ||
+      a.value.localeCompare(b.value),
+  );
 }
 
 /** Badge classes for a tool's own level word (critical is solid, like the severity palette). */
@@ -217,6 +244,120 @@ export function reportedLevels(
   return Object.entries(counts)
     .filter(([, n]) => n > 0)
     .sort((a, b) => levelRank(a[0]) - levelRank(b[0]) || b[1] - a[1]);
+}
+
+/**
+ * A finished run's findings by scope (`code_findings`, `dependency_findings`,
+ * `runtime_findings`; null = no tool of that scope measured the run), or null
+ * for a summary without the split (active, or never finished).
+ */
+export function runScopeCounts(
+  summary: Record<string, any> | null | undefined,
+): ScopeCounts | null {
+  const s = summary ?? {};
+  if (!("code_findings" in s)) return null;
+  const n = (v: unknown) => (typeof v === "number" ? v : null);
+  return {
+    code: n(s.code_findings),
+    dependencies: n(s.dependency_findings),
+    runtime: n(s.runtime_findings),
+  };
+}
+
+/** "102 advisories · 3 runtime": the findings that are not code issues (empty when there are none). */
+export function nonCodeText(scopes: ScopeCounts | null | undefined): string {
+  if (!scopes) return "";
+  return [
+    scopes.dependencies ? `${scopes.dependencies} advisories` : "",
+    scopes.runtime ? `${scopes.runtime} runtime` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * The run Overview's "Tools measured" subtitle of a finished run. A tool
+ * with no result at all (the run failed while preparing, or was cancelled
+ * while queued) measured nothing too, so "all measured" needs every tool
+ * measured.
+ */
+export function toolsMeasuredNote(c: {
+  total: number;
+  measured: number;
+  failed: number;
+  notApplicable: number;
+}): string {
+  const notMeasured = Math.max(0, c.total - c.measured - c.failed);
+  return (
+    [
+      c.failed ? `${c.failed} failed` : "",
+      notMeasured ? `${notMeasured} not measured` : "",
+      c.notApplicable ? `${c.notApplicable} had nothing to read` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ") || "all measured"
+  );
+}
+
+/**
+ * What `summary.truncated_inputs` means for the findings: generated code cut
+ * off at the token limit (`backend`, `frontend`), or the agent's final
+ * response cut off (`agent`). Empty when nothing was cut off.
+ */
+export function truncationNote(parts: readonly string[]): string {
+  const code = parts.filter((p) => p !== "agent");
+  const agent = parts.includes("agent");
+  if (code.length === 0) {
+    return agent
+      ? "The agent's final response was cut off at the model's token limit: the app may be unfinished."
+      : "";
+  }
+  return `The generated ${code.join(" and ")} code was cut off at the model's token limit${
+    agent ? ", and so was the agent's final response" : ""
+  }: these findings describe an incomplete app.`;
+}
+
+export interface RunToolCounts {
+  /** Tools in the run. */
+  total: number;
+  /** Completed, plus skipped as not applicable (nothing to read: a true zero). */
+  measured: number;
+  notApplicable: number;
+  failed: number;
+  /** Skipped because the app was down, the tool unavailable or the run cancelled: said nothing. */
+  unmeasured: number;
+  /** Finished, yet no tool measured anything: its findings count is not a clean zero. */
+  nothingMeasured: boolean;
+}
+
+/**
+ * Tool outcome counts of a finished run from its summary (`tools_completed`,
+ * `tools_failed`, `tools_not_applicable`, `tools_unmeasured`); null while
+ * active or for a summary without them.
+ */
+export function runToolCounts(run: {
+  status: string;
+  tool_slugs: string[];
+  summary: Record<string, any> | null | undefined;
+}): RunToolCounts | null {
+  const s = run.summary ?? {};
+  if (isActive(run.status) || s.tools_run == null) return null;
+  const n = (v: unknown) => (typeof v === "number" ? v : 0);
+  const notApplicable = n(s.tools_not_applicable);
+  const measured = n(s.tools_completed) + notApplicable;
+  // Older summaries lack the skip counters: what neither completed nor failed was not measured.
+  const unmeasured =
+    typeof s.tools_unmeasured === "number"
+      ? s.tools_unmeasured
+      : Math.max(0, run.tool_slugs.length - measured - n(s.tools_failed));
+  return {
+    total: run.tool_slugs.length,
+    measured,
+    notApplicable,
+    failed: n(s.tools_failed),
+    unmeasured,
+    nothingMeasured: run.tool_slugs.length > 0 && measured === 0,
+  };
 }
 
 // --- Targets ------------------------------------------------------------------------
@@ -258,16 +399,231 @@ export function downloadText(
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** RFC 4180 CSV of *rows* (first row = header). */
+/**
+ * A text cell a spreadsheet would read as a formula (`=`, `+`, `-`, `@`, tab,
+ * CR first) gets a leading apostrophe; numbers, and text that is a number
+ * ("-1.5"), stay as they are.
+ */
+function spreadsheetSafe(cell: string | number): string {
+  if (typeof cell === "number") return String(cell);
+  if (!/^[=+\-@\t\r]/.test(cell)) return cell;
+  return /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(cell) ? cell : `'${cell}`;
+}
+
+/**
+ * RFC 4180 CSV of *rows* (first row = header), made to be opened in a
+ * spreadsheet: text that would run as a formula is neutralized.
+ */
 export function toCsv(rows: (string | number | null | undefined)[][]): string {
   return rows
     .map((row) =>
       row
         .map((cell) => {
-          const s = cell == null ? "" : String(cell);
+          const s = cell == null ? "" : spreadsheetSafe(cell);
           return /[",\n\r]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
         })
         .join(","),
     )
     .join("\r\n");
+}
+
+// --- Run context ----------------------------------------------------------------------
+
+/** One part of a run's setup line; `href` links it, `title` explains it. */
+export interface SetupItem {
+  label: string;
+  href?: string;
+  title?: string;
+}
+
+/**
+ * The run header's setup line: the design cell (experiment › condition ›
+ * repeat k/N) and the method (model · harness · app). Parts the job does not
+ * have are left out; a repeat beyond the planned N says so.
+ */
+export function setupItems(job: RunSetup): {
+  cell: SetupItem[];
+  method: SetupItem[];
+} {
+  const cell: SetupItem[] = [];
+  if (job.experiment_id) {
+    cell.push({
+      label: job.experiment_name || "Experiment",
+      href: `/experiments/${job.experiment_id}`,
+      title: "Open the experiment",
+    });
+  }
+  if (job.condition_label) {
+    cell.push({
+      label: job.condition_label,
+      title: "Experiment condition (arm)",
+    });
+  }
+  if (job.repeat_index != null) {
+    const k = job.repeat_index + 1;
+    const n = job.planned_repeats;
+    cell.push({
+      label:
+        n == null
+          ? `repeat ${k}`
+          : k > n
+            ? `repeat ${k} (beyond the ${n} planned)`
+            : `repeat ${k}/${n}`,
+      title: "Trial of this (condition, app) cell / repeats planned at launch",
+    });
+  }
+  const method: SetupItem[] = [];
+  if (job.model_id || job.model_name) {
+    method.push({
+      label: shortModelName(job.model_name || job.model_id),
+      href: `/models/${job.model_slug || modelPathSegment(job.model_id)}`,
+      title: job.model_id,
+    });
+  }
+  if (job.harness) {
+    method.push({
+      label: job.harness,
+      title: job.bundle_key
+        ? `Method: ${job.bundle_key}`
+        : "Coding-agent harness",
+    });
+  } else if (job.bundle_key) {
+    method.push({
+      label: job.bundle_key,
+      title: "Generation profile / method",
+    });
+  }
+  method.push({
+    label: job.app_name || job.stack_slug || "App",
+    href: `/applications/${job.id}`,
+    title: "Open the app",
+  });
+  return { cell, method };
+}
+
+/** "81 in .tmp/ · 3 in node_modules/": where the stored files the analysis left out are. */
+export function excludedDirsText(dirs: Record<string, number>): string {
+  return Object.entries(dirs)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([dir, n]) => `${n} in ${dir || "(other)"}/`)
+    .join(" · ");
+}
+
+/** "15/30 apps · 4/6 of this model": how common a rule is (a tool that measured no app reads "—"). */
+export function prevalenceText(p: RulePrevalence): string {
+  const corpus =
+    p.apps_measured > 0
+      ? `${p.apps_with_rule}/${p.apps_measured} apps`
+      : "— apps";
+  if (p.model_apps_measured == null) return corpus;
+  const model =
+    p.model_apps_measured > 0
+      ? `${p.model_apps_with_rule ?? 0}/${p.model_apps_measured}`
+      : "—";
+  return `${corpus} · ${model} of this model`;
+}
+
+/** The tooltip of a prevalence figure: what is counted, over which apps. */
+export function prevalenceTitle(p: RulePrevalence, scopeLabel: string): string {
+  return (
+    `Apps in ${scopeLabel || "the corpus"} whose latest ${p.tool} result reports ${p.rule_id}, ` +
+    `out of the ${p.apps_measured} app${p.apps_measured === 1 ? "" : "s"} ${p.tool} measured ` +
+    "(completed or nothing to read); repeats count separately. Descriptive, no test."
+  );
+}
+
+/**
+ * Prevalence rows by `tool + rule`; for rule-only lookups, the rule's most frequent row in the
+ * run (`byRule`) and every tool's row of that rule id, most findings in the run first (`byRuleAll`).
+ */
+export function prevalenceIndex(rows: readonly RulePrevalence[]): {
+  byToolRule: Map<string, RulePrevalence>;
+  byRule: Map<string, RulePrevalence>;
+  byRuleAll: Map<string, RulePrevalence[]>;
+} {
+  const byToolRule = new Map<string, RulePrevalence>();
+  const byRule = new Map<string, RulePrevalence>();
+  const byRuleAll = new Map<string, RulePrevalence[]>();
+  for (const row of rows) {
+    byToolRule.set(prevalenceKey(row.tool, row.rule_id), row);
+    const seen = byRule.get(row.rule_id);
+    if (!seen || row.count_in_run > seen.count_in_run)
+      byRule.set(row.rule_id, row);
+    byRuleAll.set(row.rule_id, [...(byRuleAll.get(row.rule_id) ?? []), row]);
+  }
+  for (const list of byRuleAll.values()) {
+    list.sort(
+      (a, b) => b.count_in_run - a.count_in_run || a.tool.localeCompare(b.tool),
+    );
+  }
+  return { byToolRule, byRule, byRuleAll };
+}
+
+/**
+ * The prevalence lines of one rule id in a list whose rows pool every tool that reports
+ * that id (ruff and flake8 both say `F401`): one line per tool, each named when several
+ * tools report it, so one tool's figures never stand for another's.
+ */
+export function rulePrevalenceLines(
+  rows: readonly RulePrevalence[],
+): { row: RulePrevalence; text: string }[] {
+  return rows.map((row) => ({
+    row,
+    text:
+      rows.length > 1
+        ? `${row.tool}: ${prevalenceText(row)}`
+        : prevalenceText(row),
+  }));
+}
+
+/**
+ * The run Overview's note on stored files in dependency / cache / scratch directories:
+ * whether this run's tools left them out, or read them (a run from before that rule,
+ * whose findings may be about them). They are never in the LOC.
+ */
+export function excludedPathsNote(e: {
+  count: number;
+  dirs: Record<string, number>;
+  left_out?: boolean | null;
+  findings_in_excluded?: number;
+}): string {
+  const one = e.count === 1;
+  const files = `${e.count.toLocaleString()} stored file${one ? "" : "s"}`;
+  const where = excludedDirsText(e.dirs);
+  const notSource =
+    "dependency, cache and scratch directories are not the app's source";
+  if (e.left_out === true) {
+    return `${files} ${one ? "was" : "were"} left out of the analysis and of the LOC (${where}): ${notSource}.`;
+  }
+  if (e.left_out === false) {
+    const n = e.findings_in_excluded ?? 0;
+    return (
+      `${files} (${where}) ${one ? "is" : "are"} not counted in the LOC: ${notSource}. ` +
+      `This run predates leaving them out of the analysis: its tools read ${one ? "it" : "them"}` +
+      (n > 0
+        ? `, and ${n.toLocaleString()} of its findings ${n === 1 ? "is" : "are"} in ${one ? "it" : "them"}`
+        : "") +
+      ". Re-run the analysis to measure the app's own source only."
+    );
+  }
+  return `${files} (${where}) ${one ? "is" : "are"} not counted in the LOC: ${notSource}; today's analyses leave ${one ? "it" : "them"} out.`;
+}
+
+export function prevalenceKey(tool: string, ruleId: string): string {
+  return `${tool}\u0000${ruleId}`;
+}
+
+/**
+ * The cross-tool issue class (the study's dedup unit) when it says more than
+ * the rule itself: "" for the `tool:rule` fallback or a class equal to the rule.
+ */
+export function issueClassLabel(
+  cls: string | null | undefined,
+  tool: string,
+  rule: string,
+): string {
+  if (!cls) return "";
+  if (cls === rule || cls === `${tool}:${rule || "unknown"}`) return "";
+  return cls;
 }

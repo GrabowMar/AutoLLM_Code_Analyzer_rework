@@ -9,15 +9,19 @@ target_language: python
 analysis_mode: static
 technologies: [python]
 icon: badge-check
-version: "3"
+version: "4.1"
 docs_url: https://pylint.readthedocs.io/
-install_cmd: "pip install --user --upgrade pylint"
+# Pinned like the other pip tools: an unpinned install drifts to new major
+# versions (new checks change the counts) between workspaces.
+install_cmd: "pip install --user --upgrade 'pylint==4.1.*'"
 verify_cmd: "pylint --version"
 uninstall_cmd: "pip uninstall -y pylint"
 # --recursive=y: without it pylint only lints {target} as one package, so
 # modules in directories without __init__.py (the usual generated-app layout)
 # are never checked. node_modules can hold .py files (node-gyp), so skip it.
-run_cmd: "pylint {target} --recursive=y --ignore=node_modules,.venv,venv -f json --exit-zero --disable={config:disable}"
+# --rcfile=/dev/null: a .pylintrc/pyproject.toml the app ships must not change
+# what is measured for that app only (like ESLint's --no-eslintrc).
+run_cmd: "pylint {target} --recursive=y --rcfile=/dev/null --ignore=node_modules,.venv,venv -f json --exit-zero --disable={config:disable}"
 parser_key: pylint
 file_patterns: ["*.py"]
 run_timeout: 180

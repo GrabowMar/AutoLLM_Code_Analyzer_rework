@@ -21,13 +21,22 @@ import Layers from '@lucide/svelte/icons/layers';
 import { shortModelName, modelNamePrefix } from '$lib/components/table';
 import AppRuntimeControls from './AppRuntimeControls.svelte';
 import CloudUpload from '@lucide/svelte/icons/cloud-upload';
+import ExperimentCellChip from './insights/ExperimentCellChip.svelte';
+import type { CodeProfile, ExperimentCell } from '$lib/api/job-insights';
 
 interface Props {
 	job: GenerationJob;
 	provider: string;
 	codeFootprint: CodeFootprint | null;
-	totalTokens: number;
-	totalCost: number;
+	/** Source LOC (study denominator) and all-lines count; null while loading or unavailable. */
+	codeProfile?: CodeProfile | null;
+	/** Set when the code profile could not be loaded (the KPI then says so instead of "…"). */
+	codeProfileError?: string;
+	/** Experiment cell the job fills (from the timeline endpoint). */
+	experimentCell?: ExperimentCell | null;
+	/** null when nothing was recorded (no artifacts, no metrics): unknown, never 0. */
+	totalTokens: number | null;
+	totalCost: number | null;
 	onCancel: () => void;
 	onRetry: () => void;
 	onExport: () => void;
@@ -43,6 +52,9 @@ let {
 	job,
 	provider,
 	codeFootprint,
+	codeProfile = null,
+	codeProfileError = '',
+	experimentCell = null,
 	totalTokens,
 	totalCost,
 	onCancel,
@@ -59,11 +71,39 @@ const temperature = $derived(
 	job.temperature != null ? String(job.temperature) : job.mode === 'agent' ? 'default' : '—'
 );
 
+// Source LOC = the study tables' per-KLOC denominator (non-blank, non-comment source
+// lines, tests and scratch/dependency dirs apart); the all-lines count (lockfiles,
+// scratch folders) is only a secondary reference.
+const allLines = $derived(codeProfile?.all_lines ?? codeFootprint?.totalLines ?? null);
+const locKpi = $derived.by(() => {
+	const total = codeProfile?.loc.total_loc;
+	if (codeProfile && total != null) {
+		return {
+			value: fmt(total, 0),
+			title: `Source LOC in ${codeProfile.loc.source_files ?? '—'} source files (tests and dependency/scratch dirs apart): the per-KLOC denominator of the study tables.\nAll lines incl. lockfiles/scratch: ${allLines != null ? fmt(allLines, 0) : '—'} in ${codeProfile.all_files} files.`,
+		};
+	}
+	if (codeProfile) return { value: '—', title: codeProfile.notes[0] ?? 'Source LOC not measured for this run.' };
+	if (codeProfileError) return { value: '—', title: `Source LOC could not be loaded: ${codeProfileError}` };
+	return { value: '…', title: allLines != null ? `Loading source LOC (all lines incl. lockfiles/scratch: ${fmt(allLines, 0)})` : 'Loading source LOC' };
+});
+// Subscription-billed runs (OpenCode Go) record cost 0; the provider's list price is kept apart.
+const listCost = $derived(typeof job.metrics?.list_cost === 'number' ? (job.metrics.list_cost as number) : null);
+const billingSource = $derived(typeof job.metrics?.billing_source === 'string' ? (job.metrics.billing_source as string) : null);
+
 const kpis = $derived([
 	{ label: 'duration', value: fmtDur(job.duration_seconds), title: job.started_at ? 'Wall clock' : 'Not started' },
-	{ label: 'tokens', value: fmt(totalTokens, 0), title: 'Prompt + completion' },
-	{ label: 'cost', value: fmtCost(totalCost), title: 'USD' },
-	{ label: 'LOC', value: fmt(codeFootprint?.totalLines ?? 0, 0), title: codeFootprint ? `Lines of code in ${codeFootprint.fileCount} file${codeFootprint.fileCount === 1 ? '' : 's'}` : 'No code' },
+	{ label: 'tokens', value: fmt(totalTokens, 0), title: totalTokens == null ? 'No LLM usage was recorded for this job' : 'Prompt + completion' },
+	{
+		label: 'cost',
+		// A subscription-billed run is $0 billed, not "Free": its list price is shown next to it.
+		value: totalCost == null ? '—' : listCost != null && totalCost === 0 ? '$0' : fmtCost(totalCost),
+		title: totalCost == null ? 'No LLM usage was recorded for this job' : `USD billed${billingSource ? ` (${billingSource})` : ''}${listCost != null ? `\nList-price equivalent reported by the provider (not billed): $${listCost.toFixed(4)}` : ''}`,
+	},
+	...(listCost != null
+		? [{ label: 'list-price equiv.', value: `$${listCost.toFixed(listCost < 0.01 ? 5 : 3)}`, title: `List-price equivalent reported by the provider${billingSource ? ` (${billingSource})` : ''}; not billed, never part of cost or budget` }]
+		: []),
+	{ label: 'src LOC', value: locKpi.value, title: locKpi.title },
 	{ label: 'temp', value: temperature, title: 'Sampling temperature' },
 	{ label: 'max tokens', value: fmt(job.max_tokens, 0), title: 'Max tokens per response' },
 ]);
@@ -126,6 +166,10 @@ const kpis = $derived([
 		{#if job.stack_slug}
 			<span aria-hidden="true" class="opacity-50">·</span>
 			<span class="inline-flex items-center gap-1"><Layers class="size-3" aria-hidden="true" /><span class="font-mono">{job.stack_slug}</span></span>
+		{/if}
+		{#if experimentCell}
+			<span aria-hidden="true" class="opacity-50">·</span>
+			<ExperimentCellChip cell={experimentCell} />
 		{/if}
 		{#if job.batch_id}
 			<span aria-hidden="true" class="opacity-50">·</span>

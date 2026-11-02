@@ -241,6 +241,9 @@ class FindingSchema(Schema):
     rule_id: str
     tool_slug: str
     tool_specific_data: dict[str, Any] = {}
+    # A code finding located in test code (reports.services.loc.is_test_path):
+    # the study counts it apart from the app's own code issues.
+    in_tests: bool = False
 
 
 class RunTargetSchema(Schema):
@@ -330,7 +333,8 @@ class FacetValueSchema(Schema):
 class LevelFacetSchema(Schema):
     value: str
     count: int
-    # 0 = most severe (the mapped rank of this label).
+    # 0 = most severe: the rank of the label word itself (runs.level_rank,
+    # the UI's LEVEL_WORDS table; CVSS scores by band), never the normalized level.
     rank: int
 
 
@@ -339,8 +343,123 @@ class FindingFacetsSchema(Schema):
     tools: list[FacetValueSchema]
     levels: list[LevelFacetSchema]
     unrated: int
+    # {"code": n, "dependencies": n, "runtime": n} over all of the run's findings:
+    # code findings, known-vulnerability dependency advisories, dynamic tools' findings.
+    # None for a scope no tool of the run measured (and with no findings): unmeasured is not 0.
+    scopes: dict[str, int | None] = {}
+    # {"source": n, "tests": n, "excluded": n}: the code findings split by test files (tests/, *.test.*,
+    # conftest.py, smoke scripts; counted apart, as in the study) and those in NON_SOURCE_DIRS files
+    # (read by a run finalized before the exclusion rule: neither); None when code is unmeasured.
+    code_parts: dict[str, int | None] = {}
     categories: list[FacetValueSchema]
     files: list[FacetValueSchema]
     files_total: int
     rules: list[FacetValueSchema]
     rules_total: int
+
+
+# --- Run context (GET /runs/{id}/context/) -------------------------------------
+
+
+class RunSetupSchema(Schema):
+    """The generation setup behind the analyzed app: its design cell and method."""
+
+    id: str
+    mode: str
+    status: str = ""
+    # LLMModel primary key (model pages), its id string, display name and URL slug.
+    model_pk: int | None = None
+    model_id: str = ""
+    model_name: str = ""
+    model_slug: str = ""
+    app_id: int | None = None
+    app_slug: str = ""
+    app_name: str = ""
+    stack_slug: str = ""
+    batch_id: str | None = None
+    experiment_id: str | None = None
+    experiment_name: str = ""
+    condition_id: int | None = None
+    condition_label: str = ""
+    # 0-based trial within the (condition, app) cell, and the repeats planned at launch.
+    repeat_index: int | None = None
+    planned_repeats: int | None = None
+    harness: str | None = None
+    bundle_key: str = ""
+    config_fingerprint: str | None = None
+
+
+class ExcludedPathsSchema(Schema):
+    # Stored files inside dependency / cache / scratch directories (analysis.services.base.NON_SOURCE_DIRS).
+    count: int
+    sample: list[str] = []
+    # {excluded directory name (the first NON_SOURCE_DIRS part of the path): files}, e.g. {".tmp": 81}.
+    dirs: dict[str, int] = {}
+    # Whether this run's tools left them out: True when the run recorded them
+    # (summary.excluded_paths); False for a run finalized before the rule (its tools read
+    # them, and ``findings_in_excluded`` of its findings lie in them); None when unknown
+    # (no tool ran, or the run did not finish).
+    left_out: bool | None = None
+    findings_in_excluded: int = 0
+
+
+class SourceLocSchema(Schema):
+    """Source size by the study's definition (reports.services.loc): non-empty, non-comment lines of source files."""
+
+    total: int
+    files: int
+    # {"backend", "frontend", "tests"}; tests is None when the code has no paths (unknown, not zero).
+    by_layer: dict[str, int | None]
+    test_files: int | None = None
+    # Stored files that are not source (manifests, lockfiles, docs, configs); None without paths.
+    other_files: int | None = None
+    excluded_paths: ExcludedPathsSchema
+
+
+class CodeSplitRowSchema(Schema):
+    tool: str
+    findings_in_tests: int
+    findings_in_source: int
+    # Findings in NON_SOURCE_DIRS files (a run finalized before the exclusion rule read them): neither of the above.
+    findings_in_excluded: int = 0
+
+
+class RulePrevalenceSchema(Schema):
+    tool: str
+    rule_id: str
+    rule_name: str = ""
+    title: str = ""
+    # The study's cross-tool class of the rule's findings in this run; "" when they span several
+    # classes (nuclei's http-missing-security-headers: one class per header), so no single
+    # finding is labelled with another finding's class.
+    issue_class: str = ""
+    # code | dependencies | runtime (runner.tool_scope; advisories by category).
+    scope: str = "code"
+    count_in_run: int
+    # Analyzed apps (generation jobs) of the corpus whose latest result of this tool measured
+    # the code (completed or not applicable), and those of them with at least one finding of the rule.
+    apps_with_rule: int
+    apps_measured: int
+    # The same, restricted to apps of the analyzed app's model; None without a model.
+    model_apps_with_rule: int | None = None
+    model_apps_measured: int | None = None
+
+
+class RunContextSchema(Schema):
+    run_id: str
+    # The corpus the prevalence is counted over: experiment | mine; None when there is none.
+    scope: str | None = None
+    scopes_available: list[str] = []
+    scope_label: str = ""
+    # Analyzed apps (jobs with a finished tool result) in the corpus, and those of this model.
+    n: int = 0
+    model_n: int | None = None
+    # Whether the analyzed app itself is one of the corpus apps (a superseded attempt is not).
+    self_in_corpus: bool = False
+    # The experiment corpus while the experiment is still running: counts are interim.
+    interim: bool = False
+    job: RunSetupSchema | None = None
+    source_loc: SourceLocSchema | None = None
+    test_split: list[CodeSplitRowSchema] = []
+    rule_prevalence: list[RulePrevalenceSchema] = []
+    notes: list[str] = []

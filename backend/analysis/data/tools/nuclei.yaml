@@ -3,8 +3,11 @@ name: Nuclei
 description: >-
   Template-based web scanner from ProjectDiscovery. Probes the running app with
   community templates for misconfigurations, exposed files and panels, missing
-  security headers, CORS issues and common injection bugs. Requires the app's
-  container to be running.
+  security headers, CORS issues and common injection bugs. It requests the
+  start URL and the paths its templates name; the API endpoints of a
+  JavaScript single-page app are not discovered. Hits Nuclei rates "info"
+  count as best practice, not security. Requires the app's container to be
+  running.
 category: security
 kind: container
 target_language: any
@@ -26,9 +29,14 @@ install_cmd: >-
 verify_cmd: "nuclei -version 2>&1 | grep -o 'Engine Version: v[0-9.]*'"
 uninstall_cmd: "rm -rf /home/analyzer/.local/bin/nuclei /home/analyzer/nuclei-templates /home/analyzer/.config/nuclei /home/analyzer/.cache/nuclei"
 # Intrusive / DoS / fuzzing templates are always excluded.
+# With -silent a clean scan prints nothing, so the run_cmd ends with an
+# llmlab-done line: output with neither a hit nor that line (nuclei never
+# ran to its end) is a failure, not a clean zero. Whether the app answered
+# before and after the scan is checked by the runner around every dynamic tool.
 run_cmd: >-
   nuclei -u {url} -tags {config:tags} -etags dos,fuzz,intrusive
-  -jsonl -omit-raw -silent -duc -no-color -rate-limit 50 -timeout 5 2>/dev/null
+  -jsonl -omit-raw -silent -duc -no-color -rate-limit 50 -timeout 5 2>/dev/null;
+  rc=$?; echo; echo "llmlab-done: nuclei exited with code $rc"; exit $rc
 parser_key: nuclei
 run_timeout: 900
 install_timeout: 600

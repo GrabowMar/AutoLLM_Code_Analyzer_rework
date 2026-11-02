@@ -12,7 +12,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import type { Snippet } from 'svelte';
 	import type { LLMModelDetail } from '$lib/api/client';
-	import { formatPrice, formatTokens, copyToClipboard, getCaps, getHuggingFace, getModelsDev, isoDay, fmtParams } from './helpers';
+	import { formatPrice, formatTokens, copyToClipboard, getCaps, isoDay, fmtParams, knownTokenLimit, metadataView } from './helpers';
 	import { shortModelName, modelNamePrefix } from '$lib/components/table';
 
 	interface Props {
@@ -44,8 +44,11 @@
 	const lastUpdated = $derived(model.updated_at ? new Date(model.updated_at).toISOString().slice(0, 10) : null);
 	const providerLabel = $derived(modelNamePrefix(model.model_name) || model.provider);
 
-	const md = $derived(getModelsDev(model));
-	const hf = $derived(getHuggingFace(model));
+	const view = $derived(metadataView(model));
+	const md = $derived(view.md);
+	const hf = $derived(view.hf);
+	const params = $derived(view.params);
+	const inherited = $derived(view.inheritedFrom ? ` (inherited from ${view.inheritedFrom}, assumed same weights)` : '');
 	const released = $derived(md?.release_date || isoDay(getCaps(model).created));
 	const knowledge = $derived(md?.knowledge || isoDay(getCaps(model).knowledge_cutoff));
 
@@ -53,18 +56,33 @@
 		label: string;
 		value: string | number;
 		title?: string;
+		/** Unknown value: the "—" renders muted. */
+		muted?: boolean;
 	}
+
+	const contextWindow = $derived(knownTokenLimit(model.context_window));
+	const maxOutput = $derived(knownTokenLimit(model.max_output_tokens));
 
 	const stats = $derived(
 		(
 		[
-			{ label: 'context', value: model.context_window_display },
-			model.max_output_tokens ? { label: 'max out', value: formatTokens(model.max_output_tokens) } : null,
+			contextWindow != null
+				? { label: 'context', value: model.context_window_display }
+				: { label: 'context', value: '—', muted: true, title: 'Context window not reported by the source' },
+			maxOutput != null ? { label: 'max out', value: formatTokens(maxOutput) } : null,
 			{
 				label: model.is_free ? 'no token cost' : '$/1M in · out',
 				value: model.is_free ? 'Free' : `${formatPrice(model.input_price_per_million)} · ${formatPrice(model.output_price_per_million)}`,
 			},
-			hf?.parameters ? { label: 'params', value: fmtParams(hf.parameters) } : null,
+			params?.active != null && params.is_moe
+				? {
+						label: 'active / total params',
+						value: `${params.active_source === 'config_estimate' ? '~' : ''}${fmtParams(params.active)} / ${fmtParams(params.reported_total ?? params.checkpoint_total)}`,
+						title: `${params.active_note ?? ''}${params.reported_total ? '' : ' Total = checkpoint tensor count.'}${inherited}`,
+					}
+				: hf?.parameters
+					? { label: 'checkpoint params', value: fmtParams(hf.parameters), title: `Every tensor stored in the Hugging Face repo${inherited}` }
+					: null,
 			released ? { label: 'released', value: released } : null,
 			knowledge ? { label: 'knowledge', value: knowledge } : null,
 			{ label: 'value', value: efficiency.grade, title: `Cost efficiency ${(model.cost_efficiency * 100).toFixed(0)}/100 — context per dollar, A+ best` },
@@ -102,10 +120,17 @@
 			<span aria-hidden="true" class="opacity-50">·</span>
 			<span>metadata from <time class="font-mono" datetime={model.updated_at}>{lastUpdated}</time></span>
 		{/if}
+		{#if view.inheritedFrom}
+			<span aria-hidden="true" class="opacity-50">·</span>
+			<span title="Same name on the serving provider; assumed same weights. This model's own runs are never pooled with the twin's.">
+				external metadata inherited from
+				{#if view.inheritedSlug}<a href="/models/{view.inheritedSlug}" class="font-mono text-primary hover:underline">{view.inheritedFrom}</a>{:else}<span class="font-mono">{view.inheritedFrom}</span>{/if}
+			</span>
+		{/if}
 	</div>
 	<p class="header-stats mt-1.5">
 		{#each stats as s (s.label)}
-			<span class="header-stat" title={s.title}><b>{s.value}</b> {s.label}</span>
+			<span class="header-stat" title={s.title}><b class={s.muted ? 'font-normal text-muted-foreground' : undefined}>{s.value}</b> {s.label}</span>
 		{/each}
 	</p>
 	{#snippet actions()}

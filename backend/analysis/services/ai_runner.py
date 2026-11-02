@@ -19,6 +19,7 @@ from typing import Any
 from backend.analysis.services.base import SEVERITIES
 from backend.analysis.services.base import AnalyzerOutput
 from backend.analysis.services.base import FindingData
+from backend.analysis.services.base import fingerprint
 from backend.analysis.services.parsers import _label
 
 if TYPE_CHECKING:
@@ -46,7 +47,7 @@ _SYSTEM_PROMPT = (
 )
 
 
-def run(
+def run(  # noqa: PLR0911 - one early return per way a review can fail
     tool: AnalyzerTool,
     code: dict[str, str],
     config: dict[str, Any] | None,
@@ -68,7 +69,16 @@ def run(
     except OpenRouterError as exc:
         return AnalyzerOutput(error=str(exc))
     if not code_blob.strip():
-        return AnalyzerOutput(summary={"message": "No code to review"})
+        if omitted:
+            # Reviewable code exists but no file fits the prompt: nothing was reviewed.
+            budget = f"no file fits the prompt budget ({MAX_CODE_CHARS} chars)"
+            return AnalyzerOutput(
+                error=f"AI review not run: {budget}: {', '.join(omitted)}",
+                summary={"files_not_reviewed": omitted},
+            )
+        # The runner skips an app without reviewable files as not applicable;
+        # reaching here (e.g. the tool's "test" action) still reviewed nothing.
+        return AnalyzerOutput(error="AI review not run: no reviewable source files")
 
     try:
         response = _chat(access, messages, max_tokens)
@@ -76,30 +86,76 @@ def run(
         logger.warning("AI review failed: %s", exc)
         return AnalyzerOutput(error=str(exc))
 
-    from backend.generation.services.openrouter_client import OpenRouterClient
-
-    content = OpenRouterClient.extract_content(response)
-    truncated = OpenRouterClient.is_truncated(response)
+    content, finish_reason, provider_error = _response_parts(response)
+    truncated = finish_reason == "length"
+    raw_output = {"model": model, "truncated": truncated, "finish_reason": finish_reason, "response": content[:8000]}
+    if provider_error:
+        return AnalyzerOutput(error=f"AI review failed: provider error: {provider_error}"[:500], raw_output=raw_output)
+    if not content.strip():
+        # A review always answers with an array ("[]" when clean); an empty
+        # answer (reasoning used the whole budget, refusal, no choices) is no review.
+        return AnalyzerOutput(
+            error=f"AI review failed: the model returned no content (finish_reason: {finish_reason or 'none'})",
+            raw_output=raw_output,
+        )
+    payload = _extract_json_array(content)
     findings = _parse_findings(content)
-    if not findings and content.strip() and _extract_json_array(content) is None:
+    if payload is None or (payload and not findings):
         # The model answered but nothing parseable came out — report a failure
         # instead of a clean zero-finding result the user would trust.
-        reason = "response hit the max_tokens limit" if truncated else "response was not a JSON findings array"
-        return AnalyzerOutput(
-            error=f"AI review unparseable: {reason}",
-            raw_output={"model": model, "truncated": truncated, "response": content[:8000]},
-        )
+        if payload is not None:
+            reason = "the JSON array holds no finding objects"
+        elif truncated:
+            reason = "response hit the max_tokens limit"
+        else:
+            reason = "response was not a JSON findings array"
+        return AnalyzerOutput(error=f"AI review unparseable: {reason}", raw_output=raw_output)
+    warnings = [f"Not reviewed (prompt size limit): {', '.join(omitted)}"] if omitted else []
+    if truncated:
+        warnings.append("Review truncated at max_tokens: findings after the cut are missing.")
     return AnalyzerOutput(
         findings=findings,
-        raw_output={"model": model, "truncated": truncated, "response": content[:8000]},
+        raw_output=raw_output,
         summary={
             "model": model,
             "finding_count": len(findings),
             "truncated": truncated,
             **({"files_not_reviewed": omitted} if omitted else {}),
         },
-        warnings=[f"Not reviewed (prompt size limit): {', '.join(omitted)}"] if omitted else [],
+        warnings=warnings,
     )
+
+
+def _response_parts(response: Any) -> tuple[str, str, str]:
+    """``(content, finish_reason, provider_error)`` of a chat response, tolerating partial bodies.
+
+    A 200 response can carry an ``error`` object and no choices, and a
+    choice's ``content`` can be null (refusal, or a reasoning model that used
+    the whole token budget).
+    """
+    if not isinstance(response, dict):
+        return "", "", "the response was not a JSON object"
+    error = response.get("error")
+    if isinstance(error, dict):
+        error = error.get("message") or error.get("code") or "unknown error"
+    choices = response.get("choices") or []
+    choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+    message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+    content = message.get("content")
+    if isinstance(content, list):  # content parts
+        content = "".join(str(p.get("text") or "") for p in content if isinstance(p, dict))
+    return (
+        content if isinstance(content, str) else "",
+        str(choice.get("finish_reason") or ""),
+        str(error) if error and not choices else "",
+    )
+
+
+def prompt_fingerprint() -> str:
+    """Provenance hash of what the reviewer is told besides the code (prompt and response parsing)."""
+    import inspect
+
+    return fingerprint(_SYSTEM_PROMPT + "\n" + inspect.getsource(_parse_findings))
 
 
 def _resolve(model_id: str, user: User | None):
@@ -204,6 +260,17 @@ def _review_order(name: str) -> tuple[int, str]:
     return (0 if is_source_file(name) else 1, name)
 
 
+def _reviewable(name: str, content: Any) -> bool:
+    """Whether the reviewer reads this file (lockfiles, minified and empty files carry nothing to review)."""
+    base = name.rsplit("/", 1)[-1].lower()
+    return isinstance(content, str) and bool(content.strip()) and base not in _LOCKFILES and ".min." not in base
+
+
+def reviewable_files(code: dict[str, str]) -> list[str]:
+    """The files of *code* the reviewer would read (budget aside); none means not applicable."""
+    return [name for name, content in code.items() if _reviewable(name, content)]
+
+
 def _format_code(code: dict[str, str]) -> tuple[str, list[str]]:
     """The review prompt's code bundle and the files that did not fit in it.
 
@@ -215,8 +282,7 @@ def _format_code(code: dict[str, str]) -> tuple[str, list[str]]:
     used = 0
     for name in sorted(code, key=_review_order):
         content = code[name]
-        base = name.rsplit("/", 1)[-1].lower()
-        if not content or not content.strip() or base in _LOCKFILES or ".min." in base:
+        if not _reviewable(name, content):
             continue
         block = f"# ===== {name} =====\n{content}"
         if used + len(block) > MAX_CODE_CHARS:

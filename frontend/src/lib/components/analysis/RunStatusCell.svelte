@@ -2,13 +2,14 @@
 	/**
 	 * RunStatusCell — a run's status for tables: the badge, and while active a
 	 * thin progress bar with "3/12 tools · Semgrep" (or the phase / queue state).
-	 * Finished runs with failed tools say how many.
+	 * Finished runs say how many tools failed, and how many measured nothing
+	 * (app down, tool unavailable): a completed run is not a clean result then.
 	 *
 	 * Props: `run` (list item), `toolName(slug)`.
 	 */
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { AnalysisRunListItem } from '$lib/api/runs';
-	import { RUN_STATUS_HELP, isActive, runStatusLabel } from './format';
+	import { RUN_STATUS_HELP, isActive, runStatusLabel, runToolCounts } from './format';
 
 	interface Props {
 		run: AnalysisRunListItem;
@@ -27,10 +28,17 @@
 		if (run.phase === 'preparing') return 'preparing';
 		return '';
 	});
-	const failedTools = $derived((run.summary?.tools_failed as number | undefined) ?? 0);
+	const counts = $derived(runToolCounts(run));
+	const failedTools = $derived(counts?.failed ?? 0);
+	const unmeasuredTools = $derived(counts?.unmeasured ?? 0);
+	const help = $derived(
+		counts?.nothingMeasured && run.status === 'completed'
+			? 'No tool measured the code: every tool was skipped (app not running, tool unavailable). Zero findings is not a clean result.'
+			: RUN_STATUS_HELP[run.status]
+	);
 </script>
 
-<div class="min-w-[9rem] space-y-1" title={RUN_STATUS_HELP[run.status]}>
+<div class="min-w-[9rem] space-y-1" title={help}>
 	<StatusBadge status={run.status} label={runStatusLabel(run.status)} />
 	{#if isActive(run.status)}
 		<div class="h-1 w-full max-w-[10rem] overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={p?.done ?? 0} aria-label="Tools finished">
@@ -39,7 +47,9 @@
 		<p class="truncate text-[11px] text-muted-foreground">
 			<span class="font-mono tabular-nums">{p?.done ?? 0}/{total}</span> tools{note ? ` · ${note}` : ''}
 		</p>
-	{:else if failedTools > 0 && run.status !== 'failed'}
-		<p class="cell-sub text-[11px] text-danger-fg">{failedTools} tool{failedTools === 1 ? '' : 's'} failed</p>
+	{:else if (failedTools > 0 && run.status !== 'failed') || unmeasuredTools > 0}
+		<p class="cell-sub text-[11px]">
+			{#if failedTools > 0 && run.status !== 'failed'}<span class="text-danger-fg">{failedTools} tool{failedTools === 1 ? '' : 's'} failed</span>{/if}{#if failedTools > 0 && run.status !== 'failed' && unmeasuredTools > 0}<span class="text-muted-foreground"> · </span>{/if}{#if unmeasuredTools > 0}<span class="text-warning-fg">{unmeasuredTools} not measured</span>{/if}
+		</p>
 	{/if}
 </div>

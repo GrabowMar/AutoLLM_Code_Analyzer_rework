@@ -25,10 +25,15 @@ export interface CodeGenerationStats {
   completed: number;
   failed: number;
   running: number;
-  success_rate: number;
-  avg_duration_seconds: number;
+  pending?: number;
+  cancelled?: number;
+  /** completed / (completed + failed), percent; null until something finished */
+  success_rate: number | null;
+  /** mean over completed generations; null until one completed */
+  avg_duration_seconds: number | null;
   total_tokens: number;
   total_cost_usd: number;
+  /** source lines of code (the study tables' LOC denominator) */
   total_lines_of_code: number;
   unique_templates: number;
 }
@@ -39,21 +44,25 @@ export interface ModelComparisonRow {
   provider: string;
   apps: number;
   apps_completed: number;
-  success_rate: number;
-  avg_duration_seconds: number;
+  apps_failed?: number;
+  /** over finished generations (completed + failed), percent; null when none finished */
+  success_rate: number | null;
+  /** mean over completed generations; null when none completed */
+  avg_duration_seconds: number | null;
   // Shared rankings scoring — all 0..1 scales.
   mss: number;
   empirical_quality: number | null;
   composite: number;
   smoke_pass_rate: number | null;
   n_trials: number;
+  /** Code issues the empirical score counts, by normalized level; null when no app of the model was measured. */
   findings: {
     critical: number;
     high: number;
     medium: number;
     low: number;
     info: number;
-  };
+  } | null;
   ai_findings: {
     critical: number;
     high: number;
@@ -77,6 +86,11 @@ export interface SeverityBucket {
   percent: number;
 }
 
+/**
+ * Findings by the platform's *normalized* severity (a heuristic, also for
+ * tools that print no level): aggregate statistics only, always labelled
+ * "normalized (heuristic)", never shown as a finding's level.
+ */
 export interface SeverityDistribution {
   total: number;
   distribution: SeverityBucket[];
@@ -106,30 +120,46 @@ export interface StatisticsOverview {
   apps_failed: number;
   apps_running: number;
   apps_pending: number;
-  apps_success_rate: number;
+  apps_cancelled?: number;
+  /** completed / (completed + failed), percent; null until something finished */
+  apps_success_rate: number | null;
   total_analyses: number;
   analyses_completed: number;
+  analyses_partial?: number;
   analyses_failed: number;
   analyses_running: number;
   analyses_pending: number;
-  analyses_success_rate: number;
-  avg_analysis_duration_seconds: number;
+  analyses_cancelled?: number;
+  /** completed / (completed + partial + failed), percent; null until something finished */
+  analyses_success_rate: number | null;
+  /** mean over completed analyses; null until one completed */
+  avg_analysis_duration_seconds: number | null;
   total_findings: number;
 }
 
 export interface ToolEffectivenessRow {
   name: string;
   type: string;
+  /** executions that measured the app (completed, or nothing to read) */
   scans: number;
+  /** failed, cancelled or app-not-running executions: they measured nothing */
+  not_measured?: number;
   findings: number;
-  avg_per_scan: number;
+  /** findings / scans; null when no execution measured anything */
+  avg_per_scan: number | null;
   top_rule: string;
 }
 
+/** One row per (title, tool, the tool's own label). */
 export interface TopFindingRow {
   title: string;
-  severity: string;
+  /** Tool slug. */
+  tool: string;
+  /** The level exactly as the tool printed it; "" = the tool rates nothing (show "unrated"). */
+  tool_severity: string;
   count: number;
+  /** A known-vulnerability advisory about a package version, not a code issue. */
+  dependency_advisory: boolean;
 }
 
 export interface TrendPoint {

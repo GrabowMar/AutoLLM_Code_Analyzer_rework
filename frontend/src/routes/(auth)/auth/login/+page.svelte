@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { formatApiError } from '$lib/api/core';
 	import { getAuth } from '$lib/stores/auth.svelte';
 	import { Input } from '$lib/components/ui/input';
@@ -11,6 +12,13 @@
 	const auth = getAuth();
 
 	const REMEMBER_KEY = 'llm_lab_stay_logged_in';
+
+	/** Where to go after signing in: a same-origin relative path from ?next=, else the dashboard. */
+	function safeNext(value: string | null): string {
+		if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/';
+		return value;
+	}
+	const next = $derived(safeNext(page.url.searchParams.get('next')));
 
 	let email = $state('');
 	let password = $state('');
@@ -39,7 +47,7 @@
 
 	$effect(() => {
 		if (!auth.isLoading && auth.isAuthenticated) {
-			goto('/');
+			goto(next);
 		}
 	});
 
@@ -66,7 +74,7 @@
 				error = res.error || 'Login failed. Please check your credentials.';
 				return;
 			}
-			goto('/');
+			goto(next);
 		} catch (err: unknown) {
 			error = formatApiError(err, 'Login failed. Please check your credentials.');
 		} finally {

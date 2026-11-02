@@ -2,7 +2,10 @@
 	/**
 	 * Benchmarks tab: external scores — Artificial Analysis indices and Design
 	 * Arena (both embedded in the OpenRouter catalog payload) with catalog
-	 * percentiles, plus benchmark rows seeded into the rankings.
+	 * percentiles, external covariates (Epoch AI, LMArena), the evaluations
+	 * self-reported in the Hugging Face repo (labelled as such, never verified
+	 * here), plus benchmark rows seeded into the rankings. A local endpoint
+	 * model shows its catalog twin's external data, marked inherited.
 	 */
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
@@ -11,7 +14,10 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import type { LLMModelDetail, ModelInsights } from '$lib/api/client';
 	import PercentileMeter from './PercentileMeter.svelte';
-	import { getArtificialAnalysis, getDesignArena } from './helpers';
+	import ModelExternalCovariates from './ModelExternalCovariates.svelte';
+	import ModelSelfReportedEvals from './ModelSelfReportedEvals.svelte';
+	import InheritedNote from './InheritedNote.svelte';
+	import { getArtificialAnalysis, getDesignArena, getMeta, metadataView } from './helpers';
 
 	interface Props {
 		model: LLMModelDetail;
@@ -35,7 +41,9 @@
 	});
 	const aaCatalog = $derived(insights?.catalog.artificial_analysis);
 	const local = $derived(insights?.benchmarks ?? []);
-	const hasAny = $derived(!!aa || arena.length > 0 || local.length > 0);
+	const view = $derived(metadataView(model));
+	const selfReported = $derived(view.hf?.eval_results ?? []);
+	const hasAny = $derived(!!aa || arena.length > 0 || local.length > 0 || selfReported.length > 0);
 
 	// Design Arena category ids are run-together words; unknown ids show as-is.
 	const CATEGORY_LABELS: Record<string, string> = {
@@ -73,10 +81,15 @@
 	}
 </script>
 
+<div class="space-y-4">
+	{#if view.inheritedFrom}<InheritedNote from={view.inheritedFrom} slug={view.inheritedSlug} source={view.twin?.link.source ?? null} />{/if}
+	<ModelExternalCovariates metadata={view.meta} ownMetadata={getMeta(model)} />
+</div>
+
 {#if !hasAny}
-	<EmptyState icon={Trophy} title="No benchmark data" description="OpenRouter publishes no Artificial Analysis or Design Arena scores for this model, and no benchmark rows were seeded for it." />
+	<EmptyState class="mt-4" compact icon={Trophy} title="No other benchmark data" description="OpenRouter publishes no Artificial Analysis or Design Arena scores for this model, its Hugging Face repo publishes no evaluations, and no benchmark rows were seeded for it." />
 {:else}
-	<div class="space-y-4">
+	<div class="mt-4 space-y-4">
 		{#if aa}
 			<Card.Root>
 				<Card.Header class="pb-0">
@@ -141,6 +154,17 @@
 					{/each}
 				</Card.Content>
 			</Card.Root>
+		{/if}
+
+		{#if selfReported.length && view.hf}
+			<ModelSelfReportedEvals
+				results={selfReported}
+				total={view.hf.eval_results_total ?? null}
+				hfId={view.hf.id}
+				fetchedAt={view.hf.fetched_at}
+				inheritedFrom={view.inheritedFrom}
+				inheritedSlug={view.inheritedSlug}
+			/>
 		{/if}
 
 		{#if local.length}

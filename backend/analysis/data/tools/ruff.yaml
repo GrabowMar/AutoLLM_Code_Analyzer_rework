@@ -15,7 +15,9 @@ install_cmd: "pip install --user --upgrade 'ruff==0.6.*'"
 verify_cmd: "ruff --version"
 uninstall_cmd: "pip uninstall -y ruff"
 # --no-cache: a .ruff_cache in /work would be scanned by detect-secrets/jscpd.
-run_cmd: "sel={config:select}; ruff check {target} --no-cache --output-format json ${sel:+--select \"$sel\"}"
+# --isolated: a pyproject.toml/ruff.toml the app ships must not change what is
+# measured for that app only (like ESLint's --no-eslintrc).
+run_cmd: "sel={config:select}; ruff check {target} --isolated --no-cache --output-format json ${sel:+--select \"$sel\"}"
 parser_key: ruff
 file_patterns: ["*.py"]
 run_timeout: 90

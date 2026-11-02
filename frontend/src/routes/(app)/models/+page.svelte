@@ -15,6 +15,8 @@ import { toast } from 'svelte-sonner';
 import Upload from '@lucide/svelte/icons/upload';
 import Trophy from '@lucide/svelte/icons/trophy';
 import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
+import FileSpreadsheet from '@lucide/svelte/icons/file-spreadsheet';
+import { getModelCovariatesCsvUrl } from '$lib/api/model-covariates';
 import ModelsFiltersBar from '$lib/components/models/ModelsFiltersBar.svelte';
 import type { FilterTag } from '$lib/components/FilterBar.svelte';
 import ModelsTable from '$lib/components/models/ModelsTable.svelte';
@@ -210,6 +212,11 @@ function downloadExport(format: 'csv' | 'json' = 'csv') {
 	window.location.href = getModelsExportUrl(format);
 }
 
+/** One covariate row per model used in your jobs (Epoch AI, LMArena, Hugging Face, models.dev). */
+function downloadCovariates() {
+	window.location.href = getModelCovariatesCsvUrl(true);
+}
+
 function toggleCapability(value: string) {
 	filterCapability = filterCapability === value ? '' : value;
 	applyFilterAndReload();
@@ -248,6 +255,10 @@ onMount(() => {
 			<Button variant="outline" size="sm" onclick={openComparison} disabled={selectedModelSlugs.size === 0}>
 				<GitCompareArrows class="h-3.5 w-3.5 sm:mr-2" />
 				<span class="hidden sm:inline">Compare{selectedModelSlugs.size > 0 ? ` (${selectedModelSlugs.size})` : ''}</span>
+			</Button>
+			<Button variant="outline" size="sm" onclick={downloadCovariates} aria-label="Covariates CSV" title="Per-model research covariates (models used in your jobs) as CSV">
+				<FileSpreadsheet class="h-3.5 w-3.5 sm:mr-2" />
+				<span class="hidden sm:inline">Covariates CSV</span>
 			</Button>
 			<Button variant="outline" size="sm" href="/rankings">
 				<Trophy class="h-3.5 w-3.5 sm:mr-2" />

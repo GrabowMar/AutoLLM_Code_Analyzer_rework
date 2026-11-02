@@ -51,6 +51,7 @@
 	let templateSlug = $state('');
 	let toolName = $state('');
 	let days = $state(30);
+	let toolDays = $state<number | null>(null);
 	let experimentId = $state('');
 	let includeAi = $state(false);
 	let bootstrap = $state(true);
@@ -109,8 +110,10 @@
 			}
 			config.template_slug = templateSlug;
 		}
-		if (selectedType === 'tool_analysis' && toolName) {
-			config.tool_name = toolName;
+		if (selectedType === 'tool_analysis') {
+			if (toolName) config.tool_name = toolName;
+			// Blank window: all time.
+			if (toolDays) config.days = Number(toolDays);
 		}
 		if (selectedType === 'generation_analytics' || selectedType === 'comprehensive') {
 			config.days = Number(days) || 30;
@@ -229,6 +232,19 @@
 						<label for="rep-tool" class="text-sm font-medium">Tool name (optional)</label>
 						<Input id="rep-tool" bind:value={toolName} placeholder="bandit, eslint, zap, … (blank = all)" />
 						<p class="text-xs text-muted-foreground">Leave blank to aggregate all tools</p>
+					</div>
+					<div class="space-y-2">
+						<label for="rep-tool-days" class="text-sm font-medium">Window (days, optional)</label>
+						<input
+							id="rep-tool-days"
+							type="number"
+							min="1"
+							max="365"
+							bind:value={toolDays}
+							placeholder="all time"
+							class="block w-full std-select py-2"
+						/>
+						<p class="text-xs text-muted-foreground">Only runs created in the last N days; blank for all runs</p>
 					</div>
 				{:else if selectedType === 'generation_analytics' || selectedType === 'comprehensive'}
 					<div class="space-y-2">

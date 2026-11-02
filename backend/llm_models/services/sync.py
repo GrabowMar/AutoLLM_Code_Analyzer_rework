@@ -9,10 +9,13 @@ from django.conf import settings
 from backend.llm_models.models import LLMModel
 from backend.llm_models.services.enrichment import enrich_model
 from backend.llm_models.services.enrichment import fetch_models_dev
+from backend.llm_models.services.enrichment import fetch_models_dev_providers
+from backend.llm_models.services.enrichment import link_local_models
 from backend.llm_models.services.enrichment import preserved_enrichment
 from backend.llm_models.services.helpers import _build_canonical_slug
 from backend.llm_models.services.helpers import _update_or_create_model
 from backend.llm_models.services.helpers import normalize_model_identifier
+from backend.llm_models.services.hf import client_for
 
 logger = logging.getLogger(__name__)
 
@@ -200,8 +203,16 @@ def upsert_openrouter_models(models_payload: list[dict]) -> int:
     return upserted
 
 
-def refresh_model_from_openrouter(model: LLMModel, api_key: str) -> bool:
-    """Refresh a single model from the OpenRouter catalog (never a local endpoint model)."""
+# An interactive refresh waits out at most this long on a Hugging Face 429.
+REFRESH_HF_MAX_RETRY_WAIT = 15.0
+
+
+def refresh_model_from_openrouter(model: LLMModel, api_key: str, *, hf_user=None) -> bool:
+    """Refresh a single model from the OpenRouter catalog (never a local endpoint model).
+
+    Hugging Face metadata is refetched with ``hf_user``'s token (else the
+    deployment token, else anonymous).
+    """
     if model.endpoint_id is not None:
         return False
     models_payload = fetch_openrouter_models(api_key)
@@ -228,7 +239,11 @@ def refresh_model_from_openrouter(model: LLMModel, api_key: str) -> bool:
             if upsert_openrouter_models([model_data]) != 1:
                 return False
             model.refresh_from_db()
-            enrich_model(model, force_hf=True)
+            enrich_model(
+                model,
+                force_hf=True,
+                hf_client=client_for(hf_user, max_retry_wait=REFRESH_HF_MAX_RETRY_WAIT),
+            )
             return True
 
     return False
@@ -245,9 +260,15 @@ def sync_models_from_openrouter(api_key: str) -> dict:
 
 
 def _enrich_from_models_dev() -> None:
-    """One models.dev download covers the whole catalog; Hugging Face runs separately (``enrich_models``)."""
+    """One models.dev download covers the whole catalog; Hugging Face runs separately (``enrich_models``).
+
+    The same download links local endpoint models to their catalog twin.
+    """
     catalog = fetch_models_dev(use_cache=False)
     if not catalog:
         return
     for model in LLMModel.objects.filter(endpoint__isnull=True).iterator():
         enrich_model(model, catalog=catalog, include_hf=False)
+    providers = fetch_models_dev_providers()
+    if providers:
+        link_local_models(providers)

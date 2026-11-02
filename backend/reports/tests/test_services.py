@@ -91,13 +91,13 @@ def test_generate_model_analysis_returns_aggregates():
     assert data["generation"]["completed_jobs"] == 2
     assert data["generation"]["failed_jobs"] == 1
     assert data["loc"]["total_loc"] == 4
-    assert data["findings"] == {
-        "critical": 0,
-        "high": 0,
-        "medium": 0,
-        "low": 0,
-        "info": 0,
-    }
+    # No job was analyzed: the counts are unknown, not zero findings.
+    assert data["runs_analyzed"] == 0
+    assert data["total_findings"] is None
+    assert data["reported_levels"] is None
+    assert data["severity_normalized_heuristic"] is None
+    assert data["issues_dedup"]["runs"] == 0
+    assert data["issues_dedup"]["code_unique"] is None
 
 
 def test_generate_model_analysis_counts_only_latest_run_per_job():
@@ -203,7 +203,7 @@ def test_template_comparison_stats_mean_and_stdev():
     assert stats["trials"] == 2
     assert stats["analyzed"] == 2
     assert stats["findings_total"] == {"mean": 3.0, "stdev": pytest.approx(1.4142, abs=1e-3), "n": 2}
-    assert stats["critical_high"]["mean"] == 3.0
+    assert stats["critical_high_normalized"]["mean"] == 3.0
     # weighted: high=5 → 10 and 20 → mean 15
     assert stats["weighted_score"]["mean"] == 15.0
     assert stats["cost"]["total"] == pytest.approx(0.04)
@@ -367,15 +367,19 @@ def test_template_comparison_splits_ai_findings_from_static():
     data = generators.generate_template_comparison({"template_slug": template.slug})
 
     row = data["models"][0]
-    assert row["findings"] == {"critical": 0, "high": 2, "medium": 0, "low": 0, "info": 0}
+    # The normalized split is labelled as such; the tools printed no level (unrated).
+    assert row["severity_normalized_heuristic"] == {"critical": 0, "high": 2, "medium": 0, "low": 0, "info": 0}
+    assert row["reported_levels"] == {"unrated": 2}
     assert row["total_findings"] == 2
-    assert row["ai_findings"] == {"critical": 5, "high": 0, "medium": 0, "low": 0, "info": 0}
+    assert row["ai_severity_normalized_heuristic"] == {"critical": 5, "high": 0, "medium": 0, "low": 0, "info": 0}
+    assert row["ai_reported_levels"] == {"unrated": 5}
     assert row["ai_total"] == 5
+    assert "findings" not in row
     stats = row["stats"]
     assert stats["findings_total"]["mean"] == 2.0
-    assert stats["critical_high"]["mean"] == 2.0  # AI criticals not counted
+    assert stats["critical_high_normalized"]["mean"] == 2.0  # AI criticals not counted
     assert stats["ai_findings_total"]["mean"] == 5.0
-    assert stats["ai_critical_high"]["mean"] == 5.0
+    assert stats["ai_critical_high_normalized"]["mean"] == 5.0
 
 
 def test_template_comparison_includes_weight_sensitivity():
@@ -435,9 +439,10 @@ def test_generate_template_comparison():
     assert data["total_models"] == 2
 
 
-def test_generate_tool_analysis_empty_returns_zero():
+def test_generate_tool_analysis_empty_is_unmeasured():
     data = generators.generate_tool_analysis({})
-    assert data["total_findings"] == 0
+    # Nothing executed: unmeasured, not zero findings.
+    assert data["total_findings"] is None
     assert data["tools"] == []
     assert data["metrics_by_tool"] == {}
 
@@ -492,7 +497,8 @@ def test_generate_comprehensive_returns_platform_metrics():
     data = generators.generate_comprehensive({"days": 30})
     assert "generation_analytics" in data
     assert "tool_analysis" in data
-    assert data["platform"]["total_models"] >= 2
+    assert data["platform"]["catalog_models"] >= 2
+    assert data["platform"]["models_with_jobs"] == 1
 
 
 def test_generate_experiment_report_missing_id_raises():
@@ -701,3 +707,166 @@ def test_experiment_report_markdown_keeps_paired_rows_and_notes():
     assert "p (holm)" in md
     assert "Every graded cell scored 1" in md
     assert "Base (preregistered)" in md
+
+
+def test_create_and_dispatch_starts_the_thread_only_after_commit(django_capture_on_commit_callbacks):
+    from unittest import mock
+
+    user = UserFactory()
+    with mock.patch("backend.reports.services.report_service._dispatch") as dispatch:
+        with django_capture_on_commit_callbacks(execute=False) as callbacks:
+            report = services.create_and_dispatch(report_type="generation_analytics", config={}, user=user)
+        # Started before the commit, the thread could not see the row and the report would stay pending.
+        dispatch.assert_not_called()
+        assert len(callbacks) == 1
+        callbacks[0]()
+        dispatch.assert_called_once_with(report.id)
+
+
+def test_reap_stale_reports_fails_reports_whose_thread_died():
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from backend.reports.services import report_service
+
+    now = timezone.now()
+
+    def report(status, age):
+        r = Report.objects.create(report_type="comprehensive", title=f"{status} {age}", config={}, status=status)
+        Report.objects.filter(id=r.id).update(created_at=now - age)
+        return r
+
+    stuck_pending = report(Report.Status.PENDING, timedelta(minutes=11))
+    fresh_pending = report(Report.Status.PENDING, timedelta(minutes=1))
+    stuck_generating = report(Report.Status.GENERATING, timedelta(hours=2))
+    busy_generating = report(Report.Status.GENERATING, timedelta(minutes=20))
+    done = report(Report.Status.COMPLETED, timedelta(days=3))
+
+    assert report_service.reap_stale_reports(now) == 2
+    statuses = {r.id: Report.objects.get(id=r.id).status for r in (stuck_pending, fresh_pending, stuck_generating)}
+    assert statuses[stuck_pending.id] == Report.Status.FAILED
+    assert statuses[stuck_generating.id] == Report.Status.FAILED
+    assert statuses[fresh_pending.id] == Report.Status.PENDING
+    assert Report.objects.get(id=busy_generating.id).status == Report.Status.GENERATING
+    assert Report.objects.get(id=done.id).status == Report.Status.COMPLETED
+    assert Report.objects.get(id=stuck_pending.id).error_message.startswith("Interrupted")
+
+
+def _summary(leaderboard):
+    from backend.reports.services.report_service import _make_summary
+
+    return _make_summary("experiment_report", {"results": {"leaderboard": leaderboard}, "total_conditions": 3})
+
+
+def test_experiment_report_summary_names_no_leader_on_a_tie():
+    tied = _summary(
+        [
+            {"label": "A", "pass_rate_mean": 1.0},
+            {"label": "B", "pass_rate_mean": 1.0},
+            {"label": "C", "pass_rate_mean": 0.5},
+        ],
+    )
+    assert (tied["leader"], tied["leader_pass_rate"], tied["tied_leaders"]) == (None, 1.0, 2)
+
+    clear = _summary([{"label": "A", "pass_rate_mean": 0.9}, {"label": "B", "pass_rate_mean": 0.5}])
+    assert (clear["leader"], clear["leader_pass_rate"], clear["tied_leaders"]) == ("A", 0.9, 0)
+
+    ungraded = _summary([{"label": "A", "pass_rate_mean": None}, {"label": "B", "pass_rate_mean": None}])
+    assert (ungraded["leader"], ungraded["leader_pass_rate"]) == (None, None)
+
+
+def test_tool_analysis_rejects_an_unknown_tool():
+    from backend.analysis.tests.factories import AnalyzerToolFactory
+
+    with pytest.raises(ValueError, match="Unknown tool"):
+        services.create_and_dispatch(report_type="tool_analysis", config={"tool_name": "osv"}, user=UserFactory())
+    AnalyzerToolFactory(slug="osv-scanner")
+    report = services.create_and_dispatch(
+        report_type="tool_analysis",
+        config={"tool_name": "osv-scanner"},
+        user=UserFactory(),
+    )
+    assert report.title == "Tool analysis: osv-scanner"
+
+
+def test_list_reports_ends_reports_whose_thread_died():
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    user = UserFactory()
+    stuck = Report.objects.create(report_type="comprehensive", title="stuck", config={}, created_by=user)
+    Report.objects.filter(id=stuck.id).update(created_at=timezone.now() - timedelta(minutes=11))
+
+    qs, total = services.list_reports(user=user)
+
+    assert total == 1
+    listed = next(iter(qs))
+    assert listed.status == Report.Status.FAILED
+    assert listed.error_message.startswith("Interrupted")
+
+
+def test_model_analysis_summary_keeps_unmeasured_values_unset():
+    from backend.reports.services.report_service import _make_summary
+
+    model = LLMModelFactory(model_id="openai/never-analyzed")
+    GenerationJobFactory(created_by=UserFactory(), model=model, status=GenerationJob.Status.PENDING)
+
+    summary = _make_summary("model_analysis", generators.generate_model_analysis({"model_id": model.model_id}))
+
+    assert summary["total_jobs"] == 1
+    # Nothing finished and nothing analyzed: unknown, not 0% and not zero findings.
+    assert (summary["success_rate"], summary["runs_analyzed"], summary["total_findings"]) == (None, 0, None)
+
+
+def _study_summary(ranking):
+    from backend.reports.services.report_service import _make_summary
+
+    return _make_summary("study_report", {"ranking": ranking, "funnel": {"overall": {"jobs": 6}}})
+
+
+def test_study_report_summary_names_no_leader_on_a_tie():
+    # Competition ranks from mcdm.rank_models: a three-way ceiling tie all rank 1.
+    tied = _study_summary(
+        {
+            "models_tied": True,
+            "ranking": [
+                {"model": "deepseek", "topsis_rank": 1},
+                {"model": "glm", "topsis_rank": 1},
+                {"model": "qwen", "topsis_rank": 1},
+            ],
+        },
+    )
+    assert (tied["leader"], tied["tied_leaders"]) == (None, 3)
+
+    # A tie below the top does not take the leader away.
+    clear = _study_summary(
+        {
+            "models_tied": True,
+            "ranking": [
+                {"model": "deepseek", "topsis_rank": 1},
+                {"model": "glm", "topsis_rank": 2},
+                {"model": "qwen", "topsis_rank": 2},
+            ],
+        },
+    )
+    assert (clear["leader"], clear["tied_leaders"]) == ("deepseek", 0)
+
+    empty = _study_summary({"ranking": []})
+    assert (empty["leader"], empty["tied_leaders"], empty["unique_issues"]) == (None, 0, None)
+
+
+def test_study_report_summary_from_rank_models_ties():
+    from backend.statistics.services.mcdm import Criterion
+    from backend.statistics.services.mcdm import rank_models
+
+    criteria = (
+        Criterion("deploy_rate", "Deploy rate", "benefit", 0.5),
+        Criterion("pass_rate", "Pass rate", "benefit", 0.5),
+    )
+    ceiling = {m: {"deploy_rate": 1.0, "pass_rate": 1.0} for m in ("deepseek", "glm", "qwen")}
+
+    summary = _study_summary(rank_models(ceiling, criteria, draws=10))
+
+    assert (summary["leader"], summary["tied_leaders"]) == (None, 3)

@@ -15,6 +15,7 @@ import ChartColumn from "@lucide/svelte/icons/chart-column";
 import FileText from "@lucide/svelte/icons/file-text";
 import BookOpen from "@lucide/svelte/icons/book-open";
 import Activity from "@lucide/svelte/icons/activity";
+import ClipboardCheck from "@lucide/svelte/icons/clipboard-check";
 
 export interface NavItem {
   label: string;
@@ -53,6 +54,7 @@ export const navSections: NavSection[] = [
     items: [
       { label: "Applications", href: "/applications", icon: AppWindow },
       { label: "Analysis", href: "/analysis", icon: Microscope },
+      { label: "Human eval", href: "/human-eval", icon: ClipboardCheck },
       { label: "Analyzers", href: "/analyzers", icon: ScanSearch },
       { label: "Runtime", href: "/runtime", icon: Container },
     ],
@@ -88,6 +90,7 @@ const extraLabels: Record<string, string> = {
   "/endpoints/new": "New endpoint",
   "/sample-generator/batches": "Batches",
   "/reports/create": "New report",
+  "/human-eval/new": "New task",
 };
 
 export const routeLabels: Record<string, string> = {

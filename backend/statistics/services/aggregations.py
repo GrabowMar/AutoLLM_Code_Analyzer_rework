@@ -13,6 +13,7 @@ from backend.analysis.models import AnalysisRun
 from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import Finding
 from backend.analysis.models import ToolResult
+from backend.analysis.services.base import ADVISORY_TOOLS
 from backend.generation.models import GenerationJob
 from backend.llm_models.models import LLMModel
 from backend.statistics.services.helpers import _percent
@@ -20,6 +21,20 @@ from backend.statistics.services.helpers import _scoped
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractBaseUser
+
+
+def _finished_rate(succeeded: int, finished: int) -> float | None:
+    """Success percent over the work that finished; None (not 0) when nothing finished yet.
+
+    Pending, running and cancelled work is no outcome: counting it in the
+    denominator made a running experiment look like a wave of failures.
+    """
+    return _percent(succeeded, finished) if finished > 0 else None
+
+
+def _rounded(value: float | None) -> float | None:
+    """An average rounded for display; None (not 0.0) when nothing was measured."""
+    return round(value, 1) if value is not None else None
 
 
 def get_system_overview(user: AbstractBaseUser | None = None) -> dict[str, Any]:
@@ -46,14 +61,17 @@ def get_system_overview(user: AbstractBaseUser | None = None) -> dict[str, Any]:
         failed=Count("id", filter=Q(status="failed")),
         running=Count("id", filter=Q(status="running")),
         pending=Count("id", filter=Q(status="pending")),
+        cancelled=Count("id", filter=Q(status="cancelled")),
     )
 
     task_counts = tasks.aggregate(
         total=Count("id"),
         completed=Count("id", filter=Q(status="completed")),
+        partial=Count("id", filter=Q(status="partial")),
         failed=Count("id", filter=Q(status="failed")),
         running=Count("id", filter=Q(status="running")),
         pending=Count("id", filter=Q(status="pending")),
+        cancelled=Count("id", filter=Q(status="cancelled")),
         avg_duration=Avg("duration_seconds", filter=Q(status="completed")),
     )
 
@@ -67,22 +85,25 @@ def get_system_overview(user: AbstractBaseUser | None = None) -> dict[str, Any]:
         "apps_failed": job_counts["failed"] or 0,
         "apps_running": job_counts["running"] or 0,
         "apps_pending": job_counts["pending"] or 0,
-        "apps_success_rate": _percent(
+        "apps_cancelled": job_counts["cancelled"] or 0,
+        "apps_success_rate": _finished_rate(
             job_counts["completed"] or 0,
-            job_counts["total"] or 0,
+            (job_counts["completed"] or 0) + (job_counts["failed"] or 0),
         ),
         "total_analyses": task_counts["total"] or 0,
         "analyses_completed": task_counts["completed"] or 0,
+        "analyses_partial": task_counts["partial"] or 0,
         "analyses_failed": task_counts["failed"] or 0,
         "analyses_running": task_counts["running"] or 0,
         "analyses_pending": task_counts["pending"] or 0,
-        "analyses_success_rate": _percent(
+        "analyses_cancelled": task_counts["cancelled"] or 0,
+        # A partial run finished with some tools failed: finished, not a success.
+        "analyses_success_rate": _finished_rate(
             task_counts["completed"] or 0,
-            task_counts["total"] or 0,
+            (task_counts["completed"] or 0) + (task_counts["partial"] or 0) + (task_counts["failed"] or 0),
         ),
-        "avg_analysis_duration_seconds": (
-            round(task_counts["avg_duration"], 1) if task_counts["avg_duration"] else 0.0
-        ),
+        # None (not 0.0) until an analysis completed: no duration was measured.
+        "avg_analysis_duration_seconds": _rounded(task_counts["avg_duration"]),
         "total_findings": findings.count(),
     }
     cache.set(cache_key, res, 15)
@@ -183,7 +204,9 @@ def get_model_comparison(
                 "provider": r["provider"],
                 "apps": r["apps"],
                 "apps_completed": r["apps_completed"],
-                "success_rate": _percent(r["apps_completed"], r["apps"]),
+                "apps_failed": r.get("apps_failed", 0),
+                # Over finished generations: pending, running and cancelled jobs are no outcome.
+                "success_rate": _finished_rate(r["apps_completed"], r["apps_completed"] + r.get("apps_failed", 0)),
                 "avg_duration_seconds": r["avg_duration"],
                 "mss": r["mss_score"],
                 "empirical_quality": r["empirical_quality_score"],
@@ -204,7 +227,14 @@ def get_model_comparison(
 def get_tool_effectiveness(
     user: AbstractBaseUser | None = None,
 ) -> list[dict[str, Any]]:
-    """Per-analyzer scan and finding totals."""
+    """Per-analyzer scan and finding totals.
+
+    ``scans`` counts executions that measured the app: completed, or skipped
+    because the app has nothing the tool reads (zero findings is then the
+    truth). Failed, cancelled and app-not-running results measured nothing;
+    they are ``not_measured``, and stay out of ``avg_per_scan`` so a tool that
+    often fails does not look quieter than it is.
+    """
     from django.core.cache import cache
 
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
@@ -219,10 +249,22 @@ def get_tool_effectiveness(
         "run__created_by",
     )
 
+    from backend.analysis.services.runner import SKIP_NOT_APPLICABLE
+
+    measured = Q(status=ToolResult.Status.COMPLETED) | Q(
+        status=ToolResult.Status.SKIPPED,
+        summary__skip_reason=SKIP_NOT_APPLICABLE,
+    )
     by_tool = (
         results.values("tool_slug", "category")
         .annotate(
-            scans=Count("id", distinct=True),
+            scans=Count("id", filter=measured, distinct=True),
+            # Pending and running results are neither: they have no outcome yet.
+            not_measured=Count(
+                "id",
+                filter=Q(status__in=[ToolResult.Status.FAILED, ToolResult.Status.SKIPPED]) & ~measured,
+                distinct=True,
+            ),
             findings=Count("findings"),
         )
         .order_by("-findings")
@@ -257,8 +299,10 @@ def get_tool_effectiveness(
                 "name": t["tool_slug"],
                 "type": t["category"],
                 "scans": scans,
+                "not_measured": int(t["not_measured"]) or 0,
                 "findings": findings,
-                "avg_per_scan": round(findings / scans, 1) if scans else 0.0,
+                # None, not 0.0, when no execution measured anything.
+                "avg_per_scan": round(findings / scans, 1) if scans else None,
                 "top_rule": top_rules.get(t["tool_slug"], ""),
             },
         )
@@ -270,10 +314,15 @@ def get_top_findings(
     limit: int = 10,
     user: AbstractBaseUser | None = None,
 ) -> list[dict[str, Any]]:
+    """Most frequent findings: ``title``, ``tool``, ``tool_severity`` (as the tool printed it) and ``count``.
+
+    ``dependency_advisory`` marks rows of known-vulnerability advisories
+    (packages, mostly the scaffold's pins), which are not code issues (P2).
+    """
     from django.core.cache import cache
 
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
-    cache_key = f"stats_top_findings_{limit}_{u_key}"
+    cache_key = f"stats_top_findings_v2_{limit}_{u_key}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -283,12 +332,24 @@ def get_top_findings(
         user,
         "result__run__created_by",
     )
-    rows = findings.values("title", "severity").annotate(count=Count("id")).order_by("-count")[:limit]
+    # One row per (title, tool, the tool's own label): the level shown is the
+    # one the tool printed ("" when it rates nothing), never the normalized
+    # severity, and two tools reporting the same title stay apart.
+    rows = (
+        findings.values("title", "result__tool_slug", "tool_severity")
+        .annotate(
+            count=Count("id"),
+            advisories=Count("id", filter=Q(result__tool_slug__in=ADVISORY_TOOLS, category="dependency")),
+        )
+        .order_by("-count", "title", "result__tool_slug", "tool_severity")[:limit]
+    )
     res = [
         {
             "title": r["title"],
-            "severity": r["severity"],
+            "tool": r["result__tool_slug"] or "",
+            "tool_severity": r["tool_severity"] or "",
             "count": int(r["count"]),
+            "dependency_advisory": int(r["advisories"]) == int(r["count"]),
         }
         for r in rows
     ]
@@ -314,47 +375,40 @@ def get_code_generation_stats(
         completed=Count("id", filter=Q(status="completed")),
         failed=Count("id", filter=Q(status="failed")),
         running=Count("id", filter=Q(status="running")),
+        pending=Count("id", filter=Q(status="pending")),
+        cancelled=Count("id", filter=Q(status="cancelled")),
         avg_duration=Avg("duration_seconds", filter=Q(status="completed")),
     )
 
-    completed = jobs.filter(status="completed").only("metrics")
+    # Lazy: backend.reports.services imports the statistics services (study report).
+    from backend.reports.services.loc import loc_from_result_data
+
     total_tokens = 0
     total_cost = 0.0
     total_loc = 0
     unique_templates = jobs.exclude(stack_slug="").values_list("stack_slug", flat=True).distinct().count()
-    for j in completed.iterator():
-        metrics = j.metrics or {}
+    for raw_metrics, result_data in (
+        jobs.filter(status="completed").values_list("metrics", "result_data").iterator(chunk_size=200)
+    ):
+        metrics = raw_metrics if isinstance(raw_metrics, dict) else {}
         total_tokens += int(metrics.get("total_tokens", 0) or 0)
         cost = metrics.get("cost") or metrics.get("total_cost")
         if isinstance(cost, (int, float)):
             total_cost += float(cost)
-
-        loc = metrics.get("lines_of_code")
-        if loc is not None:
-            total_loc += int(loc)
-        else:
-            # Fallback for old/legacy jobs: lazily loads result_data (Django will hit DB)
-            result = j.result_data or {}
-            job_loc = 0
-            for key in ("backend", "frontend", "backend_code", "frontend_code", "content"):
-                blob = result.get(key)
-                if isinstance(blob, str):
-                    job_loc += blob.count("\n") + 1
-            # Also handle copilot files dict if present
-            files = result.get("files")
-            if isinstance(files, dict):
-                for code in files.values():
-                    if isinstance(code, str):
-                        job_loc += code.count("\n") + 1
-            total_loc += job_loc
+        # Source LOC, as in the study tables and reports: metrics.lines_of_code
+        # counts every generated line (lockfiles, configs, blank lines) and is
+        # only the fallback for legacy jobs without stored code.
+        total_loc += loc_from_result_data(result_data)["total_loc"] or int(metrics.get("lines_of_code") or 0)
 
     res = {
         "total_apps": counts["total"] or 0,
         "completed": counts["completed"] or 0,
         "failed": counts["failed"] or 0,
         "running": counts["running"] or 0,
-        "success_rate": _percent(counts["completed"] or 0, counts["total"] or 0),
-        "avg_duration_seconds": (round(counts["avg_duration"], 1) if counts["avg_duration"] else 0.0),
+        "pending": counts["pending"] or 0,
+        "cancelled": counts["cancelled"] or 0,
+        "success_rate": _finished_rate(counts["completed"] or 0, (counts["completed"] or 0) + (counts["failed"] or 0)),
+        "avg_duration_seconds": _rounded(counts["avg_duration"]),
         "total_tokens": total_tokens,
         "total_cost_usd": round(total_cost, 4),
         "total_lines_of_code": total_loc,

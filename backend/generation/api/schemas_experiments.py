@@ -165,7 +165,8 @@ class PostRunOut(Schema):
     status: Literal["pending", "running", "completed", "failed", "cancelled"]
     progress: dict = {}
     analysis_run_ids: list[Any] = []
-    report_id: UUID | None = None
+    # The report's public id (rpt_...), as /reports/{id} and /api/reports/{id}/ take it.
+    report_id: str | None = None
     error: str = ""
     created_at: datetime
     completed_at: datetime | None = None
@@ -430,6 +431,10 @@ class ExperimentDetail(ExperimentListItem):
     cloned_from: IdNameRef | None = None
     created_by_schedule: ScheduleRef | None = None
     baseline_condition_id: int | None = None
+    # The pre-registered analysis plan ({} without one), its sha256 and when launch froze it (null: not frozen).
+    analysis_plan: dict[str, Any] = {}
+    analysis_plan_hash: str = ""
+    analysis_plan_frozen_at: datetime | None = None
     conditions: list[ExperimentConditionV2] = []
     batches: list[BatchRef] = []
     schedules: list[ScheduleOut] = []
@@ -679,6 +684,9 @@ class ExperimentResults(Schema):
     exclude_truncated: bool = True
     common_cells: bool = True
     fingerprint_filter: str = "all"
+    planned_only: bool = True
+    planned_repeats: int = 1
+    stopped_early: bool = False
     baseline_condition_id: int | None = None
     baseline_source: Literal["preregistered", "post_hoc"] = "preregistered"
     interim: bool = True

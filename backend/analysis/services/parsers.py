@@ -21,22 +21,41 @@ from backend.analysis.services.base import ParsedOutput
 logger = logging.getLogger(__name__)
 
 _PARSERS: dict[str, Callable[[str], list[FindingData] | ParsedOutput]] = {}
-# Parsers of ``### <manifest>``-sectioned output (one report per manifest).
-_SECTIONED: set[str] = set()
+# Parsers of ``### <manifest>``-sectioned output (one report per manifest),
+# with the test telling a section's report from other JSON (None: any JSON).
+_SECTIONED: dict[str, Callable[[Any], bool] | None] = {}
 
 _SECTION_RE = re.compile(r"^### (.+)$", re.MULTILINE)
 # Lines a sectioned run command prints when a manifest's tool run failed.
 _FAILURE_LINE_PREFIX = "!! "
 
 
-def register(key: str, *, sectioned: bool = False) -> Callable[[Callable], Callable]:
+def register(
+    key: str,
+    *,
+    sectioned: bool = False,
+    report: Callable[[Any], bool] | None = None,
+) -> Callable[[Callable], Callable]:
+    """Register a parser under *key*.
+
+    ``sectioned``: the output holds one ``### <manifest>`` section per
+    manifest. ``report`` tells a section's report from other JSON the tool
+    printed instead (npm prints a request failure as ``{"message": ...}``):
+    such a section was not analyzed.
+    """
+
     def _wrap(fn: Callable[[str], list[FindingData] | ParsedOutput]) -> Callable:
         _PARSERS[key] = fn
         if sectioned:
-            _SECTIONED.add(key)
+            _SECTIONED[key] = report
         return fn
 
     return _wrap
+
+
+def report_with(*keys: str) -> Callable[[Any], bool]:
+    """A ``report`` test: a JSON object holding any of *keys*."""
+    return lambda data: isinstance(data, dict) and any(k in data for k in keys)
 
 
 def parse(parser_key: str, raw_output: str) -> ParsedOutput:
@@ -53,7 +72,7 @@ def parse(parser_key: str, raw_output: str) -> ParsedOutput:
         return ParsedOutput(error=f"Could not parse the tool output ({type(exc).__name__}: {exc})"[:500])
     parsed = result if isinstance(result, ParsedOutput) else ParsedOutput(findings=result)
     if parser_key in _SECTIONED:
-        _check_sections(raw_output or "", parsed)
+        _check_sections(raw_output or "", parsed, _SECTIONED[parser_key])
     return parsed
 
 
@@ -73,12 +92,35 @@ def failure_lines(body: str) -> list[str]:
     ]
 
 
-def _check_sections(raw: str, parsed: ParsedOutput) -> None:
+def section_report(body: str, report: Callable[[Any], bool] | None = None) -> Any:
+    """The report in a ``###`` section's *body*; None when the body holds none
+    (no JSON, a cut-off report, or JSON that fails the parser's *report* test)."""
+    data = _loads(body)
+    if data is None or (report is not None and not report(data)):
+        return None
+    return data
+
+
+def _failure_reason(body: str) -> str:
+    """Why a section holds no report: the ``!!`` lines, or the message of an error object."""
+    reason = "; ".join(failure_lines(body))
+    if not reason:
+        data = _loads(body)
+        if isinstance(data, dict):
+            error = data.get("error")
+            if isinstance(error, dict):
+                error = error.get("summary") or error.get("detail") or error.get("code")
+            reason = str(data.get("message") or error or "")
+    return reason.strip()[:300]
+
+
+def _check_sections(raw: str, parsed: ParsedOutput, report: Callable[[Any], bool] | None = None) -> None:
     """Flag manifests whose section holds no report: they were not analyzed.
 
     Multi-manifest tools (pip-audit, npm audit, deptry, depcheck) run once
     per manifest; a run that fails (an unresolvable pin, a package missing
-    from the registry) leaves an empty section. Counting that as "no
+    from the registry, an unreachable advisory endpoint) leaves an empty
+    section or an error object instead of a report. Counting that as "no
     vulnerabilities" would make broken apps look clean.
 
     Each unanalyzed manifest is a coverage gap in ``warnings``; when none was
@@ -90,8 +132,8 @@ def _check_sections(raw: str, parsed: ParsedOutput) -> None:
     sections = section_bodies(raw)
     failed = []
     for path, body in sections:
-        if _loads(body) is None:
-            reason = "; ".join(failure_lines(body))[:300]
+        if section_report(body, report) is None:
+            reason = _failure_reason(body)
             failed.append(f"{path}: {reason}" if reason else path)
     if not failed:
         return
@@ -108,20 +150,41 @@ def has_parser(parser_key: str) -> bool:
 _MAX_JSON_ATTEMPTS = 200
 _OPENER_RE = re.compile(r"[\[{]")
 _LINE_OPENER_RE = re.compile(r"^[ \t]*[\[{]", re.MULTILINE)
+# What a decode error leaves when the input ended inside a value: nothing, or
+# part of a number or literal (``tru``); inside a string, part of a ``\uXXXX``
+# escape (or of a surrogate pair), which the decoder reports from its ``u``.
+_CUT_TOKEN_RE = re.compile(r"[-+.0-9eE]*|t(?:r(?:ue?)?)?|f(?:a(?:l(?:se?)?)?)?|n(?:u(?:ll?)?)?")
+_CUT_ESCAPE_RE = re.compile(r"u[0-9a-fA-F]{0,4}(?:\\(?:u[0-9a-fA-F]{0,4})?)?")
 
 
-def _loads(raw: str) -> Any:
-    """The JSON report in *raw*, or None when it holds none.
+def _cut_off(text: str, err: json.JSONDecodeError) -> bool:
+    """Whether *err* means the value being decoded ran into the end of *text*."""
+    if err.msg.startswith("Unterminated string"):
+        return True
+    if err.msg.startswith("Invalid \\uXXXX escape"):
+        return bool(_CUT_ESCAPE_RE.fullmatch(text, err.pos))
+    return bool(_CUT_TOKEN_RE.fullmatch(text, err.pos))
+
+
+def _scan(raw: str) -> tuple[Any, bool]:
+    """``(report, truncated)``: the JSON report in *raw* (None when it holds none),
+    and whether the output ends inside an unfinished JSON value.
 
     ``exec_in`` merges stdout and stderr, so the report may be preceded or
     followed by log lines ("WARNING ..."). The report is the first JSON value
     that decodes, tried at the openers that start a line first (a bracket in
     a log line, ``[INFO]``, must not win), then at any opener; text after it
     is ignored.
+
+    A value that runs into the end of the output is a cut-off report. Every
+    later opener lies inside it, and in a real report some inner object is
+    complete: decoding that one would turn the cut-off report into an empty
+    one (``{"name": ..., "vulns": [...]}`` read as a scanner report without
+    results). So the search stops there and the output holds no report.
     """
     text = (raw or "").strip()
     if not text:
-        return None
+        return None, False
     decoder = json.JSONDecoder()
     tried: set[int] = set()
     candidates = itertools.chain(
@@ -135,18 +198,25 @@ def _loads(raw: str) -> Any:
             break
         tried.add(idx)
         try:
-            return decoder.raw_decode(text, idx)[0]
-        except json.JSONDecodeError:
-            continue
-    return None
+            return decoder.raw_decode(text, idx)[0], False
+        except json.JSONDecodeError as err:
+            if _cut_off(text, err):
+                return None, True
+    return None, False
+
+
+def _loads(raw: str) -> Any:
+    """The JSON report in *raw*, or None when it holds none (or only a cut-off one); see :func:`_scan`."""
+    return _scan(raw)[0]
 
 
 class NoJSONReportError(ValueError):
-    """The tool printed output, but no JSON report in it."""
+    """The tool printed output, but no (complete) JSON report in it."""
 
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, *, truncated: bool = False) -> None:
         tail = ("…" + text[-300:]) if len(text) > 300 else text
-        super().__init__(f"no JSON report in the tool output: {tail}")
+        what = "the JSON report in the tool output is cut off" if truncated else "no JSON report in the tool output"
+        super().__init__(f"{what}: {tail}")
 
 
 def _json(raw: str, empty: Any) -> Any:
@@ -156,13 +226,13 @@ def _json(raw: str, empty: Any) -> Any:
     raises: ``parse`` turns that into an error, so the result is recorded as
     failed instead of as a clean, zero-finding one.
     """
-    data = _loads(raw)
+    data, truncated = _scan(raw)
     if data is not None:
         return data
     text = (raw or "").strip()
     if not text:
         return empty
-    raise NoJSONReportError(text)
+    raise NoJSONReportError(text, truncated=truncated)
 
 
 def _clip_list(items: list[str], limit: int = 10) -> str:
@@ -330,28 +400,52 @@ def _pyflakes_severity(code: str) -> str:
     return "low"
 
 
+def _ruff_syntax_error(code: str, message: str) -> bool:
+    """A file Ruff could not parse: ``code`` null with "SyntaxError: ..." (0.5-0.14),
+    ``invalid-syntax`` (newer) or the old E999."""
+    return code in ("invalid-syntax", "E999") or (not code and message.startswith("SyntaxError"))
+
+
 @register("ruff")
-def parse_ruff(raw: str) -> list[FindingData]:
+def parse_ruff(raw: str) -> ParsedOutput:
+    """``ruff check --output-format json``: a flat list of diagnostics.
+
+    A syntax error means Ruff ran no AST rule on that file: one ``high``
+    finding per file (Ruff reports the cascade of follow-up errors too) and a
+    coverage gap in ``warnings``.
+    """
     data = _json(raw, [])
+    if not isinstance(data, list):
+        return ParsedOutput(error="Unexpected Ruff report (not a JSON list)")
     findings: list[FindingData] = []
+    not_parsed: dict[str, str] = {}
     for item in data:
+        if not isinstance(item, dict):
+            continue
         loc = item.get("location") or {}
         end = item.get("end_location") or {}
         code = item.get("code") or ""
+        message = str(item.get("message") or "")
         url = str(item.get("url") or "")
+        file_path = item.get("filename", "")
+        syntax = _ruff_syntax_error(code, message)
+        if syntax:
+            if file_path in not_parsed:
+                continue
+            not_parsed[file_path] = f"{file_path}:{loc.get('row', '?')}: {message}"[:300]
         findings.append(
             FindingData(
                 # Ruff's codes are flake8's: rate them the same way so the
                 # two tools' severities stay comparable. Ruff itself rates
                 # nothing, so ``tool_severity`` stays empty.
-                severity=_pyflakes_severity(code),
+                severity="high" if syntax else _pyflakes_severity(code),
                 category="quality",
-                title=item.get("message", "Lint issue"),
-                description=item.get("message", ""),
-                file_path=item.get("filename", ""),
+                title=message or "Lint issue",
+                description=message,
+                file_path=file_path,
                 line_number=loc.get("row"),
                 column_number=loc.get("column"),
-                rule_id=item.get("code") or "",
+                rule_id=(code if code == "E999" else "syntax-error") if syntax else code,
                 confidence="high",
                 tool_specific_data=_compact(
                     {
@@ -365,7 +459,12 @@ def parse_ruff(raw: str) -> list[FindingData]:
                 ),
             ),
         )
-    return findings
+    parsed = ParsedOutput(findings=findings)
+    if not_parsed:
+        parsed.warnings.append(
+            f"Not parsed ({len(not_parsed)} file(s), syntax error): {_clip_list(list(not_parsed.values()))}",
+        )
+    return parsed
 
 
 # What the ESLint CLI prints for a message's numeric severity.
@@ -386,13 +485,48 @@ def _eslint_fatal(msg: dict[str, Any]) -> bool:
     )
 
 
+_ESLINT_RULE_NOT_FOUND_RE = re.compile(r"^Definition for rule '([^']+)' was not found\.?$")
+
+
+def _eslint_unloaded_rule(msg: dict[str, Any]) -> str:
+    """The rule an inline directive names but this configuration does not load, else "".
+
+    ESLint 8 reports ``// eslint-disable-next-line react-hooks/exhaustive-deps``
+    as an error under that rule's id when its plugin is not loaded: an artifact
+    of our configuration, not a defect in the app's code.
+    """
+    m = _ESLINT_RULE_NOT_FOUND_RE.match(str(msg.get("message") or ""))
+    return m.group(1) if m and m.group(1) == msg.get("ruleId") else ""
+
+
+# Rules whose hits are security issues (XSS through raw HTML, tabnabbing,
+# script URLs, code evaluation), whichever ESLint flavour runs them; rated
+# "medium" whatever level the configuration gives them.
+_ESLINT_SECURITY_RULES = frozenset(
+    {
+        "react/no-danger",
+        "react/no-danger-with-children",
+        "react/jsx-no-target-blank",
+        "react/jsx-no-script-url",
+        "no-eval",
+        "no-implied-eval",
+        "no-new-func",
+        "no-script-url",
+    },
+)
+# Purely stylistic rules that recommended configurations set to "error": a
+# stray apostrophe in JSX text is not a high-severity defect.
+_ESLINT_STYLE_RULES = frozenset({"react/no-unescaped-entities", "react/display-name"})
+
+
 @register("eslint")
 def parse_eslint(raw: str) -> ParsedOutput:
     """``eslint -f json``: one entry per linted file.
 
     A fatal message means the file could not be parsed, so no rule ran on
     it: that is a coverage gap (``warnings``), not a finding. When no file
-    could be parsed the result is an error.
+    could be parsed the result is an error. An inline directive naming a rule
+    the configuration does not load is a note in ``warnings``, not a finding.
     """
     data = _json(raw, [])
     if not isinstance(data, list):
@@ -400,9 +534,12 @@ def parse_eslint(raw: str) -> ParsedOutput:
     sev_map = {2: "high", 1: "low"}
     findings: list[FindingData] = []
     not_parsed: list[str] = []
+    unloaded: dict[str, int] = {}
     for file_entry in data:
+        if not isinstance(file_entry, dict):
+            continue
         file_path = file_entry.get("filePath", "")
-        messages = file_entry.get("messages") or []
+        messages = [m for m in file_entry.get("messages") or [] if isinstance(m, dict)]
         fatal = [m for m in messages if _eslint_fatal(m)]
         if fatal:
             not_parsed.append(f"{file_path}:{fatal[0].get('line', '?')}: {fatal[0].get('message', '')}"[:300])
@@ -410,13 +547,23 @@ def parse_eslint(raw: str) -> ParsedOutput:
             if _eslint_fatal(msg):
                 continue
             rule_id = msg.get("ruleId") or ""
+            missing_rule = _eslint_unloaded_rule(msg)
+            if missing_rule:
+                unloaded[missing_rule] = unloaded.get(missing_rule, 0) + 1
+                continue
             suggestions = [
                 s.get("desc") for s in msg.get("suggestions") or [] if isinstance(s, dict) and s.get("desc")
             ]
+            if rule_id in _ESLINT_SECURITY_RULES:
+                category, severity = "security", "medium"
+            elif rule_id in _ESLINT_STYLE_RULES:
+                category, severity = "quality", "low"
+            else:
+                category, severity = "quality", sev_map.get(msg.get("severity", 1), "low")
             findings.append(
                 FindingData(
-                    severity=sev_map.get(msg.get("severity", 1), "low"),
-                    category="quality",
+                    severity=severity,
+                    category=category,
                     title=msg.get("message", "Lint issue"),
                     description=msg.get("message", ""),
                     file_path=file_path,
@@ -435,11 +582,16 @@ def parse_eslint(raw: str) -> ParsedOutput:
                     ),
                 ),
             )
-    parsed = ParsedOutput(findings=findings)
+    parsed = ParsedOutput(findings=findings, recognized=sum(unloaded.values()))
     if not_parsed:
         parsed.warnings.append(f"Not parsed ({len(not_parsed)} of {len(data)} file(s)): {_clip_list(not_parsed)}")
         if len(not_parsed) == len(data):
             parsed.error = f"ESLint could not parse any file — {_clip_list(not_parsed, 3)}"
+    if unloaded:
+        parsed.warnings.append(
+            "Inline directives name rules this configuration does not load (not counted): "
+            + _clip_list([f"{rule} ({n})" for rule, n in sorted(unloaded.items())]),
+        )
     return parsed
 
 
@@ -635,6 +787,37 @@ _MYPY_LINE_RE = re.compile(
 _MYPY_FILE_ERROR_RE = re.compile(r"^(?P<file>[^\s:][^:]*): error: (?P<msg>.+)$")
 # The error summary's note when a blocking error stopped the run.
 _MYPY_BLOCKED = "errors prevented further checking"
+# The app's dependencies are not installed (``--ignore-missing-imports``), so an
+# ORM base class held in a variable is ``Any`` and mypy rejects every model
+# class built on it: ``class Task(db.Model)`` (Flask-SQLAlchemy) and
+# ``class Task(Base)`` with ``Base = declarative_base()``. One error per model
+# class, about the analyzer's environment rather than the code.
+_MYPY_ORM_MODEL_RE = re.compile(r'^Name "[A-Za-z_]\w*\.Model" is not defined$')
+_MYPY_VARIABLE_TYPE_RE = re.compile(r'^Variable "(?:[\w.]*\.)?(?P<name>\w+)" is not valid as a type$')
+_MYPY_BASE_CLASS_RE = re.compile(r'^Invalid base class "(?:[\w.]*\.)?(?P<name>\w+)"$')
+
+
+def _mypy_environment_artifacts(findings: list[FindingData]) -> set[int]:
+    """Indices of *findings* caused by untyped ORM base classes (see ``_MYPY_ORM_MODEL_RE``).
+
+    A ``valid-type`` error on a variable only counts when the same line also
+    has ``Invalid base class`` for it (``misc``): that pair is subclassing an
+    ``Any`` variable. Either error alone can be a real defect.
+    """
+    drop: set[int] = set()
+    variables: dict[tuple[str, int | None, str], int] = {}
+    bases: dict[tuple[str, int | None, str], int] = {}
+    for i, f in enumerate(findings):
+        if f.rule_id == "name-defined" and _MYPY_ORM_MODEL_RE.match(f.title):
+            drop.add(i)
+        elif f.rule_id == "valid-type" and (m := _MYPY_VARIABLE_TYPE_RE.match(f.title)):
+            variables[(f.file_path, f.line_number, m.group("name"))] = i
+        elif f.rule_id == "misc" and (m := _MYPY_BASE_CLASS_RE.match(f.title)):
+            bases[(f.file_path, f.line_number, m.group("name"))] = i
+    for key, i in variables.items():
+        if key in bases:
+            drop.update((i, bases[key]))
+    return drop
 
 
 @register("mypy")
@@ -683,7 +866,16 @@ def parse_mypy(raw: str) -> ParsedOutput:
         findings.append(last)
         if m.group("code") == "syntax":
             blockers.append(f"{last.file_path}:{last.line_number}: {last.title}"[:300])
-    parsed = ParsedOutput(findings=findings)
+    artifacts = _mypy_environment_artifacts(findings)
+    parsed = ParsedOutput(
+        findings=[f for i, f in enumerate(findings) if i not in artifacts],
+        recognized=len(artifacts),
+    )
+    if artifacts:
+        parsed.warnings.append(
+            f"Not counted: {len(artifacts)} error(s) on ORM model classes (db.Model, declarative_base()) "
+            "that only arise because the app's dependencies are not installed",
+        )
     if blockers or _MYPY_BLOCKED in (raw or ""):
         parsed.error = "Mypy stopped at a blocking error before type-checking — " + (
             _clip_list(blockers, 3) or _MYPY_BLOCKED
@@ -705,6 +897,11 @@ def parse_radon(raw: str) -> ParsedOutput:
 
     Complexity is metric-shaped, so every block feeds the metrics; only the
     truly pathological ranks (E/F) also become findings.
+
+    Radon lists every method twice (top level, ``type: method``, and again in
+    its class's ``methods``), and a method's closures under both copies: each
+    block is counted once. A file radon could not parse maps to
+    ``{"error": ...}``: a coverage gap, and an error when no file parsed.
     """
     data = _json(raw, {})
     if not isinstance(data, dict):
@@ -712,8 +909,19 @@ def parse_radon(raw: str) -> ParsedOutput:
     sev_map = {"E": "high", "F": "critical"}
     blocks: list[dict[str, Any]] = []
     findings: list[FindingData] = []
+    seen: set[tuple[Any, ...]] = set()
 
     def _walk(file_path: str, block: dict) -> None:
+        key = (
+            file_path,
+            block.get("classname"),
+            block.get("name"),
+            block.get("lineno"),
+            block.get("col_offset"),
+        )
+        if key in seen:
+            return
+        seen.add(key)
         rank = str(block.get("rank", ""))
         complexity = block.get("complexity")
         blocks.append(
@@ -760,15 +968,23 @@ def parse_radon(raw: str) -> ParsedOutput:
         for child in (block.get("methods") or []) + (block.get("closures") or []):
             _walk(file_path, child)
 
+    not_parsed: list[str] = []
     for file_path, file_blocks in data.items():
-        # A file radon failed to parse maps to {"error": "..."} — skip it.
         if not isinstance(file_blocks, list):
+            # A file radon failed to parse maps to {"error": "..."}: no block was measured.
+            reason = file_blocks.get("error") if isinstance(file_blocks, dict) else None
+            not_parsed.append(f"{file_path}: {reason or 'error'}"[:300])
             continue
         for block in file_blocks:
-            _walk(file_path, block)
+            if isinstance(block, dict):
+                _walk(file_path, block)
 
+    warnings = (
+        [f"Not parsed ({len(not_parsed)} of {len(data)} file(s)): {_clip_list(not_parsed)}"] if not_parsed else []
+    )
     if not blocks:
-        return ParsedOutput(findings=findings)
+        error = f"Radon could not parse any file — {_clip_list(not_parsed, 3)}" if not_parsed else None
+        return ParsedOutput(findings=findings, warnings=warnings, error=error)
 
     complexities = [b["complexity"] for b in blocks]
     rank_distribution = dict.fromkeys("ABCDEF", 0)
@@ -783,21 +999,41 @@ def parse_radon(raw: str) -> ParsedOutput:
         "rank_distribution": rank_distribution,
         "top_functions": top_functions,
     }
-    return ParsedOutput(findings=findings, metrics=metrics)
+    return ParsedOutput(findings=findings, metrics=metrics, warnings=warnings)
 
 
 _VULTURE_LINE_RE = re.compile(
     r"^(?P<file>.+?):(?P<line>\d+): (?P<msg>.+?) \((?P<conf>\d+)% confidence\)$",
 )
+# Files vulture could not read: ``file:line: <SyntaxError msg> at "<text>"``,
+# ``file: invalid source code "..."`` (null bytes), ``Error: Could not read file ...``.
+_VULTURE_UNPARSED_RES = (
+    re.compile(r"^(?P<file>[^\s:][^:]*):(?P<line>\d+): (?P<msg>.+)$"),
+    re.compile(r"^(?P<file>[^\s:][^:]*): (?P<msg>invalid source code .*)$"),
+    re.compile(r"^Error: Could not read file (?P<file>.+?) - (?P<msg>.*)$"),
+)
+# Python's own warnings that ``ast.parse`` writes to stderr (merged into the
+# output), e.g. ``app.py:2: SyntaxWarning: invalid escape sequence '\.'`` on
+# Python 3.12+: the file parsed, so this is not a coverage gap.
+_PY_WARNING_RE = re.compile(r"^\S.*:\d+: \w*Warning: ")
 
 
 @register("vulture")
-def parse_vulture(raw: str) -> list[FindingData]:
-    """Vulture has no JSON output; parse ``file:line: msg (NN% confidence)`` text."""
+def parse_vulture(raw: str) -> ParsedOutput:
+    """Vulture has no JSON output; parse ``file:line: msg (NN% confidence)`` text.
+
+    Any other ``file:...`` line names a file vulture could not parse (its
+    dead code is unknown): a coverage gap in ``warnings``. Vulture then exits
+    1 when nothing else was found, which the runner already records as failed.
+    """
     findings: list[FindingData] = []
+    not_parsed: list[str] = []
     for raw_line in (raw or "").splitlines():
-        m = _VULTURE_LINE_RE.match(raw_line.rstrip())
+        line = raw_line.rstrip()
+        m = _VULTURE_LINE_RE.match(line)
         if not m:
+            if not _PY_WARNING_RE.match(line) and any(regex.match(line) for regex in _VULTURE_UNPARSED_RES):
+                not_parsed.append(line[:300])
             continue
         msg = m.group("msg")
         conf = int(m.group("conf"))
@@ -814,7 +1050,25 @@ def parse_vulture(raw: str) -> list[FindingData]:
                 tool_specific_data={"tool_confidence": f"{m.group('conf')}%", "confidence_pct": conf},
             ),
         )
-    return findings
+    parsed = ParsedOutput(findings=findings)
+    if not_parsed:
+        parsed.warnings.append(f"Not parsed ({len(not_parsed)} file(s)): {_clip_list(not_parsed)}")
+    return parsed
+
+
+# Neither detect-secrets nor Gitleaks rates its hits (``tool_severity`` stays
+# empty); the normalized level is ours. A provider-specific detector (AWS key,
+# private key, GitHub/Stripe/Slack token, ...) matches a credential's exact
+# format: "high". The heuristic ones fire on any string next to a word like
+# "password" (validation messages, test fixtures) or on any high-entropy
+# string (CSS class lists): detect-secrets' keyword detector is Bandit's
+# B105/B106 heuristic, which Bandit itself rates LOW.
+_HEURISTIC_SECRET_SEVERITY = {
+    "Secret Keyword": "low",
+    "Base64 High Entropy String": "medium",
+    "Hex High Entropy String": "medium",
+    "generic-api-key": "medium",  # Gitleaks' keyword + entropy rule
+}
 
 
 @register("detect_secrets")
@@ -831,7 +1085,7 @@ def parse_detect_secrets(raw: str) -> list[FindingData]:
             secret_type = item.get("type", "secret")
             findings.append(
                 FindingData(
-                    severity="high",
+                    severity=_HEURISTIC_SECRET_SEVERITY.get(secret_type, "high"),
                     category="secrets",
                     title=f"Potential secret: {secret_type}",
                     description=f"detect-secrets flagged a {secret_type} in {path}.",
@@ -1054,19 +1308,22 @@ def parse_codespell(raw: str) -> list[FindingData]:
         m = _CODESPELL_LINE_RE.match(raw_line.rstrip())
         if not m:
             continue
-        wrong, right = m.group("wrong"), m.group("right")
+        wrong = m.group("wrong")
+        # A dictionary entry with a reason prints "wrong ==> right  | reason".
+        right, _, reason = m.group("right").partition(" | ")
+        right, reason = right.strip(), reason.strip()
         findings.append(
             FindingData(
                 severity="info",
                 category="quality",
                 title=f"Possible typo: '{wrong}'",
-                description=f"'{wrong}' looks like a misspelling.",
+                description=f"'{wrong}' looks like a misspelling." + (f" {reason}" if reason else ""),
                 suggestion=f"Replace '{wrong}' with '{right}'",
                 file_path=m.group("file"),
                 line_number=int(m.group("line")),
                 rule_id="typo",
                 confidence="medium",
-                tool_specific_data={"fix": right.strip()},
+                tool_specific_data=_compact({"fix": right, "reason": reason}),
             ),
         )
     return findings
@@ -1083,7 +1340,7 @@ def parse_gitleaks(raw: str) -> list[FindingData]:
         desc = item.get("Description") or f"Potential secret ({rule})"
         findings.append(
             FindingData(
-                severity="high",
+                severity=_HEURISTIC_SECRET_SEVERITY.get(rule, "high"),
                 category="secrets",
                 title=desc[:200],
                 description=desc,

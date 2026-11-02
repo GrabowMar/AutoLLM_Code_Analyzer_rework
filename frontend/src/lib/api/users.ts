@@ -10,6 +10,8 @@ export interface ApiUser {
   name: string;
   url: string;
   is_staff: boolean;
+  /** Restricted evaluator account: may only use the evaluation portal (/eval). */
+  is_evaluator?: boolean;
 }
 
 export async function authenticate2FA(code: string): Promise<void> {

@@ -104,3 +104,10 @@ CELERY_FLOWER_PASSWORD=
 # to enforce per-user keys.
 OPENROUTER_API_KEY=
 OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK=False
+
+# Hugging Face — optional, for model-metadata enrichment (https://huggingface.co/settings/tokens)
+# ------------------------------------------------------------------------------
+# Used when the staff user who syncs the catalog has no personal Hugging Face key
+# (Settings → API keys); without either, Hub requests go anonymous at a lower rate
+# limit. A read token is enough; gated repos also need their license accepted.
+HUGGINGFACE_API_TOKEN=

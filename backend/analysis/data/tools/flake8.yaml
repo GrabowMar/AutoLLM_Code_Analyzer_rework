@@ -14,7 +14,9 @@ docs_url: https://flake8.pycqa.org/
 install_cmd: "pip install --user --upgrade 'flake8==7.*'"
 verify_cmd: "flake8 --version"
 uninstall_cmd: "pip uninstall -y flake8"
-run_cmd: "flake8 {target} --exit-zero --max-line-length 120 --exclude node_modules,.venv,venv 2>/dev/null"
+# --isolated: a setup.cfg/tox.ini/.flake8 the app ships must not change what is
+# measured for that app only (like ESLint's --no-eslintrc).
+run_cmd: "flake8 {target} --isolated --exit-zero --max-line-length 120 --exclude node_modules,.venv,venv 2>/dev/null"
 parser_key: flake8
 file_patterns: ["*.py"]
 run_timeout: 120

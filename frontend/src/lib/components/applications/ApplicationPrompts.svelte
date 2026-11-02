@@ -6,6 +6,10 @@ import Terminal from '@lucide/svelte/icons/terminal';
 import Copy from '@lucide/svelte/icons/copy';
 import type { GenerationJob, GenerationArtifact } from '$lib/api/client';
 import { copyText, parsePromptSegments, segmentBorderColors } from './utils';
+import { onMount } from 'svelte';
+import { getTrajectoryStep, type ObservedInputs } from '$lib/api/trajectory';
+import { formatApiError } from '$lib/api/core';
+import { fmtInt } from './agent/format';
 
 interface PromptEntry {
 	label: string;
@@ -24,6 +28,34 @@ let { job, artifacts }: Props = $props();
 
 let selectedPromptIdx = $state(0);
 
+// Agent runs: what actually reached the model on the first call (the gateway
+// log), next to the frozen texts. Identity hashes come from the trajectory
+// record; the text itself is fetched from the run record.
+const agentSection = $derived(
+	job.mode === 'agent' ? ((job.result_data?.agent ?? null) as Record<string, any> | null) : null,
+);
+const observed = $derived((agentSection?.trajectory?.observed_inputs ?? null) as ObservedInputs | null);
+let observedPrompt = $state<string | null>(null);
+let observedTools = $state<string[]>([]);
+let observedState = $state<'idle' | 'loading' | 'ready' | 'error'>('idle');
+let observedError = $state('');
+
+onMount(async () => {
+	if (!agentSection) return;
+	observedState = 'loading';
+	try {
+		const step = await getTrajectoryStep(job.id, observed?.seq ?? 1);
+		observedPrompt = step.request.system_prompt;
+		observedTools = step.request.tools_offered ?? [];
+		observedState = 'ready';
+	} catch (e) {
+		observedError = formatApiError(e);
+		observedState = 'error';
+	}
+});
+
+const toolsOffered = $derived(observed?.tools_offered?.length ? observed.tools_offered : observedTools);
+
 const promptEntries = $derived.by<PromptEntry[]>(() => {
 	const entries: PromptEntry[] = [];
 
@@ -41,7 +73,25 @@ const promptEntries = $derived.by<PromptEntry[]>(() => {
 		// conversation lives in the run record (llm_calls.jsonl.gz).
 		const snap = (job.resolved_bundle ?? {}) as Record<string, any>;
 		if (snap.harness?.system_prompt)
-			entries.push({ label: `Harness system prompt (v${snap.harness.system_prompt_version})`, badge: 'SYS', badgeColor: 'bg-info/15 text-info-fg', content: snap.harness.system_prompt });
+			entries.push({ label: `Harness system prompt (frozen${snap.harness.version ? `, ${snap.harness.name ?? 'harness'} ${snap.harness.version}` : ''})`, badge: 'SYS', badgeColor: 'bg-info/15 text-info-fg', content: snap.harness.system_prompt });
+		if (observedState !== 'idle' && (observedPrompt || observedState !== 'ready'))
+			entries.push({
+				label: 'Observed system prompt (first LLM call)',
+				badge: 'SYS',
+				badgeColor: 'bg-info/15 text-info-fg',
+				content:
+					observedState === 'loading'
+						? 'Loading the system prompt from the run record…'
+						: observedState === 'error'
+							? `Could not load it from the run record: ${observedError}`
+							: (observedPrompt ?? ''),
+				meta: {
+					stage: `call ${observed?.seq ?? 1}`,
+					tokens: observed?.first_call_prompt_tokens != null ? `${fmtInt(observed.first_call_prompt_tokens)} prompt tokens` : '—',
+					sha256: observed?.system_prompt_sha256?.slice(0, 16) ?? '—',
+					tools: toolsOffered.length ? toolsOffered.join(', ') : 'none',
+				},
+			});
 		if (snap.brief?.text)
 			entries.push({ label: `Task brief (v${snap.brief.version})`, badge: 'USR', badgeColor: 'bg-success/15 text-success-fg', content: snap.brief.text });
 		const final = job.result_data?.agent?.harness_report?.final_message;
@@ -93,6 +143,30 @@ const legend = [
 </script>
 
 <section id="prompts" class="space-y-4">
+	{#if agentSection && (observed || toolsOffered.length)}
+		<Card.Root>
+			<Card.Header class="pb-2">
+				<Card.Title class="text-sm">Observed inputs</Card.Title>
+				<Card.Description class="text-xs">
+					What reached the model on the first call, from the gateway log. The harness adds run-specific lines (model name,
+					date) to its frozen prompt; the template hash ignores those, so equal template hashes mean identical treatment.
+				</Card.Description>
+			</Card.Header>
+			<Card.Content>
+				<dl class="grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2">
+					<div class="flex justify-between gap-2"><dt class="text-muted-foreground">System prompt sha256</dt><dd class="truncate font-mono" title={observed?.system_prompt_sha256 ?? ''}>{observed?.system_prompt_sha256?.slice(0, 16) ?? '—'}</dd></div>
+					<div class="flex justify-between gap-2"><dt class="text-muted-foreground">Template sha256</dt><dd class="truncate font-mono" title={observed?.system_prompt_template_sha256 ?? ''}>{observed?.system_prompt_template_sha256?.slice(0, 16) ?? '—'}</dd></div>
+					<div class="flex justify-between gap-2"><dt class="text-muted-foreground">System prompt</dt><dd class="font-mono tabular-nums">{fmtInt(observed?.system_prompt_chars)} chars · {fmtInt(observed?.system_messages)} message(s)</dd></div>
+					<div class="flex justify-between gap-2" title="Prompt tokens of the first call: harness prompt + tool specs + brief (the per-run overhead before any work)"><dt class="text-muted-foreground">First-call prompt tokens</dt><dd class="font-mono tabular-nums">{fmtInt(observed?.first_call_prompt_tokens)}</dd></div>
+					<div class="flex justify-between gap-2"><dt class="text-muted-foreground">Tool spec sha256</dt><dd class="truncate font-mono" title={observed?.tool_spec_sha256 ?? ''}>{observed?.tool_spec_sha256?.slice(0, 16) ?? '—'}{observed?.tool_spec_chars ? ` · ${fmtInt(observed.tool_spec_chars)} chars` : ''}</dd></div>
+					<div class="flex justify-between gap-2"><dt class="text-muted-foreground">Tools offered</dt><dd class="truncate font-mono">{toolsOffered.length ? toolsOffered.join(', ') : 'none'}</dd></div>
+				</dl>
+				{#if !observed}
+					<p class="mt-2 text-[11px] text-muted-foreground">Hashes appear once the run's trajectory record is stored (backfill_agent_trajectories).</p>
+				{/if}
+			</Card.Content>
+		</Card.Root>
+	{/if}
 	{#if promptEntries.length === 0}
 		<Card.Root>
 			<Card.Content>

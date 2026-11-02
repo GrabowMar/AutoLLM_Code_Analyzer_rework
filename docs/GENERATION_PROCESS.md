@@ -140,11 +140,72 @@ A run with **no** successful LLM call ends in one of two ways. A transport or pl
 | --- | --- |
 | `exclude`: not a valid sample of the condition | `evaluation_infra_error`, `infra_interrupted` (a local-endpoint run kept being interrupted by infrastructure errors) |
 | `warn`: valid, but not model-neutral or not as configured | `budget:max_cost_usd`, `budget:max_total_tokens`, `budget:max_attempts`, `wall_clock`, `resource_limit`, `harness_error`, `params_not_applied` (a configured param the model cannot take), `served_model_differs`, `output_truncated` (responses cut off at the per-call output cap; single-turn harnesses such as Aider are most exposed), `not_evaluated`, `infra_retried` (attempt 2 or later), `contended` (more than 10% of the wall clock spent waiting for endpoint request slots) |
-| `info`: context | `budget:max_requests` (the model-neutral limit), `params_not_applied` when only the seed was dropped, `harness_killed`, `llm_errors`, `protected_files_modified`, `egress_denied`, `relay_interruptions` |
+| `info`: context | `budget:max_requests` (the model-neutral limit), `params_not_applied` when only the seed was dropped, `harness_killed`, `llm_errors`, `protected_files_modified`, `egress_denied`, `relay_interruptions`, `harness_policy_denials` (the harness's own permission rules refused some agent actions; see [Trajectory and behaviour metrics](#trajectory-and-behaviour-metrics)) |
 
 ### Building and running the result
 
 Agent results set `result_data.materialize = "verbatim"`. The runtime writes the collected files over the pinned skeleton exactly as the agent left them: no entry renaming, no Flask patching, no dependency inference. Build healing never applies to them. The runtime does restore the platform-owned `Dockerfile`, `.dockerignore` and `docker-compose.yml`. Builtin stack Dockerfiles copy the whole backend tree and honour `package-lock.json`.
+
+### Trajectory and behaviour metrics
+
+`services/agent/trajectory.py` rebuilds what the agent did from the run evidence, with no LLM call and no rerun. The gateway call log is the primary source: each request holds the messages so far (so every tool result) and each response its tool calls, usage, provider and finish reason. Counts taken from it do not depend on what a harness reports about itself, so they compare across the tool-calling harnesses (OpenCode, mini-swe-agent). OpenCode's event stream adds each tool call's status, bash exit code, error text and timing. mini-swe-agent's `traj.json` is recorded as a source but adds nothing the log lacks.
+
+The runner builds the record at ingestion, after the metrics and before the per-call artifacts. An error there is stored as `agent.trajectory_error` and never fails the run. The keys it writes are all additive:
+
+| Key | Content |
+| --- | --- |
+| `result_data.agent.trajectory` | The full record (`schema_version` 1, `parser_version`). **Actions**: `tool_calls_gateway`, `actions_total` (mini's submit command left out), `tool_names`, `action_categories` (one primary category per action), `activity_counts` (every label an action matched). **Outcomes**: `outcomes`, `failure_kinds`, `failed_actions`, `killed_actions`, `policy_denials`, `edit_no_match`, `outcome_unknown`, `format_errors`, `no_tool_responses`. **`verification`**: built, ran a server, probed HTTP, ran tests, checked syntax; number of builds, ok and failed, whether the last build succeeded, the action index of the first build and of the first probe. **Writes**: `files_written`, `write_events`, `max_writes_per_file`, `writes_after_first_build`, `most_rewritten`, `first_pass` (each file's first whole-file write against the final file, difflib line ratio). **`time`**: `llm_s`, `between_calls_s`, `llm_share`, `tool_exec_s` (OpenCode only), first and last call, `head_s` / `tail_s` (approximate). **`context`**: prompt tokens of the first, last and largest main-role call, and the series. Also `cache_hit_ratio`, `reasoning_share`, `call_roles` (main, summarizer, compaction, title, subagent, matched on the system-prompt prefix), `model_turns`, `observed_inputs` (sha256 of the first system prompt, and of its template with the model-name and date lines normalised; its length; the tools offered and the sha256 of their specs; first-call prompt tokens), `harness_counters` (the harness's own steps and tool calls, `report_missing`), `list_cost`, `comparable` and `comparable_reason` |
+| `metrics.behaviour` | The scalar summary (contract C2): `parser_version`, `actions_total`, `tool_calls_gateway`, `failed_actions`, `killed_actions`, `policy_denials`, `builds`, `ran_server`, `probed_http`, `ran_tests`, `files_written`, `writes_after_first_build`, `llm_seconds`, `between_calls_seconds`, `context_tokens_first`, `context_tokens_max`, `cache_hit_ratio`, `reasoning_share`, `first_build_action_index`, `comparable` |
+| `metrics.list_cost`, `metrics.billing_source` | Subscription-billed runs (OpenCode Go) only: the list-price equivalent the provider reported for the run's calls. `metrics.cost` stays the billed value ($0) |
+
+`metrics.cost`, `metrics.harness_steps`, `metrics.tool_calls` and `agent.harness_report` are never overwritten. The record keeps the harness's own counts next to the gateway's (`harness_counters`). When a harness report is missing, the Agent Run tab shows the gateway counts marked "(gateway)".
+
+Reading the fields:
+
+- Everything but the plain counts is a heuristic over logged text. Compare categories within one harness.
+- Unknown is null, never 0. Aider answers in edit blocks without tool calls, so its action fields are null and `comparable` is false: only its time and token fields apply. `failed_actions` is null when no action's outcome is known. Token counts a response did not report are left out of the context series and of the ratio denominators.
+- `failed_actions` leaves out harness policy denials (the sandbox's permission rules, for example OpenCode's `external_directory` deny). They are counted in `policy_denials`, and a run with any gets the info validity note `harness_policy_denials`.
+- `time.llm_s` sums the gateway's call durations, so a retried call includes its retry backoff. `between_calls_s` is tool execution plus harness overhead.
+
+**Rule table.** Each action gets one primary category, the first label it matches in this priority order. Every label it matches is also counted in `activity_counts`, since one command can install, build and probe at once.
+
+| Category | Matches |
+| --- | --- |
+| `submit` | The harness's own end-of-task command (mini-swe-agent) |
+| `test` | A test runner or test script (pytest, unittest, vitest, jest, `npm test`, `*test*.py`, `*test*.sh`) |
+| `build` | A frontend or app build (`npm`/`yarn`/`pnpm run build`, `vite build`, `tsc`, webpack) |
+| `run_server` | Starting the app or a dev server (`python app.py`, `flask run`, uvicorn, gunicorn, `npm run dev`/`start`) |
+| `probe_http` | HTTP requests to the app (curl, wget, urllib/requests/fetch, Flask `test_client`, FastAPI `TestClient`) |
+| `write_file` | A whole workspace file written (write tool, cat/tee heredoc, redirect, Python `open(..., 'w')`) |
+| `edit` | A workspace file edited in place (edit tool, `sed -i`, Python read-replace-write) |
+| `install` | Dependency installs (`npm`/`yarn`/`pnpm install`, `pip install`, `apt-get install`) |
+| `registry_lookup` | Package version lookups (`npm view`/`info`/`pack`, `pip index versions`, `pip download`) |
+| `syntax_check` | Syntax or lint checks (`py_compile`, `ast.parse`, `node --check`, `tsc --noEmit`, eslint, ruff, flake8) |
+| `git` | git |
+| `todo` | OpenCode's todo list (`todowrite`/`todoread`) |
+| `process` | Process management (kill, pkill, ps, pgrep, fuser, lsof, ss, sleep) |
+| `explore` | Reading or listing files and the environment (read, glob and grep tools; cat, ls, find, grep, head, `sed -n`, …) |
+| `other` | Anything else (only cd/echo/mkdir/cp/rm, subagent tasks, unknown tools) |
+
+Shell commands are split on `&&`, `||`, `;`, `&` and newlines. Heredoc bodies are removed before matching: a cat/tee heredoc counts as a whole-file write, and a python/node heredoc body is scanned separately without a Python script's string literals. Quoted strings are data (`pkill -f 'python3 app.py'` does not start a server) unless inline code runs them (`python3 -c`, `node -e`, `bash -c`). A `*.sh` script counts only when it is run. Package names in an install command are ignored, so `pip install uvicorn` does not start a server. Only workspace paths count as written files. A piped build or test reports the pipe's exit code, so it is judged by its output (vite's `✓ built in` against `error during build`; a test summary fails only with a non-zero failure count or a FAIL line). Exit code 1 from grep, rg, diff or test is `no_match`, not a failure. Killed means exit −9, −15, 124, 137 or 143, or OpenCode's shell-tool timeout (120 s, or the timeout the agent set).
+
+Known limits of the heuristic: tests are recognised by script name, so a UI test run as `node ui.mjs` is not a test; `esbuild --bundle` smoke bundles written to `/tmp` count as builds; string literals inside inline `node -e` / `python -c` code are still matched; writes to `/tmp` scratch files are not file writes; mini-swe-agent's exit −15 covers both its 30 s command timeout and an agent's own `pkill`, and both count as killed.
+
+**Parser version.** `rule_table()` publishes the rules (categories, native tool mapping, shell patterns, call roles, failed outcomes and these notes); the trajectory endpoint returns it, and the Behaviour card shows it. Any change to a rule, a category or a derived field's definition bumps `PARSER_VERSION` (currently `1.1`). Records stay comparable only within one parser version: the model-level summary flags mixed versions, the trajectory endpoint computes a record on the fly (and does not save it) when the stored one is older, and the backfill below recomputes stale records. Version 1.1 treats quoted strings as data, counts `*.sh` scripts only when run, no longer counts clean test summaries as failures or scans a Python edit script's string literals, counts FastAPI `TestClient` as a probe and `node -e` file writes as writes, drops unreported token counts from the series and denominators, and leaves policy denials out of `failed_actions`.
+
+**Backfill.** Runs from before the record existed, or recorded by an older parser, are rebuilt from their run records:
+
+```bash
+python manage.py backfill_agent_trajectories [--job <uuid or unique prefix> ...] [--dry-run] [--force]
+```
+
+It covers every completed agent job with a run record (or the `--job` ones), checks each file against the sha256 the job recorded, skips records already at the current parser version unless `--force`, and writes under a `select_for_update` re-read, merging only the derived keys above. Executors and workers that run agent jobs load the parser at start, so restart them after a parser change for new runs to get the new rules at ingestion.
+
+**Endpoints** (the job routes answer 404 for another user's job and for non-agent jobs):
+
+- `GET /jobs/<id>/trajectory/?limit=500` (1–2000): the record (`record_source` `stored` or `computed`), one row per LLM call (offset, duration, role, status, tokens, finish reason, provider, upstream retries, and each tool call's category, labels, a summary of at most 300 characters, outcome and exit code), `truncated`, `total_steps`, `source` (`llm_calls`, or `artifacts` when the run record is gone and tool outcomes are unknown), the rule table and notes.
+- `GET /jobs/<id>/trajectory/steps/<seq>/`: one call in full: request params, system prompt, tools offered, the messages since the previous assistant turn, the response (content, reasoning, usage, error) and each tool call's arguments, result, outcome, exit code and duration. Texts are cut at about 20,000 characters.
+- `GET /models/<model_id>/behaviour/`: `metrics.behaviour` aggregated per harness over your completed agent jobs of a model you can see: n, mean, median, min and max per numeric field, k of n for the yes/no fields, the conformance pass rate (suite-graded runs only, never the generation-time smoke check), the harness and parser versions and the request budgets (`max_llm_requests`) pooled. Runs whose validity note excludes them are left out and counted (`n_invalid_excluded`), as are runs without a record (`n_without_record`). Descriptive, no tests; the notes flag pooled budgets and mixed parser versions.
 
 ## Research design: what keeps agent samples comparable
 
@@ -160,7 +221,7 @@ Agent results set `result_data.materialize = "verbatim"`. The runtime writes the
 | A flaky provider costs a model steps, and harnesses retry differently | The gateway retries transient failures for every harness. Only successful calls count toward `max_llm_requests`, and attempts are capped separately |
 | Budgets that favour some models (USD favours cheap ones, tokens terse ones, wall clock fast providers) | The **request budget** binds by default (100). USD (5), tokens (30M) and wall clock (60 min) are safety nets, and a run stopped by one carries a `warn` note |
 | Time confounds (provider load, routing and rate limits drift over hours) | Randomised complete blocks: repeat by repeat, with cells shuffled within a repeat by a seeded RNG. The executor keeps dispatch order equal to run order, and each job records its run order and queue time (`agent.schedule`) |
-| Seeds confounded with conditions | Common random numbers: every condition of an (app, repeat) cell shares one seed |
+| Seeds confounded with conditions | Every condition of an (app, repeat) cell gets the same seed. This does not make the conditions' runs correlated: a seed does not reproduce an agent run (see [Seeds](/docs/EXPERIMENTS#seeds)) |
 | Unequal sandboxes across harnesses | One base image with an exact pinned release. Harness packages are locked and isolated in a private venv, and memory/CPU caps are frozen per job |
 | Dependency drift inside a harness (an unpinned install once resolved a LiteLLM that would not import) | A fully locked `requirements.lock` per Python harness. Content-addressed image tags are recorded per job, and a changed definition makes old jobs refuse to run |
 | Agent kills its own harness while restarting its server | The brief goes in via file/stdin only, and `harness.sh` is exec'd under `timeout`. Remaining self-kills are recorded as `harness_killed` |
@@ -188,7 +249,7 @@ Known residual variation, recorded but not controlled:
 - Without a model-metadata file, Aider refreshes its model database from GitHub at start-up (blocked, and recorded as `egress_denied`). With the metadata file it does not.
 - Request budgets are not compute-equal across harnesses: Aider needs few calls, mini-swe-agent many. For cross-harness comparisons, report cost and tokens alongside outcomes.
 
-Agent runs are not deterministic even with a seed (tool timing, provider batching), so **repeats are the unit of analysis**. Use `trials` (or experiment `repeats`) of 3 or more, with a `base_seed` so that the seed matrix and the run order are reproducible.
+Agent runs are not deterministic even with a seed (tool timing, provider batching). The only exact replay recorded so far (two runs with `run_fingerprint` 5b4d75641ae71433: same snapshot, same forwarded seed, same provider) already differed at the first LLM call. **Repeats are therefore the unit of analysis.** Use `trials` (or experiment `repeats`) of 3 or more, with a `base_seed` so that the seed matrix and the run order are reproducible. How much repeats differ is measured per job, per model and per experiment ([Run-to-run variation](/docs/EXPERIMENTS#run-to-run-variation)).
 
 ### Fairness rules
 
@@ -291,6 +352,7 @@ All paths are under `/api/generation` ([API reference](/docs/api-reference)).
 - `GET /agent/config/` returns the defaults, limits, network and sampling policies, the default provider routing, the default stack and output cap, and every harness with its option schema. `GET /agent/harnesses/` lists the harnesses.
 - Presets: `GET /presets/?kind=&include_archived=` (the latest version per slug, system and your own), `POST /presets/validate/`, `POST /presets/`, `GET /presets/<id>/` (any visible version), `GET /presets/<kind>/<slug>/versions/`, `PUT /presets/<kind>/<slug>/` (a content change creates a new version) and `DELETE /presets/<kind>/<slug>/` (archives).
 - `POST /jobs/<id>/evaluate/` re-grades a completed job. `GET /jobs/<id>/run-record/<name>` downloads run evidence.
+- `GET /jobs/<id>/trajectory/`, `GET /jobs/<id>/trajectory/steps/<seq>/` and `GET /models/<model_id>/behaviour/`: see [Trajectory and behaviour metrics](#trajectory-and-behaviour-metrics).
 
 ## Template modes (scaffolding, custom)
 
@@ -371,6 +433,86 @@ Healing is not part of the snapshot: healed and raw builds share a fingerprint. 
 
 **Grading.** Scaffolding jobs of an experiment are graded by the conformance suite after generation, unless the experiment's `post_run.evaluate` is off. Ad-hoc scaffolding jobs are graded on demand through `POST /jobs/<id>/evaluate/`.
 
+## Per-call telemetry
+
+Every LLM call a job makes is stored as a `GenerationArtifact`: `agent_call_<nnnn>` in agent runs, one per call stage in the template modes (`custom`, `backend`, `frontend`, and their continuation and repair calls). Its `telemetry` field (contract C1, `services/call_telemetry.py`) holds one normalized record of the call. Every key is optional: an absent key or null means unknown, never 0. `GET /jobs/<id>/artifacts/` returns it, and the Artifacts tab shows it under each call.
+
+| Key | Meaning |
+| --- | --- |
+| `source` | `gateway`, `orchestrator` or `llm_request` (below) |
+| `started_at`, `ended_at`, `duration_s` | Platform-measured timing of the call |
+| `attempts`, `upstream_retries` | Upstream attempts; retries after transient failures |
+| `status`, `error` | HTTP status; `{status, code, message}` for failed calls |
+| `provider`, `served_model`, `system_fingerprint` | Who served it, and the model id the response named |
+| `finish_reason`, `native_finish_reason` | As the response reported them |
+| `tokens` | `prompt`, `completion`, `reasoning`, `cached`, `cache_write` |
+| `cost`, `list_cost`, `billing_source` | The billed amount the response reported (`usage.cost`: 0 on subscription and local endpoints); for subscription endpoints (OpenCode Go) the list price the provider reported and its billing source |
+| `failed_attempts` | Template calls: the client's failed attempts, `[{status, kind}]` |
+| `local` | Proxied and local calls: the executor proxy's `request_id`, `endpoint`, `upstream_ms`, `load_ms`, `eval_ms`, `eval_tps`, `relay_attempts`, `queue_wait_s`, `delivery_s` |
+| `openrouter` | OpenRouter's own record of the call (below) |
+
+Three sources write it:
+
+- **Gateway** (agent runs): the gateway's `llm_calls` line. `duration_s` spans every upstream attempt *including the backoff sleeps between retries* (2, 4, 8, 16 s). Gateway lines from before `upstream_retries` was logged leave it absent.
+- **Orchestrator** (template modes): wall time measured around the chat completion, all client retries included. Attempts are counted from the OpenRouter client's per-retry warnings. A failed call gets its status, message and attempts; its stored response payload is unchanged.
+- **LLM request** (OpenCode Go, Ollama and other proxied endpoints): the executor proxy's `LLMRequest` row, paired with the gateway call by token counts inside the call's time window, adds the `local` block.
+
+Telemetry is written when the call's artifact is stored. A failure while building it leaves `telemetry` empty and never affects the job. Finished template jobs also record `metrics.llm_calls` (every call), `metrics.providers` (successful calls per provider), `metrics.reasoning_tokens` and `metrics.cached_tokens` (summed over the calls the token totals count, repairs excluded). Every writer merges additively: a value already stored is never replaced.
+
+### OpenRouter generation stats
+
+For calls with an OpenRouter `gen-` id, `services/openrouter_stats.py` fetches `GET https://openrouter.ai/api/v1/generation?id=gen-…`, a free metadata query (not a completion), with the job owner's key (the same resolution as generation, global fallback rules included). It stores `telemetry.openrouter`:
+
+| Field | Meaning |
+| --- | --- |
+| `latency_ms` | OpenRouter-measured time to first token (TTFT), *including* the provider's queueing and prefill: not a pure model latency |
+| `generation_time_ms` | From the request to the last token, at OpenRouter |
+| `decode_tps` (derived) | `native_tokens_completion / ((generation_time_ms − latency_ms) / 1000)`: output speed after the first token. Null when that span is under 250 ms (`MIN_DECODE_SPAN_MS`): the provider delivered the output in one burst (observed: 49–1,124 tokens in 1–87 ms, i.e. 1.9k–312k tok/s), which cannot be timed. Provider buffering short of that can still inflate it |
+| `native_tokens_*`, `tokens_prompt`, `tokens_completion` | Counts in the model's own tokenizer, and OpenRouter's normalized counts |
+| `provider_attempts`, `router_retries`, `fallbacks` | Every upstream attempt OpenRouter made; `router_retries` = attempts − 1; `fallbacks` = switches to *another* provider (a 429 retried on the same provider is a retry, not a fallback) |
+| `provider_name`, `model_permaslug` | The serving provider and the dated model version |
+| Also | `status`, `fetched_at`, `moderation_latency_ms`, `finish_reason`, `native_finish_reason`, `cache_discount`, `total_cost`, `upstream_inference_cost`, `upstream_id`, `request_id`, `streamed`, `cancelled`, `is_byok`, `service_tier`, `data_region`, `api_type`, `created_at` |
+
+- **Allow-list.** Only the fields above are kept. Account, workspace and client identifiers (`workspace_id`, `app_id`, `user_agent`, `origin`, `http_referer`, `external_user`, `session_id`, `api_key_id`, `user_id`) are never stored.
+- **Statuses.** `ok`; `unavailable` for a 404 (an unknown or expired record; the post-run task first tries again, below), never fetched again; `error` for a 429, 5xx or network failure after backing off 2, 4 and 8 s, fetched again next time. A 401/403 stops the batch. Requests are throttled to 5 per second.
+- **Not available for every call.** OpenCode Go and local-endpoint calls have no OpenRouter record, so their TTFT and decode speed are n/a, not zero.
+- **Retention.** OpenRouter does not document how long it keeps these records (12-day-old ids still answered). Fetch soon after the runs: a record that has expired is stored as `unavailable`.
+
+**After each run.** `GenerationService.execute` schedules the Celery task `backend.generation.tasks.fetch_call_stats_task` after every generation stage (agent and template modes), on commit with a 90 s countdown, and only when the job has `gen-` calls. A record still missing then (OpenRouter's can lag the completion) is fetched again up to twice, 600 s apart, before it is marked `unavailable`. Failures are logged and never change the job. It needs a running Celery worker (restart the worker after deploying, so it registers the task). The optional setting `CALL_TELEMETRY_AUTO_FETCH` turns the schedule off (`False`) or forces it on under tests; by default it is on except under `TESTING`.
+
+### Backfill
+
+```bash
+python manage.py backfill_call_telemetry [--from-logs] [--openrouter] [--rederive] \
+    [--job <uuid> ...] [--since <date or datetime>] [--limit N] [--dry-run]
+```
+
+At least one of the three modes is required:
+
+| Flag | Effect |
+| --- | --- |
+| `--from-logs` | Agent artifacts from the run record's `llm_calls.jsonl.gz` (`GENERATION_RUNS_ROOT/<job>[/a<attempt>]/`, checked against the sha256 in `result_data.agent.run_record`, matched by seq and response id), with the proxy's `LLMRequest` rows linked for local calls. Template artifacts, and agent jobs whose log is gone or fails its sha256, are filled from the stored response payload. Finished template jobs also get the `metrics` keys above when they lack them |
+| `--openrouter` | The OpenRouter record for every `gen-` call without an `ok` or `unavailable` block, with each job owner's key, at 5 requests per second |
+| `--rederive` | Recompute the derived `decode_tps`, `fallbacks` and `router_retries` of stored `ok` blocks from their measured fields (no network). The only flag that replaces stored values, and only these platform-derived keys |
+| `--job` (repeatable), `--since` | Limit to these jobs, or to jobs (artifacts, for `--openrouter`) created on or after the date |
+| `--limit N` | At most N jobs (`--from-logs`) and N fetches (`--openrouter`) |
+| `--dry-run` | Report what would change; write nothing |
+
+Merges are additive and the command is idempotent. Run `--from-logs` before `--openrouter`, not at the same time: the log pass writes without a row lock, so it could overwrite a stats block stored in between. Infrastructure retries delete the failed attempt's artifacts, so every job's telemetry covers its surviving attempt.
+
+### Statistics and exports
+
+`GET /models/<model_id>/call-telemetry/?mode=agent|scaffolding|custom` summarizes the calls of your jobs of a model you can see, overall and per upstream provider: `n_calls`, `n_jobs`, `modes`, `ttft_ms` and `duration_s` (n, median, p90), `generation_time_ms`, `decode_tps`, `e2e_output_tps`, `cache_hit_ratio`, `reasoning_share`, `retry_rate`, `error_rate`, `fallback_rate`, `finish_reasons`, `served_models`, `model_permaslugs`, `coverage` (calls with an `ok` record, `unavailable` ones, calls that can have one, and the shares) and `notes`. Every figure carries its n. Calls without stored telemetry are derived from their payload when it is read.
+
+- Call duration and end-to-end tok/s use only calls known to have had no upstream retry, because a retried call's duration includes backoff. Calls whose retry count was not recorded (older gateway logs) are left out too; their raw durations stay in `calls.csv`.
+- End-to-end tok/s = completion tokens (reasoning included) / call duration. It includes prefill and queueing, so it is not a decode speed.
+- Cache-hit ratio = cached prompt tokens / prompt tokens; reasoning share = reasoning tokens / completion tokens; both over calls whose response reported the breakdown.
+- Descriptive only: providers are not randomized, so differences between them are associations.
+
+`GET /calls.csv?experiment=<uuid>&job=<uuid>&model=<id>` streams one row per call of your jobs. The filters combine and at least one is required (400 otherwise; a foreign or malformed id is a 404). It never contains message content, unknown values are empty cells, and cells are spreadsheet-safe (`spreadsheet_safe=false` writes them verbatim). Columns: `job_id`, `experiment_id`, `condition_label`, `repeat_index`, `model_id`, `mode`, `harness`, `seq`, `stage`, `started_at`, `duration_s`, `attempts`, `upstream_retries`, `status`, `provider`, `served_model`, `model_permaslug`, `ttft_ms`, `generation_time_ms`, `decode_tps`, `prompt_tokens`, `completion_tokens`, `reasoning_tokens`, `cached_tokens`, `cache_write_tokens`, `cost`, `list_cost`, `catalog_cost`, `billing_source`, `finish_reason`, `native_finish_reason`, `fallbacks`, `router_retries`, `openrouter_status`, `telemetry_source`, `response_id`, `error_code`. `catalog_cost` is the prompt and completion tokens at the catalog headline prices frozen in the job's snapshot (empty when a price is missing or 0): it ignores cache discounts and the serving provider's own prices, so compare it with `cost` as a ratio. `fallbacks` counts provider switches; `router_retries` counts every extra attempt inside OpenRouter.
+
+In the UI: the model page's **Generation data** tab (Providers and calls), the experiment's Data section (**Per-call telemetry .csv**), and each call on an application's Artifacts tab.
+
 ## Job lifecycle (all modes)
 
 1. The API view creates the job(s) and freezes the snapshot. `dispatcher.dispatch_job` / `enqueue_jobs` then marks the rows as executor-owned (`queued_at`, lane, endpoint, priority, `sequence`) and wakes the executor after the transaction commits. Agent jobs go to the `sandbox` lane, and scaffolding and custom jobs to the `llm` lane. The web process never runs a job: the executor (`manage.py run_executor`) claims jobs under a lease and runs `GenerationService.execute` (`services/orchestrator.py`) in a worker thread. See [Execution engine](/docs/EXECUTION).
@@ -383,7 +525,7 @@ Healing is not part of the snapshot: healed and raw builds share a fingerprint. 
 
 | Action | Endpoint | Allowed from | Snapshot | Seed | Batch / experiment cell |
 | --- | --- | --- | --- | --- | --- |
-| Retry | `POST /jobs/<id>/retry/` | `failed`, `cancelled` | Re-resolved from current templates, except the spec content and stack version (below) | The cell's seed (common random numbers), or a fresh one if the job never had a seed | Takes over the original's cell and batch; refuses if the cell is already filled; reopens a finished experiment |
+| Retry | `POST /jobs/<id>/retry/` | `failed`, `cancelled` | Re-resolved from current templates, except the spec content and stack version (below) | The cell's seed (shared by the cell's conditions), or a fresh one if the job never had a seed | Takes over the original's cell and batch; refuses if the cell is already filled; reopens a finished experiment |
 | Replay | `POST /jobs/<id>/replay/` | Any finished job | Copied verbatim | Same seed | No batch and no cell (a reproducibility check) |
 | Rerun | `POST /jobs/<id>/rerun/` | Any finished job | Copied, reseeded | Fresh seed; gateway policy kept | Joins the batch, no cell (an extra, unpaired trial) |
 
@@ -399,6 +541,15 @@ Everything else is re-resolved as before: the current harness, images and proced
 
 Other job and batch endpoints: `GET /jobs/` (filters include `mode`, `status`, `model_id`, `batch_id`, `harness`, `experiment_id`, `condition_id`, `endpoint_id`, `app_requirement_id`, `repeat_index`, `phase`, `current`), `GET /jobs/stats/`, `GET /jobs/<id>/`, `POST /jobs/<id>/cancel/`, `DELETE /jobs/<id>/` (not while running), `GET /jobs/<id>/artifacts/`, `GET /jobs/<id>/export/`, `GET /batches/?mode=&experiment=`, `GET /batches/<id>/`, `GET /batches/<id>/jobs/` and `POST /batches/<id>/cancel/`.
 
+Read-only views of one job, all owner-only (404 for another user's or a malformed id) and derived on read, so they cover old jobs without a backfill and never change a stored value:
+
+| Endpoint | Returns |
+| --- | --- |
+| `GET /jobs/<id>/code-profile/` | Source LOC (`reports/services/loc.py`, the study's denominator) by layer (backend, frontend, tests, config/manifests/docs, excluded) and by language, next to `all_lines` (the all-lines count `metrics.lines_of_code` stores, lockfiles and scratch included) and its ratio to source LOC; excluded directories grouped by root with sample paths; non-source files tagged lockfile, manifest, docs, container, minified or config. File origins (scaffold, added, modified) with source and test LOC per origin, from the agent's workspace manifest (`known: false` with `not_agent` or `no_manifest` otherwise, never 0). Structure counts (SQLAlchemy models, route decorators, component and page files, component definitions) are regex heuristics marked approximate. Dependencies: declared specs per manifest against the scaffold's (pinned, latest or missing), model-added, re-pinned and dropped packages, and the pip packages the evaluation resolved (declared or transitive). Older storage layouts degrade to null with a note |
+| `GET /jobs/<id>/timeline/` | Phases with start, end, seconds and source: queue, generation (agent runs: LLM time, endpoint-slot wait, tools = wall − LLM, and the trajectory's time split; template modes: backend and frontend stages), a residual "waiting / other" (approximate), and evaluation (build attempts, app start and tests). The evaluation stores no start time, so its start is approximate, and an evaluation that ran outside the run (a later re-evaluation) is flagged separate. Also milestones, the execution record (lane, endpoint, attempt, policy, run order, queue, LLM slot wait, earlier attempts with their errors and cost, infra errors, retry backoff) and the experiment cell (experiment, condition, repeat k of planned N) |
+| `GET /jobs/<id>/quality-metrics/` | The latest result per tool for this job (`ToolResult.latest_ids_per_job`) of lizard, radon and jscpd (each listed, `not_run` when absent) and of any other tool with numeric metrics: the metrics, a derived lizard mean function NLOC, the tool version and parser/command/patterns hashes, measured or skip reason or error, and the run it came from. Different tools can come from different runs |
+| `GET /jobs/<id>/replicates/` | The job's same-setup group: see [Run-to-run variation](/docs/EXPERIMENTS#run-to-run-variation) |
+
 ## In the UI
 
 | Page | What it does |
@@ -407,7 +558,7 @@ Other job and batch endpoints: `GET /jobs/` (filters include `mode`, `status`, `
 | `/sample-generator/batches` | Every batch with its progress, mean pass rate and cost |
 | `/sample-generator/batches/<id>` | The results matrix and every run of one batch, with Cancel and a link to re-generate the grid |
 | `/templates` | The Generation Library: app specs, stacks, presets (harness / sampling / budget), profiles and blocks, plus the Packages dialog |
-| `/applications/<id>` | One job: overview, Agent run summary (agent jobs), prompts, files, container, tools, analyses, logs, artifacts and metrics, with retry/replay/rerun and evaluate actions |
+| `/applications/<id>` | One job: overview (code footprint, phase timeline, platform evaluation, complexity and duplication, code profile, the frozen inputs), Agent run summary with behaviour and trajectory (agent jobs), prompts, files, container, tools, analyses, logs, dependencies, same setup, artifacts and metrics, with retry/replay/rerun and evaluate actions ([User guide](/docs/USER_GUIDE#applications-applications)) |
 | `/applications/<id>/failure` | Error details and LLM artifacts of a failed job |
 
-For designed runs (models × harness presets × apps × repeats) see [Experiments](/docs/EXPERIMENTS). Experiments run in agent mode by default (`Experiment.mode`, either `agent` or `scaffolding`). The stack and the sampling and budget presets are set experiment-wide, with a harness preset per condition. Launches use common random numbers and a blocked randomised order, and the preview reports the budget cap as an upper-bound cost along with a comparability report per condition.
+For designed runs (models × harness presets × apps × repeats) see [Experiments](/docs/EXPERIMENTS). Experiments run in agent mode by default (`Experiment.mode`, either `agent` or `scaffolding`). The stack and the sampling and budget presets are set experiment-wide, with a harness preset per condition. Launches give every condition of an (app, repeat) cell the same seed and use a blocked randomised order, and the preview reports the budget cap as an upper-bound cost along with a comparability report per condition.

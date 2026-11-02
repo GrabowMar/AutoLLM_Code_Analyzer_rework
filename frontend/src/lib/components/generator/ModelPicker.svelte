@@ -563,14 +563,14 @@
 												{#if m.quantization}
 													<span class={cn(chip, 'border-border text-foreground')} title="Quantization">{m.quantization}</span>
 												{/if}
-												<span class={cn(chip, 'border-border text-foreground')} title="Context window (capped by the endpoint's num_ctx)">{m.context_window_display} ctx</span>
+												{#if (m.context_window ?? 0) > 0}<span class={cn(chip, 'border-border text-foreground')} title="Context window (capped by the endpoint's num_ctx)">{m.context_window_display} ctx</span>{/if}
 												{#if isLoaded(m)}
 													<span class={cn(chip, 'border-transparent bg-primary/15 text-success-fg')} title="Loaded in memory now: no warm-up">
 														<span class="status-dot h-1.5 w-1.5" aria-hidden="true"></span>loaded
 													</span>
 												{/if}
 											{:else}
-												<span class={cn(chip, 'border-border text-foreground')} title="Context window">{m.context_window_display} ctx</span>
+												{#if (m.context_window ?? 0) > 0}<span class={cn(chip, 'border-border text-foreground')} title="Context window">{m.context_window_display} ctx</span>{/if}
 												<span
 													class={cn(chip, m.is_free ? 'border-transparent bg-primary/15 text-success-fg' : 'border-border text-foreground')}
 													title="Input / output price per 1M tokens">{priceLabel(m)}</span

@@ -350,37 +350,53 @@ def collect_app_files(job: GenerationJob, *, include_scaffold: bool = True) -> A
 # ── findings ──────────────────────────────────────────────────────────
 
 
-def latest_analysis_run(user: User, job: GenerationJob):
-    from backend.analysis.models import AnalysisRun
+def latest_results(job: GenerationJob):
+    """The app's latest completed result per tool (``ToolResult.latest_ids_per_job``): what the study tables count.
 
-    return (
-        AnalysisRun.objects.filter(
-            generation_job=job,
-            created_by=user,
-            status__in=[AnalysisRun.Status.COMPLETED, AnalysisRun.Status.PARTIAL],
-        )
-        .order_by("-created_at")
-        .first()
+    Re-running one tool supersedes only that tool's result, so a partial
+    re-run never becomes the only source of the README summary or the upload.
+    """
+    from backend.analysis.models import ToolResult
+
+    return ToolResult.objects.filter(
+        id__in=ToolResult.latest_ids_per_job([job.id]),
+        status=ToolResult.Status.COMPLETED,
     )
 
 
-def _findings_qs(run):
+def _findings_qs(results):
     from backend.analysis.models import Finding
 
-    return Finding.objects.filter(result__run=run)
+    return Finding.objects.filter(result__in=results)
 
 
-def _findings_summary(run) -> dict[str, Any] | None:
-    if run is None:
+def _findings_summary(results) -> dict[str, Any] | None:
+    """Code findings per tool and reported level, and dependency advisories apart; ``None`` when nothing ran.
+
+    Levels are the labels the tools printed (``unrated`` when a tool rates
+    nothing). Dependency advisories (:func:`is_dependency_advisory`) are
+    about the app's packages, not its code, so they are counted on their own.
+    """
+    from backend.analysis.services.base import is_dependency_advisory
+
+    measured = list(results.values_list("run_id", "tool_slug"))
+    if not measured:
         return None
-    rows = list(_findings_qs(run).values_list("severity", "result__tool_slug"))
+    by_level: Counter = Counter()
+    advisories: Counter = Counter()
+    rows = _findings_qs(results).values_list("result__tool_slug", "category", "rule_id", "tool_severity")
+    for tool, category, rule_id, label in rows:
+        if is_dependency_advisory(tool, category, rule_id):
+            advisories[tool] += 1
+        else:
+            by_level[(tool, (label or "").strip() or "unrated")] += 1
     return {
-        "run_id": str(run.id),
-        "completed_at": run.completed_at,
-        "total": len(rows),
-        "by_severity": Counter(sev for sev, _ in rows),
-        "by_tool": Counter(tool for _, tool in rows),
-        "tools": list(run.tool_slugs or []),
+        "run_ids": sorted({str(run_id) for run_id, _ in measured}),
+        "tools": sorted({tool for _, tool in measured}),
+        "total": sum(by_level.values()),
+        "by_level": by_level,
+        "advisories": sum(advisories.values()),
+        "advisories_by_tool": advisories,
     }
 
 
@@ -395,29 +411,41 @@ def _match_path(uri: str, exported: set[str]) -> str:
     return norm.lstrip("/")
 
 
-def build_sarif(run, exported_paths: set[str]) -> tuple[dict[str, Any], int]:
-    """SARIF for ``run``'s findings, shaped for GitHub code scanning.
+def build_sarif(job: GenerationJob, exported_paths: set[str]) -> tuple[dict[str, Any], int]:
+    """SARIF for the app's findings (:func:`latest_results`), shaped for GitHub code scanning.
 
-    Returns the document and the number of results kept. Results without a
-    file location are dropped (code scanning cannot place them).
+    Returns the document and the number of results kept. Code scanning places
+    results on repository files only, so results without a file location,
+    results of dynamic (DAST) tools (their "path" is a URL on the running
+    app) and results whose file is not in the exported repository are
+    dropped. There is one latest result per tool, so the document has one
+    SARIF run per tool; GitHub derives each analysis's category from the upload.
     """
+    from backend.export.services.findings import dynamic_tool_slugs
     from backend.export.services.findings import findings_sarif
 
-    sarif = findings_sarif(_findings_qs(run))
+    sarif = findings_sarif(_findings_qs(latest_results(job)))
+    dynamic = dynamic_tool_slugs()
     kept = 0
     for sarif_run in sarif.get("runs", []):
+        sarif_run.pop("automationDetails", None)
         driver = sarif_run.get("tool", {}).get("driver", {})
-        if not driver.get("informationUri"):
-            driver.pop("informationUri", None)
+        if driver.get("name") in dynamic:
+            sarif_run["results"] = []
+            continue
         results = []
         for result in sarif_run.get("results", []):
             locations = result.get("locations") or []
-            if not locations:
-                continue
+            placed = []
             for loc in locations:
                 art = loc.get("physicalLocation", {}).get("artifactLocation", {})
-                if art.get("uri"):
-                    art["uri"] = _match_path(art["uri"], exported_paths)
+                uri = _match_path(art.get("uri") or "", exported_paths)
+                if uri and uri in exported_paths:
+                    art["uri"] = uri
+                    placed.append(loc)
+            if not placed:
+                continue
+            result["locations"] = placed
             results.append(result)
         sarif_run["results"] = results[:SARIF_MAX_RESULTS_PER_RUN]
         kept += len(sarif_run["results"])
@@ -430,17 +458,15 @@ def _upload_sarif(
     full_name: str,
     ref: str,
     commit_sha: str,
-    user: User,
     job: GenerationJob,
     exported: set[str],
 ) -> dict[str, Any]:
     """Upload the app's findings; never raises — failures come back as a message."""
-    run = latest_analysis_run(user, job)
-    if run is None:
+    if not latest_results(job).exists():
         return {"uploaded": False, "message": "This application has no completed analysis run; nothing to upload."}
-    sarif, kept = build_sarif(run, exported)
+    sarif, kept = build_sarif(job, exported)
     if kept == 0:
-        return {"uploaded": False, "message": "The latest analysis run has no file-located findings to upload."}
+        return {"uploaded": False, "message": "The latest analysis results have no file-located findings to upload."}
     payload = base64.b64encode(gzip.compress(json.dumps(sarif).encode("utf-8"))).decode("ascii")
     try:
         response = client.request(
@@ -479,8 +505,6 @@ def _upload_sarif(
 
 
 # ── README ────────────────────────────────────────────────────────────
-
-_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
 
 
 def build_readme(job: GenerationJob, summary: dict[str, Any] | None, *, files_count: int) -> str:
@@ -522,15 +546,31 @@ def build_readme(job: GenerationJob, summary: dict[str, Any] | None, *, files_co
         lines += ["No static analysis has been run on this application yet.", ""]
     else:
         tools = ", ".join(f"`{t}`" for t in summary["tools"]) or "n/a"
-        lines += [f"Latest analysis run `{summary['run_id']}` (tools: {tools}).", ""]
-        if summary["total"] == 0:
+        runs = ", ".join(f"`{r}`" for r in summary["run_ids"])
+        lines += [f"Latest completed result of each tool (analysis runs {runs}; tools: {tools}).", ""]
+        if summary["total"] == 0 and summary["advisories"] == 0:
             lines += ["No findings were reported.", ""]
+        elif summary["total"] == 0:
+            lines += ["No findings in the code were reported.", ""]
         else:
-            lines += [f"**{summary['total']} finding(s)**", "", "| Severity | Count |", "|---|---|"]
-            by_sev = summary["by_severity"]
-            lines += [f"| {sev} | {by_sev[sev]} |" for sev in _SEVERITY_ORDER if by_sev.get(sev)]
-            lines += ["", "| Tool | Findings |", "|---|---|"]
-            lines += [f"| `{tool}` | {count} |" for tool, count in summary["by_tool"].most_common()]
+            lines += [
+                f"**{summary['total']} finding(s) in the code**",
+                "",
+                "| Tool | Level (as the tool reported it) | Findings |",
+                "|---|---|---|",
+            ]
+            by_level = sorted(summary["by_level"].items(), key=lambda kv: (kv[0][0], -kv[1], kv[0][1]))
+            lines += [f"| `{tool}` | {level} | {count} |" for (tool, level), count in by_level]
+            lines.append("")
+        if summary["advisories"]:
+            lines += [
+                f"**{summary['advisories']} dependency advisory(ies)**: what the known-vulnerability scanners "
+                "report about the packages the app installs, counted apart from the code findings.",
+                "",
+                "| Tool | Advisories |",
+                "|---|---|",
+            ]
+            lines += [f"| `{tool}` | {count} |" for tool, count in summary["advisories_by_tool"].most_common()]
             lines.append("")
     return "\n".join(lines)
 
@@ -594,9 +634,9 @@ def export_to_repo(
         msg = "This application has no exportable files."
         raise GitHubError(msg, status_code=400)
 
-    run = latest_analysis_run(user, job)
     readme_name = _readme_path(app.files)
-    readme = build_readme(job, _findings_summary(run), files_count=len(app.files) + 1).encode("utf-8")
+    summary = _findings_summary(latest_results(job))
+    readme = build_readme(job, summary, files_count=len(app.files) + 1).encode("utf-8")
     files = {**app.files, readme_name: readme}
 
     client = GitHubClient(token)
@@ -671,7 +711,7 @@ def export_to_repo(
         "sarif": {"uploaded": False, "message": "SARIF upload not requested."},
     }
     if upload_sarif:
-        result["sarif"] = _upload_sarif(client, full_name, ref, commit_sha, user, job, set(files))
+        result["sarif"] = _upload_sarif(client, full_name, ref, commit_sha, job, set(files))
     return result
 
 
@@ -710,7 +750,7 @@ def export_to_gist(
         if text.strip():
             gist_files[path.replace("/", "__")] = {"content": text}
     readme_name = "LLM_LAB_EXPORT.md" if "README.md" in gist_files else "README.md"
-    summary = _findings_summary(latest_analysis_run(user, job))
+    summary = _findings_summary(latest_results(job))
     gist_files[readme_name] = {"content": build_readme(job, summary, files_count=len(gist_files) + 1)}
 
     gist = GitHubClient(token).call(

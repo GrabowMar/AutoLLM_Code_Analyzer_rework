@@ -14,12 +14,14 @@ Which work runs where: the executor process, threads inside the web process, Cel
 | Analyzer workspace provisioning, tool installs | Daemon threads in `django` | No |
 | Report generation, container start/stop/build actions | Daemon threads in `django` | No |
 | Catalog enrichment after a model sync | Celery `enrich_catalog_task` | Yes (queued in Redis) |
+| OpenRouter per-call stats after a generation stage | Celery `fetch_call_stats_task` | Yes (queued in Redis) |
 | Outbound webhook deliveries | Celery `deliver_webhook`, retried with backoff | Yes |
 | Webhook sweep for missed status transitions | Celery beat, every 60 s | Yes |
+| Human-evaluation idle-app reaper (stop idle task apps, drain the start queue) | Celery beat, every 120 s, plus lazily (at most once a minute) from portal heartbeats and hosting calls; the containers it stops are stopped by threads in `celeryworker` | Yes |
 
 The web process never runs generation jobs. Views write rows (`queued_at`, lane, priority) and, after the transaction commits, push a token onto the Redis list `executor:wake` (the doorbell) so the executor claims them without waiting for its next tick. See [Execution engine](/docs/EXECUTION) for the scheduler, slots, leases and drain procedure.
 
-Threads in `django` die with the process. In the local stack that includes every `uvicorn --reload` triggered by a backend edit. A killed analysis run stays `running`; cancel it, or use **System → Maintenance → Clear Stuck Analysis Tasks** (staff) to fail runs untouched for an hour.
+Threads in `django` die with the process. In the local stack that includes every `uvicorn --reload` triggered by a backend edit. A killed analysis run is failed as interrupted once its heartbeat is 5 minutes old, the next time runs are listed or opened ([Analysis pipeline](/docs/ANALYSIS_PIPELINE)); **System → Maintenance → Clear Stuck Analysis Tasks** (staff) does the same on demand and also fails runs untouched for an hour. A report's thread starts once its row is committed; a report left `pending` for 10 minutes or `generating` for 1 hour is marked `failed` ("Interrupted…") the next time reports are listed or opened.
 
 ## The executor
 
@@ -55,13 +57,15 @@ Three compose services share the django image and the Redis broker (`REDIS_URL`,
 
 | Task | Module | Triggered by |
 | --- | --- | --- |
-| `enrich_catalog_task` | `backend/llm_models/tasks.py` | `POST /api/models/sync/`, after the commit. Also available synchronously as `manage.py enrich_models` |
+| `enrich_catalog_task` | `backend/llm_models/tasks.py` | `POST /api/models/sync/`, after the commit, with the syncing user's id (for their Hugging Face token; only the id travels through the broker). Also available synchronously as `manage.py enrich_models` |
+| `fetch_call_stats_task` | `backend/generation/tasks.py` | The executor, after each generation stage of a job with OpenRouter `gen-` calls: on commit, 90 s countdown. Fetches OpenRouter's per-call records into the artifacts' telemetry; records still missing are tried twice more, 600 s apart. Never changes the job. Also available as `manage.py backfill_call_telemetry --openrouter` ([Generation process](/docs/GENERATION_PROCESS#openrouter-generation-stats)) |
 | `deliver_webhook` | `backend/integrations/tasks.py` | A webhook event for an enabled subscription. Up to 3 retries at 15, 60 and 240 s on 5xx, 429 or network errors |
 | `sweep_webhook_events` | `backend/integrations/tasks.py` | Beat, every 60 s. Registered as the periodic task "integrations: sweep webhook events" after every migrate. Emits events for terminal transitions from the last 30 minutes that bypassed `post_save`, and re-dispatches deliveries that never got a first attempt |
+| `reap_idle_apps_task` | `backend/human_eval/tasks.py` | Beat, every 120 s. Registered as the periodic task "human_eval: reap idle apps" after every migrate. Stops task-started, unpinned apps idle past their task's `hosting.idle_stop_minutes` and apps of closed tasks, clears stale start markers and drops abandoned queue requests, then starts queued apps ([Human evaluation](/docs/HUMAN_EVALUATION#running-apps-for-testers)) |
 | `run_pipeline_task`, `run_scheduler_tick` | `backend/automation/tasks.py` | Legacy automation; nothing calls or schedules them any more |
 | `get_users_count` | `backend/users/tasks.py` | Template example, unused |
 
-Without a worker the app still works: model sync succeeds without enrichment, and webhook deliveries wait in Redis (and stay `pending` in the database) until a worker starts. Without beat the sweep stops, so deliveries that could not be queued (Redis down) are never retried.
+Without a worker the app still works: model sync succeeds without enrichment, per-call stats fetches wait in Redis (OpenRouter's records may expire meanwhile; the backfill command fetches them later), and webhook deliveries wait in Redis (and stay `pending` in the database) until a worker starts. Without beat the sweep stops, so deliveries that could not be queued (Redis down) are never retried.
 
 > [!NOTE]
 > Experiment schedules do not need Celery beat. The old `run_scheduler_tick` / `runautomationscheduler` path only served legacy automation pipelines; schedules now fire inside the executor. See [Experiments](/docs/EXPERIMENTS#automation) and [Automation guide](/docs/AUTOMATION_GUIDE).

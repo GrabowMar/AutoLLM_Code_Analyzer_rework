@@ -6,6 +6,7 @@ import logging
 from datetime import timedelta
 from typing import Any
 
+from django.db import models
 from django.db import transaction
 from django.utils import timezone
 
@@ -17,6 +18,17 @@ from .generators import USER_SCOPED
 
 logger = logging.getLogger(__name__)
 
+# A report's generation thread dies with its process (autoreload, restart, a
+# lost dispatch); nothing would ever finish such a row, and the detail page
+# would poll it forever. Rows still unfinished this long after creation are
+# marked failed (``reap_stale_reports``). Generation normally takes seconds.
+STALE_PENDING_AFTER = timedelta(minutes=10)
+STALE_GENERATING_AFTER = timedelta(hours=1)
+INTERRUPTED_MESSAGE = (
+    "Interrupted: generation did not finish (the worker process restarted or the job was lost). "
+    "Generate the report again."
+)
+
 
 def create_and_dispatch(
     *,
@@ -27,7 +39,13 @@ def create_and_dispatch(
     user=None,
     expires_in_days: int | None = 30,
 ) -> Report:
-    """Create a Report row, then run the generator in a daemon thread."""
+    """Create a Report row, then run the generator in a daemon thread once the row is committed.
+
+    The thread reads the row on its own connection: started before the
+    caller's transaction (the request's, under ATOMIC_REQUESTS) commits, it
+    would not find it and the report would stay pending. Outside a
+    transaction the callback runs at once.
+    """
 
     report = _create(
         report_type=report_type,
@@ -37,7 +55,8 @@ def create_and_dispatch(
         user=user,
         expires_in_days=expires_in_days,
     )
-    _dispatch(report.id)
+    report_id = report.id
+    transaction.on_commit(lambda: _dispatch(report_id))
     return report
 
 
@@ -126,10 +145,20 @@ def _run_generation(report_id) -> None:
         connection.close()
 
 
+def reap_stale_reports(now=None) -> int:
+    """Mark reports stuck pending/generating past their deadline as failed; returns how many."""
+    now = now or timezone.now()
+    stale = Report.objects.filter(
+        models.Q(status=Report.Status.PENDING, created_at__lt=now - STALE_PENDING_AFTER)
+        | models.Q(status=Report.Status.GENERATING, created_at__lt=now - STALE_GENERATING_AFTER),
+    )
+    return stale.update(status=Report.Status.FAILED, error_message=INTERRUPTED_MESSAGE, completed_at=now)
+
+
 def _generate(report: Report) -> None:
     generator = GENERATORS[report.report_type]
     if report.report_type in USER_SCOPED:
-        # Owner-scoped generators read only what the report's creator may see.
+        # Owner-scoped generators read only what the report's creator may see (staff: everything).
         data = generator(report.config or {}, user=report.created_by)
     else:
         data = generator(report.config or {})
@@ -160,6 +189,16 @@ def _validate_config(report_type: str, config: dict[str, Any], user=None) -> Non
         from backend.statistics.services.mcdm import criteria_from_config
 
         criteria_from_config(config["ranking_criteria"])
+    if report_type == "tool_analysis" and (config or {}).get("tool_name"):
+        from backend.analysis.models import AnalyzerTool
+        from backend.analysis.models import ToolResult
+
+        # A typo would otherwise produce a completed report of zero findings.
+        # Tools removed from the registry can still be reported on by their results.
+        name = config["tool_name"]
+        if not (AnalyzerTool.objects.filter(slug=name).exists() or ToolResult.objects.filter(tool_slug=name).exists()):
+            msg = f"Unknown tool: {name}"
+            raise ValueError(msg)
 
 
 def _default_title(report_type: str, config: dict[str, Any]) -> str:  # noqa: PLR0911 - one branch per type
@@ -190,8 +229,10 @@ def _make_summary(report_type: str, data: dict[str, Any]) -> dict[str, Any]:  # 
         return {
             "model_id": (data.get("model") or {}).get("model_id"),
             "total_jobs": gen.get("total_jobs", 0),
-            "success_rate": gen.get("success_rate", 0),
-            "total_findings": data.get("total_findings", 0),
+            # None: nothing finished / nothing analyzed (unmeasured is not zero).
+            "success_rate": gen.get("success_rate"),
+            "runs_analyzed": data.get("runs_analyzed"),
+            "total_findings": data.get("total_findings"),
             "total_loc": (data.get("loc") or {}).get("total_loc", 0),
         }
     if report_type == "template_comparison":
@@ -202,7 +243,7 @@ def _make_summary(report_type: str, data: dict[str, Any]) -> dict[str, Any]:  # 
     if report_type == "tool_analysis":
         return {
             "tool": data.get("tool_filter"),
-            "total_findings": data.get("total_findings", 0),
+            "total_findings": data.get("total_findings"),
             "tool_count": len(data.get("tools", []) or []),
         }
     if report_type == "generation_analytics":
@@ -216,24 +257,39 @@ def _make_summary(report_type: str, data: dict[str, Any]) -> dict[str, Any]:  # 
         }
     if report_type == "experiment_report":
         results = data.get("results") or {}
-        leader = (results.get("leaderboard") or [{}])[0]
+        board = [r for r in results.get("leaderboard") or [] if r.get("pass_rate_mean") is not None]
+        best = max((r["pass_rate_mean"] for r in board), default=None)
+        # Conditions sharing the top mean (as the Results tab's findings decide a
+        # tie): with more than one there is no leader, and with no graded
+        # condition there is nothing to lead.
+        top = [r for r in board if abs(r["pass_rate_mean"] - best) < 1e-9] if best is not None else []
         return {
             "experiment_id": (data.get("experiment") or {}).get("id"),
             "condition_count": data.get("total_conditions", 0),
-            "leader": leader.get("label"),
-            "leader_pass_rate": leader.get("pass_rate_mean"),
+            "leader": top[0].get("label") if len(top) == 1 else None,
+            "leader_pass_rate": best,
+            "tied_leaders": len(top) if len(top) > 1 else 0,
             "interim": results.get("interim"),
         }
     if report_type == "study_report":
         funnel = (data.get("funnel") or {}).get("overall") or {}
-        ranking = (data.get("ranking") or {}).get("ranking") or [{}]
+        ranking = (data.get("ranking") or {}).get("ranking") or []
+        # TOPSIS ranks are competition ranks: every row ranked 1 shares the top,
+        # and ranking[0] of a tie is only the alphabetically first. A tie names
+        # no leader (as the experiment report's summary decides it).
+        if ranking and all("topsis_rank" in r for r in ranking):
+            top = [r.get("model") for r in ranking if r.get("topsis_rank") == 1]
+        else:
+            top = [ranking[0].get("model")] if ranking else []
         return {
             "jobs": funnel.get("jobs", 0),
             "models": len((data.get("protocol") or {}).get("models") or []),
             "deploy_rate": (funnel.get("deploy_rate") or {}).get("rate"),
             "functional_rate": (funnel.get("functional_rate") or {}).get("rate"),
-            "unique_issues": ((data.get("issues") or {}).get("totals") or {}).get("unique_issues", 0),
-            "leader": ranking[0].get("model") if ranking else None,
+            # None: no app was measured (unmeasured is not zero).
+            "unique_issues": ((data.get("issues") or {}).get("totals") or {}).get("unique_issues"),
+            "leader": top[0] if len(top) == 1 else None,
+            "tied_leaders": len(top) if len(top) > 1 else 0,
             "warnings": sum(1 for v in data.get("validity") or [] if v.get("level") == "warning"),
         }
     return {}
@@ -247,6 +303,7 @@ def list_reports(
     limit: int = 50,
     offset: int = 0,
 ):
+    reap_stale_reports()
     qs = Report.objects.all()
     if user and user.is_authenticated:
         qs = qs.filter(created_by=user)

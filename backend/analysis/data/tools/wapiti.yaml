@@ -4,7 +4,9 @@ description: >-
   Black-box web vulnerability scanner. Crawls the running app and fuzzes its
   forms and parameters for XSS, SQL and command injection, path traversal,
   open redirects, CRLF and CSRF, and checks cookie flags and security
-  headers. Requires the app's container to be running.
+  headers. The crawler does not run JavaScript, so it reaches only what the
+  start page links to: the API endpoints of a single-page app are not fuzzed.
+  Requires the app's container to be running.
 category: security
 kind: container
 target_language: any

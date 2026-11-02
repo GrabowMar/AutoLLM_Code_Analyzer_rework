@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from django.http import HttpResponse
 from ninja import Router
+from ninja.errors import HttpError
 
 from backend.rankings import services
 from backend.rankings.api.schema import RankingsResponse
@@ -36,6 +38,12 @@ def list_rankings(
 ):
     per_page = min(max(per_page, 10), 100)
     page = max(page, 1)
+    if experiment_id:
+        try:
+            experiment_id = str(uuid.UUID(experiment_id))
+        except ValueError as exc:
+            # A malformed id is the caller's error, not a server error.
+            raise HttpError(400, "experiment_id must be a UUID") from exc
 
     rankings = services.aggregate_rankings(
         prompt_hash=prompt_hash,
@@ -145,6 +153,7 @@ def export_csv(request):
         "empirical_density_stdev",
         "smoke_pass_rate_stdev",
         "findings_total_static",
+        "dependency_findings",
         "ai_findings_total",
         "apps",
         "apps_completed",
@@ -157,7 +166,9 @@ def export_csv(request):
         row["smoke_pass_rate"] = entry.get("functional_pass_rate")
         row["empirical_density_stdev"] = variance.get("density_per_kloc_stdev")
         row["smoke_pass_rate_stdev"] = variance.get("smoke_pass_rate_stdev")
-        row["findings_total_static"] = sum((entry.get("findings") or {}).values())
+        # Unmeasured stays empty in the CSV (None), never 0.
+        findings = entry.get("findings")
+        row["findings_total_static"] = sum(findings.values()) if findings is not None else None
         row["ai_findings_total"] = sum((entry.get("ai_findings") or {}).values())
         writer.writerow(row)
     response = HttpResponse(buf.getvalue(), content_type="text/csv")

@@ -32,6 +32,8 @@ export const KNOWN_KEYS = new Set([
   "wstg",
   "tags",
   "end_line",
+  // Legacy radon key, read when `end_line` is missing.
+  "endline",
   "end_column",
   "fix",
   "tool_confidence",
@@ -61,6 +63,8 @@ export const KNOWN_KEYS = new Set([
   "matcher",
   "secret_type",
   "complexity",
+  // Lizard's own name for it; older rows have only this.
+  "ccn",
   "function",
   "nloc",
   "duplicate_of",
@@ -192,9 +196,18 @@ export interface HttpInfo {
   matcher: string;
 }
 
+/**
+ * Advisory page stored under the legacy `url` key (trivy writes its AVD page
+ * there): a dependency finding's `package`, or the same link as `docs_url`.
+ */
+function isAdvisoryLink(d: Data): boolean {
+  return !!d.package || (!!d.docs_url && d.url === d.docs_url);
+}
+
+/** The request a dynamic scanner flagged; null for static findings (an advisory link is not a request). */
 export function httpInfo(f: RunFinding): HttpInfo | null {
   const d: Data = f.tool_specific_data ?? {};
-  if (!d.url && !d.curl && !d.method) return null;
+  if (!d.method && !d.curl && (!d.url || isAdvisoryLink(d))) return null;
   const url = String(d.url ?? "");
   const evidence = String(d.evidence ?? "");
   return {
@@ -240,7 +253,8 @@ export function ruleInfo(f: RunFinding) {
   const cwe = strings(d.cwe);
   return {
     name: String(d.rule_name ?? d.test_name ?? ""),
-    docsUrl: safeUrl(d.docs_url),
+    // Older trivy rows keep their advisory page only under `url`.
+    docsUrl: safeUrl(d.docs_url) ?? (d.package ? safeUrl(d.url) : null),
     references: [
       ...new Set(
         strings(d.references)
@@ -264,7 +278,8 @@ export function ruleInfo(f: RunFinding) {
 
 export function complexityInfo(f: RunFinding) {
   const d: Data = f.tool_specific_data ?? {};
-  const complexity = num(d.complexity);
+  // Older lizard rows store only `ccn`.
+  const complexity = num(d.complexity ?? d.ccn);
   if (complexity == null && !d.function && num(d.nloc) == null) return null;
   return {
     complexity,
@@ -282,7 +297,8 @@ export function locationText(f: RunFinding): string {
   if (f.line_number != null) {
     text += `:${f.line_number}`;
     if (f.column_number != null) text += `:${f.column_number}`;
-    const end = num(d.end_line);
+    // Older radon rows store only `endline`.
+    const end = num(d.end_line ?? d.endline);
     if (end != null && end !== f.line_number) text += `–${end}`;
   }
   return text;

@@ -208,7 +208,7 @@
 					<strong class="font-medium text-foreground">Figure 1.</strong>
 					Mean of app-level pass rates per condition (dot), ranked, with the cluster-bootstrap 95% interval over apps (whiskers; shown from 3 apps).
 					{#if baseline}The hollow diamond and the vertical hairline mark the baseline.{/if}
-					k/n: cells that passed every check / graded cells. Common cells only, truncated runs excluded{results.interim ? '; interim' : ''}.
+					k/n: cells that passed every check / graded cells. Common cells only, truncated runs {results.exclude_truncated ? 'excluded' : 'kept'}{results.interim ? '; interim' : ''}.
 					<a class="settings-link" href="?tab=results">Full results</a>
 				{/snippet}
 			</StudyFigure>

@@ -2,8 +2,10 @@ slug: osv-scanner
 name: OSV-Scanner
 description: >-
   Google's scanner for known vulnerabilities in dependencies, backed by the
-  OSV.dev database. Reads requirements.txt, package.json and lockfiles and
-  resolves transitive packages. Needs network access.
+  OSV.dev database. Checks the versions declared in requirements files and
+  lockfiles, without resolving transitive packages; a package.json is read
+  only through its lockfile. Like npm audit, packages only dev dependencies
+  reach are left out. Needs network access.
 category: dependencies
 kind: container
 target_language: any
@@ -20,12 +22,28 @@ install_cmd: >-
   chmod +x /home/analyzer/.local/bin/osv-scanner
 verify_cmd: "osv-scanner --version | head -1"
 uninstall_cmd: "rm -f /home/analyzer/.local/bin/osv-scanner"
-# Exits 1 when it finds vulnerabilities; the JSON on stdout is what counts.
+# Exits 1 when it finds vulnerabilities: turned into 0 (as npm-audit, Trivy
+# --exit-code 0 and retire --exitwith 0 do), so a non-zero exit is a failure
+# (127 general error, 128 no package source it can read); those print no
+# report, which the parser fails.
 # --no-resolve: osv-scanner's own transitive resolution of requirements.txt
 # (via deps.dev) picks implausibly old versions (ecdsa 0.9.0 under a pinned
 # python-jose), inventing critical CVEs. Scan only declared versions and real
 # lockfiles; pip-audit covers Python transitive dependencies with pip itself.
-run_cmd: "osv-scanner scan source -r --no-resolve --format json {target} 2>/dev/null"
+# osv-scanner reads npm dependencies only from a lockfile: each package.json
+# without one gets an llmlab-warning line (a coverage gap on the result).
+# The parser leaves out packages osv-scanner puts in the "dev" dependency
+# group, unless also in "optional" (npm audit runs --omit=dev; Trivy skips
+# them too).
+run_cmd: >-
+  osv-scanner scan source -r --no-resolve --format json {target} 2>/dev/null; rc=$?;
+  if [ "$rc" -eq 1 ]; then rc=0; fi; echo;
+  (cd {target} && find . -name package.json -not -path '*/node_modules/*') | while IFS= read -r p; do
+  d=$(dirname "$p");
+  [ -e "$d/package-lock.json" ] || [ -e "$d/yarn.lock" ] || [ -e "$d/pnpm-lock.yaml" ] ||
+  echo "llmlab-warning: ${p#./} has no lockfile beside it, so its npm dependencies were not scanned";
+  done;
+  exit $rc
 parser_key: osv_scanner
 file_patterns: ["requirements*.txt", "package.json", "package-lock.json", "poetry.lock", "Pipfile.lock", "yarn.lock", "pnpm-lock.yaml"]
 run_timeout: 300

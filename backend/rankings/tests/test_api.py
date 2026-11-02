@@ -122,3 +122,27 @@ def test_sensitivity_endpoint(auth_client):
 def test_unauthenticated(client):
     assert client.get("/api/rankings/").status_code == 401
     assert client.get("/api/rankings/sensitivity/").status_code == 401
+
+
+def test_list_rankings_rejects_a_malformed_experiment_id(auth_client):
+    client, _ = auth_client
+    res = client.get("/api/rankings/?experiment_id=not-a-uuid")
+    assert res.status_code == 400
+    ok = client.get("/api/rankings/?experiment_id=6f1c1d5e-9a43-4a8b-b6a4-3c3f4f0b9d2e")
+    assert ok.status_code == 200
+
+
+def test_export_csv_leaves_unmeasured_counts_empty(auth_client):
+    """A model nothing measured exports empty cells, not 0 findings."""
+    import csv
+    import io
+
+    client, _ = auth_client
+    LLMModelFactory(model_id="m1", model_name="One", provider="OpenAI")
+
+    res = client.get("/api/rankings/export/")
+
+    row = next(r for r in csv.DictReader(io.StringIO(res.content.decode())) if r["model_id"] == "m1")
+    assert row["findings_total_static"] == ""
+    assert row["dependency_findings"] == ""
+    assert row["empirical_quality_score"] == ""

@@ -50,6 +50,7 @@ class Command(BaseCommand):
             self.style.SUCCESS(
                 f"Sampled {manifest['size']} of {manifest['population']} apps ({manifest['method']}): "
                 f"{c['ai_findings']} AI findings, {c['static_issues']} static issues, "
+                f"{c['dependency_issues']} dependency advisories, {c['runtime_issues']} runtime issues, "
                 f"{c['requirements']} requirements to label -> {out}",
             ),
         )

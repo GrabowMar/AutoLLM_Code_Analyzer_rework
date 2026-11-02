@@ -343,16 +343,20 @@ def sync_models(request):
     if not isinstance(api_key, str):
         return api_key
     result = sync_models_from_openrouter(api_key)
-    transaction.on_commit(_queue_hf_enrichment)
+    user_id = getattr(request.auth, "pk", None)
+    transaction.on_commit(lambda: _queue_hf_enrichment(user_id))
     return Status(200, result)
 
 
-def _queue_hf_enrichment() -> None:
-    """Hugging Face lookups take minutes for the whole catalog: run them on a worker."""
+def _queue_hf_enrichment(hf_user_id: int | None = None) -> None:
+    """Hugging Face lookups take minutes for the whole catalog: run them on a worker.
+
+    The worker uses ``hf_user_id``'s stored Hugging Face token (only the id is queued).
+    """
     from backend.llm_models.tasks import enrich_catalog_task
 
     try:
-        enrich_catalog_task.delay()
+        enrich_catalog_task.delay(hf_user_id=hf_user_id)
     except Exception:  # noqa: BLE001 — any broker/kombu error; the sync already succeeded
         logger.warning("Could not queue catalog enrichment", exc_info=True)
 
@@ -436,7 +440,7 @@ def refresh_model(request, slug: str):
     api_key = _resolve_openrouter_catalog_key(request)
     if not isinstance(api_key, str):
         return api_key
-    if not refresh_model_from_openrouter(model, api_key):
+    if not refresh_model_from_openrouter(model, api_key, hf_user=request.auth):
         raise HttpError(404, "Model not found in OpenRouter catalog.")
     model.refresh_from_db()
     return Status(200, model)
@@ -476,3 +480,134 @@ def get_model_endpoints(request, slug: str, refresh: bool = Query(False)):  # no
     if model.endpoint_id is not None and not model.endpoint.is_system:
         return {"available": False, "fetched_at": None, "endpoints": []}
     return fetch_provider_endpoints(model, use_cache=not refresh)
+
+
+# ── Sampling actually sent by this platform's runs of a model ──────────────
+
+# Sampling keys compared with the authors' generation_config.json and OpenRouter's defaults.
+SAMPLING_USAGE_KEYS = (
+    "temperature",
+    "top_p",
+    "top_k",
+    "min_p",
+    "repetition_penalty",
+    "frequency_penalty",
+    "presence_penalty",
+    "reasoning",
+)
+# Policies under which a key the platform did not send was sent by nobody: ``provider_default``
+# strips every harness sampling key it does not force, template modes send exactly the frozen
+# values. Under ``harness_native`` (pass-through) or an unrecorded policy, an unforced key may
+# have come from the harness: unknown, never "not sent".
+_NOT_SENT_KNOWN_POLICIES = frozenset({"provider_default", "template_mode"})
+
+
+def _job_sampling(row: dict) -> tuple[dict, str, str]:
+    """``(params sent on every request, sampling policy, where it was read)`` for one job row.
+
+    Agent runs: what the gateway forced (``resolved_bundle.gateway.forced_params``);
+    under ``provider_default`` everything else was stripped, so the provider's
+    own defaults applied. Template modes: the frozen ``resolved_bundle.llm``
+    (legacy jobs without one: the job's own fields).
+    """
+    gateway = row.get("resolved_bundle__gateway")
+    if row["mode"] == "agent":
+        policy = row.get("result_data__agent__sampling_policy")
+        if isinstance(gateway, dict):
+            forced = gateway.get("forced_params") or {}
+            policy = gateway.get("sampling_policy") or policy or "not_recorded"
+            sent = {k: forced[k] for k in SAMPLING_USAGE_KEYS if forced.get(k) is not None}
+            return sent, policy, "resolved_bundle.gateway.forced_params"
+        return {}, policy or "not_recorded", "not_recorded"
+    llm = row.get("resolved_bundle__llm")
+    if isinstance(llm, dict):
+        sent = {k: llm[k] for k in SAMPLING_USAGE_KEYS if llm.get(k) is not None}
+        return sent, "template_mode", "resolved_bundle.llm"
+    legacy = {"temperature": row.get("temperature"), "top_p": row.get("top_p"), **(row.get("llm_params") or {})}
+    return {k: legacy[k] for k in SAMPLING_USAGE_KEYS if legacy.get(k) is not None}, "template_mode", "job_fields"
+
+
+def model_sampling_usage(model: LLMModel, user) -> dict:
+    """What the caller's runs of ``model`` actually sent (same job scope as the insights)."""
+    from backend.generation.models import GenerationJob
+    from backend.generation.models import RunPreset
+
+    jobs = GenerationJob.objects.filter(model=model)
+    if user is not None and getattr(user, "is_authenticated", False):
+        jobs = jobs.filter(created_by=user)
+    rows = jobs.values(
+        "mode",
+        "temperature",
+        "top_p",
+        "llm_params",
+        "sampling_preset_id",
+        "resolved_bundle__gateway",
+        "resolved_bundle__llm",
+        "result_data__agent__sampling_policy",
+        "result_data__agent__harness_sampling_stripped",
+    )
+    by_mode: dict[str, int] = {}
+    policies: dict[str, int] = {}
+    sources: dict[str, int] = {}
+    presets: dict[int, int] = {}
+    values: dict[str, dict[str, dict]] = {k: {} for k in SAMPLING_USAGE_KEYS}
+    sent_counts = dict.fromkeys(SAMPLING_USAGE_KEYS, 0)
+    unknown_counts = dict.fromkeys(SAMPLING_USAGE_KEYS, 0)
+    stripped: dict[str, dict[str, int]] = {}
+    n = 0
+    for row in rows:
+        n += 1
+        by_mode[row["mode"]] = by_mode.get(row["mode"], 0) + 1
+        sent, policy, source = _job_sampling(row)
+        policies[policy] = policies.get(policy, 0) + 1
+        sources[source] = sources.get(source, 0) + 1
+        if row.get("sampling_preset_id"):
+            presets[row["sampling_preset_id"]] = presets.get(row["sampling_preset_id"], 0) + 1
+        for key, value in sent.items():
+            sent_counts[key] += 1
+            slot = values[key].setdefault(json.dumps(value, sort_keys=True), {"value": value, "n": 0})
+            slot["n"] += 1
+        if policy not in _NOT_SENT_KNOWN_POLICIES:
+            for key in SAMPLING_USAGE_KEYS:
+                if key not in sent:
+                    unknown_counts[key] += 1
+        harness_stripped = row.get("result_data__agent__harness_sampling_stripped")
+        if isinstance(harness_stripped, dict):
+            for key, calls in harness_stripped.items():
+                entry = stripped.setdefault(str(key), {"jobs": 0, "calls": 0})
+                entry["jobs"] += 1
+                entry["calls"] += int(calls) if isinstance(calls, int) and not isinstance(calls, bool) else 0
+    preset_rows = RunPreset.objects.filter(pk__in=presets).values("id", "slug", "version", "name")
+    return {
+        "n_jobs": n,
+        "scope": "your jobs",
+        "by_mode": by_mode,
+        "policies": policies,
+        "sources": sources,
+        "params": [
+            {
+                "key": key,
+                "n_sent": sent_counts[key],
+                # Known not sent (provider_default / template mode): the provider's default applied.
+                "n_not_sent": n - sent_counts[key] - unknown_counts[key],
+                # Not forced by the platform, but the harness may have sent its own value
+                # (harness_native pass-through, or a run that recorded no policy).
+                "n_unknown": unknown_counts[key],
+                "values": sorted(values[key].values(), key=lambda v: -v["n"]),
+            }
+            for key in SAMPLING_USAGE_KEYS
+        ],
+        "harness_sampling_stripped": [{"key": k, **v} for k, v in sorted(stripped.items())],
+        "presets": sorted(({**p, "n": presets[p["id"]]} for p in preset_rows), key=lambda p: -p["n"]),
+    }
+
+
+@router.get("/detail/{slug}/sampling/", response=dict)
+def get_model_sampling_usage(request, slug: str):
+    """Sampling params the caller's runs of this model actually sent (agent policy, template-mode values)."""
+    model = _get_model_by_identifier(request, slug)
+    return model_sampling_usage(model, request.auth)
+
+
+# Covariate endpoints register on this router (imported last: they import ``router`` from here).
+from backend.llm_models.api import covariates  # noqa: E402, F401

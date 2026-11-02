@@ -90,6 +90,7 @@ from backend.generation.services.agent.snapshot import resolve_llm
 from backend.generation.services.analysis_plan import PlanError
 from backend.generation.services.analysis_plan import normalize_analysis_plan
 from backend.generation.services.analysis_plan import plan_hash
+from backend.generation.services.analysis_plan import significance_check
 from backend.generation.services.batches import refresh_batch
 from backend.generation.services.job_cloning import apply_pinned_snapshot
 from backend.generation.services.llm_params import merge_llm_params
@@ -1143,6 +1144,25 @@ def preview_experiment_v2(experiment: Experiment, user: AbstractUser) -> dict[st
     slots = _slots_for(experiment.mode, executor_settings)
 
     issues = _plan_issues(plans)
+    reach = significance_check(
+        len(apps),
+        len(conditions) - 1,
+        experiment.analysis_plan if isinstance(experiment.analysis_plan, dict) else {},
+    )
+    if reach is not None:
+        # Pairing is on the app, so the app count bounds the smallest p: with
+        # too few apps no result could be significant, whatever the data.
+        issues.append(
+            _issue(
+                "significance_unreachable",
+                f"With {reach['n_apps']} apps the smallest possible {reach['alternative']} p is "
+                f"{reach['min_p']:.3g}; after {reach['correction']} over {reach['family_size']} test(s) it is "
+                f"{reach['adjusted_min_p']:.3g}, above alpha {reach['alpha']:g}, so no comparison can be "
+                f"significant. Use at least {reach['apps_needed']} apps (repeats do not help: the app is the unit), "
+                "or fewer conditions",
+                blocking=False,
+            ),
+        )
     unpinned = sorted(
         {p.row["model"] for p in plans if p.row is not None and p.row.get("provider_routing") == "default"},
     )
@@ -3083,6 +3103,7 @@ def schedule_out(schedule: ExperimentSchedule) -> dict[str, Any]:
 
 
 def post_run_out(post_run: ExperimentPostRun | None) -> dict[str, Any] | None:
+    """``PostRunOut``. ``report_id`` is the report's public id (``rpt_...``), the one ``/api/reports/{id}/`` takes."""
     if post_run is None:
         return None
     return {
@@ -3091,7 +3112,7 @@ def post_run_out(post_run: ExperimentPostRun | None) -> dict[str, Any] | None:
         "status": post_run.status,
         "progress": dict(post_run.progress or {}),
         "analysis_run_ids": list(post_run.analysis_run_ids or []),
-        "report_id": post_run.report_id,
+        "report_id": post_run.report.report_id if post_run.report_id else None,
         "error": post_run.error,
         "created_at": post_run.created_at,
         "completed_at": post_run.completed_at,
@@ -3134,13 +3155,17 @@ def experiment_detail(experiment: Experiment) -> dict[str, Any]:
             else None
         ),
         "baseline_condition_id": experiment.baseline_condition_id,
+        # The pre-registered analysis plan as frozen at launch (a draft's plan is not frozen yet).
+        "analysis_plan": dict(experiment.analysis_plan or {}),
+        "analysis_plan_hash": experiment.analysis_plan_hash or "",
+        "analysis_plan_frozen_at": experiment.analysis_plan_frozen_at,
         "conditions": conditions,
         "batches": [
             {"id": b.id, "kind": b.kind, "created_at": b.created_at, "total_jobs": b.total_jobs}
             for b in experiment.batches.order_by("-created_at")
         ],
         "schedules": [schedule_out(s) for s in experiment.schedules.order_by("id")],
-        "latest_post_run": post_run_out(experiment.post_runs.order_by("-created_at").first()),
+        "latest_post_run": post_run_out(experiment.post_runs.select_related("report").order_by("-created_at").first()),
     }
 
 
@@ -3563,7 +3588,7 @@ def experiment_status_v2(experiment: Experiment, user: AbstractUser) -> dict[str
         "endpoints": endpoints,
         "lanes": lanes,
         "executor": executor_state(),
-        "latest_post_run": post_run_out(experiment.post_runs.order_by("-created_at").first()),
+        "latest_post_run": post_run_out(experiment.post_runs.select_related("report").order_by("-created_at").first()),
         # Thread-era rows the executor never claims ("Requeue legacy runs", execution.api.requeue_legacy_jobs).
         "legacy_pending": experiment.jobs.filter(
             queued_at__isnull=True,

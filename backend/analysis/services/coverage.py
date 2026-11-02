@@ -90,6 +90,7 @@ def detect_technologies(files: dict[str, str]) -> set[str]:
 def app_coverage(user) -> dict[str, Any]:
     """Technology and per-tool fit counts over *user*'s recent generated apps."""
     from backend.analysis.services.runner import _materialize
+    from backend.analysis.services.runner import nonempty_files
     from backend.generation.models import GenerationJob
 
     jobs = (
@@ -100,7 +101,8 @@ def app_coverage(user) -> dict[str, Any]:
     per_app: list[set[str]] = []
     for job in jobs:
         code = AnalysisRun(generation_job=job).get_code_for_analysis()
-        techs = detect_technologies(_materialize(code))
+        # An empty file (e.g. an empty requirements.txt) gives no tool anything to read.
+        techs = detect_technologies(nonempty_files(_materialize(code)))
         if techs:
             per_app.append(techs)
 

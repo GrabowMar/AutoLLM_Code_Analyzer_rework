@@ -232,7 +232,9 @@ def test_export_repo_single_commit(client, token, job, findings):
     readme = next(e["content"] for e in tree if e["path"] == "README.md")
     assert "acme/coder-1" in readme
     assert "Todo App" in readme
-    assert "| high | 1 |" in readme
+    # The level the tool printed (bandit's findings here carry none), never the normalized bucket.
+    assert "| `bandit` | unrated | 2 |" in readme
+    assert "Severity" not in readme
     assert set(data["skipped"]) >= {"big.txt", "node_modules/left-pad/index.js"}
 
     commit = fake.find("POST", "/git/commits")[0][2]
@@ -280,6 +282,103 @@ def test_export_repo_with_sarif(client, token, job, findings):
     uri = results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
     assert uri == "backend/app.py"  # absolute analyzer path mapped onto the repo
     assert "informationUri" not in sarif["runs"][0]["tool"]["driver"]
+
+
+def test_build_sarif_keeps_only_results_code_scanning_can_place(owner, job):
+    from backend.analysis.tests.factories import AnalyzerToolFactory
+
+    AnalyzerToolFactory(slug="zap", analysis_mode="dynamic")
+    run = AnalysisRun.objects.create(created_by=owner, generation_job=job, status="completed")
+    bandit = ToolResult.objects.create(
+        run=run,
+        tool_slug="bandit",
+        status="completed",
+        summary={"tool_version": "1.7.10"},
+    )
+    Finding.objects.create(
+        result=bandit,
+        tool_severity="MEDIUM",
+        title="placed",
+        rule_id="B104",
+        file_path="/tmp/workspace/backend/app.py",  # noqa: S108
+        line_number=3,
+    )
+    # A file the repository does not contain (e.g. a scaffold file left out of the export).
+    Finding.objects.create(result=bandit, title="elsewhere", rule_id="B105", file_path="backend/missing.py")
+    zap = ToolResult.objects.create(run=run, tool_slug="zap", status="completed")
+    for path in ("/", "/assets/index.js"):
+        Finding.objects.create(result=zap, tool_severity="Medium", title=f"zap {path}", rule_id="1", file_path=path)
+
+    sarif, kept = github.build_sarif(job, {"backend/app.py", "frontend/src/App.jsx"})
+    assert kept == 1
+    (sarif_run,) = sarif["runs"]
+    assert sarif_run["tool"]["driver"]["name"] == "bandit"
+    assert sarif_run["tool"]["driver"]["version"] == "1.7.10"  # the recorded version, not a made-up one
+    assert "automationDetails" not in sarif_run
+    (result,) = sarif_run["results"]
+    assert result["message"]["text"] == "placed"
+    assert result["level"] == "warning"  # bandit's own MEDIUM
+    assert result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "backend/app.py"
+
+
+def test_readme_and_sarif_use_each_tools_latest_result_and_keep_advisories_apart(owner, job):
+    full = AnalysisRun.objects.create(created_by=owner, generation_job=job, status="completed")
+    bandit = ToolResult.objects.create(run=full, tool_slug="bandit", status="completed")
+    Finding.objects.create(
+        result=bandit,
+        severity="medium",
+        tool_severity="HIGH",
+        title="hardcoded password",
+        rule_id="B105",
+        file_path="backend/app.py",
+        line_number=1,
+    )
+    audit = ToolResult.objects.create(run=full, tool_slug="pip-audit", status="completed")
+    Finding.objects.create(
+        result=audit,
+        severity="high",
+        category="dependency",
+        rule_id="PYSEC-1",
+        title="flask advisory",
+        file_path="requirements.txt",
+        tool_specific_data={"package": "flask"},
+    )
+    # Manifest hygiene shares category "dependency" but is the app's own issue (P2).
+    deptry = ToolResult.objects.create(run=full, tool_slug="deptry", status="completed")
+    Finding.objects.create(
+        result=deptry,
+        severity="medium",
+        category="dependency",
+        rule_id="DEP001",
+        title="requests imported but not declared",
+        file_path="backend/app.py",
+    )
+    # A later re-run of one tool supersedes only that tool's result.
+    rerun = AnalysisRun.objects.create(created_by=owner, generation_job=job, status="completed")
+    ruff = ToolResult.objects.create(run=rerun, tool_slug="ruff", status="completed")
+    Finding.objects.create(
+        result=ruff,
+        severity="low",
+        title="unused import",
+        rule_id="F401",
+        file_path="backend/app.py",
+        line_number=2,
+    )
+
+    readme = github.build_readme(job, github._findings_summary(github.latest_results(job)), files_count=3)
+    assert "**3 finding(s) in the code**" in readme
+    assert "| `bandit` | HIGH | 1 |" in readme
+    assert "| `deptry` | unrated | 1 |" in readme
+    assert "| `pip-audit` | unrated" not in readme
+    assert "| `ruff` | unrated | 1 |" in readme
+    assert "**1 dependency advisory(ies)**" in readme
+    assert "| `pip-audit` | 1 |" in readme
+    assert str(full.id) in readme
+    assert str(rerun.id) in readme
+
+    sarif, kept = github.build_sarif(job, {"backend/app.py"})
+    assert kept == 3
+    assert {r["tool"]["driver"]["name"] for r in sarif["runs"]} == {"bandit", "deptry", "ruff"}
 
 
 @pytest.mark.parametrize("status", [403, 404])

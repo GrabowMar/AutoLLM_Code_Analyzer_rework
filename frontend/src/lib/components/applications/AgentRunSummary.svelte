@@ -5,13 +5,13 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import { evaluateGenerationJob, runRecordUrl, type GenerationJob } from '$lib/api/client';
-	import { Button } from '$lib/components/ui/button';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import { runRecordUrl, type GenerationJob } from '$lib/api/client';
 	import { toneClasses } from '$lib/constants/colors';
 	import Download from '@lucide/svelte/icons/download';
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import AgentBehaviour from './agent/AgentBehaviour.svelte';
+	import { auxiliaryCallsNote, effectiveSteps, effectiveToolCalls } from './agent/format';
 
 	interface Props {
 		job: GenerationJob;
@@ -27,34 +27,28 @@
 	const budget = $derived((agent?.budget ?? snapshot.agent ?? {}) as Record<string, any>);
 	const workspace = $derived((agent?.workspace ?? {}) as Record<string, any>);
 	const providers = $derived(Object.entries((agent?.providers ?? {}) as Record<string, number>).sort((a, b) => b[1] - a[1]));
+	// Gateway-derived counts (trajectory record / metrics.behaviour) next to the harness's self-report.
+	const trajectory = $derived((agent?.trajectory ?? null) as Record<string, any> | null);
+	const behaviour = $derived((metrics.behaviour ?? null) as Record<string, any> | null);
+	const toolCalls = $derived(
+		effectiveToolCalls(metrics.tool_calls, behaviour?.tool_calls_gateway ?? trajectory?.tool_calls_gateway),
+	);
+	const steps = $derived(effectiveSteps(metrics.harness_steps, trajectory?.model_turns));
+	const auxNote = $derived(auxiliaryCallsNote(trajectory?.call_roles, agent?.llm_calls));
+	const listCost = $derived(typeof metrics.list_cost === 'number' ? (metrics.list_cost as number) : null);
+	const harnessPrompt = $derived(String(snapshot.harness?.system_prompt_source ?? '—'));
+	const images = $derived(`${snapshot.images?.harness ?? '—'} on ${snapshot.images?.base ?? '—'}`);
+	const routing = $derived(JSON.stringify(snapshot.llm?.provider ?? {}));
 	const recordFiles = $derived(
 		Object.entries((agent?.run_record ?? {}) as Record<string, any>).filter(([name]) => !name.startsWith('_')),
 	);
 
 	let showBrief = $state(false);
 	let showFinal = $state(false);
-	let showChecks = $state(false);
-	let evaluating = $state(false);
-	let evaluateMessage = $state('');
 
 	const evaluation = $derived((job.result_data?.evaluation ?? null) as Record<string, any> | null);
-	const checks = $derived(((evaluation?.checks ?? []) as { category: string; name: string; passed: boolean; detail: string }[]));
-	const failedChecks = $derived(checks.filter((c) => !c.passed));
 	const validity = $derived((agent?.validity ?? null) as { valid: boolean; notes: { code: string; severity: string; detail: string }[] } | null);
 	const visibleNotes = $derived((validity?.notes ?? []).filter((n) => n.severity !== 'info' || !compact));
-
-	async function reevaluate() {
-		evaluating = true;
-		evaluateMessage = '';
-		try {
-			await evaluateGenerationJob(job.id);
-			evaluateMessage = 'Evaluation queued — reload the page in a few minutes.';
-		} catch (err: any) {
-			evaluateMessage = err?.detail ?? err?.message ?? 'Could not queue the evaluation';
-		} finally {
-			evaluating = false;
-		}
-	}
 
 	const severityTone: Record<string, 'danger' | 'warning' | 'neutral'> = { exclude: 'danger', warn: 'warning', info: 'neutral' };
 
@@ -76,6 +70,7 @@
 </script>
 
 {#if agent}
+	<div class="space-y-4">
 	<Card.Root>
 		<Card.Header class="pb-2">
 			<div class="flex flex-wrap items-center justify-between gap-2">
@@ -102,6 +97,11 @@
 				<div>
 					<dt class="text-[11px] text-muted-foreground">Cost</dt>
 					<dd class="font-mono tabular-nums">{fmtCost(metrics.cost)}{pct(metrics.cost, budget.max_cost_usd)}</dd>
+					{#if listCost != null}
+						<dd class="text-[11px] text-muted-foreground" title="Sum of the provider's per-call list price; the billed cost above is what this subscription run actually cost">
+							list-price equivalent {fmtCost(listCost)}{metrics.billing_source ? ` · billed via ${metrics.billing_source}` : ''} (not billed)
+						</dd>
+					{/if}
 				</div>
 				<div>
 					<dt class="text-[11px] text-muted-foreground">Tokens in / out</dt>
@@ -111,11 +111,17 @@
 				</div>
 				<div>
 					<dt class="text-[11px] text-muted-foreground">Tool calls</dt>
-					<dd class="font-mono tabular-nums">{metrics.tool_calls ?? 0}</dd>
+					<dd class="font-mono tabular-nums" title={toolCalls.source === 'gateway' ? 'counted from the gateway call log' : 'reported by the harness'}>
+						{toolCalls.value ?? '—'}{#if toolCalls.source === 'gateway'}<span class="text-[11px] text-muted-foreground"> (gateway)</span>{/if}
+					</dd>
+					{#if toolCalls.note}<dd class="text-[11px] text-muted-foreground">{toolCalls.note}</dd>{/if}
 				</div>
 				<div>
 					<dt class="text-[11px] text-muted-foreground">Steps</dt>
-					<dd class="font-mono tabular-nums">{metrics.harness_steps ?? 0}</dd>
+					<dd class="font-mono tabular-nums" title={steps.source === 'gateway' ? 'model turns counted from the gateway call log' : 'reported by the harness'}>
+						{steps.value ?? '—'}{#if steps.source === 'gateway'}<span class="text-[11px] text-muted-foreground"> (gateway)</span>{/if}
+					</dd>
+					{#if steps.note && steps.note !== toolCalls.note}<dd class="text-[11px] text-muted-foreground">{steps.note}</dd>{/if}
 				</div>
 				<div>
 					<dt class="text-[11px] text-muted-foreground">Files (added / modified)</dt>
@@ -132,78 +138,25 @@
 				</div>
 			</dl>
 
+			{#if auxNote}
+				<p class="text-[11px] text-muted-foreground">{auxNote}.</p>
+			{/if}
+
 			{#if agent.budget_exhausted}
 				<p class="text-[11px] text-warning-fg">Stopped by budget: {agent.budget_exhausted.replace(/_/g, ' ')}.</p>
 			{/if}
 
-			{#if evaluation}
-				<div class="space-y-1.5 rounded-md border p-3">
-					<div class="flex flex-wrap items-center justify-between gap-2">
-						<p class="section-label">Platform evaluation</p>
-						<div class="flex items-center gap-1.5">
-							<StatusBadge status={evaluation.status} />
-							{#if evaluation.summary?.total}
-								<span class="font-mono text-xs tabular-nums">
-									{evaluation.summary.passed}/{evaluation.summary.total} checks · {Math.round((evaluation.summary.pass_rate ?? 0) * 100)}%
-								</span>
-							{/if}
-						</div>
-					</div>
-					{#if evaluation.summary?.by_category}
-						<div class="flex flex-wrap gap-1">
-							{#each Object.entries(evaluation.summary.by_category as Record<string, { passed: number; total: number }>) as [cat, v] (cat)}
-								<Badge variant="secondary" class="font-mono">{cat} {v.passed}/{v.total}</Badge>
-							{/each}
-						</div>
-					{/if}
-					{#if evaluation.error}
-						<p class="text-[11px] text-danger-fg">{evaluation.error}</p>
-					{/if}
-					{#if evaluation.build && !evaluation.build.ok}
-						<pre class="max-h-40 overflow-auto rounded border bg-muted/20 p-2 text-[11px] font-mono">{evaluation.build.log_tail}</pre>
-					{/if}
-					{#if failedChecks.length}
-						<button
-							type="button"
-							class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-							aria-expanded={showChecks}
-							onclick={() => (showChecks = !showChecks)}
-						>
-							<ChevronRight class="h-3.5 w-3.5 transition-transform duration-150 {showChecks ? 'rotate-90' : ''}" />
-							{failedChecks.length} failed {failedChecks.length === 1 ? 'check' : 'checks'}
-						</button>
-						{#if showChecks}
-							<ul class="space-y-1 text-xs">
-								{#each failedChecks as c (c.category + c.name)}
-									<li class="rounded border px-2 py-1">
-										<span class="font-mono">{c.name}</span>
-										{#if c.detail}<span class="block text-muted-foreground">{c.detail}</span>{/if}
-									</li>
-								{/each}
-							</ul>
-						{/if}
-					{/if}
-					<p class="text-[11px] text-muted-foreground">
-						Built with the stack's own Dockerfile, run without network access, graded by conformance suite
-						v{evaluation.tester_version} (contract v{evaluation.contract_version}){evaluation.contract_stated_in_prompt === false ? ' — this sample\'s prompt did not state that contract, so compare its score with care' : ''}.
-					</p>
-					{#if !compact}
-						<div class="flex items-center gap-2">
-							<Button variant="outline" size="sm" onclick={reevaluate} disabled={evaluating}>
-								<RefreshCw class="h-3.5 w-3.5" /> Re-evaluate
-							</Button>
-							{#if evaluateMessage}<span class="text-[11px] text-muted-foreground">{evaluateMessage}</span>{/if}
-						</div>
-					{/if}
-				</div>
-			{:else if !compact}
-				<div class="flex items-center gap-2">
-					<Button variant="outline" size="sm" onclick={reevaluate} disabled={evaluating}>
-						<RefreshCw class="h-3.5 w-3.5" /> Evaluate
-					</Button>
-					{#if evaluateMessage}<span class="text-[11px] text-muted-foreground">{evaluateMessage}</span>{/if}
-				</div>
-			{/if}
+			<!-- The platform evaluation (build + conformance suite, re-evaluate) is the Overview tab's EvaluationCard. -->
+			<p class="text-[11px] text-muted-foreground">
+				Platform evaluation:
+				{#if evaluation}
+					<StatusBadge status={evaluation.status} />
+					{#if evaluation.summary?.total}<span class="font-mono tabular-nums">{evaluation.summary.passed}/{evaluation.summary.total} checks</span>{/if}
+				{:else}
+					not evaluated yet
+				{/if}
+				· details and re-evaluation on the Overview tab.
+			</p>
 
 			{#if visibleNotes.length}
 				<div class="space-y-1">
@@ -269,9 +222,10 @@
 						<div class="flex justify-between gap-2"><dt class="text-muted-foreground">Sampling</dt><dd class="font-mono">{agent.sampling_policy ?? snapshot.gateway?.sampling_policy ?? '—'}</dd></div>
 						<div class="flex justify-between gap-2"><dt class="text-muted-foreground">Run order</dt><dd class="font-mono">#{agent.schedule?.run_order ?? '—'}</dd></div>
 						<div class="flex justify-between gap-2"><dt class="text-muted-foreground">Brief</dt><dd class="font-mono">v{snapshot.brief?.version} · {snapshot.brief?.sha256?.slice(0, 12)}</dd></div>
-						<div class="flex justify-between gap-2 sm:col-span-2"><dt class="text-muted-foreground">Harness prompt</dt><dd class="truncate">{snapshot.harness?.system_prompt_source ?? '—'}</dd></div>
-						<div class="flex justify-between gap-2 sm:col-span-2"><dt class="text-muted-foreground">Images</dt><dd class="font-mono truncate">{snapshot.images?.harness ?? '—'} on {snapshot.images?.base ?? '—'}</dd></div>
-						<div class="flex justify-between gap-2 sm:col-span-2"><dt class="text-muted-foreground">Routing</dt><dd class="font-mono truncate">{JSON.stringify(snapshot.llm?.provider ?? {})}</dd></div>
+						<!-- min-w-0 on the row and value: long refs ellipsize at phone width instead of clipping; full value in the tooltip. -->
+						<div class="flex min-w-0 justify-between gap-2 sm:col-span-2"><dt class="shrink-0 text-muted-foreground">Harness prompt</dt><dd class="min-w-0 truncate" title={harnessPrompt}>{harnessPrompt}</dd></div>
+						<div class="flex min-w-0 justify-between gap-2 sm:col-span-2"><dt class="shrink-0 text-muted-foreground">Images</dt><dd class="min-w-0 truncate font-mono" title={images}>{images}</dd></div>
+						<div class="flex min-w-0 justify-between gap-2 sm:col-span-2"><dt class="shrink-0 text-muted-foreground">Routing</dt><dd class="min-w-0 truncate font-mono" title={routing}>{routing}</dd></div>
 						{#if snapshot.gateway?.dropped_params && Object.keys(snapshot.gateway.dropped_params).length}
 							<div class="flex justify-between gap-2 sm:col-span-2"><dt class="text-muted-foreground">Not forwarded</dt><dd class="font-mono">{Object.keys(snapshot.gateway.dropped_params).join(', ')}</dd></div>
 						{/if}
@@ -314,4 +268,8 @@
 			{/if}
 		</Card.Content>
 	</Card.Root>
+	{#if !compact}
+		<AgentBehaviour {job} />
+	{/if}
+	</div>
 {/if}

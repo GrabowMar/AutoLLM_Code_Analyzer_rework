@@ -122,16 +122,24 @@ def compute_empirical_quality(
 ) -> float | None:
     """Quality measured by this platform's own experiments, 0..1.
 
-    Combines severity-weighted findings density (per KLOC of generated code,
+    Combines severity-weighted code-issue density (per KLOC of source code,
     lower is better) with the smoke-test pass rate. Returns None when the
     model has no completed local generations — no data is not the same as
     bad data. `severity_weights` lets the sensitivity analysis rescore under
     alternative schemes; the default is the baseline SEVERITY_WEIGHTS.
+
+    The aggregator supplies ``empirical_findings``/``empirical_loc`` (repeats
+    collapsed to app means); entries without them (report generators) use
+    ``findings``/``local_loc``.
     """
     if not entry.get("apps_completed"):
         return None
-    loc = entry.get("local_loc", 0) or 0
-    findings = entry.get("findings") or {}
+    if "empirical_loc" in entry:
+        loc = entry.get("empirical_loc") or 0
+        findings = entry.get("empirical_findings") or {}
+    else:
+        loc = entry.get("local_loc", 0) or 0
+        findings = entry.get("findings") or {}
     if loc <= 0:
         return None
 

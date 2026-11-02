@@ -70,7 +70,9 @@
         }).catch(function() {});
       }
 
-      // Stale chunk after Vite restart: reload once per tab session, never destroy the page.
+      // Stale chunk after Vite restart: reload once, then show the fallback instead of looping.
+      // The flag is cleared by hooks.client.ts init() — i.e. only once the client bundle has
+      // actually loaded — so a dev server that keeps failing can't cause a reload loop.
       window.addEventListener('unhandledrejection', function(e) {
         var msg = (e.reason && (e.reason.message || String(e.reason))) || '';
         if (!/Failed to fetch dynamically imported module|Importing a module script failed|ChunkLoadError/i.test(msg)) {
@@ -78,12 +80,16 @@
         }
         e.preventDefault();
         console.warn('[llm-lab] Chunk load failed:', e.reason);
+        var retried = true;
         try {
-          if (!sessionStorage.getItem('llm_lab_chunk_reload')) {
-            sessionStorage.setItem('llm_lab_chunk_reload', '1');
-            window.__hardReload();
-          }
+          retried = !!sessionStorage.getItem('llm_lab_chunk_reload');
+          if (!retried) sessionStorage.setItem('llm_lab_chunk_reload', '1');
         } catch (_) {
+          // No sessionStorage: we can't remember a retry, so never auto-reload.
+        }
+        if (retried) {
+          window.__showFallback();
+        } else {
           window.__hardReload();
         }
       });
@@ -96,7 +102,6 @@
           u.searchParams.delete('_cb');
           window.history.replaceState(window.history.state, '', u.toString());
         }
-        sessionStorage.removeItem('llm_lab_chunk_reload');
       } catch (_) {}
     </script>
   </body>

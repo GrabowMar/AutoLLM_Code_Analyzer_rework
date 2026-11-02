@@ -16,9 +16,10 @@ class FindingsRollup(Schema):
 
 
 class VarianceStats(Schema):
-    """Per-trial spread of the empirical inputs (stdev is None below n=2)."""
+    """Spread of the empirical inputs over apps (repeats collapsed to app means; stdev is None below n=2)."""
 
     n_jobs: int = 0
+    n_apps: int = 0
     density_per_kloc_mean: float | None = None
     density_per_kloc_stdev: float | None = None
     smoke_pass_rate_stdev: float | None = None
@@ -34,9 +35,22 @@ class RankingRow(Schema):
     price_per_million_output: float | None = None
     apps: int = 0
     apps_completed: int = 0
-    avg_duration: float = 0.0
-    findings: FindingsRollup
+    apps_failed: int = 0
+    # Mean generation time of completed apps; None when none completed.
+    avg_duration: float | None = None
+    # Experiment conditions this row pools (several = arms mixed; see pooling_note).
+    conditions_pooled: int = 0
+    pooling_note: str | None = None
+    # Code issues the empirical score counts (common tools, no advisories, no
+    # dynamic-tool or test-code findings); the others are counted apart.
+    # Unmeasured is None, not 0: no measured app, or (dependency/runtime) no
+    # advisory scanner / dynamic tool in the instrument set.
+    findings: FindingsRollup | None = None
     ai_findings: FindingsRollup | None = None
+    dependency_findings: int | None = None
+    runtime_findings: int | None = None
+    test_findings: int | None = None
+    local_loc: int = 0
     n_trials: int = 0
     functional_pass_rate: float | None = None
     variance: VarianceStats | None = None

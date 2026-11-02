@@ -18,18 +18,31 @@ from typing import Any
 
 PLAN_VERSION = 1
 
-# Outcomes a plan may name (per-app values, aggregated per condition/model).
+# Outcomes a plan may name: per-app values (an app's repeats averaged), then
+# the mean over a condition's (or model's) apps. Plans store only the keys, so
+# these descriptions can be sharpened without touching a frozen plan.
 METRICS: dict[str, str] = {
     "deploy_rate": "Share of evaluated apps that build and answer their health check",
     "pass_rate": "Mean conformance pass rate (0..1) over evaluated apps",
     "functional_passed": "Share of evaluated apps passing every conformance check",
-    "unique_issues_per_app": "Deduplicated static issues per analyzed app",
-    "issues_per_kloc": "Deduplicated static code issues per 1,000 source lines (dependency advisories excluded)",
-    "security_per_app": "Deduplicated security/secret issues per analyzed app",
+    "unique_issues_per_app": "Deduplicated static issues of every kind per analyzed app",
+    "issues_per_kloc": (
+        "Deduplicated code issues per 1,000 non-test source lines (dependency advisories, runtime (DAST) issues "
+        "and test code excluded)"
+    ),
+    "security_per_app": (
+        "Deduplicated security/secret issues in the app's own non-test code per analyzed app (dependency "
+        "advisories and runtime (DAST) issues excluded)"
+    ),
     "cost_per_app": "Generation cost per app (USD)",
 }
 CORRECTIONS = ("holm", "bh", "none")
 DIRECTIONS = ("two-sided", "greater", "less")
+# Which tests one correction covers: every declared (metric, condition) test
+# together ("all", the default), or each metric's tests on their own
+# ("per_metric", the only behaviour of plans frozen before this setting
+# existed: those keep it, so a frozen plan's meaning never changes).
+MULTIPLICITY = ("all", "per_metric")
 _MAX_QUESTIONS = 20
 
 
@@ -60,6 +73,10 @@ def normalize_analysis_plan(plan: dict[str, Any] | None) -> dict[str, Any]:
     correction = plan.get("correction", "holm")
     if correction not in CORRECTIONS:
         msg = f"correction must be one of {', '.join(CORRECTIONS)}"
+        raise PlanError(msg)
+    multiplicity = plan.get("multiplicity", "all")
+    if multiplicity not in MULTIPLICITY:
+        msg = f"multiplicity must be one of {', '.join(MULTIPLICITY)}"
         raise PlanError(msg)
 
     questions = []
@@ -114,6 +131,7 @@ def normalize_analysis_plan(plan: dict[str, Any] | None) -> dict[str, Any]:
         "secondary_metrics": list(dict.fromkeys(secondary)),
         "alpha": alpha,
         "correction": correction,
+        "multiplicity": multiplicity,
         "ranking_criteria": criteria,
         "exclusions": {
             "truncated": bool(exclusions.get("truncated", True)),
@@ -138,4 +156,70 @@ def declared_metrics(plan: dict[str, Any]) -> set[str]:
         plan["primary_metric"],
         *plan.get("secondary_metrics", []),
         *(q["metric"] for q in plan.get("research_questions", [])),
+    }
+
+
+def plan_multiplicity(plan: dict[str, Any]) -> str:
+    """The plan's correction family; plans frozen without the key corrected per metric."""
+    return plan.get("multiplicity") or "per_metric"
+
+
+def plan_excludes_truncated(plan: dict[str, Any]) -> bool:
+    """The plan's pre-registered truncation rule (default: excluded)."""
+    return bool((plan.get("exclusions") or {}).get("truncated", True))
+
+
+def min_attainable_p(n_pairs: int, alternative: str = "two-sided") -> float:
+    """The smallest p an exact sign or Wilcoxon signed-rank test can give with ``n_pairs`` non-zero pairs.
+
+    Both reach it only when every pair moves the same way: 2^-n one-sided, 2^(1-n) two-sided.
+    """
+    if n_pairs <= 0:
+        return 1.0
+    return min(1.0, (1 if alternative in ("greater", "less") else 2) / 2**n_pairs)
+
+
+def significance_check(
+    n_apps: int,
+    n_comparisons: int,
+    plan: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Whether the design can reach significance at all; None when it can.
+
+    The tests pair conditions on the app, so the number of apps bounds the
+    smallest p. Holm (and Bonferroni) multiply the smallest p by the number of
+    tests in the family; BH and no correction leave it as is. With the plan's
+    ``multiplicity = "all"`` the family is every declared metric's
+    comparisons. Returns ``{n_apps, min_p, adjusted_min_p, alpha, family_size,
+    apps_needed}`` when no outcome could be significant.
+    """
+    if n_comparisons < 1:
+        return None
+    plan = plan or {}
+    alpha = float(plan.get("alpha", 0.05))
+    correction = plan.get("correction", "holm")
+    directions = {q.get("direction") for q in plan.get("research_questions") or []}
+    alternative = directions.pop() if len(directions) == 1 else "two-sided"
+    family = n_comparisons
+    if plan and plan_multiplicity(plan) == "all":
+        family *= max(1, len(declared_metrics(plan)))
+    factor = family if correction == "holm" else 1
+
+    def adjusted(n: int) -> float:
+        return min(1.0, factor * min_attainable_p(n, alternative))
+
+    if adjusted(n_apps) < alpha:
+        return None
+    needed = n_apps
+    while adjusted(needed) >= alpha and needed < 64:
+        needed += 1
+    return {
+        "n_apps": n_apps,
+        "min_p": min_attainable_p(n_apps, alternative),
+        "adjusted_min_p": adjusted(n_apps),
+        "alpha": alpha,
+        "alternative": alternative,
+        "family_size": family,
+        "correction": correction,
+        "apps_needed": needed,
     }

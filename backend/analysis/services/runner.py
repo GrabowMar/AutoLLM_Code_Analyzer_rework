@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import fnmatch
+import functools
+import inspect
+import json
 import logging
 import re
 import shlex
 import threading
+import time
 import zlib
 from collections import Counter
 from contextlib import contextmanager
@@ -17,6 +21,7 @@ from pathlib import PurePosixPath
 from django.conf import settings
 from django.db import connection
 from django.db import transaction
+from django.db.models import Count
 from django.db.models import Q
 from django.utils import timezone
 
@@ -27,9 +32,12 @@ from backend.analysis.models import ToolResult
 from backend.analysis.services import ai_runner
 from backend.analysis.services import parsers
 from backend.analysis.services import workspace_service
+from backend.analysis.services.base import ADVISORY_TOOLS
 from backend.analysis.services.base import AnalyzerOutput
 from backend.analysis.services.base import ParsedOutput
 from backend.analysis.services.base import build_severity_counts
+from backend.analysis.services.base import fingerprint
+from backend.analysis.services.base import is_non_source_path
 from backend.analysis.services.serialize import serialize_result
 from backend.common.threading import dispatch_in_thread
 from backend.realtime import events as realtime
@@ -53,6 +61,10 @@ _EXT_BY_KEY = {
     "typescript": ".ts",
 }
 
+# File names that have no extension but are files, not semantic code blobs.
+_EXTENSIONLESS_FILES = frozenset(
+    {"Dockerfile", "Containerfile", "Makefile", "Procfile", "Gemfile", "Pipfile", "Jenkinsfile", "Vagrantfile"},
+)
 
 # Port generated apps listen on inside their container (see runtime.proxy).
 APP_CONTAINER_PORT = 8000
@@ -91,6 +103,78 @@ PHASE_TOOLS = "running_tools"
 _CMD_MARKER = "llmlab-analysis-run"
 
 _CONFIG_PLACEHOLDER_RE = re.compile(r"\{config:([A-Za-z0-9_]+)\}")
+
+# Seconds the workspace waits for the app to answer the liveness probe that
+# brackets every dynamic tool (any HTTP status counts as alive).
+APP_PROBE_TIMEOUT_S = 10
+
+# Postgres text and jsonb reject NUL; binary tool output (a scanned SQLite file,
+# a DAST response body) must not make a result unsavable.
+_NUL = "\x00"
+
+
+def _scrub(value):
+    """*value* with every NUL character (in nested dicts/lists too) replaced by U+FFFD."""
+    if isinstance(value, str):
+        return value.replace(_NUL, "\ufffd") if _NUL in value else value
+    if isinstance(value, dict):
+        return {_scrub(k): _scrub(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_scrub(v) for v in value]
+    return value
+
+
+def command_fingerprint(command: str, url: str = "") -> str:
+    """Provenance hash of a rendered tool command (``summary["command_sha"]``).
+
+    The app's URL (different for every app) is normalized to ``{url}``, so one
+    command over many apps hashes alike. For results stored before the hash
+    existed: ``command_fingerprint(raw_output["command"], raw_output.get("target_url", ""))``.
+    """
+    return fingerprint(command.replace(url, "{url}") if url else command)
+
+
+def _source(fn) -> str:
+    try:
+        return inspect.getsource(fn)
+    except (OSError, TypeError):
+        return getattr(fn, "__qualname__", "")
+
+
+@functools.cache
+def parser_fingerprint(parser_key: str) -> str:
+    """Provenance hash of the parser behind *parser_key* (``summary["parser_sha"]``).
+
+    A parser edit changes what a tool reports under the same build and
+    command, so the parser's source and the analysis helpers it calls by name
+    (one level deep) are part of the instrument. "" when no parser is registered.
+    """
+    fn = parsers._PARSERS.get(parser_key)  # noqa: SLF001
+    if fn is None:
+        return ""
+    module = inspect.getmodule(fn)
+    parts = [_source(fn)]
+    for name in sorted(set(fn.__code__.co_names)):
+        helper = getattr(module, name, None)
+        if (
+            inspect.isfunction(helper)
+            and helper is not fn
+            and helper.__module__.startswith("backend.analysis.services")
+        ):
+            parts.append(_source(helper))
+    return fingerprint("\n".join(parts))
+
+
+def patterns_fingerprint(tool: AnalyzerTool) -> str:
+    """Provenance hash of the file patterns that decide whether *tool* applies (``summary["patterns_sha"]``).
+
+    A catalog edit to ``file_patterns`` moves apps between "not applicable" (a
+    true zero) and "measured" under the same build, command and parser. ""
+    for dynamic tools, which scan the running app whatever its files.
+    """
+    if tool.analysis_mode == "dynamic":
+        return ""
+    return fingerprint(json.dumps(sorted(tool.file_patterns or [])))
 
 
 def render_command(tool: AnalyzerTool, *, target: str, url: str = "", config: dict | None = None) -> str:
@@ -372,7 +456,7 @@ class _Heartbeat:
             connection.close()
 
 
-def reap_stale_runs(stale_after: timedelta = STALE_AFTER) -> int:
+def reap_stale_runs(stale_after: timedelta = STALE_AFTER, run_ids=None) -> int:
     """Fail ``running`` runs whose executing thread is gone; return how many.
 
     A live run beats every ``HEARTBEAT_INTERVAL_S``, so only a run whose
@@ -381,15 +465,17 @@ def reap_stale_runs(stale_after: timedelta = STALE_AFTER) -> int:
     process is never touched. Its still-``running`` tool results fail too.
     Queued (``pending``) runs whose queue stopped beating fail as well; a
     pending run that was never queued (no heartbeat) is left alone.
+    *run_ids* limits the reaping to those runs.
     """
     now = timezone.now()
     cutoff = now - stale_after
-    stale = AnalysisRun.objects.filter(status=AnalysisRun.Status.RUNNING).filter(
+    scope = AnalysisRun.objects.all() if run_ids is None else AnalysisRun.objects.filter(id__in=list(run_ids))
+    stale = scope.filter(status=AnalysisRun.Status.RUNNING).filter(
         Q(heartbeat_at__lt=cutoff)
         | Q(heartbeat_at__isnull=True, started_at__lt=cutoff)
         | Q(heartbeat_at__isnull=True, started_at__isnull=True, updated_at__lt=cutoff),
     )
-    queued = AnalysisRun.objects.filter(status=AnalysisRun.Status.PENDING, heartbeat_at__lt=cutoff)
+    queued = scope.filter(status=AnalysisRun.Status.PENDING, heartbeat_at__lt=cutoff)
     queued_count = queued.update(
         status=AnalysisRun.Status.FAILED,
         error_message=QUEUE_INTERRUPTED_MESSAGE,
@@ -423,7 +509,20 @@ def execute(run: AnalysisRun) -> AnalysisRun:
     # One workspace container, one /work and fixed /tmp report paths: two
     # runs of the same user must not interleave, or each scans the other's code.
     with _Heartbeat(run.pk), _workspace_lock(run.workspace_id, on_wait=lambda: _set_phase(run, PHASE_WAITING)):
-        return _execute_locked(run)
+        try:
+            return _execute_locked(run)
+        except Exception:
+            # The caller fails the run (``_execute``, the experiment post-run);
+            # no tool result may be left looking like it is still in progress.
+            _fail_unfinished_results(run, "Internal error during analysis")
+            raise
+
+
+def _fail_unfinished_results(run: AnalysisRun, message: str) -> None:
+    ToolResult.objects.filter(run=run, status__in=[ToolResult.Status.PENDING, ToolResult.Status.RUNNING]).update(
+        status=ToolResult.Status.FAILED,
+        error_message=message,
+    )
 
 
 @contextmanager
@@ -455,7 +554,8 @@ def _execute_locked(run: AnalysisRun) -> AnalysisRun:
         return run
     _set_phase(run, PHASE_PREPARING)
     code = run.get_code_for_analysis()
-    files = _materialize(code)
+    excluded_paths = sorted(k for k in code if is_non_source_path(k))
+    files = _materialize({k: v for k, v in code.items() if not is_non_source_path(k)})
     truncated_inputs = _truncated_inputs(run)
     tools = _resolve_tools(run.tool_slugs)
     tool_configs = _resolve_tool_configs(run)
@@ -492,26 +592,31 @@ def _execute_locked(run: AnalysisRun) -> AnalysisRun:
             _fail(run, str(exc))
             return run
 
-    app_url, app_url_error = "", ""
-    if any(t.analysis_mode == "dynamic" for t in tools.values()):
-        app_url, app_url_error = resolve_app_url(run)
-
     _set_phase(run, PHASE_TOOLS)
     statuses: list[str] = []
     cancelled = False
     for slug in run.tool_slugs:
         tool = tools.get(slug)
         cancelled = cancelled or is_cancelled(run)
+        app_url, app_url_error = "", ""
+        if not cancelled and tool is not None and tool.is_enabled and tool.analysis_mode == "dynamic":
+            # Resolved per tool, right before it: the app may have died (or
+            # moved to another address) while the previous tools ran.
+            app_url, app_url_error = _live_app_url(run, container_name)
         skip = _skip(tool, files, cancelled=cancelled, app_url=app_url, app_url_error=app_url_error)
         if skip is not None:
             reason, message = skip
+            summary = {"skip_reason": reason}
+            if reason == SKIP_NOT_APPLICABLE and (patterns_sha := patterns_fingerprint(tool)):
+                # A measurement (a true zero): record the patterns that decided it.
+                summary["patterns_sha"] = patterns_sha
             result = ToolResult.objects.create(
                 run=run,
                 tool_slug=slug,
                 category=tool.category if tool else "",
                 status=ToolResult.Status.SKIPPED,
                 error_message=message,
-                summary={"skip_reason": reason},
+                summary=summary,
             )
             _publish_result(result)
             statuses.append(result.status)
@@ -526,40 +631,134 @@ def _execute_locked(run: AnalysisRun) -> AnalysisRun:
             started_at=started_at,
         )
         _publish_result(result)
-
-        if tool.kind == "ai":
-            output = ai_runner.run(tool, files, tool_configs.get(slug) or {}, run.created_by)
-        else:
-            output = _run_container_tool(
+        try:
+            cancelled = _run_tool(
+                run,
                 tool,
-                container_name,
-                config=tool_configs.get(slug),
+                result,
+                files=files,
+                container_name=container_name,
+                config=tool_configs.get(slug) or {},
+                tool_version=tool_versions.get(slug, ""),
                 app_url=app_url,
-                run_id=run.pk,
             )
-        result.duration_seconds = round((timezone.now() - started_at).total_seconds(), 3)
-
-        if is_cancelled(run):
-            # Killed by cancel (or finished after it): not a measurement.
-            cancelled = True
-            result.status = ToolResult.Status.SKIPPED
-            result.error_message = "Run cancelled while this tool was running"
-            result.summary = {"skip_reason": SKIP_CANCELLED}
-            result.save(update_fields=["status", "error_message", "summary", "duration_seconds"])
-            _publish_result(result)
-            statuses.append(result.status)
-            continue
-
-        if tool.kind != "ai" and tool_versions.get(slug):
-            output.summary["tool_version"] = tool_versions[slug]
-        # The options the findings were produced with (provenance for reports).
-        output.summary["config"] = {**(tool.default_config or {}), **(tool_configs.get(slug) or {})}
-        _persist_result(result, output)
+        except Exception as exc:
+            # One tool's crash (a provider's odd response, an unsavable value)
+            # must not abort the run: the other tools still measure the app.
+            logger.exception("Tool %s of AnalysisRun %s failed unexpectedly", slug, run.pk)
+            result.status = ToolResult.Status.FAILED
+            result.error_message = _scrub(f"Internal error: {type(exc).__name__}: {exc}")[:500]
+            result.duration_seconds = round((timezone.now() - started_at).total_seconds(), 3)
+            result.summary, result.raw_output, result.metrics = {}, {}, {}
+            result.save(
+                update_fields=["status", "error_message", "duration_seconds", "summary", "raw_output", "metrics"],
+            )
         _publish_result(result)
         statuses.append(result.status)
 
-    _finalize(run, statuses, truncated_inputs)
+    _finalize(run, statuses, truncated_inputs, excluded_paths)
     return run
+
+
+def _run_tool(
+    run: AnalysisRun,
+    tool: AnalyzerTool,
+    result: ToolResult,
+    *,
+    files: dict[str, str],
+    container_name: str,
+    config: dict,
+    tool_version: str,
+    app_url: str,
+) -> bool:
+    """Execute *tool* and store its outcome on *result*; returns whether the run was cancelled meanwhile."""
+    started_at = result.started_at or timezone.now()
+    if tool.kind == "ai":
+        output = ai_runner.run(tool, files, config, run.created_by)
+    else:
+        output = _run_container_tool(tool, container_name, config=config, app_url=app_url, run_id=run.pk)
+    result.duration_seconds = round((timezone.now() - started_at).total_seconds(), 3)
+
+    if is_cancelled(run):
+        # Killed by cancel (or finished after it): not a measurement.
+        result.status = ToolResult.Status.SKIPPED
+        result.error_message = "Run cancelled while this tool was running"
+        result.summary = {"skip_reason": SKIP_CANCELLED}
+        result.save(update_fields=["status", "error_message", "summary", "duration_seconds"])
+        return True
+
+    if tool.analysis_mode == "dynamic" and app_url and container_name:
+        # Twice: an app still busy with the scan's last requests may answer late.
+        alive, detail = _app_answers(container_name, app_url, attempts=2)
+        if not alive:
+            # The app died during the scan (crashed under the attack, OOM,
+            # stopped): what the scanner saw is not a measurement of the app.
+            message = (
+                f"The app stopped answering at {app_url} during the scan ({detail}); "
+                "the scan is incomplete. Restart the app, then re-run the dynamic tools."
+            )
+            if not output.findings:
+                # A scanner aimed at a dead port prints nothing: never a clean zero.
+                result.status = ToolResult.Status.SKIPPED
+                result.error_message = message
+                result.summary = {"skip_reason": SKIP_APP_NOT_RUNNING}
+                result.raw_output = _scrub(output.raw_output)
+                result.save(update_fields=["status", "error_message", "summary", "raw_output", "duration_seconds"])
+                return False
+            output.error = f"{message} {output.error}" if output.error else message
+
+    if tool.kind != "ai" and tool_version:
+        output.summary["tool_version"] = tool_version
+    # The options the findings were produced with (provenance for reports).
+    output.summary["config"] = {**(tool.default_config or {}), **config}
+    # What turned the code into findings besides the build and the options:
+    # the rendered command (or the reviewer's prompt) and the parser's code.
+    if tool.kind == "ai":
+        output.summary["command_sha"] = ai_runner.prompt_fingerprint()
+    elif output.raw_output.get("command"):
+        output.summary["command_sha"] = command_fingerprint(output.raw_output["command"], app_url)
+    if tool.kind != "ai" and tool.parser_key and (parser_sha := parser_fingerprint(tool.parser_key)):
+        output.summary["parser_sha"] = parser_sha
+    if patterns_sha := patterns_fingerprint(tool):
+        output.summary["patterns_sha"] = patterns_sha
+    _persist_result(result, output)
+    return False
+
+
+def _live_app_url(run: AnalysisRun, container_name: str) -> tuple[str, str]:
+    """``(url, "")`` of the run's app when it answers HTTP from the workspace now, else ``("", reason)``."""
+    try:
+        url, reason = resolve_app_url(run)
+    except Exception as exc:  # noqa: BLE001 - an unreachable daemon means "cannot reach the app"
+        logger.warning("Resolving the app of AnalysisRun %s failed", run.pk, exc_info=True)
+        return "", f"Could not locate the app's container: {type(exc).__name__}: {exc}"[:300]
+    if not url or not container_name:
+        return url, reason
+    alive, detail = _app_answers(container_name, url)
+    if not alive:
+        return "", f"The app did not answer at {url} ({detail}). Start it, then re-run the dynamic tools."
+    return url, ""
+
+
+def _app_answers(container_name: str, url: str, *, attempts: int = 1) -> tuple[bool, str]:
+    """Whether the app at *url* answers HTTP from the workspace (any status counts), and why not."""
+    detail = ""
+    for _ in range(attempts):
+        probe = docker_manager.exec_in(
+            container_name,
+            f"curl -sS -o /dev/null --max-time {APP_PROBE_TIMEOUT_S} {shlex.quote(url.rstrip('/') + '/')}",
+            timeout_s=APP_PROBE_TIMEOUT_S + 5,
+        )
+        code = probe.get("exit_code")
+        if code == 0:
+            return True, ""
+        if code == 127 or (code == -1 and probe.get("error")):
+            # No curl, or the workspace itself is unreachable: the app's state is
+            # unknown, and the tool run will report a workspace problem itself.
+            logger.warning("Could not probe %s from %s: %s", url, container_name, probe)
+            return True, ""
+        detail = _scrub((probe.get("output") or "").strip())[:200] or f"curl exit {code}"
+    return False, detail
 
 
 def _skip(
@@ -577,10 +776,26 @@ def _skip(
         return SKIP_UNAVAILABLE, "Tool unavailable"
     if tool.analysis_mode == "dynamic" and not app_url:
         return SKIP_APP_NOT_RUNNING, app_url_error
-    if not applicable_files(tool, files):
-        # Not "0 findings": the tool had nothing to read, so it measured nothing.
-        return SKIP_NOT_APPLICABLE, f"Not applicable: no files matching {', '.join(tool.file_patterns)}"
+    reason = not_applicable_reason(tool, files)
+    if reason:
+        # A true zero, not "0 findings": the app has nothing this tool reads.
+        return SKIP_NOT_APPLICABLE, reason
     return None
+
+
+def not_applicable_reason(tool: AnalyzerTool, files: dict[str, str]) -> str:
+    """Why *tool* has nothing to read in *files* ("" when it applies)."""
+    if tool.kind == "ai" and not ai_runner.reviewable_files(files):
+        return "Not applicable: no reviewable source files (lockfiles and minified files are not reviewed)"
+    if not applicable_files(tool, nonempty_files(files)):
+        return f"Not applicable: no files matching {', '.join(tool.file_patterns)}"
+    return ""
+
+
+def nonempty_files(files: dict[str, str]) -> dict[str, str]:
+    """*files* without empty ones: an empty file is copied in (an empty ``__init__.py`` shapes the
+    package layout) but gives a tool nothing to read, so it never makes the tool applicable."""
+    return {path: content for path, content in files.items() if isinstance(content, str) and content.strip()}
 
 
 def applicable_files(tool: AnalyzerTool, files: dict[str, str]) -> list[str]:
@@ -626,7 +841,12 @@ def _truncated_inputs(run: AnalysisRun) -> list[str]:
     data = getattr(run.generation_job, "result_data", None) or {}
     if not isinstance(data, dict):
         return []
-    return [part for part in ("backend", "frontend") if data.get(f"{part}_truncated")]
+    parts = [part for part in ("backend", "frontend") if data.get(f"{part}_truncated")]
+    # Agent jobs: the same rule as reports (experiment_results.output_truncated).
+    agent = data.get("agent") if isinstance(data.get("agent"), dict) else {}
+    if agent.get("final_response_truncated") is True:
+        parts.append("agent")
+    return parts
 
 
 def _normalize_path(path: str) -> str:
@@ -653,6 +873,7 @@ def _run_container_tool(
     cmd = render_command(tool, target=workspace_service.WORK_DIR, url=app_url, config=config)
     # The marker lets cancel() find this run's processes (see _kill_script).
     marked = f": {_CMD_MARKER}:{run_id}; {cmd}" if run_id else cmd
+    started = time.monotonic()
     result = docker_manager.exec_in(
         container_name,
         marked,
@@ -660,21 +881,24 @@ def _run_container_tool(
         workdir=workspace_service.WORK_DIR,
     )
     if result.get("error") and result.get("exit_code") == -1:
-        return AnalyzerOutput(error=result["error"])
-    raw = result.get("output", "")
+        return AnalyzerOutput(error=_scrub(result["error"]))
+    # Binary output (and the parsers' "\u0000" escapes) must not reach the database.
+    raw = _scrub(result.get("output", ""))
     exit_code = result.get("exit_code")
     raw_output = {
         "command": cmd,
         "exit_code": exit_code,
         "stdout": raw[:_STDOUT_STORE_LIMIT],
+        # The stored stdout is cut: re-parsing it offline would see an incomplete report.
+        "stdout_truncated": len(raw) > _STDOUT_STORE_LIMIT,
         **({"target_url": app_url} if tool.analysis_mode == "dynamic" else {}),
     }
-    error = _exit_error(tool, exit_code, raw)
+    error = _exit_error(tool, exit_code, raw, elapsed=time.monotonic() - started)
     parsed = ParsedOutput()
     if error is None:
         parsed = parsers.parse(tool.parser_key, raw) if tool.parser_key else ParsedOutput()
         error = parsed.error
-        if exit_code not in (0, None) and not parsed.findings and not parsed.metrics:
+        if exit_code not in (0, None) and not parsed.findings and not parsed.metrics and not parsed.recognized:
             # Linters exit non-zero *because* they found something; non-zero
             # with nothing parsed means the tool itself failed.
             error = (
@@ -682,6 +906,8 @@ def _run_container_tool(
                 if error is None
                 else f"Exited with code {exit_code}: {error}"
             )
+            if exit_code in (126, 127):
+                error += " (127/126 also mean the command was not found or not executable: Verify the tool's install.)"
     if error is not None:
         # Keep what the parser did find (nonexistent-package/-version findings
         # of a manifest whose audit could not run): stored on the failed
@@ -706,46 +932,69 @@ def _tail(raw: str, limit: int = 300) -> str:
     return ("…" + text[-limit:]) if len(text) > limit else (text or "(no output)")
 
 
-def _exit_error(tool: AnalyzerTool, exit_code, raw: str) -> str | None:
+# What a shell prints when the command itself is missing or not executable
+# (dash, bash, busybox). Exit 127 alone proves nothing: tools use it too
+# (osv-scanner: "general error").
+_NOT_FOUND_RE = re.compile(r"not found|No such file or directory|Permission denied|cannot execute", re.IGNORECASE)
+
+
+def _exit_error(tool: AnalyzerTool, exit_code, raw: str, *, elapsed: float | None = None) -> str | None:
     """A failure the exit code alone proves (``timeout -s KILL`` exits 137)."""
     if exit_code == 137:
+        if elapsed is not None and elapsed < tool.run_timeout * 0.9:
+            return (
+                f"Killed (SIGKILL) after {elapsed:.1f}s, before its {tool.run_timeout}s timeout: out of memory or "
+                "killed from outside; the result would be incomplete."
+            )
         return f"Killed after {tool.run_timeout}s (timeout) or out of memory; the result would be incomplete."
-    if exit_code in (126, 127):
+    if exit_code in (126, 127) and _NOT_FOUND_RE.search(raw or ""):
         return f"Command not found or not executable (exit {exit_code}) — reinstall the tool: {_tail(raw)}"
     return None
 
 
-def _persist_result(result: ToolResult, output: AnalyzerOutput) -> None:
-    _store_findings(result, output)
-    if output.has_error:
-        result.status = ToolResult.Status.FAILED
-        result.error_message = output.error or ""
-        result.raw_output = output.raw_output
-        result.summary = {k: v for k, v in output.summary.items() if k in ("tool_version", "config")}
-        if output.findings:
-            result.summary["finding_count"] = len(output.findings)
-            result.summary["severity_counts"] = build_severity_counts(output.findings)
-            result.summary["reported_severity_counts"] = _reported_counts(output.findings)
-        if output.warnings:
-            result.summary["warnings"] = output.warnings
-        result.save(update_fields=["status", "error_message", "raw_output", "summary", "duration_seconds"])
-        return
+# Summary keys a failed result keeps: what it was produced with (provenance),
+# and which files the AI reviewer could not fit into its prompt.
+_PROVENANCE_KEYS = ("tool_version", "config", "command_sha", "parser_sha", "patterns_sha", "model")
+_FAILED_KEPT_KEYS = (*_PROVENANCE_KEYS, "files_not_reviewed")
 
-    result.status = ToolResult.Status.COMPLETED
-    result.raw_output = output.raw_output
-    result.metrics = output.metrics
-    result.summary = {
-        **output.summary,
-        "severity_counts": build_severity_counts(output.findings),
-        "reported_severity_counts": _reported_counts(output.findings),
-        **({"warnings": output.warnings} if output.warnings else {}),
-    }
-    result.save(update_fields=["status", "raw_output", "metrics", "summary", "duration_seconds"])
+
+def _persist_result(result: ToolResult, output: AnalyzerOutput) -> None:
+    # Findings and the result's status land together: a failed save must not
+    # leave findings attached to a result the caller then marks failed.
+    with transaction.atomic():
+        _store_findings(result, output)
+        if output.has_error:
+            result.status = ToolResult.Status.FAILED
+            result.error_message = _scrub(output.error or "")
+            result.raw_output = _scrub(output.raw_output)
+            result.summary = {k: v for k, v in output.summary.items() if k in _FAILED_KEPT_KEYS}
+            if output.findings:
+                result.summary["finding_count"] = len(output.findings)
+                result.summary["severity_counts"] = build_severity_counts(output.findings)
+                result.summary["reported_severity_counts"] = _reported_counts(output.findings)
+            if output.warnings:
+                result.summary["warnings"] = output.warnings
+            result.summary = _scrub(result.summary)
+            result.save(update_fields=["status", "error_message", "raw_output", "summary", "duration_seconds"])
+            return
+
+        result.status = ToolResult.Status.COMPLETED
+        result.raw_output = _scrub(output.raw_output)
+        result.metrics = _scrub(output.metrics)
+        result.summary = _scrub(
+            {
+                **output.summary,
+                "severity_counts": build_severity_counts(output.findings),
+                "reported_severity_counts": _reported_counts(output.findings),
+                **({"warnings": output.warnings} if output.warnings else {}),
+            },
+        )
+        result.save(update_fields=["status", "raw_output", "metrics", "summary", "duration_seconds"])
 
 
 def _reported_counts(findings) -> dict[str, int]:
     """Findings per level as the tool printed it (case-folded); unrated ones are not counted."""
-    counts = Counter((f.tool_severity or "").strip().lower() for f in findings)
+    counts = Counter(_scrub((f.tool_severity or "").strip().lower()) for f in findings)
     counts.pop("", None)
     return dict(counts)
 
@@ -756,25 +1005,30 @@ def _store_findings(result: ToolResult, output: AnalyzerOutput) -> None:
             Finding(
                 result=result,
                 severity=f.severity,
-                category=f.category,
-                confidence=f.confidence,
-                title=f.title[:500],
-                description=f.description,
-                suggestion=f.suggestion,
-                file_path=_normalize_path(f.file_path)[:500],
+                category=_scrub(f.category),
+                confidence=_scrub(f.confidence),
+                title=_scrub(f.title)[:500],
+                description=_scrub(f.description),
+                suggestion=_scrub(f.suggestion),
+                file_path=_scrub(_normalize_path(f.file_path))[:500],
                 line_number=f.line_number,
                 column_number=f.column_number,
-                code_snippet=f.code_snippet,
-                rule_id=f.rule_id[:100],
-                tool_specific_data=f.tool_specific_data,
-                tool_severity=(f.tool_severity or "").strip()[:40],
+                code_snippet=_scrub(f.code_snippet),
+                rule_id=_scrub(f.rule_id)[:100],
+                tool_specific_data=_scrub(f.tool_specific_data),
+                tool_severity=_scrub((f.tool_severity or "").strip())[:40],
             )
             for f in output.findings
         ],
     )
 
 
-def _finalize(run: AnalysisRun, statuses: list[str], truncated_inputs: list[str] | None = None) -> None:
+def _finalize(
+    run: AnalysisRun,
+    statuses: list[str],
+    truncated_inputs: list[str] | None = None,
+    excluded_paths: list[str] | None = None,
+) -> None:
     findings = Finding.objects.filter(result__run=run)
     severity_counts: dict[str, int] = {}
     for sev in findings.values_list("severity", flat=True):
@@ -799,6 +1053,11 @@ def _finalize(run: AnalysisRun, statuses: list[str], truncated_inputs: list[str]
 
     summary = {
         "total_findings": findings.count(),
+        # Code findings are what the model wrote; dependency advisories and
+        # what dynamic tools saw at runtime are reported apart (study rules).
+        # A scope no tool measured is None, not 0; skipped tools are split
+        # into not applicable (measured) and unmeasured.
+        **run_scope_counts([run.pk])[run.pk],
         "severity_counts": severity_counts,
         "reported_severity_counts": dict(reported),
         "unrated_findings": unrated,
@@ -811,6 +1070,9 @@ def _finalize(run: AnalysisRun, statuses: list[str], truncated_inputs: list[str]
         # The generated code was cut off at max_tokens; findings describe an
         # incomplete app, so surface that next to them.
         summary["truncated_inputs"] = truncated_inputs
+    if excluded_paths:
+        # Stored files inside dependency, cache or scratch directories (not the app's source).
+        summary["excluded_paths"] = {"count": len(excluded_paths), "sample": excluded_paths[:20]}
     completed_at = timezone.now()
     duration = (completed_at - run.started_at).total_seconds() if run.started_at else None
     # A cancelled run keeps its status (cancel is sticky); it still gets the
@@ -825,15 +1087,141 @@ def _finalize(run: AnalysisRun, statuses: list[str], truncated_inputs: list[str]
     _publish(run)
 
 
+# Summary key of each finding scope's counter.
+SCOPE_KEYS = {"code": "code_findings", "dependencies": "dependency_findings", "runtime": "runtime_findings"}
+
+
+def tool_scope(slug: str, dynamic: set[str]) -> str:
+    """The finding scope a tool measures: ``runtime`` (dynamic tools), ``dependencies``
+    (known-vulnerability scanners) or ``code`` (every other tool, the AI reviewer included)."""
+    if slug in dynamic:
+        return "runtime"
+    if slug in ADVISORY_TOOLS:
+        return "dependencies"
+    return "code"
+
+
+def _is_measurement(status: str, skip_reason) -> bool:
+    """A completed result, or a skip because the app has nothing the tool reads (a true zero)."""
+    return status == ToolResult.Status.COMPLETED or (
+        status == ToolResult.Status.SKIPPED and skip_reason == SKIP_NOT_APPLICABLE
+    )
+
+
+def measured_scopes(results, dynamic: set[str] | None = None) -> set[str]:
+    """The scopes that at least one measurement among *results* covers.
+
+    *results* is an iterable of ``(tool_slug, status, skip_reason)``.
+    """
+    dynamic = AnalyzerTool.dynamic_slugs() if dynamic is None else dynamic
+    return {tool_scope(slug, dynamic) for slug, status, reason in results if _is_measurement(status, reason)}
+
+
+def finding_scope_counts(findings, measured: set[str] | None = None) -> dict[str, int | None]:
+    """``code_findings`` / ``dependency_findings`` / ``runtime_findings`` of a Finding queryset.
+
+    Dependency advisories are the known-vulnerability scanners' package
+    findings (``base.is_dependency_advisory``); runtime findings come from
+    dynamic tools; everything else is a code finding. With *measured* (see
+    :func:`measured_scopes`), a scope that no tool measured and that has no
+    findings is None: unmeasured is not zero.
+    """
+    dynamic = AnalyzerTool.dynamic_slugs()
+    counts = findings.aggregate(
+        total=Count("id"),
+        dependencies=Count("id", filter=finding_scope_q("dependencies", dynamic)),
+        runtime=Count("id", filter=finding_scope_q("runtime", dynamic)),
+    )
+    return _scope_counters(counts, measured)
+
+
+def _scope_counters(counts: dict[str, int], measured: set[str] | None) -> dict[str, int | None]:
+    values = {
+        "code": counts["total"] - counts["dependencies"] - counts["runtime"],
+        "dependencies": counts["dependencies"],
+        "runtime": counts["runtime"],
+    }
+    return {
+        SCOPE_KEYS[scope]: n if measured is None or n or scope in measured else None for scope, n in values.items()
+    }
+
+
+def finding_scope_q(scope: str, dynamic: set[str] | None = None) -> Q:
+    """Filter on Finding for *scope*: ``code`` | ``dependencies`` | ``runtime``."""
+    advisory = Q(result__tool_slug__in=ADVISORY_TOOLS, category="dependency")
+    dynamic = AnalyzerTool.dynamic_slugs() if dynamic is None else dynamic
+    runtime = Q(result__tool_slug__in=sorted(dynamic)) & ~advisory
+    if scope == "dependencies":
+        return advisory
+    if scope == "runtime":
+        return runtime
+    if scope == "code":
+        return ~advisory & ~runtime
+    msg = f"Unknown finding scope {scope!r}"
+    raise ValueError(msg)
+
+
+def run_scope_counts(run_ids) -> dict:
+    """Per run id: the scope counters (:func:`finding_scope_counts`, None when unmeasured) plus
+    ``tools_not_applicable`` (skipped, nothing to read: measured, a true zero) and
+    ``tools_unmeasured`` (skipped as app not running, tool unavailable, cancelled: they said nothing).
+
+    Computed from the rows in two grouped queries, so finished runs of any age
+    get the current rules (the list and detail views fill them in at read time).
+    """
+    ids = list(run_ids)
+    dynamic = AnalyzerTool.dynamic_slugs()
+    counts = {
+        str(row["result__run_id"]): row
+        for row in Finding.objects.filter(result__run_id__in=ids)
+        .values("result__run_id")
+        .annotate(
+            total=Count("id"),
+            dependencies=Count("id", filter=finding_scope_q("dependencies", dynamic)),
+            runtime=Count("id", filter=finding_scope_q("runtime", dynamic)),
+        )
+    }
+    results: dict[str, list] = {}
+    for run_id, slug, status, reason in ToolResult.objects.filter(run_id__in=ids).values_list(
+        "run_id",
+        "tool_slug",
+        "status",
+        "summary__skip_reason",
+    ):
+        results.setdefault(str(run_id), []).append((slug, status, reason))
+    out = {}
+    for run_id in ids:
+        rows = results.get(str(run_id), [])
+        skipped = [reason for _, status, reason in rows if status == ToolResult.Status.SKIPPED]
+        not_applicable = sum(1 for reason in skipped if reason == SKIP_NOT_APPLICABLE)
+        out[run_id] = {
+            **_scope_counters(
+                counts.get(str(run_id)) or {"total": 0, "dependencies": 0, "runtime": 0},
+                measured_scopes(rows, dynamic),
+            ),
+            "tools_not_applicable": not_applicable,
+            "tools_unmeasured": len(skipped) - not_applicable,
+        }
+    return out
+
+
 def _materialize(code: dict[str, str]) -> dict[str, str]:
-    """Turn a semantic/file-keyed code map into ``{filename: content}``."""
+    """Turn a semantic/file-keyed code map into ``{filename: content}``.
+
+    Real files keep empty content (an empty ``__init__.py`` makes a package:
+    the tools must see the tree the app runs with); empty semantic blobs
+    (``backend_code`` …) are dropped.
+    """
     files: dict[str, str] = {}
     for key, content in code.items():
-        if not content or not str(content).strip():
+        if not isinstance(content, str):
             continue
-        if "." in Path(key).name:
-            filename = key
-        else:
-            filename = f"{key}{_EXT_BY_KEY.get(key.lower(), '.py')}"
+        name = Path(key).name
+        # A file's real path (extension, directory, or a well-known extension-
+        # less name such as Dockerfile) is kept as is; a bare key is a blob.
+        is_path = "." in name or "/" in key.strip("/") or name in _EXTENSIONLESS_FILES
+        if not content.strip() and not is_path:
+            continue
+        filename = key if is_path else f"{key}{_EXT_BY_KEY.get(key.lower(), '.py')}"
         files[filename.lstrip("/")] = content
     return files

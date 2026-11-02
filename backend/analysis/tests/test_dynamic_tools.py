@@ -172,3 +172,94 @@ def test_execute_runs_dynamic_tool_against_app_with_user_config(user, monkeypatc
     assert result.raw_output["command"] == "nuclei -u http://llm-app3:8000 -tags exposure"
     finding = Finding.objects.get(result=result)
     assert (finding.file_path, finding.severity) == ("/.git/config", "medium")
+
+
+# --- liveness around each dynamic tool --------------------------------------------
+
+
+def _dast_run(user, settings, name="llm-app4"):
+    settings.DOCKER_APPS_NETWORK = "apps"
+    _dynamic_tool()
+    workspace = AnalyzerWorkspaceFactory(user=user)
+    job = GenerationJobFactory(created_by=user, result_data={"backend_code": "print(1)"})
+    _running_app(job, user, name=name)
+    return AnalysisRunFactory(created_by=user, workspace=workspace, generation_job=job, tool_slugs=["dast-fixture"])
+
+
+def _scripted_workspace(monkeypatch, calls, *, probes, output=""):
+    """Each curl probe answers with the next exit code of *probes*; the tool prints *output*."""
+    monkeypatch.setattr(runner.workspace_service, "require_ready_container", lambda ws: "cname")
+    monkeypatch.setattr(runner.docker_manager, "copy_files_in", lambda *a, **k: {"status": "ok"})
+    answers = iter(probes)
+
+    def _exec(name, cmd, **kwargs):
+        calls.append(cmd)
+        if cmd.startswith("curl "):
+            code = next(answers)
+            return {"exit_code": code, "output": "" if code == 0 else "curl: (7) Failed to connect"}
+        return {"exit_code": 0, "output": output}
+
+    monkeypatch.setattr(runner.docker_manager, "exec_in", _exec)
+
+
+def test_dynamic_tool_is_skipped_when_the_app_does_not_answer(user, monkeypatch, settings):
+    # The database still says "running", but the app is down.
+    run = _dast_run(user, settings)
+    calls: list[str] = []
+    _scripted_workspace(monkeypatch, calls, probes=[7])
+
+    runner.execute(run)
+    run.refresh_from_db()
+
+    result = ToolResult.objects.get(run=run, tool_slug="dast-fixture")
+    assert result.status == ToolResult.Status.SKIPPED
+    assert result.summary["skip_reason"] == runner.SKIP_APP_NOT_RUNNING
+    assert "did not answer at http://llm-app4:8000" in result.error_message
+    assert not any("nuclei" in c for c in calls)
+    assert "curl -sS -o /dev/null --max-time 10 http://llm-app4:8000/" in calls
+    assert run.summary["tools_unmeasured"] == 1
+
+
+def test_app_dying_during_the_scan_is_never_a_clean_zero(user, monkeypatch, settings):
+    run = _dast_run(user, settings)
+    calls: list[str] = []
+    # Alive before the scan, dead after it (asked twice); nuclei printed nothing.
+    _scripted_workspace(monkeypatch, calls, probes=[0, 7, 7], output="")
+
+    runner.execute(run)
+    result = ToolResult.objects.get(run=run, tool_slug="dast-fixture")
+    assert result.status == ToolResult.Status.SKIPPED
+    assert result.summary["skip_reason"] == runner.SKIP_APP_NOT_RUNNING
+    assert "stopped answering" in result.error_message
+    assert result.raw_output["command"].startswith("nuclei -u http://llm-app4:8000")
+
+
+def test_app_dying_during_the_scan_keeps_findings_on_a_failed_result(user, monkeypatch, settings):
+    run = _dast_run(user, settings)
+    hit = {
+        "template-id": "git-config",
+        "info": {"name": "Git Config Disclosure", "severity": "medium"},
+        "matched-at": "http://llm-app4:8000/.git/config",
+    }
+    _scripted_workspace(monkeypatch, [], probes=[0, 7, 7], output=json.dumps(hit))
+
+    runner.execute(run)
+    run.refresh_from_db()
+    result = ToolResult.objects.get(run=run, tool_slug="dast-fixture")
+    # Incomplete scan: not a measurement, but what it saw stays inspectable.
+    assert result.status == ToolResult.Status.FAILED
+    assert "stopped answering" in result.error_message
+    assert result.findings.count() == 1
+    assert result.summary["command_sha"] == runner.command_fingerprint(
+        "nuclei -u {url} -tags misconfig",
+    )
+    assert run.status == AnalysisRun.Status.FAILED
+
+
+def test_an_app_that_answers_the_second_probe_after_the_scan_is_measured(user, monkeypatch, settings):
+    run = _dast_run(user, settings)
+    hit = {"template-id": "x-frame", "info": {"name": "Missing XFO", "severity": "info"}, "matched-at": "http://a/"}
+    _scripted_workspace(monkeypatch, [], probes=[0, 28, 0], output=json.dumps(hit))
+    runner.execute(run)
+    result = ToolResult.objects.get(run=run, tool_slug="dast-fixture")
+    assert result.status == ToolResult.Status.COMPLETED

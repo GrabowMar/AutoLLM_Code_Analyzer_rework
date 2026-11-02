@@ -16,6 +16,8 @@ class UpdateUserSchema(ModelSchema):
 class UserSchema(ModelSchema):
     url: str
     is_staff: bool
+    # Restricted human-evaluation account (portal only); staff are never evaluators.
+    is_evaluator: bool
 
     class Meta:
         model = User
@@ -28,6 +30,12 @@ class UserSchema(ModelSchema):
     @staticmethod
     def resolve_is_staff(obj: User) -> bool:
         return obj.is_staff
+
+    @staticmethod
+    def resolve_is_evaluator(obj: User) -> bool:
+        from backend.human_eval.services.access import is_restricted_evaluator
+
+        return is_restricted_evaluator(obj)
 
 
 class BootstrapStatusSchema(Schema):

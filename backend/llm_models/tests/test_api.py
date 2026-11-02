@@ -339,8 +339,9 @@ class TestRefreshAPI:
             model_name="Old Name",
         )
 
-        def refresh_side_effect(instance, api_key):
+        def refresh_side_effect(instance, api_key, *, hf_user=None):
             assert api_key == "user-key"
+            assert hf_user is not None  # the staff caller's Hugging Face token is used
             instance.model_name = "New Name"
             instance.save(update_fields=["model_name", "updated_at"])
             return True

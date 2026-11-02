@@ -9,6 +9,7 @@ import { browser } from "$app/environment";
 import type { AgentConfigOverrides, LLMParams } from "$lib/api/generation";
 import type { LLMModelSummary } from "$lib/api/models";
 import type {
+  AnalysisPlan,
   ConditionChoice,
   ExperimentCreateV2,
   ExperimentDetail,
@@ -80,6 +81,17 @@ export interface ExperimentDraft {
   postRun: PostRunSpec;
   /** One optional schedule (more can be added on the Automation tab). */
   schedule: ScheduleSpec | null;
+  /**
+   * A clone's copy of the source's analysis plan: sent unfrozen, frozen at
+   * launch. null = no plan (edits never send one: the PATCH keeps the stored plan).
+   */
+  analysisPlan: AnalysisPlan | null;
+  /**
+   * An edit's stored analysis plan truncation rule (the plan freezes at launch
+   * and overrides the report's setting). Display only, never sent; null or
+   * absent = the experiment has no plan.
+   */
+  storedPlanTruncated?: boolean | null;
 }
 
 export function defaultPostRun(mode: ComposerMode): PostRunSpec {
@@ -126,6 +138,7 @@ export function defaultComposerDraft(): ExperimentDraft {
     execution: defaultExecution(),
     postRun: defaultPostRun("agent"),
     schedule: null,
+    analysisPlan: null,
   };
 }
 
@@ -282,6 +295,7 @@ export function buildCreateBody(
       evaluate: agent ? false : draft.postRun.evaluate,
     },
     schedules: draft.schedule ? [draft.schedule] : [],
+    ...(draft.analysisPlan ? { analysis_plan: draft.analysisPlan } : {}),
   };
   return body;
 }
@@ -388,7 +402,15 @@ export function sanitizeDraft(raw: unknown): ExperimentDraft | null {
       },
     },
     schedule: isRecord(raw.schedule) ? sanitizeSchedule(raw.schedule) : null,
+    analysisPlan: planOf(raw.analysisPlan),
   };
+}
+
+/** A non-empty analysis plan (the server validates it on save), else null. */
+function planOf(value: unknown): AnalysisPlan | null {
+  return isRecord(value) && typeof value.primary_metric === "string"
+    ? (JSON.parse(JSON.stringify(value)) as AnalysisPlan)
+    : null;
 }
 
 const SCHEDULE_ACTIONS = new Set(["top_up", "add_replicates", "clone_and_run"]);
@@ -541,7 +563,19 @@ export function draftFromExperiment(
       report: { ...defaultPostRun("agent").report, ...(post.report ?? {}) },
     },
     schedule: null,
+    // A clone copies the plan unfrozen (as POST /clone/ does); an edit leaves the stored plan alone.
+    analysisPlan: options.clone ? planOf(exp.analysis_plan) : null,
+    // An edit still shows the stored plan's truncation rule, which the report will apply.
+    storedPlanTruncated: options.clone
+      ? null
+      : planTruncated(exp.analysis_plan),
   };
+}
+
+/** A plan's truncation rule (excluded unless it says otherwise), or null without a plan. */
+function planTruncated(value: unknown): boolean | null {
+  const plan = planOf(value);
+  return plan ? (plan.exclusions?.truncated ?? true) : null;
 }
 
 // ── selection grouped by endpoint ─────────────────────────────────────

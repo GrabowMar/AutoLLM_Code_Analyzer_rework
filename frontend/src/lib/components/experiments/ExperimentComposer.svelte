@@ -42,6 +42,7 @@
 		type ExperimentPreviewV2,
 		type Issue,
 	} from '$lib/api/experiments';
+	import type { AnalysisPlan } from '$lib/api/types/experiments';
 	import { apiFieldErrors, formatApiError, isAbortError } from '$lib/api/core';
 	import { getAuth } from '$lib/stores/auth.svelte';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
@@ -119,7 +120,7 @@
 		type ExecutionDraft,
 		type ExperimentDraft,
 	} from './composer';
-	import { formatHours, plural, policyLabel } from './format';
+	import { CORRECTION_LABEL, formatHours, plural, policyLabel } from './format';
 
 	interface Props {
 		mode?: 'create' | 'edit';
@@ -156,6 +157,10 @@
 	let execution = $state<ExecutionDraft>(init.execution);
 	let postRun = $state(init.postRun);
 	let schedule = $state(init.schedule);
+	// A clone's copy of the source's analysis plan (never edited here; frozen at launch).
+	let analysisPlan = $state.raw<AnalysisPlan | null>(init.analysisPlan ?? null);
+	// An edited draft's stored plan rule: shown, never sent (the PATCH keeps the stored plan).
+	const storedPlanTruncated = init.storedPlanTruncated ?? null;
 
 	let llmInvalid = $state(false);
 	let budgetInvalid = $state(false);
@@ -403,6 +408,7 @@
 		execution: $state.snapshot(execution) as ExecutionDraft,
 		postRun: $state.snapshot(postRun),
 		schedule: schedule ? $state.snapshot(schedule) : null,
+		analysisPlan,
 	});
 	const samplingNoop = $derived(method === 'scaffolding' && isNoopSamplingPreset(samplingPreset as RunPreset | null));
 	const body = $derived(buildCreateBody(draft, { samplingNoop }));
@@ -794,6 +800,22 @@
 					<Label for="exp-description">Description <span class="font-normal text-muted-foreground">(optional)</span></Label>
 					<Textarea id="exp-description" bind:value={description} rows={2} />
 				</div>
+				{#if analysisPlan}
+					{@const questions = analysisPlan.research_questions?.length ?? 0}
+					<div class="flex flex-wrap items-start gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs" role="note">
+						<p class="min-w-0 flex-1 text-muted-foreground">
+							<span class="font-medium text-foreground">Analysis plan copied from the source</span>: primary metric
+							<span class="font-mono">{analysisPlan.primary_metric}</span>{questions ? `, ${plural(questions, 'research question')}` : ''}, α = {analysisPlan.alpha ?? 0.05},
+							{CORRECTION_LABEL[analysisPlan.correction ?? 'holm'] ?? analysisPlan.correction}. It is saved unfrozen and freezes at launch under a new hash.
+						</p>
+						<Button variant="ghost" size="sm" class="h-7 text-xs" onclick={() => (analysisPlan = null)}>Don’t copy the plan</Button>
+					</div>
+				{:else if storedPlanTruncated != null}
+					<p class="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground" role="note">
+						<span class="font-medium text-foreground">This draft has an analysis plan</span>: it is kept as stored and freezes at launch (see the
+						Method tab). Its truncation rule decides the report's.
+					</p>
+				{/if}
 			</ComposerSection>
 
 			<ComposerSection step={2} id="composer-method" title="Method" description="How apps are generated, and the stack every condition runs on.">
@@ -1039,7 +1061,7 @@
 			</ComposerSection>
 
 			<ComposerSection step={10} id="composer-automation" title="Automation" description="What happens after the runs, and optional repeats on a schedule.">
-				<AutomationSettings bind:postRun bind:schedule mode={method} bind:scheduleInvalid />
+				<AutomationSettings bind:postRun bind:schedule mode={method} bind:scheduleInvalid planTruncated={analysisPlan ? (analysisPlan.exclusions?.truncated ?? true) : storedPlanTruncated} />
 			</ComposerSection>
 
 			<div class="flex justify-end @4xl/composer:hidden">

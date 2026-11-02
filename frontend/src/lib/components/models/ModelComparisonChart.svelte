@@ -5,7 +5,7 @@
 	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import { rowLink, shortModelName } from '$lib/components/table';
 	import type { LLMModelSummary } from '$lib/api/client';
-	import { formatPrice } from './helpers';
+	import { formatPrice, knownTokenLimit } from './helpers';
 
 	interface Props {
 		provider: string;
@@ -47,7 +47,7 @@
 									<a {href} class="block truncate font-medium hover:text-primary" title={m.model_name}>{shortModelName(m.model_name)}</a>
 									<span class="cell-sub block truncate font-mono text-[11px] text-muted-foreground">{m.model_id}</span>
 								</td>
-								<td class="num">{m.context_window_display}</td>
+								<td class="num">{#if knownTokenLimit(m.context_window) != null}{m.context_window_display}{:else}<span class="text-muted-foreground" title="Not reported by the source">—</span>{/if}</td>
 								<td class="num whitespace-nowrap">{m.is_free ? 'Free' : `${formatPrice(m.input_price_per_million)} / ${formatPrice(m.output_price_per_million)}`}</td>
 								<td class="text-xs text-muted-foreground">
 									{[m.supports_function_calling && 'tools', m.supports_vision && 'vision', m.supports_reasoning && 'reasoning', m.supports_json_mode && 'JSON'].filter(Boolean).join(' · ') || '—'}

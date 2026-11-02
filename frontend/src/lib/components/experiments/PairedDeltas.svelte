@@ -97,7 +97,14 @@
 	{#if results.interim}
 		<span class="text-muted-foreground" title="Hidden while conditions are at unequal progress">—</span>
 	{:else if row.p_adjusted == null}
-		<span class="text-muted-foreground">—</span>
+		<span
+			class="text-muted-foreground"
+			title={row.untested_reason === 'all_ties' || (row.n_pairs > 0 && row.wins + row.losses === 0)
+				? 'Not tested: every paired app scored the same as the baseline'
+				: row.untested_reason === 'no_pairs' || row.n_pairs === 0
+					? 'Not tested: no app was graded in both conditions'
+					: undefined}>—</span
+		>
 	{:else}
 		<span
 			class={row.significant ? 'font-semibold text-foreground' : ''}

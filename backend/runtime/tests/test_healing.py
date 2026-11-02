@@ -106,6 +106,25 @@ def test_verbatim_agent_output_is_not_applicable(tmp_path):
     assert report.to_dict()["changed"] is False
 
 
+def test_verbatim_agent_output_drops_scaffold_files_the_agent_deleted(tmp_path):
+    job = GenerationJobFactory(
+        mode="agent",
+        stack_slug="flask-react",
+        result_data={
+            "result_schema_version": 2,
+            "materialize": "verbatim",
+            "files": {"app.py": _BACKEND},
+            "agent": {"workspace": {"deleted_scaffold_files": ["frontend/src/App.css", "Dockerfile", "../x"]}},
+        },
+    )
+    seeded, _ = _build(GenerationJobFactory(mode="agent", stack_slug="flask-react", result_data={}), tmp_path / "seed")
+    assert (seeded / "frontend" / "src" / "App.css").exists()
+
+    dest, _report = _build(job, tmp_path / "built")
+    assert not (dest / "frontend" / "src" / "App.css").exists()
+    assert (dest / "Dockerfile").exists()  # platform build files are never removed
+
+
 def test_unknown_mode_falls_back_to_full():
     assert svc.resolve_healing_mode(object(), "bogus") == svc.HealingMode.FULL
 

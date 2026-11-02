@@ -54,6 +54,41 @@ export interface LLMModelDetail extends LLMModelSummary {
   capabilities_json: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  /**
+   * Local endpoint model linked to a catalog row (`metadata.catalog_twin`):
+   * that row's metadata, shown as inherited ("assumed same weights"). Never
+   * merged with this model and never pooled into its statistics.
+   */
+  twin?: ModelTwin | null;
+}
+
+/** `metadata.catalog_twin` of a local endpoint model. */
+export interface CatalogTwinLink {
+  model_id: string | null;
+  /** `models.dev:<provider>` (provider record maps the served name), `served_name` or `manual`. */
+  source: string | null;
+  canonical_model_id?: string | null;
+  served_name?: string | null;
+  note?: string;
+  provider_record?: Record<string, unknown> | null;
+  linked_at?: string;
+}
+
+export interface ModelTwin {
+  link: CatalogTwinLink;
+  model: {
+    id: number;
+    model_id: string;
+    canonical_slug: string;
+    model_name: string;
+    provider: string;
+    context_window: number;
+    max_output_tokens: number;
+  } | null;
+  /** The twin's `models_dev`, `huggingface`, `params`, `epoch`, `lmarena` metadata. */
+  metadata: Record<string, unknown>;
+  /** The twin's `hugging_face_id`, `reasoning`, `default_parameters`, `architecture`, `benchmarks`. */
+  capabilities: Record<string, unknown>;
 }
 
 export interface ModelComparisonResult {
@@ -219,6 +254,12 @@ export type SeverityCounts = Record<
   number
 >;
 
+/**
+ * Normalized (heuristic) levels of findings whose tool printed a level, plus
+ * `unrated` for the findings of tools that print none (never given a level).
+ */
+export type NormalizedCounts = SeverityCounts & { unrated?: number };
+
 export interface RankPosition {
   rank: number;
   of: number;
@@ -283,14 +324,30 @@ export interface ModelInsights {
   }[];
   analysis: {
     analyzed_jobs: number;
-    findings_static: SeverityCounts;
-    findings_ai: SeverityCounts;
-    by_tool: ({ tool: string; ai: boolean; total: number } & SeverityCounts)[];
+    /** Code findings of the static tools (dependency advisories apart), by normalized level. */
+    findings_static: NormalizedCounts;
+    findings_ai: NormalizedCounts;
+    /** Known-vulnerability advisories (pip-audit, npm-audit, osv-scanner, trivy, retire): packages, not code. */
+    findings_dependency?: NormalizedCounts;
+    severity_note?: string;
+    by_tool: ({
+      tool: string;
+      ai: boolean;
+      total: number;
+      /** The tool's own labels with counts ("unrated" when it prints none). */
+      tool_severities?: Record<string, number>;
+    } & NormalizedCounts)[];
     top_rules: {
       tool: string;
       rule_id: string;
       title: string;
-      severity: string;
+      /** The tool's own label(s) for the rule ("HIGH", "HIGH / MEDIUM", "unrated"). */
+      tool_severity?: string;
+      tool_severities?: Record<string, number>;
+      /** Highest normalized level among rated findings: a heuristic, never shown as the rule's level. */
+      normalized_severity?: string | null;
+      /** Older payloads: the normalized level. Not displayed. */
+      severity?: string;
       count: number;
     }[];
   };
@@ -309,8 +366,10 @@ export interface ModelInsights {
       "composite" | "mss" | "empirical" | "benchmark",
       RankPosition | null
     >;
+    /** Spread over apps: repeats are averaged per (condition, app) first; `n_apps` units, `n_jobs` runs. */
     variance: {
       n_jobs: number;
+      n_apps?: number;
       density_per_kloc_mean: number | null;
       density_per_kloc_stdev: number | null;
       smoke_pass_rate_stdev: number | null;
@@ -388,6 +447,51 @@ export async function getModelEndpoints(
   const q = refresh ? "?refresh=true" : "";
   const res = await apiFetch(
     `/models/detail/${modelPathSegment(slug)}/endpoints/${q}`,
+  );
+  return res.json();
+}
+
+// ── Sampling actually sent by this platform's runs ──────────────────────────
+
+export interface SamplingParamUsage {
+  key: string;
+  /** Runs that sent this key on every request. */
+  n_sent: number;
+  /** Runs known not to have sent it (provider_default / template mode): the provider's default applied. */
+  n_not_sent: number;
+  /**
+   * Runs where the platform did not force it but the harness may have sent its own value
+   * (harness_native pass-through, or a run that recorded no sampling policy). Absent on older payloads.
+   */
+  n_unknown?: number;
+  values: { value: unknown; n: number }[];
+}
+
+/** `GET /models/detail/<slug>/sampling/`: the caller's runs of this model. */
+export interface SamplingUsage {
+  n_jobs: number;
+  scope: string;
+  by_mode: Record<string, number>;
+  /** `provider_default` / `harness_native` (agent), `template_mode`, `not_recorded`. */
+  policies: Record<string, number>;
+  sources: Record<string, number>;
+  params: SamplingParamUsage[];
+  /** Sampling keys a harness tried to send and the gateway stripped (provider_default runs). */
+  harness_sampling_stripped: { key: string; jobs: number; calls: number }[];
+  presets: {
+    id: number;
+    slug: string;
+    version: number;
+    name: string;
+    n: number;
+  }[];
+}
+
+export async function getModelSamplingUsage(
+  slug: string,
+): Promise<SamplingUsage> {
+  const res = await apiFetch(
+    `/models/detail/${modelPathSegment(slug)}/sampling/`,
   );
   return res.json();
 }

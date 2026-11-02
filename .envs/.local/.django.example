@@ -28,6 +28,13 @@ OPENROUTER_API_KEY=
 # shared deployments). Defaults to True.
 OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK=True
 
+# Hugging Face — optional, for model-metadata enrichment (https://huggingface.co/settings/tokens)
+# ------------------------------------------------------------------------------
+# Used when the staff user who syncs the catalog has no personal Hugging Face key
+# (Settings → API keys); without either, Hub requests go anonymous at a lower rate
+# limit. A read token is enough; gated repos also need their license accepted.
+HUGGINGFACE_API_TOKEN=
+
 # Public URL of the SvelteKit app in the browser (used in verification/reset emails).
 # Must match how you open the app — not the internal Docker service name.
 # ------------------------------------------------------------------------------

@@ -18,9 +18,9 @@ The catalog has 33 tools, one YAML file per tool in `backend/analysis/data/tools
 | eslint-security | security | JavaScript, Express | `*.js`, `*.jsx`, `*.cjs`, `*.mjs` | eval, ReDoS, unsafe child processes, timing-unsafe comparisons |
 | pip-audit | dependencies | Python, pip/PyPI | `requirements*.txt` | Vulnerable Python packages; nonexistent packages and versions |
 | npm-audit | dependencies | JavaScript, npm | `package.json` | Vulnerable JavaScript packages; nonexistent packages and versions |
-| osv-scanner | dependencies | pip/PyPI, npm | `requirements*.txt`, `package.json`, lockfiles | Vulnerable packages from OSV.dev, at the declared versions (`--no-resolve`: its own resolution invented old versions and bogus critical CVEs) |
+| osv-scanner | dependencies | pip/PyPI, npm | `requirements*.txt`, `package.json`, lockfiles | Vulnerable packages from OSV.dev. Checks versions declared in `requirements*.txt` and lockfiles (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `Pipfile.lock`) without transitive resolution (`--no-resolve`: its own resolution invented old versions and bogus critical CVEs); `package.json` only through its lockfile; dev-only packages left out. Exit 1 (vulnerabilities found) is normalized to 0 in the run_cmd; a run that prints no JSON report fails |
 | deptry | dependencies | Python, pip/PyPI | `requirements*.txt` | Missing, unused and misplaced Python dependencies |
-| retire | dependencies | JavaScript, HTML, npm | `*.js`, `*.html`, `package.json` | Vulnerable JS libraries, including vendored copies |
+| retire | dependencies | JavaScript | `*.js`, `bower.json` | Vulnerable JS libraries, including vendored copies. Reads `*.js` files and `bower.json` (not HTML script tags, not `package.json`) |
 | depcheck | dependencies | JavaScript, npm | `package.json` | Missing and unused JavaScript dependencies |
 | ruff | lint | Python | `*.py` | Bugs, unused imports, style |
 | flake8 | lint | Python | `*.py` | pyflakes + pycodestyle + mccabe |
@@ -30,7 +30,7 @@ The catalog has 33 tools, one YAML file per tool in `backend/analysis/data/tools
 | mypy | lint | Python | `*.py` | Type errors |
 | vulture | lint | Python | `*.py` | Dead code |
 | codespell | lint | any source | always | Typos in code and comments |
-| djlint | lint | HTML, Jinja/Django templates | `*.html`, `*.jinja`, `*.jinja2`, `*.j2` | Template accessibility and markup problems |
+| djlint | lint | HTML, Jinja/Django templates | `*.html`, `*.jinja`, `*.jinja2`, `*.j2` | Template accessibility and markup problems. One pass per template extension (`.html`, `.jinja`, `.jinja2`, `.j2`); H030/H031 ignored; a run that linted nothing fails |
 | jscpd | lint | any source | always | Copy-paste duplication (**metrics** + findings) |
 | hadolint | lint | Docker | `Dockerfile`, `Dockerfile.*`, `*.dockerfile` | Dockerfile mistakes |
 | shellcheck | lint | Shell | `*.sh`, `*.bash` | Quoting, globbing and portability bugs |
@@ -49,11 +49,13 @@ Every other tool is `output_kind: findings`; radon, jscpd and lizard are `output
 
 | Tool | Category | Scans | Finds | Timeout |
 | --- | --- | --- | --- | --- |
-| zap | security | Web app, REST API | OWASP ZAP: spider, passive and active scan (headers, XSS, SQLi, leaks, misconfigurations) | 1200 s |
-| nuclei | security | Web app, REST API | Template checks: misconfigurations, exposures, headers, CORS, common injections | 900 s |
-| wapiti | security | Web app, REST API | Crawls and fuzzes forms and parameters: XSS, SQL and command injection, CRLF, CSRF, cookie flags | 900 s |
+| zap | security | Web app, REST API | OWASP ZAP: spider, passive and active scan (headers, XSS, SQLi, leaks, misconfigurations) of the pages the start page links to | 1200 s |
+| nuclei | security | Web app, REST API | Template checks: misconfigurations, exposures, headers, CORS, common injections, on the start URL and the paths its templates name | 900 s |
+| wapiti | security | Web app, REST API | Crawls and fuzzes forms and parameters it finds from the start page: XSS, SQL and command injection, CRLF, CSRF, cookie flags | 900 s |
 
-Dynamic tools need the generated app's container to be **running** when the analysis starts (start it from the application page). The runner resolves the target from the run's generation job only: a running `ContainerInstance` of that job, created by the run's owner or belonging to the owner's job, reached from the analyzer workspace at `http://<app container>:8000` (by name on `DOCKER_APPS_NETWORK`, else by its bridge IP). If the app isn't running, or the run analyzes pasted code, the result is `skipped` with `skip_reason: app_not_running`; the analysis wizard drops dynamic tools for pasted code. Findings point at URL paths (`file_path` = `/api/items`), with the full URL, method and parameter in `tool_specific_data`.
+None of the three runs JavaScript or reads an API description, so the API endpoints of a React or Vue single-page app are never requested: on the generated SPAs, DAST results are mostly security-header checks on `/` and its static files (see Known limits in [Analysis pipeline](/docs/ANALYSIS_PIPELINE)).
+
+Dynamic tools need the generated app's container to be **running** when the analysis starts (start it from the application page). The runner resolves the target from the run's generation job only: a running `ContainerInstance` of that job, created by the run's owner or belonging to the owner's job, reached from the analyzer workspace at `http://<app container>:8000` (by name on `DOCKER_APPS_NETWORK`, else by its bridge IP). It resolves and probes the app right before each dynamic tool (any HTTP answer counts) and probes again after it. If the app isn't running or doesn't answer, or the run analyzes pasted code, the result is `skipped` with `skip_reason: app_not_running`; an app that stopped answering during a scan that found something fails the result. The analysis wizard drops dynamic tools for pasted code. Findings point at URL paths (`file_path` = `/`, `/robots.txt`, a static asset), with the full URL, method and parameter in `tool_specific_data`.
 
 Experiment post-run analysis does not offer dynamic tools: evaluation deploys each app in a throwaway sandbox and removes it, so no app is running when the post-run analysis starts.
 
@@ -110,7 +112,7 @@ docs_url: https://docs.astral.sh/ruff/
 install_cmd: "pip install --user --upgrade 'ruff==0.6.*'"
 verify_cmd: "ruff --version"
 uninstall_cmd: "pip uninstall -y ruff"
-run_cmd: "sel={config:select}; ruff check {target} --no-cache --output-format json ${sel:+--select \"$sel\"}"
+run_cmd: "sel={config:select}; ruff check {target} --isolated --no-cache --output-format json ${sel:+--select \"$sel\"}"
 parser_key: ruff        # which registered parser reads stdout
 file_patterns: ["*.py"] # files the tool reads; none present -> skipped
 run_timeout: 90
@@ -153,31 +155,40 @@ Commands run as the unprivileged `analyzer` user under `sh -c` (no root, no apt)
 
 ### Applicability: `file_patterns`
 
-`file_patterns` lists the files a tool reads, as case-sensitive globs. A pattern without `/` matches the file name (`"*.py"`, `"Dockerfile"`); a pattern with `/` matches the path relative to the code root (`"templates/*.html"`). If none of a run's files match, the tool is not run: its result is `skipped` with `summary.skip_reason = "not_applicable"`, instead of a clean-looking 0 findings that would count as "no issues" in model comparisons. An empty list means always applicable, and dynamic tools ignore the field (they scan the running app).
+`file_patterns` lists the files a tool reads, as case-sensitive globs. A pattern without `/` matches the file name (`"*.py"`, `"Dockerfile"`); a pattern with `/` matches the path relative to the code root (`"templates/*.html"`). Empty files are copied into `/work` but never make a tool applicable. If none of a run's non-empty files match, the tool is not run: its result is `skipped` with `summary.skip_reason = "not_applicable"`, instead of a clean-looking 0 findings that would count as "no issues" in model comparisons. An empty list means always applicable, and dynamic tools ignore the field (they scan the running app).
 
 ### Failure rules (no silent clean results)
 
 The runner marks a tool result `failed`, never `completed` with 0 findings, when:
 
-- the command exits **137** (killed by the `run_timeout` or out of memory),
-- it exits **126/127** (tool not installed or not executable: reinstall it),
+- the command exits **137** (killed by the `run_timeout`, or, well before it, out of memory or killed from outside),
+- it exits **126/127** and the shell says the command was not found or not executable (reinstall it); a tool that uses 127 for its own errors (osv-scanner) is judged by its output like any other non-zero exit,
 - it exits non-zero and the parser extracted neither findings nor metrics,
-- no parser is registered under the `parser_key`, or the parser raises an exception, or
-- the parser itself reports an error (every manifest of a sectioned tool failed).
+- no parser is registered under the `parser_key`, or the parser raises an exception,
+- the parser itself reports an error (no report, a cut-off report, every manifest of a sectioned tool failed), or
+- running or storing the tool raised an unexpected error (`Internal error: …`; the run goes on with the next tool).
 
-A non-zero exit *with* parsed findings is normal (many linters exit 1 when they find something). Every result records the exact command in `raw_output.command` and the effective configuration (defaults plus the user's options) in `summary.config`, alongside `summary.tool_version`.
+A non-zero exit *with* parsed findings is normal (many linters exit 1 when they find something). Every result records the exact command in `raw_output.command` and the effective configuration (defaults plus the user's options) in `summary.config`, alongside `summary.tool_version`, `summary.command_sha` (the rendered command, app URL normalized to `{url}`), `summary.parser_sha` (the parser's code) and `summary.patterns_sha` (the `file_patterns` that decide not applicable vs measured; not for dynamic tools, and also on results skipped as not applicable).
 
 ### Tools that scan several manifests
 
-Dependency tools (pip-audit, npm audit, deptry, depcheck) run once per manifest and print one `### <relative path>` header followed by that manifest's JSON report. Register their parser with `register(key, sectioned=True)`; the registry then checks the output per section:
+Dependency tools (pip-audit, npm audit, deptry, depcheck) run once per manifest and print one `### <relative path>` header followed by that manifest's JSON report. Register their parser with `register(key, sectioned=True, report=report_with("<a report key>", …))`. `report` tells the tool's report from other JSON it may print instead (npm prints a request failure as `{"message": …}`); it can also be any predicate on the parsed JSON (deptry's). The registry then checks the output per section:
 
-- an empty or unparsable section counts as "not analyzed" and is listed in `summary.warnings`;
+- an empty, unparsable or cut-off section, or one whose JSON is not the tool's report, counts as "not analyzed" and is listed in `summary.warnings`, with the reason from the `!!` lines or the error object's `message`/`error.summary`;
 - if every section fails, the whole result is `failed`, but any findings the parser derived from the failure are still stored on it;
 - the run command may print `!! <reason>` lines inside a section to say why that manifest failed. pip-audit and npm audit use these to turn resolution errors into `nonexistent-package`/`nonexistent-version` findings: a requirement on a package or version that doesn't exist is a hallucinated dependency (they are stored even when the result is `failed`; see [What a tool result means](/docs/ANALYSIS_PIPELINE)).
 
 ### Keep `/work` clean
 
 `/work` holds only the code under analysis, and tools such as detect-secrets and jscpd scan everything in it. A tool must not write caches or reports there: point caches at `/tmp` (mypy uses `--cache-dir /tmp/mypy-cache`, ruff runs with `--no-cache`) and write report files under `/tmp` (`/tmp/jscpd/`, `/tmp/gitleaks-report.json`).
+
+### Ignore the app's own tool configs
+
+A generated app may ship `pyproject.toml`, `setup.cfg`, `.pylintrc`, `.eslintrc` or `.semgrepignore`. Run tools so these cannot change what is measured: ESLint `--no-eslintrc`, Ruff and flake8 `--isolated`, Pylint/Perflint `--rcfile=/dev/null`, mypy `--config-file=` (empty value), Semgrep `--x-ignore-semgrepignore-files`.
+
+### Marker lines
+
+A `run_cmd` may print `llmlab-warning: <text>` lines, which the scanner parsers keep as the result's warnings (coverage gaps), and `llmlab-done: <text>`, which nuclei prints after a silent scan to show it ran to its end. Print them after the tool's own output, preceded by `echo` so they start a line, and keep the tool's exit code (`tool ...; rc=$?; ...; exit $rc`).
 
 ## Seeding
 
@@ -186,14 +197,14 @@ The YAML files upsert into the `AnalyzerTool` table, keyed by slug (`backend/ana
 - automatically after every `migrate` (post-migrate hook in the analysis app; a seeding error is logged and never breaks `migrate`), and
 - manually via `just manage seed_analysis_tools`.
 
-Seeding is idempotent; edits to the YAML land on the next migrate or manual seed. It never deletes a tool whose YAML file was removed: set `is_enabled: false` to retire one. The seed logs a warning for technology slugs missing from `catalog.yaml` and for a container tool whose `parser_key` has no registered parser. In tests, run `just test --create-db` after changing tool YAML: the reused test database keeps the old catalog.
+Seeding is idempotent; edits to the YAML land on the next migrate or manual seed. Parser code reloads live in local dev (uvicorn --reload, the watchfiles celery worker; the executor, which runs experiment post-run analyses, does not reload and needs a restart), but `migrate` runs only when the container starts. So after changing a tool YAML (`run_cmd`, `file_patterns`, `parser_key`, ...), run `docker exec llmlab-django-1 /entrypoint python manage.py seed_analysis_tools` before any analysis or re-analysis. Otherwise new parsers run against the old stored commands (a nuclei scan with no hits would fail for lack of the `llmlab-done` line). `backend.analysis.seeding.stale_tools()` lists the tools whose stored run_cmd, parser_key, output_kind, file_patterns, default_config, kind, analysis_mode, version, install_cmd or verify_cmd differ from their YAML (`["missing"]` for a YAML with no row; an empty result means the catalog is in sync). It never deletes a tool whose YAML file was removed: set `is_enabled: false` to retire one. The seed logs a warning for technology slugs missing from `catalog.yaml` and for a container tool whose `parser_key` has no registered parser. In tests, run `just test --create-db` after changing tool YAML: the reused test database keeps the old catalog.
 
 ## Adding a tool
 
 1. Drop a new `<slug>.yaml` in `backend/analysis/data/tools/` with the fields above. The tool must be installable inside the analyzer-base container by `install_cmd` and print machine-readable output from `run_cmd`. Add any new technology to `catalog.yaml`, and set `file_patterns` so the tool is skipped (not "clean") on apps it can't read.
-2. If no existing parser fits its output, register one under your `parser_key` with `@register("<key>")` in `services/parsers.py`, `extra_parsers.py` (dependency, extra lint and web parsers) or `scanner_parsers.py` (DAST and multi-ecosystem scanners). A parser returns a list of `FindingData` or a `ParsedOutput` (findings, metrics, warnings, error). Set `tool_specific_data` keys the deduplicator understands where they apply: `cwe`, `end_line`, `package` (vulnerability scanners) and `issue_key`.
-3. Reseed, install the tool into your workspace from the Analyzers page, and use the test action to check the parse end to end: it copies `sample_code` (as `sample_filename`) into `/tmp/analyzer-test` and runs `run_cmd` there with a timeout of at most 60 seconds. For a dynamic tool the test action only verifies the install; run it against a started app to check the parse. For the AI reviewer it makes a real model call.
+2. If no existing parser fits its output, register one under your `parser_key` with `@register("<key>")` in `services/parsers.py`, `extra_parsers.py` (dependency, extra lint and web parsers) or `scanner_parsers.py` (DAST and multi-ecosystem scanners). A parser returns a list of `FindingData` or a `ParsedOutput` (findings, metrics, warnings, error). Set `tool_specific_data` keys the deduplicator understands where they apply: `cwe`, `end_line`, `package` (vulnerability scanners and dependency-hygiene tools; deptry derives it from the inverted `--package-module-name-map`) and `issue_key`.
+3. Reseed (`seed_analysis_tools`, see [Seeding](#seeding); also after every later change to the YAML), install the tool into your workspace from the Analyzers page, and use the test action to check the parse end to end: it copies `sample_code` (as `sample_filename`) into `/tmp/analyzer-test` and runs `run_cmd` there with a timeout of at most 60 seconds. For a dynamic tool the test action only verifies the install; run it against a started app to check the parse. For the AI reviewer it makes a real model call.
 
 ## Per-user configuration
 
-Each `config_schema` entry becomes a form field on the installed tool. Values are stored per user on the workspace's `InstalledTool.config` (seeded from `default_config` at install) and reach the tool through `{config:<name>}` placeholders in `run_cmd`, or directly for the AI reviewer (`model`, `max_tokens`). Tools with options today: bandit (`confidence`, `skip`), pylint (`disable`), ruff (`select`), npm-audit (`production_only`), trivy (`scanners`), djlint (`profile`), llm_review (`model`, `max_tokens`), zap (`spider_minutes`, `scan_minutes`), nuclei (`tags`) and wapiti (`modules`, `max_scan_seconds`). See [Analysis pipeline](/docs/ANALYSIS_PIPELINE) for the rest of the run.
+Each `config_schema` entry becomes a form field on the installed tool. Values are stored per user on the workspace's `InstalledTool.config` (seeded from `default_config` at install) and reach the tool through `{config:<name>}` placeholders in `run_cmd`, or directly for the AI reviewer (`model`, `max_tokens`). Tools with options today: bandit (`confidence`, `skip`), semgrep (`exclude_rules`), pylint (`disable`), ruff (`select`), npm-audit (`production_only`), trivy (`scanners`), djlint (`profile`), llm_review (`model`, `max_tokens`), zap (`spider_minutes`, `scan_minutes`), nuclei (`tags`) and wapiti (`modules`, `max_scan_seconds`). See [Analysis pipeline](/docs/ANALYSIS_PIPELINE) for the rest of the run.

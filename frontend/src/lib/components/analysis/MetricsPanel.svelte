@@ -37,6 +37,9 @@
 		functions: 'Functions',
 		total_nloc: 'Lines of code (NLOC)',
 		functions_over_15: 'Functions with CCN > 15',
+		// osv-scanner: advisories of dev-only packages it left out (0 = none), and per name@version.
+		dev_only_advisories_skipped: 'Dev-only advisories left out',
+		dev_only_packages_skipped: 'Dev-only packages left out',
 	};
 
 	function label(key: string): string {

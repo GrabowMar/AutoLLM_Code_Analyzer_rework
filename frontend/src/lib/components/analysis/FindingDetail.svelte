@@ -5,11 +5,15 @@
 	 * location, duplicate), the rule (name, docs, CWE / OWASP / WSTG, references),
 	 * and the domain facts parsers extract — vulnerable package and fixed versions,
 	 * the HTTP request a scanner flagged, complexity — plus any other tool data.
-	 * Only what the tool reported is shown; nothing is rated here.
+	 * Only what the tool reported is shown; nothing is rated here. With the run's
+	 * context: whether the finding sits in test code (counted apart), its
+	 * cross-tool issue class, and how common its rule is across the corpus.
 	 *
-	 * Props: `finding`, `toolName`.
+	 * Props: `finding`, `toolName`, `prevalence` (this tool + rule across the
+	 * corpus, optional), `scopeLabel` (which corpus), `issueClass` (the merged
+	 * row's class, optional).
 	 */
-	import type { RunFinding } from '$lib/api/runs';
+	import type { RulePrevalence, RunFinding } from '$lib/api/runs';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import Copy from '@lucide/svelte/icons/copy';
 	import { toast } from 'svelte-sonner';
@@ -27,13 +31,18 @@
 		ruleInfo,
 		safeUrl,
 	} from './finding-data';
+	import { issueClassLabel, prevalenceText, prevalenceTitle } from './format';
 
 	interface Props {
 		finding: RunFinding;
 		toolName: string;
+		prevalence?: RulePrevalence | null;
+		scopeLabel?: string;
+		issueClass?: string;
 	}
 
-	let { finding: f, toolName }: Props = $props();
+	let { finding: f, toolName, prevalence = null, scopeLabel = '', issueClass = '' }: Props = $props();
+	const cls = $derived(issueClassLabel(issueClass || f.issue_class || prevalence?.issue_class, f.tool_slug, f.rule_id));
 
 	const rule = $derived(ruleInfo(f));
 	const dep = $derived(dependencyInfo(f));
@@ -166,6 +175,24 @@
 		{#if location && !f.code_snippet}
 			<dt class="text-muted-foreground">Location</dt>
 			<dd class="break-all font-mono">{location}</dd>
+		{/if}
+
+		{#if f.in_tests}
+			<dt class="text-muted-foreground">Code part</dt>
+			<dd>Test file <span class="text-muted-foreground">· counted apart from the app's code, as in the study</span></dd>
+		{/if}
+
+		{#if cls}
+			<dt class="text-muted-foreground">Issue class</dt>
+			<dd class="break-all font-mono" title="The cross-tool class the study deduplicates on: findings of one class at one location are one issue">{cls}</dd>
+		{/if}
+
+		{#if prevalence && f.rule_id}
+			<dt class="text-muted-foreground">Prevalence</dt>
+			<dd title={prevalenceTitle(prevalence, scopeLabel)}>
+				<span class="font-mono tabular-nums">{prevalenceText(prevalence)}</span>
+				{#if scopeLabel}<span class="block text-muted-foreground">in {scopeLabel}</span>{/if}
+			</dd>
 		{/if}
 
 		{#if f.category}

@@ -20,6 +20,7 @@ from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import ToolKind
 from backend.analysis.models import ToolResult
 from backend.generation.models import GenerationJob
+from backend.generation.services.evaluation.runner import NON_SAMPLE_STATUSES
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
@@ -132,6 +133,10 @@ def _evaluation_counts(jobs: list[GenerationJob]) -> dict[str, Any]:
             "deployed": deployed,
             "not_deployed": c.get("build_failed", 0) + c.get("start_failed", 0),
             "infra_error": c.get("infra_error", 0),
+            "not_applicable": c.get("not_applicable", 0),
+            # Outcomes that say something about the app (infra errors and
+            # "nothing to evaluate against" do not).
+            "evaluated": sum(n for status, n in c.items() if status not in NON_SAMPLE_STATUSES),
         }
 
     return {
@@ -147,8 +152,11 @@ def run_accounting(jobs: QuerySet[GenerationJob]) -> dict[str, Any]:
     ``tools.latest`` counts each job's latest result per tool (what the
     result tables describe), ``analysis_runs.latest`` its latest finished run;
     ``all_runs`` includes re-analyses and unfinished runs.
-    ``planned`` is what the runs asked for (sum of selected tools), so a gap
-    between planned and executed is visible instead of assumed away.
+    ``planned_static`` is what the runs asked for: per job, the distinct tools
+    selected across its finished runs (completed, partial or failed, the runs
+    ``tools.latest`` draws from). It counts the same (job, tool) universe as
+    ``static``, so a gap means a tool was requested and never produced a
+    result, instead of a partial re-analysis looking like unplanned work.
     """
     job_list = list(jobs)
     job_ids = [j.id for j in job_list]
@@ -158,10 +166,12 @@ def run_accounting(jobs: QuerySet[GenerationJob]) -> dict[str, Any]:
     # What the issue tables count: each job's latest result per tool (a later
     # partial re-analysis does not hide the tools it did not re-run).
     latest_results = ToolResult.objects.filter(id__in=ToolResult.latest_ids_per_job(job_ids))
-    planned = sum(
-        len(slugs or [])
-        for slugs in AnalysisRun.objects.filter(id__in=latest_ids).values_list("tool_slugs", flat=True)
-    )
+    planned_by_job: dict[Any, set[str]] = defaultdict(set)
+    for job_id, slugs in all_runs.filter(
+        status__in=[AnalysisRun.Status.COMPLETED, AnalysisRun.Status.PARTIAL, AnalysisRun.Status.FAILED],
+    ).values_list("generation_job_id", "tool_slugs"):
+        planned_by_job[job_id].update(slugs or [])
+    planned = sum(len(slugs) for slugs in planned_by_job.values())
 
     latest_tools = _tool_rows(latest_results)
     evaluations = _evaluation_counts(job_list)
@@ -173,7 +183,7 @@ def run_accounting(jobs: QuerySet[GenerationJob]) -> dict[str, Any]:
             "by_status": dict(sorted(status.items())),
             "generated": status.get(GenerationJob.Status.COMPLETED, 0),
             "analyzed": len(latest_ids),
-            "evaluated": evaluations["conformance"]["executions"] - evaluations["conformance"]["infra_error"],
+            "evaluated": evaluations["conformance"]["evaluated"],
             "deployed": evaluations["conformance"]["deployed"],
         },
         "analysis_runs": {

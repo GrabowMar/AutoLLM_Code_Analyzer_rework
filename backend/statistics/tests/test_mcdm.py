@@ -70,3 +70,73 @@ def test_reproducible_with_seed():
     a = mcdm.rank_models(_matrix(), CRITERIA, seed=5, draws=100)
     b = mcdm.rank_models(_matrix(), CRITERIA, seed=5, draws=100)
     assert a == b
+
+
+TIE_CRITERIA = mcdm.criteria_from_config(
+    [
+        {"key": "deploy_rate", "direction": "benefit", "weight": 1},
+        {"key": "pass_rate", "direction": "benefit", "weight": 1},
+    ],
+)
+
+
+def test_identical_models_share_rank_one_everywhere():
+    # The ceiling case: every model deploys and passes everything.
+    matrix = {m: {"deploy_rate": 1.0, "pass_rate": 1.0} for m in ("deepseek/v4", "qwen/q3", "z-ai/glm")}
+    result = mcdm.rank_models(matrix, TIE_CRITERIA, seed=1, draws=200, resample=lambda rng: matrix)
+    assert {r["model"]: (r["topsis_rank"], r["wsm_rank"]) for r in result["ranking"]} == {
+        "deepseek/v4": (1, 1),
+        "qwen/q3": (1, 1),
+        "z-ai/glm": (1, 1),
+    }
+    assert result["models_tied"] is True
+    assert result["tied_groups"] == [["deepseek/v4", "qwen/q3", "z-ai/glm"]]
+    for section in ("monte_carlo_near_weights", "monte_carlo_any_weights", "data_uncertainty"):
+        for r in result[section]["ranks"]:
+            assert r["p_rank_1"] == 1.0
+            assert r["rank_ci95"] == [1, 1]
+    # Nothing is ordered, so there is no agreement to report and no single leader.
+    assert result["topsis_vs_wsm_kendall_tau"] is None
+    assert result["equal_weights"]["kendall_tau"] is None
+    assert all(o["leader"] is None and len(o["leaders"]) == 3 for o in result["one_at_a_time"])
+    assert all(not o["rank_reversals"] for o in result["one_at_a_time"])
+
+
+def test_partial_tie_gives_both_tied_models_rank_one():
+    matrix = {
+        "a": {"deploy_rate": 1.0, "pass_rate": 1.0},
+        "b": {"deploy_rate": 1.0, "pass_rate": 1.0},
+        "c": {"deploy_rate": 0.5, "pass_rate": 0.5},
+    }
+    result = mcdm.rank_models(matrix, TIE_CRITERIA, seed=3, draws=200)
+    ranks = {r["model"]: r["topsis_rank"] for r in result["ranking"]}
+    assert ranks == {"a": 1, "b": 1, "c": 3}
+    anyw = {r["model"]: r for r in result["monte_carlo_any_weights"]["ranks"]}
+    assert anyw["a"]["p_rank_1"] == anyw["b"]["p_rank_1"] == 1.0
+    assert anyw["c"]["p_rank_1"] == 0.0
+    assert result["tied_groups"] == [["a", "b"]]
+
+
+def test_ranking_does_not_depend_on_model_names():
+    # Two models with the same per-app outcome distribution: renaming them must not move the result.
+    def run(names):
+        first, second = names
+        outcomes = [0.0, 1.0]
+
+        def resample(rng):
+            return {
+                first: {"deploy_rate": 1.0, "pass_rate": rng.choice(outcomes)},
+                second: {"deploy_rate": 1.0, "pass_rate": rng.choice(outcomes)},
+            }
+
+        matrix = {first: {"deploy_rate": 1.0, "pass_rate": 0.5}, second: {"deploy_rate": 1.0, "pass_rate": 0.5}}
+        result = mcdm.rank_models(matrix, TIE_CRITERIA, seed=7, draws=800, resample=resample)
+        return {r["model"]: r for r in result["data_uncertainty"]["ranks"]}
+
+    plain = run(("a-model", "z-model"))
+    renamed = run(("z-model", "a-model"))
+    # The first-listed model gets the same summary whatever it is called.
+    assert plain["a-model"]["p_rank_1"] == renamed["z-model"]["p_rank_1"]
+    assert plain["z-model"]["p_rank_1"] == renamed["a-model"]["p_rank_1"]
+    # Ties in a draw credit both models, so neither is favoured by its name.
+    assert plain["a-model"]["median_rank"] == plain["z-model"]["median_rank"] == 1

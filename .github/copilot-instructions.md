@@ -57,7 +57,7 @@ just frontend-dev         # start frontend dev server in container
 
 - `config/` — Django project config: settings (`base.py`, `local.py`, `production.py`, `test.py`), root URLconf, ASGI/WSGI, Celery app
 - `config/api.py` — Django Ninja API root. Registers routers from Django apps.
-- `backend/` — Django apps directory (`APPS_DIR`). Apps: `users`, `tokens`, `credentials`, `llm_models`, `generation`, `execution`, `inference`, `runtime`, `analysis`, `statistics`, `rankings`, `reports`, `export`, `integrations`, `realtime`, `docs`, `system`, `automation` (retired, router unmounted), plus `common` and `contrib`. See `docs/development-guide.md`
+- `backend/` — Django apps directory (`APPS_DIR`). Apps: `users`, `tokens`, `credentials`, `llm_models`, `generation`, `execution`, `inference`, `runtime`, `analysis`, `statistics`, `rankings`, `reports`, `export`, `integrations`, `realtime`, `docs`, `system`, `human_eval` (human-evaluation tasks and the participant portal, see `docs/HUMAN_EVALUATION.md`), `automation` (retired, router unmounted), plus `common` and `contrib`. See `docs/development-guide.md`
 - `tests/` — Project-level tests
 
 Settings are environment-specific (`config/settings/{base,local,production,test}.py`) and use `django-environ` for env var loading.

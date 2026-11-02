@@ -25,6 +25,7 @@ from django.db.models import Min
 from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import Finding
 from backend.analysis.models import ToolResult
+from backend.analysis.services.base import is_dependency_advisory
 from backend.generation.models import GenerationJob
 from backend.llm_models.models import LLMModel
 from backend.rankings.models import BenchmarkResult
@@ -34,6 +35,8 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractBaseUser
 
 SEVERITIES = ("critical", "high", "medium", "low", "info")
+_SEVERITY_RANK = {s: len(SEVERITIES) - i for i, s in enumerate(SEVERITIES)}
+UNRATED = "unrated"
 RANKINGS_CACHE_SECONDS = 60
 CATALOG_CACHE_SECONDS = 600
 TOP_RULES = 10
@@ -114,8 +117,12 @@ def _generation_stats(jobs) -> dict[str, Any]:
     repair_used = continuations = 0
     total_cost = 0.0
 
-    rows = jobs.filter(status=GenerationJob.Status.COMPLETED).values_list("metrics", "duration_seconds")
-    for metrics, duration in rows:
+    # Lazy: backend.reports.services imports the statistics services.
+    from backend.reports.services.loc import loc_from_result_data
+
+    cost_with_loc = loc_with_cost = 0.0
+    rows = jobs.filter(status=GenerationJob.Status.COMPLETED).values_list("metrics", "duration_seconds", "result_data")
+    for metrics, duration, result_data in rows:
         if not isinstance(metrics, dict):
             continue
         for key in (
@@ -125,13 +132,20 @@ def _generation_stats(jobs) -> dict[str, Any]:
             "cached_tokens",
             "total_tokens",
             "llm_calls",
-            "lines_of_code",
         ):
             if (v := _num(metrics, key)) is not None:
                 series[key].append(v)
+        # Source LOC (reports.services.loc), as in the study tables: metrics.lines_of_code
+        # counts every generated line, lockfiles included, and is only the legacy fallback.
+        loc = loc_from_result_data(result_data)["total_loc"] or _num(metrics, "lines_of_code")
+        if loc:
+            series["lines_of_code"].append(float(loc))
         if (cost := _num(metrics, "cost")) is not None:
             series["cost"].append(cost)
             total_cost += cost
+            if loc:
+                cost_with_loc += cost
+                loc_with_cost += float(loc)
         dur = duration if duration else _num(metrics, "total_duration")
         if dur:
             series["duration"].append(float(dur))
@@ -157,7 +171,6 @@ def _generation_stats(jobs) -> dict[str, Any]:
                 series["pass_rate"].append(float(functional["pass_rate"]))
 
     prompt_sum = sum(series["prompt_tokens"])
-    loc_sum = sum(series["lines_of_code"])
 
     return {
         "jobs_total": total,
@@ -173,7 +186,8 @@ def _generation_stats(jobs) -> dict[str, Any]:
         "resources": {
             "total_cost": round(total_cost, 4),
             "mean_cost": _mean(series["cost"]),
-            "cost_per_kloc": round(total_cost / loc_sum * 1000, 4) if loc_sum and series["cost"] else None,
+            # Over the jobs with both a cost and code, so numerator and denominator describe the same apps.
+            "cost_per_kloc": round(cost_with_loc / loc_with_cost * 1000, 4) if loc_with_cost else None,
             "mean_duration": _mean(series["duration"]),
             "median_duration": _median(series["duration"]),
             "mean_prompt_tokens": _mean(series["prompt_tokens"]),
@@ -248,48 +262,114 @@ def _experiments(jobs) -> list[dict[str, Any]]:
 # ── Analysis ────────────────────────────────────────────────────────────────
 
 
+def _label(tool_severity: str) -> str:
+    return tool_severity or UNRATED
+
+
+def _labels_text(counts: Counter[str]) -> str:
+    """The tool's own labels for a rule, most frequent first ("HIGH", or "HIGH / MEDIUM" when it varies)."""
+    return " / ".join(label for label, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
 def _analysis_stats(jobs) -> dict[str, Any]:
+    """Findings of the model's apps (each job's latest result per tool).
+
+    ``findings_static``/``findings_ai`` and the per-tool level columns are the
+    *normalized* severity (a heuristic mapping, for aggregates only); a
+    finding whose tool printed no level is counted under ``unrated`` instead
+    of a level nobody gave it. ``tool_severities`` and the top rules'
+    ``tool_severity`` are the labels exactly as the tools printed them.
+    Dependency advisories of the known-vulnerability scanners describe
+    packages (mostly the scaffold's pins), not the model's code: they are
+    ``findings_dependency``, not part of ``findings_static``
+    (:func:`~backend.analysis.services.base.is_dependency_advisory`, the one
+    P2 definition; deptry/depcheck manifest findings stay code issues).
+    """
     job_ids = list(jobs.values_list("id", flat=True))
     # Latest result per (job, tool): a partial re-analysis keeps the other tools' findings.
     latest = ToolResult.latest_ids_per_job(job_ids) if job_ids else []
     findings = Finding.objects.filter(result_id__in=latest)
     ai_slugs = AnalyzerTool.ai_slugs()
 
-    static = dict.fromkeys(SEVERITIES, 0)
-    ai = dict.fromkeys(SEVERITIES, 0)
+    static = dict.fromkeys((*SEVERITIES, UNRATED), 0)
+    ai = dict.fromkeys((*SEVERITIES, UNRATED), 0)
+    dependency = dict.fromkeys((*SEVERITIES, UNRATED), 0)
     by_tool: dict[str, dict[str, Any]] = {}
-    for row in findings.values("result__tool_slug", "severity").annotate(c=Count("id")):
-        tool, sev, c = row["result__tool_slug"], row["severity"], int(row["c"])
-        target = ai if tool in ai_slugs else static
-        if sev in target:
-            target[sev] += c
+    for row in findings.values("result__tool_slug", "category", "severity", "tool_severity").annotate(c=Count("id")):
+        tool, sev, label, c = row["result__tool_slug"], row["severity"], row["tool_severity"], int(row["c"])
+        bucket = sev if label and sev in SEVERITIES else UNRATED
+        if tool in ai_slugs:
+            ai[bucket] += c
+        elif is_dependency_advisory(tool, row["category"]):
+            dependency[bucket] += c
+        else:
+            static[bucket] += c
         entry = by_tool.setdefault(
             tool,
-            {"tool": tool, "ai": tool in ai_slugs, "total": 0, **dict.fromkeys(SEVERITIES, 0)},
+            {
+                "tool": tool,
+                "ai": tool in ai_slugs,
+                "total": 0,
+                **dict.fromkeys((*SEVERITIES, UNRATED), 0),
+                "tool_severities": Counter(),
+            },
         )
         entry["total"] += c
-        if sev in SEVERITIES:
-            entry[sev] += c
+        entry[bucket] += c
+        entry["tool_severities"][_label(label)] += c
+    for entry in by_tool.values():
+        entry["tool_severities"] = dict(entry["tool_severities"].most_common())
 
-    # Titles vary with the matched code; Min() picks one representative per rule.
-    top_rules = [
-        {
-            "tool": r["result__tool_slug"],
-            "rule_id": r["rule_id"],
-            "title": r["title"] or r["rule_id"],
-            "severity": r["severity"],
-            "count": int(r["c"]),
-        }
-        for r in findings.exclude(rule_id="")
-        .values("result__tool_slug", "rule_id", "severity")
+    # One row per (tool, rule): titles vary with the matched code, so Min()
+    # picks one representative, and the rule's levels are listed, not split into rows.
+    rules = list(
+        findings.exclude(rule_id="")
+        .values("result__tool_slug", "rule_id")
         .annotate(c=Count("id"), title=Min("title"))
-        .order_by("-c")[:TOP_RULES]
-    ]
+        .order_by("-c", "result__tool_slug", "rule_id")[:TOP_RULES],
+    )
+    labels: dict[tuple[str, str], Counter[str]] = {}
+    normalized: dict[tuple[str, str], str] = {}
+    if rules:
+        for row in (
+            findings.filter(
+                result__tool_slug__in={r["result__tool_slug"] for r in rules},
+                rule_id__in={r["rule_id"] for r in rules},
+            )
+            .values("result__tool_slug", "rule_id", "tool_severity", "severity")
+            .annotate(c=Count("id"))
+        ):
+            key = (row["result__tool_slug"], row["rule_id"])
+            labels.setdefault(key, Counter())[_label(row["tool_severity"])] += int(row["c"])
+            if row["tool_severity"] and _SEVERITY_RANK.get(row["severity"], 0) > _SEVERITY_RANK.get(
+                normalized.get(key, ""),
+                0,
+            ):
+                normalized[key] = row["severity"]
+    top_rules = []
+    for r in rules:
+        key = (r["result__tool_slug"], r["rule_id"])
+        counts = labels.get(key, Counter())
+        top_rules.append(
+            {
+                "tool": r["result__tool_slug"],
+                "rule_id": r["rule_id"],
+                "title": r["title"] or r["rule_id"],
+                # As the tool printed it ("unrated" when it rates nothing).
+                "tool_severity": _labels_text(counts) or UNRATED,
+                "tool_severities": dict(counts.most_common()),
+                # Highest normalized level among rated findings: heuristic, for sorting/statistics only.
+                "normalized_severity": normalized.get(key),
+                "count": int(r["c"]),
+            },
+        )
 
     return {
         "analyzed_jobs": ToolResult.objects.filter(id__in=latest).values("run__generation_job_id").distinct().count(),
         "findings_static": static,
         "findings_ai": ai,
+        "findings_dependency": dependency,
+        "severity_note": "Levels are normalized (heuristic) across tools; unrated = the tool printed no level.",
         "by_tool": sorted(by_tool.values(), key=lambda t: -t["total"]),
         "top_rules": top_rules,
     }

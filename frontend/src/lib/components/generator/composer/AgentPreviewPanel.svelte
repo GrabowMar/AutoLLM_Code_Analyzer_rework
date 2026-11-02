@@ -266,7 +266,7 @@
 												</td>
 												<td class="num">
 													{#if m.output_cap != null}{formatTokens(m.output_cap)}{:else}<span class="text-muted-foreground">—</span>{/if}
-													{#if m.context_window != null}
+													{#if m.context_window != null && m.context_window > 0}
 														<span class="cell-sub block text-[11px] text-muted-foreground">{formatTokens(m.context_window)} ctx</span>
 													{/if}
 												</td>

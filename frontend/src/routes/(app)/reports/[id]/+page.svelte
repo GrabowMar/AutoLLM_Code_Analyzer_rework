@@ -1,4 +1,8 @@
 <script lang="ts">
+	// A report: summary card, then the report's curated tables exactly as the
+	// Markdown/LaTeX exports have them (`GET /reports/{id}/tables/`, server-side
+	// `renderers.report_tables`: labelled columns, condition names, p-values
+	// with their interim/withheld state, "-" for unmeasured), one card per table.
 	import { formatDateTime as formatDate } from '$lib/utils/formatters';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -10,24 +14,37 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import FileDown from '@lucide/svelte/icons/file-down';
 	import { getReport, deleteReport, type ReportDetail } from '$lib/api/client';
-	import { reportExportUrl, type ReportExportFormat } from '$lib/api/reports';
+	import { formatApiError } from '$lib/api/core';
+	import {
+		getReportTables,
+		reportExportUrl,
+		summaryItems,
+		type ReportDocument,
+		type ReportExportFormat,
+		type ReportTable,
+	} from '$lib/api/reports';
+	import { tableFrame } from '$lib/components/table';
 
 	const exportFormats: { format: ReportExportFormat; label: string }[] = [
 		{ format: 'md', label: 'Markdown' },
 		{ format: 'tex', label: 'LaTeX' },
 		{ format: 'json', label: 'JSON' }
 	];
-	import { tableFrame } from '$lib/components/table';
 
 	let report = $state<ReportDetail | null>(null);
 	let loading = $state(true);
 	let error = $state('');
 	let timer: ReturnType<typeof setInterval> | null = null;
+
+	let doc = $state<ReportDocument | null>(null);
+	let docError = $state('');
+	let docKey = '';
 
 	async function load() {
 		try {
@@ -39,6 +56,25 @@
 			loading = false;
 		}
 	}
+
+	async function loadTables(r: ReportDetail) {
+		docError = '';
+		try {
+			doc = await getReportTables(r.report_id);
+		} catch (e) {
+			docError = formatApiError(e, 'Could not load the report tables.');
+		}
+	}
+
+	// The tables of a completed report, once per completion.
+	$effect(() => {
+		if (report?.status !== 'completed') return;
+		const key = `${report.report_id}:${report.completed_at}`;
+		if (key === docKey) return;
+		docKey = key;
+		doc = null;
+		void loadTables(report);
+	});
 
 	onMount(() => {
 		load().then(() => {
@@ -71,139 +107,79 @@
 		}
 	}
 
-	function isObject(v: unknown): v is Record<string, unknown> {
-		return typeof v === 'object' && v !== null && !Array.isArray(v);
+	// Experiment and study reports re-read their leader (or a tie) from the data.
+	const summary = $derived(
+		summaryItems(
+			report?.summary,
+			report?.report_type === 'experiment_report' || report?.report_type === 'study_report' ? report.report_data : null
+		)
+	);
+
+	const NUMERIC = /^[+\-\u2212]?(\d{1,3}(,\d{3})+|\d+)?(\.\d+)?(e[+-]?\d+)?%?$/i;
+	/** Columns whose every value is a number (or "-"): right-aligned, mono. */
+	function numericColumns(table: ReportTable): Set<number> {
+		const out = new Set<number>();
+		table.columns.forEach((_, i) => {
+			const values = table.rows.map((r) => r[i] ?? '').filter((v) => v !== '-' && v !== '');
+			if (values.length > 0 && values.every((v) => NUMERIC.test(v))) out.add(i);
+		});
+		return out;
 	}
 
-	function isArray(v: unknown): v is unknown[] {
-		return Array.isArray(v);
+	/** Text columns with long values (condition names, notes) get room instead of wrapping word by word. */
+	function wideColumns(table: ReportTable): Set<number> {
+		const out = new Set<number>();
+		table.columns.forEach((_, i) => {
+			if (table.rows.some((r) => (r[i] ?? '').length > 24)) out.add(i);
+		});
+		return out;
 	}
 
-	function entries(v: unknown): [string, unknown][] {
-		return isObject(v) ? Object.entries(v) : [];
-	}
-
-	function fmtValue(v: unknown): string {
-		if (v === null || v === undefined) return '—';
-		if (typeof v === 'number') {
-			return Number.isInteger(v) ? v.toString() : v.toFixed(2);
-		}
-		if (typeof v === 'boolean') return v ? 'yes' : 'no';
-		return String(v);
-	}
-
-	/** One-line rendering for flat objects/arrays ("low: 2, high: 1"), so table
-	 *  cells and grid values never fall back to "[object Object]". */
-	function fmtCompact(v: unknown): string {
-		if (isArray(v)) {
-			return v.length ? v.map(fmtCompact).join(', ') : '—';
-		}
-		if (isObject(v)) {
-			const es = Object.entries(v);
-			if (!es.length) return '—';
-			return es
-				.map(([k, val]) =>
-					`${k.replace(/_/g, ' ')}: ${isObject(val) || isArray(val) ? JSON.stringify(val) : fmtValue(val)}`
-				)
-				.join(', ');
-		}
-		return fmtValue(v);
-	}
-
-	function isObjectRows(v: unknown): v is Record<string, unknown>[] {
-		return isArray(v) && v.length > 0 && isObject(v[0]);
-	}
-
-	/** Entries too structured for the key/value grid: rendered full-width below it. */
-	function isWide(k: string, v: unknown): boolean {
-		if (k === 'metrics_by_tool') return isObject(v) && Object.keys(v).length > 0;
-		if (isObjectRows(v)) return true;
-		// An object earns full-width treatment only when it holds a table-shaped
-		// list; anything flatter reads fine as a compact "k: v, …" line.
-		return isObject(v) && Object.values(v).some((x) => isObjectRows(x));
+	function anchor(i: number): string {
+		return `report-table-${i + 1}`;
 	}
 </script>
 
-{#snippet objectTable(rows: Record<string, unknown>[])}
-	{@const cols = Object.keys(rows[0])}
-	{@const numCols = new Set(cols.filter((c) => rows.some((r) => typeof r[c] === 'number') && rows.every((r) => r[c] == null || typeof r[c] === 'number')))}
-	<div class="table-frame rounded-md border border-border" {@attach tableFrame}>
-		<table>
-			<thead>
-				<tr>
-					{#each cols as c (c)}
-						<th class="whitespace-nowrap" class:num={numCols.has(c)}>{c.replace(/_/g, ' ')}</th>
-					{/each}
-				</tr>
-			</thead>
-			<tbody>
-				{#each rows as row, i (i)}
-					<tr class="align-top">
-						{#each cols as c (c)}
-							<td class:num={numCols.has(c)}>
-								{#if row[c] == null}<span class="text-muted-foreground">—</span>{:else}{fmtCompact(row[c])}{/if}
-							</td>
-						{/each}
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
-{/snippet}
-
-{#snippet statValue(v: unknown)}
-	{#if v == null}<span class="text-muted-foreground">—</span>{:else}{fmtValue(v)}{/if}
-{/snippet}
-
-{#snippet metricsByTool(metrics: Record<string, unknown>)}
-	<div class="space-y-5">
-		{#each entries(metrics) as [tool, m] (tool)}
-			{@const numeric = entries(isObject(m) ? m['numeric'] : undefined)}
-			{@const dists = entries(isObject(m) ? m['distributions'] : undefined)}
-			{@const nResults = isObject(m) ? m['results_with_metrics'] : undefined}
-			<div>
-				<div class="mb-1.5 flex items-baseline gap-2">
-					<span class="font-medium">{tool}</span>
-					{#if nResults !== undefined}
-						<span class="text-xs text-muted-foreground">{fmtValue(nResults)} result{nResults === 1 ? '' : 's'} with metrics</span>
-					{/if}
-				</div>
-				{#if numeric.length > 0}
-					<div class="overflow-x-auto rounded-md border border-border">
-						<table>
-							<thead>
-								<tr>
-									<th>Metric</th>
-									<th class="num">Avg</th>
-									<th class="num">Min</th>
-									<th class="num">Max</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each numeric as [k, stat] (k)}
-									{@const s = isObject(stat) ? stat : {}}
-									<tr>
-										<td class="capitalize">{k.replace(/_/g, ' ')}</td>
-										<td class="num">{@render statValue(s['avg'])}</td>
-										<td class="num text-muted-foreground">{@render statValue(s['min'])}</td>
-										<td class="num text-muted-foreground">{@render statValue(s['max'])}</td>
-									</tr>
+{#snippet reportTable(table: ReportTable, i: number)}
+	{@const nums = numericColumns(table)}
+	{@const wide = wideColumns(table)}
+	<Card.Root class="scroll-mt-20 gap-0 overflow-clip py-0" id={anchor(i)}>
+		<Card.Header class="border-b border-border py-3">
+			<Card.Title class="text-base">{table.title}</Card.Title>
+		</Card.Header>
+		<Card.Content class="p-0">
+			{#if table.rows.length === 0}
+				<div class="p-4"><EmptyState compact title="No data" description="Nothing in this report's scope for this table." /></div>
+			{:else}
+				<div class="table-frame" {@attach tableFrame}>
+					<table>
+						<thead>
+							<tr>
+								{#each table.columns as column, c (c)}
+									<th class={nums.has(c) ? 'num' : 'whitespace-nowrap'}>{column}</th>
 								{/each}
-							</tbody>
-						</table>
-					</div>
-				{/if}
-				{#each dists as [k, buckets] (k)}
-					<div class="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
-						<span class="text-muted-foreground capitalize">{k.replace(/_/g, ' ')}:</span>
-						{#each entries(buckets) as [bucket, count] (bucket)}
-							<span class="rounded border bg-muted/40 px-1.5 py-0.5 font-mono">{bucket}: {fmtValue(count)}</span>
-						{/each}
-					</div>
-				{/each}
-			</div>
-		{/each}
-	</div>
+							</tr>
+						</thead>
+						<tbody>
+							{#each table.rows as row, r (r)}
+								<tr class="align-top">
+									{#each table.columns as _, c (c)}
+										{@const value = row[c] ?? ''}
+										<td class={nums.has(c) ? 'num' : wide.has(c) ? 'min-w-56 max-w-[32rem] break-words' : 'whitespace-nowrap'}>
+											{#if value === '-' || value === ''}<span class="text-muted-foreground" title="No value (not measured or not applicable)">—</span>{:else}{value}{/if}
+										</td>
+									{/each}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+			{#if table.note}
+				<p class="border-t border-border px-4 py-2 text-xs leading-relaxed text-muted-foreground">{table.note}</p>
+			{/if}
+		</Card.Content>
+	</Card.Root>
 {/snippet}
 
 <div class="max-w-5xl space-y-4">
@@ -250,17 +226,17 @@
 		{:else if report.status === 'failed'}
 			<ErrorAlert title="Generation failed" message={report.error_message || 'Generation failed.'} />
 		{:else if report.status === 'completed'}
-			{#if report.summary && Object.keys(report.summary).length > 0}
+			{#if summary.length > 0}
 				<Card.Root>
 					<Card.Header><Card.Title class="text-base">Summary</Card.Title></Card.Header>
-					<Card.Content class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-						{#each entries(report.summary) as [k, v] (k)}
-							<div>
-								<div class="text-xs text-muted-foreground capitalize">{k.replace(/_/g, ' ')}</div>
-								{#if isObject(v) || isArray(v)}
-									<div class="mt-0.5 text-xs">{fmtCompact(v)}</div>
+					<Card.Content class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+						{#each summary as item (item.label)}
+							<div class="min-w-0">
+								<div class="text-xs text-muted-foreground">{item.label}</div>
+								{#if item.href}
+									<a href={item.href} class="font-mono font-medium hover:text-primary">{item.value}</a>
 								{:else}
-									<div class="font-semibold">{fmtValue(v)}</div>
+									<div class="break-words font-semibold">{item.value}</div>
 								{/if}
 							</div>
 						{/each}
@@ -268,76 +244,27 @@
 				</Card.Root>
 			{/if}
 
-			{@const scalarSections = entries(report.report_data).filter(([, v]) => !isObject(v) && !isArray(v))}
-			{#if scalarSections.length > 0}
-				<Card.Root>
-					<Card.Header><Card.Title class="text-base">Details</Card.Title></Card.Header>
-					<Card.Content class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-						{#each scalarSections as [k, v] (k)}
-							<div>
-								<div class="text-xs text-muted-foreground capitalize">{k.replace(/_/g, ' ')}</div>
-								<div class="font-semibold">{fmtValue(v)}</div>
-							</div>
-						{/each}
-					</Card.Content>
-				</Card.Root>
-			{/if}
-
-			{#each entries(report.report_data).filter(([, v]) => isObject(v) || isArray(v)) as [section, value] (section)}
-				<Card.Root>
-					<Card.Header>
-						<Card.Title class="text-base capitalize">{section.replace(/_/g, ' ')}</Card.Title>
-					</Card.Header>
-					<Card.Content class="text-sm">
-						{#if section === 'metrics_by_tool' && isObject(value) && Object.keys(value).length > 0}
-							{@render metricsByTool(value)}
-						{:else if isArray(value)}
-							{#if value.length === 0}
-								<p class="text-xs text-muted-foreground">No items.</p>
-							{:else if isObjectRows(value)}
-								{@render objectTable(value)}
-							{:else}
-								<ul class="list-disc pl-5 text-xs">
-									{#each value as v, i (i)}<li>{fmtValue(v)}</li>{/each}
-								</ul>
-							{/if}
-						{:else if isObject(value)}
-							{@const flat = entries(value).filter(([k, v]) => !isWide(k, v))}
-							{@const wide = entries(value).filter(([k, v]) => isWide(k, v))}
-							{#if flat.length > 0}
-								<dl class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-									{#each flat as [k, v] (k)}
-										<div>
-											<dt class="text-muted-foreground capitalize">{k.replace(/_/g, ' ')}</dt>
-											<dd class="font-medium">
-												{#if isObject(v) || isArray(v)}
-													<span class="font-normal">{fmtCompact(v)}</span>
-												{:else}
-													{fmtValue(v)}
-												{/if}
-											</dd>
-										</div>
-									{/each}
-								</dl>
-							{/if}
-							{#each wide as [k, v] (k)}
-								<div class="{flat.length > 0 ? 'mt-4 border-t pt-4' : ''}">
-									<h4 class="section-label mb-2">{k.replace(/_/g, ' ')}</h4>
-									{#if k === 'metrics_by_tool' && isObject(v)}
-										{@render metricsByTool(v)}
-									{:else if isObjectRows(v)}
-										{@render objectTable(v)}
-									{:else}
-										<pre class="text-xs bg-muted/40 rounded p-2 overflow-auto">{JSON.stringify(v, null, 2)}</pre>
-									{/if}
-								</div>
+			{#if docError}
+				<ErrorAlert message={docError} onretry={() => report && loadTables(report)} />
+			{:else if !doc}
+				<LoadingState label="loading report tables" />
+			{:else if doc.tables.length === 0}
+				<EmptyState title="Nothing to tabulate" description="This report has no data; the JSON export has the raw payload." />
+			{:else}
+				{#if doc.tables.length > 3}
+					<nav aria-label="Report tables" class="rounded-md border border-border bg-card px-4 py-2.5 text-xs shadow-[var(--shadow-card)]">
+						<p class="section-label mb-1.5">Tables</p>
+						<ol class="flex flex-wrap gap-x-4 gap-y-1">
+							{#each doc.tables as table, i (i)}
+								<li><a href="#{anchor(i)}" class="text-muted-foreground hover:text-primary"><span class="font-mono">{i + 1}.</span> {table.title}</a></li>
 							{/each}
-						{:else}
-							<div class="text-xs">{fmtValue(value)}</div>
-						{/if}
-					</Card.Content>
-				</Card.Root>
-			{/each}
+						</ol>
+					</nav>
+				{/if}
+				{#each doc.tables as table, i (i)}
+					{@render reportTable(table, i)}
+				{/each}
+			{/if}
 		{/if}
 	{/if}
 </div>

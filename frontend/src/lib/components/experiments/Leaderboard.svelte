@@ -70,6 +70,8 @@
 			m.excluded_invalid ? `${m.excluded_invalid} excluded as invalid` : '',
 			m.excluded_truncated ? `${m.excluded_truncated} excluded as truncated` : '',
 			m.not_common ? `${m.not_common} outside the common cells` : '',
+			// Not missing: repeats added after launch are outside the planned sample (and this count).
+			m.beyond_plan ? `not counted: ${m.beyond_plan} run${m.beyond_plan === 1 ? '' : 's'} added after launch (beyond the plan)` : '',
 		]
 			.filter(Boolean)
 			.join(' · ') || 'Nothing missing';
