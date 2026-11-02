@@ -51,7 +51,14 @@ function model(overrides: Partial<LLMModelDetail> = {}): LLMModelDetail {
 
 /** SSR body without Svelte's hydration markers (<!--[-->, <!---->). */
 function html(body: string): string {
-  return body.replace(/<!--[\s\S]*?-->/g, "");
+  // Repeat until stable so nested/overlapping markers cannot leave a partial "<!--" behind.
+  let out = body;
+  let prev: string;
+  do {
+    prev = out;
+    out = out.replace(/<!--[\s\S]*?-->/g, "");
+  } while (out !== prev);
+  return out;
 }
 
 const known = {

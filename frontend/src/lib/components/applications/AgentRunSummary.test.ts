@@ -44,10 +44,12 @@ function job(): GenerationJob {
 
 describe("AgentRunSummary reproducibility rows", () => {
   // Without Svelte's hydration markers (<!--[-->, <!---->).
-  const body = render(AgentRunSummary, { props: { job: job() } }).body.replace(
-    /<!--[\s\S]*?-->/g,
-    "",
-  );
+  // Repeat until stable so nested/overlapping markers cannot leave a partial "<!--" behind.
+  let body = render(AgentRunSummary, { props: { job: job() } }).body;
+  for (let prev = ""; prev !== body; ) {
+    prev = body;
+    body = body.replace(/<!--[\s\S]*?-->/g, "");
+  }
   const imagesText = `${images.harness} on ${images.base}`;
   const routingText = JSON.stringify(provider);
   const re = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

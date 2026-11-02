@@ -127,6 +127,7 @@ def from_native_response(
     request_id: str,
     served_model: str,
     provider: str,
+    created: int | None = None,
 ) -> dict[str, Any]:
     """Ollama ``/api/chat`` (non-stream) response → OpenAI ``chat.completion``."""
     message = payload.get("message") or {}
@@ -142,7 +143,7 @@ def from_native_response(
     return {
         "id": f"chatcmpl-{request_id}",
         "object": "chat.completion",
-        "created": int(time.time()),
+        "created": created if created is not None else int(time.time()),
         "model": served_model,
         "provider": provider,
         "choices": [
@@ -167,6 +168,7 @@ def from_openai_response(
     request_id: str,
     served_model: str,
     provider: str,
+    created: int | None = None,
 ) -> dict[str, Any]:
     """An upstream OpenAI-compatible response, normalised (``provider``, ``model``, ``usage.cost = 0``)."""
     out = dict(payload)
@@ -186,7 +188,7 @@ def from_openai_response(
     out["model"] = served_model
     out.setdefault("id", f"chatcmpl-{request_id}")
     out.setdefault("object", "chat.completion")
-    out.setdefault("created", int(time.time()))
+    out.setdefault("created", created if created is not None else int(time.time()))
     rid8 = str(request_id).replace("-", "")[:8]
     choices = []
     for raw_choice in out.get("choices") or []:
