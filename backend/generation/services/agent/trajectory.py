@@ -244,9 +244,9 @@ SCRIPT_LABELS = (
 # Inline code whose quoted argument is itself a command or a script: rules read
 # that quoted text too (everywhere else a quoted string is data).
 _INLINE_CODE = re.compile(
-    r"\b(?:python3?\s+(?:-\w+\s+)*-c|node\s+(?:--?[\w-]+(?:=\S+)?\s+)*-[ep]|(?:ba|da|z)?sh\s+(?:-\w+\s+)*-c|eval)\s",
+    r"\b(?:python3?\s+(?:-\w+\s+)*-c|node\s+(?:-[^\s=]*(?:=\S*)?\s+)*-[ep]|(?:ba|da|z)?sh\s+(?:-\w+\s+)*-c|eval)\s",
 )
-_NODE_INLINE = re.compile(r"\bnode\s+(?:--?[\w-]+(?:=\S+)?\s+)*-[ep]\s")
+_NODE_INLINE = re.compile(r"\bnode\s+(?:-[^\s=]*(?:=\S*)?\s+)*-[ep]\s")
 # Python string literals (masked before scanning an edit script for test/probe/lint calls).
 _PY_STRING = re.compile(r"""(?s)'''.*?'''|\"\"\".*?\"\"\"|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*\"""")
 
