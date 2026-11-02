@@ -214,9 +214,23 @@ def translate(row: LLMRequest, access: Access) -> dict[str, Any]:
     """A ``done`` request's response in OpenAI ``chat.completion`` shape."""
     payload = row.response if isinstance(row.response, dict) else {}
     label = served_model_label(access.served_model_name, access.digest)
+    # Stamp from the stored request, so a re-delivered (deduped / reattached) response is byte-identical.
+    created = int(row.completed_at.timestamp()) if row.completed_at else None
     if row.path == NATIVE_CHAT_PATH:
-        return from_native_response(payload, request_id=str(row.pk), served_model=label, provider=access.endpoint.slug)
-    return from_openai_response(payload, request_id=str(row.pk), served_model=label, provider=access.endpoint.slug)
+        return from_native_response(
+            payload,
+            request_id=str(row.pk),
+            served_model=label,
+            provider=access.endpoint.slug,
+            created=created,
+        )
+    return from_openai_response(
+        payload,
+        request_id=str(row.pk),
+        served_model=label,
+        provider=access.endpoint.slug,
+        created=created,
+    )
 
 
 def served_info(row: LLMRequest, access: Access) -> dict[str, Any]:

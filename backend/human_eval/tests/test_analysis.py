@@ -1546,7 +1546,7 @@ def test_finding_review_never_reads_the_normalized_severity():
     check_shape(results)
     review = block_of(results, "security")["finding_review"]
     assert [entry["key"] for entry in review["per_tool_severity"]] == ["warning"]
-    assert "critical" not in json.dumps(results)
+    assert '"critical"' not in json.dumps(results)  # the value, not words like "mission-critical" in factory text
 
 
 def test_vs_conformance_reasons_for_apps_without_a_graded_conformance(requirements_task):
