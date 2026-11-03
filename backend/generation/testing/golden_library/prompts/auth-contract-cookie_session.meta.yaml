@@ -1,0 +1,4 @@
+name: Auth contract, cookie session
+role: fragment
+modes: [app]
+variables: []

@@ -7,6 +7,8 @@ description = "Project-wide allowlist for documented false positives."
 paths = [
   # `*.example` env templates are intentionally committed placeholders.
   '''(^|/)\.envs/.*\.example$''',
+  # Golden-library fixture: content hashes (sha256 hex) of test library entities, not secrets.
+  '''backend/generation/testing/golden_library/hashes\.json$''',
 ]
 
 [[rules]]

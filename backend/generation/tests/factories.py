@@ -1,75 +1,98 @@
-import factory
-from factory.django import DjangoModelFactory
+"""Re-export of ``backend.generation.testing.factories`` (the v3 factories; spec section 2.1).
 
-from backend.generation.models import AppRequirementTemplate
-from backend.generation.models import ContentBlock
-from backend.generation.models import Experiment
-from backend.generation.models import ExperimentCondition
-from backend.generation.models import GenerationJob
-from backend.generation.models import GenerationProfile
-from backend.llm_models.tests.factories import LLMModelFactory
-from backend.users.tests.factories import UserFactory
+Kept so that ``from backend.generation.tests.factories import ...`` stays the import path for tests. The v2
+factories (``GenerationJobFactory``, ``ExperimentFactory``, ...) are gone with their models; WP-02b re-points
+their consumers to the v3 names listed here.
+"""
 
+from backend.generation.testing.factories import BlobFactory
+from backend.generation.testing.factories import ClusterLabelFactory
+from backend.generation.testing.factories import CostPriorFactory
+from backend.generation.testing.factories import DetectorAuditFactory
+from backend.generation.testing.factories import EvalBaselineFactory
+from backend.generation.testing.factories import EvalSuiteFactory
+from backend.generation.testing.factories import GenerationArtifactFactory
+from backend.generation.testing.factories import GenerationRunFactory
+from backend.generation.testing.factories import GuidanceFactory
+from backend.generation.testing.factories import HarnessPresetFactory
+from backend.generation.testing.factories import PatternDetectorFactory
+from backend.generation.testing.factories import PatternHitFactory
+from backend.generation.testing.factories import PatternRunFactory
+from backend.generation.testing.factories import PromptSetFactory
+from backend.generation.testing.factories import PromptTemplateFactory
+from backend.generation.testing.factories import ResourcePolicyFactory
+from backend.generation.testing.factories import RunAttemptFactory
+from backend.generation.testing.factories import RunEvaluationFactory
+from backend.generation.testing.factories import RunFileFactory
+from backend.generation.testing.factories import RunManifestFactory
+from backend.generation.testing.factories import RunSymbolIndexFactory
+from backend.generation.testing.factories import SamplingPresetFactory
+from backend.generation.testing.factories import SlotSetFactory
+from backend.generation.testing.factories import SlotTargetFactory
+from backend.generation.testing.factories import SlotVariantResultFactory
+from backend.generation.testing.factories import SpendCapFactory
+from backend.generation.testing.factories import SpendLedgerEntryFactory
+from backend.generation.testing.factories import StackProfileFactory
+from backend.generation.testing.factories import StarterFactory
+from backend.generation.testing.factories import StudyCellFactory
+from backend.generation.testing.factories import StudyConditionFactory
+from backend.generation.testing.factories import StudyFactorFactory
+from backend.generation.testing.factories import StudyFactory
+from backend.generation.testing.factories import StudyPlanFactory
+from backend.generation.testing.factories import StudyPostRunFactory
+from backend.generation.testing.factories import StudyPromptOverrideFactory
+from backend.generation.testing.factories import StudyScheduleFactory
+from backend.generation.testing.factories import StudyUnitFactory
+from backend.generation.testing.factories import StyleDirectiveFactory
+from backend.generation.testing.factories import TaskSpecFactory
+from backend.generation.testing.factories import TaskSpecVersionFactory
+from backend.generation.testing.factories import VariantClusterFactory
+from backend.generation.testing.factories import VariantClusterMemberFactory
+from backend.generation.testing.factories import run_manifest_content
 
-class AppRequirementTemplateFactory(DjangoModelFactory):
-    class Meta:
-        model = AppRequirementTemplate
-
-    name = factory.Sequence(lambda n: f"App Template {n}")
-    slug = factory.Sequence(lambda n: f"app-template-{n}")
-    category = "Productivity"
-    description = factory.Faker("sentence")
-    backend_requirements = ["Requirement 1", "Requirement 2"]
-    frontend_requirements = ["UI Requirement 1"]
-
-
-class ContentBlockFactory(DjangoModelFactory):
-    class Meta:
-        model = ContentBlock
-
-    block_type = ContentBlock.BlockType.PROMPT_TONE
-    slug = factory.Sequence(lambda n: f"block-{n}")
-    version = 1
-    name = factory.Sequence(lambda n: f"Block {n}")
-    content = "Sample block content"
-    is_system = True
-
-
-class GenerationProfileFactory(DjangoModelFactory):
-    class Meta:
-        model = GenerationProfile
-
-    name = factory.Sequence(lambda n: f"Bundle {n}")
-    slug = factory.Sequence(lambda n: f"bundle-{n}")
-    scaffolding_slug = "flask-react"
-    block_refs = []
-    is_system = True
-
-
-class GenerationJobFactory(DjangoModelFactory):
-    class Meta:
-        model = GenerationJob
-
-    mode = "custom"
-    created_by = factory.SubFactory(UserFactory)
-    custom_system_prompt = "You are a senior developer."
-    custom_user_prompt = "Build a todo app."
-
-
-class ExperimentFactory(DjangoModelFactory):
-    class Meta:
-        model = Experiment
-
-    name = factory.Sequence(lambda n: f"Experiment {n}")
-    slug = factory.Sequence(lambda n: f"experiment-{n}")
-    created_by = factory.SubFactory(UserFactory)
-    repeats = 2
-
-
-class ExperimentConditionFactory(DjangoModelFactory):
-    class Meta:
-        model = ExperimentCondition
-
-    experiment = factory.SubFactory(ExperimentFactory)
-    profile = factory.SubFactory(GenerationProfileFactory)
-    model = factory.SubFactory(LLMModelFactory)
+__all__ = [
+    "BlobFactory",
+    "ClusterLabelFactory",
+    "CostPriorFactory",
+    "DetectorAuditFactory",
+    "EvalBaselineFactory",
+    "EvalSuiteFactory",
+    "GenerationArtifactFactory",
+    "GenerationRunFactory",
+    "GuidanceFactory",
+    "HarnessPresetFactory",
+    "PatternDetectorFactory",
+    "PatternHitFactory",
+    "PatternRunFactory",
+    "PromptSetFactory",
+    "PromptTemplateFactory",
+    "ResourcePolicyFactory",
+    "RunAttemptFactory",
+    "RunEvaluationFactory",
+    "RunFileFactory",
+    "RunManifestFactory",
+    "RunSymbolIndexFactory",
+    "SamplingPresetFactory",
+    "SlotSetFactory",
+    "SlotTargetFactory",
+    "SlotVariantResultFactory",
+    "SpendCapFactory",
+    "SpendLedgerEntryFactory",
+    "StackProfileFactory",
+    "StarterFactory",
+    "StudyCellFactory",
+    "StudyConditionFactory",
+    "StudyFactorFactory",
+    "StudyFactory",
+    "StudyPlanFactory",
+    "StudyPostRunFactory",
+    "StudyPromptOverrideFactory",
+    "StudyScheduleFactory",
+    "StudyUnitFactory",
+    "StyleDirectiveFactory",
+    "TaskSpecFactory",
+    "TaskSpecVersionFactory",
+    "VariantClusterFactory",
+    "VariantClusterMemberFactory",
+    "run_manifest_content",
+]

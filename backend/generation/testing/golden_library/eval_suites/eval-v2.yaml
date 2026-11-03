@@ -1,0 +1,8 @@
+name: EvalSuite v2
+description: Tester v1 and adherence checker v1 (fixture digests).
+content:
+  tester: {version: 1, image_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"}
+  acceptance_compiler_version: 1
+  adherence_checker: {version: 1, image_digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222"}
+  probes: task
+  baseline: starter

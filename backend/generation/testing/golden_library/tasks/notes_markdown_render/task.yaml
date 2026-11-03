@@ -1,0 +1,21 @@
+title: Markdown notes
+summary: Users write notes in Markdown and read them rendered as HTML.
+category: content
+entities:
+  - name: Note
+    owned_by_user: true
+    fields:
+      - {name: title, type: string, required: true, max_length: 120}
+      - {name: body, type: text, required: true}
+endpoints:
+  - {id: auth.register, method: POST, path: /api/auth/register, auth: public, success_status: 201, errors: [400, 409]}
+  - {id: auth.login, method: POST, path: /api/auth/login, auth: public, errors: [401]}
+  - {id: notes.list, method: GET, path: /api/notes, auth: user}
+  - {id: notes.create, method: POST, path: /api/notes, auth: user, success_status: 201, errors: [400]}
+  - {id: notes.render, method: GET, path: "/api/notes/{id}/html", auth: owner, owner_entity: Note, content_type: none, errors: [404]}
+ui:
+  - {id: ui.editor, text: A Markdown editor with a rendered preview., endpoints: [notes.create, notes.render]}
+features: [auth, ownership, render-markdown]
+surfaces: [cwe-79]
+probes:
+  - {id: probe.notes.xss, cwe: cwe-79, kind: xss_stored, endpoint: notes.render}

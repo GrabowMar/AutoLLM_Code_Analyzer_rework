@@ -101,7 +101,7 @@ class EvalTask(models.Model):
         help_text="Seeds allocation order, pair sides and finding samples (reproducible)",
     )
     experiment = models.ForeignKey(
-        "generation.Experiment",
+        "generation.Study",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -153,7 +153,7 @@ class EvalTaskApp(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     task = models.ForeignKey(EvalTask, on_delete=models.CASCADE, related_name="apps")
     job = models.ForeignKey(
-        "generation.GenerationJob",
+        "generation.GenerationRun",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

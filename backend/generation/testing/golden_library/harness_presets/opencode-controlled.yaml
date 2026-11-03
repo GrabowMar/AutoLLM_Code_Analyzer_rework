@@ -1,0 +1,10 @@
+name: opencode (controlled)
+description: Equalised knobs - 300 s command timeout, web tools denied, subagents off, pinned prompt.
+content:
+  harness: opencode
+  harness_version: 1.18.35
+  controlled: true
+  command_timeout_s: 300
+  tool_policy: {deny: [webfetch, websearch]}
+  max_turns: 40
+  pin_system_prompt: true

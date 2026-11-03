@@ -189,62 +189,12 @@ MEDIA_ROOT = str(APPS_DIR / "media")
 # https://docs.djangoproject.com/en/dev/ref/settings/#media-url
 MEDIA_URL = "/media/"
 
-# Agent-mode generation (OpenCode harness in an apps-daemon sandbox)
+# GENERATION, AGENT SANDBOXES, HARNESSES AND THE EXECUTOR
 # ------------------------------------------------------------------------------
-# Full run records (LLM call log, harness events, patch) land under
-# GENERATION_RUNS_ROOT/<job_id>/; job rows keep summaries plus sha256s.
-GENERATION_RUNS_ROOT = str(Path(MEDIA_ROOT) / "generation_runs")
-# Stack a generation request runs on when neither the request nor its profile
-# names one.
-GENERATION_DEFAULT_STACK = env.str("GENERATION_DEFAULT_STACK", default="flask-react")
-# Harness releases baked into the sandbox images (images/agent-*). Changing one
-# changes the image tag and every new job's run_fingerprint.
-AGENT_DEFAULT_HARNESS = env.str("AGENT_DEFAULT_HARNESS", default="opencode")
-AGENT_OPENCODE_VERSION = env.str("AGENT_OPENCODE_VERSION", default="1.18.35")
-AGENT_MINI_SWE_AGENT_VERSION = env.str("AGENT_MINI_SWE_AGENT_VERSION", default="2.4.6")
-AGENT_AIDER_VERSION = env.str("AGENT_AIDER_VERSION", default="0.86.2")
-# Defaults for every agent run; experiments / jobs may override them
-# (generation/services/agent/config.py validates the ranges). The request
-# budget binds; wall clock and USD are safety nets (see config.py).
-AGENT_MAX_LLM_REQUESTS = env.int("AGENT_MAX_LLM_REQUESTS", default=100)
-AGENT_WALL_CLOCK_SECONDS = env.int("AGENT_WALL_CLOCK_SECONDS", default=3600)
-AGENT_MAX_TOTAL_TOKENS = env.int("AGENT_MAX_TOTAL_TOKENS", default=30_000_000)
-AGENT_MAX_COST_USD = env.float("AGENT_MAX_COST_USD", default=5.0)
-AGENT_SAMPLING_POLICY = env.str("AGENT_SAMPLING_POLICY", default="provider_default")
-# Build, run and grade every agent sample with the hidden conformance suite
-# right after its run (generation/services/evaluation/).
-AGENT_AUTO_EVALUATE = env.bool("AGENT_AUTO_EVALUATE", default=True)
-AGENT_NETWORK_POLICY = env.str("AGENT_NETWORK_POLICY", default="packages")
-# Initial ExecutorSettings.sandbox_slots (sandboxes running at once; editable at
-# runtime by staff). Each may use AGENT_SANDBOX_MEM_LIMIT of the apps daemon's
-# own cap (APPS_DIND_MEM_LIMIT, shared with the sample apps), so raise both
-# together. Only sandbox_mem_limit / nano_cpus are frozen into job snapshots
-# (runs are only comparable under the same caps); the concurrency is not.
-AGENT_MAX_CONCURRENT_RUNS = env.int("AGENT_MAX_CONCURRENT_RUNS", default=1)
-AGENT_SANDBOX_MEM_LIMIT = env.str("AGENT_SANDBOX_MEM_LIMIT", default="3g")
-AGENT_SANDBOX_NANO_CPUS = env.int("AGENT_SANDBOX_NANO_CPUS", default=2_000_000_000)
-# Provider routing used when a run sets no explicit ``provider`` llm param.
-AGENT_DEFAULT_PROVIDER_ROUTING = {
-    "require_parameters": True,
-    "quantizations": ["fp8", "fp16", "bf16", "fp32", "unknown"],
-    "allow_fallbacks": True,
-}
+# Every generation setting lives in the component, one block per work package
+# (docs/design/SAMPLE_GEN_V3.md §12.2).
+from .components.generation import *  # noqa: E402, F403
 
-# ── Execution (backend/execution) ──
-EXECUTOR_TICK_SECONDS = env.float("EXECUTOR_TICK_SECONDS", default=2.0)
-EXECUTOR_LEASE_SECONDS = env.int("EXECUTOR_LEASE_SECONDS", default=90)
-EXECUTOR_HEARTBEAT_SECONDS = env.int("EXECUTOR_HEARTBEAT_SECONDS", default=20)
-EXECUTOR_LEADER_LOCK_KEY = 0x6C6C6D6C6162  # "llmlab"
-EXECUTOR_MAX_DB_THREADS = 48
-EXECUTOR_LOST_RETRIES = 10  # executor_lost requeues; separate from infra_retries
-EXECUTOR_STARVATION_S = 600  # residency starvation guard (spec §C.4 rule 4)
-EVAL_MAX_REQUEUES = 2
-# AUTHORITATIVE for the memory rule (docker info MemTotal inside apps-dind reports host RAM).
-APPS_DIND_MEM_LIMIT = env.str("APPS_DIND_MEM_LIMIT", default="4g")
-APPS_DIND_APP_RESERVE = env.str("APPS_DIND_APP_RESERVE", default="1g")
-EVAL_SLOT_MEM = "1536m"  # app 1g + tester 256m + slack (evaluation/runner.py)
-ANALYSIS_WORKSPACE_MEM = "1g"  # runtime/services/docker_manager.py
-SCHEDULE_MIN_INTERVAL_S = 900
 # ── Inference ──
 LLM_PROXY_BIND = env.str("LLM_PROXY_BIND", default="172.30.99.2:8090")
 LLM_PROXY_UPSTREAM = env.str("LLM_PROXY_UPSTREAM", default="http://172.30.99.2:8090/v1")

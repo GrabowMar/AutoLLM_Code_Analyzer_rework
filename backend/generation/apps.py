@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from django.apps import AppConfig
+from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 
 logger = logging.getLogger(__name__)
@@ -16,23 +17,27 @@ class GenerationConfig(AppConfig):
         from django.db.models.signals import post_migrate
 
         post_migrate.connect(
-            _seed_generation_data,
+            _seed_library_after_migrate,
             sender=self,
-            dispatch_uid="backend.generation.seed_templates",
+            dispatch_uid="backend.generation.seed_library",
         )
 
 
-def _seed_generation_data(sender, *, using, verbosity=1, **kwargs) -> None:
-    """Sync scaffolding/requirement/prompt/block/bundle seeds after migrate."""
-    from backend.generation.seeding import seed_all
+def _seed_library_after_migrate(sender, *, using, verbosity=1, **kwargs) -> None:
+    """Seed the library from ``generation/data/`` after ``migrate`` when ``GENERATION_SEED_ON_MIGRATE`` is on.
+
+    Section 11.1: off by default in production, on in dev and test. WP-03 owns the setting and
+    ``library.seeding.seed_library``. Seeding never breaks ``migrate``.
+    """
+    if not getattr(settings, "GENERATION_SEED_ON_MIGRATE", False):
+        return
+    from backend.generation.library.seeding import seed_library
 
     try:
-        results = seed_all(using=using)
+        report = seed_library(using=using)
     except Exception:
-        # Seed data must never break `migrate` (malformed YAML/JSON, table
-        # torn down by `migrate generation zero`, ...).
-        logger.exception("Generation template seeding failed")
+        # Malformed seed data, a stub not implemented yet, or tables torn down by `migrate generation zero`.
+        logger.exception("Generation library seeding failed")
         return
     if verbosity >= 1:
-        for name, (created, updated) in results.items():
-            logger.info("Generation seeding (%s): %s created, %s updated", name, created, updated)
+        logger.info("Generation library seeding: %s", report)

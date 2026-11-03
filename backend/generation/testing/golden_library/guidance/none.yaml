@@ -1,0 +1,4 @@
+name: No guidance
+description: No security hint.
+content:
+  security_hint: none
