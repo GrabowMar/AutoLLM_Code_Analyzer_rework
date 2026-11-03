@@ -1,0 +1,8 @@
+name: Model's choice, dark first tone
+description: No styling prescription, with the dark first visual tone.
+content:
+  system: model-choice
+  tone: dark-first
+  tone_text: 'Dark first: a dark background by default with light text and a single vivid accent colour.'
+  fragment: style-model-choice@1
+  compatible_frontends: [react, vue, svelte, none, free]

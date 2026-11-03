@@ -1,0 +1,11 @@
+name: 'File path joined from user input (Python)'
+description: 'os.path.join / send_file / open receive request data, a route path parameter or an uploaded file''s raw filename.'
+content:
+  engine: regex
+  languages: [python]
+  rule: '\bos\.path\.join\([^)\n]*\brequest\.(?:args|form|values|files|GET|POST|query_params|view_args)\b|\bos\.path\.join\((?:(?!secure_filename)[^)\n])*\.filename\b|^[ \t]*(\w+)\s*=\s*request\.(?:args|form|values|GET|POST|query_params)\b[^\n]*\n(?:[^\n]*\n){0,10}?[^\n]*\b(?:os\.path\.join|send_file|open)\([^)\n]*\b\1\b|@\w+\.(?:route|get)\([^\n]*<(?:path:|string:)?(\w+)>[^\n]*\n(?:[^\n]*\n){0,10}?[^\n]*\bos\.path\.join\([^)\n]*\b\2\b'
+  tool: {name: re, version: py3.13}
+  feature_key: py-path-join-user-input
+  polarity: insecure
+  cwe: [cwe-22]
+  description: 'A filesystem path is joined from request data, a route parameter or an unsanitized upload filename.'

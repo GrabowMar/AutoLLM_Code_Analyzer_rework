@@ -1,0 +1,12 @@
+name: MUI (Material UI)
+description: React components from MUI.
+content:
+  system: component-library
+  library:
+    name: MUI
+    packages: ['@mui/material', '@emotion/react', '@emotion/styled']
+    frameworks: [react]
+  fragment: style-mui@1
+  adherence:
+    required_markers: ['@mui/material']
+  compatible_frontends: [react]

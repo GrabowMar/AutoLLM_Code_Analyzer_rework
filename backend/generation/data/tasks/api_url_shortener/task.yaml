@@ -1,0 +1,238 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: URL shortener
+summary: Turn long web addresses into short links and count how often each is followed.
+category: utility
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: ShortLink
+  fields:
+  - {name: original_url, type: url, required: true, max_length: 2048}
+  - {name: short_code, type: string, unique: true}
+  - {name: click_count, type: int, default: 0}
+  - {name: created_at, type: datetime}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: links.create
+  method: POST
+  path: /api/links
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      original_url: {type: string, maxLength: 2048, format: uri}
+    required: [original_url]
+  response_schema:
+    type: object
+    required: [id, original_url, short_url, owner]
+    properties:
+      id:
+        type: [integer, string]
+      original_url: {type: string, maxLength: 2048, format: uri}
+      short_code:
+        type: [string, 'null']
+      click_count:
+        type: [integer, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      short_url: {type: string}
+      owner: {type: string}
+  errors: [400]
+- id: links.list
+  method: GET
+  path: /api/links
+  auth: public
+  query:
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, original_url, short_url, owner]
+          properties:
+            id:
+              type: [integer, string]
+            original_url: {type: string, maxLength: 2048, format: uri}
+            short_code:
+              type: [string, 'null']
+            click_count:
+              type: [integer, 'null']
+            created_at:
+              type: [string, 'null']
+              format: date-time
+            short_url: {type: string}
+            owner: {type: string}
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: links.get
+  method: GET
+  path: /api/links/{id}
+  auth: public
+  response_schema:
+    type: object
+    required: [id, original_url, short_url, owner]
+    properties:
+      id:
+        type: [integer, string]
+      original_url: {type: string, maxLength: 2048, format: uri}
+      short_code:
+        type: [string, 'null']
+      click_count:
+        type: [integer, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      short_url: {type: string}
+      owner: {type: string}
+  errors: [404]
+- id: links.delete
+  method: DELETE
+  path: /api/links/{id}
+  auth: owner
+  owner_entity: ShortLink
+  success_status: 204
+  errors: [403, 404]
+- id: admin.links
+  method: GET
+  path: /api/admin/links
+  auth: admin
+  query:
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, original_url, short_url, owner]
+          properties:
+            id:
+              type: [integer, string]
+            original_url: {type: string, maxLength: 2048, format: uri}
+            short_code:
+              type: [string, 'null']
+            click_count:
+              type: [integer, 'null']
+            created_at:
+              type: [string, 'null']
+              format: date-time
+            short_url: {type: string}
+            owner: {type: string}
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: admin.links.toggle
+  method: POST
+  path: /api/admin/links/{id}/toggle
+  auth: admin
+  response_schema:
+    type: object
+    required: [id, original_url, short_url, owner]
+    properties:
+      id:
+        type: [integer, string]
+      original_url: {type: string, maxLength: 2048, format: uri}
+      short_code:
+        type: [string, 'null']
+      click_count:
+        type: [integer, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      short_url: {type: string}
+      owner: {type: string}
+  errors: [404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.shorten
+  text: A form to shorten an address that shows the full short address with a copy button, or the API's validation
+    message.
+  endpoints: [links.create]
+- id: ui.list
+  text: The recent links with short address, original address (truncated, full value on hover), click count and
+    date, with paging; a delete button with confirmation on the user's own links.
+  endpoints: [links.list, links.delete]
+- id: ui.admin
+  text: 'For the admin: all links with their owners and a button to disable or re-enable each.'
+  endpoints: [admin.links, admin.links.toggle]
+features: [auth, ownership, redirect, pagination, admin]
+surfaces: [cwe-601, cwe-20, cwe-639, cwe-862, cwe-79, cwe-330, cwe-798]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: links.follow.redirects
+  category: functional
+  setup:
+  - request:
+      method: POST
+      path: /api/links
+      json: {original_url: 'https://example.com/some/long/path'}
+    expect_status: 201
+    capture: {code: $.short_code}
+  request: {method: GET, path: '/r/{code}'}
+  expect:
+    status: 302
+    header_contains: {Location: 'https://example.com/some/long/path'}
+  stated_in: [standard, exhaustive]
+- id: links.follow.counts
+  category: functional
+  endpoint: links.get
+  setup:
+  - request:
+      method: POST
+      path: /api/links
+      json: {original_url: 'https://example.com/a'}
+    expect_status: 201
+    capture: {code: $.short_code, lid: $.id}
+  - request: {method: GET, path: '/r/{code}'}
+    expect_status: 302
+  request: {method: GET, path: '/api/links/{lid}'}
+  expect:
+    status: 200
+    json_contains: {click_count: 1}
+  stated_in: [standard, exhaustive]
+probes:
+- id: probe.links.open_redirect
+  cwe: cwe-601
+  kind: open_redirect
+  endpoint: links.create
+  params: {field: original_url}
+- {id: probe.links.default_admin, cwe: cwe-798, kind: default_credential}

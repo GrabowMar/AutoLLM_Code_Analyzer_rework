@@ -2,8 +2,8 @@
 	/**
 	 * ModelVariabilityPanel — the model's run-to-run variability
 	 * (`GET /generation/models/{id}/variability/`): spread within each group of
-	 * the caller's completed runs that share one setup (a configuration
-	 * fingerprint, else an approximate legacy key), never across setups.
+	 * the caller's completed runs that share one setup (one configuration
+	 * fingerprint, i.e. one condition on one task), never across setups.
 	 * KPI tiles (groups and runs, pass agreement, median within-group CV,
 	 * median code similarity between repeats, seeded replays reproduced), one
 	 * row per group, then the server's caveats. Distinct from the between-app
@@ -14,14 +14,14 @@
 	 */
 	import { untrack } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import { tableFrame } from '$lib/components/table';
 	import { formatApiError, isAbortError } from '$lib/api/core';
-	import { getModelVariability, type ModelVariability } from '$lib/api/variability';
-	import { DASH, formatRatio, formatShare } from '$lib/components/experiments/variability';
+	import { getModelVariability, type ModelVariability, type ModelVariabilityGroup } from '$lib/api/variability';
+	import { DASH, formatRatio, formatShare } from '$lib/components/studies/variability/variability';
+	import { kindLabel } from '$lib/components/runs/format';
 	import Repeat from '@lucide/svelte/icons/repeat';
 
 	interface Props {
@@ -66,6 +66,15 @@
 	];
 
 	const overall = $derived(data?.overall);
+
+	/** The group's setup beyond its task: run kind, stack, harness and the studies its runs belong to. */
+	function setupLine(g: ModelVariabilityGroup): string {
+		const parts = [kindLabel(g.kind)];
+		if (g.stack) parts.push(g.stack);
+		if (g.harness) parts.push(`${g.harness[0]} ${g.harness[1]}`);
+		if (g.studies.length) parts.push(g.studies.join(', '));
+		return parts.join(' · ');
+	}
 	const cvSummary = $derived(
 		['cost', 'total_tokens', 'source_loc']
 			.map((k) => `${CV_COLUMNS.find((c) => c.key === k)?.label} ${formatRatio(overall?.metrics[k]?.median_cv)}`)
@@ -91,8 +100,8 @@
 				compact
 				icon={Repeat}
 				title="No setup has been run twice yet"
-				description={data.n_completed_jobs
-					? `${data.n_completed_jobs} completed run${data.n_completed_jobs === 1 ? '' : 's'}, each with its own setup. Plan 2 or more repeats in an experiment to measure run-to-run variation.`
+				description={data.n_completed_runs
+					? `${data.n_completed_runs} completed run${data.n_completed_runs === 1 ? '' : 's'}, each with its own setup. Plan 2 or more repeats in a study to measure run-to-run variation.`
 					: 'Generate apps with this model, with 2 or more repeats, to measure run-to-run variation.'}
 			/>
 		{:else if data && overall}
@@ -100,7 +109,7 @@
 				<div class="kpi-card">
 					<span class="kpi-label">Same-setup groups</span>
 					<span class="font-mono text-xl font-medium tabular-nums">{data.n_groups}</span>
-					<span class="text-[11px] text-muted-foreground">{data.n_runs} runs of {data.n_completed_jobs} completed</span>
+					<span class="text-[11px] text-muted-foreground">{data.n_runs} runs of {data.n_completed_runs} completed</span>
 				</div>
 				<div class="kpi-card">
 					<span class="kpi-label">Pass agreement</span>
@@ -141,11 +150,11 @@
 							<tr>
 								<td class="col-sticky max-w-72 bg-card">
 									<span class="flex flex-wrap items-center gap-1.5 text-sm">
-										<span class="font-medium">{g.app_slug ?? 'no app'}</span>
-										{#if g.approximate}<Badge variant="secondary" title="Legacy runs without a fingerprint">approximate</Badge>{/if}
+										<span class="font-medium">{g.task ?? 'no task'}</span>
+										{#if g.unit_key && g.unit_key !== g.task}<span class="font-mono text-[11px] text-muted-foreground">{g.unit_key}</span>{/if}
 									</span>
-									<span class="block truncate font-mono text-[11px] text-muted-foreground" title={g.experiments.join(', ') || g.value}
-										>{g.method}{g.experiments.length ? ` · ${g.experiments.join(', ')}` : ''}</span
+									<span class="block truncate font-mono text-[11px] text-muted-foreground" title={`${setupLine(g)} · ${g.value}`}
+										>{setupLine(g)}</span
 									>
 								</td>
 								<td class="num text-xs">{g.n}</td>
@@ -161,7 +170,7 @@
 									{#if g.replays.length === 0}
 										<span class="text-muted-foreground">{DASH}</span>
 									{:else}
-										{#each g.replays as r (`${r.job_a}:${r.job_b}`)}
+										{#each g.replays as r (`${r.run_a}:${r.run_b}`)}
 											<span class="block">{r.first_divergent_call == null ? 'reproduced' : `differs at call ${r.first_divergent_call}`}</span>
 										{/each}
 									{/if}

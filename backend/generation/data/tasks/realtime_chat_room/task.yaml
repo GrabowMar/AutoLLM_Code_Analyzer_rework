@@ -1,0 +1,137 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Chat room
+summary: A single shared chat room with live message delivery, typing indicators and moderation.
+category: realtime
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Message
+  fields:
+  - {name: text, type: string, required: true, max_length: 1000}
+  - {name: created_at, type: datetime}
+  - {name: is_hidden, type: bool, default: false}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: messages.create
+  method: POST
+  path: /api/messages
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      text: {type: string, maxLength: 1000, minLength: 1}
+    required: [text]
+  response_schema:
+    type: object
+    required: [id, text, username]
+    properties:
+      id:
+        type: [integer, string]
+      text: {type: string, maxLength: 1000, minLength: 1}
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      is_hidden:
+        type: [boolean, 'null']
+      username: {type: string}
+  errors: [400]
+- id: messages.list
+  method: GET
+  path: /api/messages
+  auth: public
+  query:
+  - {name: limit, type: int, semantics: page_size, default: 50, max: 100}
+  - {name: before, type: int, semantics: page}
+  response_schema:
+    type: object
+    required: [items, total]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, text, username]
+          properties:
+            id:
+              type: [integer, string]
+            text: {type: string, maxLength: 1000, minLength: 1}
+            created_at:
+              type: [string, 'null']
+              format: date-time
+            is_hidden:
+              type: [boolean, 'null']
+            username: {type: string}
+      total: {type: integer}
+- {id: chat.ws, method: GET, path: /api/ws/chat, auth: public, content_type: none, realtime: websocket}
+- id: admin.messages.hide
+  method: POST
+  path: /api/admin/messages/{id}/toggle
+  auth: admin
+  response_schema:
+    type: object
+    required: [id, text, username]
+    properties:
+      id:
+        type: [integer, string]
+      text: {type: string, maxLength: 1000, minLength: 1}
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      is_hidden:
+        type: [boolean, 'null']
+      username: {type: string}
+  errors: [404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.room
+  text: The room with the message list (username, text, time), automatic scrolling to new messages and a 'Load older'
+    button.
+  endpoints: [messages.list, chat.ws]
+- id: ui.compose
+  text: 'For signed-in users: a message box that sends on Enter and a ''someone is typing'' line for others.'
+  endpoints: [messages.create, chat.ws]
+- id: ui.status
+  text: A connection indicator that reconnects automatically when the socket drops.
+  endpoints: [chat.ws]
+- id: ui.admin
+  text: 'For the admin: a hide button on each message.'
+  endpoints: [admin.messages.hide]
+features: [auth, websocket, realtime, admin, pagination]
+surfaces: [cwe-79, cwe-1385, cwe-862, cwe-20, cwe-400, cwe-770, cwe-798]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+probes:
+- id: probe.messages.xss
+  cwe: cwe-79
+  kind: xss_stored
+  endpoint: messages.create
+  params: {field: text, view_endpoint: messages.list}
+- {id: probe.chat.default_admin, cwe: cwe-798, kind: default_credential}

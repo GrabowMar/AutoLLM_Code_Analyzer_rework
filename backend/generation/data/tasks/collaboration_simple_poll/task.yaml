@@ -1,0 +1,193 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Quick polls
+summary: Create quick polls that anyone can vote on and watch the results.
+category: collaboration
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Poll
+  fields:
+  - {name: question, type: string, required: true, max_length: 500}
+  - {name: options, type: json, max_length: 200}
+  - {name: created_at, type: datetime}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: polls.create
+  method: POST
+  path: /api/polls
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      question: {type: string, maxLength: 500, minLength: 1}
+      options:
+        type: array
+        items: {type: string, maxLength: 200, minLength: 1}
+        minItems: 2
+        maxItems: 6
+    required: [question]
+  response_schema:
+    type: object
+    required: [id, question, options, total_votes]
+    properties:
+      id:
+        type: [integer, string]
+      question: {type: string, maxLength: 500, minLength: 1}
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      options: &id001
+        type: array
+        items:
+          type: object
+          properties:
+            id: [integer, string]
+            position: {type: integer}
+            text: {type: string}
+            votes: {type: integer}
+          required: [id, position, text, votes]
+      total_votes: {type: integer}
+  errors: [400]
+- id: polls.list
+  method: GET
+  path: /api/polls
+  auth: public
+  query:
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, question, options, total_votes]
+          properties:
+            id:
+              type: [integer, string]
+            question: {type: string, maxLength: 500, minLength: 1}
+            created_at:
+              type: [string, 'null']
+              format: date-time
+            options: *id001
+            total_votes: {type: integer}
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: polls.get
+  method: GET
+  path: /api/polls/{id}
+  auth: public
+  response_schema:
+    type: object
+    required: [id, question, options, total_votes]
+    properties:
+      id:
+        type: [integer, string]
+      question: {type: string, maxLength: 500, minLength: 1}
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      options: *id001
+      total_votes: {type: integer}
+  errors: [404]
+- id: polls.vote
+  method: POST
+  path: /api/polls/{id}/vote
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      position: {type: integer, minimum: 1}
+    required: [position]
+  response_schema:
+    type: object
+    required: [id, question, options, total_votes]
+    properties:
+      id:
+        type: [integer, string]
+      question: {type: string, maxLength: 500, minLength: 1}
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      options: *id001
+      total_votes: {type: integer}
+  errors: [400, 404]
+- id: polls.delete
+  method: DELETE
+  path: /api/polls/{id}
+  auth: owner
+  owner_entity: Poll
+  success_status: 204
+  errors: [403, 404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.vote
+  text: Each poll shows its question and a vote button per option; after voting it switches to its results.
+  endpoints: [polls.list, polls.vote]
+- id: ui.results
+  text: Results as a horizontal bar per option with its vote count and share in percent.
+  endpoints: [polls.get]
+- id: ui.create
+  text: A create form whose option fields can be added (up to six) and removed (down to two), showing the API's
+    validation messages; a delete button on the user's own polls.
+  endpoints: [polls.create, polls.delete]
+- id: ui.remember
+  text: The browser remembers which polls this visitor voted on and shows those as results.
+  endpoints: [polls.list]
+features: [auth, ownership, pagination]
+surfaces: [cwe-639, cwe-862, cwe-79, cwe-20, cwe-770, cwe-362]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: polls.default_options
+  category: functional
+  endpoint: polls.create
+  request:
+    method: POST
+    path: /api/polls
+    json: {question: 'Lunch at noon?'}
+  expect:
+    status: 201
+    json_contains:
+      options:
+      - {position: 1, text: 'Yes', votes: 0}
+      - {position: 2, text: 'No', votes: 0}
+      total_votes: 0
+  stated_in: [exhaustive]
+probes:
+- id: probe.polls.xss
+  cwe: cwe-79
+  kind: xss_stored
+  endpoint: polls.create
+  params: {field: question, view_endpoint: polls.get}

@@ -1,15 +1,13 @@
 import { apiFetch } from "./core";
 
 /**
- * Application-page insights (`/api/generation/jobs/{id}/…`): code profile,
- * phase timeline and code-quality metrics. All read-only, derived on read
- * from what the job already stores. Missing values are `null` (unknown),
- * never 0.
+ * Sample (run) page insights (`/api/generation/runs/{id}/…`): code profile, phase timeline and
+ * code-quality metrics. All read-only, derived on read from what the GenerationRun already stores.
+ * Missing values are `null` (not measured), never 0. Only the caller's own runs are readable.
  */
 
 // ── Code profile ──────────────────────────────────────────────────────
 
-export type CodeLayout = "files" | "stage_blobs" | "single_blob" | "none";
 export type CodeLayer =
   | "backend"
   | "frontend"
@@ -17,15 +15,18 @@ export type CodeLayer =
   | "config"
   | "excluded";
 
+/**
+ * Source LOC of one scope. Every key is null when the run has no collected tree; `source_files`,
+ * `test_files` are absent then.
+ */
 export interface SourceLoc {
   backend_loc: number | null;
   frontend_loc: number | null;
   /** The per-KLOC denominator of the study tables (reports/services/loc.py). */
   total_loc: number | null;
-  source_files: number | null;
-  /** null: a single-blob result (test code cannot be told apart). */
+  source_files?: number | null;
   test_loc: number | null;
-  test_files: number | null;
+  test_files?: number | null;
 }
 
 export interface CodeLayerRow {
@@ -59,11 +60,22 @@ export interface NonSourceFile {
     | "docs"
     | "minified"
     | "config"
-    | string;
+    | (string & {});
   all_lines: number;
 }
 
-export type FileOrigin = "scaffold" | "added" | "modified" | "unknown" | string;
+/**
+ * The collector's `RunFile.origin`, or `parent` for a slot variant's overlaid parent file
+ * (spec 3.11 `RunView`).
+ */
+export type FileOrigin =
+  | "starter"
+  | "authored"
+  | "modified"
+  | "slot"
+  | "artifact"
+  | "parent"
+  | (string & {});
 
 export interface OriginRow {
   origin: FileOrigin;
@@ -74,22 +86,17 @@ export interface OriginRow {
   test_loc: number;
 }
 
-export type CodeOrigins =
-  | { known: false; reason: "not_agent" | "no_manifest" | CodeLayout | string }
-  | {
-      known: true;
-      counts: Record<string, number>;
-      by_origin: OriginRow[];
-      per_file: Record<string, FileOrigin>;
-      deleted_scaffold_files: string[];
-      protected_modified: string[];
-      skipped: {
-        path: string | null;
-        reason: string | null;
-        size: number | null;
-        origin: string | null;
-      }[];
-    };
+/** `known: false` when no files were collected (every count is then not measured). */
+export interface CodeOrigins {
+  known: boolean;
+  counts: Record<string, number>;
+  by_origin: OriginRow[];
+  per_file: Record<string, FileOrigin>;
+  /** Starter files the model deleted. */
+  deleted_starter_files: string[];
+  /** Files left out of the source counts, by `RunFile.excluded` reason. */
+  excluded_by_reason: Record<string, number>;
+}
 
 export interface CodeStructure {
   approximate: true;
@@ -102,73 +109,66 @@ export interface CodeStructure {
   component_definitions: number;
 }
 
-export type DependencyStatus = "scaffold" | "added" | "repinned" | "unknown";
+export type DependencyStatus = "starter" | "added" | "repinned" | "unknown";
 
 export interface DeclaredDependency {
   package: string;
   spec: string;
-  ecosystem: "pypi" | "npm" | string;
+  ecosystem: "pypi" | "npm" | (string & {});
   manifest: string;
   status?: DependencyStatus;
-  scaffold_spec?: string | null;
+  starter_spec?: string | null;
   declared_by_app?: boolean;
 }
 
+/** Manifest dependencies vs the run's starter; every list is null when it cannot be decided. */
 export interface CodeDependencies {
   has_manifests: boolean;
   declared: DeclaredDependency[];
-  scaffold: DeclaredDependency[];
-  scaffold_stack: {
-    slug: string;
-    pinned_version: number | null;
-    version: number | null;
-    source: "pinned" | "latest" | "missing";
-  } | null;
+  starter: DeclaredDependency[];
+  /** The pinned starter (`slug@version`), null for a free-choice stack. */
+  starter_ref: string | null;
   model_added: string[] | null;
   repinned:
     | {
         package: string;
         spec: string;
-        scaffold_spec: string;
+        starter_spec: string;
         ecosystem: string | null;
       }[]
     | null;
-  dropped_scaffold: string[] | null;
-  /**
-   * pip freeze of the evaluation image. `declared_by`: the manifests the image was
-   * built from ("app" for agent runs, "scaffold" for template runs), "healing" for a
-   * requirement the platform added, null for transitive / tooling packages.
-   */
+  dropped_starter: string[] | null;
+  /** Python packages of the run's resolved lock; null when no lock was resolved. */
   resolved_python:
     | {
         package: string;
         version: string | null;
         declared: boolean;
-        declared_by: "app" | "scaffold" | "healing" | null;
       }[]
     | null;
-  reported_by_generator: string[] | null;
   counts: Record<
     | "declared"
-    | "scaffold"
+    | "starter"
     | "model_added"
     | "repinned"
-    | "dropped_scaffold"
+    | "dropped_starter"
     | "resolved_python",
     number | null
   >;
 }
 
 export interface CodeProfile {
-  job_id: string;
+  run_id: string;
   version: number;
-  mode: string;
-  layout: CodeLayout;
+  /** Run kind (`app_agentic`, `slot_*`, `reference`). */
+  kind: string;
+  /** Model scope: the files the model wrote or changed (Appendix A #4). */
   loc: SourceLoc;
-  /** Every stored line (lockfiles, docs, scratch folders included), as metrics.lines_of_code counts. */
+  /** App scope: the whole buildable tree. */
+  loc_app: SourceLoc;
+  /** Every stored line (lockfiles, docs, scratch folders included). */
   all_lines: number | null;
   all_files: number;
-  recorded_lines_of_code: number | null;
   all_lines_ratio: number | null;
   layers: CodeLayerRow[];
   languages: LanguageRow[];
@@ -181,11 +181,11 @@ export interface CodeProfile {
   notes: string[];
 }
 
-export async function getJobCodeProfile(
-  jobId: string,
+export async function getRunCodeProfile(
+  runId: string,
   opts: { signal?: AbortSignal } = {},
 ): Promise<CodeProfile> {
-  const res = await apiFetch(`/generation/jobs/${jobId}/code-profile/`, {
+  const res = await apiFetch(`/generation/runs/${runId}/code-profile/`, {
     signal: opts.signal,
   });
   return res.json();
@@ -198,19 +198,13 @@ export interface TimelinePart {
   label: string;
   seconds: number | null;
   source: string;
-  approximate: boolean;
+  /** Evaluation stages carry their stage status. */
+  status?: string | null;
 }
 
 export interface TimelineSegment {
-  /** `sandbox_wait`: a pre-executor run started on dispatch, then waited for a sandbox. */
-  key:
-    | "queue"
-    | "sandbox_wait"
-    | "generation"
-    | "other"
-    | "evaluation"
-    | "run"
-    | string;
+  /** `queue`, `attempt_<n>` (one per RunAttempt), `run` (no attempt recorded) or `evaluation`. */
+  key: "queue" | "run" | "evaluation" | `attempt_${number}` | (string & {});
   label: string;
   kind: "wait" | "work";
   start: string | null;
@@ -220,20 +214,13 @@ export interface TimelineSegment {
   approximate: boolean;
   note: string | null;
   parts: TimelinePart[];
-  /** Numeric split from the agent trajectory (`result_data.agent.trajectory.time`), when recorded. */
-  trajectory_time?: Record<string, number> | null;
-  /** Evaluation ran outside this run's span (a later re-evaluation). */
-  separate?: boolean;
-}
-
-export interface ExecutionAttempt {
-  attempt: number | null;
-  reason: string | null;
-  error: string | null;
-  at: string | null;
-  cost: number | null;
-  total_tokens: number | null;
-  infra_errors: number | null;
+  /** Attempt segments. */
+  termination?: string | null;
+  budget_exhausted?: string | null;
+  oom_killed?: boolean;
+  /** The evaluation segment. */
+  evaluation_id?: number;
+  status?: string;
 }
 
 export interface ExecutionRecord {
@@ -245,69 +232,62 @@ export interface ExecutionRecord {
   policy: string | null;
   executor: string | null;
   started_seq: number | null;
-  run_order: number | null;
   queue_seconds: number | null;
   llm_queue_wait_s: number | null;
-  prefetch_load_s: number | null;
   run_after: string | null;
   requeued_at: string | null;
   waiting_reason: "retry_backoff" | null;
-  attempts: ExecutionAttempt[];
   infra_errors: Record<string, unknown>[];
   infra_error_count: number;
   executor_lost_count: number | null;
   relay_interruptions: unknown;
-  /** A requested re-evaluation is queued or running (the flag is dropped when it finishes). */
-  reevaluated: boolean;
-  prior_attempts: Partial<
-    Record<
-      "cost" | "prompt_tokens" | "completion_tokens" | "total_tokens",
-      number | null
-    >
-  > | null;
   recorded: boolean;
 }
 
-export interface ExperimentCell {
-  experiment_id: string;
-  experiment_name: string | null;
-  experiment_status: string | null;
+/** The study cell a run fills (null for a run outside any study). */
+export interface StudyCellRef {
+  study_id: string;
+  study_name: string | null;
+  study_status: string | null;
   condition_id: number | null;
   condition_label: string | null;
-  condition_method: string | null;
-  condition_model: string | null;
-  app_slug: string | null;
+  cell_id: number | null;
+  unit_key: string | null;
+  stage: string | null;
   repeat_index: number | null;
   /** 1-based trial number (repeat_index + 1). */
   repeat_number: number | null;
   planned_repeats: number | null;
-  /** Jobs in this cell (retries / top-ups included). */
-  cell_jobs: number;
-  is_current_in_cell: boolean;
+  cell_attempt: number | null;
+  /** A run beyond the frozen plan (never in the confirmatory sample). */
+  beyond_plan: boolean;
+  /** Runs in this cell (retries included). */
+  cell_runs: number | null;
+  is_current_in_cell: boolean | null;
 }
 
-export interface JobTimeline {
-  job_id: string;
-  mode: string;
+export interface RunTimeline {
+  run_id: string;
+  kind: string;
   status: string;
   phase: string;
+  outcome: string | null;
   live: boolean;
   milestones: { key: string; label: string; at: string }[];
   segments: TimelineSegment[];
   total_seconds: number | null;
   run_seconds: number | null;
   duration_seconds: number | null;
-  evaluation_in_run: boolean | null;
   execution: ExecutionRecord;
-  experiment: ExperimentCell | null;
+  study: StudyCellRef | null;
   notes: string[];
 }
 
-export async function getJobTimeline(
-  jobId: string,
+export async function getRunTimeline(
+  runId: string,
   opts: { signal?: AbortSignal } = {},
-): Promise<JobTimeline> {
-  const res = await apiFetch(`/generation/jobs/${jobId}/timeline/`, {
+): Promise<RunTimeline> {
+  const res = await apiFetch(`/generation/runs/${runId}/timeline/`, {
     signal: opts.signal,
   });
   return res.json();
@@ -342,19 +322,19 @@ export interface QualityToolRow {
   } | null;
 }
 
-export interface JobQualityMetrics {
-  job_id: string;
+export interface RunQualityMetrics {
+  run_id: string;
   selection: string;
   measured: number;
   tools: QualityToolRow[];
   notes: string[];
 }
 
-export async function getJobQualityMetrics(
-  jobId: string,
+export async function getRunQualityMetrics(
+  runId: string,
   opts: { signal?: AbortSignal } = {},
-): Promise<JobQualityMetrics> {
-  const res = await apiFetch(`/generation/jobs/${jobId}/quality-metrics/`, {
+): Promise<RunQualityMetrics> {
+  const res = await apiFetch(`/generation/runs/${runId}/quality-metrics/`, {
     signal: opts.signal,
   });
   return res.json();

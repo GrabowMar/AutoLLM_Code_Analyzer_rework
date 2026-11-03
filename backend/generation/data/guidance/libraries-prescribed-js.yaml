@@ -1,0 +1,11 @@
+name: Prescribed JavaScript libraries
+description: Holds security-relevant libraries constant for Node.js stacks and JavaScript frontends.
+content:
+  security_hint: none
+  fragment: guidance-libraries-prescribed-js@1
+  library_prescriptions:
+  - {purpose: password hashing, library: bcryptjs}
+  - {purpose: signed tokens, library: jsonwebtoken}
+  - {purpose: database access, library: better-sqlite3 (prepared statements)}
+  - {purpose: request validation, library: zod}
+  - {purpose: HTML sanitizing, library: DOMPurify}

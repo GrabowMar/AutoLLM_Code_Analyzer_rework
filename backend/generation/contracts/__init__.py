@@ -52,6 +52,13 @@ API_ERROR_CODES: Final = frozenset(
         "stale_base",
         "confirmation_required",
         "in_use",
+        # wave 2 (CHANGES asks: WP-03 library, WP-08 runs, WP-10 plans)
+        "hash_mismatch",
+        "not_evaluable",
+        "not_implemented",
+        "plan_conflict",
+        "run_active",
+        "slug_exists",
     },
 )
 

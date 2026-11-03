@@ -61,6 +61,9 @@ class ReconcileReport:
     sessions_ended: int = 0
     instances_stopped: int = 0
     studies_completed: int = 0
+    ledger_settled: int = 0
+    blocks_closed: int = 0
+    studies_resumed: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -377,12 +380,28 @@ def completion_sweep() -> int:
     if stray.exists():
         transitions.cancel_runs(stray, scope="all")
     active = GenerationRun.objects.filter(study_id=OuterRef("pk"), status__in=transitions.ACTIVE_STATUSES)
-    candidates = Study.objects.filter(status="running").exclude(Exists(active))
+    stopping = Q(status="piloting", stop_reason__isnull=False)
+    candidates = Study.objects.filter(Q(status="running") | stopping).exclude(Exists(active))
     completed = 0
     for study_id in candidates.values_list("id", flat=True):
         if transitions.maybe_complete_study(study_id):
             completed += 1
     return completed
+
+
+def reconcile_ledger() -> dict[str, int]:
+    """Spend ledger repair (spec 4.5): settle ended attempts that still hold a reservation and release
+    the block reservations of finished blocks (``budget.ledger.reconcile``)."""
+    from backend.generation.budget import ledger
+
+    return ledger.reconcile()
+
+
+def resume_paused_for_caps() -> int:
+    """Resume studies paused for ``quota`` / ``spend_cap`` once the next run fits every spend cap again."""
+    from backend.generation.budget import claims
+
+    return claims.resume_paused_for_caps()
 
 
 # ── entry point ────────────────────────────────────────────────────────
@@ -423,6 +442,10 @@ def reconcile(
     )
     report.instances_stopped = _step(report, "instances", stop_dead_instances, executor_id) or 0
     report.studies_completed = _step(report, "completion", completion_sweep) or 0
+    ledger_report = _step(report, "ledger", reconcile_ledger) or {}
+    report.ledger_settled = ledger_report.get("settled", 0)
+    report.blocks_closed = ledger_report.get("blocks_closed", 0)
+    report.studies_resumed = _step(report, "spend_caps", resume_paused_for_caps) or 0
     close = getattr(docker, "close", None)
     if callable(close):
         try:
@@ -441,7 +464,9 @@ __all__ = [
     "expire_leases",
     "reap_orphans",
     "reconcile",
+    "reconcile_ledger",
     "requeue_evaluation",
     "requeue_lost",
+    "resume_paused_for_caps",
     "stop_dead_instances",
 ]

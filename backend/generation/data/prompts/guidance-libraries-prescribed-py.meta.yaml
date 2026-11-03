@@ -1,0 +1,7 @@
+name: 'Guidance fragment: prescribed Python libraries'
+role: fragment
+modes:
+- app
+- slot
+variables:
+- guidance

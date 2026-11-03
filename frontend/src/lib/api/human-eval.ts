@@ -9,12 +9,13 @@ import type {
   AssignmentExclusionInput,
   AssignmentQuery,
   AssignmentSummary,
-  CandidateJob,
-  CandidateJobQuery,
+  CandidateRun,
+  CandidateRunQuery,
   CodesCreated,
   CreatedCode,
   DesignValidation,
   ExportKind,
+  FunctionalSummary,
   GroupBy,
   HttpExchangeRecord,
   HumanEvalEnvironment,
@@ -121,15 +122,64 @@ export async function validateDesign(
   );
 }
 
-export async function listCandidateJobs(
-  q: CandidateJobQuery = {},
+/** Completed app runs that can join a task's pool (the caller's; `study_id` narrows to one study). */
+export async function listCandidateRuns(
+  q: CandidateRunQuery = {},
   options: FetchOptions = {},
-): Promise<Paginated<CandidateJob>> {
+): Promise<Paginated<CandidateRun>> {
   return json(
-    await apiFetch(`${BASE}/candidate-jobs/${query({ ...q })}`, {
+    await apiFetch(`${BASE}/candidate-runs/${query({ ...q })}`, {
       signal: options.signal,
     }),
   );
+}
+
+/** Display label of an app's functional status (`not_measured` is never a pass or a 0). */
+export function functionalStatusLabel(
+  status: string | null | undefined,
+): string {
+  if (!status) return "Not measured";
+  return FUNCTIONAL_STATUS_LABELS[status] ?? status.replace(/_/g, " ");
+}
+
+const FUNCTIONAL_STATUS_LABELS: Record<string, string> = {
+  tested: "Tested",
+  pending: "Evaluation pending",
+  running: "Evaluating",
+  not_measured: "Not measured",
+  error: "Evaluation error",
+  build_fail: "Build failed",
+  start_fail: "Start failed",
+  output_invalid: "Output invalid",
+  infra_error: "Infrastructure error",
+  excluded: "Excluded",
+};
+
+/** Where an app's functional verdict comes from; "" when there is none. */
+export function functionalSourceLabel(
+  source: FunctionalSummary["source"] | undefined,
+): string {
+  return source === "eval_suite" ? "EvalSuite" : "";
+}
+
+/** One-line description of a study in a picker: status, mode, kind and main-stage cell progress. */
+export function studyOptionDescription(study: {
+  status: string;
+  mode: string;
+  kind: string;
+  cells_done: number;
+  cells_total: number;
+}): string {
+  const cells =
+    study.cells_total > 0
+      ? `${study.cells_done}/${study.cells_total} cells`
+      : "no cells yet";
+  return [
+    study.status.replace(/_/g, " "),
+    `${study.mode} mode`,
+    study.kind,
+    cells,
+  ].join(" · ");
 }
 
 // --- tasks -------------------------------------------------------------------

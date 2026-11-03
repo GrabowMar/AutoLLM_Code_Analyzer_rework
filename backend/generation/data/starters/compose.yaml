@@ -1,0 +1,37 @@
+# Which (stack profile, level) starters `build.starters` composes (spec section 11.4). The composed trees
+# are NOT checked in: they are rebuilt from the fragments, the Dockerfile templates, base_images.yaml and
+# lock/ on every seed, and are identical (same tree_hash) whenever those inputs are.
+# Starter slug: <stack>-<level>. Phase B entries are seams for wave 3: they are listed so the gap is
+# explicit, and `build_starters` reports them as skipped until their profile and fragments exist.
+version: 1
+starters:
+  # phase A (wave 2): bare + minimal for flask/fastapi/django/express x react/vue/svelte/none, free-choice bare
+  - {stack: flask-react, levels: [bare, minimal]}
+  - {stack: flask-vue, levels: [bare, minimal]}
+  - {stack: flask-svelte, levels: [bare, minimal]}
+  - {stack: flask-none, levels: [bare, minimal]}
+  - {stack: fastapi-react, levels: [bare, minimal]}
+  - {stack: fastapi-vue, levels: [bare, minimal]}
+  - {stack: fastapi-svelte, levels: [bare, minimal]}
+  - {stack: fastapi-none, levels: [bare, minimal]}
+  - {stack: django-react, levels: [bare, minimal]}
+  - {stack: django-vue, levels: [bare, minimal]}
+  - {stack: django-svelte, levels: [bare, minimal]}
+  - {stack: django-none, levels: [bare, minimal]}
+  - {stack: express-react, levels: [bare, minimal]}
+  - {stack: express-vue, levels: [bare, minimal]}
+  - {stack: express-svelte, levels: [bare, minimal]}
+  - {stack: express-none, levels: [bare, minimal]}
+  - {stack: free-choice, levels: [bare]}
+  # phase B (wave 3): go (stdlib net/http), spring-boot (java21), postgres variants, optional `full` level
+  - {stack: go-react, levels: [bare, minimal], phase: B}
+  - {stack: go-vue, levels: [bare, minimal], phase: B}
+  - {stack: go-svelte, levels: [bare, minimal], phase: B}
+  - {stack: go-none, levels: [bare, minimal], phase: B}
+  - {stack: spring-boot-react, levels: [bare, minimal], phase: B}
+  - {stack: spring-boot-vue, levels: [bare, minimal], phase: B}
+  - {stack: spring-boot-svelte, levels: [bare, minimal], phase: B}
+  - {stack: spring-boot-none, levels: [bare, minimal], phase: B}
+  - {stack: fastapi-react-postgres, levels: [bare, minimal], phase: B}
+  - {stack: django-react-postgres, levels: [bare, minimal], phase: B}
+  - {stack: express-react-postgres, levels: [bare, minimal], phase: B}

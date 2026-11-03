@@ -20,6 +20,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from dataclasses import field
@@ -401,7 +402,18 @@ def _builder_oom(client, name: str) -> bool:
         return False
 
 
-def _buildkit(path, tag, *, client, labels, force_rebuild, cache_namespace, timeout_s, cancelled) -> BuildResult:
+def _buildkit(
+    path,
+    tag,
+    *,
+    client,
+    labels,
+    force_rebuild,
+    cache_namespace,
+    timeout_s,
+    cancelled,
+    build_contexts=(),
+) -> BuildResult:
     started = time.monotonic()
     env = docker_environment(client)
     name = _builder_name()
@@ -443,6 +455,9 @@ def _buildkit(path, tag, *, client, labels, force_rebuild, cache_namespace, time
                     # Historical immutable recipes do not declare the token
                     # (nor the new package caches); retain true refresh there.
                     args += ["--no-cache"]
+            # BuildKit named contexts (``--build-context image:tag=docker-image://ref@digest``) pin the
+            # frozen bases of a free-choice Dockerfile, so a tag is never re-resolved at build time.
+            args += list(build_contexts)
             args += [str(Path(path).resolve())]
             resources.sample()
             remaining = max(0.001, timeout_s - (time.monotonic() - started))
@@ -538,8 +553,14 @@ def build(
     cache_namespace: str = "sample",
     timeout_s: int = 1200,
     cancelled: Callable[[], bool] | None = None,
+    build_contexts: Sequence[str] = (),
 ) -> BuildResult:
-    """Build one sample image; callers hold the shared build-admission lease."""
+    """Build one sample image; callers hold the shared build-admission lease.
+
+    ``build_contexts`` are extra ``docker buildx build`` arguments inserted before the context path
+    (``BuildContextReport.build_context_args()``: the frozen base pins). The legacy SDK backend cannot pass
+    them, so a pinned build there fails as infra instead of silently re-resolving a tag.
+    """
     if cancelled and cancelled():
         message = "Build cancelled"
         raise BuildFailure(message, infra_suspected=True, cancelled=True)
@@ -554,8 +575,12 @@ def build(
             cache_namespace=cache_namespace,
             timeout_s=timeout_s,
             cancelled=cancelled,
+            build_contexts=tuple(build_contexts),
         )
     if backend == "legacy":
+        if build_contexts:
+            message = "The legacy build backend cannot pin base images (named build contexts); use buildkit"
+            raise BuildFailure(message, infra_suspected=True)
         return _legacy(
             path,
             tag,

@@ -90,7 +90,8 @@ def test_tools_list_has_curated_and_generic(client, token):
     tools = rpc(client, "tools/list", token=token).json()["result"]["tools"]
     names = {t["name"] for t in tools}
     assert {"whoami", "search_models", "analyze", "call_api", "find_api_operations"} <= names
-    # The study/run tools stay hidden until WP-08/WP-10 publish their operation ids.
+    # The v3 study/run tools are live (WP-10 / WP-08 operation ids); nothing is pending.
+    assert {"list_studies", "get_study", "resolve_study", "launch_study", "list_runs", "get_run"} <= names
     assert not names & set(tools_module.pending_tools())
     for tool in tools:
         assert tool["inputSchema"]["type"] == "object"
@@ -99,14 +100,33 @@ def test_tools_list_has_curated_and_generic(client, token):
 
 def test_every_enabled_curated_tool_resolves_to_an_operation():
     ops = openapi.operations()
-    missing = [c.name for c in tools_module.CURATED if c.enabled and f"backend_{c.operation_id}" not in ops]
+    missing = [
+        c.name
+        for c in tools_module.CURATED
+        if c.enabled and tools_module.resolve_operation(ops, c.operation_id) is None
+    ]
     assert missing == []
 
 
-def test_study_tools_are_registered_disabled_until_published():
-    pending = tools_module.pending_tools()
-    assert {"list_studies", "get_study", "resolve_study", "launch_study"} <= set(pending)
-    assert set(pending.values()) <= {"WP-08", "WP-10"}
+@pytest.mark.parametrize(
+    ("name", "method", "path"),
+    [
+        ("list_studies", "GET", "/api/generation/studies/"),
+        ("get_study", "GET", "/api/generation/studies/{study_id}/"),
+        ("resolve_study", "POST", "/api/generation/studies/{study_id}/resolve/"),
+        ("launch_study", "POST", "/api/generation/studies/{study_id}/launch/"),
+        ("list_runs", "GET", "/api/generation/runs/"),
+        ("get_run", "GET", "/api/generation/runs/{run_id}/"),
+    ],
+)
+def test_v3_study_and_run_tools_resolve_to_their_published_operations(name, method, path):
+    item, op = tools_module._curated_index()[name]
+    assert item.enabled
+    assert (op.method, op.path) == (method, path)
+
+
+def test_curated_tools_registry_is_consistent():
+    assert tools_module.pending_tools() == {}
     for item in tools_module.CURATED:
         if not item.enabled:
             assert item.pending
@@ -120,10 +140,17 @@ def test_study_tools_are_registered_disabled_until_published():
     assert not [n for n in names if "experi" + "ment" in n or n in v2]
 
 
-def test_disabled_tool_is_not_callable(client, token):
-    body = rpc(client, "tools/call", {"name": "launch_study", "arguments": {}}, token=token).json()
+def test_unknown_tool_is_not_callable(client, token):
+    body = rpc(client, "tools/call", {"name": "no_such_tool", "arguments": {}}, token=token).json()
     failed = body.get("error") or body["result"]
     assert "unknown tool" in json.dumps(failed)
+
+
+def test_read_only_token_sees_study_reads_but_not_launch(client, user):
+    raw, _ = services.generate_token(user=user, name="ro-studies", scopes=["read"])
+    names = {t["name"] for t in rpc(client, "tools/list", token=raw).json()["result"]["tools"]}
+    assert {"list_studies", "get_study", "list_runs", "get_run"} <= names
+    assert not names & {"resolve_study", "launch_study"}
 
 
 def test_whoami_runs_as_token_user(client, token, user):

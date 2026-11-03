@@ -14,7 +14,7 @@
 	import XCircle from '@lucide/svelte/icons/circle-x';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import LevelBadge from '$lib/components/analysis/LevelBadge.svelte';
-	import { numberInputValue } from '$lib/components/generator/llm-params';
+	import { numberInputValue } from '$lib/components/studies/shared/llm-params';
 	import {
 		testTool,
 		updateToolConfig,

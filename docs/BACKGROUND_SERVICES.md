@@ -6,9 +6,12 @@ Which work runs where: the executor process, threads inside the web process, Cel
 
 | Work | Runs in | Survives a `django` restart? |
 | --- | --- | --- |
-| Generation jobs (agent, scaffolding, custom) and their evaluation | `executor` service, claimed from Postgres | Yes |
-| Experiment schedules (top up, add replicates, clone and run) | `executor`, checked every 30 s | Yes |
-| Experiment post-runs (analyses over completed jobs, then the report) | `executor` post-run pool | Yes; a lost lease is re-claimed |
+| Generation runs (agentic, slot single-shot, slot agent) and their evaluation | `executor` service, claimed from Postgres with budget admission | Yes |
+| Study stop rules and pilot gates | `executor`, after every finished run and every 60 s | Yes |
+| Spend ledger repair (unsettled attempts, finished blocks) and spend-cap resume | `executor` reconciler, every 15 s | Yes |
+| Cost priors for estimates | `executor` on every finished run; `manage.py refresh_cost_priors` nightly | Yes |
+| Study schedules (top up, add replicates, clone and run) | `executor`, checked every 30 s | Yes |
+| Study post-runs (analyses or pattern analysis over the study's runs, then the report) | `executor` post-run pool | Yes; a lost lease is re-claimed |
 | Internal LLM proxy and direct-endpoint pumps for local models | `executor` threads | Yes |
 | Interactive analysis runs | Daemon thread in `django` (`analysis.services.runner.dispatch`) | No |
 | Analyzer workspace provisioning, tool installs | Daemon threads in `django` | No |
@@ -21,7 +24,7 @@ Which work runs where: the executor process, threads inside the web process, Cel
 | Webhook sweep for missed status transitions | Celery beat, every 60 s | Yes |
 | Human-evaluation idle-app reaper (stop idle task apps, drain the start queue) | Celery beat, every 120 s, plus lazily (at most once a minute) from portal heartbeats and hosting calls; the containers it stops are stopped by threads in `celeryworker` | Yes |
 
-The web process never runs generation jobs. Views write rows (`queued_at`, lane, priority) and, after the transaction commits, push a token onto the Redis list `executor:wake` (the doorbell) so the executor claims them without waiting for its next tick. See [Execution engine](/docs/EXECUTION) for the scheduler, slots, leases and drain procedure.
+The web process never runs generation runs. Views write rows (`queued_at`, lane, priority) and, after the transaction commits, push a token onto the Redis list `executor:wake` (the doorbell) so the executor claims them without waiting for its next tick. See [Execution engine](/docs/EXECUTION) for the scheduler, slots, leases and drain procedure.
 
 Threads in `django` die with the process. In the local stack that includes every `uvicorn --reload` triggered by a backend edit. A killed analysis run is failed as interrupted once its heartbeat is 5 minutes old, the next time runs are listed or opened ([Analysis pipeline](/docs/ANALYSIS_PIPELINE)); **System → Maintenance → Clear Stuck Analysis Tasks** (staff) does the same on demand and also fails runs untouched for an hour. A report's thread starts once its row is committed; a report left `pending` for 10 minutes or `generating` for 1 hour is marked `failed` ("Interrupted…") the next time reports are listed or opened.
 
@@ -31,16 +34,16 @@ One instance, compose service `executor`, command `python manage.py run_executor
 
 | Thread or pool | Job |
 | --- | --- |
-| Main loop | Wait on `executor:wake` up to `EXECUTOR_TICK_SECONDS` (2 s), requeue lost jobs, claim work, reconcile every 15 s, schedules and post-runs every 30 s, purge old LLM request rows daily |
-| Heartbeat | Every `EXECUTOR_HEARTBEAT_SECONDS` (20 s): instance `last_seen_at`, lease renewal for jobs it is running |
-| `sandbox`, `eval`, `llm`, `post`, `schedule` pools | Agent runs, evaluations and preview builds, scaffolding/custom jobs, post-runs, schedule actions/cache GC |
+| Main loop | Wait on `executor:wake` up to `EXECUTOR_TICK_SECONDS` (2 s), requeue lost runs, claim work (budget admission inside the claim), reconcile every 15 s (incl. the spend ledger), stop rules every 60 s, schedules and post-runs every 30 s, purge old LLM request rows daily |
+| Heartbeat | Every `EXECUTOR_HEARTBEAT_SECONDS` (20 s): instance `last_seen_at`, lease renewal for runs it is running |
+| `sandbox`, `eval`, `llm`, `post`, `schedule` pools | Agentic runs and slot agents, evaluations and preview builds, single-shot slot calls, post-runs, schedule actions/cache GC |
 | LLM proxy | `inference.proxy_server` on `LLM_PROXY_BIND` (`172.30.99.2:8090` on the internal `llmproxy` network) |
 | Direct pumps | Workers that forward queued LLM requests to direct local endpoints |
 
 It has `restart: unless-stopped` and exits with code 1 when it loses the Postgres leader lock, when the LLM proxy cannot bind, or when migrations are still pending after 10 minutes. It does not autoreload; restart it after backend edits. Check it with:
 
 ```bash
-just manage executor status     # online, draining, running jobs, safe_to_restart
+just manage executor status     # online, draining, running runs, safe_to_restart
 just manage executor drain      # stop claiming before a restart
 just manage executor resume
 ```
@@ -60,7 +63,7 @@ Three compose services share the django image and the Redis broker (`REDIS_URL`,
 | Task | Module | Triggered by |
 | --- | --- | --- |
 | `enrich_catalog_task` | `backend/llm_models/tasks.py` | `POST /api/models/sync/`, after the commit, with the syncing user's id (for their Hugging Face token; only the id travels through the broker). Also available synchronously as `manage.py enrich_models` |
-| `fetch_call_stats_task` | `backend/generation/tasks.py` | The executor, after each generation stage of a job with OpenRouter `gen-` calls: on commit, 90 s countdown. Fetches OpenRouter's per-call records into the artifacts' telemetry; records still missing are tried twice more, 600 s apart. Never changes the job. Also available as `manage.py backfill_call_telemetry --openrouter` ([Generation process](/docs/GENERATION_PROCESS#openrouter-generation-stats)) |
+| `fetch_call_stats_task` | `backend/generation/services/openrouter_stats.py` | After each generation stage of a run with OpenRouter `gen-` calls: on commit, 90 s countdown. Fetches OpenRouter's per-call records into the artifacts' telemetry (the ledger's last-resort cost source); records still missing are tried twice more, 600 s apart. Never changes the run |
 | `deliver_webhook` | `backend/integrations/tasks.py` | A webhook event for an enabled subscription. Up to 3 retries at 15, 60 and 240 s on 5xx, 429 or network errors |
 | `sweep_webhook_events` | `backend/integrations/tasks.py` | Beat, every 60 s. Registered as the periodic task "integrations: sweep webhook events" after every migrate. Emits events for terminal transitions from the last 30 minutes that bypassed `post_save`, and re-dispatches deliveries that never got a first attempt |
 | `reap_idle_apps_task` | `backend/human_eval/tasks.py` | Beat, every 120 s. Registered as the periodic task "human_eval: reap idle apps" after every migrate. Stops task-started, unpinned apps idle past their task's `hosting.idle_stop_minutes` and apps of closed tasks, clears stale start markers and drops abandoned queue requests, then starts queued apps ([Human evaluation](/docs/HUMAN_EVALUATION#running-apps-for-testers)) |
@@ -70,23 +73,23 @@ Three compose services share the django image and the Redis broker (`REDIS_URL`,
 Without a worker the app still works: model sync succeeds without enrichment, per-call stats fetches wait in Redis (OpenRouter's records may expire meanwhile; the backfill command fetches them later), and webhook deliveries wait in Redis (and stay `pending` in the database) until a worker starts. Without beat the sweep stops, so deliveries that could not be queued (Redis down) are never retried.
 
 > [!NOTE]
-> Experiment schedules do not need Celery beat. The old `run_scheduler_tick` / `runautomationscheduler` path only served legacy automation pipelines; schedules now fire inside the executor. See [Experiments](/docs/EXPERIMENTS#automation) and [Automation guide](/docs/AUTOMATION_GUIDE).
+> Study schedules and stop rules do not need Celery beat: they run inside the executor. The old `run_scheduler_tick` / `runautomationscheduler` path only served legacy automation pipelines. See [Studies](/docs/STUDIES) and [Budget](/docs/BUDGET).
 
 ## Realtime events (SSE)
 
 Progress reaches the browser over server-sent events, not polling.
 
-- Publishers call `backend.realtime.events.publish(channel, event)`, which pushes JSON into Redis pub/sub. Helpers wrap the experiment, endpoint and capacity channels.
+- Publishers call `backend.realtime.events.publish(channel, event)`, which pushes JSON into Redis pub/sub. `publish_run_event` / `publish_study_event` validate payloads against `generation.contracts.events` (a malformed event is logged and dropped).
 - `GET /api/realtime/stream?channels=a,b` (or repeated `channels=`) is an async Django view mounted outside ninja in `config/urls.py`. It authorizes every channel, closes its database connection, then streams from Redis on the event loop, so an open tab holds neither a worker thread nor a Postgres connection.
 - Responses: 401 unauthenticated, 400 with no channels or more than 20, 403 when any channel is malformed, unknown or not yours.
 
 | Channel | Who may subscribe | Published by |
 | --- | --- | --- |
-| `generation:<uuid>` | The job's creator or staff | Job status and results |
-| `experiment:<uuid>` | The experiment's creator or staff | Executor tick events, job transitions |
+| `run:<uuid>` | The run's creator, the creator of its study, or staff | `status`, `step`, `usage` (live spend), `trajectory_step`, `log`, `evaluation` |
+| `study:<uuid>` | The study's creator or staff | `run`, `tick`, `state`, `post_run`, `spend`, `budget_alert`, `stopped`, `paused` |
 | `endpoint:<id>` | Users who may use the endpoint; non-owners get `endpoint:<id>:public` | Local endpoint state |
 | `analysis:<id>` | The run's creator or staff | Analysis run status |
-| `runtime:<id>` | The container's creator, the owner of its generation job, or staff | Container actions |
+| `runtime:<id>` | The container's creator, the owner of its generation run, or staff | Container actions |
 | `capacity` | Any authenticated user | Executor slot usage, at most every 5 s |
 
 ## Redis roles
@@ -99,7 +102,7 @@ Progress reaches the browser over server-sent events, not polling.
 | LLM request queue doorbells | `backend/inference/doorbell.py` keys (prefix `INFERENCE_REDIS_PREFIX`, empty by default) |
 | Django cache | Production only; local settings use an in-memory cache |
 
-Postgres stays the source of truth: a Redis outage delays the executor by at most one tick and drops live updates, but loses no jobs.
+Postgres stays the source of truth: a Redis outage delays the executor by at most one tick and drops live updates, but loses no runs and no ledger rows.
 
 ## Runtime housekeeping
 
@@ -108,7 +111,7 @@ Two management commands keep the container fleet honest, useful from cron in pro
 - `just manage sync_container_status`: updates `ContainerInstance.status` from the live Docker state.
 - `just manage reconcile_app_routes`: rewrites the per-app Traefik route files and drops stale ones ([Deployment guide](/docs/deployment-guide)).
 
-The executor's reconciler separately reaps lost agent sandboxes and evaluation containers on the apps daemon. **System → Maintenance** offers "Purge Orphan Containers" for container rows whose Docker container is gone, and "Clear Stuck Generation Jobs" as a manual backstop for executor-owned jobs whose lease expired long ago.
+The executor's reconciler separately reaps lost agent sandboxes and evaluation containers on the apps daemon. **System → Maintenance** offers "Purge Orphan Containers" for container rows whose Docker container is gone, and "Clear Stuck Generation Jobs" as a manual backstop for executor-owned runs whose lease expired long ago (the ledger reconciler then settles their reservations).
 
 The executor also recovers interrupted preview build/startup leases and runs
 reference-aware sample-image cleanup hourly. BuildKit keeps its package/layer

@@ -97,6 +97,28 @@ MANIFEST_FROZEN_FIELDS: tuple[str, ...] = (
 )
 
 
+# Treatment columns "copied from the manifest" (WP-08, follow-up #3b). Once the run has a manifest, ``save()``
+# lets each keep its stored value or go from empty to the value the manifest pins (the comparison is
+# ``agentic.manifest.run_column_mismatches``: library FKs by pinned ref, ``model`` by slug, the rest by value).
+# ``QuerySet.update()`` is not guarded for these (as for derived columns); production code never bulk-updates them.
+MANIFEST_PINNED_COLUMNS: tuple[str, ...] = (
+    "model",
+    "task_version",
+    "stack_profile",
+    "starter",
+    "style",
+    "guidance",
+    "prompt_set",
+    "harness_preset",
+    "sampling_preset",
+    "resource_policy",
+    "prose_variant",
+    "auth_mode",
+    "pinned_served_name",
+    "pinned_digest",
+)
+
+
 def manifest_expected(manifest: Any) -> dict[str, Any]:
     """``{run column: value}`` that a run with this manifest payload must hold (missing keys omitted)."""
     if not isinstance(manifest, dict):
@@ -377,6 +399,7 @@ class GenerationRun(ValidatedModel):
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self._state.adding:
             self._refuse_manifest_drift(kwargs.get("update_fields"))
+            self._refuse_treatment_drift(kwargs.get("update_fields"))
         super().save(*args, **kwargs)
 
     def _refuse_manifest_drift(self, update_fields: Any) -> None:
@@ -400,6 +423,38 @@ class GenerationRun(ValidatedModel):
             msg = (
                 f"run {self.pk} has a manifest; {', '.join(changed)} are write-once "
                 "and must equal the manifest (appendix A #13)"
+            )
+            raise ImmutableVersionError(msg)
+
+    def _refuse_treatment_drift(self, update_fields: Any) -> None:
+        """``MANIFEST_PINNED_COLUMNS``: write-once from empty, and only to what the manifest pins (WP-08)."""
+        names = list(MANIFEST_PINNED_COLUMNS)
+        if update_fields is not None:
+            names = [name for name in names if name in set(update_fields)]
+        if not names:
+            return
+        attnames = {name: self._meta.get_field(name).attname for name in names}
+        stored = self.stored_values(*attnames.values())
+        if stored is None:
+            return
+        changed = [name for name in names if getattr(self, attnames[name]) != stored[attnames[name]]]
+        if not changed:
+            return
+        payload = RunManifest._base_manager.filter(run_id=self.pk).values_list("manifest", flat=True).first()  # noqa: SLF001
+        if payload is None:
+            return
+        from backend.generation.agentic.manifest import run_column_mismatches
+
+        problems = run_column_mismatches(self, payload)
+        refused = [
+            name
+            for name in changed
+            if getattr(self, attnames[name]) in ("", None) or any(p.startswith(f"{name}:") for p in problems)
+        ]
+        if refused:
+            msg = (
+                f"run {self.pk} has a manifest; {', '.join(refused)} are copied from it and may only "
+                "be filled with the manifest's value (appendix A #13)"
             )
             raise ImmutableVersionError(msg)
 

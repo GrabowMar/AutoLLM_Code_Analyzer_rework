@@ -1,0 +1,11 @@
+name: SQL built by concatenation or formatting (Python)
+description: execute() receives an SQL string built with %, + or .format() instead of bound parameters.
+content:
+  engine: regex
+  languages: [python]
+  rule: 'execute\(\s*["''][^"''\n]*\b(?:SELECT|INSERT|UPDATE|DELETE)\b[^"''\n]*["'']\s*(?:%|\+|\.format\()'
+  tool: {name: re, version: py3.13}
+  feature_key: py-sql-concat
+  polarity: insecure
+  cwe: [cwe-89]
+  description: SQL passed to execute() is built with %, + or str.format instead of query parameters.

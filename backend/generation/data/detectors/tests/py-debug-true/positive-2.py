@@ -1,0 +1,2 @@
+# Django settings
+DEBUG = True

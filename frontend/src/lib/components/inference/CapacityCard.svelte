@@ -23,7 +23,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import Switch from '$lib/components/ui/switch/switch.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
-	import NumberField from '$lib/components/generator/composer/NumberField.svelte';
+	import NumberField from '$lib/components/studies/shared/NumberField.svelte';
 	import SlotMeter from './SlotMeter.svelte';
 	import { formatAgo } from './endpoint-display';
 	import Cpu from '@lucide/svelte/icons/cpu';
@@ -150,7 +150,7 @@
 	const slotFields: { key: SlotKey; label: string; hint: string }[] = [
 		{ key: 'sandbox_slots', label: 'Sandbox slots', hint: 'Agent runs at once (each needs apps-dind memory).' },
 		{ key: 'eval_slots', label: 'Evaluation slots', hint: 'Test containers at once.' },
-		{ key: 'llm_job_threads', label: 'LLM job threads', hint: 'Scaffolding runs at once.' },
+		{ key: 'llm_job_threads', label: 'LLM job threads', hint: 'Generation runs calling an LLM at once.' },
 		{ key: 'post_run_slots', label: 'Post-run slots', hint: 'Analyses and reports at once.' },
 	];
 </script>
@@ -175,10 +175,10 @@
 			</span>
 			{#if executor?.draining}
 				<span class="text-xs text-warning-fg" role="status" title="No new runs start while draining.">
-					{#if lanesIdle && executor.draining_remaining.jobs === 0 && executor.draining_remaining.post_runs === 0}
+					{#if lanesIdle && executor.draining_remaining.runs === 0 && executor.draining_remaining.post_runs === 0}
 						Drained: safe to restart the executor.
 					{:else}
-						{executor.draining_remaining.jobs} runs and {executor.draining_remaining.post_runs} post-run steps still finishing
+						{executor.draining_remaining.runs} runs and {executor.draining_remaining.post_runs} post-run steps still finishing
 					{/if}
 				</span>
 			{:else if executor?.code_stale}

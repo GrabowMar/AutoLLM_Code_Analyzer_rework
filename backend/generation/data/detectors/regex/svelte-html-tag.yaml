@@ -1,0 +1,11 @@
+name: Svelte {@html} tag
+description: A Svelte template renders raw HTML with the {@html ...} tag.
+content:
+  engine: regex
+  languages: [svelte]
+  rule: '\{@html\s'
+  tool: {name: re, version: py3.13}
+  feature_key: svelte-html-tag
+  polarity: insecure
+  cwe: [cwe-79]
+  description: The template uses {@html ...}.

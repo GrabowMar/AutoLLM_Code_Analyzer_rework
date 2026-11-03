@@ -1,0 +1,10 @@
+{
+  "unified": "--- a/fixture-brief@1\n+++ b/fixture-brief@2\n@@ -7,6 +7,7 @@\n - task\n \n # --- template ---\n-Build {{ task.title }}.\n+Build {{ task.title }} with care.\n Keep it small.\n+Add tests.\n \n",
+  "structured": [
+    {
+      "path": "template",
+      "a": "Build {{ task.title }}.\nKeep it small.\n",
+      "b": "Build {{ task.title }} with care.\nKeep it small.\nAdd tests.\n"
+    }
+  ]
+}

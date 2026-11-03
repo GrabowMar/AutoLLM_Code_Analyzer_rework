@@ -86,7 +86,7 @@ class MemoryCheck:
 
 def _terms() -> dict[str, int]:
     return {
-        # The largest sandbox a resource policy may ask for (per-study limits are WP-11's).
+        # The largest sandbox any policy may ask for: effective policies clamp sandbox.memory to it (WP-11).
         "sandbox": parse_mem(settings.AGENT_SANDBOX_MEM_LIMIT_MAX) + parse_mem(SANDBOX_OVERHEAD),
         "eval": max(parse_mem(settings.EVAL_SLOT_MEM), parse_mem(getattr(settings, "SAMPLE_BUILD_MEMORY", "1536m"))),
         "post": parse_mem(settings.ANALYSIS_WORKSPACE_MEM),
@@ -289,6 +289,10 @@ class CapacitySnapshot:
     ep_user_active: Counter = field(default_factory=Counter)  # (endpoint, user) -> running
     resident: dict[int, set[str]] = field(default_factory=dict)
     study_active: Counter = field(default_factory=Counter)  # all phases
+    # Generation stages per study and endpoint / model / pinned provider (concurrency.per_* knobs).
+    study_ep_active: Counter = field(default_factory=Counter)  # (study, endpoint) -> running
+    study_model_active: Counter = field(default_factory=Counter)  # (study, model) -> running
+    study_provider_active: Counter = field(default_factory=Counter)  # (study, provider) -> running
     user_active: Counter = field(default_factory=Counter)  # all phases
     endpoints: dict[int, EndpointState] = field(default_factory=dict)
     warmups: dict[int, dict[str, Warmup]] = field(default_factory=dict)
@@ -304,11 +308,14 @@ def residency_key(served_name: str, model_id: int | None) -> str:
 
 
 _ACTIVE_SQL = """
-SELECT lane, phase, status, coalesce(endpoint_id, %s) AS ep, study_id, created_by_id,
-       pinned_served_name AS served, model_id, count(*)
-FROM generation_run
-WHERE queued_at IS NOT NULL AND (status = 'running' OR lease_owner <> '')
-GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+SELECT j.lane, j.phase, j.status, coalesce(j.endpoint_id, %s) AS ep, j.study_id, j.created_by_id,
+       j.pinned_served_name AS served, j.model_id,
+       coalesce(rm.manifest #>> '{gateway,routing,only,0}',
+                rm.manifest #>> '{gateway,routing,provider,only,0}', '') AS provider,
+       count(*)
+FROM generation_run j LEFT JOIN generation_runmanifest rm ON rm.run_id = j.id
+WHERE j.queued_at IS NOT NULL AND (j.status = 'running' OR j.lease_owner <> '')
+GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
 """
 
 
@@ -437,7 +444,7 @@ def snapshot(system_ep: int | None = None) -> CapacitySnapshot:
     with connection.cursor() as cursor:
         cursor.execute(_ACTIVE_SQL, [system_ep])
         rows = cursor.fetchall()
-    for lane, raw_phase, status, ep, study_id, user_id, served, model_id, count in rows:
+    for lane, raw_phase, status, ep, study_id, user_id, served, model_id, provider, count in rows:
         # A cancelled (or otherwise finished) row whose worker still holds it counts as running.
         phase = raw_phase if status == "running" else (raw_phase or "running")
         snap.user_active[user_id] += count
@@ -452,6 +459,11 @@ def snapshot(system_ep: int | None = None) -> CapacitySnapshot:
                 snap.llm_used += count
             snap.ep_active[ep] += count
             snap.ep_user_active[(ep, user_id)] += count
+            if study_id is not None:
+                snap.study_ep_active[(study_id, ep)] += count
+                snap.study_model_active[(study_id, model_id)] += count
+                if provider:
+                    snap.study_provider_active[(study_id, provider)] += count
             snap.resident.setdefault(ep, set()).add(residency_key(served, model_id))
     snap.endpoints = _endpoint_states(now)
     local_ids = [s.id for s in snap.endpoints.values() if not s.is_system]

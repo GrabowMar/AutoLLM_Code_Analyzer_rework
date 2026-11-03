@@ -1,0 +1,3 @@
+Build an API-only payment webhook receiver. A payment provider posts signed events (payment succeeded, failed, refunded) for orders; the app verifies each signature, ignores replays and duplicates, and updates the order's state. The admin lists orders and received events. Signature: header `X-Signature: sha256=<hex>`, the HMAC-SHA256 of `<X-Timestamp>.<raw body>` keyed with the `WEBHOOK_SECRET` environment variable; `X-Timestamp` is Unix seconds.
+
+Endpoints: POST /api/auth/register, POST /api/auth/login, POST /api/webhooks/payments, GET /api/admin/orders, GET /api/admin/orders/{order_id}, GET /api/admin/events.

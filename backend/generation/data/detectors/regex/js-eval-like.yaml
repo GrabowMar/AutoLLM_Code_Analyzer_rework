@@ -1,0 +1,11 @@
+name: eval-like code execution (JS/TS)
+description: Code is evaluated from a string with eval(), new Function() or setTimeout/setInterval with a string.
+content:
+  engine: regex
+  languages: [javascript, typescript, tsx, vue, svelte]
+  rule: '(?<![\w.])eval\s*\(|\bnew\s+Function\s*\(|\bset(?:Timeout|Interval)\s*\(\s*["''`]'
+  tool: {name: re, version: py3.13}
+  feature_key: js-eval-like
+  polarity: insecure
+  cwe: [cwe-95]
+  description: The code calls eval(), new Function() or setTimeout/setInterval with a string argument.

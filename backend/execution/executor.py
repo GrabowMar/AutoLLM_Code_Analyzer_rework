@@ -65,6 +65,7 @@ logger = logging.getLogger(__name__)
 RECONCILE_EVERY_S = 15.0
 AUTOMATION_EVERY_S = 30.0
 PURGE_EVERY_S = 86400.0
+STOP_RULES_EVERY_S = 60.0  # spec 4.6: stop rules after every run completion and every 60 s
 TICK_EVENT_EVERY_S = 2.0
 SCHEDULE_THREADS = 1  # schedule actions (top up / replicates / clone): short DB work, own pool
 CAPACITY_EVENT_EVERY_S = 5.0
@@ -477,6 +478,9 @@ class Executor:
         if now - self._last.get("automation", -AUTOMATION_EVERY_S) >= AUTOMATION_EVERY_S:
             self._last["automation"] = now
             self._automation()
+        if now - self._last.get("stop_rules", 0) >= STOP_RULES_EVERY_S:
+            self._last["stop_rules"] = now
+            self._evaluate_stop_rules()
         if now - self._last.get("purge", 0) >= PURGE_EVERY_S:
             self._last["purge"] = now
             self._purge()
@@ -551,6 +555,16 @@ class Executor:
                 return
         with contextlib.suppress(PoolFullError):
             post.submit(workers.run_post_run, self.ctx)
+
+    @staticmethod
+    def _evaluate_stop_rules() -> None:
+        """Spec 4.6: every 60 s, the stop rules of every piloting or running study (never fatal)."""
+        try:
+            from backend.generation.budget import stop_rules
+
+            stop_rules.evaluate_active()
+        except Exception:
+            logger.exception("Evaluating the study stop rules failed")
 
     def _purge(self) -> None:
         try:
@@ -776,14 +790,19 @@ def study_progress(study_id: Any, stage: str = "main") -> tuple[dict[str, int], 
     """``({status or phase: n}, planned cells)`` over the current run of every cell of ``study_id`` at ``stage``.
 
     Running runs count under their phase (``running`` / ``eval_queued`` / ``evaluating``); a cell
-    without any run yet counts only in the total.
+    without any run yet counts only in the total. Both sides cover the planned cells of the active plan
+    (replicate cells and ``beyond_plan`` runs are left out, as in ``runs.queries``).
     """
-    from backend.generation.models import StudyCell
+    from backend.generation.models import Study
+    from backend.generation.runs.queries import cells_for_stage
     from backend.generation.runs.view import current_runs
 
+    study = Study.objects.filter(pk=study_id).only("pk", "active_plan_id").first()
+    if study is None:
+        return {}, 0
     counts: dict[str, int] = {}
-    for status, phase in current_runs(study_id, stage).order_by().values_list("status", "phase"):
+    for status, phase in current_runs(study, stage).order_by().values_list("status", "phase"):
         key = (phase or "running") if status == S.RUNNING else status
         counts[key] = counts.get(key, 0) + 1
-    total = StudyCell.objects.filter(study_id=study_id, stage=stage).count()
+    total = cells_for_stage(study, stage).count()
     return counts, total

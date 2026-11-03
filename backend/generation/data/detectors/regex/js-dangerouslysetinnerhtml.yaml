@@ -1,0 +1,11 @@
+name: React dangerouslySetInnerHTML (JS/TS)
+description: A React element renders raw HTML through dangerouslySetInnerHTML.
+content:
+  engine: regex
+  languages: [javascript, typescript, tsx]
+  rule: '\bdangerouslySetInnerHTML\s*='
+  tool: {name: re, version: py3.13}
+  feature_key: js-dangerouslysetinnerhtml
+  polarity: insecure
+  cwe: [cwe-79]
+  description: The component passes dangerouslySetInnerHTML.

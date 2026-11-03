@@ -89,6 +89,8 @@ extend-exclude = [
   "*/migrations/*.py",
   # Frozen v2 reference code (never imported; deleted in v3 wave 3).
   "backend/generation/_legacy/*",
+  # Pattern-detector fixtures: deliberately vulnerable sample code, not project code.
+  "backend/generation/data/detectors/tests/*",
   "staticfiles/*",
 ]
 lint.select = [
@@ -186,11 +188,6 @@ lint.per-file-ignores."backend/generation/services/packages/**" = [
   # import/export callers, which catch `except ValueError` at the API
   #          boundary (see api/views/profiles.py) to return 400s for bad input.
 ]
-lint.per-file-ignores."backend/runtime/scaffolding/**" = [
-  "INP001",  # Scaffold templates are copied into generated apps, not imported as packages.
-  "PLW1508", # Generated Flask apps use int env defaults by design.
-  "S104",    # Generated apps bind 0.0.0.0 inside Docker.
-]
 lint.per-file-ignores."config/settings/local.py" = [
   "S701", # Local-dev settings intentionally enable Jinja2 autoescape=False stand-ins.
 ]
@@ -232,6 +229,12 @@ plugins = [
   "mypy_django_plugin.main",
 ]
 warn_unused_configs = true
+# The golden fixture trees are sample apps (their `backend/` would shadow the real package) and
+# generation/_legacy is read-only v2 reference code that imports deleted modules.
+exclude = [
+  "backend/generation/testing/golden_library/(parent_app|starters)/",
+  "backend/generation/_legacy/",
+]
 overrides = [
   # Django migrations should not produce any errors:
   { module = "*.migrations.*", ignore_errors = true },

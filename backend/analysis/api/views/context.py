@@ -52,7 +52,6 @@ from backend.analysis.services.base import is_non_source_path
 from backend.generation.models import GenerationRun
 from backend.generation.models import choices
 from backend.generation.runs.view import RunView
-from backend.generation.runs.view import current_runs
 from backend.generation.runs.view import run_view
 from backend.reports.services.loc import is_source_file
 from backend.reports.services.loc import loc_from_files
@@ -60,6 +59,7 @@ from backend.reports.services.loc import loc_of_test_files
 from backend.statistics.services.dedup import RECORD_FIELDS
 from backend.statistics.services.dedup import finding_record
 from backend.statistics.services.dedup import issue_class
+from backend.statistics.services.runs import study_current_runs
 
 CONTEXT_SCOPES = ("study", "mine")
 _EXCLUDED_SAMPLE = 20
@@ -277,14 +277,14 @@ def _mine(user):
     ids = set(own.filter(cell__isnull=True).values_list("id", flat=True))
     for study_id in own.filter(cell__isnull=False).values_list("study_id", flat=True).distinct():
         for stage in (choices.Stage.PILOT, choices.Stage.MAIN):
-            ids |= set(current_runs(study_id, stage=stage).filter(created_by=user).values_list("id", flat=True))
+            ids |= set(study_current_runs(study_id, stage=stage).filter(created_by=user).values_list("id", flat=True))
     return GenerationRun.objects.filter(id__in=ids)
 
 
 def _corpus_runs(run: AnalysisRun, user, scope: str):
     """The corpus's generation runs: the study's current runs (main stage), or every current run of the caller."""
     if scope == "study":
-        return current_runs(run.generation_job.study_id, stage=choices.Stage.MAIN)
+        return study_current_runs(run.generation_job.study_id, stage=choices.Stage.MAIN)
     return _mine(user)
 
 

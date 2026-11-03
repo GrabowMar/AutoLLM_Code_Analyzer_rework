@@ -1,0 +1,6 @@
+name: Model's choice
+description: 'No styling prescription: the model picks the approach and libraries (default).'
+content:
+  system: model-choice
+  fragment: style-model-choice@1
+  compatible_frontends: [react, vue, svelte, none, free]

@@ -1,0 +1,4 @@
+{% set layout = "- `backend/`: the Django project. `backend/manage.py` is the entry file; dependencies go in `backend/requirements.txt`." %}
+{% set manifest = "requirements.txt" %}
+{% set entry = "the app with `python backend/manage.py migrate` followed by `python backend/manage.py runserver 0.0.0.0:" ~ run.port ~ "`" %}
+{% include "common/README.md.jinja2" %}

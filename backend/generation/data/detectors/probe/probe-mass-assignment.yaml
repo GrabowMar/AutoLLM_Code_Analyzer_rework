@@ -1,0 +1,11 @@
+name: Mass assignment probe exploited
+description: Maps the evaluation's mass_assignment probes (CWE-915) of the variant to a feature (one per probe kind).
+content:
+  engine: probe
+  languages: []
+  rule: 'kind:mass_assignment'
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-mass-assignment
+  polarity: insecure
+  cwe: [cwe-915]
+  description: A mass_assignment probe was exploited against the assembled app.

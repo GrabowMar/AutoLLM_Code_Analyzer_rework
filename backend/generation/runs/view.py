@@ -16,18 +16,14 @@ Typical reads: ``run.config_fingerprint``; ``run_view(run).stack`` / ``.task_dic
 ``run.pinned_served_name`` / ``run.pinned_digest``; ``code_files()`` / ``files()`` (``RunFile`` rows);
 ``run.validity`` / ``run.usable``; ``latest_evaluation().result.metrics`` (mirrored in ``run.metrics["eval"]``);
 ``run.study`` / ``run.condition`` / ``run.cell.unit``; ``run.kind``; ``current_runs(study, stage="main")``
-(temporary ``_current_runs_tmp`` here; WP-10 replaces it with ``runs.queries.current_runs``).
+(``runs.queries.current_runs``); ``run_views_files(runs, scope)`` (bulk ``files()``).
 """
 
 from __future__ import annotations
 
-import functools
-import importlib.util
 from collections.abc import Iterable
 from dataclasses import dataclass
 from dataclasses import field
-from pathlib import Path
-from types import ModuleType
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
@@ -58,6 +54,7 @@ __all__ = [
     "run_view",
     "run_views",
     "run_views_code",
+    "run_views_files",
     "source_loc",
 ]
 
@@ -107,43 +104,19 @@ _FACTOR_FKS: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
-@functools.cache
-def _reports_loc() -> ModuleType:
-    """``backend.reports.services.loc``: the one LOC / test-path classifier every study table uses.
-
-    TEMPORARY (U1): ``reports/services/__init__`` still imports the v2 report generators, so until WP-02b
-    re-points them the module file is loaded on its own (same code, no copy of the rules).
-    """
-    try:
-        from backend.reports.services import loc
-    except ImportError:
-        path = Path(__file__).resolve().parents[2] / "reports" / "services" / "loc.py"
-        spec = importlib.util.spec_from_file_location("backend.reports.services._loc_u1", path)
-        if spec is None or spec.loader is None:
-            raise
-        loc = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(loc)
-    return loc
-
-
 def source_loc(path: str, text: str | None) -> int:
     """Source LOC of one file: 0 for tests, lockfiles, manifests, docs and other non-source files.
 
-    Delegates to ``reports.services.loc.source_loc`` once WP-02b has added it; until then the same rules
-    are applied from ``is_test_path`` / ``is_source_file`` (non-blank, non-comment lines).
+    Delegates to ``reports.services.loc.source_loc`` (the one rule set every study table uses).
     """
-    rules = _reports_loc()
-    shared = getattr(rules, "source_loc", None)
-    if shared is not None:
-        return int(shared(path, text))
-    if not text or rules.is_test_path(path) or not rules.is_source_file(path):
-        return 0
-    prefix = rules._COMMENT_PREFIX_BY_EXT.get(rules._ext(path), "#")  # noqa: SLF001
-    return rules._count_lines(text, prefix)  # noqa: SLF001
+    from backend.reports.services import loc as rules
+
+    return int(rules.source_loc(path, text))
 
 
 def _counts_as_source(entry: FileEntry) -> bool:
-    rules = _reports_loc()
+    from backend.reports.services import loc as rules
+
     return (
         not entry.excluded
         and not entry.is_test
@@ -575,14 +548,11 @@ def _read_texts(entries: Iterable[FileEntry], cache: _BlobCache) -> dict[str, st
     return {entry.path: cache.text(entry.blob) for entry in entries if entry.excluded != _BINARY and entry.blob}
 
 
-def run_views_code(
+def _bulk_entries(
     runs: QuerySet[GenerationRun] | Iterable[GenerationRun],
-    scope: CodeScope = "model",
-) -> dict[str, dict[str, str]]:
-    """Bulk reader for statistics: ``{run_id: {path: text}}`` with one row query and batched blob reads.
-
-    Every run is a key; a run without files maps to ``{}`` (the caller reports "not measured", never 0).
-    """
+    scope: str,
+) -> dict[str, list[FileEntry]]:
+    """``{run_id: files(scope)}`` with one ``RunFile`` query (parents of slot variants included for ``app``)."""
     _check_scope(scope)
     if isinstance(runs, QuerySet):
         triples = list(runs.values_list("pk", "kind", "parent_run_id"))
@@ -594,44 +564,48 @@ def run_views_code(
         if scope == "app" and kind in _SLOT_KINDS and parent_id
     }
     rows = _load_rows([str(pk) for pk, _, _ in triples] + list(parents.values()))
-    cache = _BlobCache()
-    result: dict[str, dict[str, str]] = {}
+    result: dict[str, list[FileEntry]] = {}
     for pk, _, _ in triples:
         run_id = str(pk)
         parent_id = parents.get(run_id)
-        entries = _select(scope, rows.get(run_id, []), rows.get(parent_id, []) if parent_id else None)
-        result[run_id] = _read_texts(entries, cache)
+        result[run_id] = _select(scope, rows.get(run_id, []), rows.get(parent_id, []) if parent_id else None)
     return result
 
 
-# ---------------------------------------------------------------------------
-# Current runs (temporary; WP-10's runs.queries.current_runs replaces it)
-# ---------------------------------------------------------------------------
+def run_views_files(
+    runs: QuerySet[GenerationRun] | Iterable[GenerationRun],
+    scope: CodeScope = "model",
+) -> dict[str, list[FileEntry]]:
+    """Bulk ``RunView.files(scope)``: ``{run_id: [FileEntry, ...]}`` with one ``RunFile`` query.
 
-
-def _current_runs_tmp(study: Study | Any, stage: str = "main") -> QuerySet[GenerationRun]:
-    """The current run of every cell of ``study`` at ``stage``: the **first usable** attempt, never a later one.
-
-    A cell without a usable run contributes its latest attempt, so attrition stays visible (its ``usable`` is
-    not True; consumers filter on it). ``beyond_plan`` runs are excluded. Temporary until WP-10 implements
-    ``runs.queries.current_runs``.
+    Same entries and order as ``files()`` (parent rows overlaid with origin ``parent`` for ``app`` of a
+    slot variant). Every run is a key; a run without files maps to ``[]``.
     """
-    from backend.generation.models import GenerationRun as Run
-
-    study_id = getattr(study, "pk", study)
-    rows = (
-        Run.objects.filter(study_id=study_id, cell__isnull=False, cell__stage=stage, beyond_plan=False)
-        .order_by("cell_id", F("cell_attempt").asc(nulls_last=True), "created_at", "pk")
-        .values_list("pk", "cell_id", "usable")
-    )
-    first_usable: dict[int, Any] = {}
-    latest: dict[int, Any] = {}
-    for pk, cell_id, usable in rows:
-        latest[cell_id] = pk
-        if usable and cell_id not in first_usable:
-            first_usable[cell_id] = pk
-    chosen = [first_usable.get(cell_id, pk) for cell_id, pk in latest.items()]
-    return Run.objects.filter(pk__in=chosen)
+    return _bulk_entries(runs, scope)
 
 
-current_runs = _current_runs_tmp
+def run_views_code(
+    runs: QuerySet[GenerationRun] | Iterable[GenerationRun],
+    scope: CodeScope = "model",
+) -> dict[str, dict[str, str]]:
+    """Bulk reader for statistics: ``{run_id: {path: text}}`` with one row query and batched blob reads.
+
+    Every run is a key; a run without files maps to ``{}`` (the caller reports "not measured", never 0).
+    """
+    cache = _BlobCache()
+    return {run_id: _read_texts(entries, cache) for run_id, entries in _bulk_entries(runs, scope).items()}
+
+
+# ---------------------------------------------------------------------------
+# Current runs (``runs.queries.current_runs``)
+# ---------------------------------------------------------------------------
+
+
+def current_runs(study: Study | Any, stage: str = "main") -> QuerySet[GenerationRun]:
+    """The current run of every cell of ``study`` at ``stage`` (``runs.queries.current_runs``).
+
+    Imported lazily: ``runs.queries`` imports the models at module level, ``runs.view`` must not.
+    """
+    from backend.generation.runs.queries import current_runs as _current_runs
+
+    return _current_runs(study, stage)

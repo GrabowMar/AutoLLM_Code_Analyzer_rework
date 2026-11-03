@@ -1,0 +1,11 @@
+name: SQL injection probe exploited
+description: Maps the evaluation's SQL-injection probes (CWE-89) of the variant to a feature.
+content:
+  engine: probe
+  languages: []
+  rule: ''
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-sqli
+  polarity: insecure
+  cwe: [cwe-89]
+  description: A CWE-89 probe was exploited against the assembled app.

@@ -1,0 +1,11 @@
+name: Reflected cross-site scripting probe exploited
+description: Maps the evaluation's xss_reflected probes (CWE-79) of the variant to a feature (one per probe kind).
+content:
+  engine: probe
+  languages: []
+  rule: 'kind:xss_reflected'
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-xss-reflected
+  polarity: insecure
+  cwe: [cwe-79]
+  description: A xss_reflected probe was exploited against the assembled app.

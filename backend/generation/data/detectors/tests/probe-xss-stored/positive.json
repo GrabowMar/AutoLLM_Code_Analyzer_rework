@@ -1,0 +1,17 @@
+{
+  "probes": [
+    {
+      "id": "p-xss_stored",
+      "cwe": "cwe-79",
+      "kind": "xss_stored",
+      "status": "exploited",
+      "evidence": "fixture"
+    },
+    {
+      "id": "p-other",
+      "cwe": "cwe-611",
+      "kind": "xxe",
+      "status": "not_exploited"
+    }
+  ]
+}

@@ -9,7 +9,7 @@
 	 *
 	 * Props: `result` (PairwiseBlockResult), `section`, `ctx`.
 	 */
-	import StudyFigure from '$lib/components/experiments/study/StudyFigure.svelte';
+	import StudyFigure from '$lib/components/studies/study/StudyFigure.svelte';
 	import type { BtEntry, PairwiseBlockResult } from '$lib/api/human-eval';
 	import { formatP, plural, symmetricDomain } from '../../format';
 	import AgreementLine from './AgreementLine.svelte';

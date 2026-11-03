@@ -11,14 +11,12 @@ import { toneClasses } from "$lib/constants/colors";
 import type {
   RulePrevalence,
   RunPhase,
-  RunSetup,
   RunStatus,
   RunTarget,
   RunToolResult,
   ScopeCounts,
   SkipReason,
 } from "$lib/api/runs";
-import { modelPathSegment } from "$lib/api/models";
 import { shortModelName } from "$lib/components/table";
 
 export const ACTIVE_STATUSES: ReadonlySet<string> = new Set([
@@ -68,17 +66,18 @@ export function phaseLabel(phase: string | null | undefined): string {
 export interface ResultState {
   label: string;
   tone: Tone;
-  /** Whether the result says something about the code (completed, or nothing to read). */
+  /** Whether the result says something about the code (completed only; nothing to read is not measured). */
   measured: boolean;
   /** Work in flight. */
   live: boolean;
 }
 
 const SKIP_STATES: Record<SkipReason, ResultState> = {
+  // Nothing in the tree for the tool to read: not measured, never a clean zero (spec 8.8).
   not_applicable: {
     label: "Not applicable",
     tone: "neutral",
-    measured: true,
+    measured: false,
     live: false,
   },
   app_not_running: {
@@ -278,8 +277,8 @@ export function nonCodeText(scopes: ScopeCounts | null | undefined): string {
 /**
  * The run Overview's "Tools measured" subtitle of a finished run. A tool
  * with no result at all (the run failed while preparing, or was cancelled
- * while queued) measured nothing too, so "all measured" needs every tool
- * measured.
+ * while queued) measured nothing too, and so did a not-applicable tool
+ * (nothing to read), so "all measured" needs every tool completed.
  */
 export function toolsMeasuredNote(c: {
   total: number;
@@ -287,12 +286,17 @@ export function toolsMeasuredNote(c: {
   failed: number;
   notApplicable: number;
 }): string {
-  const notMeasured = Math.max(0, c.total - c.measured - c.failed);
+  const notMeasured = Math.max(
+    0,
+    c.total - c.measured - c.failed - c.notApplicable,
+  );
   return (
     [
       c.failed ? `${c.failed} failed` : "",
       notMeasured ? `${notMeasured} not measured` : "",
-      c.notApplicable ? `${c.notApplicable} had nothing to read` : "",
+      c.notApplicable
+        ? `${c.notApplicable} had nothing to read (not measured)`
+        : "",
     ]
       .filter(Boolean)
       .join(" · ") || "all measured"
@@ -320,8 +324,9 @@ export function truncationNote(parts: readonly string[]): string {
 export interface RunToolCounts {
   /** Tools in the run. */
   total: number;
-  /** Completed, plus skipped as not applicable (nothing to read: a true zero). */
+  /** Completed tools only. */
   measured: number;
+  /** Skipped as not applicable (nothing in the tree to read): not measured, never a zero. */
   notApplicable: number;
   failed: number;
   /** Skipped because the app was down, the tool unavailable or the run cancelled: said nothing. */
@@ -344,12 +349,16 @@ export function runToolCounts(run: {
   if (isActive(run.status) || s.tools_run == null) return null;
   const n = (v: unknown) => (typeof v === "number" ? v : 0);
   const notApplicable = n(s.tools_not_applicable);
-  const measured = n(s.tools_completed) + notApplicable;
-  // Older summaries lack the skip counters: what neither completed nor failed was not measured.
+  const measured = n(s.tools_completed);
+  // Older summaries lack the skip counters: what neither completed, failed nor was
+  // not applicable said nothing either.
   const unmeasured =
     typeof s.tools_unmeasured === "number"
       ? s.tools_unmeasured
-      : Math.max(0, run.tool_slugs.length - measured - n(s.tools_failed));
+      : Math.max(
+          0,
+          run.tool_slugs.length - measured - notApplicable - n(s.tools_failed),
+        );
   return {
     total: run.tool_slugs.length,
     measured,
@@ -362,17 +371,21 @@ export function runToolCounts(run: {
 
 // --- Targets ------------------------------------------------------------------------
 
-/** Two-line identity of what a run analyzed: app (or pasted code) and model · stack. */
+/**
+ * Two-line identity of what a run analyzed: the generated run's task (or the
+ * pasted code / deleted app label) and model · stack.
+ */
 export function targetLines(target: RunTarget | null | undefined): {
   title: string;
   sub: string;
 } {
   if (!target) return { title: "—", sub: "" };
-  if (target.kind !== "job") return { title: target.label, sub: "" };
-  const title = target.app_name || target.stack_slug || "Generated app";
+  if (target.kind !== "run") return { title: target.label, sub: "" };
+  const title =
+    target.task_title || target.stack_ref || target.label || "Generated app";
   const sub = [
     shortModelName(target.model_name),
-    target.app_name ? target.stack_slug : "",
+    target.task_title ? target.stack_ref : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -425,80 +438,6 @@ export function toCsv(rows: (string | number | null | undefined)[][]): string {
         .join(","),
     )
     .join("\r\n");
-}
-
-// --- Run context ----------------------------------------------------------------------
-
-/** One part of a run's setup line; `href` links it, `title` explains it. */
-export interface SetupItem {
-  label: string;
-  href?: string;
-  title?: string;
-}
-
-/**
- * The run header's setup line: the design cell (experiment › condition ›
- * repeat k/N) and the method (model · harness · app). Parts the job does not
- * have are left out; a repeat beyond the planned N says so.
- */
-export function setupItems(job: RunSetup): {
-  cell: SetupItem[];
-  method: SetupItem[];
-} {
-  const cell: SetupItem[] = [];
-  if (job.experiment_id) {
-    cell.push({
-      label: job.experiment_name || "Experiment",
-      href: `/experiments/${job.experiment_id}`,
-      title: "Open the experiment",
-    });
-  }
-  if (job.condition_label) {
-    cell.push({
-      label: job.condition_label,
-      title: "Experiment condition (arm)",
-    });
-  }
-  if (job.repeat_index != null) {
-    const k = job.repeat_index + 1;
-    const n = job.planned_repeats;
-    cell.push({
-      label:
-        n == null
-          ? `repeat ${k}`
-          : k > n
-            ? `repeat ${k} (beyond the ${n} planned)`
-            : `repeat ${k}/${n}`,
-      title: "Trial of this (condition, app) cell / repeats planned at launch",
-    });
-  }
-  const method: SetupItem[] = [];
-  if (job.model_id || job.model_name) {
-    method.push({
-      label: shortModelName(job.model_name || job.model_id),
-      href: `/models/${job.model_slug || modelPathSegment(job.model_id)}`,
-      title: job.model_id,
-    });
-  }
-  if (job.harness) {
-    method.push({
-      label: job.harness,
-      title: job.bundle_key
-        ? `Method: ${job.bundle_key}`
-        : "Coding-agent harness",
-    });
-  } else if (job.bundle_key) {
-    method.push({
-      label: job.bundle_key,
-      title: "Generation profile / method",
-    });
-  }
-  method.push({
-    label: job.app_name || job.stack_slug || "App",
-    href: `/applications/${job.id}`,
-    title: "Open the app",
-  });
-  return { cell, method };
 }
 
 /** "81 in .tmp/ · 3 in node_modules/": where the stored files the analysis left out are. */

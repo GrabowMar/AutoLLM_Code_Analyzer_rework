@@ -1,0 +1,360 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Subscription billing console
+summary: A team console for customer subscriptions, invoices and failed-payment recovery.
+category: commerce
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Subscription
+  fields:
+  - {name: customer_name, type: string, required: true, max_length: 200}
+  - name: plan
+    type: enum
+    required: true
+    enum: [starter, growth, enterprise]
+  - {name: monthly_amount, type: float, required: true, min: 0.01, max: 100000}
+  - {name: renewal_date, type: date, required: true}
+  - name: status
+    type: enum
+    enum: [trial, active, past_due, cancelled]
+    default: trial
+  - {name: failed_payment_count, type: int, default: 0}
+  - {name: created_at, type: datetime}
+- name: Invoice
+  fields:
+  - {name: subscription_id, type: ref, ref: Subscription}
+  - {name: amount_due, type: float, min: 0.01}
+  - {name: due_date, type: date}
+  - name: status
+    type: enum
+    enum: [open, paid]
+    default: open
+  - {name: paid_at, type: datetime}
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: subs.create
+  method: POST
+  path: /api/subscriptions
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      customer_name: {type: string, maxLength: 200, minLength: 1}
+      plan:
+        type: string
+        enum: [starter, growth, enterprise]
+      monthly_amount: {type: number, minimum: 0.01, maximum: 100000}
+      renewal_date: {type: string, format: date}
+      status:
+        type: [string, 'null']
+        enum: [trial, active, past_due, cancelled, null]
+    required: [customer_name, plan, monthly_amount, renewal_date]
+  response_schema:
+    type: object
+    required: [id, customer_name, plan, monthly_amount, renewal_date]
+    properties:
+      id:
+        type: [integer, string]
+      customer_name: {type: string, maxLength: 200, minLength: 1}
+      plan:
+        type: string
+        enum: [starter, growth, enterprise]
+      monthly_amount: {type: number, minimum: 0.01, maximum: 100000}
+      renewal_date: {type: string, format: date}
+      status:
+        type: [string, 'null']
+        enum: [trial, active, past_due, cancelled, null]
+      failed_payment_count:
+        type: [integer, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400]
+- id: subs.list
+  method: GET
+  path: /api/subscriptions
+  auth: user
+  query:
+  - {name: q, type: string, semantics: search}
+  - name: status
+    type: enum
+    semantics: filter
+    enum: [trial, active, past_due, cancelled]
+  - name: plan
+    type: enum
+    semantics: filter
+    enum: [starter, growth, enterprise]
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, customer_name, plan, monthly_amount, renewal_date]
+          properties:
+            id:
+              type: [integer, string]
+            customer_name: {type: string, maxLength: 200, minLength: 1}
+            plan:
+              type: string
+              enum: [starter, growth, enterprise]
+            monthly_amount: {type: number, minimum: 0.01, maximum: 100000}
+            renewal_date: {type: string, format: date}
+            status:
+              type: [string, 'null']
+              enum: [trial, active, past_due, cancelled, null]
+            failed_payment_count:
+              type: [integer, 'null']
+            created_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: subs.get
+  method: GET
+  path: /api/subscriptions/{id}
+  auth: user
+  response_schema:
+    type: object
+    required: [id, customer_name, plan, monthly_amount, renewal_date]
+    properties:
+      id:
+        type: [integer, string]
+      customer_name: {type: string, maxLength: 200, minLength: 1}
+      plan:
+        type: string
+        enum: [starter, growth, enterprise]
+      monthly_amount: {type: number, minimum: 0.01, maximum: 100000}
+      renewal_date: {type: string, format: date}
+      status:
+        type: [string, 'null']
+        enum: [trial, active, past_due, cancelled, null]
+      failed_payment_count:
+        type: [integer, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [404]
+- id: subs.update
+  method: PATCH
+  path: /api/subscriptions/{id}
+  auth: user
+  request_schema:
+    type: object
+    properties:
+      customer_name: {type: string, maxLength: 200, minLength: 1}
+      plan:
+        type: string
+        enum: [starter, growth, enterprise]
+      monthly_amount: {type: number, minimum: 0.01, maximum: 100000}
+      renewal_date: {type: string, format: date}
+      status:
+        type: [string, 'null']
+        enum: [trial, active, past_due, cancelled, null]
+  response_schema:
+    type: object
+    required: [id, customer_name, plan, monthly_amount, renewal_date]
+    properties:
+      id:
+        type: [integer, string]
+      customer_name: {type: string, maxLength: 200, minLength: 1}
+      plan:
+        type: string
+        enum: [starter, growth, enterprise]
+      monthly_amount: {type: number, minimum: 0.01, maximum: 100000}
+      renewal_date: {type: string, format: date}
+      status:
+        type: [string, 'null']
+        enum: [trial, active, past_due, cancelled, null]
+      failed_payment_count:
+        type: [integer, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400, 404, 409]
+- id: invoices.list
+  method: GET
+  path: /api/subscriptions/{id}/invoices
+  auth: user
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: [integer, string]
+            subscription_id:
+              type: [integer, 'null']
+            amount_due:
+              type: [number, 'null']
+              minimum: 0.01
+            due_date:
+              type: [string, 'null']
+              format: date
+            status:
+              type: [string, 'null']
+              enum: [open, paid, null]
+            paid_at:
+              type: [string, 'null']
+              format: date-time
+  errors: [404]
+- id: invoices.create
+  method: POST
+  path: /api/subscriptions/{id}/invoices
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      amount_due:
+        type: [number, 'null']
+        minimum: 0.01
+      due_date:
+        type: [string, 'null']
+        format: date
+  response_schema:
+    type: object
+    required: [id]
+    properties:
+      id:
+        type: [integer, string]
+      subscription_id:
+        type: [integer, 'null']
+      amount_due:
+        type: [number, 'null']
+        minimum: 0.01
+      due_date:
+        type: [string, 'null']
+        format: date
+      status:
+        type: [string, 'null']
+        enum: [open, paid, null]
+      paid_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400, 404, 409]
+- id: collections.record
+  method: POST
+  path: /api/subscriptions/{id}/collections
+  auth: user
+  request_schema:
+    type: object
+    properties:
+      outcome:
+        type: string
+        enum: [failed, succeeded]
+    required: [outcome]
+  response_schema:
+    type: object
+    required: [id, customer_name, plan, monthly_amount, renewal_date]
+    properties:
+      id:
+        type: [integer, string]
+      customer_name: {type: string, maxLength: 200, minLength: 1}
+      plan:
+        type: string
+        enum: [starter, growth, enterprise]
+      monthly_amount: {type: number, minimum: 0.01, maximum: 100000}
+      renewal_date: {type: string, format: date}
+      status:
+        type: [string, 'null']
+        enum: [trial, active, past_due, cancelled, null]
+      failed_payment_count:
+        type: [integer, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400, 404]
+- id: stats.public
+  method: GET
+  path: /api/public/stats
+  auth: public
+  response_schema:
+    type: object
+    properties:
+      mrr: {type: number}
+      counts: {type: object}
+    required: [mrr, counts]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.landing
+  text: A public page with MRR and the number of subscriptions per status.
+  endpoints: [stats.public]
+- id: ui.browse
+  text: A subscription table with status tabs, a plan filter, a customer search and paging.
+  endpoints: [subs.list]
+- id: ui.detail
+  text: A subscription page with an edit form, the invoice history, an 'Issue invoice' form and buttons to record
+    a failed or successful collection run.
+  endpoints: [subs.get, subs.update, invoices.list, invoices.create, collections.record]
+features: [auth, search, filter, pagination, money]
+surfaces: [cwe-862, cwe-89, cwe-20, cwe-362, cwe-840, cwe-79, cwe-209]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: collections.failed.past_due
+  category: functional
+  endpoint: collections.record
+  setup:
+  - request:
+      method: POST
+      path: /api/subscriptions
+      json: {customer_name: Acme, plan: growth, monthly_amount: 99, renewal_date: '2099-01-01', status: active}
+    expect_status: 201
+    capture: {sid: $.id}
+  - request:
+      method: POST
+      path: /api/subscriptions/{sid}/invoices
+      json: {}
+    expect_status: 201
+  request:
+    method: POST
+    path: /api/subscriptions/{sid}/collections
+    json: {outcome: failed}
+  expect:
+    status: 200
+    json_contains: {status: past_due, failed_payment_count: 1}
+  stated_in: [exhaustive]
+probes:
+- id: probe.subs.sqli
+  cwe: cwe-89
+  kind: sqli_boolean
+  endpoint: subs.list
+  params: {param: q}

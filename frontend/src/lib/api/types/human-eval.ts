@@ -118,12 +118,11 @@ export interface RatingBlock {
   comment: CommentMode;
 }
 
-export type RequirementSource =
-  | "backend"
-  | "frontend"
-  | "admin"
-  | "api"
-  | "admin_api";
+/**
+ * Spec sections a requirements block turns into checklist items: `frontend` (the task's UI
+ * requirements), `api` (non-admin endpoints) and `admin_api` (endpoints with `auth == "admin"`).
+ */
+export type RequirementSource = "frontend" | "api" | "admin_api";
 /** blocked: an app defect prevents testing (scores 0); cannot_test: the tester could not test it (excluded). */
 export type RequirementVerdict =
   | "met"
@@ -142,7 +141,7 @@ export interface RequirementsBlock {
   type: "requirements";
   title: string;
   instructions?: string;
-  /** Spec sections turned into checklist items (from the job's frozen spec snapshot). */
+  /** Spec sections turned into checklist items (from the run's pinned task version). */
   sources: RequirementSource[];
   /** Extra items added by the researcher, identical for every app. */
   custom: CustomRequirement[];
@@ -314,11 +313,14 @@ export interface TaskDesign {
 // Settings (task.settings)
 // ---------------------------------------------------------------------------
 
-/** Participants never see model / condition / job ids (always; not configurable). */
+/** Participants never see model / condition / run ids (always; not configurable). */
 export interface BlindingSettings {
   show_spec: boolean;
   show_source_code: boolean;
-  /** Show the app's admin login (runtime builds use the contract default). */
+  /**
+   * Show the app's admin login. It is the run's real runtime credential (there is no default
+   * password); when the app has none the portal says "admin login not available".
+   */
   show_admin_credentials: boolean;
 }
 
@@ -343,9 +345,9 @@ export interface PairingSettings {
   strategy: PairingStrategy;
   /** random_k: target pairs per app (1..20). */
   k: number;
-  /** Only pair apps from different conditions (models when there is no experiment). */
+  /** Only pair apps from different conditions (models when there is no study). */
   cross_condition_only: boolean;
-  /** vs_baseline: ExperimentCondition id; default = the experiment's baseline. */
+  /** vs_baseline: StudyCondition id; default = the study's baseline condition. */
   baseline_condition_id: number | null;
 }
 
@@ -581,7 +583,7 @@ export interface TaskListItem {
   status: TaskStatus;
   mode: TaskMode;
   counts: TaskCounts;
-  experiment: { id: string; name: string } | null;
+  study: StudyRef | null;
   opens_at: string | null;
   closes_at: string | null;
   created_at: string;
@@ -624,14 +626,15 @@ export interface TaskCreateInput {
   preset?: string;
   design?: TaskDesign;
   settings?: TaskSettings;
-  experiment_id?: string | null;
-  job_ids?: string[];
+  study_id?: string | null;
+  /** GenerationRun ids of the initial app pool. */
+  run_ids?: string[];
   opens_at?: string | null;
   closes_at?: string | null;
 }
 
 export type TaskUpdateInput = Partial<
-  Omit<TaskCreateInput, "preset" | "job_ids">
+  Omit<TaskCreateInput, "preset" | "run_ids">
 >;
 
 export interface DesignValidation {
@@ -642,37 +645,65 @@ export interface DesignValidation {
   settings: TaskSettings | null;
 }
 
+export interface StudyRef {
+  id: string;
+  name: string;
+}
+
+/**
+ * Evaluation status of an app as the human-eval module shows it: `tested` (a measured EvalSuite
+ * run), the evaluation status (`pending`, `running`, `not_measured`, `error`), or the run outcome
+ * when the app was never deployed or evaluated (`build_fail`, `start_fail`, `infra_error`, ...).
+ */
+export type FunctionalStatus =
+  | "tested"
+  | "pending"
+  | "running"
+  | "not_measured"
+  | "error"
+  | "build_fail"
+  | "start_fail"
+  | "infra_error"
+  | (string & {});
+
 export interface FunctionalSummary {
-  /** conformance status (passed, failed, build_failed, …) or null */
-  status: string | null;
+  /** null: no evaluation and no outcome recorded. */
+  status: FunctionalStatus | null;
+  /** Set only for a measured evaluation; null is "not measured", never 0. */
   pass_rate: number | null;
   /** true / false / null (unknown) */
   deployed: boolean | null;
-  source: "conformance" | "smoke" | null;
+  source: "eval_suite" | null;
 }
 
-export interface CandidateJob {
+/** A completed app run (`app_agentic` or slot variant) that can join a task's pool. */
+export interface CandidateRun {
+  /** GenerationRun id. */
   id: string;
   model_name: string;
   model_id: string;
+  /** Task title and slug. */
   app_name: string;
   app_slug: string;
-  experiment: { id: string; name: string } | null;
+  study: StudyRef | null;
   condition: { id: number; label: string } | null;
   repeat_index: number | null;
-  mode: string;
+  /** Run kind (`app_agentic`, `slot_*`). */
+  kind: string;
+  /** Stack profile ref, when known. */
+  stack: string | null;
   created_at: string;
   functional: FunctionalSummary;
-  /** A RUNNING llm-* container exists for the job. */
+  /** A RUNNING llm-* container exists for the run. */
   running: boolean;
 }
 
-export interface CandidateJobQuery {
-  experiment_id?: string;
+export interface CandidateRunQuery {
+  study_id?: string;
   app_slug?: string;
   model_id?: string;
   search?: string;
-  /** only the current attempt per experiment cell (default true) */
+  /** only the current run per study cell (default true) */
   current_only?: boolean;
   page?: number;
   per_page?: number;
@@ -681,7 +712,8 @@ export interface CandidateJobQuery {
 export interface TaskApp {
   id: string;
   label: string;
-  job_id: string | null;
+  /** GenerationRun id (null once the run was deleted). */
+  run_id: string | null;
   group_key: string;
   position: number;
   is_active: boolean;
@@ -703,9 +735,9 @@ export interface TaskApp {
 }
 
 export interface TaskAppsAddInput {
-  job_ids?: string[];
-  experiment_id?: string;
-  /** with experiment_id: only the current attempt per cell (default true) */
+  run_ids?: string[];
+  study_id?: string;
+  /** with study_id: only the current run per main-stage cell (default true) */
   current_only?: boolean;
 }
 
@@ -974,7 +1006,7 @@ export interface ResultApp {
   model_name: string;
   condition_label: string;
   app_slug: string;
-  job_id: string | null;
+  run_id: string | null;
   n_submitted: number;
   n_unavailable: number;
 }
@@ -1067,7 +1099,7 @@ export interface RequirementsBlockResult {
   agreement: Agreement;
   /**
    * Convergent validity against the automated conformance suite, on within-spec ranks, restricted
-   * to the modal (evaluator_version, tester_sha256). scope "endpoints" (primary): the block's
+   * to the modal (evaluator_version, tester_version). scope "endpoints" (primary): the block's
    * api / admin_api items vs the matching check categories (api → api, admin_api → admin);
    * "overall" (secondary, different constructs).
    */
@@ -1546,12 +1578,15 @@ export interface AssignmentContext {
   skip_hosting?: Record<string, { state: HostingState; error: string }>;
 }
 
+/** The participant spec view of an app: the task as the model got it. */
 export interface AppSpecView {
+  /** Task title. */
   name: string;
+  /** Task summary. */
   description: string;
-  backend_requirements: string[];
+  /** The prose variant the model was given. */
+  prose: string;
   frontend_requirements: string[];
-  admin_requirements: string[];
   api_endpoints: {
     method: string;
     path: string;
@@ -1572,7 +1607,13 @@ export interface PortalApp {
   label: string;
   hosting: HostingInfo;
   spec: AppSpecView | null;
+  /** The app's real runtime admin login; null when hidden or not available. */
   admin_credentials: { username: string; password: string } | null;
+  /**
+   * `available` when shown; `not_measured` when the app has no runtime credentials record (show
+   * "admin login not available", never a default password); null when blinding hides it.
+   */
+  admin_credentials_status: "available" | "not_measured" | null;
   has_source: boolean;
 }
 

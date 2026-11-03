@@ -86,6 +86,28 @@ def sample_builder(monkeypatch, settings):
 
 
 @pytest.mark.django_db
+def test_build_passes_the_reports_base_pins(sample_builder, monkeypatch):
+    """``build_sample`` hands ``report.build_context_args()`` to the backend (frozen free-choice bases)."""
+    plain = sample_builds.prepare_build_dir
+
+    def prepare(job, path, *, report):
+        plain(job, path, report=report)
+        report.base_pins["python:3.13-slim"] = "python:3.13-slim@sha256:" + "b" * 64
+
+    monkeypatch.setattr(sample_builds, "prepare_build_dir", prepare)
+    sample_builds.build_sample(sample_builder.job, client=sample_builder.client)
+    contexts = list(sample_builder.builds[0]["build_contexts"])
+    assert contexts
+    assert any("python:3.13-slim@sha256:" + "b" * 64 in arg for arg in contexts)
+
+
+@pytest.mark.django_db
+def test_unpinned_build_passes_no_named_contexts(sample_builder):
+    sample_builds.build_sample(sample_builder.job, client=sample_builder.client)
+    assert list(sample_builder.builds[0]["build_contexts"]) == []
+
+
+@pytest.mark.django_db
 def test_identical_sample_reuses_image_without_rebuilding(sample_builder):
     env = sample_builder
     first = sample_builds.build_sample(env.job, client=env.client)

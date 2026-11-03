@@ -1,0 +1,15 @@
+name: Free choice
+description: The model picks language, framework, frontend and database, and writes its own Dockerfile from the allowed base images.
+content:
+  choice_mode: free
+  backend: {language: free, framework: free, runtime: free}
+  frontend: {framework: free, language: free, build_tool: free}
+  database: free
+  run_contract: {port: 8000, api_prefix: /api, health_path: /api/health, static_serving: backend, data_dir: ./data, start: dockerfile}
+  brief_fragment: run-contract-free@1
+  adherence:
+    backend_markers: []
+    frontend_markers: []
+    db_markers: []
+  # Any language may be picked (a JVM stack included), so the sandbox gets the larger minimum.
+  resources: {min_memory: 3g, min_cpus: 2.0}

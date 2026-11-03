@@ -25,8 +25,6 @@
 		spec
 			? [
 					{ title: 'Frontend', items: spec.frontend_requirements ?? [] },
-					{ title: 'Backend', items: spec.backend_requirements ?? [] },
-					{ title: 'Admin', items: spec.admin_requirements ?? [] },
 				].filter((l) => l.items.length > 0)
 			: []
 	);
@@ -72,6 +70,11 @@
 				</Button>
 			</dl>
 		</section>
+	{:else if app.admin_credentials_status === 'not_measured'}
+		<p class="flex items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-muted-foreground">
+			<KeyRound class="size-4" aria-hidden="true" />
+			Admin login not available for {app.label}.
+		</p>
 	{/if}
 
 	{#if spec}
@@ -81,6 +84,12 @@
 				<p class="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">{spec.description}</p>
 			{/if}
 		</section>
+		{#if spec.prose}
+			<section class="space-y-2">
+				<SectionHeading size="sm" level={3} title="Brief given to the model" />
+				<p class="whitespace-pre-line break-words text-sm leading-relaxed">{spec.prose}</p>
+			</section>
+		{/if}
 		{#each lists as list (list.title)}
 			<section class="space-y-2">
 				<SectionHeading size="sm" level={3} title={list.title} count={list.items.length} />
@@ -118,7 +127,7 @@
 				</div>
 			</section>
 		{/each}
-	{:else if !app.admin_credentials}
+	{:else if !app.admin_credentials && app.admin_credentials_status !== 'not_measured'}
 		<EmptyState compact title="No specification shown" description="This study does not show the app's specification." />
 	{/if}
 </div>

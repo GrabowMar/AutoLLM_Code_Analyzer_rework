@@ -1,0 +1,14 @@
+name: Django 5 + Vue (SQLite)
+description: Django 5 (Python 3.13) API serving a Vite Vue (TypeScript) build.
+content:
+  choice_mode: fixed
+  backend: {language: python, framework: django, runtime: python3.13}
+  frontend: {framework: vue, language: ts, build_tool: vite}
+  database: sqlite
+  run_contract: {port: 8000, api_prefix: /api, health_path: /api/health, static_serving: backend, data_dir: ./data, start: dockerfile}
+  brief_fragment: stack-django-vue@1
+  adherence:
+    backend_markers: [django]
+    frontend_markers: [vue]
+    db_markers: [sqlite3]
+  resources: {min_memory: 2g, min_cpus: 1.0}

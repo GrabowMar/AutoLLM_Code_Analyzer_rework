@@ -1,0 +1,11 @@
+name: JWT with alg=none accepted probe exploited
+description: Maps the evaluation's jwt_none_alg probes (CWE-347) of the variant to a feature (one per probe kind).
+content:
+  engine: probe
+  languages: []
+  rule: 'kind:jwt_none_alg'
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-jwt-none-alg
+  polarity: insecure
+  cwe: [cwe-347]
+  description: A jwt_none_alg probe was exploited against the assembled app.

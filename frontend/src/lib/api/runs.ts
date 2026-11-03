@@ -33,18 +33,23 @@ export type SkipReason =
   | "cancelled";
 
 export interface RunTarget {
-  /** "job": a generated app; "code": pasted files; "deleted": the app was deleted since. */
-  kind: "job" | "code" | "deleted";
+  /** "run": a generated app (GenerationRun); "code": pasted files; "deleted": the app was deleted since. */
+  kind: "run" | "code" | "deleted";
   label: string;
+  /** The GenerationRun id (the key keeps the AnalysisRun FK name, D5). */
   job_id?: string | null;
+  /** GenerationRun status, outcome and kind. */
   job_status?: string;
-  mode?: string;
+  outcome?: string;
+  run_kind?: string;
   model_name?: string;
   model_id?: string;
-  app_name?: string;
-  app_slug?: string;
-  stack_slug?: string;
-  experiment_id?: string | null;
+  task_title?: string;
+  task_slug?: string;
+  /** Pinned refs (`slug@v`). */
+  task_ref?: string;
+  stack_ref?: string;
+  study_id?: string | null;
   file_count?: number | null;
 }
 
@@ -87,12 +92,14 @@ export interface ToolResultDetail extends RunToolResult {
  * Run summary. Finished runs: `total_findings`, `reported_severity_counts`
  * (levels as the tools printed them, case-folded), `unrated_findings`,
  * `tools_run` / `tools_completed` / `tools_failed`, `tools_not_applicable`
- * (nothing to read: measured, a true zero) / `tools_unmeasured` (app not
- * running, tool unavailable, cancelled: measured nothing), `code_findings` /
- * `dependency_findings` (known-vulnerability advisories) / `runtime_findings`
- * (dynamic tools) — each `null` when no tool of that scope measured the run
- * (unmeasured, not zero) —, `truncated_inputs` (`backend`, `frontend`,
- * `agent`: the agent's final response), `metrics_by_tool` (detail only).
+ * (nothing in the tree to read: not measured, never a zero) / `tools_unmeasured`
+ * (app not running, tool unavailable, cancelled: measured nothing),
+ * `tool_applicable` (`{slug: true | false | null}`; null = not decided),
+ * `code_findings` / `dependency_findings` (known-vulnerability advisories) /
+ * `runtime_findings` (dynamic tools) — each `null` when no tool of that scope
+ * measured the run (unmeasured, not zero) —, `truncated_inputs`
+ * (`[validity.termination]` when the generation run was truncated),
+ * `metrics_by_tool` (detail only).
  * `severity_counts` is a normalization kept for aggregate statistics — never
  * display it.
  */
@@ -120,8 +127,14 @@ export interface AnalysisRunListItem {
   tool_slugs: string[];
   summary: RunSummary;
   error_message: string;
+  /** The analyzed GenerationRun (FK name kept, D5). */
   generation_job_id: string | null;
-  batch_id: string | null;
+  /** Shared by the runs launched together (`POST runs/batch/`). */
+  launch_id: string | null;
+  /** "app" for a generation run (the whole app tree, spec 8.8); "" for pasted code. */
+  code_scope: "app" | "";
+  /** H(sorted analyzed paths). */
+  code_scope_paths_sha: string;
   target: RunTarget;
   created_at: string;
   started_at: string | null;
@@ -133,8 +146,20 @@ export interface AnalysisRunListItem {
 
 export interface AnalysisRunDetail extends AnalysisRunListItem {
   results: RunToolResult[];
-  source_files: { path: string; lines: number }[];
+  /** `origin`: the file's RunFile origin (`parent` for a slot variant's overlaid file); "" for pasted code. */
+  source_files: { path: string; lines: number; origin: FileOrigin | "" }[];
 }
+
+/**
+ * RunFile origin of an analyzed file. Model/slot attribution happens at stats time from this
+ * tag; "" (a URL, a package-only advisory, pasted code) is unattributed, never model code.
+ */
+export type FileOrigin =
+  | "starter"
+  | "authored"
+  | "modified"
+  | "slot"
+  | "parent";
 
 export interface RunFinding {
   id: string;
@@ -164,6 +189,8 @@ export interface RunFinding {
    * scripts — the study's `is_test_path`): counted apart from the app's code.
    */
   in_tests?: boolean;
+  /** RunFile origin of the finding's file; "" when the path is not a file of the analyzed tree. */
+  file_origin?: FileOrigin | "";
 }
 
 export interface Paginated<T> {
@@ -214,6 +241,7 @@ export interface RunStats {
 }
 
 export interface RunPreviewTarget {
+  /** GenerationRun id; null for pasted code. */
   job_id: string | null;
   label: string;
   files: number;
@@ -248,8 +276,10 @@ export interface ListRunsParams {
   per_page?: number;
   /** Comma-separated statuses; "active" = pending + running. */
   status?: string;
+  /** Analyses of one GenerationRun. */
   generation_job_id?: string;
-  batch_id?: string;
+  /** Runs launched together (`createBatch`). */
+  launch_id?: string;
   tool_slug?: string;
   search?: string;
   sort?:
@@ -356,7 +386,7 @@ export async function createBatch(payload: {
   name?: string;
   tool_slugs: string[];
   generation_job_ids: string[];
-}): Promise<{ batch_id: string; run_ids: string[] }> {
+}): Promise<{ launch_id: string; run_ids: string[] }> {
   const res = await post("/analysis/runs/batch/", payload);
   return res.json();
 }
@@ -463,37 +493,54 @@ export async function getAllRunFindings(
 
 // --- Context ------------------------------------------------------------------------
 
-/** The generation setup behind an analyzed app (its design cell and method). */
+/** The generation setup behind an analyzed app (read through RunView): its study cell and treatment. */
 export interface RunSetup {
+  /** GenerationRun id. */
   id: string;
-  mode: string;
+  /** Run kind (`app_agentic`, `slot_*`, `reference`). */
+  kind: string;
   status: string;
+  outcome: string;
+  usable: boolean | null;
   /** LLMModel primary key (model pages), id string, display name, URL slug. */
   model_pk: number | null;
   model_id: string;
   model_name: string;
   model_slug: string;
-  app_id: number | null;
-  app_slug: string;
-  app_name: string;
-  stack_slug: string;
-  batch_id: string | null;
-  experiment_id: string | null;
-  experiment_name: string;
+  /** Pinned task version (`slug@v`), its slug and title, and the prose variant the model got. */
+  task_ref: string;
+  task_slug: string;
+  task_title: string;
+  prose_variant: string;
+  /** `task:<slug>@<v>` (app) or the slot target (slot). */
+  unit_key: string;
+  stack_ref: string;
+  study_id: string | null;
+  study_name: string;
   condition_id: number | null;
   condition_label: string;
-  /** 0-based trial within the (condition, app) cell. */
+  /** `pilot` | `main` | "" (ad hoc). */
+  stage: string;
+  /** 0-based repeat within the (condition, unit) cell. */
   repeat_index: number | null;
-  /** Repeats per cell planned at launch. */
+  /** The study's planned repeats per cell. */
   planned_repeats: number | null;
   harness: string | null;
-  bundle_key: string;
+  harness_version: string;
   config_fingerprint: string | null;
+  run_fingerprint: string | null;
 }
 
-/** Source size by the study's definition: non-empty, non-comment lines of source files. */
+/**
+ * Source size by the study's definition: non-empty, non-comment lines of source files. For a
+ * generation run the counted scope is `model` (what the model wrote); `app_total` is the source
+ * LOC of the whole app tree the tools read (starter included). Pasted code: scope `code`.
+ */
 export interface SourceLoc {
+  scope: "model" | "code";
   total: number;
+  /** Source LOC of the whole analyzed app tree; null for pasted code. */
+  app_total: number | null;
   files: number;
   /** `tests` is null when the code has no paths (unknown, not zero). */
   by_layer: {
@@ -545,7 +592,8 @@ export interface RulePrevalence {
   model_apps_measured: number | null;
 }
 
-export type ContextScope = "experiment" | "mine";
+/** `study`: the analyzed run's study (current runs, main stage); `mine`: the caller's apps. */
+export type ContextScope = "study" | "mine";
 
 export interface RunContext {
   run_id: string;
@@ -557,7 +605,7 @@ export interface RunContext {
   n: number;
   model_n: number | null;
   self_in_corpus: boolean;
-  /** The experiment corpus while the experiment still runs: the counts are interim. */
+  /** The study corpus while the study still runs: the counts are interim. */
   interim?: boolean;
   job: RunSetup | null;
   source_loc: SourceLoc | null;

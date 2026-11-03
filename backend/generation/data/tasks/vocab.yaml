@@ -1,0 +1,121 @@
+# Closed task vocabulary (spec 11.3). Not a library entity: WP-03's lint reads it.
+# - features: the only values allowed in TaskSpecContent.features (lint_unknown_feature).
+# - surfaces: the only CWE ids allowed in TaskSpecContent.surfaces and ProbeSpec.cwe (lint_unknown_surface).
+#   No surface has a fixed priority; probes and detectors are selected by these tags (D11).
+# - probe_requires: the tags a generic probe kind needs before `all_applicable` selects it (8.3); a kind
+#   applies when the task has any listed feature or any listed surface. WP-09's probes_catalog.yaml uses
+#   these tags. Empty lists on both sides mean "applies to every task".
+# Changing this file changes what lint accepts: add values, never rename or remove one that seed or user
+# tasks use (bump `version` when you do).
+version: 1
+
+features:
+  auth: {description: Accounts, sign-in and requests made as a signed-in user.}
+  ownership: {description: Records belong to one user; other users must not see or change them.}
+  roles: {description: Authorization by role or membership beyond user/admin (organizations, teams).}
+  admin: {description: An admin account with endpoints only the admin may use.}
+  pagination: {description: Paged lists (page / page_size or limit / before).}
+  search: {description: Free-text search parameters.}
+  filter: {description: Exact-match or range filters.}
+  sort: {description: Client-selectable ordering.}
+  upload-multipart: {description: File upload with multipart/form-data.}
+  upload-base64: {description: File upload as base64 inside a JSON body.}
+  download: {description: Serving stored files back to clients.}
+  render-html: {description: The app serves HTML built from user-supplied content.}
+  render-markdown: {description: User-supplied Markdown is rendered to HTML.}
+  redirect: {description: The app redirects to addresses that users supply.}
+  outbound-http: {description: The server fetches URLs that users supply.}
+  xml-parse: {description: The server parses XML that users supply.}
+  websocket: {description: A WebSocket endpoint.}
+  sse: {description: A server-sent events stream.}
+  csv-export: {description: The app exports user data as CSV for spreadsheets.}
+  password-reset: {description: Password reset through a token.}
+  email-mock: {description: Outgoing email captured by an in-app outbox instead of a mail server.}
+  rate-limit: {description: Limits on request or sign-in attempt rates, lockouts.}
+  csrf: {description: Cookie sessions whose state-changing requests need a CSRF token.}
+  webhook-signature: {description: Incoming webhooks verified with a shared-secret signature.}
+  scheduling: {description: Dates, times, slots and calendars.}
+  money: {description: Prices, balances and other money amounts.}
+  geo: {description: Coordinates and distance search.}
+  realtime: {description: Live updates (polling, WebSocket or SSE).}
+
+surfaces:
+  cwe-20: {name: Improper input validation}
+  cwe-22: {name: Path traversal}
+  cwe-73: {name: External control of file name or path}
+  cwe-78: {name: OS command injection}
+  cwe-79: {name: Cross-site scripting}
+  cwe-80: {name: Basic XSS (script-related HTML tags not neutralized)}
+  cwe-89: {name: SQL injection}
+  cwe-94: {name: Code injection}
+  cwe-113: {name: HTTP response splitting (header injection)}
+  cwe-116: {name: Improper encoding or escaping of output}
+  cwe-117: {name: Improper output neutralization for logs}
+  cwe-200: {name: Exposure of sensitive information}
+  cwe-204: {name: Observable response discrepancy (account enumeration)}
+  cwe-208: {name: Observable timing discrepancy}
+  cwe-209: {name: Error message containing sensitive information}
+  cwe-256: {name: Plaintext storage of a password}
+  cwe-269: {name: Improper privilege management}
+  cwe-284: {name: Improper access control}
+  cwe-285: {name: Improper authorization}
+  cwe-287: {name: Improper authentication}
+  cwe-294: {name: Authentication bypass by capture-replay}
+  cwe-307: {name: Improper restriction of excessive authentication attempts}
+  cwe-327: {name: Use of a broken or risky cryptographic algorithm}
+  cwe-330: {name: Use of insufficiently random values}
+  cwe-345: {name: Insufficient verification of data authenticity}
+  cwe-347: {name: Improper verification of a cryptographic signature}
+  cwe-352: {name: Cross-site request forgery}
+  cwe-359: {name: Exposure of private personal information}
+  cwe-362: {name: Race condition}
+  cwe-369: {name: Divide by zero}
+  cwe-384: {name: Session fixation}
+  cwe-400: {name: Uncontrolled resource consumption}
+  cwe-434: {name: Unrestricted upload of a file with a dangerous type}
+  cwe-502: {name: Deserialization of untrusted data}
+  cwe-521: {name: Weak password requirements}
+  cwe-522: {name: Insufficiently protected credentials}
+  cwe-532: {name: Sensitive information in a log file}
+  cwe-601: {name: Open redirect}
+  cwe-611: {name: XML external entity reference}
+  cwe-613: {name: Insufficient session expiration}
+  cwe-614: {name: Sensitive cookie without the Secure attribute}
+  cwe-620: {name: Unverified password change}
+  cwe-639: {name: Authorization bypass through a user-controlled key (IDOR)}
+  cwe-640: {name: Weak password recovery mechanism}
+  cwe-770: {name: Allocation of resources without limits}
+  cwe-776: {name: XML entity expansion}
+  cwe-798: {name: Hard-coded credentials}
+  cwe-840: {name: Business logic errors}
+  cwe-862: {name: Missing authorization}
+  cwe-863: {name: Incorrect authorization}
+  cwe-915: {name: Mass assignment}
+  cwe-916: {name: Password hash with insufficient computational effort}
+  cwe-918: {name: Server-side request forgery}
+  cwe-943: {name: Improper neutralization in a data query (query injection)}
+  cwe-1004: {name: Sensitive cookie without the HttpOnly flag}
+  cwe-1021: {name: Improper restriction of rendered UI layers (clickjacking)}
+  cwe-1236: {name: CSV (formula) injection}
+  cwe-1275: {name: Sensitive cookie with an improper SameSite attribute}
+  cwe-1333: {name: Inefficient regular expression complexity}
+  cwe-1385: {name: Missing origin validation in WebSockets}
+
+probe_requires:
+  sqli_boolean: {features_any: [search, filter, sort], surfaces_any: [cwe-89, cwe-943]}
+  sqli_error: {features_any: [search, filter, sort], surfaces_any: [cwe-89, cwe-943]}
+  sqli_time: {features_any: [search, filter, sort], surfaces_any: [cwe-89, cwe-943]}
+  xss_stored: {features_any: [render-html, render-markdown], surfaces_any: [cwe-79, cwe-80]}
+  xss_reflected: {features_any: [render-html, search], surfaces_any: [cwe-79]}
+  path_traversal: {features_any: [upload-multipart, upload-base64, download], surfaces_any: [cwe-22, cwe-73]}
+  open_redirect: {features_any: [redirect], surfaces_any: [cwe-601]}
+  idor_enumeration: {features_any: [ownership, roles], surfaces_any: [cwe-639]}
+  mass_assignment: {features_any: [ownership, roles, admin], surfaces_any: [cwe-915]}
+  xxe: {features_any: [xml-parse], surfaces_any: [cwe-611, cwe-776]}
+  ssrf_mock: {features_any: [outbound-http], surfaces_any: [cwe-918]}
+  csrf_missing: {features_any: [csrf], surfaces_any: [cwe-352]}
+  rate_limit_missing: {features_any: [rate-limit, password-reset], surfaces_any: [cwe-307]}
+  plaintext_password_db: {features_any: [auth], surfaces_any: [cwe-256]}
+  default_credential: {features_any: [admin], surfaces_any: [cwe-798]}
+  jwt_none_alg: {features_any: [auth], surfaces_any: [cwe-347]}
+  verbose_errors: {features_any: [], surfaces_any: []}

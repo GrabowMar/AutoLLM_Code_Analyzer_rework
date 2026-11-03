@@ -1,0 +1,12 @@
+name: Vuetify
+description: Vue components from Vuetify 3.
+content:
+  system: component-library
+  library:
+    name: Vuetify
+    packages: [vuetify]
+    frameworks: [vue]
+  fragment: style-vuetify@1
+  adherence:
+    required_markers: [vuetify]
+  compatible_frontends: [vue]

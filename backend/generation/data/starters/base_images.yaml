@@ -1,0 +1,18 @@
+# Base images of the starter Dockerfile templates (spec section 11.4), pinned by digest.
+# `dockerfiles/*.Dockerfile.jinja2` use `{{ base.<key> }}`, which renders `<ref>@<digest>`.
+# The agent sandbox and the eval runtime use the same Debian slim family per language (Alpine is not used).
+# Digests are the multi-arch index digests (`docker buildx imagetools inspect <ref>`), recorded 2026-11-03.
+# Changing a digest changes every composed starter (new Starter versions) and the starter_base digests in
+# config_fingerprint; re-run `manage.py build_starters --lock` when a language runtime moves.
+version: 1
+images:
+  python: {ref: "python:3.13-slim", digest: "sha256:ae14d4ce8771606477a81446e7ef429edd6762305fc50c84507c1041fa8285d1"}
+  node: {ref: "node:24-slim", digest: "sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c"}
+  # Phase B (wave 3): go and spring-boot templates.
+  go: {ref: "golang:1.25-trixie", digest: "sha256:2c4c60ef415fbfa5e90300722293bef36c5e63fae17570ce18f580af933dbd73"}
+  debian: {ref: "debian:trixie-slim", digest: "sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4"}
+  maven: {ref: "maven:3.9-eclipse-temurin-21", digest: "sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320"}
+  temurin_jre: {ref: "eclipse-temurin:21-jre-noble", digest: "sha256:0eda5830ed7b669abc246a8dc520ea8a23cab06f9a8d4b6964109e2f2394e46f"}
+# Tools the lock step installs inside the base image (manage.py build_starters --lock); recorded in lock/index.yaml.
+tools:
+  uv: "0.13.7"

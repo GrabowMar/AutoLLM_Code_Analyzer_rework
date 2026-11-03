@@ -1,0 +1,7 @@
+name: 'Guidance fragment: CWE-specific hint'
+role: fragment
+modes:
+- app
+- slot
+variables:
+- guidance

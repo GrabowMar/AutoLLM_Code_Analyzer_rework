@@ -1,0 +1,16 @@
+name: App brief, paraphrase C
+description: The default brief's information, worded and ordered differently, for prompt-sensitivity studies.
+role: brief
+modes:
+- app
+variables:
+- task
+- stack
+- starter
+- style
+- auth_contract
+- guidance
+- network
+- budget_neutral
+tags:
+- paraphrase

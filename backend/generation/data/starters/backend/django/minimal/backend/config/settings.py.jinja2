@@ -1,0 +1,45 @@
+"""Django settings."""
+
+import os
+import secrets
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = Path(os.environ.get("DATA_DIR", "data")).resolve()
+
+SECRET_KEY = os.environ.get("SECRET_KEY") or secrets.token_urlsafe(50)
+DEBUG = False
+ALLOWED_HOSTS = ["*"]
+
+INSTALLED_APPS: list[str] = []
+MIDDLEWARE = [
+    "django.middleware.common.CommonMiddleware",
+]
+ROOT_URLCONF = "config.urls"
+WSGI_APPLICATION = "config.wsgi.application"
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": DATA_DIR / "db.sqlite3",
+    },
+}
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [BASE_DIR / "templates"],
+        "APP_DIRS": False,
+        "OPTIONS": {},
+    },
+]
+{% if has_frontend %}
+
+FRONTEND_DIST = BASE_DIR.parent / "frontend" / "dist"
+{% endif %}
+
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = "UTC"
+USE_I18N = False
+USE_TZ = True
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

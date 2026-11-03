@@ -259,8 +259,12 @@ class TestLoop:
         run.refresh_from_db()
         assert (run.status, Study.objects.get(pk=study.pk).status) == (S.COMPLETED, "completed")
 
-    def test_an_unimplemented_stage_leaves_the_run_to_the_lost_run_check(self, leader, user, system_ep):
-        # Until WP-08 lands, run_stage raises NotImplementedError: the worker logs it and keeps the lease.
+    def test_an_unimplemented_stage_leaves_the_run_to_the_lost_run_check(self, leader, user, system_ep, monkeypatch):
+        # A stage that raises (here NotImplementedError): the worker logs it and keeps the lease.
+        def unimplemented(_run):
+            raise NotImplementedError
+
+        monkeypatch.setattr("backend.generation.agentic.dispatch.run_stage", unimplemented)
         run = make_run(user, make_model())
         leader.tick()
         run.refresh_from_db()
@@ -383,9 +387,13 @@ class TestAutomation:
         assert (post_run.status, post_run.lease_owner) == ("running", leader.executor_id)
         assert post_run.started_at is not None
 
-    def test_an_unimplemented_post_run_goes_back_to_pending(self, leader, user):
+    def test_an_unimplemented_post_run_goes_back_to_pending(self, leader, user, monkeypatch):
+        def unimplemented(_post_run):
+            raise NotImplementedError
+
+        monkeypatch.setattr("backend.generation.study.automation.run_post_run", unimplemented)
         post_run = self._post_run(user)
-        leader_workers().run_post_run(leader.ctx)  # study.automation is still a WP-10 skeleton
+        leader_workers().run_post_run(leader.ctx)
         post_run.refresh_from_db()
         assert (post_run.status, post_run.lease_owner) == ("pending", "")
 

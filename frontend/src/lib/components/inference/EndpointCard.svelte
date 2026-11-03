@@ -21,7 +21,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import OpenRouterKeyBanner from '$lib/components/generator/OpenRouterKeyBanner.svelte';
+	import OpenRouterKeyBanner from '$lib/components/studies/shared/OpenRouterKeyBanner.svelte';
 	import SlotMeter from './SlotMeter.svelte';
 	import {
 		CONNECTION_LABELS,

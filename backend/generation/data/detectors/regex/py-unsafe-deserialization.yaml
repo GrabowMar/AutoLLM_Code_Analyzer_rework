@@ -1,0 +1,11 @@
+name: Unsafe deserialization (pickle / yaml.load)
+description: pickle.load(s) or yaml.load without SafeLoader deserializes attacker-controlled data.
+content:
+  engine: regex
+  languages: [python]
+  rule: '\bpickle\.loads?\s*\(|\byaml\.load\s*\((?![^)\n]*SafeLoader)'
+  tool: {name: re, version: py3.13}
+  feature_key: py-unsafe-deserialization
+  polarity: insecure
+  cwe: [cwe-502]
+  description: The code calls pickle.load(s) or yaml.load without SafeLoader.

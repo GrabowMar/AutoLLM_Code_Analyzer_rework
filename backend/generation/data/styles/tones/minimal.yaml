@@ -1,0 +1,3 @@
+# Tone catalogue entry (not a library entity). A style with this tone copies `tone` (the slug) and `tone_text`.
+{name: Minimal, description: 'Visual tone preset: minimal.', tone_text: 'Minimal: generous white space, one accent
+    colour, thin borders, no shadows or decoration.'}

@@ -175,9 +175,9 @@ describe("inference client", () => {
 describe("execution client", () => {
   it("builds the queue query", async () => {
     respond(200, { items: [], others_ahead: {} });
-    await getQueue({ experiment_id: "e1", endpoint: "gpu1", limit: 50 });
+    await getQueue({ study_id: "s1", endpoint: "gpu1", limit: 50 });
     expect(calls[0].url).toBe(
-      "/api/execution/queue/?experiment_id=e1&endpoint=gpu1&limit=50",
+      "/api/execution/queue/?study_id=s1&endpoint=gpu1&limit=50",
     );
   });
 

@@ -1,0 +1,289 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Inventory
+summary: Track stock levels of warehouse items, record stock movements and spot items to reorder.
+category: inventory
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Item
+  fields:
+  - {name: name, type: string, required: true, max_length: 200}
+  - {name: sku, type: string, required: true, unique: true, max_length: 40}
+  - {name: location, type: string, max_length: 100}
+  - {name: quantity, type: int, min: 0, default: 0}
+  - {name: reorder_level, type: int, min: 0, default: 5}
+- name: StockMovement
+  fields:
+  - {name: item_id, type: ref, ref: Item}
+  - {name: delta, type: int, required: true}
+  - {name: reason, type: string, max_length: 200}
+  - {name: quantity_after, type: int}
+  - {name: created_at, type: datetime}
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: items.list
+  method: GET
+  path: /api/items
+  auth: public
+  query:
+  - {name: q, type: string, semantics: search}
+  - {name: location, type: string, semantics: filter}
+  - {name: low_stock, type: bool, semantics: filter}
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, name, sku, low_stock]
+          properties:
+            id:
+              type: [integer, string]
+            name: {type: string, maxLength: 200, minLength: 1}
+            sku: {type: string, maxLength: 40, minLength: 1}
+            location:
+              type: [string, 'null']
+              maxLength: 100
+            quantity:
+              type: [integer, 'null']
+              minimum: 0
+            reorder_level:
+              type: [integer, 'null']
+              minimum: 0
+            low_stock: {type: boolean}
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: items.create
+  method: POST
+  path: /api/items
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      name: {type: string, maxLength: 200, minLength: 1}
+      sku: {type: string, maxLength: 40, minLength: 1}
+      location:
+        type: [string, 'null']
+        maxLength: 100
+      quantity:
+        type: [integer, 'null']
+        minimum: 0
+      reorder_level:
+        type: [integer, 'null']
+        minimum: 0
+    required: [name, sku]
+  response_schema:
+    type: object
+    required: [id, name, sku, low_stock]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 200, minLength: 1}
+      sku: {type: string, maxLength: 40, minLength: 1}
+      location:
+        type: [string, 'null']
+        maxLength: 100
+      quantity:
+        type: [integer, 'null']
+        minimum: 0
+      reorder_level:
+        type: [integer, 'null']
+        minimum: 0
+      low_stock: {type: boolean}
+  errors: [400, 409]
+- id: items.get
+  method: GET
+  path: /api/items/{id}
+  auth: public
+  response_schema:
+    type: object
+    required: [id, name, sku, low_stock]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 200, minLength: 1}
+      sku: {type: string, maxLength: 40, minLength: 1}
+      location:
+        type: [string, 'null']
+        maxLength: 100
+      quantity:
+        type: [integer, 'null']
+        minimum: 0
+      reorder_level:
+        type: [integer, 'null']
+        minimum: 0
+      low_stock: {type: boolean}
+  errors: [404]
+- id: items.replace
+  method: PUT
+  path: /api/items/{id}
+  auth: user
+  request_schema:
+    type: object
+    properties:
+      name: {type: string, maxLength: 200, minLength: 1}
+      sku: {type: string, maxLength: 40, minLength: 1}
+      location:
+        type: [string, 'null']
+        maxLength: 100
+      reorder_level:
+        type: [integer, 'null']
+        minimum: 0
+    required: [name, sku]
+  response_schema:
+    type: object
+    required: [id, name, sku, low_stock]
+    properties:
+      id:
+        type: [integer, string]
+      name: {type: string, maxLength: 200, minLength: 1}
+      sku: {type: string, maxLength: 40, minLength: 1}
+      location:
+        type: [string, 'null']
+        maxLength: 100
+      quantity:
+        type: [integer, 'null']
+        minimum: 0
+      reorder_level:
+        type: [integer, 'null']
+        minimum: 0
+      low_stock: {type: boolean}
+  errors: [400, 404, 409]
+- id: items.delete
+  method: DELETE
+  path: /api/items/{id}
+  auth: user
+  success_status: 204
+  errors: [404]
+- id: movements.list
+  method: GET
+  path: /api/items/{id}/movements
+  auth: public
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, delta, username]
+          properties:
+            id:
+              type: [integer, string]
+            item_id:
+              type: [integer, 'null']
+            delta: {type: integer}
+            reason:
+              type: [string, 'null']
+              maxLength: 200
+            quantity_after:
+              type: [integer, 'null']
+            created_at:
+              type: [string, 'null']
+              format: date-time
+            username: {type: string}
+  errors: [404]
+- id: movements.create
+  method: POST
+  path: /api/items/{id}/movements
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      delta: {type: integer}
+      reason:
+        type: [string, 'null']
+        maxLength: 200
+    required: [delta]
+  response_schema:
+    type: object
+    required: [id, delta, username]
+    properties:
+      id:
+        type: [integer, string]
+      item_id:
+        type: [integer, 'null']
+      delta: {type: integer}
+      reason:
+        type: [string, 'null']
+        maxLength: 200
+      quantity_after:
+        type: [integer, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      username: {type: string}
+  errors: [400, 404, 409]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.table
+  text: An inventory table with low-stock rows highlighted, a search box, a location filter, a 'Low stock only'
+    switch and paging.
+  endpoints: [items.list]
+- id: ui.detail
+  text: An item page with its movement history and 'Receive' and 'Take out' forms that update the shown quantity.
+  endpoints: [items.get, movements.list, movements.create]
+- id: ui.forms
+  text: Add and edit forms that show the API's validation messages, including a duplicate sku; delete asks for confirmation.
+  endpoints: [items.create, items.replace, items.delete]
+features: [auth, search, filter, pagination]
+surfaces: [cwe-89, cwe-862, cwe-20, cwe-362, cwe-79, cwe-840]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: movements.negative.refused
+  category: functional
+  endpoint: movements.create
+  setup:
+  - request:
+      method: POST
+      path: /api/items
+      json: {name: Bolt, sku: zz-bolt-1, quantity: 2}
+    expect_status: 201
+    capture: {iid: $.id}
+  request:
+    method: POST
+    path: /api/items/{iid}/movements
+    json: {delta: -3}
+  expect: {status: 409}
+  stated_in: [standard, exhaustive]
+probes:
+- id: probe.items.sqli
+  cwe: cwe-89
+  kind: sqli_boolean
+  endpoint: items.list
+  params: {param: q}

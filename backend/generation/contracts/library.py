@@ -186,7 +186,7 @@ class Endpoint(ContractModel):
     path: Annotated[str, StringConstraints(pattern=r"^/")]  # "/api/todos/{id}"
     auth: Auth
     owner_entity: str | None = None  # required when auth == "owner" (lint)
-    success_status: Annotated[int, Field(ge=200, le=299)] = 200
+    success_status: Annotated[int, Field(ge=200, le=399)] = 200  # 3xx: redirect endpoints (WP-04 ask)
     query: list[QueryParam] = Field(default_factory=list)
     request_schema: dict[str, Any] | None = None  # JSON Schema 2020-12 subset
     response_schema: dict[str, Any] | None = None

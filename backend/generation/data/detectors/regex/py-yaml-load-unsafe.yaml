@@ -1,0 +1,11 @@
+name: 'Unsafe YAML load (Python)'
+description: 'yaml.load without SafeLoader, yaml.unsafe_load or yaml.full_load constructs arbitrary Python objects.'
+content:
+  engine: regex
+  languages: [python]
+  rule: '\byaml\.(?:unsafe_load|full_load)(?:_all)?\s*\(|\byaml\.load(?:_all)?\s*\((?![^)\n]*\bC?SafeLoader\b)'
+  tool: {name: re, version: py3.13}
+  feature_key: py-yaml-load-unsafe
+  polarity: insecure
+  cwe: [cwe-502]
+  description: 'yaml.load(_all) without SafeLoader, or yaml.unsafe_load/full_load, is called.'

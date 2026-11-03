@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  excludeTruncatedConfig,
   reportDocument,
   summaryItems,
   type ReportTablesResponse,
 } from "./reports";
 
-// Shape of GET /api/reports/{id}/tables/ (experiment report of f170be08).
+// Shape of GET /api/reports/{id}/tables/ (a study conditions report, stored type `experiment_report`).
 const RESPONSE: ReportTablesResponse = {
   report_id: "rpt_272a51a8cb1db9da",
   report_type: "experiment_report",
@@ -86,7 +87,7 @@ describe("summaryItems", () => {
   it("names no leader on a tie and shows unmeasured as a dash", () => {
     // f170be08: all three conditions at 100%.
     const items = summaryItems({
-      experiment_id: "f170be08-a3e8-4adf-9ea8-7b2badaada44",
+      study_id: "f170be08-a3e8-4adf-9ea8-7b2badaada44",
       condition_count: 3,
       leader: null,
       leader_pass_rate: 1,
@@ -95,9 +96,9 @@ describe("summaryItems", () => {
     });
     expect(items).toEqual([
       {
-        label: "Experiment",
+        label: "Study",
         value: "f170be08",
-        href: "/experiments/f170be08-a3e8-4adf-9ea8-7b2badaada44",
+        href: "/studies/f170be08-a3e8-4adf-9ea8-7b2badaada44",
       },
       { label: "Condition count", value: "3" },
       { label: "Leader", value: "Tie: 3 conditions share the top" },
@@ -134,9 +135,9 @@ describe("summaryItems", () => {
       },
     });
     // A summary stored before ties were detected names ranking[0].
-    const stale = { jobs: 12, leader: "m0", unique_issues: null };
+    const stale = { runs: 12, leader: "m0", unique_issues: null };
     expect(summaryItems(stale, ranking([1, 1, 3]))).toEqual([
-      { label: "Jobs", value: "12" },
+      { label: "Runs", value: "12" },
       { label: "Leader", value: "Tie: 2 models share the top" },
       { label: "Unique issues", value: "—" },
     ]);
@@ -154,5 +155,15 @@ describe("summaryItems", () => {
     expect(
       summaryItems(stale, { ranking: { ranking: [{ model: "x" }] } })[1].value,
     ).toBe("m0");
+  });
+});
+
+describe("excludeTruncatedConfig", () => {
+  it("omits the key when the option is not ticked (no false override of a locked plan)", () => {
+    expect(excludeTruncatedConfig(false)).toEqual({});
+    expect("exclude_truncated" in excludeTruncatedConfig(false)).toBe(false);
+  });
+  it("sends true when ticked", () => {
+    expect(excludeTruncatedConfig(true)).toEqual({ exclude_truncated: true });
   });
 });

@@ -1,0 +1,17 @@
+name: Auth token stored in localStorage
+description: A token-like value is written to localStorage (readable by any script on the page).
+content:
+  engine: ts_query
+  languages: [javascript, typescript, tsx]
+  rule: |
+    (call_expression
+      function: (member_expression object: (identifier) @obj property: (property_identifier) @prop)
+      arguments: (arguments . (string) @key)
+      (#eq? @obj "localStorage")
+      (#eq? @prop "setItem")
+      (#match? @key "(?i)(token|jwt|auth|session)")) @match
+  tool: {name: tree-sitter, version: 0.26.0}
+  feature_key: js-token-in-localstorage
+  polarity: insecure
+  cwe: [cwe-922]
+  description: localStorage.setItem is called with a token-like key.

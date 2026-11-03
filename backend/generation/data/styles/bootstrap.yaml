@@ -1,0 +1,12 @@
+name: Bootstrap
+description: Bootstrap 5 classes and components, for any frontend.
+content:
+  system: component-library
+  library:
+    name: Bootstrap
+    packages: [bootstrap]
+    frameworks: [react, vue, svelte, none]
+  fragment: style-bootstrap@1
+  adherence:
+    required_markers: [bootstrap]
+  compatible_frontends: [react, vue, svelte, none, free]

@@ -1,5 +1,5 @@
 # OpenCode harness layer on the shared sandbox base (see agent-base/).
-# BASE_IMAGE is the content-addressed agent-base tag, passed by sandbox.py.
+# BASE_IMAGE is the content-addressed agent-base tag, passed by agentic/images.py.
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 

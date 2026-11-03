@@ -1,0 +1,4 @@
+{% set layout = "- `backend/`: the Flask app. `backend/app.py` is the entry file; dependencies go in `backend/requirements.txt`." %}
+{% set manifest = "requirements.txt" %}
+{% set entry = "`python backend/app.py`, which must start the server on port " ~ run.port %}
+{% include "common/README.md.jinja2" %}

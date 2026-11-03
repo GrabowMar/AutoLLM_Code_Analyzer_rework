@@ -20,7 +20,6 @@ from backend.generation.models import GenerationRun
 from backend.generation.models.choices import Outcome
 from backend.generation.models.choices import RunStatus
 from backend.generation.models.choices import Stage
-from backend.generation.runs.view import current_runs
 from backend.generation.runs.view import run_views
 from backend.llm_models.models import LLMModel
 from backend.rankings.models import BenchmarkResult
@@ -32,6 +31,7 @@ from backend.rankings.services.scoring import compute_composite
 from backend.rankings.services.scoring import compute_cost_efficiency_score
 from backend.rankings.services.scoring import compute_empirical_quality
 from backend.rankings.services.scoring import compute_mss
+from backend.statistics.services.runs import study_current_runs
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractBaseUser
@@ -131,7 +131,7 @@ def _compared_runs(
     study_ids = runs.filter(cell__isnull=False).values_list("study_id", flat=True).distinct()
     for sid in study_ids:
         if sid is not None:
-            current.update(current_runs(sid, Stage.MAIN).values_list("pk", flat=True))
+            current.update(study_current_runs(sid, Stage.MAIN).values_list("pk", flat=True))
     return runs.filter(Q(cell__isnull=True) | Q(pk__in=current))
 
 

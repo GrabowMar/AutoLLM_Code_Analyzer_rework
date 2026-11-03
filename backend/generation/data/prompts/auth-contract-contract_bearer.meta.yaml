@@ -1,0 +1,8 @@
+name: 'Auth contract: bearer token'
+description: Spec 8.4 contract_bearer; rendered only for tasks with the auth feature, the admin sentence only for
+  tasks with the admin feature.
+role: fragment
+modes:
+- app
+variables:
+- task

@@ -62,9 +62,8 @@
 		resultState,
 		runDisplayName,
 		runStatusLabel,
-		setupItems,
-		targetLines,
 	} from '$lib/components/analysis/format';
+	import { runSetupItems, runTargetLines } from './setup';
 	import { formatDate } from '$lib/utils/formatters';
 	import type { RunStatus } from '$lib/api/runs';
 
@@ -182,7 +181,7 @@
 	let context = $state<RunContext | null>(null);
 	let contextLoading = $state(false);
 	let contextError = $state('');
-	/** The prevalence corpus the user picked; '' = the server's default (the experiment, else all my apps). */
+	/** The prevalence corpus the user picked; '' = the server's default (the study, else all my apps). */
 	let contextScope = $state<ContextScope | ''>('');
 	let contextCtl: AbortController | null = null;
 
@@ -344,9 +343,9 @@
 		}
 	}
 
-	const target = $derived(targetLines(run?.target));
-	/** experiment › condition › repeat k/N · model · harness · app (null until the context loads). */
-	const setup = $derived(context?.job ? setupItems(context.job) : null);
+	const target = $derived(runTargetLines(run?.target));
+	/** study › condition › repeat k/N · model · harness · task (null until the context loads). */
+	const setup = $derived(context?.job ? runSetupItems(context.job) : null);
 	const findingsTotal = $derived(
 		active ? (run?.progress?.findings ?? 0) : ((run?.summary?.total_findings as number | undefined) ?? facets?.total ?? 0)
 	);
@@ -432,15 +431,15 @@
 						{/each}
 					</span>
 					<a href="/analysis?job={run.target.job_id}" class="hover:text-foreground hover:underline">all analyses of this app</a>
-				{:else if run.target.kind === 'job' && run.target.job_id}
-					<a href="/applications/{run.target.job_id}" class="header-stat min-w-0 hover:text-foreground" title="Open the app">
+				{:else if run.target.kind === 'run' && run.target.job_id}
+					<a href="/samples/{run.target.job_id}" class="header-stat min-w-0 hover:text-foreground" title="Open the sample">
 						<b class="truncate font-sans">{target.title}</b>{#if target.sub}<span class="truncate">{target.sub}</span>{/if}
 					</a>
 					<a href="/analysis?job={run.target.job_id}" class="hover:text-foreground hover:underline">all analyses of this app</a>
 				{:else}
 					<span class="header-stat"><b class="font-sans">{target.title}</b></span>
 				{/if}
-				{#if run.batch_id}<a href="/analysis?batch={run.batch_id}" class="hover:text-foreground hover:underline">batch</a>{/if}
+				{#if run.launch_id}<a href="/analysis?launch={run.launch_id}" class="hover:text-foreground hover:underline" title="The analyses launched together with this one">launched together</a>{/if}
 				<span>created <span class="font-mono">{formatDate(run.created_at)}</span></span>
 				{#if active && run.started_at}
 					<span>elapsed <span class="font-mono tabular-nums">{formatClock(elapsedSince(run.started_at, watcher.now))}</span></span>

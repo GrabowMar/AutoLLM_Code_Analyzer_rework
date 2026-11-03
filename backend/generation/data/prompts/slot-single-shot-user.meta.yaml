@@ -1,0 +1,10 @@
+name: Slot single-shot user
+description: 'User prompt of a single-shot slot call: the hole, its interface, the spec excerpt and the resolved
+  context files.'
+role: slot_single_shot_user
+modes:
+- slot
+variables:
+- slot
+- stack
+- context

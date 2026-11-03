@@ -28,7 +28,7 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
-	import NumberField from '$lib/components/generator/composer/NumberField.svelte';
+	import NumberField from '$lib/components/studies/shared/NumberField.svelte';
 	import { PROBE_TONE_TEXT, formatCtx, probeSummary, shortDigest } from './endpoint-display';
 	import Copy from '@lucide/svelte/icons/copy';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';

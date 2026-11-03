@@ -1,0 +1,176 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: XML well-formedness checker
+summary: Check whether XML documents are well-formed and point to the first syntax error.
+category: validation
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: XmlValidation
+  fields:
+  - {name: xml, type: text, required: true, max_length: 200000}
+  - {name: xml_preview, type: string}
+  - {name: valid, type: bool}
+  - {name: error, type: string}
+  - {name: line, type: int}
+  - {name: column, type: int}
+  - {name: root_element, type: string}
+  - {name: created_at, type: datetime}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: xml.check
+  method: POST
+  path: /api/validate/xml
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      xml: {type: string, minLength: 1, maxLength: 200000}
+    required: [xml]
+  response_schema:
+    type: object
+    properties:
+      valid: {type: boolean}
+      error: [string, 'null']
+      line: [integer, 'null']
+      column: [integer, 'null']
+      root_element: [string, 'null']
+    required: [valid, error, line, column, root_element]
+  errors: [400]
+- id: validations.create
+  method: POST
+  path: /api/validations
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      xml: {type: string, maxLength: 200000, minLength: 1}
+    required: [xml]
+  response_schema:
+    type: object
+    required: [id]
+    properties:
+      id:
+        type: [integer, string]
+      xml_preview:
+        type: [string, 'null']
+      valid:
+        type: [boolean, 'null']
+      error:
+        type: [string, 'null']
+      line:
+        type: [integer, 'null']
+      column:
+        type: [integer, 'null']
+      root_element:
+        type: [string, 'null']
+      created_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400]
+- id: validations.list
+  method: GET
+  path: /api/validations
+  auth: user
+  query:
+  - {name: valid, type: bool, semantics: filter}
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: [integer, string]
+            xml_preview:
+              type: [string, 'null']
+            valid:
+              type: [boolean, 'null']
+            error:
+              type: [string, 'null']
+            line:
+              type: [integer, 'null']
+            column:
+              type: [integer, 'null']
+            root_element:
+              type: [string, 'null']
+            created_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: validations.delete
+  method: DELETE
+  path: /api/validations/{id}
+  auth: owner
+  owner_entity: XmlValidation
+  success_status: 204
+  errors: [404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.check
+  text: A text area (with file loading) and a 'Check' button; the result shows a green 'Well-formed' badge with
+    the root element, or the error with its position, and highlights that line.
+  endpoints: [xml.check]
+- id: ui.history
+  text: 'For signed-in users: a ''Save'' switch and the saved checks with a valid/invalid filter, delete buttons
+    and paging.'
+  endpoints: [validations.create, validations.list, validations.delete]
+features: [auth, ownership, xml-parse, filter, pagination]
+surfaces: [cwe-611, cwe-776, cwe-400, cwe-20, cwe-639, cwe-79]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: xml.check.invalid_position
+  category: functional
+  endpoint: xml.check
+  request:
+    method: POST
+    path: /api/validate/xml
+    json: {xml: '<a>
+
+        <b></a>'}
+  expect:
+    status: 200
+    json_contains: {valid: false, line: 2, root_element: null}
+  stated_in: [standard, exhaustive]
+probes:
+- id: probe.xml.xxe
+  cwe: cwe-611
+  kind: xxe
+  endpoint: xml.check
+  params: {field: xml}

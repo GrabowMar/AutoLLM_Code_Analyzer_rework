@@ -1,0 +1,311 @@
+{
+  "kind": "task",
+  "slug": "crud_todo_list",
+  "version": 1,
+  "name": "Todo list",
+  "description": "Users register, log in and keep a private list of todos.",
+  "schema_version": 4,
+  "content": {
+    "ui": [
+      {
+        "id": "ui.login",
+        "text": "A login and registration form.",
+        "endpoints": ["auth.register", "auth.login"]
+      },
+      {
+        "id": "ui.list",
+        "text": "The user's todos with a search box.",
+        "endpoints": ["todos.list"]
+      },
+      {
+        "id": "ui.edit",
+        "text": "Add todos and mark them done.",
+        "endpoints": ["todos.create", "todos.update"]
+      }
+    ],
+    "prose": {
+      "minimal": "Build a todo list app. Users register and log in, then add, edit, search and delete their todos.\n\nEndpoints: POST /api/auth/register, POST /api/auth/login, GET /api/todos, POST /api/todos,\nPATCH /api/todos/{id}, DELETE /api/todos/{id}.",
+      "standard": "Build a todo list app with a JSON API under `/api` and a web frontend.\n\n- `POST /api/auth/register` creates an account from a username and a password.\n- `POST /api/auth/login` returns a token; the other endpoints require it as a bearer token.\n- `GET /api/todos` lists the user's todos as `{\"items\": [...]}`; `q` searches the titles.\n- `POST /api/todos` adds a todo with a title.\n- `PATCH /api/todos/{id}` changes the title or marks the todo done.\n- `DELETE /api/todos/{id}` removes a todo.\n\nEach user sees and changes only their own todos.",
+      "exhaustive": "Build a todo list app with a JSON API under `/api` and a web frontend.\n\n- `POST /api/auth/register` creates an account from a username (at most 50 characters, unique) and a\n  password. It answers 201, 400 for invalid input and 409 when the username is taken.\n- `POST /api/auth/login` returns `{\"token\": ...}`, or 401 for wrong credentials. The other endpoints\n  require the token as a bearer token.\n- `GET /api/todos` lists the user's todos as `{\"items\": [...]}`; `q` searches the titles\n  (case-insensitive substring).\n- `POST /api/todos` adds a todo; the title is required and at most 200 characters (400 otherwise). It\n  answers 201 with the todo.\n- `PATCH /api/todos/{id}` changes the title or `done`. It answers 404 for an unknown todo.\n- `DELETE /api/todos/{id}` removes a todo and answers 204.\n\nEach user sees and changes only their own todos: a todo of another user answers 403 or 404."
+    },
+    "title": "Todo list",
+    "probes": [
+      {
+        "id": "probe.todos.sqli",
+        "cwe": "cwe-89",
+        "kind": "sqli_boolean",
+        "params": {
+          "param": "q"
+        },
+        "endpoint": "todos.list",
+        "requires_checks": null,
+        "positive_control": null
+      },
+      {
+        "id": "probe.todos.idor",
+        "cwe": "cwe-639",
+        "kind": "idor_enumeration",
+        "params": {},
+        "endpoint": "todos.update",
+        "requires_checks": null,
+        "positive_control": null
+      }
+    ],
+    "summary": "Users register, log in and keep a private list of todos.",
+    "category": "productivity",
+    "entities": [
+      {
+        "name": "User",
+        "fields": [
+          {
+            "max": null,
+            "min": null,
+            "ref": null,
+            "enum": null,
+            "name": "username",
+            "type": "string",
+            "secret": false,
+            "unique": true,
+            "default": null,
+            "required": true,
+            "max_length": 50
+          },
+          {
+            "max": null,
+            "min": null,
+            "ref": null,
+            "enum": null,
+            "name": "password",
+            "type": "string",
+            "secret": true,
+            "unique": false,
+            "default": null,
+            "required": true,
+            "max_length": null
+          }
+        ],
+        "soft_delete": false,
+        "owned_by_user": false
+      },
+      {
+        "name": "Todo",
+        "fields": [
+          {
+            "max": null,
+            "min": null,
+            "ref": null,
+            "enum": null,
+            "name": "title",
+            "type": "string",
+            "secret": false,
+            "unique": false,
+            "default": null,
+            "required": true,
+            "max_length": 200
+          },
+          {
+            "max": null,
+            "min": null,
+            "ref": null,
+            "enum": null,
+            "name": "done",
+            "type": "bool",
+            "secret": false,
+            "unique": false,
+            "default": false,
+            "required": false,
+            "max_length": null
+          }
+        ],
+        "soft_delete": false,
+        "owned_by_user": true
+      }
+    ],
+    "features": ["auth", "ownership", "search"],
+    "surfaces": ["cwe-89", "cwe-639"],
+    "auth_flow": {
+      "csrf": "none",
+      "login": "auth.login",
+      "logout": null,
+      "register": "auth.register",
+      "credential": "bearer",
+      "csrf_endpoint": null,
+      "token_json_path": "token"
+    },
+    "endpoints": [
+      {
+        "id": "auth.register",
+        "auth": "public",
+        "path": "/api/auth/register",
+        "tags": [],
+        "query": [],
+        "errors": [400, 409],
+        "method": "POST",
+        "realtime": "none",
+        "content_type": "json",
+        "owner_entity": null,
+        "request_schema": null,
+        "success_status": 201,
+        "response_schema": null
+      },
+      {
+        "id": "auth.login",
+        "auth": "public",
+        "path": "/api/auth/login",
+        "tags": [],
+        "query": [],
+        "errors": [401],
+        "method": "POST",
+        "realtime": "none",
+        "content_type": "json",
+        "owner_entity": null,
+        "request_schema": null,
+        "success_status": 200,
+        "response_schema": null
+      },
+      {
+        "id": "todos.list",
+        "auth": "user",
+        "path": "/api/todos",
+        "tags": [],
+        "query": [
+          {
+            "max": null,
+            "enum": null,
+            "name": "q",
+            "type": "string",
+            "default": null,
+            "required": false,
+            "semantics": "search"
+          }
+        ],
+        "errors": [],
+        "method": "GET",
+        "realtime": "none",
+        "content_type": "json",
+        "owner_entity": null,
+        "request_schema": null,
+        "success_status": 200,
+        "response_schema": null
+      },
+      {
+        "id": "todos.create",
+        "auth": "user",
+        "path": "/api/todos",
+        "tags": [],
+        "query": [],
+        "errors": [400],
+        "method": "POST",
+        "realtime": "none",
+        "content_type": "json",
+        "owner_entity": null,
+        "request_schema": null,
+        "success_status": 201,
+        "response_schema": null
+      },
+      {
+        "id": "todos.update",
+        "auth": "owner",
+        "path": "/api/todos/{id}",
+        "tags": [],
+        "query": [],
+        "errors": [400, 403, 404],
+        "method": "PATCH",
+        "realtime": "none",
+        "content_type": "json",
+        "owner_entity": "Todo",
+        "request_schema": null,
+        "success_status": 200,
+        "response_schema": null
+      },
+      {
+        "id": "todos.delete",
+        "auth": "owner",
+        "path": "/api/todos/{id}",
+        "tags": [],
+        "query": [],
+        "errors": [403, 404],
+        "method": "DELETE",
+        "realtime": "none",
+        "content_type": "json",
+        "owner_entity": "Todo",
+        "request_schema": null,
+        "success_status": 204,
+        "response_schema": null
+      }
+    ],
+    "seed_data": {},
+    "acceptance": [
+      {
+        "id": "todos.search.matches",
+        "actor": "user_a",
+        "setup": [
+          {
+            "actor": null,
+            "capture": {},
+            "request": {
+              "form": null,
+              "json": {
+                "title": "buy milk"
+              },
+              "path": "/api/todos",
+              "files": null,
+              "query": {},
+              "method": "POST"
+            },
+            "expect_status": 201
+          }
+        ],
+        "expect": {
+          "max_ms": null,
+          "status": 200,
+          "json_schema": null,
+          "json_contains": {
+            "items": [
+              {
+                "title": "buy milk"
+              }
+            ]
+          },
+          "header_contains": null
+        },
+        "request": {
+          "form": null,
+          "json": null,
+          "path": "/api/todos",
+          "files": null,
+          "query": {
+            "q": "milk"
+          },
+          "method": "GET"
+        },
+        "category": "functional",
+        "endpoint": "todos.list",
+        "stated_in": ["standard", "exhaustive"],
+        "depends_on": [],
+        "restart_before": false
+      }
+    ],
+    "has_frontend": true
+  },
+  "content_hash": "53048f6ec6f417e588584ab07c982e2f391734f1856c91d4e673cd69d0497867",
+  "pinned_ref": "crud_todo_list@1#53048f6ec6f4",
+  "derived_from": null,
+  "is_system": true,
+  "is_archived": false,
+  "visibility": "system",
+  "created_by": null,
+  "created_at": "2026-01-01T00:00:00Z",
+  "tags": ["auth", "cwe-639", "cwe-89", "ownership", "productivity", "search"],
+  "columns": {
+    "structured_hash": "f861019fa161f2e94eee70535b28eb0a82ff3bad36ce51525b0b68f5c6950e0e",
+    "prose_hashes": {
+      "minimal": "dc21eb3b123749c903384c7f073b7316ae550a7b36271faf0b1b32c7431809c0",
+      "standard": "01fd8f7dab28f2ea69dfbf776d481b42eeace08916b1469c10646b9a73fb2c0b",
+      "exhaustive": "65f67d5bb6f0196c2d3842d32b6b4d6ec38fafe1f786e9a3bd2d4212fd24b6af"
+    }
+  },
+  "derived": null,
+  "lint": null,
+  "unchanged": null
+}

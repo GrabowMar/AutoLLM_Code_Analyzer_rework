@@ -1,0 +1,17 @@
+{
+  "probes": [
+    {
+      "id": "p-1",
+      "cwe": "cwe-89",
+      "kind": "sqli_error",
+      "status": "not_exploited"
+    },
+    {
+      "id": "p-2",
+      "cwe": "cwe-918",
+      "kind": "ssrf_mock",
+      "status": "exploited",
+      "evidence": "fixture"
+    }
+  ]
+}

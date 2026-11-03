@@ -1,0 +1,6 @@
+name: Run contract, free-choice stack
+description: Stack fragment of the free-choice profile; lists the allowed base images (build/dockerfiles.py, data/starters/allowed_bases.yaml).
+role: fragment
+modes: [app, slot]
+variables: [allowed_bases]
+tags: [stack, run-contract]

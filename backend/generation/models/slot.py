@@ -58,6 +58,7 @@ from backend.generation.models.choices import PatternRunLabel
 from backend.generation.models.choices import RunKind
 from backend.generation.models.choices import SlotKind
 from backend.generation.models.choices import WorkStatus
+from backend.generation.models.library import PatternDetector
 
 __all__ = [
     "ClusterLabel",
@@ -428,6 +429,41 @@ class PatternRun(ValidatedModel):
 
     def __str__(self) -> str:
         return f"pattern run {str(self.id)[:8]} ({self.label}, {self.status})"
+
+    def derive_fields(self) -> Errors:
+        """``detector_set_hash`` = ``identity.detector_set_hash`` of the pinned ``detectors`` (on create).
+
+        Each pinned ref resolves to its library row (one query), so the hash commits to the full content
+        hashes. A row with no detectors keeps a supplied hash (bare test rows); a non-empty set never does.
+        """
+        errors = super().derive_fields()
+        if not self._state.adding or not self.detectors:
+            return errors
+        refs = self.CONTRACT_FIELDS["detectors"].try_validate(self.detectors)
+        if refs is None:
+            return errors  # contract_errors reports the refs
+        wanted: dict[tuple[str, int], str] = {}
+        for ref in refs:
+            base, _, short = ref.partition("#")
+            slug, _, version = base.partition("@")
+            wanted[(slug, int(version))] = short
+        match = Q()
+        for slug, version in wanted:
+            match |= Q(slug=slug, version=version)
+        stored = {
+            (row.slug, row.version): row.content_hash
+            for row in PatternDetector.objects.filter(match).only("slug", "version", "content_hash")
+        }
+        pairs: list[tuple[str, str]] = []
+        for (slug, version), short in wanted.items():
+            full = stored.get((slug, version))
+            if full is None or not full.startswith(short):
+                errors.setdefault("detectors", []).append(f"{slug}@{version}#{short} does not resolve to a detector")
+                continue
+            pairs.append((f"{slug}@{version}", full))
+        if "detectors" not in errors:
+            fill_or_check(self, "detector_set_hash", identity.detector_set_hash(pairs), errors)
+        return errors
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self._state.adding:

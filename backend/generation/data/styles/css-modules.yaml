@@ -1,0 +1,9 @@
+name: CSS modules
+description: Component-scoped CSS modules; no framework or component library.
+content:
+  system: css-modules
+  fragment: style-css-modules@1
+  adherence:
+    required_markers: [.module.css]
+    forbidden_markers: [tailwindcss, bootstrap, '@mui/material']
+  compatible_frontends: [react, vue, svelte, free]

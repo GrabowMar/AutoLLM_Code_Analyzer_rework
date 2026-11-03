@@ -1,0 +1,11 @@
+name: Boolean-based SQL injection probe exploited
+description: Maps the evaluation's sqli_boolean probes (CWE-89) of the variant to a feature (one per probe kind).
+content:
+  engine: probe
+  languages: []
+  rule: 'kind:sqli_boolean'
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-sqli-boolean
+  polarity: insecure
+  cwe: [cwe-89]
+  description: A sqli_boolean probe was exploited against the assembled app.

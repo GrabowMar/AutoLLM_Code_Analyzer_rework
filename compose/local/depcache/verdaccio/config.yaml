@@ -1,0 +1,35 @@
+# Read-only npm pull-through cache for agent sandboxes (spec 4.2). Nobody can publish, unpublish or
+# register: a package published in one run can never be installed by another.
+storage: /verdaccio/storage/data
+plugins: /verdaccio/plugins
+auth:
+  htpasswd:
+    file: /verdaccio/storage/htpasswd
+    max_users: -1
+uplinks:
+  npmjs:
+    url: https://registry.npmjs.org/
+    timeout: 60s
+    maxage: 30m
+packages:
+  "@*/*":
+    access: $all
+    publish: $nobody
+    unpublish: $nobody
+    proxy: npmjs
+  "**":
+    access: $all
+    publish: $nobody
+    unpublish: $nobody
+    proxy: npmjs
+server:
+  keepAliveTimeout: 60
+web:
+  enable: false
+security:
+  api:
+    legacy: false
+log:
+  type: stdout
+  format: json
+  level: warn

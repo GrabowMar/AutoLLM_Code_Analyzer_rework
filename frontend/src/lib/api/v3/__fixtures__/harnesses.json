@@ -1,0 +1,306 @@
+[
+  {
+    "name": "opencode",
+    "label": "OpenCode",
+    "description": "OpenCode's headless coding agent: native tool set, pinned model-agnostic prompt.",
+    "protocol": "openai_chat",
+    "capabilities": {
+      "agentic": true,
+      "requires_tool_calling": true,
+      "supports_max_turns": false,
+      "supports_system_prompt": "override",
+      "supports_tool_policy": true,
+      "supports_compaction_control": true,
+      "supports_context_limit": true,
+      "supports_reasoning_effort_passthrough": false,
+      "supports_path_restriction": false,
+      "supports_request_class": false,
+      "headless_flag": "run --format json --pure"
+    },
+    "enabled": true,
+    "blocked_reason": null,
+    "versions": ["1.18.35"],
+    "pinned_version": "1.18.35",
+    "option_schema": [],
+    "default_options": {},
+    "facts_version": 1,
+    "vendor_affinity": null,
+    "min_call_output_tokens": 4096,
+    "open_questions": []
+  },
+  {
+    "name": "mini-swe-agent",
+    "label": "mini-swe-agent",
+    "description": "The SWE-agent team's minimal bash-only loop: one shell command per step.",
+    "protocol": "openai_chat",
+    "capabilities": {
+      "agentic": true,
+      "requires_tool_calling": true,
+      "supports_max_turns": true,
+      "supports_system_prompt": "override",
+      "supports_tool_policy": false,
+      "supports_compaction_control": false,
+      "supports_context_limit": false,
+      "supports_reasoning_effort_passthrough": false,
+      "supports_path_restriction": false,
+      "supports_request_class": false,
+      "headless_flag": "--exit-immediately (yolo mode)"
+    },
+    "enabled": true,
+    "blocked_reason": null,
+    "versions": ["2.4.6"],
+    "pinned_version": "2.4.6",
+    "option_schema": [],
+    "default_options": {},
+    "facts_version": 1,
+    "vendor_affinity": null,
+    "min_call_output_tokens": 2048,
+    "open_questions": []
+  },
+  {
+    "name": "aider",
+    "label": "Aider",
+    "description": "Edit-format pair programmer: the model replies with edit blocks Aider applies.",
+    "protocol": "openai_chat",
+    "capabilities": {
+      "agentic": false,
+      "requires_tool_calling": false,
+      "supports_max_turns": false,
+      "supports_system_prompt": "none",
+      "supports_tool_policy": false,
+      "supports_compaction_control": false,
+      "supports_context_limit": true,
+      "supports_reasoning_effort_passthrough": false,
+      "supports_path_restriction": true,
+      "supports_request_class": false,
+      "headless_flag": "--message-file (single turn)"
+    },
+    "enabled": true,
+    "blocked_reason": null,
+    "versions": ["0.86.2"],
+    "pinned_version": "0.86.2",
+    "option_schema": [
+      {
+        "key": "edit_format",
+        "type": "enum",
+        "label": "Edit format",
+        "help": "How the model writes changes. 'whole' resends entire files, so it needs a large output cap.",
+        "default": "diff",
+        "choices": [
+          {
+            "value": "diff",
+            "label": "Search/replace blocks (diff)"
+          },
+          {
+            "value": "whole",
+            "label": "Whole files (whole)"
+          },
+          {
+            "value": "udiff",
+            "label": "Unified diffs (udiff)"
+          },
+          {
+            "value": "diff-fenced",
+            "label": "Fenced search/replace blocks (diff-fenced)"
+          }
+        ],
+        "min": null,
+        "max": null
+      },
+      {
+        "key": "map_tokens",
+        "type": "int",
+        "label": "Repo map tokens",
+        "help": "Token budget for Aider's repository map; 0 disables the map.",
+        "default": 1024,
+        "choices": [],
+        "min": 0,
+        "max": 8192
+      }
+    ],
+    "default_options": {
+      "edit_format": "diff",
+      "map_tokens": 1024
+    },
+    "facts_version": 1,
+    "vendor_affinity": null,
+    "min_call_output_tokens": 8192,
+    "open_questions": []
+  },
+  {
+    "name": "claude-code",
+    "label": "Claude Code",
+    "description": "Anthropic's agentic CLI in bare headless mode (Anthropic Messages protocol).",
+    "protocol": "anthropic_messages",
+    "capabilities": {
+      "agentic": true,
+      "requires_tool_calling": true,
+      "supports_max_turns": true,
+      "supports_system_prompt": "both",
+      "supports_tool_policy": true,
+      "supports_compaction_control": true,
+      "supports_context_limit": true,
+      "supports_reasoning_effort_passthrough": true,
+      "supports_path_restriction": false,
+      "supports_request_class": true,
+      "headless_flag": "--bare -p --output-format stream-json"
+    },
+    "enabled": false,
+    "blocked_reason": "passthrough needs WP-06's /v1/messages route verified against OpenRouter, and a real-model smoke run; open questions: OpenRouter /api/v1/messages: acceptance of provider routing fields and usage.cost in the native response (WP-06 passthrough; else /generation backfill + routing_partial); real-model smoke run through the WP-06 gateway on three model families (no paid calls in wave 2)",
+    "versions": ["2.1.316"],
+    "pinned_version": "2.1.316",
+    "option_schema": [],
+    "default_options": {},
+    "facts_version": 1,
+    "vendor_affinity": "anthropic",
+    "min_call_output_tokens": 16384,
+    "open_questions": [
+      "OpenRouter /api/v1/messages: acceptance of provider routing fields and usage.cost in the native response (WP-06 passthrough; else /generation backfill + routing_partial)",
+      "real-model smoke run through the WP-06 gateway on three model families (no paid calls in wave 2)"
+    ]
+  },
+  {
+    "name": "codex",
+    "label": "Codex CLI",
+    "description": "OpenAI's Codex CLI in exec mode (Responses protocol), instructions pinned.",
+    "protocol": "openai_responses",
+    "capabilities": {
+      "agentic": true,
+      "requires_tool_calling": true,
+      "supports_max_turns": false,
+      "supports_system_prompt": "override",
+      "supports_tool_policy": false,
+      "supports_compaction_control": true,
+      "supports_context_limit": true,
+      "supports_reasoning_effort_passthrough": true,
+      "supports_path_restriction": false,
+      "supports_request_class": false,
+      "headless_flag": "exec --json"
+    },
+    "enabled": false,
+    "blocked_reason": "passthrough needs WP-06's /v1/responses route verified against OpenRouter, and a real-model smoke run; open questions: OpenRouter /api/v1/responses (stateless): usage/cost fields and provider routing in passthrough (WP-06); real-model smoke run through the WP-06 gateway on three model families (no paid calls in wave 2); unknown model slugs get fallback metadata without an apply_patch tool although the pinned instructions tell the model to use one (no config key forces it; --strict-config refuses include_apply_patch_tool): force function tools or keep the harness disabled (fairness, 5.2); bundled system skills stay listed in a developer message with no switch to remove them (5.2 rule: no hidden capabilities beyond the declared tool set)",
+    "versions": ["0.166.0"],
+    "pinned_version": "0.166.0",
+    "option_schema": [],
+    "default_options": {},
+    "facts_version": 1,
+    "vendor_affinity": "openai",
+    "min_call_output_tokens": 8192,
+    "open_questions": [
+      "OpenRouter /api/v1/responses (stateless): usage/cost fields and provider routing in passthrough (WP-06)",
+      "real-model smoke run through the WP-06 gateway on three model families (no paid calls in wave 2)",
+      "unknown model slugs get fallback metadata without an apply_patch tool although the pinned instructions tell the model to use one (no config key forces it; --strict-config refuses include_apply_patch_tool): force function tools or keep the harness disabled (fairness, 5.2)",
+      "bundled system skills stay listed in a developer message with no switch to remove them (5.2 rule: no hidden capabilities beyond the declared tool set)"
+    ]
+  },
+  {
+    "name": "goose",
+    "label": "Goose",
+    "description": "Block's open-source agent with the built-in developer extension only.",
+    "protocol": "openai_chat",
+    "capabilities": {
+      "agentic": true,
+      "requires_tool_calling": true,
+      "supports_max_turns": true,
+      "supports_system_prompt": "override",
+      "supports_tool_policy": false,
+      "supports_compaction_control": true,
+      "supports_context_limit": true,
+      "supports_reasoning_effort_passthrough": false,
+      "supports_path_restriction": false,
+      "supports_request_class": false,
+      "headless_flag": "run --no-session --output-format stream-json"
+    },
+    "enabled": false,
+    "blocked_reason": "facts verified offline; awaiting a real-model smoke run through the WP-06 gateway; open questions: built-in skills (web-search via DuckDuckGo/Tavily/SearXNG, goose-doc-guide) and the load_skill tool are advertised even with --no-profile and no verified switch removes them (smoke run, v1.57.0)",
+    "versions": ["1.57.0"],
+    "pinned_version": "1.57.0",
+    "option_schema": [
+      {
+        "key": "max_tool_repetitions",
+        "type": "int",
+        "label": "Max identical tool calls",
+        "help": "Stop a run of identical consecutive tool calls after this many (0: Goose's default, unlimited).",
+        "default": 0,
+        "choices": [],
+        "min": 0,
+        "max": 100
+      }
+    ],
+    "default_options": {
+      "max_tool_repetitions": 0
+    },
+    "facts_version": 1,
+    "vendor_affinity": null,
+    "min_call_output_tokens": 4096,
+    "open_questions": [
+      "built-in skills (web-search via DuckDuckGo/Tavily/SearXNG, goose-doc-guide) and the load_skill tool are advertised even with --no-profile and no verified switch removes them (smoke run, v1.57.0)"
+    ]
+  },
+  {
+    "name": "qwen-code",
+    "label": "Qwen Code",
+    "description": "Qwen's Gemini-CLI-derived agent, headless stream-json, system prompt pinned.",
+    "protocol": "openai_chat",
+    "capabilities": {
+      "agentic": true,
+      "requires_tool_calling": true,
+      "supports_max_turns": true,
+      "supports_system_prompt": "override",
+      "supports_tool_policy": true,
+      "supports_compaction_control": false,
+      "supports_context_limit": false,
+      "supports_reasoning_effort_passthrough": false,
+      "supports_path_restriction": false,
+      "supports_request_class": false,
+      "headless_flag": "--bare --output-format stream-json (stdin prompt)"
+    },
+    "enabled": false,
+    "blocked_reason": "facts verified offline; awaiting a real-model smoke run through the WP-06 gateway; open questions: usage statistics (privacy.usageStatisticsEnabled) can only be switched off in settings.json, which --bare ignores: verify no stats traffic under network_policy=packages (egress allowlist) before enabling",
+    "versions": ["0.26.6"],
+    "pinned_version": "0.26.6",
+    "option_schema": [],
+    "default_options": {},
+    "facts_version": 1,
+    "vendor_affinity": null,
+    "min_call_output_tokens": 4096,
+    "open_questions": [
+      "usage statistics (privacy.usageStatisticsEnabled) can only be switched off in settings.json, which --bare ignores: verify no stats traffic under network_policy=packages (egress allowlist) before enabling"
+    ]
+  },
+  {
+    "name": "gemini-cli",
+    "label": "Gemini CLI",
+    "description": "Google's Gemini CLI through the gateway's Gemini translator (wave 3).",
+    "protocol": "gemini_generate",
+    "capabilities": {
+      "agentic": true,
+      "requires_tool_calling": true,
+      "supports_max_turns": true,
+      "supports_system_prompt": "override",
+      "supports_tool_policy": true,
+      "supports_compaction_control": true,
+      "supports_context_limit": true,
+      "supports_reasoning_effort_passthrough": false,
+      "supports_path_restriction": false,
+      "supports_request_class": false,
+      "headless_flag": "-o stream-json --approval-mode=yolo"
+    },
+    "enabled": false,
+    "blocked_reason": "wave 3: needs the WP-06 gemini_generate translator and the open questions closed; open questions: WP-06 gemini_generate translator (thoughtSignature round trip, countTokens local) not available yet; stdin-only prompt in headless mode (no -p) for the pinned version; generic model config for non-Gemini slugs (the CLI validates model names); GEMINI_SANDBOX=false overriding the yolo default in the pinned version; captured default prompt (GEMINI_WRITE_SYSTEM_MD) per model-dependent variant",
+    "versions": ["0.66.0"],
+    "pinned_version": "0.66.0",
+    "option_schema": [],
+    "default_options": {},
+    "facts_version": 1,
+    "vendor_affinity": "google",
+    "min_call_output_tokens": 4096,
+    "open_questions": [
+      "WP-06 gemini_generate translator (thoughtSignature round trip, countTokens local) not available yet",
+      "stdin-only prompt in headless mode (no -p) for the pinned version",
+      "generic model config for non-Gemini slugs (the CLI validates model names)",
+      "GEMINI_SANDBOX=false overriding the yolo default in the pinned version",
+      "captured default prompt (GEMINI_WRITE_SYSTEM_MD) per model-dependent variant"
+    ]
+  }
+]

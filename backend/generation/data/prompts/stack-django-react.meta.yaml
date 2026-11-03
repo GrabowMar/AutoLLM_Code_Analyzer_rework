@@ -1,0 +1,5 @@
+name: Stack fragment, Django 5 + React (SQLite)
+role: fragment
+modes: [app, slot]
+variables: []
+tags: [stack]

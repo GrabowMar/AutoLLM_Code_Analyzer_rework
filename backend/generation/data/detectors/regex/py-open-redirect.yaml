@@ -1,0 +1,11 @@
+name: 'Open redirect from request data (Python)'
+description: 'A redirect target comes from request parameters (directly, or through a variable assigned from them a few lines above).'
+content:
+  engine: regex
+  languages: [python]
+  rule: '\b(?:redirect|RedirectResponse|HttpResponseRedirect)\(\s*(?:url\s*=\s*)?request\.(?:args|form|values|GET|POST|query_params)\b|^[ \t]*(\w+)\s*=\s*request\.(?:args|form|values|GET|POST|query_params)\b[^\n]*\n(?:[^\n]*\n){0,10}?[^\n]*\b(?:redirect|RedirectResponse|HttpResponseRedirect)\(\s*(?:url\s*=\s*)?\1\s*[,)]'
+  tool: {name: re, version: py3.13}
+  feature_key: py-open-redirect
+  polarity: insecure
+  cwe: [cwe-601]
+  description: 'redirect()/RedirectResponse()/HttpResponseRedirect() receives a request parameter.'

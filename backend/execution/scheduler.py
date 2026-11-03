@@ -14,9 +14,17 @@ policy's concurrency knobs (``max_resident_models``, ``warmup``). Evaluation
 is claimed by phase (``status=running, phase=eval_queued``), never by lane, so
 ``reference`` runs created in that state are claimed like any other.
 
-Only the chosen rows are locked (``FOR UPDATE SKIP LOCKED``), then claimed
-with one conditional UPDATE; rows a concurrent cancel or pause holds are
-reconsidered on the next tick.
+Per-study concurrency knobs (``execution_options.per_endpoint / per_model /
+per_provider``) are admission rules below ``max_parallel``; runs of a paused
+condition are left out of the lanes; ``eval_parallel`` caps a study's
+evaluations in the evaluation claim.
+
+Only the chosen rows are locked (``FOR UPDATE SKIP LOCKED``). In the same
+transaction the budget admission (``generation.budget.claims.admit``: replicate
+blocks, run reservations, cell caps, spend caps, ``on_budget_exhausted``) may
+refuse a run, which stops its lane for the tick; the rest are claimed with one
+conditional UPDATE. Rows a concurrent cancel or pause holds are reconsidered
+on the next tick.
 """
 
 from __future__ import annotations
@@ -55,6 +63,15 @@ STUDY_CAP = "study_cap"
 CIRCUIT_OPEN = "circuit_open"
 DRAINING = "draining"
 RETRY_BACKOFF = "retry_backoff"
+# Per-study concurrency knobs (Study.execution_options; spec 4.2 concurrency.*).
+STUDY_ENDPOINT_CAP = "study_endpoint_cap"
+STUDY_MODEL_CAP = "study_model_cap"
+STUDY_PROVIDER_CAP = "study_provider_cap"
+# Budget admission (generation/budget/claims.py) at apply time.
+BUDGET = "budget"
+
+# A starved head that cannot run for one of these reasons abandons its drain-for-swap (rule 4).
+_HEAD_CANNOT_RUN = (MODEL_NOT_SERVED, STUDY_CAP, STUDY_ENDPOINT_CAP, STUDY_MODEL_CAP, STUDY_PROVIDER_CAP)
 
 MAX_LANE_DEPTH = 64
 WARMUP_VALID_S = 600  # a finished warm-up admits heads of its model for this long
@@ -68,6 +85,8 @@ SELECT * FROM (
          j.priority, j.queued_at, j.created_by_id, j.attempt, j.condition_id, j.cell_id, j.task_version_id,
          j.slot_target_id, j.repeat_index, j.pinned_served_name AS served_name, j.pinned_digest AS snapshot_digest,
          x.launched_at, x.max_parallel AS study_max_parallel, x.execution_options, x.scheduling,
+         coalesce(rm.manifest #>> '{gateway,routing,only,0}',
+                  rm.manifest #>> '{gateway,routing,provider,only,0}', '') AS provider,
          row_number() OVER (
            PARTITION BY coalesce(j.study_id::text, 'adhoc:' || j.created_by_id::text),
                         coalesce(j.endpoint_id, %(system_ep)s)
@@ -75,21 +94,41 @@ SELECT * FROM (
                     j.queued_at, j.sequence NULLS LAST, j.id
          ) AS rn
   FROM generation_run j LEFT JOIN generation_study x ON x.id = j.study_id
+       LEFT JOIN generation_studycondition c ON c.id = j.condition_id
+       LEFT JOIN generation_runmanifest rm ON rm.run_id = j.id
   WHERE j.status = 'pending' AND j.queued_at IS NOT NULL
     AND (j.run_after IS NULL OR j.run_after <= now())
     AND (j.study_id IS NULL OR x.status IN ('piloting', 'running'))
+    -- a paused condition (stop rule pause_condition) is invisible: it never blocks the other conditions
+    AND (c.id IS NULL OR NOT c.paused)
     %(extra)s
 ) t WHERE rn <= %(depth)s
 ORDER BY rn
 """
 
 # Both claims return the same columns, in the order Claimed.from_row reads them.
+# concurrency.eval_parallel caps a study's evaluations in flight (Study.execution_options.eval_parallel).
 _EVAL_CLAIM_SQL = """
-WITH c AS (
-  SELECT id FROM generation_run
-  WHERE status = 'running' AND phase = 'eval_queued'
-  ORDER BY priority DESC, stage_entered_at NULLS FIRST, id
-  LIMIT %s FOR UPDATE SKIP LOCKED
+WITH active AS (
+  SELECT study_id, count(*) AS n FROM generation_run
+  WHERE status = 'running' AND phase = 'evaluating' AND study_id IS NOT NULL
+  GROUP BY study_id
+), ranked AS (
+  SELECT j.id, j.priority, j.stage_entered_at, j.study_id,
+         row_number() OVER (PARTITION BY j.study_id
+                            ORDER BY j.priority DESC, j.stage_entered_at NULLS FIRST, j.id) AS rn,
+         CASE WHEN jsonb_typeof(x.execution_options -> 'eval_parallel') = 'number'
+              THEN (x.execution_options ->> 'eval_parallel')::int END AS lim,
+         coalesce(a.n, 0) AS act
+  FROM generation_run j
+       LEFT JOIN generation_study x ON x.id = j.study_id
+       LEFT JOIN active a ON a.study_id = j.study_id
+  WHERE j.status = 'running' AND j.phase = 'eval_queued'
+), c AS (
+  SELECT g.id FROM generation_run g JOIN ranked r ON r.id = g.id
+  WHERE r.study_id IS NULL OR r.lim IS NULL OR r.act + r.rn <= r.lim
+  ORDER BY r.priority DESC, r.stage_entered_at NULLS FIRST, g.id
+  LIMIT %s FOR UPDATE OF g SKIP LOCKED
 )
 UPDATE generation_run j
 SET phase = 'evaluating', lease_owner = %s, lease_expires_at = now() + %s * interval '1 second',
@@ -154,6 +193,13 @@ class LaneRow:
     study_max_parallel: int | None
     execution_options: dict[str, Any]
     scheduling: str | None = None
+    provider: str = ""
+
+    def option(self, name: str) -> int | None:
+        """A positive integer concurrency knob of the study (``None`` = no limit)."""
+        options = self.execution_options if isinstance(self.execution_options, dict) else {}
+        value = options.get(name)
+        return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
     @property
     def lane_key(self) -> tuple[str, int]:
@@ -272,6 +318,7 @@ def read_lane_heads(system_ep: int, depth: int, *, user_id: int | None = None) -
                 study_max_parallel=row["study_max_parallel"],
                 execution_options=options or {},
                 scheduling=row["scheduling"],
+                provider=row["provider"] or "",
             ),
         )
     return out
@@ -338,7 +385,13 @@ class Scheduler:
         if dry_run:
             result.admitted_order = [row.id for row in chosen]
         elif chosen:
-            result.claimed.extend(self._apply(chosen, extras))
+            claimed, refused = self._apply(chosen, extras)
+            result.claimed.extend(claimed)
+            for row, reason in refused:
+                state = result.lanes.get(row.lane_key)
+                if state is not None and state.reason is None:
+                    state.reason = reason
+                    state.head_run = row.id
         if not dry_run:
             self.last = result
         return result
@@ -387,6 +440,11 @@ class Scheduler:
         }
         ep_active = Counter(snap.ep_active)
         study_active = Counter(snap.study_active)
+        per_study = {
+            "ep": Counter(snap.study_ep_active),
+            "model": Counter(snap.study_model_active),
+            "provider": Counter(snap.study_provider_active),
+        }
         user_active = Counter(snap.user_active)
         resident = {ep: set(models) for ep, models in snap.resident.items()}
         running_models: dict[int, set[str]] = {}
@@ -452,6 +510,7 @@ class Scheduler:
                 now,
                 dry_run,
                 open_circuits,
+                per_study,
             )
             state = result.lanes[key]
             if reason is not None:
@@ -470,6 +529,10 @@ class Scheduler:
             running_models.setdefault(head.ep, set()).add(head.model_key)
             if head.study_id:
                 study_active[head.study_id] += 1
+                per_study["ep"][(head.study_id, head.ep)] += 1
+                per_study["model"][(head.study_id, head.model_id)] += 1
+                if head.provider:
+                    per_study["provider"][(head.study_id, head.provider)] += 1
             user_active[head.user_id] += 1
             if lanes[key]:
                 state.head_run = lanes[key][0].id
@@ -506,7 +569,7 @@ class Scheduler:
             return
         if reason == MODEL_NOT_SERVED:
             self.residency_wait_since.pop(key, None)
-        if starved is not None and starved[0] == key and reason in (MODEL_NOT_SERVED, STUDY_CAP):
+        if starved is not None and starved[0] == key and reason in _HEAD_CANNOT_RUN:
             del swap[head.ep]
             for other in [k for k in held_by_swap if k[1] == head.ep]:
                 held_by_swap.discard(other)
@@ -538,6 +601,7 @@ class Scheduler:
         now: datetime,
         dry_run: bool,
         open_circuits: set[int] | None,
+        per_study: dict[str, Counter] | None = None,
     ) -> tuple[str | None, dict[str, Any] | None]:
         # 1. a real worker thread and a slot
         if free.get(head.lane, 0) <= 0:
@@ -567,6 +631,17 @@ class Scheduler:
         # 5. study cap (Study.max_parallel)
         if head.study_id and head.study_max_parallel and study_active[head.study_id] >= head.study_max_parallel:
             return STUDY_CAP, None
+        # 5b. per-study concurrency knobs below the endpoint's own cap
+        if head.study_id and per_study is not None:
+            limit = head.option("per_endpoint")
+            if limit and per_study["ep"][(head.study_id, head.ep)] >= limit:
+                return STUDY_ENDPOINT_CAP, None
+            limit = head.option("per_model")
+            if limit and per_study["model"][(head.study_id, head.model_id)] >= limit:
+                return STUDY_MODEL_CAP, None
+            limit = head.option("per_provider")
+            if limit and head.provider and per_study["provider"][(head.study_id, head.provider)] >= limit:
+                return STUDY_PROVIDER_CAP, None
         # 6. prefetch (Ollama, warm-up on): admit once the model is loaded
         extra: dict[str, Any] | None = None
         if ep.kind == "ollama" and not ep.is_system and head.warmup_enabled:
@@ -628,26 +703,56 @@ class Scheduler:
 
     # ── step 5: apply ──────────────────────────────────────────────────
 
-    def _apply(self, chosen: list[LaneRow], extras: dict[str, dict[str, Any]]) -> list[Claimed]:
+    def _apply(
+        self,
+        chosen: list[LaneRow],
+        extras: dict[str, dict[str, Any]],
+    ) -> tuple[list[Claimed], list[tuple[LaneRow, str]]]:
+        """Lock the chosen rows, run the budget admission (blocks, cell caps, spend caps), claim the rest.
+
+        Budget refusals are strict head-of-line: once a lane's run is refused, its later runs in this
+        tick are not claimed either (the lane's order stays reproducible). Returns ``(claimed, refused)``.
+        """
+        from backend.generation.budget import claims as budget_claims
+
         ids = [str(row.id) for row in chosen]
+        refused: list[tuple[LaneRow, str]] = []
         with transaction.atomic(), connection.cursor() as cursor:
             cursor.execute(_LOCK_SQL, [ids])
-            locked = [str(r[0]) for r in cursor.fetchall()]
+            locked = {str(r[0]) for r in cursor.fetchall()}
             if not locked:
-                return []
+                return [], refused
+            ordered = [row for row in chosen if str(row.id) in locked]
+            # Head-of-line per lane inside admission too: a run behind a refused run of its lane is not
+            # admitted (nothing is reserved for it), so every admitted row below is claimed.
+            lanes = {str(row.id): row.lane_key for row in ordered}
+            decisions = budget_claims.admit([row.id for row in ordered], lane_of=lanes.get)
+            admitted: list[str] = []
+            stopped_lanes: set[tuple[str, int]] = set()
+            for row in ordered:
+                decision = decisions.get(str(row.id))
+                if row.lane_key in stopped_lanes:
+                    continue
+                if decision is None or not decision.ok:
+                    stopped_lanes.add(row.lane_key)
+                    refused.append((row, (decision.reason if decision else BUDGET) or BUDGET))
+                    continue
+                admitted.append(str(row.id))
+            if not admitted:
+                return [], refused
             cursor.execute(
                 _CLAIM_SQL,
                 {
                     "owner": self.executor_id,
                     "lease": self.lease_seconds,
                     "extras": json.dumps(extras),
-                    "ids": locked,
+                    "ids": admitted,
                 },
             )
             rows = cursor.fetchall()
         by_id = {str(r[0]): r for r in rows}
         # Keep admission order.
-        return [Claimed.from_row(by_id[str(row.id)]) for row in chosen if str(row.id) in by_id]
+        return [Claimed.from_row(by_id[str(row.id)]) for row in chosen if str(row.id) in by_id], refused
 
 
 def warmup_body(served_name: str, access, ep) -> dict[str, Any]:

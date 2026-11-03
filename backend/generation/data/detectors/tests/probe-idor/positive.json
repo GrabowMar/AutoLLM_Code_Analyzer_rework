@@ -1,0 +1,11 @@
+{
+  "probes": [
+    {
+      "id": "p-1",
+      "cwe": "cwe-639",
+      "kind": "idor_enumeration",
+      "status": "exploited",
+      "evidence": "fixture"
+    }
+  ]
+}

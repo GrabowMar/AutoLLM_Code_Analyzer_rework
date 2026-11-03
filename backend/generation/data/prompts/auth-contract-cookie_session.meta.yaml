@@ -1,0 +1,7 @@
+name: 'Auth contract: cookie session'
+description: Spec 8.4 cookie_session (double-submit CSRF header); rendered only for tasks with the auth feature.
+role: fragment
+modes:
+- app
+variables:
+- task

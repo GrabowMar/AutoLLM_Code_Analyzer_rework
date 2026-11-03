@@ -30,7 +30,7 @@
 	import { Segmented } from '$lib/components/ui/segmented';
 	import * as Select from '$lib/components/ui/select';
 	import Switch from '$lib/components/ui/switch/switch.svelte';
-	import NumberField from '$lib/components/generator/composer/NumberField.svelte';
+	import NumberField from '$lib/components/studies/shared/NumberField.svelte';
 	import SectionHeading from '$lib/components/SectionHeading.svelte';
 	import { endpointSlugFromName, slugError, SLUG_MAX_LENGTH } from './endpoint-display';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';

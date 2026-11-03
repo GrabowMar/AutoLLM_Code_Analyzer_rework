@@ -1,0 +1,7 @@
+name: App (paraphrase C)
+description: A paraphrase of the default brief, for prompt-sensitivity studies.
+content:
+  mode: app
+  roles: {brief: brief-app-paraphrase-c@1}
+  fragments: {auth_contract.contract_bearer: auth-contract-contract_bearer@1, auth_contract.cookie_session: auth-contract-cookie_session@1,
+    auth_contract.spec_defined: auth-contract-spec_defined@1, network.none: network-none@1, network.packages: network-packages@1}

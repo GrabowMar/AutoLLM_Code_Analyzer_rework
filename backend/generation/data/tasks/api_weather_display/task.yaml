@@ -1,0 +1,289 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Weather display
+summary: Look up the current weather of a city from the app's own store of reports.
+category: data-lookup
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: WeatherReport
+  fields:
+  - {name: city, type: string, required: true, unique: true, max_length: 100}
+  - {name: country, type: string, max_length: 100}
+  - {name: temperature_c, type: float, required: true, min: -90, max: 60}
+  - name: condition
+    type: enum
+    required: true
+    enum: [sunny, cloudy, rain, snow, storm, fog]
+  - {name: humidity, type: int, min: 0, max: 100}
+  - {name: wind_kph, type: float, min: 0, max: 500}
+  - {name: observed_at, type: datetime}
+- name: Lookup
+  fields:
+  - {name: city, type: string}
+  - {name: found, type: bool}
+  - {name: looked_up_at, type: datetime}
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: weather.list
+  method: GET
+  path: /api/weather
+  auth: public
+  query:
+  - {name: city, type: string, semantics: search}
+  - {name: page, type: int, semantics: page, default: 1}
+  - {name: page_size, type: int, semantics: page_size, default: 20, max: 100}
+  response_schema:
+    type: object
+    required: [items, total, page, page_size]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, city, temperature_c, condition]
+          properties:
+            id:
+              type: [integer, string]
+            city: {type: string, maxLength: 100, minLength: 1}
+            country:
+              type: [string, 'null']
+              maxLength: 100
+            temperature_c: {type: number, minimum: -90, maximum: 60}
+            condition:
+              type: string
+              enum: [sunny, cloudy, rain, snow, storm, fog]
+            humidity:
+              type: [integer, 'null']
+              minimum: 0
+              maximum: 100
+            wind_kph:
+              type: [number, 'null']
+              minimum: 0
+              maximum: 500
+            observed_at:
+              type: [string, 'null']
+              format: date-time
+      total: {type: integer}
+      page: {type: integer}
+      page_size: {type: integer}
+- id: weather.create
+  method: POST
+  path: /api/weather
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      city: {type: string, maxLength: 100, minLength: 1}
+      country:
+        type: [string, 'null']
+        maxLength: 100
+      temperature_c: {type: number, minimum: -90, maximum: 60}
+      condition:
+        type: string
+        enum: [sunny, cloudy, rain, snow, storm, fog]
+      humidity:
+        type: [integer, 'null']
+        minimum: 0
+        maximum: 100
+      wind_kph:
+        type: [number, 'null']
+        minimum: 0
+        maximum: 500
+    required: [city, temperature_c, condition]
+  response_schema:
+    type: object
+    required: [id, city, temperature_c, condition]
+    properties:
+      id:
+        type: [integer, string]
+      city: {type: string, maxLength: 100, minLength: 1}
+      country:
+        type: [string, 'null']
+        maxLength: 100
+      temperature_c: {type: number, minimum: -90, maximum: 60}
+      condition:
+        type: string
+        enum: [sunny, cloudy, rain, snow, storm, fog]
+      humidity:
+        type: [integer, 'null']
+        minimum: 0
+        maximum: 100
+      wind_kph:
+        type: [number, 'null']
+        minimum: 0
+        maximum: 500
+      observed_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400, 409]
+- id: weather.get
+  method: GET
+  path: /api/weather/{id}
+  auth: public
+  response_schema:
+    type: object
+    required: [id, city, temperature_c, condition]
+    properties:
+      id:
+        type: [integer, string]
+      city: {type: string, maxLength: 100, minLength: 1}
+      country:
+        type: [string, 'null']
+        maxLength: 100
+      temperature_c: {type: number, minimum: -90, maximum: 60}
+      condition:
+        type: string
+        enum: [sunny, cloudy, rain, snow, storm, fog]
+      humidity:
+        type: [integer, 'null']
+        minimum: 0
+        maximum: 100
+      wind_kph:
+        type: [number, 'null']
+        minimum: 0
+        maximum: 500
+      observed_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [404]
+- id: weather.replace
+  method: PUT
+  path: /api/weather/{id}
+  auth: user
+  request_schema:
+    type: object
+    properties:
+      city: {type: string, maxLength: 100, minLength: 1}
+      country:
+        type: [string, 'null']
+        maxLength: 100
+      temperature_c: {type: number, minimum: -90, maximum: 60}
+      condition:
+        type: string
+        enum: [sunny, cloudy, rain, snow, storm, fog]
+      humidity:
+        type: [integer, 'null']
+        minimum: 0
+        maximum: 100
+      wind_kph:
+        type: [number, 'null']
+        minimum: 0
+        maximum: 500
+    required: [city, temperature_c, condition]
+  response_schema:
+    type: object
+    required: [id, city, temperature_c, condition]
+    properties:
+      id:
+        type: [integer, string]
+      city: {type: string, maxLength: 100, minLength: 1}
+      country:
+        type: [string, 'null']
+        maxLength: 100
+      temperature_c: {type: number, minimum: -90, maximum: 60}
+      condition:
+        type: string
+        enum: [sunny, cloudy, rain, snow, storm, fog]
+      humidity:
+        type: [integer, 'null']
+        minimum: 0
+        maximum: 100
+      wind_kph:
+        type: [number, 'null']
+        minimum: 0
+        maximum: 500
+      observed_at:
+        type: [string, 'null']
+        format: date-time
+  errors: [400, 404, 409]
+- id: weather.delete
+  method: DELETE
+  path: /api/weather/{id}
+  auth: user
+  success_status: 204
+  errors: [404]
+- id: weather.recent
+  method: GET
+  path: /api/weather/recent
+  auth: public
+  query:
+  - {name: limit, type: int, semantics: page_size, default: 10, max: 50}
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: [integer, string]
+            city:
+              type: [string, 'null']
+            found:
+              type: [boolean, 'null']
+            looked_up_at:
+              type: [string, 'null']
+              format: date-time
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.search
+  text: A city search that shows a weather card (city, country, temperature, condition, humidity, wind, observed
+    time) or a 'No weather data for <city>' message.
+  endpoints: [weather.list]
+- id: ui.units
+  text: A Celsius/Fahrenheit switch that converts the shown temperatures in the browser.
+  endpoints: [weather.list]
+- id: ui.recent
+  text: The five most recent lookups; clicking one repeats the search.
+  endpoints: [weather.recent]
+- id: ui.manage
+  text: 'For signed-in users: the list of reports with add and edit forms showing the API''s validation messages,
+    and delete after confirmation.'
+  endpoints: [weather.create, weather.replace, weather.delete]
+features: [auth, search, pagination]
+surfaces: [cwe-89, cwe-79, cwe-862, cwe-20, cwe-400]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+seed_data:
+  WeatherReport:
+  - {city: London}
+  - {city: Paris}
+  - {city: Tokyo}
+  - {city: New York}
+  - {city: Sydney}
+probes:
+- id: probe.weather.sqli
+  cwe: cwe-89
+  kind: sqli_boolean
+  endpoint: weather.list
+  params: {param: city}

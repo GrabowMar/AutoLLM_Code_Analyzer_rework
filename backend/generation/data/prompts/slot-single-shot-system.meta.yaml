@@ -1,0 +1,8 @@
+name: Slot single-shot system
+description: 'System prompt of a single-shot slot call: the JSON-only output contract.'
+role: slot_single_shot_system
+modes:
+- slot
+variables:
+- slot
+- guidance

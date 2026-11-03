@@ -1,0 +1,11 @@
+name: Prescribed Python libraries
+description: Holds security-relevant libraries constant for Python stacks.
+content:
+  security_hint: none
+  fragment: guidance-libraries-prescribed-py@1
+  library_prescriptions:
+  - {purpose: password hashing, library: argon2-cffi}
+  - {purpose: signed tokens, library: PyJWT}
+  - {purpose: database access, library: SQLAlchemy (ORM or bound parameters)}
+  - {purpose: request validation, library: pydantic}
+  - {purpose: HTML sanitizing, library: nh3}
