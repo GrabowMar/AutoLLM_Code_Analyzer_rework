@@ -196,6 +196,87 @@ def test_repeated_tester_crash_is_infra_error_never_zero(golden: Any) -> None:
     assert suite_mod.outcome_of(row) == (choices.Outcome.INFRA_ERROR, "tester_crash")
 
 
+# --- database sidecar (postgres profiles) ------------------------------------------------------------
+
+
+class SidecarRuntime(ScriptedRuntime):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started_env: dict[str, str] = {}
+
+    def start_database(self, kind: str) -> dict[str, str]:
+        assert kind == "postgres"
+        return {"DATABASE_URL": "postgresql://app:pw@db:5432/app"}
+
+    def start(self, image: str, env: Any, **kwargs: Any) -> Any:
+        self.started_env = dict(env)
+        return super().start(image, env, **kwargs)
+
+
+@pytest.fixture
+def postgres_stack(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The run's stack profile reads as ``database: postgres`` (in memory; the library row is untouched)."""
+    real = suite_mod._inherited
+
+    def inherited(run: Any, name: str) -> Any:
+        found = real(run, name)
+        if name == "stack_profile" and found is not None:
+            found.content = {**(found.content or {}), "database": "postgres"}
+        return found
+
+    monkeypatch.setattr(suite_mod, "_inherited", inherited)
+
+
+@pytest.mark.usefixtures("postgres_stack")
+def test_postgres_profile_gets_a_database_url_from_the_sidecar(golden: Any) -> None:
+    runtime = SidecarRuntime()
+    row = suite_mod.evaluate(make_run(golden, level="functional"), suite_of(golden), runtime=runtime)
+    assert row.status == choices.EvaluationStatus.MEASURED
+    assert runtime.started_env["DATABASE_URL"] == "postgresql://app:pw@db:5432/app"
+
+
+@pytest.mark.usefixtures("postgres_stack")
+def test_postgres_profile_without_a_sidecar_is_infra_error_never_start_fail(golden: Any) -> None:
+    row = suite_mod.evaluate(make_run(golden, level="functional"), suite_of(golden), runtime=LocalProcessRuntime())
+    assert row.status == choices.EvaluationStatus.ERROR
+    assert row.stages["start"]["status"] == "error"
+    assert suite_mod.outcome_of(row) == (choices.Outcome.INFRA_ERROR, "postgres_sidecar_unavailable")
+
+
+@pytest.mark.usefixtures("postgres_stack")
+@pytest.mark.parametrize("vuln", ["", "plaintext_password_db"])
+def test_postgres_profile_plaintext_password_probe_is_skipped_never_clean(golden: Any, vuln: str) -> None:
+    """A non-empty ./data (uploads, logs, a fallback sqlite) must not turn into a silent ``not_exploited``."""
+    from backend.generation.testing.factories import TaskSpecVersionFactory
+
+    class DataRuntime(SidecarRuntime):
+        data_reads = 0
+
+        def read_data(self, handle: Any, data_dir: str) -> dict[str, bytes]:
+            self.data_reads += 1
+            return {"uploads/avatar.png": b"\x89PNG not a password", "app.log": b"started"}
+
+    runtime = DataRuntime()
+    version = TaskSpecVersionFactory(content=conformance.kit_task_content())
+    run = baseline.reference_run(
+        reference_of=choices.ReferenceOf.ORACLE,
+        task_version=version,
+        stack=golden.get("stack", "flask-react"),
+        starter=None,
+        auth_mode="contract_bearer",
+        files=kit_tree(LLMLAB_VULN=vuln) if vuln else kit_tree(),
+        suite=suite_of(golden),
+    )
+    row = suite_mod.evaluate(run, suite_of(golden), probes=["probe.kit.plaintext_password"], runtime=runtime)
+    assert row.status == choices.EvaluationStatus.MEASURED
+    probes = row.result["probes"]
+    assert [(p["kind"], p["status"], p["skip_reason"]) for p in probes] == [
+        ("plaintext_password_db", "skipped", "precondition_failed"),
+    ]
+    assert probes[0]["evidence"] == "passwords live in the postgres sidecar"
+    assert runtime.data_reads == 0
+
+
 @pytest.mark.parametrize(
     ("builds", "outcome", "calls"),
     [

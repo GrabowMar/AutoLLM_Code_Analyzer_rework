@@ -381,6 +381,14 @@
       "summary": "slot study with a single parent (confirmatory: error unless estimand=conditional_on_parent)"
     },
     {
+      "code": "parent_draw_pending",
+      "exploratory": "info",
+      "confirmatory": "info",
+      "alternatives": [],
+      "owner": "study/plan.py",
+      "summary": "parent_selection drew parents whose slot sets or template matches are not frozen yet; freezing the plan creates them"
+    },
+    {
       "code": "manual_parent_selection",
       "exploratory": "info",
       "confirmatory": "error",

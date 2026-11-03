@@ -31,9 +31,10 @@ FIXTURE_DIRS = {
     "claude-code": "claude-code-2.1.316",
     "codex": "codex-0.166.0",
     "qwen-code": "qwen-code-0.26.6",
+    "gemini-cli": "gemini-cli-0.66.0",
 }
 SMOKED = tuple(FIXTURE_DIRS)
-ALL_HARNESSES = (*SMOKED, "gemini-cli")
+ALL_HARNESSES = SMOKED  # every adapter has a scripted smoke run (gemini-cli since wave 3)
 
 
 def pytest_configure(config: pytest.Config) -> None:

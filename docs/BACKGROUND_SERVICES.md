@@ -70,7 +70,7 @@ Three compose services share the django image and the Redis broker (`REDIS_URL`,
 | `run_pipeline_task`, `run_scheduler_tick` | `backend/automation/tasks.py` | Legacy automation; nothing calls or schedules them any more |
 | `get_users_count` | `backend/users/tasks.py` | Template example, unused |
 
-Without a worker the app still works: model sync succeeds without enrichment, per-call stats fetches wait in Redis (OpenRouter's records may expire meanwhile; the backfill command fetches them later), and webhook deliveries wait in Redis (and stay `pending` in the database) until a worker starts. Without beat the sweep stops, so deliveries that could not be queued (Redis down) are never retried.
+Without a worker the app still works: model sync succeeds without enrichment, per-call stats fetches wait in Redis (OpenRouter's records may expire meanwhile; there is no backfill command in v3, and the ledger then settles from the gateway's own call records), and webhook deliveries wait in Redis (and stay `pending` in the database) until a worker starts. Without beat the sweep stops, so deliveries that could not be queued (Redis down) are never retried.
 
 > [!NOTE]
 > Study schedules and stop rules do not need Celery beat: they run inside the executor. The old `run_scheduler_tick` / `runautomationscheduler` path only served legacy automation pipelines. See [Studies](/docs/STUDIES) and [Budget](/docs/BUDGET).

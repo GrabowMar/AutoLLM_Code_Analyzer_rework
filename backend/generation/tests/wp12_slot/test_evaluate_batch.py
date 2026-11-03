@@ -39,7 +39,7 @@ def _planned(golden: Any, mode: str = "full", level: str = "security") -> dict[s
     suite = golden.get("eval_suite", "eval-v2")
     return {
         "planned_evaluation": {
-            "eval_suite": {"ref": f"{suite.slug}@{suite.version}", "content_hash": suite.content_hash},
+            "eval_suite": {"ref": suite.pinned_ref, "content_hash": suite.content_hash},
             "eval_level": level,
             "mode": mode,
         },
@@ -108,7 +108,9 @@ def test_overlay_for_an_interpreted_backend_file_and_fallback_for_a_frontend_com
         {"kind": "component", "component": "TodoForm", "default_hole_mode": "stub"},
     )
     component_run = slot_run(component, manifest_updates=_planned(golden, mode="overlay"))
-    assemble(component_run, part_of(component).original_text)
+    # A changed component: the unchanged original's tree would (correctly) reuse its evaluation now that
+    # FakeEvaluator rows carry the real selection detail.
+    assemble(component_run, part_of(component).original_text + "\n// variant\n")
     component_run.save(update_fields=["tree_hash"])
     evaluator.calls.clear()
     evaluate_variant(component_run)

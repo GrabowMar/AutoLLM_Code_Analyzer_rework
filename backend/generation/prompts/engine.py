@@ -699,27 +699,12 @@ def render_set(
 
 
 def preview_prompt_hash(stimuli: Iterable[Stimulus | tuple[str, str]]) -> str:
-    """``prompt_hash`` of rendered stimuli, computed by ``identity.compute_keys`` (its only implementation).
+    """``prompt_hash`` of rendered stimuli: ``identity.prompt_hash``, the function ``compute_keys`` uses.
 
-    ``stimuli`` are :class:`Stimulus` values or ``(role, text)`` pairs. The other identity inputs are fixed
-    placeholders: ``prompt_hash`` depends on the stimuli alone.
+    ``stimuli`` are :class:`Stimulus` values or ``(role, text)`` pairs.
     """
     pairs = [
         (item.role, item.sha) if isinstance(item, Stimulus) else (str(item[0]), identity.text_sha(str(item[1])))
         for item in stimuli
     ]
-    placeholder = "0" * 64
-    inputs = identity.IdentityInputs(
-        protocol="ref@1",
-        kind="reference",
-        task={"structured_hash": placeholder, "variant": "standard", "prose_sha": placeholder},
-        target=None,
-        treatment=dict.fromkeys(identity.TREATMENT_KEYS),
-        stimuli=pairs,
-        model={"slug": "preview", "endpoint_kind": None, "pinned_digest": None},
-        sampling_hash=placeholder,
-        policy_treatment_view={},
-        images={"harness": None, "gateway": None, "starter_base": []},
-        seed=0,
-    )
-    return identity.compute_keys(inputs).prompt_hash
+    return identity.prompt_hash(pairs)

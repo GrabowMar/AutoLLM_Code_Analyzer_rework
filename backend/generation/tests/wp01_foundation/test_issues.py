@@ -17,7 +17,7 @@ from backend.generation.contracts.issues import make_issue
 SPEC = Path(__file__).resolve().parents[4] / "docs" / "design" / "SAMPLE_GEN_V3.md"
 
 # Registered codes that the spec describes without naming (recorded in SAMPLE_GEN_V3_CHANGES.md, WP-01 decisions).
-CODES_NOT_NAMED_IN_SPEC = frozenset({"combination_pruned", "mixed_config_fingerprint"})
+CODES_NOT_NAMED_IN_SPEC = frozenset({"combination_pruned", "mixed_config_fingerprint", "parent_draw_pending"})
 
 # Phrases the spec uses when it names an issue code.
 ISSUE_CONTEXT_PATTERNS = (

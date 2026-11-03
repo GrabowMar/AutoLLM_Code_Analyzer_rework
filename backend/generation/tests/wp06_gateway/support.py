@@ -44,6 +44,7 @@ from protocols import common  # noqa: E402
 from protocols import gemini_generate  # noqa: E402
 from protocols import openai_chat  # noqa: E402
 from protocols import openai_responses  # noqa: E402
+from protocols import translation  # noqa: E402
 
 __all__ = [
     "anthropic_messages",
@@ -53,6 +54,7 @@ __all__ = [
     "gemini_generate",
     "openai_chat",
     "openai_responses",
+    "translation",
 ]
 
 # =====================================================================================

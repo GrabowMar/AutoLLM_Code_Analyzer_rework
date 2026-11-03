@@ -18,9 +18,10 @@ request path.
 | `llm-gateway/protocols/budget_rules.py` | Budget rules: pre-call reservation, request classes, caps, cost bases, `state.json` payload. **Shared with the executor's local proxy** |
 | `llm-gateway/protocols/common.py` | `Policy` (the parsed `GatewayConfig`), hashing, SSE parsing, `cache_control` helpers |
 | `llm-gateway/protocols/openai_chat.py` | OpenAI chat completions: the canonical format and the `native` front |
-| `llm-gateway/protocols/anthropic_messages.py` | Anthropic Messages (Claude Code): `passthrough` to OpenRouter `/messages` |
-| `llm-gateway/protocols/openai_responses.py` | OpenAI Responses (Codex): `passthrough` to OpenRouter `/responses` |
-| `llm-gateway/protocols/gemini_generate.py` | Gemini `generateContent` (Gemini CLI): routes and error shape only; the translator is wave 3 |
+| `llm-gateway/protocols/anthropic_messages.py` | Anthropic Messages (Claude Code): `passthrough` to OpenRouter `/messages`, or `translate` |
+| `llm-gateway/protocols/openai_responses.py` | OpenAI Responses (Codex): `passthrough` to OpenRouter `/responses`, or `translate` |
+| `llm-gateway/protocols/gemini_generate.py` | Gemini `generateContent` (Gemini CLI): `translate` only |
+| `llm-gateway/protocols/translation.py` | What the translators share: `translation_dropped` counts, reasoning tokens, chat stream events, turn aggregation |
 | `llm-gateway-local/local.py` | Overlay image for local endpoints: registers the `local_proxy` upstream (the executor's LLM proxy) |
 
 ## Configuration
@@ -41,19 +42,20 @@ The sandbox starts the gateway with:
 | `GATEWAY_MAX_BODY_BYTES` | Request body limit (default 64 MiB) |
 | `GATEWAY_REFERER` / `GATEWAY_TITLE` | OpenRouter attribution headers |
 
-A config this image cannot run (an unknown front, a translator that is not available yet, passthrough to a
-local endpoint, `serving_tier=batch`, an upstream kind without its overlay) makes the gateway exit with
+A config this image cannot run (an unknown front, a front in a mode it does not have, e.g. `openai_chat`
+in `translate` or `gemini_generate` in `passthrough`, passthrough to a local endpoint, `serving_tier=batch`,
+an upstream kind without its overlay) makes the gateway exit with
 status **78** after writing a `config_invalid` event. The sandbox reports that as an infra error; it never
 proceeds without a gateway.
 
 ## Front protocols and modes
 
-| Front | Harnesses | Mode (wave 2) | Upstream path |
+| Front | Harnesses | Modes | Upstream path |
 |---|---|---|---|
 | `openai_chat` | opencode, mini-swe-agent, aider, goose, qwen-code | `native` | `{base}/chat/completions` |
-| `anthropic_messages` | Claude Code | `passthrough` (OpenRouter only) | `{base}/messages` |
-| `openai_responses` | Codex | `passthrough` (OpenRouter only) | `{base}/responses` |
-| `gemini_generate` | Gemini CLI | `translate` (wave 3) | canonical chat |
+| `anthropic_messages` | Claude Code | `passthrough` (OpenRouter only), `translate` (any upstream) | `{base}/messages`; translate: `{base}/chat/completions` |
+| `openai_responses` | Codex | `passthrough` (OpenRouter only), `translate` (any upstream) | `{base}/responses`; translate: `{base}/chat/completions` |
+| `gemini_generate` | Gemini CLI | `translate` | `{base}/chat/completions` |
 
 A gateway serves only its run's front protocol; any other path is a native 404 and a `rejected_path` event.
 
@@ -65,6 +67,10 @@ A gateway serves only its run's front protocol; any other path is a native 404 a
   (`x-claude-code-request-class`, `-session-id`, `-agent-id`, `-prompt-id`, `-compaction`) are logged.
 - **openai_responses** serves `POST */responses`. The gateway is stateless: `previous_response_id` is refused
   with a native 400.
+- **gemini_generate** serves `POST /v1beta/models/{m}:generateContent` and `:streamGenerateContent`
+  (`?alt=sse`: `data: {...}\r\n\r\n` events; without it a streamed JSON array), answers `:countTokens`
+  locally (`{"totalTokens", "estimate": true}`) and serves `GET /v1beta/models`. The model in the URL is
+  recorded as `requested_model`; the pin applies as everywhere.
 - Requests that contain images or files are refused with 400 `unsupported_content`, on every front.
 
 **Passthrough** forwards the harness's native body after applying the policy on that body. Everything that
@@ -72,12 +78,61 @@ is not a policy field reaches OpenRouter unchanged: thinking blocks with their s
 `encrypted_content` reasoning items, tool definitions, metadata, key order. Usage is read from the native
 response (`usage.cost` when OpenRouter returns it).
 
-**Translate** (wave 3) will map native bodies to canonical chat and back (`to_chat`, `from_chat`,
-`stream_from_chat` in each front module, today raising `TranslatorUnavailableError`), with
-`translation_dropped` counts per call. Until then, `translate` configs are refused at startup.
-`settings.GATEWAY_TRANSLATORS` (WP-06 settings block, empty until the first translator passes its golden
-fixtures; not env-driven) lists the front protocols whose translate mode is enabled; `harnesses.registry`
-and `study.environment` read it. `test_asks.py` fails if a listed protocol's translator is unavailable.
+**Translate** (wave 3) maps the native body to canonical chat, applies the **chat** policy to it (the same
+code path as a native chat harness), forwards it to `{base}/chat/completions` and maps the answer back.
+It works with the OpenRouter upstream and with the local overlay (`local_proxy`), so Claude Code and Codex
+can run on local endpoints and Gemini CLI anywhere. Because the upstream exchange is canonical chat, the
+prompt estimate, the reservation, the ledger, request classes, retries and the call record (`request`,
+`usage`, `finish_reason`, `served_provider`, `response_id`, ...) are exactly those of a native chat call;
+the same conversation exhausts the budget at the same call on every front (`test_translate_http.py`). Only
+the bytes the harness sees are native: answers, SSE events, keepalives, errors and budget refusals.
+
+Each translated front module exposes:
+
+| Function | Contract |
+|---|---|
+| `to_chat(native_body, **options) -> (chat_body, dropped)` | `options` from `request_options(path, query)` (Gemini: `stream`, `sse`, `model`; none for the others). Raises `ValueError` (`translation.TranslationError`) for a request it cannot express (refused natively, 400 `unsupported_request`) |
+| `from_chat(chat_completion, native_body=None, *, dropped=None, **options) -> native` | An error-only payload becomes the native error shape |
+| `StreamTranslator(native_body=None, *, dropped=None, **options)` | `.content_type`, `.feed(chat_sse_bytes) -> native_bytes` (whole native events only), `.finish(failure=None) -> closing bytes` (a stream that ended without a finish, or with an error, ends with the native error event), `.fail(status, native_error) -> bytes` |
+| `stream_from_chat(chat_sse_iter, native_body=None, **options) -> iterator` | Generator form; a `None` item means "upstream silent for one ping interval" and yields the native keepalive |
+| `upstream_error(status, message, code) -> (status, native)` | Upstream chat errors keep their status; a context overflow is worded the native way (Anthropic "prompt is too long: ...", OpenAI `context_length_exceeded`, Gemini "input token count ... exceeds") so the harness compacts |
+
+What maps where:
+
+| | Anthropic Messages | OpenAI Responses | Gemini generateContent |
+|---|---|---|---|
+| System | `system` (string or blocks; blocks with markers stay text parts) | `instructions`, `system`/`developer` items | `systemInstruction` |
+| Tool calls / results | `tool_use` / `tool_result` (tool results go before the user text of the same message) | `function_call` / `function_call_output`; custom (freeform) tools are function tools with one string parameter `input`, and back to `custom_tool_call` | `functionCall` / `functionResponse` (ids kept; responses without an id are matched to the last model turn's calls by name, in order) |
+| Tools, choice | `input_schema`; `auto`/`any`/`tool`/`none`, `disable_parallel_tool_use` | `function`, `custom`; `auto`/`none`/`required`/named | `functionDeclarations` (`parameters` types lowered; `parametersJsonSchema` as is); `AUTO`/`ANY`/`NONE` |
+| Reasoning request | `thinking {enabled, budget_tokens}` / `adaptive`, `output_config.effort`, `disabled` | `reasoning {effort | max_tokens}` | `thinkingConfig {thinkingBudget, thinkingLevel, includeThoughts}` |
+| Other | `max_tokens`, `stop_sequences`, sampling | `max_output_tokens`, `text.format` -> `response_format`, `text.verbosity`, sampling | `generationConfig` (sampling, `maxOutputTokens`, `stopSequences`, `seed`, penalties, JSON mime/schema) |
+| Answer | content blocks, `stop_reason`, `usage` with cache reads/writes split out | Responses object / event stream (`response.created` ... `response.completed`/`incomplete`/`failed`), usage with cached/reasoning details | `candidates[0]` parts (thought text only with `includeThoughts`), `finishReason`, `usageMetadata` (`candidatesTokenCount` excludes thoughts) |
+
+**Reasoning continuity.** The upstream's `reasoning_details` (thinking text, summaries, signatures,
+encrypted blobs) must come back unchanged in the next request. Each front carries them in a field its
+harness replays verbatim, as an `llmlab1.<base64url(JSON)>` token: Anthropic `thinking.signature` (one block
+per detail; encrypted details as `redacted_thinking.data`), Responses `reasoning.encrypted_content`, Gemini
+`thoughtSignature` on the first `functionCall` part (else the first answer text part, else an empty text
+part; Gemini CLI drops `thought` parts from its history but keeps signatures). A native signature the
+gateway did not mint is forwarded as a detail of the front's format (`anthropic-claude-v1`,
+`openai-responses-v1`, `google-gemini-v1`), including Gemini CLI's own `skip_thought_signature_validator`.
+A plain `reasoning` string (local models) is replayed as `reasoning` text. The local overlay turns
+`reasoning_details` into `reasoning` text (signatures mean nothing to a local endpoint).
+
+**`translation_dropped`** counts, per call and by field, what the native request had that canonical chat
+cannot carry: unknown request keys (`request.<key>`), hosted/server tools (`tools.<type>`), non-text content
+kinds, `tool_result.is_error`, custom-tool grammars (`tools.custom.format`), unmatched Gemini function
+responses, Gemini `safetySettings` / `candidateCount` / unsupported `generationConfig` keys, invalid tool-call
+arguments in answers (`tool_call.invalid_arguments`), and `cache_control` markers on tool definitions or
+tool calls (not counted when `prompt_cache` is `off`/`auto`, since the policy strips every marker anyway).
+Keys that never change what the model sees (`stream`, `store`, `include`, `metadata`, `prompt_cache_key`,
+`user`, ...) are ignored. Any non-zero count gives the run the validity note `translation_lossy`. The
+recorded sessions of the pinned Claude Code, Codex and Gemini CLI binaries translate with nothing dropped.
+
+`settings.GATEWAY_TRANSLATORS` (WP-06 settings block; not env-driven) lists the fronts whose translate mode
+is enabled: `anthropic_messages`, `openai_responses`, `gemini_generate` (all must be in the image's
+`protocols.common.TRANSLATORS`). `harnesses.registry` and `study.environment` read it to pick
+`adapter.protocol_mode(endpoint_kind=..., translators=...)`.
 
 ## Policy
 
@@ -189,8 +244,12 @@ in-flight reservations); `GET /healthz` returns `{"ok": true}`.
 
 ## Streaming
 
-Upstream SSE bytes are relayed unchanged. While the upstream is silent the gateway writes the front's
-keepalive, only between events: `: ping` (chat), `event: ping` (Anthropic), `: keepalive` (Responses). Before
+Upstream SSE bytes are relayed unchanged (translate: re-encoded event by event; tool calls are emitted
+whole when the turn ends, with validated JSON arguments). While the upstream is silent the gateway writes
+the front's keepalive, only between events: `: ping` (chat), `event: ping` (Anthropic), `: keepalive`
+(Responses), `\r\n` (Gemini; whitespace is valid in both its SSE and JSON-array framings). A translated
+stream that breaks or ends without a finish ends with the native error event (Anthropic `error`,
+Responses `response.failed`, Gemini a bare `{"error": ...}` object, which the Gemini SDK raises). Before
 the first upstream byte of a streamed call (queueing, retries, a long think) the gateway commits a 200 SSE
 response and pings; an upstream error after that point is sent as the front's in-stream error event.
 Transient upstream failures (`retries.retry_on`) are retried with exponential backoff before any byte reaches
@@ -202,7 +261,20 @@ the harness.
 policy per front, v2 replay byte equality, passthrough sessions for Claude Code and Codex (recorded-shape
 fixtures, plus WP-07 smoke fixtures from `tests/wp07_harnesses/fixtures/gateway/*.json` when present), HTTP
 behaviour (error shapes, pings, retries, records, `state.json` atomicity, rate limit, startup refusals), the
-local overlay as a subprocess, and local proxy parity.
+local overlay as a subprocess, and local proxy parity. Wave 3: `test_translators.py` (pure translators:
+reasoning continuity for every front x model family x JSON/stream, tool calls, stop reasons, usage, errors,
+dropped counts, the recorded native requests) and `test_translate_http.py` (translate mode through the
+gateway with the scripted upstream: canonical upstream body and record, identical ledger across fronts,
+native refusals, errors, broken streams, keepalives, request classes, local routes, recorded sessions).
+
+Fixtures: `fixtures/translate/chat_answers.json` holds chat answers in the shapes OpenRouter returns per
+model family (Anthropic, OpenAI, open weights, Google) and the executor proxy's shape for local models,
+JSON and SSE; values are synthetic (no paid call). `fixtures/translate/gemini_cli_session.json` holds the
+real native requests of the pinned Gemini CLI 0.66.0, recorded against the WP-07 scripted upstream.
+
+Smoke (not part of pytest): the pinned Claude Code 2.1.316, Codex 0.166.0 and Gemini CLI 0.66.0 images each
+completed the WP-07 smoke task (write `hello.txt`) through `llmlab-v3-wt/llm-gateway:dev` in translate mode
+against the scripted chat upstream on an `--internal` network: 2 calls each, all `main`, nothing dropped.
 
 ```bash
 ./.wt-test.sh wp06 -- pytest -q -p no:cacheprovider backend/generation/tests/wp06_gateway

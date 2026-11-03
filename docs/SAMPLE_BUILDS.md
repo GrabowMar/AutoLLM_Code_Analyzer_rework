@@ -1,7 +1,8 @@
 # Sample app builds
 
 Evaluation and previews share immutable Docker images. The first build prepares
-the job's pinned stack, applies its selected healing mode, and builds an image.
+the run's app tree (starter plus the model's files, through `RunView`; no healing)
+and builds an image.
 An unchanged sample from the same owner can reuse that image for seven days.
 Every evaluation and new preview still starts a fresh container: database files,
 administrator passwords and conformance-test mutations are never cached.
@@ -23,8 +24,8 @@ lockfiles can still select the same dependency versions.
 The API exposes this behavior through optional query parameters:
 
 ```text
-POST /api/runtime/jobs/<job-id>/build/?force_rebuild=true
-POST /api/generation/jobs/<job-id>/evaluate/?force_rebuild=true
+POST /api/runtime/jobs/<run-id>/build/?force_rebuild=true
+POST /api/generation/runs/<run-id>/evaluate/   {"force_rebuild": true}
 ```
 
 The default is `false`. Reusing an image also reuses the package versions installed
@@ -89,8 +90,8 @@ volume. Renaming the builder instead starts a separate cache.
 ## Upgrade and verification
 
 Rebuild the Django/executor images to include Docker CLI and Buildx, apply database
-migrations, and restart the executor. Migrations seed new builtin stack versions;
-existing job snapshots keep their old versions. Recreate apps-dind while idle to
+migrations, and restart the executor. New starter versions are new library rows;
+existing runs keep the starter version pinned in their manifest. Recreate apps-dind while idle to
 pick up the sample-image prune exclusion. Its persistent volumes must be retained.
 
 The backend selection is configurable for staged rollout. New builtin recipes
@@ -109,20 +110,20 @@ reuse measure different kinds of work.
 Run targeted regression tests with:
 
 ```bash
-just test backend/runtime/tests backend/execution/tests backend/generation/tests/test_conformance.py
+just test backend/runtime/tests backend/execution/tests backend/generation/tests/wp09_eval
 ```
 
 Use the opt-in `benchmark_sample_builds` management command with representative
-job IDs to collect repeated measurements without changing generation outcomes.
+run IDs to collect repeated measurements without changing generation outcomes.
 Run it while the executor is drained: it builds images directly and consumes
 the same sandbox resources as evaluation.
 
 ```bash
-python manage.py benchmark_sample_builds <job-uuid> [<another-job-uuid>] \
+python manage.py benchmark_sample_builds <run-uuid> [<another-run-uuid>] \
   --repeats 3 --output /tmp/sample-build-benchmark.json
 ```
 
-The jobs must be completed. Omit `--output` to write JSON to stdout. Each
+The runs must be completed. Omit `--output` to write JSON to stdout. Each
 repetition measures forced refresh, unchanged-image reuse, backend/frontend
 source edits, and a requirements-manifest edit. Inputs are unsaved copies and
 comments preserve application behavior and the dependency graph. The manifest

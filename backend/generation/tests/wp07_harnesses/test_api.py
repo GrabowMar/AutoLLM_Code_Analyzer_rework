@@ -32,8 +32,8 @@ def test_harnesses_list(api):
     assert rows["aider"]["option_schema"][0]["key"] == "edit_format"
     gemini = rows["gemini-cli"]
     assert gemini["enabled"] is False
-    assert gemini["blocked_reason"]
-    assert gemini["open_questions"]
+    assert "gemini_generate translator" in gemini["blocked_reason"]  # listed with its reason, never hidden
+    assert gemini["open_questions"] == []  # facts verified offline (wave 3)
 
 
 def test_facts(api):

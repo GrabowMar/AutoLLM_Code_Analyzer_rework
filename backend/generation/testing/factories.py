@@ -495,18 +495,26 @@ def run_manifest_content(run: GenerationRun) -> dict[str, Any]:
         version = run.task_version
         variant = run.prose_variant or "standard"
         task = {
-            "ref": version.ref,
+            "ref": version.pinned_ref,
             "structured_hash": version.structured_hash,
             "variant": variant,
             "prose_sha": version.prose_hashes.get(variant) or fake_sha(f"prose:{variant}"),
         }
     slot = _slot_manifest_block(run) if run.is_slot_variant else None
+    # The run's own library rows, so the manifest's pinned refs name them (run/manifest agreement).
+    rows = {
+        "sampling": run.sampling_preset,
+        "resources": run.resource_policy,
+        "harness_preset": run.harness_preset,
+        "starter": run.starter,
+    }
     return samples.manifest_content(
         kind=run.kind,
         task=task,
         slot=slot,
         model_slug=run.model.model_id if run.model is not None else "none",
         identity=run.fingerprints,
+        refs={key: row.pinned_ref for key, row in rows.items() if row is not None},
     )
 
 

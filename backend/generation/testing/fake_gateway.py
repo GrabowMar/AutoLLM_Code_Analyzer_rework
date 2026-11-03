@@ -15,8 +15,9 @@ upstream instead of OpenRouter:
   plus everything in flight must fit the cost cap, and likewise for the token caps; ``max_tokens`` is never
   clamped to make a call fit. A refusal is the protocol's native error shape, status 400, text
   "Run budget exhausted. Stop working and summarise.", and ``budget_exhausted:<kind>`` in ``state.json`` and
-  ``gateway_events.jsonl`` (kinds: ``requests``, ``aux_requests``, ``cost``, ``tokens``, ``uncached_input``,
-  ``output_tokens``). Exhaustion is sticky: every later call is refused too. A prompt estimate above
+  ``gateway_events.jsonl`` (kinds: ``requests``, ``aux_requests``, ``attempts``, ``cost``, ``tokens``,
+  ``uncached_input``, ``output_tokens``; ``attempts`` is the real gateway's loop guard on calls started,
+  :func:`attempt_ceiling`). Exhaustion is sticky: every later call is refused too. A prompt estimate above
   ``call.max_input_tokens`` is refused with 400 ``context_budget`` and does not exhaust the run;
 * **logs**: ``calls.jsonl`` (one record per forwarded call), ``gateway_events.jsonl`` and ``state.json``, which
   is rewritten atomically after every call start and end (``inflight``, ``last_call_end``, totals).
@@ -62,6 +63,7 @@ __all__ = [
     "ScriptedReply",
     "ScriptedStateFile",
     "UpstreamCall",
+    "attempt_ceiling",
     "canned_call",
     "estimate_tokens",
     "gateway_config",
@@ -96,6 +98,15 @@ _ANTHROPIC_STOP = {"stop": "end_turn", "length": "max_tokens", "tool_calls": "to
 def estimate_tokens(text: str) -> int:
     """The gateway's local prompt estimate: ``ceil(chars / 3.6)``."""
     return math.ceil(len(text) / CHARS_PER_TOKEN)
+
+
+def attempt_ceiling(max_llm_requests: int, max_aux_requests: int) -> int:
+    """The gateway's loop guard: calls started (successful or not) before ``budget_exhausted:attempts``.
+
+    Same rule as ``images/llm-gateway/protocols/budget_rules.BudgetLimits.attempt_ceiling``: a harness that
+    keeps re-sending a failing request cannot loop until the wall clock.
+    """
+    return 2 * (max_llm_requests + max_aux_requests) + 20
 
 
 # =====================================================================================
@@ -505,6 +516,8 @@ class FakeGateway:
             kind = "requests"
         elif request_class in AUX_CLASSES and used(AUX_CLASSES) >= budget.max_aux_requests:
             kind = "aux_requests"
+        elif totals.calls_started >= attempt_ceiling(budget.max_llm_requests, budget.max_aux_requests):
+            kind = "attempts"
         elif totals.cost + sum(r.usd for r in inflight) + worst > budget.max_cost_usd:
             kind = "cost"
         elif (

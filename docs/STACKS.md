@@ -16,18 +16,25 @@ the run contract every sample follows, the stack fragment of the brief and the s
 | fastapi (Python 3.13) | `fastapi-react` | `fastapi-vue` | `fastapi-svelte` | `fastapi-none` | A |
 | django 5.2 (Python 3.13) | `django-react` | `django-vue` | `django-svelte` | `django-none` (templates) | A |
 | express 5 (TypeScript, Node.js 24) | `express-react` | `express-vue` | `express-svelte` | `express-none` | A |
-| go 1.25 (net/http) | `go-*` | | | | B (wave 3) |
-| spring-boot (Java 21) | `spring-boot-*` | | | | B (wave 3) |
+| go 1.25 (stdlib `net/http`, framework `go-stdlib`) | `go-react` | `go-vue` | `go-svelte` | `go-none` (`html/template`) | B (wave 3) |
+| spring-boot 4.1 (Java 21, Maven) | `spring-boot-react` | `spring-boot-vue` | `spring-boot-svelte` | `spring-boot-none` (Thymeleaf named in the brief) | B (wave 3) |
 
 Plus `free-choice` (`choice_mode: free`, bare starter only: the model picks everything and writes its own
-Dockerfile from the allowed bases). Every fixed profile uses SQLite under `./data`; postgres variants
-(fastapi/django/express + react, 3g sidecar minimum) are phase B. Frontends are Vite + TypeScript.
+Dockerfile from the allowed bases). Every fixed profile above uses SQLite under `./data`. Phase B also adds
+the PostgreSQL variants `fastapi-react-postgres`, `django-react-postgres` and `express-react-postgres`
+(`database: postgres`; `spring-boot-react-postgres` from the spec's "if time allows" is not shipped).
+Frontends are Vite + TypeScript.
 
 Run contract (all profiles): port 8000, API under `/api`, `GET /api/health` → `{"status": "ok"}`, the
 frontend build (or the server-rendered pages) at `/`, data in `./data`, started by the root `Dockerfile`.
+A `database: postgres` profile additionally gets **`DATABASE_URL=postgresql://<user>:<password>@<host>:5432/<db>`**
+pointing at a PostgreSQL sidecar (`base_images.yaml` `sidecars.postgres`, `postgres:18-trixie@sha256:…`,
+published as `build.dockerfiles.sidecar_images()`); the README and the stack fragment state it, and
+`/api/health` must not depend on the database (the minimal starters never touch it there).
 
-`resources`: 2g / 1 CPU for every phase-A fixed profile, 3g / 2 CPUs for `free-choice` (a JVM stack may be
-picked). A study's sandbox is the maximum over its profiles (spec 4.2).
+`resources`: 2g / 1 CPU for the phase-A fixed profiles and the go profiles; 3g / 2 CPUs for `free-choice` (a
+JVM stack may be picked) and the spring-boot profiles; 3g / 1 CPU for the postgres variants (the sidecar
+shares the sandbox). A study's sandbox is the maximum over its profiles (spec 4.2).
 
 Brief fragments: `stack-<slug>@1` (one neutral paragraph: frameworks, languages, where the code lives) and
 `run-contract-free@1`, the free-choice fragment, which renders the allowlist (`allowed_bases` context
@@ -37,7 +44,10 @@ variable). No fragment mentions security, evaluation or budget.
 
 `build/starters.py: compose(stack_profile, level) -> StarterContent` merges
 
-1. the backend fragment `data/starters/backend/<framework>/<level>/` (`backend/free/bare/` for free choice),
+1. the backend fragment `data/starters/backend/<framework>/<level>/` (`backend/free/bare/` for free choice;
+   `backend/<framework>/<level>-<database>/` from `minimal` up for a non-SQLite profile, e.g.
+   `backend/django/minimal-postgres/` whose manifest adds the driver; there is no fallback to the SQLite
+   fragment, a missing one is a `StarterCompositionError`),
 2. the frontend fragment `data/starters/frontend/<framework>/<level>/` (minimal only; bare has no code),
 3. the checked-in lockfiles of those fragments (`data/starters/lock/`),
 4. the rendered `data/starters/dockerfiles/<backend>.Dockerfile.jinja2` (no Dockerfile for free choice).
@@ -45,14 +55,20 @@ variable). No fragment mentions security, evaluation or budget.
 Files ending in `.jinja2` are rendered with the run contract and `has_frontend` (a template that renders to
 nothing is left out, which is how one fragment serves `-react` and `-none` profiles); every other file is
 copied byte for byte. Composition is deterministic: equal inputs give an equal `tree_hash`
-(`tests/wp05_build/starter_hashes.json` freezes all 33). `compose.yaml` lists the (stack, level) pairs;
-the composed trees are not checked in.
+(`tests/wp05_build/starter_hashes.json` freezes all 55: 33 phase A + 22 phase B). `compose.yaml` lists the
+(stack, level) pairs; the composed trees are not checked in. Its `phase` label is provenance only: every
+phase in `build.starters.ACTIVE_PHASES` (`A`, `B`) is composed, checked, locked and seeded.
 
 | Level | Contents |
 |---|---|
 | `bare` | `Dockerfile` (installs `backend/` and `frontend/` manifests when present, runs the entry file by convention), `.dockerignore`, `README.md` with the run contract. No manifests, no code. |
-| `minimal` | The framework installed and locked (manifest with only framework, server and frontend build tool, plus its lock), `GET /api/health`, SPA serving of `frontend/dist` (or a `GET /` placeholder page for `-none`), a one-component frontend shell rendering "App". No auth, no security or UI libraries, no comments addressed to the model. |
-| `full` | Phase B, optional. |
+| `minimal` | The framework installed and locked (manifest with only framework, server, the DB driver where the language has none built in, and the frontend build tool, plus its lock), `GET /api/health`, SPA serving of `frontend/dist` with the fallback to `index.html` (or a `GET /` placeholder page for `-none`), a one-component frontend shell rendering "App". No auth, no security or UI libraries, no comments addressed to the model. |
+| `full` | Optional (spec 11.4); not shipped. `find_starter(profile, "full")` is `None` → `starter_missing`. |
+
+DB drivers in `minimal`: none for SQLite on Python (`sqlite3`) and Node.js 24 (`node:sqlite`);
+`modernc.org/sqlite` v1.59.0 (pure Go, the newest release whose `go` directive is ≤ 1.25) for go;
+`org.xerial:sqlite-jdbc` (version managed by the Spring Boot BOM, no `spring-boot-starter-jdbc`, so nothing
+connects at startup) for spring-boot; `psycopg[binary]` 3.3.7 / `pg` 8.23.1 for the postgres variants.
 
 Entry conventions (bare and minimal):
 
@@ -62,6 +78,14 @@ Entry conventions (bare and minimal):
 | fastapi | `backend/main.py` | `python backend/main.py` | `uvicorn --app-dir backend main:app` |
 | django | `backend/manage.py`, `backend/config/` | `migrate` + `runserver` | `migrate` + `gunicorn config.wsgi:application` |
 | express | `backend/src/server.ts` (run by Node.js 24 directly) | `node backend/src/server.ts` | same |
+| go-stdlib | `backend/` = Go module, package `main` (`main.go`, `db.go`, `templates/`) | `go mod init app && go mod tidy` when there is no `go.mod`, `go mod download all` when there is no `go.sum`, then `go build` → `server` | `go mod download`, `go build` → `server` (run from `/app`, sources copied to `/app/backend` for templates) |
+| spring-boot | `backend/` = Maven project (`pom.xml`, `src/main/java/app/`) | `mvn package` when `backend/pom.xml` exists, then `java -jar app.jar` (first jar in `target/`) | `mvn dependency:resolve`, `mvn package`, `java -jar app.jar` |
+
+The Go and Spring Boot templates build in the language image (`golang`, `maven`) and run on a slim one
+(`debian:trixie-slim` with the binary, `eclipse-temurin:21-jre-noble` with the jar). Go builds use
+`GOTOOLCHAIN=local` (never a toolchain download at build time) and leave cgo on (the build stage has gcc and the
+runtime the same glibc, so cgo drivers such as `mattn/go-sqlite3` work; no unstated build rule). Postgres variants reuse
+their SQLite stack's Dockerfile template (Django's `migrate` then needs the sidecar at start).
 
 Base images (`data/starters/base_images.yaml`) are pinned by index digest: `python:3.13-slim`,
 `node:24-slim` (phase A); `golang:1.25-trixie`, `debian:trixie-slim`, `maven:3.9-eclipse-temurin-21`,
@@ -76,14 +100,28 @@ and out through the Docker API, so it works on apps-dind or any `--docker-host`)
 * PyPI: `uv pip compile --generate-hashes` of `requirements.txt` → `requirements.lock`. Dockerfiles install
   `pip install -r requirements.txt -c requirements.lock` (the lock is a pip constraints file).
 * npm: `npm install --package-lock-only --ignore-scripts` → `package-lock.json` (`npm ci`).
+* Go: `go mod tidy` → `go.sum`. The container gets every plain file of the module directory (tidy reads the
+  imports; `*.jinja2` templates are left out, so third-party imports live in plain `.go` files such as
+  `db.go`), and the step fails if tidy would change `go.mod` (the checked-in `go.mod` must be tidy). The index
+  also records `inputs_sha` (tree hash of those files); a changed source makes the lock stale.
+* Maven: `mvn dependency:resolve` + `mvn dependency:list -DincludeScope=runtime -Dsort=true` →
+  `dependency-list.txt`. `pom.xml` pins the Spring Boot parent (whose BOM manages every version); the list is
+  a record of the resolution, Maven never reads it back.
+
+`build.locks.check_tree_locks` (the build seam) checks the locks a build enforces: pip, npm and Go
+(`lock_covers(..., ecosystem="go")`: the `/go.mod` checksum of every requirement and the module checksum of
+every direct one; a `go.mod` with `replace` is never covered). A starter `go.sum` is not origin bound (extra
+lines are harmless), so it is judged by coverage alone. Maven's record is not checked (it cannot fail a
+build). The platform's Go lock is `go mod download all` in the go image: it completes `go.sum` from `go.mod`
+alone and never edits `go.mod`.
 
 `lock/index.yaml` records the manifest sha, lock sha, image and tool per lock. Composition refuses a lock
 whose manifest changed (`StaleLockError`); `build_starters --check` fails CI-style on that.
 
 **Conventions the platform lock step (WP-09, spec 6.10) must follow** so starter Dockerfiles use its locks:
-write Python constraints to `<dir>/requirements.lock` next to `<dir>/requirements.txt` and node locks to
-`<dir>/package-lock.json` (the templates copy both with a `*` so a missing lock falls back to an unlocked
-install instead of failing the build).
+write Python constraints to `<dir>/requirements.lock` next to `<dir>/requirements.txt`, node locks to
+`<dir>/package-lock.json` and Go checksums to `<dir>/go.sum` (the templates copy each with a `*`, so a
+missing lock falls back to an unlocked install instead of failing the build).
 
 ### Starter rules (`build/starter_rules.py`, reported by library lint as kind `starter`)
 
@@ -93,16 +131,17 @@ install instead of failing the build).
 | `lint_starter_security_library` | no manifest or lockfile names a package of `data/starters/security_deny.yaml` (PyPI names PEP 503-normalized; Go module sub-paths included) |
 | `lint_starter_unpinned_image` | every external `FROM` has `@sha256:`; `base_images` lists exactly those |
 | `lint_starter_file_missing` | the Dockerfile (fixed stacks) and every listed lockfile are in `files`; every `minimal`/`full` manifest has a lock next to it; an unparseable manifest is reported, never skipped |
-| `lint_starter_stack_mismatch` | free choice: bare only, no Dockerfile; `frontend: none`: no frontend project; minimal: the frontend project exists and the manifests name the profile's frameworks |
+| `lint_starter_stack_mismatch` | free choice: bare only, no Dockerfile; `frontend: none`: no frontend project; minimal: the frontend project exists and the manifests name the profile's frameworks (spring-boot: `spring-boot-starter-webmvc`; go-stdlib has no framework package) |
 
 `RULES_VERSION = 1` is `forbidden_content_check.linter_version`. `seed_starters` never stores a starter
 that fails a rule.
 
 ### Seeding
 
-`build.starters.seed_starters()` composes every phase-A entry against the latest profile rows: an equal
-`content_hash` is a no-op, a different one creates `version + 1` (system row, `derived_from` = previous);
-a user slug is never touched; phase-B entries and unseeded profiles are `skipped`. `seed_library` (WP-03)
+`build.starters.seed_starters()` composes every entry of an active phase (A and B) against the latest
+profile rows: an equal `content_hash` is a no-op, a different one creates `version + 1` (system row,
+`derived_from` = previous); a user slug is never touched; unseeded profiles are `skipped`; a starter that
+cannot be composed or fails a rule is `error`, whatever its phase. `seed_library` (WP-03)
 calls it after stacks; `manage.py build_starters --with-stacks` also seeds WP-05's own fragments and
 profiles with the same rules. `find_starter(profile, level)` returns `None` when a plan names a missing
 starter (issue `starter_missing`).
@@ -208,8 +247,17 @@ those addresses (see the CHANGES ask to the apps-dind owner); until then the cac
 
 `backend/generation/tests/wp05_build/`; `./.wt-test.sh wp05 -- pytest -q backend/generation/tests/wp05_build`.
 Docker-marked tests (`LLMLAB_DOCKER_TESTS=1`, daemon from `STARTERS_DOCKER_HOST`): every minimal starter
-builds and answers `/api/health` and serves `/`; cache isolation across containers; verdaccio refuses
-publish.
+builds and answers `/api/health` and serves `/` (and a client-side route for SPA stacks); cache isolation
+across containers; verdaccio refuses publish. The starter test runs each app on its own `--internal`
+network `v3wt-starter-<slug>` with a probe container (the slim runtime images have no HTTP client) and, for
+postgres profiles, the pinned sidecar; `LLMLAB_STARTER_ONLY=<slug>,...` limits it to some starters.
+
+Wave-3 run (2026-11-03, host daemon, one starter per invocation under the shared build lock): all 11 phase-B
+minimal starters built and answered `/api/health`, `/` and (SPA) a client route: go-none, go-react, go-vue,
+go-svelte (≈140 MB images), spring-boot-none/-react/-vue/-svelte (≈470 MB), fastapi-, django- and
+express-react-postgres (with the postgres sidecar; Django runs `migrate` against it). The bare Go (with and
+without `go.mod`/`go.sum`) and Spring Boot Dockerfiles were also built from model-like trees and answered
+`/api/health`.
 
 ## Decisions
 
@@ -226,3 +274,14 @@ publish.
 6. Lock indices are keyed by fragment, not by starter: one lock serves every profile sharing the fragment.
 7. The depcache services are opt-in (compose profile), on an internal `depcache` network with fixed
    addresses; cache volumes belong to the cache containers only.
+8. Phase B (wave 3): the Go framework slug is `go-stdlib` (the contract's literal), fragments
+   `backend/go-stdlib/`, template `go-stdlib.Dockerfile.jinja2`. Spring Boot is 4.1.2 (current GA; Java 21
+   is supported) with `spring-boot-starter-webmvc` (the Boot 4 name of the web starter).
+9. `-none` profiles of go and spring-boot serve a static placeholder page in `minimal` (`html/template` for
+   go, `static/index.html` for Spring) and ship no template-engine dependency, as express-none does; the brief
+   names the server-rendering approach (Thymeleaf), the model adds it.
+10. Go 1.25 (spec 11.4) is no longer a supported Go release (1.27 is current): `go mod tidy` in a bare
+    starter resolves the newest module versions, some of which already need Go 1.26 (e.g.
+    `modernc.org/sqlite` ≥ v1.60), and fails with `GOTOOLCHAIN=local`. The minimal starter pins a compatible
+    driver; whether to move the go profiles to Go 1.27 is an open decision (CHANGES).
+

@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from django.test import Client
+from pydantic import ValidationError as PydanticValidationError
 
 from backend.generation.agentic import runner
 from backend.generation.agentic.manifest import build_manifest
@@ -172,7 +173,12 @@ def test_build_manifest_refuses_unpinned_library_refs(agentic_env) -> None:
     body = cell.manifest.model_dump(mode="json")
     body["sampling"]["ref"] = "t07@1"
     body["harness"]["preset_ref"] = "fake-native"
-    bad = cell.model_copy(update={"manifest": type(cell.manifest).model_validate(body)})
+    # The contract itself refuses them now (follow-up #4: manifest refs are PinnedRefStr) ...
+    with pytest.raises(PydanticValidationError) as contract:
+        type(cell.manifest).model_validate(body)
+    assert {"sampling.ref", "harness.preset_ref"} <= {".".join(map(str, e["loc"])) for e in contract.value.errors()}
+    # ... and build_manifest still checks a payload that bypassed validation (model_construct).
+    bad = cell.model_copy(update={"manifest": type(cell.manifest).model_construct(**body)})
     with pytest.raises(Exception, match="not a pinned ref") as info:
         build_manifest(run, bad)
     assert {"sampling.ref", "harness.preset_ref"} <= {p.split(":")[0] for p in info.value.message_dict["refs"]}

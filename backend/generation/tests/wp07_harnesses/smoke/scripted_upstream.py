@@ -15,6 +15,9 @@ Script, per conversation (decided from the request alone, so it needs no state):
 2. no tool result in the conversation yet: one shell tool call writing ``hello.txt`` into the workspace;
 3. one tool result: for mini-swe-agent (its instance prompt names the submit sentinel) the submit command,
    otherwise a final text answer.
+
+``--steps N`` (probe runs, e.g. compaction) issues N shell calls in all before the final answer, counted
+server-side so a compacted history cannot restart the script.
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ FINAL_TEXT = "Done. I created hello.txt in the workspace."
 AIDER_EDIT = "hello.txt\n```text\n<<<<<<< SEARCH\n=======\nhello from the scripted upstream\n>>>>>>> REPLACE\n```\n"
 _SHELL_NAME = re.compile(r"(^|_)(bash|shell|run_shell_command|exec_command|execute_bash)$", re.IGNORECASE)
 _LOCK = threading.Lock()
+STEPS = {"max": 1, "issued": 0}  # --steps
 
 
 def _text(content: Any) -> str:
@@ -152,6 +156,13 @@ def decide(protocol: str, body: dict[str, Any]) -> dict[str, Any]:
         if "SEARCH" in system and "REPLACE" in system and results == 0:
             return {"text": AIDER_EDIT}
         return {"text": FINAL_TEXT}
+    if STEPS["max"] > 1:  # --steps N: N shell calls in all (a counter, so compaction cannot reset it)
+        with _LOCK:
+            if STEPS["issued"] >= STEPS["max"]:
+                return {"text": FINAL_TEXT}
+            STEPS["issued"] += 1
+        call = _shell_call(tools, WRITE_CMD)
+        return {"tool": call[0], "args": call[1]} if call else {"text": FINAL_TEXT}
     if results == 0:
         call = _shell_call(tools, WRITE_CMD)
     elif results == 1 and SUBMIT_SENTINEL in json.dumps(body):
@@ -418,6 +429,14 @@ class Handler(BaseHTTPRequestHandler):
                 handle.write(json.dumps(entry, sort_keys=True) + "\n")
         return n
 
+    def do_CONNECT(self) -> None:
+        # Egress probe: with HTTPS_PROXY pointing here, every attempt to reach a third-party host (telemetry,
+        # update checks, usage statistics) is logged as protocol "connect" and refused.
+        self._record("connect", {"target": self.path}, None)
+        self.send_response(403)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_HEAD(self) -> None:
         self._record(None, None, None)
         self.send_response(404)
@@ -472,7 +491,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--log", default="/logs/upstream.jsonl")
+    parser.add_argument("--steps", type=int, default=1, help="shell calls before the final answer (probe runs)")
     args = parser.parse_args()
+    STEPS["max"] = args.steps
     Handler.log_path = args.log
     server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)  # noqa: S104 - internal docker network only
     server.serve_forever()

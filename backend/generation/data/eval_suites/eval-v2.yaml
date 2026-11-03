@@ -1,12 +1,13 @@
 # EvalSuite (spec 8, 11.6). Digests: the image ids of llmlab-v3-wt/eval-tester:dev and llmlab-v3-wt/adherence-checker:dev
-# built by WP-09 from backend/generation/images/{eval-tester,adherence-checker} (2026-11-03). Rebuilding an image changes
+# built by WP-09 from backend/generation/images/{eval-tester,adherence-checker} (2026-11-03, wave 3; `docker build
+# --provenance=false --sbom=false`, docs/EVALUATION.md 7). Rebuilding an image changes
 # its id: re-pin here (a new suite version on re-seed), else evaluations refuse it (image_digest_mismatch).
 name: EvalSuite v2
 description: Tester v1, acceptance compiler v1, adherence checker v1, the task's own probes, starter baseline. The
   image digests pin the WP-09 builds of eval-tester and adherence-checker.
 content:
-  tester: {version: 1, image_digest: 'sha256:235f2a8060e2260f196de32150e34c67229af19b4fd0b922e37275fd58b76c02'}
+  tester: {version: 1, image_digest: 'sha256:e516a9650ba7be4fa1750791299aac2dee7dc144692ba46d2ee34c43bae29b06'}
   acceptance_compiler_version: 1
-  adherence_checker: {version: 1, image_digest: 'sha256:e46cecfcb7d4d9bec809e1b3f9b4a1ec277a0b7ac7c62b2d0f67213b8e594aa8'}
+  adherence_checker: {version: 1, image_digest: 'sha256:39a54949680e9c326e8decf9e2f8dd76e8ff36e44d28ff7c6dfaedcd731ed225'}
   probes: task
   baseline: starter

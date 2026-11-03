@@ -70,7 +70,7 @@ The app frame uses `sandbox="allow-scripts allow-same-origin allow-forms allow-p
 - an invalid design or invalid settings;
 - no block, or a pairwise task without a pairwise block;
 - no access method enabled;
-- no active app, or active apps whose generation job was deleted;
+- no active app, or active apps whose generation run was deleted;
 - a pairwise pool in which no pair can be formed, or vs-baseline pairing with no baseline condition.
 
 The first open runs in one transaction, so a failure leaves the draft untouched. It:
@@ -93,20 +93,20 @@ A task *accepts* work while it is open and inside its `opens_at` / `closes_at` w
 
 ### Snapshots and blinding
 
-`EvalTaskApp.snapshot` is the de-blinding key. It is taken when the app is added and taken again, in full, at first open. Analysis and exports read only the snapshot, never live job data.
+`EvalTaskApp.snapshot` is the de-blinding key. It is taken when the app is added and taken again, in full, at first open. Analysis and exports read only the snapshot, never live run data. Everything in it is read through `generation.runs.view` (`RunView`).
 
 | Key | Content |
 |---|---|
 | `model_id`, `model_name`, `provider` | The model |
 | `condition_id`, `condition_label`, `study_id`, `study_name`, `task_ref`, `prose_variant`, `stack`, `auth_mode`, `unit_key`, `repeat_index`, `kind`, `harness` | The study cell and run kind |
-| `app_slug`, `app_name`, `spec_content_hash` | The app spec and the version of its content (sha256 of the canonical spec JSON) |
-| `functional` | `{status, pass_rate, deployed, source}` (`source` is `conformance`, `smoke` or null), plus `by_category` at first open |
-| `evaluator_version`, `tester_sha256` | Which conformance suite graded the job |
-| `checks` (first open) | The api/admin conformance checks: `name` (`METHOD /path`), `category`, `passed` |
-| `static_findings` (first open) | `{count, loc, tools, by_tool}`: non-dependency findings from static, non-AI tools in the latest measured `ToolResult` per (job, tool); `loc` = `loc_from_job(job)["total_loc"]`; not deduplicated |
+| `run_id`, `app_slug`, `app_name`, `spec_content_hash`, `run_fingerprint` | The task (slug and title) and the run's `task_hash` (task version and prose variant), so apps built from different task versions or prose variants are never paired; the run's identity fingerprint |
+| `functional` | `{status, pass_rate, deployed, source}` from the latest `RunEvaluation` (`source` is `eval_suite`, or null when the run was never evaluated; an unmeasured evaluation has `pass_rate: null`, never 0), plus `by_category` at first open |
+| `evaluator_version`, `tester_version` | The evaluation suite (`slug@version`) and the tester version that graded the run; compare pass rates only within one suite version |
+| `checks` (first open) | The suite's endpoint checks: `name` (`METHOD /path`), `category`, `passed` |
+| `static_findings` (first open) | `{count, loc, loc_model, tools, by_tool}`: non-dependency findings from static, non-AI tools in the latest measured `ToolResult` per (run, tool) (a not-applicable tool is not measured, never a zero); `loc` is the app-scope source LOC (`RunView.loc("app")`), `loc_model` the model's own files; either is null without a collected tree; not deduplicated |
 | `blinding_scan` | Model and provider tokens found in the generated source and in the sampled findings |
 
-`group_key` is `f"{app_slug}:{spec_content_hash[:12]}"`. Pairs are formed only within one group key, so only apps built from the same spec version are compared. An app without a spec gets its own app id as group key and is never paired.
+`group_key` is `f"{app_slug}:{spec_content_hash[:12]}"`. Pairs are formed only within one group key, so only apps built from the same task version and prose variant are compared. An app without a task gets its own app id as group key and is never paired.
 
 Blinding is always on and cannot be turned off. Participants never receive model names or ids, condition labels, run, study or task-app ids, container ids or names (apart from the host in the app URL), or the expected answers of attention checks. Three settings decide what else they see:
 
@@ -157,7 +157,7 @@ When an assignment is first opened (workbench GET or first heartbeat) it becomes
 
 ### Human evaluation and the review sample
 
-The [manual review sample](/docs/STUDY_TABLES#manual-review-sample) (`export_review_sample` / `score_review_sample`) is the offline counterpart. A seeded, stratified sample of jobs is exported as a ZIP of code, requirement lists and blank label sheets; one or a few reviewers fill them in, and the scorer reports precision (Wilson), Cohen's κ and Spearman ρ against the automated verdicts.
+The [manual review sample](/docs/STUDY_TABLES#manual-review-sample) (`export_review_sample` / `score_review_sample`) is the offline counterpart. A seeded, stratified sample of runs is exported as a ZIP of code, requirement lists and blank label sheets; one or a few reviewers fill them in, and the scorer reports precision (Wilson), Cohen's κ and Spearman ρ against the automated verdicts.
 
 This module covers the same questions online, with many raters working on the *running* apps:
 
@@ -381,7 +381,7 @@ Attachment files are deleted after the deleting transaction commits, cascades in
 
 ## Running apps for testers
 
-Task apps are ordinary runtime containers (`llm-<hex>`) built from the job's code by `runtime.container_service`. `services/hosting.py` decides when to build, start, stop or reset them. All Docker work is dispatched after the deciding transaction commits, in a daemon thread of that process: the `django` web process for requests, the Celery worker for the periodic reaper. A `django` restart or autoreload can therefore strand a build; the in-flight marker expires after 10 minutes and **Rebuild** recovers a stuck app ([Background services](/docs/BACKGROUND_SERVICES)).
+Task apps are ordinary runtime containers (`llm-<hex>`) built from the run's collected tree by `runtime.container_service`. `services/hosting.py` decides when to build, start, stop or reset them. All Docker work is dispatched after the deciding transaction commits, in a daemon thread of that process: the `django` web process for requests, the Celery worker for the periodic reaper. A `django` restart or autoreload can therefore strand a build; the in-flight marker expires after 10 minutes and **Rebuild** recovers a stuck app ([Background services](/docs/BACKGROUND_SERVICES)).
 
 > [!WARNING]
 > Participants can open apps only with **subdomain routing**: `APPS_SUBDOMAIN_PROXY=True` (a wildcard `*.<APPS_DOMAIN>` edge route) or the Traefik bridge (`TRAEFIK_DYNAMIC_DIR`). Path mode (`APPS_PROXY_PATH`) is owner-only and breaks SPAs, and direct ports are not public. Otherwise every participant sees the state `unavailable`, the environment reports `apps_not_reachable` and the Overview tab shows the warning. Researchers still see the real container state. See [Deployment guide](/docs/deployment-guide).
@@ -393,8 +393,8 @@ Task apps are ordinary runtime containers (`llm-<hex>`) built from the job's cod
 | Capacity | A slot is a distinct container that is running, building or starting, or an in-flight start, among task-started apps. The limits are `HUMAN_EVAL_MAX_RUNNING_APPS` (server-wide, default 4), `hosting.max_running_apps` (per task, default 3) and, for builds, `HUMAN_EVAL_MAX_CONCURRENT_BUILDS` (default 1). When full, the least recently active task-started, unpinned, unshared app idle for 3 minutes or more is evicted. Otherwise the app joins a FIFO queue, and the participant sees "Waiting for a free app slot (n of N in use) — number k in the queue". Unpinned queue requests nobody polled for 10 minutes are dropped. |
 | In-flight marker | `start_dispatched_at` is set under a row lock when a build, start or reset is dispatched; nothing is dispatched again while it is under 10 minutes old. The reaper clears stale markers. |
 | Idle stop | Task-started, unpinned running apps whose `last_activity_at` is older than `hosting.idle_stop_minutes` (default 20) are stopped, and so are the started apps of closed and archived tasks. The reaper runs from Celery beat (`human_eval: reap idle apps`, every 120 s) and lazily, at most once a minute, from ensure, heartbeat and the hosting panel; the lazy run covers every task, but without beat idle apps are stopped only while some task is in use. Heartbeats from a viewed app keep it alive. Containers the task adopted (already running, `started_by_task` false) are never stopped by the task. |
-| Adopted containers | If the job already has a running container, for example one started from `/runtime`, the task uses it without counting it as task-started. |
-| Shared containers | One job's container can serve several tasks. The reaper, eviction, stop-all, close and non-forced stops leave a container alone while another open or paused task's app on it is pinned or active within its idle window. Rebuild and reset answer 409 `shared_container`. Activity on one task's app refreshes every app on the same container. |
+| Adopted containers | If the run already has a running container, for example one started from `/runtime`, the task uses it without counting it as task-started. |
+| Shared containers | One run's container can serve several tasks. The reaper, eviction, stop-all, close and non-forced stops leave a container alone while another open or paused task's app on it is pinned or active within its idle window. Rebuild and reset answer 409 `shared_container`. Activity on one task's app refreshes every app on the same container. |
 | Heartbeats | The workbench beats every 30 s while open. A beat is honoured when the tab is visible, or while hidden for at most `assignment_timeout_minutes` since the last visible beat, so an abandoned tab lets the assignment expire. Honoured beats set `last_activity_at` and add the gap since the last beat to `wall_seconds` (at most 60 s; gaps over 5 minutes add nothing). Visible beats add up to 60 s to `active_seconds`. Viewed slots add to `app_views[slot].viewed_seconds` and set `first_running_at` once their app runs. |
 | Provenance | The first time a slot's app is seen running for an assignment, `context.hosting[slot]` records `container_id`, `container_name`, `image`, `reset_at`, `prior_users` (other assignments that used this container state since its last reset or build) and `first_running_at`. Skips store each slot's hosting state in `context.skip_hosting`. |
 
@@ -616,7 +616,7 @@ Full shapes are in `frontend/src/lib/api/types/human-eval.ts` and the OpenAPI UI
 
 | Route | Purpose |
 |---|---|
-| `GET presets/`, `POST validate-design/`, `GET candidate-jobs/`, `GET environment/` | Presets; validate `{mode, design, settings}`; completed jobs you can add (filters, `current_only`); routing, caps, warnings, defaults, instruments, default checklist |
+| `GET presets/`, `POST validate-design/`, `GET candidate-runs/`, `GET environment/` | Presets; validate `{mode, design, settings}`; completed runs you can add (filters, `current_only`); routing, caps, warnings, defaults, instruments, default checklist |
 | `GET/POST tasks/` | List (`status`, `search`, `page`, `per_page`) and create (`preset`, `study_id`, `run_ids`) |
 | `GET/PATCH/DELETE tasks/{id}/`, `POST …/duplicate/`, `POST …/status/` | Detail, update, delete; duplicate; `{action}` open, pause, close, reopen, archive |
 | `GET …/items/`, `POST/DELETE …/preview/` | Items with counts; the researcher's preview session |

@@ -1,7 +1,6 @@
-// WP-17 gate (spec 12.3): nothing may import the v2 clients `lib/api/generation.ts` and
-// `lib/api/experiments.ts`; wave 3 deletes them. Files that other work packages delete or
-// re-point in wave 2 (the v2 generator/experiments/templates screens, the `client.ts` barrel)
-// are listed in PENDING; the list must be empty before the deletion.
+// WP-17 gate (spec 12.3): the v2 clients `lib/api/generation.ts` and `lib/api/experiments.ts`
+// (and their wire types `lib/api/types/experiments.ts`) were deleted in wave 3. Nothing may import
+// them again, and the files must stay gone.
 import { describe, expect, it } from "vitest";
 
 const SOURCES = import.meta.glob("/src/**/*.{ts,svelte}", {
@@ -13,20 +12,7 @@ const SOURCES = import.meta.glob("/src/**/*.{ts,svelte}", {
 const LEGACY = new Set([
   "/src/lib/api/generation.ts",
   "/src/lib/api/experiments.ts",
-]);
-
-/** Owned by other WPs; deleted or re-pointed by them (CHANGES "WP-17 → ..."). */
-const PENDING_PREFIXES = [
-  "/src/lib/components/experiments/", // WP-15 removes it
-  "/src/lib/components/generator/", // WP-15 removes it
-  "/src/lib/components/templates/", // WP-14 removes it
-  "/src/routes/(app)/experiments/", // WP-15 replaces it with a redirect
-  "/src/routes/(app)/sample-generator/", // WP-15 replaces it with a redirect
-  "/src/routes/(app)/templates/", // WP-14 replaces it with a redirect
-];
-const PENDING_FILES = new Set([
-  "/src/lib/api/client.ts", // `export * from "./generation"`: lead (CHANGES)
-  "/src/lib/api/types/experiments.ts", // v2 wire types of experiments.ts: lead (CHANGES)
+  "/src/lib/api/types/experiments.ts",
 ]);
 
 /** WP-17's files: never allowed to import the v2 clients. */
@@ -91,12 +77,6 @@ export function legacyImports(file: string, source: string): string[] {
   return [...hits];
 }
 
-function pending(file: string): boolean {
-  return (
-    PENDING_FILES.has(file) || PENDING_PREFIXES.some((p) => file.startsWith(p))
-  );
-}
-
 describe("legacy client imports", () => {
   it("resolves aliases and relative specifiers", () => {
     expect(
@@ -119,7 +99,7 @@ describe("legacy client imports", () => {
         "/src/lib/api/types/x.ts",
         'import type { A } from "./experiments";',
       ),
-    ).toEqual([]);
+    ).toEqual(["/src/lib/api/types/experiments.ts"]);
     expect(
       legacyImports(
         "/src/lib/x.ts",
@@ -137,18 +117,25 @@ describe("legacy client imports", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("finds no other importer outside the files pending deletion or re-pointing", () => {
+  it("keeps the v2 client modules deleted", () => {
+    expect([...LEGACY].filter((f) => f in SOURCES)).toEqual([]);
+  });
+
+  it("finds no importer of the v2 clients anywhere", () => {
     const offenders = Object.entries(SOURCES)
-      .filter(
-        ([file]) =>
-          !LEGACY.has(file) && !file.endsWith("/legacy-imports.test.ts"),
-      )
-      .filter(
-        ([file, source]) =>
-          legacyImports(file, source).length > 0 && !pending(file),
-      )
+      .filter(([file]) => !file.endsWith("/legacy-imports.test.ts"))
+      .filter(([file, source]) => legacyImports(file, source).length > 0)
       .map(([file]) => file)
       .sort();
     expect(offenders).toEqual([]);
+  });
+
+  it("keeps the API barrel free of the v2 clients", () => {
+    expect(
+      legacyImports(
+        "/src/lib/api/client.ts",
+        SOURCES["/src/lib/api/client.ts"],
+      ),
+    ).toEqual([]);
   });
 });

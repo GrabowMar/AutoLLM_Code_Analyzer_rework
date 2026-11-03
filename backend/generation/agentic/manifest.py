@@ -149,6 +149,10 @@ def manifest_payload(
 ) -> dict[str, Any]:
     """The validated ``RunManifest`` payload of ``run`` (the resolved body + study block + ``created_at``)."""
     body = ManifestBody.model_validate(resolved_cell.manifest).model_dump(mode="json")
+    # The contract types these refs as PinnedRefStr too; report them by path first, as ManifestMismatchError.
+    unpinned = unpinned_refs(body)
+    if unpinned:
+        raise ManifestMismatchError({"refs": unpinned})
     payload = {
         **body,
         "study": _study_block(run, resolved_cell, study),

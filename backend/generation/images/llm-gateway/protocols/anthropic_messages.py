@@ -1,4 +1,5 @@
-"""Anthropic Messages front (Claude Code): ``passthrough`` to OpenRouter's native ``/messages``.
+"""Anthropic Messages front (Claude Code): ``passthrough`` to OpenRouter's native ``/messages``, or
+``translate`` to canonical chat (local endpoints).
 
 Passthrough forwards the harness's native body after applying the run policy **on the native body**:
 the model pin, ``max_tokens``, ``thinking`` / ``output_config.effort`` for the reasoning knob, sampling,
@@ -6,8 +7,13 @@ the model pin, ``max_tokens``, ``thinking`` / ``output_config.effort`` for the r
 under ``off``/``auto``) and ``session_id``. Everything else, thinking blocks and their signatures
 included, is forwarded byte-for-byte in content. Usage comes from the native response.
 
-The stdlib translator to canonical chat (``to_chat`` / ``from_chat`` / ``stream_from_chat``, needed for
-local endpoints) is wave 3; until then a ``translate`` config is refused at startup.
+``translate`` (wave 3) maps the native body to canonical chat (``to_chat``), the chat answer back
+(``from_chat``, ``StreamTranslator`` / ``stream_from_chat``): system blocks, text, ``tool_use`` /
+``tool_result``, tool definitions and ``tool_choice``, ``thinking`` / ``output_config.effort`` ->
+``reasoning``, stop reasons, usage (cache reads/writes split out of ``prompt_tokens``) and native error
+shapes. Thinking blocks round-trip: each block's ``signature`` (or ``redacted_thinking.data``) is an
+``llmlab1.`` token carrying the upstream's ``reasoning_details`` entry (see ``translation.py``); a
+native signature is kept as a ``reasoning.text`` detail of format ``anthropic-claude-v1``.
 """
 
 from __future__ import annotations
@@ -33,6 +39,27 @@ from protocols.common import pin_model
 from protocols.common import set_cache_ttl
 from protocols.common import sse_event
 from protocols.common import strip_cache_control
+from protocols.translation import STREAM_ENDED_EARLY
+from protocols.translation import ChatStreamReader
+from protocols.translation import ChatTurn
+from protocols.translation import Dropped
+from protocols.translation import ToolCall
+from protocols.translation import TurnBuilder
+from protocols.translation import as_dropped
+from protocols.translation import assistant_reasoning
+from protocols.translation import chat_error_text
+from protocols.translation import decode_token
+from protocols.translation import detail_text
+from protocols.translation import dump_arguments
+from protocols.translation import encode_token
+from protocols.translation import finish_from_chat
+from protocols.translation import iterate_stream
+from protocols.translation import looks_like_context_overflow
+from protocols.translation import merge_details
+from protocols.translation import parse_arguments
+from protocols.translation import synthetic_detail
+from protocols.translation import tool_call_id
+from protocols.translation import turn_from_completion
 
 NAME = "anthropic_messages"
 UPSTREAM_PATH = "/messages"
@@ -62,7 +89,7 @@ STOP_REASONS = {
 
 
 class TranslatorUnavailableError(NotImplementedError):
-    """The Anthropic <-> canonical chat translator ships in wave 3."""
+    """Kept for callers that guard on it; the translator is available since wave 3 (never raised)."""
 
 
 def route(method: str, path: str) -> str | None:
@@ -374,17 +401,522 @@ class StreamAccumulator:
 
 
 # =====================================================================================
-# Translator seams (wave 3)
+# Translator (translate mode: local endpoints, or any chat upstream)
 # =====================================================================================
 
+TRANSLATED_FORMAT = "anthropic-claude-v1"
+# Native request keys that never change what the model sees or generates (transport, telemetry).
+IGNORED_KEYS = frozenset({"model", "stream", "metadata", "service_tier", "anthropic_version", "container"})
+# Chat finish -> Anthropic stop_reason.
+CHAT_TO_STOP = {
+    "stop": "end_turn",
+    "length": "max_tokens",
+    "tool_calls": "tool_use",
+    "content_filter": "refusal",
+    "error": "end_turn",
+}
 
-def to_chat(request_json: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
-    raise TranslatorUnavailableError(NAME)
+
+def to_chat(request_json: Mapping[str, Any], **_options: Any) -> tuple[dict[str, Any], dict[str, int]]:
+    """An Anthropic Messages request -> ``(chat request, translation_dropped)``."""
+    body = request_json
+    dropped = Dropped()
+    out: dict[str, Any] = {"model": body.get("model")}
+    messages: list[dict[str, Any]] = []
+    if body.get("system"):
+        messages.append({"role": "system", "content": _text_content(body["system"], dropped, "system")})
+    for message in body.get("messages") or []:
+        if isinstance(message, Mapping):
+            messages.extend(_message_to_chat(message, dropped))
+    out["messages"] = messages
+    if "max_tokens" in body:
+        out["max_tokens"] = body["max_tokens"]
+    for key in SAMPLING_KEYS:
+        if key in body:
+            out[key] = body[key]
+    if body.get("stop_sequences"):
+        out["stop"] = list(body["stop_sequences"])
+    tools = _tools_to_chat(body.get("tools"), dropped)
+    if tools:
+        out["tools"] = tools
+    _tool_choice_to_chat(body.get("tool_choice"), out, dropped)
+    reasoning = _reasoning_to_chat(body, dropped)
+    if reasoning is not None:
+        out["reasoning"] = reasoning
+    if body.get("stream"):
+        out["stream"] = True
+    handled = {"system", "messages", "max_tokens", *SAMPLING_KEYS, "stop_sequences", "tools", "tool_choice"}
+    handled |= {"thinking", "output_config"}
+    for key in body:
+        if key not in handled and key not in IGNORED_KEYS:
+            dropped.add(f"request.{key}")
+    return out, dropped.data
 
 
-def from_chat(chat_response: Mapping[str, Any]) -> dict[str, Any]:
-    raise TranslatorUnavailableError(NAME)
+def _text_content(value: Any, dropped: Dropped, where: str) -> Any:
+    """System / user / tool-result content as chat content: a string, or text parts when there are
+    several blocks or ``cache_control`` markers to keep."""
+    if isinstance(value, str):
+        return value
+    parts: list[dict[str, Any]] = []
+    for block in value if isinstance(value, list) else []:
+        if isinstance(block, str):
+            parts.append({"type": "text", "text": block})
+            continue
+        if not isinstance(block, Mapping):
+            continue
+        if block.get("type") not in (None, "text"):
+            dropped.add(f"{where}.{block.get('type')}")
+            continue
+        part: dict[str, Any] = {"type": "text", "text": str(block.get("text") or "")}
+        if block.get("cache_control"):
+            part["cache_control"] = dict(block["cache_control"])
+        parts.append(part)
+    if len(parts) == 1 and "cache_control" not in parts[0]:
+        return parts[0]["text"]
+    return parts
 
 
-def stream_from_chat(chat_sse_iter: Iterable[bytes]) -> Iterator[bytes]:
-    raise TranslatorUnavailableError(NAME)
+def _message_to_chat(message: Mapping[str, Any], dropped: Dropped) -> list[dict[str, Any]]:
+    role = message.get("role")
+    content = message.get("content")
+    if role == "assistant":
+        return [_assistant_to_chat(content, dropped)]
+    if isinstance(content, str):
+        return [{"role": "user", "content": content}]
+    tool_messages: list[dict[str, Any]] = []
+    text_blocks: list[Any] = []
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, Mapping):
+            continue
+        kind = block.get("type")
+        if kind == "tool_result":
+            if block.get("is_error"):
+                dropped.add("tool_result.is_error")
+            tool_messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": str(block.get("tool_use_id") or ""),
+                    "content": _tool_result_content(block, dropped),
+                },
+            )
+        elif kind == "text":
+            text_blocks.append(block)
+        else:
+            dropped.add(f"user.{kind}")
+    out = list(tool_messages)
+    if text_blocks:
+        out.append({"role": "user", "content": _text_content(text_blocks, dropped, "user")})
+    return out
+
+
+def _tool_result_content(block: Mapping[str, Any], dropped: Dropped) -> Any:
+    content = block.get("content")
+    if content is None:
+        return ""
+    value = _text_content(content, dropped, "tool_result")
+    if block.get("cache_control"):
+        parts = [{"type": "text", "text": value}] if isinstance(value, str) else list(value)
+        if parts:
+            parts[-1]["cache_control"] = dict(block["cache_control"])
+        return parts
+    return value
+
+
+def _assistant_to_chat(content: Any, dropped: Dropped) -> dict[str, Any]:
+    message: dict[str, Any] = {"role": "assistant"}
+    if isinstance(content, str):
+        message["content"] = content
+        return message
+    texts: list[dict[str, Any]] = []
+    details: list[dict[str, Any]] = []
+    calls: list[dict[str, Any]] = []
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, Mapping):
+            continue
+        kind = block.get("type")
+        if kind == "text":
+            part = {"type": "text", "text": str(block.get("text") or "")}
+            if block.get("cache_control"):
+                part["cache_control"] = dict(block["cache_control"])
+            texts.append(part)
+        elif kind in ("thinking", "redacted_thinking"):
+            details.extend(_thinking_to_details(block))
+        elif kind == "tool_use":
+            if block.get("cache_control"):
+                dropped.add("cache_control")
+            calls.append(
+                {
+                    "id": str(block.get("id") or f"toolu_{len(calls)}"),
+                    "type": "function",
+                    "function": {"name": block.get("name"), "arguments": dump_arguments(block.get("input"))},
+                },
+            )
+        else:
+            dropped.add(f"assistant.{kind}")
+    if texts:
+        if any("cache_control" in t for t in texts):
+            message["content"] = texts
+        else:
+            message["content"] = "".join(t["text"] for t in texts)
+    else:
+        message["content"] = None
+    assistant_reasoning(message, merge_details(details))
+    if calls:
+        message["tool_calls"] = calls
+    return message
+
+
+def _thinking_to_details(block: Mapping[str, Any]) -> list[dict[str, Any]]:  # noqa: PLR0911
+    """A thinking / redacted_thinking block -> reasoning details (our tokens decoded, native ones kept)."""
+    if block.get("type") == "redacted_thinking":
+        carried = decode_token(block.get("data"))
+        if isinstance(carried, list):
+            return [dict(d) for d in carried if isinstance(d, Mapping)]
+        if isinstance(carried, Mapping):
+            return [dict(carried)]
+        return [{"type": "reasoning.encrypted", "data": block.get("data"), "format": TRANSLATED_FORMAT}]
+    text = str(block.get("thinking") or "")
+    signature = block.get("signature")
+    carried = decode_token(signature)
+    if isinstance(carried, list):  # several details in one block: the token holds them whole
+        return [dict(d) for d in carried if isinstance(d, Mapping)]
+    if isinstance(carried, Mapping):
+        detail = dict(carried)
+        detail["summary" if detail.get("type") == "reasoning.summary" else "text"] = text
+        return [detail]
+    if not signature:
+        return [synthetic_detail(text)] if text else []
+    return [{"type": "reasoning.text", "text": text, "signature": signature, "format": TRANSLATED_FORMAT}]
+
+
+def _tools_to_chat(tools: Any, dropped: Dropped) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for tool in tools if isinstance(tools, list) else []:
+        if not isinstance(tool, Mapping):
+            continue
+        if tool.get("type") not in (None, "custom"):
+            dropped.add(f"tools.{tool.get('type')}")  # server tools (web search, code execution, ...)
+            continue
+        if tool.get("cache_control"):
+            dropped.add("cache_control")
+        function: dict[str, Any] = {"name": tool.get("name")}
+        if tool.get("description"):
+            function["description"] = tool["description"]
+        function["parameters"] = dict(tool.get("input_schema") or {"type": "object", "properties": {}})
+        out.append({"type": "function", "function": function})
+    return out
+
+
+def _tool_choice_to_chat(choice: Any, out: dict[str, Any], dropped: Dropped) -> None:
+    if not isinstance(choice, Mapping):
+        return
+    kind = choice.get("type")
+    if kind == "auto":
+        out["tool_choice"] = "auto"
+    elif kind == "any":
+        out["tool_choice"] = "required"
+    elif kind == "tool":
+        out["tool_choice"] = {"type": "function", "function": {"name": choice.get("name")}}
+    elif kind == "none":
+        out["tool_choice"] = "none"
+    else:
+        dropped.add("tool_choice")
+    if choice.get("disable_parallel_tool_use"):
+        out["parallel_tool_calls"] = False
+
+
+def _reasoning_to_chat(body: Mapping[str, Any], dropped: Dropped) -> dict[str, Any] | None:
+    """``thinking`` / ``output_config.effort`` -> OpenRouter ``reasoning`` (the policy may replace it)."""
+    thinking = body.get("thinking") if isinstance(body.get("thinking"), Mapping) else {}
+    config = body.get("output_config") if isinstance(body.get("output_config"), Mapping) else {}
+    for key in config:
+        if key != "effort":
+            dropped.add(f"output_config.{key}")
+    kind = thinking.get("type")
+    if kind == "disabled":
+        return {"enabled": False}
+    if kind == "enabled" and thinking.get("budget_tokens"):
+        return {"max_tokens": int(thinking["budget_tokens"])}
+    if config.get("effort"):
+        return {"effort": config["effort"]}
+    if kind in ("enabled", "adaptive"):
+        return {"enabled": True}
+    return None
+
+
+# -- responses ---------------------------------------------------------------------------------------
+
+
+def _usage_from_chat(usage: Mapping[str, Any] | None) -> dict[str, Any]:
+    norm = budget_rules.chat_usage(usage) or {}
+    prompt = norm.get("prompt_tokens") or 0
+    cached = norm.get("cached_tokens") or 0
+    written = norm.get("cache_write_tokens") or 0
+    out: dict[str, Any] = {
+        "input_tokens": max(0, prompt - cached - written),
+        "cache_creation_input_tokens": written,
+        "cache_read_input_tokens": cached,
+        "output_tokens": norm.get("completion_tokens") or 0,
+    }
+    if norm.get("cost") is not None:
+        out["cost"] = norm["cost"]
+    return out
+
+
+def _message_id(turn: ChatTurn) -> str:
+    raw = turn.id or "llmlab"
+    return raw if raw.startswith("msg_") else f"msg_{raw}"
+
+
+def _thinking_blocks(details: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Reasoning details -> thinking / redacted_thinking blocks whose signature carries each detail."""
+    blocks: list[dict[str, Any]] = []
+    for detail in details:
+        if detail.get("type") == "reasoning.encrypted":
+            blocks.append({"type": "redacted_thinking", "data": encode_token(detail)})
+            continue
+        text_key = "summary" if detail.get("type") == "reasoning.summary" else "text"
+        carried = {k: v for k, v in detail.items() if k != text_key}
+        blocks.append({"type": "thinking", "thinking": detail_text(detail), "signature": encode_token(carried)})
+    return blocks
+
+
+def _tool_input(call: ToolCall, dropped: Dropped) -> dict[str, Any]:
+    value, ok = parse_arguments(call.arguments)
+    if not ok or not isinstance(value, Mapping):
+        dropped.add("tool_call.invalid_arguments")
+        return {}
+    return dict(value)
+
+
+def from_chat(
+    chat_response: Mapping[str, Any],
+    request_json: Mapping[str, Any] | None = None,
+    *,
+    dropped: Dropped | dict[str, int] | None = None,
+    **_options: Any,
+) -> dict[str, Any]:
+    """A chat completion -> an Anthropic ``message`` (an error payload -> the Anthropic error shape)."""
+    drops = as_dropped(dropped)
+    if chat_response.get("error") and not chat_response.get("choices"):
+        message, code = chat_error_text(chat_response)
+        return upstream_error(502, message, code)[1]
+    turn = turn_from_completion(chat_response)
+    content = _thinking_blocks(turn.details)
+    if turn.content:
+        content.append({"type": "text", "text": turn.content})
+    if turn.refusal:
+        content.append({"type": "text", "text": turn.refusal})
+    for n, call in enumerate(turn.tool_calls):
+        content.append(
+            {
+                "type": "tool_use",
+                "id": tool_call_id(call.id, "toolu_", n),
+                "name": call.name,
+                "input": _tool_input(call, drops),
+            },
+        )
+    if isinstance(dropped, dict):
+        dropped.update(drops.data)
+    return {
+        "id": _message_id(turn),
+        "type": "message",
+        "role": "assistant",
+        "model": turn.model,
+        "content": content,
+        "stop_reason": CHAT_TO_STOP.get(finish_from_chat(turn), "end_turn"),
+        "stop_sequence": None,
+        "usage": _usage_from_chat(turn.usage),
+    }
+
+
+def upstream_error(status: int, message: str, code: str | None = None) -> tuple[int, dict[str, Any]]:
+    """An upstream chat error in Anthropic's shape; a context overflow in Anthropic's own wording."""
+    if looks_like_context_overflow(message, code) and "prompt is too long" not in message:
+        message = f"prompt is too long: {message}"
+    return error("upstream_error", message, status)
+
+
+class StreamTranslator:
+    """Chat SSE -> Anthropic Messages SSE (``message_start`` ... ``message_stop``).
+
+    Thinking and text stream live as content blocks; tool calls are emitted whole when the turn ends
+    (their arguments are validated JSON then). Reasoning details that arrive after their thinking block
+    closed (late signatures) become one more thinking block; the request side merges them back.
+    """
+
+    content_type = "text/event-stream"
+
+    def __init__(
+        self,
+        request_json: Mapping[str, Any] | None = None,
+        *,
+        dropped: Dropped | dict[str, int] | None = None,
+        **_options: Any,
+    ) -> None:
+        self._reader = ChatStreamReader()
+        self._drops = dropped if isinstance(dropped, Dropped) else Dropped()
+        self._sink = dropped if isinstance(dropped, dict) else None
+        self._turn = TurnBuilder()
+        self._started = False
+        self._index = -1
+        self._open: str | None = None  # "thinking" | "text"
+        self._block_fragments: list[dict[str, Any]] = []
+        self._late: list[dict[str, Any]] = []
+        self._synthetic = False
+        self._finished = False
+
+    # -- framing ------------------------------------------------------------------------------------
+
+    def _start(self) -> bytes:
+        if self._started:
+            return b""
+        self._started = True
+        t = self._turn.turn
+        message = {
+            "id": _message_id(t),
+            "type": "message",
+            "role": "assistant",
+            "model": t.model,
+            "content": [],
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        }
+        return sse_event({"type": "message_start", "message": message}, "message_start")
+
+    def _open_block(self, block: dict[str, Any], kind: str) -> bytes:
+        out = self._close()
+        self._index += 1
+        self._open = kind
+        return out + sse_event(
+            {"type": "content_block_start", "index": self._index, "content_block": block},
+            "content_block_start",
+        )
+
+    def _delta(self, delta: dict[str, Any]) -> bytes:
+        return sse_event({"type": "content_block_delta", "index": self._index, "delta": delta}, "content_block_delta")
+
+    def _stop(self) -> bytes:
+        return sse_event({"type": "content_block_stop", "index": self._index}, "content_block_stop")
+
+    def _close(self) -> bytes:
+        if self._open is None:
+            return b""
+        out = b""
+        if self._open == "thinking":
+            details = merge_details(self._block_fragments)
+            if self._synthetic and not details:
+                carried: Any = {"type": "reasoning.text", "synthetic": True}
+            elif len(details) == 1 and details[0].get("type") != "reasoning.encrypted":
+                key = "summary" if details[0].get("type") == "reasoning.summary" else "text"
+                carried = {k: v for k, v in details[0].items() if k != key}
+            else:
+                carried = details
+            out += self._delta({"type": "signature_delta", "signature": encode_token(carried)})
+            self._block_fragments = []
+            self._synthetic = False
+        out += self._stop()
+        self._open = None
+        return out
+
+    # -- events -------------------------------------------------------------------------------------
+
+    def feed(self, chunk: bytes) -> bytes:
+        out = b""
+        for event in self._reader.feed(chunk):
+            self._turn.feed(event)
+            out += self._event(event)
+        return out
+
+    def _event(self, event: tuple[Any, ...]) -> bytes:
+        kind = event[0]
+        if kind in ("meta", "finish", "usage", "error", "tool"):
+            return b""
+        out = self._start()
+        if kind == "reasoning":
+            if self._open != "thinking" or not self._synthetic:
+                out += self._open_block({"type": "thinking", "thinking": "", "signature": ""}, "thinking")
+                self._synthetic = True
+            return out + self._delta({"type": "thinking_delta", "thinking": event[1]})
+        if kind == "details":
+            for fragment in event[1]:
+                out += self._detail(fragment)
+            return out
+        if kind in ("content", "refusal"):
+            if self._open != "text":
+                out += self._open_block({"type": "text", "text": ""}, "text")
+            return out + self._delta({"type": "text_delta", "text": event[1]})
+        return out
+
+    def _detail(self, fragment: dict[str, Any]) -> bytes:
+        out = b""
+        if fragment.get("type") == "reasoning.encrypted":
+            out += self._close()
+            self._index += 1
+            block = {"type": "redacted_thinking", "data": encode_token(fragment)}
+            out += sse_event(
+                {"type": "content_block_start", "index": self._index, "content_block": block},
+                "content_block_start",
+            )
+            return out + self._stop()
+        text = detail_text(fragment)
+        if not text and self._open == "text":
+            self._late.append(fragment)  # a signature after the text started: one more block at the end
+            return out
+        if self._open != "thinking" or self._synthetic:
+            out += self._open_block({"type": "thinking", "thinking": "", "signature": ""}, "thinking")
+        self._block_fragments.append(fragment)
+        if text:
+            out += self._delta({"type": "thinking_delta", "thinking": text})
+        return out
+
+    def finish(self, failure: Any = None) -> bytes:
+        """The closing events; ``failure`` is a transport error seen by the relay (stream broke)."""
+        if self._finished:
+            return b""
+        self._finished = True
+        turn = self._turn.finish()
+        out = self._start() + self._close()
+        if self._late:
+            out += self._open_block({"type": "thinking", "thinking": "", "signature": ""}, "thinking")
+            self._block_fragments = self._late
+            out += self._close()
+        problem = failure or turn.error
+        if problem or turn.finish_reason in (None, "error"):
+            message, code = chat_error_text({"error": problem}) if problem else (STREAM_ENDED_EARLY, None)
+            return out + stream_error(502, upstream_error(502, message, code)[1])
+        for n, call in enumerate(turn.tool_calls):
+            self._index += 1
+            block = {"type": "tool_use", "id": tool_call_id(call.id, "toolu_", n), "name": call.name, "input": {}}
+            out += sse_event(
+                {"type": "content_block_start", "index": self._index, "content_block": block},
+                "content_block_start",
+            )
+            out += self._delta(
+                {"type": "input_json_delta", "partial_json": json.dumps(_tool_input(call, self._drops))},
+            )
+            out += self._stop()
+        if self._sink is not None:
+            self._sink.update(self._drops.data)
+        delta = {"stop_reason": CHAT_TO_STOP.get(finish_from_chat(turn), "end_turn"), "stop_sequence": None}
+        out += sse_event(
+            {"type": "message_delta", "delta": delta, "usage": _usage_from_chat(turn.usage)},
+            "message_delta",
+        )
+        return out + sse_event({"type": "message_stop"}, "message_stop")
+
+    def fail(self, status: int, payload: Mapping[str, Any]) -> bytes:
+        """An upstream error after the stream started: the native in-stream error event."""
+        self._finished = True
+        return self._start() + self._close() + stream_error(status, payload)
+
+
+def stream_from_chat(
+    chat_sse_iter: Iterable[bytes | None],
+    request_json: Mapping[str, Any] | None = None,
+    **options: Any,
+) -> Iterator[bytes]:
+    """Chat SSE chunks -> Anthropic SSE bytes; a ``None`` item (upstream silence) yields a ping."""
+    return iterate_stream(StreamTranslator(request_json, **options), chat_sse_iter, PING)

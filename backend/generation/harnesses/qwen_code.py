@@ -53,7 +53,7 @@ EXCLUDED_TOOLS: Final = ("web_fetch", "web_search")
 SUBAGENT_TOOLS: Final = ("task", "agent")
 
 FACTS: Final = HarnessFacts(
-    facts_version=1,
+    facts_version=2,
     verified_against=f"@qwen-code/qwen-code@{VERSION}: --help, settings schema scan, scripted smoke run, 2026-11-03",
     license="Apache-2.0",
     install=f'npm install -g "@qwen-code/qwen-code@{VERSION}" (Node >= 22)',
@@ -98,8 +98,9 @@ FACTS: Final = HarnessFacts(
         "time.command_timeout_s",
     ),
     open_questions=(
-        "usage statistics (privacy.usageStatisticsEnabled) can only be switched off in settings.json, which "
-        "--bare ignores: verify no stats traffic under network_policy=packages (egress allowlist) before enabling",
+        "usage statistics are sent even with --bare: the egress probe (HTTPS proxy, 2026-11-03) saw CONNECTs to "
+        "*.rum.aliyuncs.com (Aliyun RUM) and models.dev; privacy.usageStatisticsEnabled lives in settings.json, "
+        "which --bare ignores, and no verified flag or env var switches it off",
     ),
 )
 

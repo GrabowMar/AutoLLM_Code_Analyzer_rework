@@ -58,6 +58,7 @@ __all__ = [
     "pinned_ref",
     "plan_hash",
     "prereg_hash",
+    "prompt_hash",
     "target_hash",
     "task_prose_hashes",
     "task_structured_hash",
@@ -356,6 +357,40 @@ def target_hash(
 DETECTOR_SET_HASH_VERSION: Final = 1
 
 
+def _validate_stimuli(stimuli: Iterable[Any]) -> list[tuple[str, str]]:
+    """``(role, text_sha)`` pairs: non-empty, unique roles and lowercase hex shas (ValueError otherwise)."""
+    pairs: list[tuple[str, str]] = []
+    roles: set[str] = set()
+    for item in stimuli:
+        if len(item) != 2:
+            msg = f"stimuli entries are (role, text_sha), got {item!r}"
+            raise ValueError(msg)
+        role, sha = item
+        if not isinstance(role, str) or not role:
+            msg = f"stimulus role must be a non-empty str, got {role!r}"
+            raise ValueError(msg)
+        if role in roles:
+            msg = f"duplicate stimulus role {role!r}"
+            raise ValueError(msg)
+        roles.add(role)
+        _require_sha(sha, f"stimulus {role!r} text_sha")
+        pairs.append((role, sha))
+    return pairs
+
+
+def _prompt_hash(pairs: Iterable[tuple[str, str]]) -> str:
+    return H(sorted([[role, sha] for role, sha in pairs]))
+
+
+def prompt_hash(stimuli: Iterable[tuple[str, str]]) -> str:
+    """``prompt_hash = H(sorted([[role, text_sha(rendered)], ...]))`` (section 3.1), the one implementation.
+
+    ``stimuli`` are ``(role, text_sha)`` pairs, one per role; ``compute_keys`` uses the same function, so a
+    preview (``prompts.engine.preview_prompt_hash``) always equals the key of a run with those stimuli.
+    """
+    return _prompt_hash(_validate_stimuli(stimuli))
+
+
 def detector_set_hash(detectors: Iterable[tuple[str, str]]) -> str:
     """``PatternRun.detector_set_hash``: ``H({"version": 1, "detectors": sorted([[slug@version, content_hash]])})``.
 
@@ -493,20 +528,7 @@ class IdentityInputs:
             raise ValueError(msg)
 
     def _validate_rest(self) -> None:
-        roles: set[str] = set()
-        for item in self.stimuli:
-            if len(item) != 2:
-                msg = f"stimuli entries are (role, text_sha), got {item!r}"
-                raise ValueError(msg)
-            role, sha = item
-            if not isinstance(role, str) or not role:
-                msg = f"stimulus role must be a non-empty str, got {role!r}"
-                raise ValueError(msg)
-            if role in roles:
-                msg = f"duplicate stimulus role {role!r}"
-                raise ValueError(msg)
-            roles.add(role)
-            _require_sha(sha, f"stimulus {role!r} text_sha")
+        _validate_stimuli(self.stimuli)
         model = _require_exact_keys(self.model, MODEL_KEYS, "IdentityInputs.model")
         if not isinstance(model["slug"], str) or not model["slug"]:
             msg = f"model.slug must be a non-empty str, got {model['slug']!r}"
@@ -564,7 +586,7 @@ def compute_keys(inputs: IdentityInputs) -> IdentityKeys:
             },
         )
     treatment_hash = H({"protocol": inputs.protocol, "executor": inputs.kind, **dict(inputs.treatment)})
-    prompt_hash = H(sorted([[role, sha] for role, sha in inputs.stimuli]))
+    prompt_hash = _prompt_hash(inputs.stimuli)
     generation_policy_hash = H(inputs.policy_treatment_view)
     model = inputs.model
     images = inputs.images

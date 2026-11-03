@@ -442,19 +442,31 @@ def manifest_content(
     model_slug: str = "deepseek/deepseek-v4.1-flash",
     identity: Mapping[str, str] | None = None,
     created_at: str = "2026-11-03T00:00:00Z",
+    refs: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """A ``contracts.manifest.RunManifest`` payload for a run of ``kind``.
 
     ``task`` (app runs) is ``{ref, structured_hash, variant, prose_sha}``; ``slot`` (slot runs) is the
     full ``ManifestSlot`` block. Identity keys default to fake shas; pass the run's own keys when the
-    run row has them (``RunManifest.clean`` compares them).
+    run row has them (``RunManifest.clean`` compares them). Library refs are pinned (``slug@v#hash12``,
+    the manifest contract requires it): ``refs`` overrides them by key (``task``, ``sampling``,
+    ``resources``, ``harness_preset``, ``starter``, ``eval_suite``); the defaults are :func:`fake_ref` pins.
     """
+    pins = {
+        "task": fake_ref("crud_todo_list@1"),
+        "sampling": fake_ref("t07@1"),
+        "resources": fake_ref("frugal@1"),
+        "harness_preset": fake_ref("opencode-native@1"),
+        "starter": fake_ref("flask-react-minimal@1"),
+        "eval_suite": fake_ref("eval-v2@1"),
+    }
+    pins.update({key: value for key, value in (refs or {}).items() if value})
     protocol = _PROTOCOL[kind]
     manifest: dict[str, Any] = {
         "protocol": protocol,
         "kind": kind,
         "planned_evaluation": {
-            "eval_suite": {"ref": "eval-v2@1", "content_hash": fake_sha("eval-v2")},
+            "eval_suite": {"ref": pins["eval_suite"], "content_hash": fake_sha("eval-v2")},
             "eval_level": "security",
         },
         "network_policy": "packages",
@@ -464,7 +476,7 @@ def manifest_content(
         manifest["task"] = dict(
             task
             or {
-                "ref": "crud_todo_list@1",
+                "ref": pins["task"],
                 "structured_hash": fake_sha("task:structured"),
                 "variant": "standard",
                 "prose_sha": fake_sha("task:prose"),
@@ -487,13 +499,13 @@ def manifest_content(
             "pricing": {"input_per_mtok": 0.1, "output_per_mtok": 0.3, "source": "openrouter", "as_of": "2026-11-01"},
         },
         "sampling": {
-            "ref": "t07@1",
+            "ref": pins["sampling"],
             "policy": "explicit",
             "forced_params": {"temperature": 0.7},
             "seed_forwarded": True,
         },
         "resources": {
-            "ref": "frugal@1",
+            "ref": pins["resources"],
             "generation_policy_hash": keys["generation_policy_hash"],
             "budget_basis": "usd",
             "effective": {},
@@ -513,7 +525,7 @@ def manifest_content(
             "harness": {
                 "name": "opencode",
                 "version": "1.18.35",
-                "preset_ref": "opencode-native@1",
+                "preset_ref": pins["harness_preset"],
                 "image": "agent-opencode",
                 "image_digest": "sha256:" + fake_sha("agent-opencode"),
                 "command_sha": fake_sha("command"),
@@ -523,7 +535,7 @@ def manifest_content(
         }
     if kind == "app_agentic":
         manifest["starter"] = {
-            "ref": "flask-react-minimal@1",
+            "ref": pins["starter"],
             "tree_hash": fake_sha("starter-tree"),
             "base_images": [dict(BASE_IMAGE)],
         }

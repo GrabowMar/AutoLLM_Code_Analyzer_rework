@@ -2,9 +2,9 @@
 
 Seed data is linted in memory as system entities (refs resolve to stored rows or to the other entries of the
 directory), so it works on an empty database and writes nothing. ``--db`` lints the latest version of every
-stored slug. Phase-B starters whose stack is not written yet are listed as deferred (not linted); a phase-A
-starter that cannot be composed is an ``error``. The command exits non-zero on ``error`` issues
-(``--fail-on warn`` also fails on warnings).
+stored slug. Starters of a phase outside ``build.starters.ACTIVE_PHASES`` are listed as deferred (not
+linted); a starter of an active phase (A, B) that cannot be composed is an ``error``. The command exits
+non-zero on ``error`` issues (``--fail-on warn`` also fails on warnings).
 """
 
 from __future__ import annotations

@@ -264,10 +264,10 @@
 		}
 	}
 
-	function useInExperiment() {
+	function useInStudy() {
 		const ids = [...selectedModels];
 		if (ids.length === 0) return;
-		void goto(`/experiments/new?models=${ids.join(',')}`);
+		void goto(`/studies/new?models=${ids.map(encodeURIComponent).join(",")}`);
 	}
 
 	function reveal(secret: TokenSecret, note = '') {
@@ -545,8 +545,8 @@
 					<p class="text-sm text-muted-foreground">
 						Hidden models stay out of the model pickers. Overrides apply to new runs only.
 					</p>
-					<Button size="sm" onclick={useInExperiment} disabled={selectedModels.size === 0}>
-						<FlaskConical />Use {selectedModels.size || ''} in new experiment
+					<Button size="sm" onclick={useInStudy} disabled={selectedModels.size === 0}>
+						<FlaskConical />Use {selectedModels.size || ''} in new study
 					</Button>
 				</div>
 				<DiscoveredModelsTable

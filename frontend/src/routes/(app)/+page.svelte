@@ -7,7 +7,6 @@
 		getStatisticsAnalyzerHealth,
 		getStatisticsSeverity,
 		getStatisticsTrends,
-		getGenerationJobs,
 		clearCaches,
 		clearStuckAnalysis,
 		clearStuckGeneration,
@@ -17,9 +16,10 @@
 		type AnalyzerHealth,
 		type SeverityDistribution,
 		type AnalysisTrends,
-		type GenerationJobList,
 	} from '$lib/api/client';
 	import { listRuns, type AnalysisRunListItem } from '$lib/api/runs';
+	import { listSamples } from '$lib/api/v3/samples';
+	import type { RunListOut } from '$lib/api/v3/types';
 	import { formatApiError } from '$lib/api/core';
 	import {
 		timeAgo,
@@ -32,7 +32,7 @@
 	import SeverityPanel from '$lib/components/dashboard/SeverityPanel.svelte';
 	import AnalyzerHealthGrid from '$lib/components/dashboard/AnalyzerHealthGrid.svelte';
 	import RecentRunsTable from '$lib/components/dashboard/RecentRunsTable.svelte';
-	import RecentJobsTable from '$lib/components/dashboard/RecentJobsTable.svelte';
+	import RecentSamplesTable from '$lib/components/dashboard/RecentSamplesTable.svelte';
 	import ActivityFeed from '$lib/components/dashboard/ActivityFeed.svelte';
 
 	const AUTO_REFRESH_MS = 60_000;
@@ -67,7 +67,7 @@
 				healthResult,
 				severityResult,
 				trendsResult,
-				jobsResult,
+				samplesResult,
 			] = await Promise.allSettled([
 				listRuns({ per_page: 5 }),
 				listRuns({ status: 'completed', per_page: 1 }),
@@ -77,7 +77,7 @@
 				getStatisticsAnalyzerHealth(),
 				getStatisticsSeverity(),
 				getStatisticsTrends(30),
-				getGenerationJobs({ per_page: 5 }),
+				listSamples({ page_size: 5 }),
 			]);
 
 			totalAnalyses = runsResult.status === 'fulfilled' ? runsResult.value.total : null;
@@ -102,13 +102,13 @@
 			trends = trendsResult.status === 'fulfilled' ? trendsResult.value : null;
 
 			recentApps =
-				jobsResult.status === 'fulfilled'
-					? jobsResult.value.items.map((j: GenerationJobList) => ({
-							id: j.id,
-							name: j.template_name || j.scaffolding_name || `Job ${j.id.slice(0, 8)}`,
-							model: j.model_name || j.model_id_str || '—',
-							status: normalizeStatus(j.status),
-							time: timeAgo(j.created_at),
+				samplesResult.status === 'fulfilled'
+					? samplesResult.value.items.map((r: RunListOut) => ({
+							id: r.id,
+							name: r.task_title || r.task || `Run ${r.id.slice(0, 8)}`,
+							model: r.model || '—',
+							status: normalizeStatus(r.status),
+							time: timeAgo(r.created_at),
 						}))
 					: [];
 
@@ -166,7 +166,7 @@
 		pendingAction = 'stuck';
 		try {
 			const [a, g] = await Promise.all([clearStuckAnalysis(60), clearStuckGeneration(60)]);
-			toast.success(`Released ${a.updated} stuck analyses and ${g.updated} generation jobs`);
+			toast.success(`Released ${a.updated} stuck analyses and ${g.updated} generation runs`);
 			await loadAll();
 		} catch (e) {
 			toast.error(`Failed: ${(e as Error).message}`);
@@ -229,7 +229,7 @@
 	<!-- Tables + side column -->
 	<div class="b-8 rise-in space-y-4" style="--stagger-i: 5">
 		<RecentRunsTable analyses={recentAnalyses} />
-		<RecentJobsTable jobs={recentApps} />
+		<RecentSamplesTable samples={recentApps} />
 	</div>
 	<div class="b-4 rise-in space-y-4" style="--stagger-i: 6">
 		<ActivityFeed items={liveActivity} {isRefreshing} onRefresh={handleRefresh} />

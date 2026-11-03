@@ -604,12 +604,12 @@ def test_rate_limited_gateway_records_the_wait(tmp_path):
 
 
 def test_unrunnable_configs_exit_78_with_an_event(tmp_path):
-    cfg = config_dict("http://x/api/v1", front_protocol="gemini_generate", protocol_mode="translate")
+    cfg = config_dict("http://x/api/v1", front_protocol="gemini_generate", protocol_mode="passthrough")
     env = {"GATEWAY_CONFIG": json.dumps(cfg), "GATEWAY_LOG_DIR": str(tmp_path)}
     assert gateway_module.main(env) == gateway_module.EX_CONFIG
     events = read_jsonl(tmp_path / "gateway_events.jsonl")
     assert events[0]["event"] == "config_invalid"
-    assert "wave 3" in events[0]["error"]
+    assert "does not run in protocol_mode 'passthrough'" in events[0]["error"]
 
 
 def test_local_upstream_needs_the_overlay(tmp_path, monkeypatch):

@@ -28,6 +28,8 @@ django.setup()
 
 from backend.generation.contracts.library import HarnessPresetContent  # noqa: E402
 from backend.generation.contracts.library import ToolPolicy  # noqa: E402
+from backend.generation.contracts.resources import EffectivePolicy  # noqa: E402
+from backend.generation.contracts.resources import preset_content  # noqa: E402
 from backend.generation.harnesses import registry  # noqa: E402
 from backend.generation.harnesses.base import GATEWAY_HOST  # noqa: E402
 from backend.generation.harnesses.base import CapturedPromptMissingError  # noqa: E402
@@ -45,6 +47,20 @@ _CAPTURE_ENV = {
 }
 
 
+def _policy(updates: list[str]) -> EffectivePolicy:
+    """The frugal tier with ``dotted.key=<JSON>`` updates (probe runs: compaction, output caps, ...)."""
+    data = preset_content("frugal").model_dump(mode="json")
+    for item in updates:
+        dotted, raw = item.split("=", 1)
+        node = data
+        *parents, leaf = dotted.split(".")
+        for key in parents:
+            node = node[key]
+        node[leaf] = json.loads(raw)
+    content = type(preset_content("frugal")).model_validate(data)
+    return EffectivePolicy(content=content, budget_basis="usd", cap_basis="billed", serving_tier="standard")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("harness")
@@ -53,7 +69,12 @@ def main() -> None:
     parser.add_argument("--capture", action="store_true")
     parser.add_argument("--controlled", action="store_true")
     parser.add_argument("--max-turns", type=int, default=None)
+    parser.add_argument("--policy", action="append", default=[], help="dotted.key=JSON value (frugal tier base)")
+    parser.add_argument("--model-window", type=int, default=None, help="HarnessContext.model_context_window")
     args = parser.parse_args()
+    extra: dict = {"model_context_window": args.model_window}
+    if args.policy:
+        extra["policy"] = _policy(args.policy)
 
     adapter = registry.get(args.harness)
     version = adapter.version()
@@ -73,8 +94,11 @@ def main() -> None:
         model_name=args.model,
         gateway=adapter.gateway_wiring(GATEWAY_HOST),
         preset=preset,
+        **extra,
     )
     try:
+        if args.capture and args.harness in _CAPTURE_ENV:
+            raise CapturedPromptMissingError(args.harness)  # dump the native default even when pinned
         rendered = adapter.render(ctx)
     except CapturedPromptMissingError:
         if not args.capture:
@@ -87,6 +111,7 @@ def main() -> None:
                 gateway=adapter.gateway_wiring(GATEWAY_HOST),
                 preset=preset,
                 system_prompt=captured_placeholder,
+                **extra,
             ),
         )
     files = dict(rendered.files)

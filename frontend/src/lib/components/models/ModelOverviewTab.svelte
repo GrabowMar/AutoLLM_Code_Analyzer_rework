@@ -231,7 +231,7 @@
 						<LoadingState label="loading measurements" class="py-6" />
 					{:else if gen.jobs_total === 0}
 						<p class="text-sm text-muted-foreground">Not generated with yet. Run it on a template to measure build success, conformance and code findings.</p>
-						<Button size="sm" variant="outline" class="mt-3" href="/sample-generator?mode=agent&model={encodeURIComponent(slug)}">
+						<Button size="sm" variant="outline" class="mt-3" href="/studies/new?model={encodeURIComponent(slug)}">
 							<Sparkles class="size-3.5" />Generate an app
 						</Button>
 					{:else}

@@ -21,14 +21,17 @@ from protocols import budget_rules
 
 FRONT_PROTOCOLS = ("openai_chat", "openai_responses", "anthropic_messages", "gemini_generate")
 PROTOCOL_MODES = ("native", "passthrough", "translate")
-# Fronts that may run in each mode in this gateway version. Translators are wave 3: a config that
-# asks for one is refused at startup (exit 78) instead of failing call by call.
+# Fronts that may run in each mode in this gateway version (a config outside it is refused at startup,
+# exit 78, instead of failing call by call). ``translate`` maps the native protocol to canonical chat
+# (protocols/translation.py) and works with every upstream; Gemini has no native upstream at all.
 SUPPORTED_MODES = {
     "openai_chat": ("native",),
-    "anthropic_messages": ("passthrough",),
-    "openai_responses": ("passthrough",),
-    "gemini_generate": (),
+    "anthropic_messages": ("passthrough", "translate"),
+    "openai_responses": ("passthrough", "translate"),
+    "gemini_generate": ("translate",),
 }
+# The fronts whose translator ships in this image (settings.GATEWAY_TRANSLATORS must be a subset).
+TRANSLATORS = tuple(front for front, modes in SUPPORTED_MODES.items() if "translate" in modes)
 # Sampling keys a front body may carry (stripped / forced by the sampling policy).
 CHAT_SAMPLING_KEYS = (
     "temperature",
@@ -199,10 +202,7 @@ class Policy:
         if self.front not in FRONT_PROTOCOLS:
             out.append(f"unknown front_protocol {self.front!r}")
         elif self.mode not in SUPPORTED_MODES[self.front]:
-            if self.mode == "translate" or self.front == "gemini_generate":
-                out.append(f"the {self.front} translator is not available in this gateway version (wave 3)")
-            else:
-                out.append(f"{self.front} does not run in protocol_mode {self.mode!r}")
+            out.append(f"{self.front} does not run in protocol_mode {self.mode!r}")
         if self.mode == "passthrough" and self.upstream_kind != "openrouter":
             out.append("passthrough forwards native bodies to OpenRouter only (remote endpoints)")
         if self.reasoning_mode == "effort" and not self.reasoning_effort:

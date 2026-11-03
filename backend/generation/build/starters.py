@@ -4,6 +4,8 @@
 ``data/starters/``:
 
 * the backend fragment ``backend/<framework>/<level>/`` (``backend/free/bare/`` for the free-choice profile);
+  a profile whose database is not SQLite uses ``backend/<framework>/<level>-<database>/`` from ``minimal`` up
+  (its manifest names the database driver; ``bare`` ships no manifest, so it shares the SQLite fragment);
 * the frontend fragment ``frontend/<framework>/<level>/`` when the profile has a frontend and that level ships
   one (``bare`` ships no frontend code);
 * the checked-in lockfiles of those fragments (``lock/``, see ``build.locks``);
@@ -45,6 +47,7 @@ if TYPE_CHECKING:
     from backend.generation.models import Starter
 
 __all__ = [
+    "ACTIVE_PHASES",
     "COMPOSE_PATH",
     "LEVELS",
     "STACKS_ROOT",
@@ -68,6 +71,9 @@ STARTERS_ROOT: Final = dockerfiles.STARTERS_ROOT
 STACKS_ROOT: Final = STARTERS_ROOT.parent / "stacks"
 COMPOSE_PATH: Final = STARTERS_ROOT / "compose.yaml"
 LEVELS: Final = ("bare", "minimal", "full")
+# compose.yaml phases that are composed and seeded. Phase A shipped in wave 2, phase B (go, spring-boot, the
+# postgres variants) in wave 3; the label stays on the rows as provenance.
+ACTIVE_PHASES: Final = ("A", "B")
 _REGULAR: Final = 0o644
 _EXECUTABLE: Final = 0o755
 _TEMPLATE_SUFFIX: Final = ".jinja2"
@@ -170,6 +176,13 @@ def fragments_for(stack_content: Mapping[str, Any], level: str) -> tuple[str, st
     if stack_content.get("choice_mode") == "free":
         return "backend/free/bare", None
     backend = f"backend/{stack_content['backend']['framework']}/{level}"
+    database = stack_content.get("database", "sqlite")
+    if level != "bare" and database != "sqlite":
+        backend = f"{backend}-{database}"
+        if not (STARTERS_ROOT / backend).is_dir():
+            # Never fall back to the SQLite fragment: its manifest has no driver for this database.
+            msg = f"no backend fragment {backend} for database {database!r}"
+            raise StarterCompositionError(msg)
     frontend_framework = stack_content["frontend"]["framework"]
     frontend = None
     if frontend_framework not in {"none", "free"}:
@@ -235,6 +248,10 @@ def _install(tree: Mapping[str, Any], level: str) -> list[str]:
         elif name == "package.json":
             lock = f"{directory}/package-lock.json"
             commands.append(f"npm ci (in {directory}/)" if lock in tree else f"npm install (in {directory}/)")
+        elif name == "go.mod":
+            commands.append(f"go mod download, go build (in {directory}/)")
+        elif name == "pom.xml":
+            commands.append(f"mvn package (in {directory}/)")
     if level == "bare" and "Dockerfile" in tree:
         commands.append("the Dockerfile installs backend/ and frontend/ manifests when present")
     return commands
@@ -379,11 +396,12 @@ def seed_starters(
     created_by: Any = None,
     dry_run: bool = False,
 ) -> list[SeedRecord]:
-    """Compose every phase-A entry of ``compose.yaml`` against the latest profile rows and store new versions.
+    """Compose every ``compose.yaml`` entry of an active phase against the latest profile rows and store them.
 
     Idempotent: an equal ``content_hash`` is a no-op, a different one creates ``version + 1`` (system row).
     A slug owned by a user (``is_system=False``) is never touched (``error``). A profile that is not seeded
-    yet, and every phase-B entry, is reported as ``skipped``. A starter failing the rule list is ``error``.
+    yet, and an entry of a phase outside ``ACTIVE_PHASES``, is ``skipped``. A starter failing the rule list,
+    or one that cannot be composed, is ``error`` whatever its phase.
     """
     from django.db import transaction
 
@@ -397,8 +415,8 @@ def seed_starters(
         slug = starter_slug(entry.stack, entry.level)
         if wanted is not None and entry.stack not in wanted:
             continue
-        if entry.phase != "A":
-            records.append(SeedRecord(slug, "skipped", reason=f"phase {entry.phase} (wave 3)"))
+        if entry.phase not in ACTIVE_PHASES:
+            records.append(SeedRecord(slug, "skipped", reason=f"phase {entry.phase} is not active"))
             continue
         profile = _latest_profile(entry.stack, using)
         if profile is None:

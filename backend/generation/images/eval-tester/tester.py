@@ -44,6 +44,7 @@ import json
 import os
 import re
 import secrets
+import select
 import sys
 import threading
 import time
@@ -57,6 +58,8 @@ PROBE_RULES_VERSION = 1
 
 REQUEST_TIMEOUT_S = 20.0
 OVERSIZE_BYTES = 12 * 1024 * 1024
+_STREAM_ABOVE = 1024 * 1024  # bodies above this are streamed in chunks (early-answer tolerance)
+_STREAM_CHUNK = 64 * 1024
 _STATE_CHANGING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _SQL_ERROR = re.compile(
@@ -167,7 +170,10 @@ class Http:
         conn = conn_cls(self.host, self.port, timeout=REQUEST_TIMEOUT_S)
         started = time.monotonic()
         try:
-            conn.request(method, url, body=body, headers=headers or {})
+            if body is not None and len(body) > _STREAM_ABOVE:
+                self._stream(conn, method, url, body, headers or {})
+            else:
+                conn.request(method, url, body=body, headers=headers or {})
             raw = conn.getresponse()
             data = raw.read()
             out = Response(raw.status, list(raw.getheaders()), data, int((time.monotonic() - started) * 1000), path)
@@ -177,6 +183,28 @@ class Http:
         finally:
             conn.close()
         return out
+
+    @staticmethod
+    def _stream(conn: http.client.HTTPConnection, method: str, url: str, body: bytes, headers: dict[str, str]) -> None:
+        """Send a large body in chunks and stop as soon as the app answers early (tolerance 8.5: 413 "from the
+        framework or the app"). A server that refuses an oversize upload often answers 413 before reading the
+        body and then closes the connection; writing the rest would fail with a broken pipe or a reset and turn
+        a correct 413 into a connection error. The response already sent is read instead."""
+        conn.putrequest(method, url, skip_accept_encoding=True)
+        for name, value in headers.items():
+            conn.putheader(name, value)
+        if not any(name.lower() == "content-length" for name in headers):
+            conn.putheader("Content-Length", str(len(body)))
+        conn.endheaders()
+        sock = conn.sock
+        view = memoryview(body)
+        for start in range(0, len(body), _STREAM_CHUNK):
+            if sock is not None and select.select([sock], [], [], 0)[0]:
+                return  # an early answer: read it
+            try:
+                sock.sendall(view[start : start + _STREAM_CHUNK])
+            except (BrokenPipeError, ConnectionResetError):
+                return  # the app stopped reading; its answer (if any) is read by the caller
 
 
 def _q(value: Any) -> str:
@@ -288,10 +316,12 @@ _TYPES = {
 
 def schema_errors(value: Any, schema: Any, where: str = "$") -> list[str]:
     """A JSON Schema subset: type, properties, required, items, enum, const, min/maxLength, minimum, maximum,
-    min/maxItems, format date/date-time, anyOf/oneOf. Unknown keywords are ignored."""
+    min/maxItems, format date/date-time, anyOf/oneOf/allOf. Unknown keywords are ignored."""
     if not isinstance(schema, dict):
         return []
     errors: list[str] = []
+    for sub in schema.get("allOf") or []:
+        errors += schema_errors(value, sub, where)
     for key in ("anyOf", "oneOf"):
         options = schema.get(key)
         if isinstance(options, list) and options and not any(not schema_errors(value, s, where) for s in options):
@@ -661,6 +691,12 @@ class Tester:
             sign=sign,
         )
 
+    @staticmethod
+    def _referenced_actors(check: dict[str, Any]) -> list[str]:
+        """The user actors whose username placeholder (``{user_a_username}``, ``{user_b_username}``) the check uses."""
+        text = json.dumps([check.get("setup"), check.get("request"), check.get("expect")])
+        return [name for name in ("user_a", "user_b") if "{" + name + "_username}" in text]
+
     def _run_setup(self, check: dict[str, Any], ctx: dict[str, Any]) -> str | None:
         """Run the setup steps; returns a failure note or None."""
         for i, step in enumerate(check.get("setup") or []):
@@ -714,6 +750,16 @@ class Tester:
                 note=f"actor {actor} could not log in: {self.actors[actor].error}",
             )
             return
+        for other in self._referenced_actors(check):
+            # ``{user_b_username}`` names an account that must exist: register and log it in first.
+            if not self.ensure_actor(other):
+                self._record(
+                    check,
+                    "skipped",
+                    skipped_due_to=[f"auth:{other}"],
+                    note=f"actor {other} (referenced by name) could not log in: {self.actors[other].error}",
+                )
+                return
         ctx = ctx if ctx is not None else self.new_ctx()
         expect = check.get("expect") or {}
         try:

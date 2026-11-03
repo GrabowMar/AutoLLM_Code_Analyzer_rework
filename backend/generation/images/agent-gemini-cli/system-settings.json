@@ -1,0 +1,66 @@
+{
+  "admin": {
+    "extensions": {
+      "enabled": false
+    },
+    "mcp": {
+      "enabled": false
+    },
+    "skills": {
+      "enabled": false
+    }
+  },
+  "advanced": {
+    "ignoreLocalEnv": true
+  },
+  "experimental": {
+    "autoMemory": false,
+    "enableAgents": false,
+    "gemmaModelRouter": {
+      "enabled": false
+    }
+  },
+  "general": {
+    "checkpointing": {
+      "enabled": false
+    },
+    "enableAutoUpdate": false,
+    "enableAutoUpdateNotification": false,
+    "maxAttempts": 1,
+    "plan": {
+      "enabled": false
+    },
+    "retryFetchErrors": false,
+    "sessionRetention": {
+      "enabled": false
+    }
+  },
+  "hooksConfig": {
+    "enabled": false
+  },
+  "ide": {
+    "enabled": false
+  },
+  "model": {
+    "disableLoopDetection": true,
+    "skipNextSpeakerCheck": true
+  },
+  "privacy": {
+    "usageStatisticsEnabled": false
+  },
+  "security": {
+    "auth": {
+      "selectedType": "gemini-api-key"
+    }
+  },
+  "skills": {
+    "enabled": false
+  },
+  "telemetry": {
+    "enabled": false,
+    "logPrompts": false
+  },
+  "tools": {
+    "disableLLMCorrection": true
+  }
+}

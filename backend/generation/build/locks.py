@@ -18,9 +18,17 @@ be remote, e.g. apps-dind):
 * PyPI: ``uv pip compile --generate-hashes`` of ``requirements.txt`` into ``requirements.lock``. The starter
   Dockerfiles install ``pip install -r requirements.txt -c requirements.lock`` (the lock is a constraints file).
 * npm: ``npm install --package-lock-only --ignore-scripts`` writes ``package-lock.json`` (``npm ci``).
-* Go (``go mod tidy`` -> ``go.sum``) and Maven (``dependency:resolve`` + a recorded ``dependency:list``) are
-  phase B (wave 3): their specs are listed in ``ECOSYSTEMS`` so the seam is explicit, but no phase-A fragment
-  has such a manifest.
+* Go (phase B): ``go mod tidy`` writes ``go.sum``. Tidy reads the imports of the module's sources, so the
+  container gets every plain file of the manifest's directory (templates ``*.jinja2`` are left out: a fragment
+  keeps its third-party imports in plain ``.go`` files), and the lock step fails when tidy would change
+  ``go.mod`` (the checked-in ``go.mod`` must already be tidy). The index records ``inputs_sha`` (the
+  ``tree_hash`` of those inputs) next to ``manifest_sha``; a change to either makes the lock stale.
+  A model's ``go.mod`` whose ``go.sum`` misses entries fails ``go build`` ("missing go.sum entry"), so Go locks
+  are checked like pip and npm ones; the platform's Go lock is ``go mod download all`` (completes ``go.sum``
+  from ``go.mod`` alone, never edits ``go.mod``).
+* Maven (phase B): ``pom.xml`` pins the Spring Boot parent, whose BOM manages every version; the lock step runs
+  ``dependency:resolve`` and records ``dependency:list`` (``dependency-list.txt``). Maven does not read that
+  file back: it is a record of the resolution, not an input of the build.
 
 Lock completeness on the build seam (``check_tree_locks``, ``lock_covers``): a starter lock is generated for
 the starter's manifest only. When the model adds a dependency, the hashed ``requirements.lock`` (pip
@@ -56,6 +64,7 @@ from backend.generation import identity
 from backend.generation.build import dockerfiles
 
 __all__ = [
+    "ALL_PHASES",
     "ECOSYSTEMS",
     "LOCK_COMPLETE",
     "LOCK_INCOMPLETE",
@@ -105,6 +114,15 @@ class Ecosystem:
     image_key: str  # base_images.yaml key of the image the lock runs in
     script: Callable[[Mapping[str, str]], str]  # tools -> shell script run in the manifest's directory
     phase: str = "A"
+    # "manifest": the container gets the manifest only; "directory": every plain file of its directory
+    inputs: str = "manifest"
+    # Whether the build consumes the lock so strictly that a lock not covering the manifest fails the build
+    # (pip --require-hashes, npm ci, Go's missing go.sum entry). Only those are checked by check_tree_locks.
+    enforced: bool = True
+    # Whether a starter lock is unusable next to any other manifest than the one it was generated from (pip:
+    # hashes for the whole closure; npm ci: exact match). A go.sum only adds checksums, so extra lines are
+    # harmless and coverage alone decides.
+    origin_bound: bool = True
 
 
 def _pypi_script(tools: Mapping[str, str]) -> str:
@@ -121,22 +139,29 @@ def _npm_script(_tools: Mapping[str, str]) -> str:
 
 
 def _go_script(_tools: Mapping[str, str]) -> str:
-    return "go mod tidy"
+    # The checked-in go.mod must already be tidy: tidy may only write go.sum.
+    return (
+        "cp go.mod /tmp/go.mod.in && GOTOOLCHAIN=local go mod tidy"
+        " && if ! cmp -s go.mod /tmp/go.mod.in; then echo 'go.mod is not tidy:' >&2;"
+        " diff /tmp/go.mod.in go.mod >&2; exit 1; fi"
+    )
 
 
 def _maven_script(_tools: Mapping[str, str]) -> str:
     return (
         "mvn -q -B dependency:resolve"
-        " && mvn -q -B dependency:list -DoutputFile=dependency-list.txt -DincludeScope=runtime"
+        " && mvn -q -B dependency:list -DoutputFile=dependency-list.txt -DincludeScope=runtime -Dsort=true"
+        " -DoutputAbsoluteArtifactFilename=false"
     )
 
 
 ECOSYSTEMS: Final = {
     "pypi": Ecosystem("pypi", "requirements.txt", "requirements.lock", "python", _pypi_script),
     "npm": Ecosystem("npm", "package.json", "package-lock.json", "node", _npm_script),
-    "go": Ecosystem("go", "go.mod", "go.sum", "go", _go_script, phase="B"),
-    "maven": Ecosystem("maven", "pom.xml", "dependency-list.txt", "maven", _maven_script, phase="B"),
+    "go": Ecosystem("go", "go.mod", "go.sum", "go", _go_script, phase="B", inputs="directory", origin_bound=False),
+    "maven": Ecosystem("maven", "pom.xml", "dependency-list.txt", "maven", _maven_script, phase="B", enforced=False),
 }
+ALL_PHASES: Final = ("A", "B")
 _BY_MANIFEST: Final = {eco.manifest: eco for eco in ECOSYSTEMS.values()}
 
 
@@ -159,6 +184,32 @@ class LockSpec:
 
     def manifest_bytes(self, root: Path | None = None) -> bytes:
         return ((root or dockerfiles.STARTERS_ROOT) / self.fragment / self.manifest).read_bytes()
+
+    def input_files(self, root: Path | None = None) -> dict[str, bytes]:
+        """``{name relative to the manifest's directory: bytes}`` the lock container gets."""
+        if self.ecosystem.inputs != "directory":
+            return {self.ecosystem.manifest: self.manifest_bytes(root)}
+        directory = (root or dockerfiles.STARTERS_ROOT) / self.fragment / PurePosixPath(self.manifest).parent
+        out: dict[str, bytes] = {}
+        for path in sorted(directory.rglob("*")):
+            rel = path.relative_to(directory)
+            if (
+                not path.is_file()
+                or path.name.endswith(".jinja2")
+                or path.name == self.ecosystem.lock
+                or any(part in {"node_modules", "__pycache__", "target"} for part in rel.parts)
+            ):
+                continue
+            out[rel.as_posix()] = path.read_bytes()
+        return out
+
+    def inputs_sha(self, root: Path | None = None) -> str | None:
+        """``tree_hash`` of ``input_files`` for directory ecosystems (``None`` for manifest-only ones)."""
+        if self.ecosystem.inputs != "directory":
+            return None
+        return identity.tree_hash(
+            (name, 0o644, identity.bytes_sha(data)) for name, data in self.input_files(root).items()
+        )
 
 
 def lock_specs(fragments: Iterable[str], *, root: Path | None = None) -> list[LockSpec]:
@@ -221,7 +272,9 @@ def locks_for_fragment(
         if entry is None or not lock_path.is_file():
             msg = f"{spec.key} has no lock; run `manage.py build_starters --lock`"
             raise MissingLockError(msg)
-        if entry.get("manifest_sha") != identity.bytes_sha(spec.manifest_bytes(root)):
+        if entry.get("manifest_sha") != identity.bytes_sha(spec.manifest_bytes(root)) or entry.get(
+            "inputs_sha",
+        ) != spec.inputs_sha(root):
             msg = f"{spec.key} changed since it was locked; run `manage.py build_starters --lock`"
             raise StaleLockError(msg)
         data = lock_path.read_bytes()
@@ -325,6 +378,49 @@ def _npm_covers(manifest: bytes, lock: bytes) -> bool:
     return all((package.get(key) or {}) == (root.get(key) or {}) for key in _NPM_FIELDS)
 
 
+_GO_REQUIRE_LINE: Final = re.compile(r"^\s*(\S+)\s+(v\S+)(\s*//\s*indirect)?\s*$")
+
+
+def _go_requires(text: str) -> list[tuple[str, str, bool]] | None:
+    """``[(module, version, indirect)]`` of a ``go.mod``; ``None`` when it has ``replace`` directives."""
+    out: list[tuple[str, str, bool]] = []
+    block = False
+    for raw in text.replace("\r\n", "\n").split("\n"):
+        line = raw.split("//", 1)[0].strip() if "// indirect" not in raw else raw.strip()
+        if not line:
+            continue
+        if block:
+            if line == ")":
+                block = False
+                continue
+            match = _GO_REQUIRE_LINE.match(line)
+            if match:
+                out.append((match.group(1), match.group(2), bool(match.group(3))))
+            continue
+        if line.startswith("replace"):
+            return None  # the sums belong to the replacement: not checkable offline
+        if line in {"require (", "require("}:
+            block = True
+        elif line.startswith("require "):
+            match = _GO_REQUIRE_LINE.match(line.removeprefix("require "))
+            if match:
+                out.append((match.group(1), match.group(2), bool(match.group(3))))
+    return out
+
+
+def _go_covers(manifest: bytes, lock: bytes) -> bool:
+    requires = _go_requires(manifest.decode("utf-8", errors="replace"))
+    if requires is None:
+        return False
+    sums = {tuple(line.split()[:2]) for line in lock.decode("utf-8", errors="replace").splitlines() if line.strip()}
+    for module, version, indirect in requires:
+        if (module, f"{version}/go.mod") not in sums:
+            return False
+        if not indirect and (module, version) not in sums:
+            return False  # a direct requirement provides imported packages: its zip sum is needed
+    return True
+
+
 def lock_covers(manifest_bytes: bytes, lock_bytes: bytes, *, ecosystem: str = "pypi") -> bool:
     """Whether the lock pins every direct requirement of the manifest (necessary for a usable lock).
 
@@ -333,6 +429,8 @@ def lock_covers(manifest_bytes: bytes, lock_bytes: bytes, *, ecosystem: str = "p
       Python 3.13).
     * ``npm``: ``package-lock.json``'s root package declares exactly the manifest's dependency maps (what
       ``npm ci`` checks).
+    * ``go``: ``go.sum`` holds the ``/go.mod`` checksum of every requirement and the module checksum of every
+      direct one (a ``go.mod`` with ``replace`` directives is never covered).
 
     Transitive closure cannot be checked offline; a starter lock next to an edited manifest is caught by
     ``check_tree_locks`` (``stale_starter_lock``) even when it happens to cover. Other ecosystems: ``False``.
@@ -341,6 +439,8 @@ def lock_covers(manifest_bytes: bytes, lock_bytes: bytes, *, ecosystem: str = "p
         return _pypi_covers(manifest_bytes, lock_bytes)
     if ecosystem == "npm":
         return _npm_covers(manifest_bytes, lock_bytes)
+    if ecosystem == "go":
+        return _go_covers(manifest_bytes, lock_bytes)
     return False
 
 
@@ -387,7 +487,10 @@ def check_tree_locks(
     platform_locks: Iterable[str] = (),
     index: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[LockCheck]:
-    """Every phase-A manifest of ``files`` (``{path: bytes}``) with the state of the lock next to it.
+    """Every manifest of ``files`` (``{path: bytes}``) whose lock the build enforces, with that lock's state.
+
+    pip (``requirements.lock``, ``--require-hashes``), npm (``package-lock.json``, ``npm ci``) and Go
+    (``go.sum``) locks are checked; Maven never reads ``dependency-list.txt``, so it cannot fail a build.
 
     A lock is ``incomplete`` (``stale_starter_lock``) when it is a starter lock (its bytes equal a checked-in
     starter lock, or its ``origins`` entry is ``starter``) and the manifest beside it is not the one it was
@@ -403,7 +506,7 @@ def check_tree_locks(
     for path in sorted(files):
         pure = PurePosixPath(path)
         ecosystem = _BY_MANIFEST.get(pure.name)
-        if ecosystem is None or ecosystem.phase != "A" or "node_modules" in pure.parts:
+        if ecosystem is None or not ecosystem.enforced or "node_modules" in pure.parts:
             continue
         lock_path = (pure.parent / ecosystem.lock).as_posix()
         manifest = files[path]
@@ -419,7 +522,7 @@ def check_tree_locks(
         else:
             source = "tree"
         reason: str | None = None
-        if source == "starter":
+        if source == "starter" and ecosystem.origin_bound:
             recorded = starter_locks.get(lock_sha)
             if recorded is not None:
                 stale = identity.bytes_sha(manifest) not in recorded
@@ -531,7 +634,7 @@ def generate_locks(
     root: Path | None = None,
     lock_root: Path | None = None,
     only_stale: bool = True,
-    phases: Iterable[str] = ("A",),
+    phases: Iterable[str] = ALL_PHASES,
 ) -> list[dict[str, Any]]:
     """(Re)generate the locks of ``fragments`` and update ``lock/index.yaml``; returns one record per spec.
 
@@ -550,12 +653,14 @@ def generate_locks(
             continue
         manifest = spec.manifest_bytes(root)
         manifest_sha = identity.bytes_sha(manifest)
+        inputs_sha = spec.inputs_sha(root)
         lock_path = lock_root / spec.fragment / spec.lock
         current = index.get(spec.key)
         if (
             only_stale
             and current is not None
             and current.get("manifest_sha") == manifest_sha
+            and current.get("inputs_sha") == inputs_sha
             and lock_path.is_file()
             and current.get("lock_sha") == identity.bytes_sha(lock_path.read_bytes())
         ):
@@ -563,11 +668,11 @@ def generate_locks(
             continue
         image = images[spec.ecosystem.image_key].pinned
         script = spec.ecosystem.script(tools)
-        produced = runner.run(image, {spec.ecosystem.manifest: manifest}, script, [spec.ecosystem.lock])
+        produced = runner.run(image, spec.input_files(root), script, [spec.ecosystem.lock])
         data = produced[spec.ecosystem.lock]
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path.write_bytes(data)
-        index[spec.key] = {
+        record = {
             "manifest": spec.manifest,
             "manifest_sha": manifest_sha,
             "lock": spec.lock,
@@ -575,6 +680,9 @@ def generate_locks(
             "image": image,
             "tool": script,
         }
+        if inputs_sha is not None:
+            record["inputs_sha"] = inputs_sha
+        index[spec.key] = record
         _write_index(index, index_path)
         records.append({"key": spec.key, "status": "locked", "lock": spec.lock})
     return records

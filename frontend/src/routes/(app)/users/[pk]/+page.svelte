@@ -31,7 +31,7 @@
 	const KIND: Record<ActivityKind, { label: string; icon: Component }> = {
 		application: { label: 'Application', icon: AppWindow },
 		analysis: { label: 'Analysis', icon: Microscope },
-		experiment: { label: 'Experiment', icon: FlaskConical },
+		study: { label: 'Study', icon: FlaskConical },
 		report: { label: 'Report', icon: FileText },
 	};
 	const SHORTCUTS = ['credentials', 'tokens', 'mcp', 'notifications'].map(
@@ -122,11 +122,11 @@
 					accent="cyan"
 				/>
 				<KpiCard
-					title="Experiments"
-					value={counts?.experiments ?? null}
+					title="Studies"
+					value={counts?.studies ?? null}
 					subtitle="studies designed"
 					icon={FlaskConical}
-					href="/experiments"
+					href="/studies"
 					accent="violet"
 				/>
 				<KpiCard
@@ -154,10 +154,10 @@
 								compact
 								icon={WandSparkles}
 								title="Nothing here yet"
-								description="Applications, analyses, experiments and reports you create show up here."
+								description="Applications, analyses, studies and reports you create show up here."
 							>
 								{#snippet action()}
-									<Button href="/sample-generator" size="sm"><WandSparkles />Generate an app</Button>
+									<Button href="/studies/new" size="sm"><WandSparkles />Generate an app</Button>
 								{/snippet}
 							</EmptyState>
 						{:else}

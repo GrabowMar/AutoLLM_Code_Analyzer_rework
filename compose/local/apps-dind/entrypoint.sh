@@ -35,6 +35,17 @@ if [ -n "${LLM_PROXY_ADDR:-}" ] && [ -n "${LLM_GATEWAY_EGRESS_SUBNET:-}" ]; then
 	iptables -A INPUT -i docker0 -d "${APPS_DIND_LLMPROXY_ADDR:-172.30.99.3}" -j REJECT
 	iptables -A INPUT -i llmlab-gwegr -d "${APPS_DIND_LLMPROXY_ADDR:-172.30.99.3}" -j REJECT
 fi
+# Dependency caches (WP-05, docs/STACKS.md): only sandbox gateways (llmlab-gw-egress) may reach the read-only
+# caches on the internal depcache network, on their four service ports; agents reach them through their
+# gateway's forward proxy (proxy_hosts), never directly. Everything else bound for that network is refused
+# (a separate interface: the uplink REJECTs below would not cover it), apps-dind's own address included.
+if [ -n "${DEPCACHE_SUBNET:-}" ] && [ -n "${LLM_GATEWAY_EGRESS_SUBNET:-}" ]; then
+	iptables -A DOCKER-USER -i llmlab-gwegr -s "$LLM_GATEWAY_EGRESS_SUBNET" -d "$DEPCACHE_SUBNET" -p tcp -m multiport --dports 4873,3141,3000,8080 -j RETURN
+	iptables -A DOCKER-USER -d "$DEPCACHE_SUBNET" -j REJECT --reject-with icmp-net-prohibited
+	for iface in br+ docker0 llmlab-gwegr; do
+		iptables -A INPUT -i "$iface" -d "$DEPCACHE_SUBNET" -j REJECT
+	done
+fi
 for cidr in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16; do
 	iptables -A DOCKER-USER -o "$uplink" -d "$cidr" -j REJECT --reject-with icmp-net-prohibited
 done

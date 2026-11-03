@@ -163,7 +163,18 @@
    "expect": {
     "header_contains": null,
     "json_contains": null,
-    "json_schema": null,
+    "json_schema": {
+     "properties": {
+      "token": {
+       "minLength": 1,
+       "type": "string"
+      }
+     },
+     "required": [
+      "token"
+     ],
+     "type": "object"
+    },
     "max_ms": null,
     "status": 200
    },

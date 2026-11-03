@@ -77,3 +77,55 @@ def test_unindexed_starter_lock_uses_origins_and_model_locks_are_coverage_checke
     assert (check.status, check.reason) == ("incomplete", "not_covered")
     (check,) = locks.check_tree_locks(files, platform_locks=["requirements.lock"])
     assert check.source == "platform"
+
+
+GO = "backend/go-stdlib/minimal"
+
+
+def go_pair() -> tuple[bytes, bytes]:
+    manifest = (dockerfiles.STARTERS_ROOT / GO / "backend/go.mod").read_bytes()
+    lock = (locks.LOCK_ROOT / GO / "backend/go.sum").read_bytes()
+    return manifest, lock
+
+
+def test_go_sum_must_hold_the_requirements_checksums():
+    manifest, lock = go_pair()
+    assert locks.lock_covers(manifest, lock, ecosystem="go")
+    extended = manifest.replace(
+        b"require modernc.org/sqlite",
+        b"require example.com/extra v1.0.0\n\nrequire modernc.org/sqlite",
+    )
+    assert not locks.lock_covers(extended, lock, ecosystem="go")
+    # A direct requirement needs its module checksum, an indirect one only its go.mod checksum.
+    text = b"module app\n\ngo 1.25.0\n\nrequire (\n\tex.com/a v1.0.0\n\tex.com/b v1.0.0 // indirect\n)\n"
+    sums = b"ex.com/a v1.0.0 h1:x=\nex.com/a v1.0.0/go.mod h1:y=\nex.com/b v1.0.0/go.mod h1:z=\n"
+    assert locks.lock_covers(text, sums, ecosystem="go")
+    assert not locks.lock_covers(text, sums.replace(b"ex.com/a v1.0.0 h1:x=\n", b""), ecosystem="go")
+    assert not locks.lock_covers(text + b"replace ex.com/a => ./a\n", sums, ecosystem="go")
+
+
+def test_check_tree_locks_covers_go_and_ignores_the_maven_record():
+    manifest, lock = go_pair()
+    pom = (dockerfiles.STARTERS_ROOT / "backend/spring-boot/minimal/backend/pom.xml").read_bytes()
+    files = {
+        "backend/go.mod": manifest,
+        "backend/go.sum": lock,
+        "api/pom.xml": pom + b"<!-- edited -->\n",
+        "api/dependency-list.txt": b"The following files have been resolved:\n",
+    }
+    (check,) = locks.check_tree_locks(files, origins={"backend/go.mod": "modified", "backend/go.sum": "starter"})
+    # Extra go.sum lines are harmless: a starter go.sum next to an edited go.mod is judged by coverage alone.
+    assert (check.manifest, check.ecosystem, check.status, check.source) == (
+        "backend/go.mod",
+        "go",
+        "complete",
+        "starter",
+    )
+    extended = manifest.replace(
+        b"require modernc.org/sqlite",
+        b"require example.com/extra v1.0.0\n\nrequire modernc.org/sqlite",
+    )
+    (check,) = locks.check_tree_locks({**files, "backend/go.mod": extended})
+    assert (check.status, check.reason) == ("incomplete", "not_covered")
+    (check,) = locks.check_tree_locks({"backend/go.mod": manifest})
+    assert check.status == "absent"  # the Dockerfile then runs `go mod download all` (unlocked install)

@@ -1,0 +1,1 @@
+{"budget_exhausted": null, "cache_write_tokens": 0, "cached_tokens": 0, "call_truncations": 0, "completion_tokens": 100, "cost": 0.0022, "inflight": 0, "last_call_end": 1793725248.1307552, "list_cost": 0.0022, "prompt_tokens": 2000, "reasoning_tokens": 0, "requests_by_class": {"auxiliary": 0, "compaction": 0, "main": 2, "subagent": 0}, "updated": 1793725248.1307852}

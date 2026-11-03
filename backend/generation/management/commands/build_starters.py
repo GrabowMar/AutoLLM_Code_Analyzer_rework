@@ -1,7 +1,7 @@
 """``manage.py build_starters``: lock, check and seed the starters of ``data/starters/compose.yaml``.
 
     build_starters --lock [--all] [--docker-host URL]   (re)generate stale lockfiles inside the pinned base images
-    build_starters --check                              compose every phase-A starter in memory and apply the rules
+    build_starters --check                              compose every active starter in memory and apply the rules
     build_starters [--with-stacks] [--stack S ...]      store new Starter versions (idempotent; --dry-run)
 
 Locks run in containers on ``settings.STARTERS_DOCKER_HOST`` (default: the apps daemon, apps-dind), with files
@@ -61,7 +61,7 @@ class Command(BaseCommand):
     def _lock(self, stacks: list[str] | None, *, rebuild: bool, host: str) -> list[dict[str, Any]]:
         fragments: set[str] = set()
         for entry in self._entries(stacks):
-            if entry.phase != "A" or entry.level == "bare":
+            if entry.phase not in starters.ACTIVE_PHASES or entry.level == "bare":
                 continue
             content = starters.load_stack_yaml(entry.stack)["content"]
             for fragment in starters.fragments_for(content, entry.level):
@@ -73,14 +73,14 @@ class Command(BaseCommand):
 
             client = docker.DockerClient(base_url=host)
         runner = locks.DockerLockRunner(client)
-        return locks.generate_locks(sorted(fragments), runner, only_stale=not rebuild)
+        return locks.generate_locks(sorted(fragments), runner, only_stale=not rebuild, phases=locks.ALL_PHASES)
 
     def _check(self, stacks: list[str] | None) -> list[dict[str, Any]]:
         report: list[dict[str, Any]] = []
         for entry in self._entries(stacks):
             slug = starters.starter_slug(entry.stack, entry.level)
-            if entry.phase != "A":
-                report.append({"slug": slug, "status": "skipped", "reason": f"phase {entry.phase}"})
+            if entry.phase not in starters.ACTIVE_PHASES:
+                report.append({"slug": slug, "status": "skipped", "reason": f"phase {entry.phase} is not active"})
                 continue
             try:
                 stack = starters.load_stack_yaml(entry.stack)

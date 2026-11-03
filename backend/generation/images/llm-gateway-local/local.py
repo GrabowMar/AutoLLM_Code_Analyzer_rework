@@ -6,14 +6,17 @@ The base ``gateway.py`` owns every policy, budget, retry and log rule; this over
 * transport: plain HTTP or HTTPS by the upstream URL's scheme, the per-run proxy token
   (``LLMLAB_UPSTREAM_TOKEN``) as bearer, none of the OpenRouter attribution headers;
 * body: the OpenRouter-only fields are dropped (``usage``, ``provider``, ``session_id``, the ``:floor``
-  suffix, ``cache_control`` markers), since the proxy builds the endpoint's own body;
+  suffix, ``cache_control`` markers), since the proxy builds the endpoint's own body; assistant
+  ``reasoning_details`` (replayed by the translators) become plain ``reasoning`` text, the only
+  reasoning a local endpoint reads back (signatures mean nothing to it);
 * headers for the proxy's budget backstop (``budget_rules``, local proxy parity):
   ``X-LLMLab-Request-Class`` and ``X-LLMLab-Call-Index`` (a gateway retry of the same call keeps its
   index, so the proxy never reserves twice for one call);
 * retries: no 500 (an Ollama 500 is usually an out-of-memory model load, not transient) and no 408 (the
   proxy owns timeouts); 504 is always retried, because a proxy 504 means "still waiting, re-attach".
 
-Only ``openai_chat`` runs in ``native`` mode on local endpoints until the wave-3 translators land.
+Claude Code, Codex and Gemini CLI reach local endpoints through the ``translate`` mode of their fronts
+(canonical chat upstream); passthrough is OpenRouter-only.
 """
 
 # Standalone script baked into its own image (no package).
@@ -31,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import gateway as g
 from protocols.common import strip_cache_control
+from protocols.translation import details_text
 
 if TYPE_CHECKING:
     from protocols import budget_rules
@@ -52,6 +56,12 @@ class LocalProxyUpstream(g.OpenRouterUpstream):
         if isinstance(model, str) and model.endswith(":floor"):
             body["model"] = model.removesuffix(":floor")
         strip_cache_control(body)
+        for message in body.get("messages") or []:
+            if isinstance(message, dict) and "reasoning_details" in message:
+                details = message.pop("reasoning_details") or []
+                text = details_text(d for d in details if isinstance(d, dict))
+                if text and not message.get("reasoning"):
+                    message["reasoning"] = text
         return body
 
     def headers(self, *, stream: bool, native: Mapping[str, str], reservation: budget_rules.Reservation) -> dict:

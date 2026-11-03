@@ -9,8 +9,11 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # Captured harness prompts and smoke fixtures are verbatim recordings (pinned by tests): never rewrite them.
       - id: trailing-whitespace
+        exclude: '^backend/generation/harnesses/captured/|^backend/generation/tests/wp07_harnesses/fixtures/'
       - id: end-of-file-fixer
+        exclude: '^backend/generation/harnesses/captured/|^backend/generation/tests/wp07_harnesses/fixtures/'
       - id: check-json
       - id: check-toml
       - id: check-xml

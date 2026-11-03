@@ -141,3 +141,18 @@ def test_adhoc_top_up_clone_export_schedules_post_runs(api, golden, fake_study):
     assert post_run.json()["status"] == "pending"
     assert len(api.get(f"/studies/{study_id}/post-runs/").json()) == 1
     assert api.get("/studies/cron-preview/", cron="0 3 * * *").json()["valid"] is True
+
+
+def test_slot_export_writes_the_pattern_readme_never_an_empty_directory(make_study, fake_study):
+    """WP-02b ask: ``patterns/`` comes from ``export.services.patterns`` and always states its status."""
+    import json
+
+    from backend.generation.study import export as study_export
+
+    study = make_study()
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        study_export._patterns(archive, study)
+    with zipfile.ZipFile(buffer) as archive:
+        assert archive.namelist() == ["patterns/README.txt"]
+        assert json.loads(archive.read("patterns/README.txt"))["status"] == "not_measured"

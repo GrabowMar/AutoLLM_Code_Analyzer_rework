@@ -86,6 +86,7 @@ _FRAMEWORK_PACKAGE: Final = {
     "fastapi": ("pypi", "fastapi"),
     "django": ("pypi", "django"),
     "express": ("npm", "express"),
+    "spring-boot": ("maven", "spring-boot-starter-webmvc"),
     "react": ("npm", "react"),
     "vue": ("npm", "vue"),
     "svelte": ("npm", "svelte"),

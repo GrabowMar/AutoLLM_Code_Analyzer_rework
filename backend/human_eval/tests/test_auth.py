@@ -25,8 +25,8 @@ from backend.human_eval.models import Participant
 from backend.human_eval.services import access
 from backend.human_eval.services.errors import HumanEvalServiceError
 from backend.human_eval.tests.factories import ParticipantFactory
-from backend.human_eval.tests.urls_u1 import urlpatterns as project_urlpatterns
 from backend.users.tests.factories import UserFactory
+from config.urls import urlpatterns as project_urlpatterns
 
 pytestmark = pytest.mark.django_db
 

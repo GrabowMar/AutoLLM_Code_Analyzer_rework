@@ -357,15 +357,30 @@ def test_responses_usage_and_finish():
 
 
 # =====================================================================================
-# Startup refusals (wave-3 seams)
+# Startup refusals and the translate modes (wave 3)
 # =====================================================================================
+
+
+@pytest.mark.parametrize(
+    ("front", "upstream"),
+    [
+        (front, upstream)
+        for front in ("anthropic_messages", "openai_responses", "gemini_generate")
+        for upstream in ("openrouter", "local_proxy")
+    ],
+)
+def test_translate_mode_runs_for_every_translated_front_and_upstream(front, upstream):
+    p = policy(front_protocol=front, protocol_mode="translate", upstream={"kind": upstream})
+    assert p.problems() == []
+    assert front in common.TRANSLATORS
 
 
 @pytest.mark.parametrize(
     ("front", "mode", "upstream", "needle"),
     [
-        ("gemini_generate", "translate", "openrouter", "translator"),
-        ("anthropic_messages", "translate", "openrouter", "translator"),
+        ("gemini_generate", "passthrough", "openrouter", "does not run"),
+        ("gemini_generate", "native", "openrouter", "does not run"),
+        ("openai_chat", "translate", "openrouter", "does not run"),
         ("openai_responses", "native", "openrouter", "does not run"),
         ("openai_chat", "passthrough", "openrouter", "does not run"),
         ("anthropic_messages", "passthrough", "local_proxy", "OpenRouter only"),

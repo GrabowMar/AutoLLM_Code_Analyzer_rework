@@ -18,6 +18,9 @@ from scripted_upstream import USAGE_IN
 from scripted_upstream import USAGE_OUT
 from scripted_upstream import _system
 
+# The gateway mode each front runs in (Gemini CLI is translate-only: there is no native Gemini upstream).
+_MODES = {"openai_chat": "native", "gemini_generate": "translate"}
+
 
 def convert(lines: list[str]) -> list[dict]:
     calls = []
@@ -42,7 +45,7 @@ def convert(lines: list[str]) -> list[dict]:
                 "duration_s": 0.05,
                 "path": entry["path"],
                 "front_protocol": protocol,
-                "protocol_mode": "native" if protocol == "openai_chat" else "passthrough",
+                "protocol_mode": _MODES.get(protocol, "passthrough"),
                 "request_class": request_class,
                 "request_class_header": header_class,
                 "status": 200,

@@ -2,6 +2,7 @@
 # The suite copies the tree to /tree and /in/expect.json in and reads /out/adherence.json (and /out/sbom.json).
 # The checker only reads the tree; it never executes it. No network at run time.
 # The pinned digest of the built image goes into data/eval_suites/eval-v2.yaml (adherence_checker.image_digest).
+# Build with `docker build --provenance=false --sbom=false` so the image id is reproducible (docs/EVALUATION.md 7).
 FROM python:3.13-slim@sha256:ae14d4ce8771606477a81446e7ef429edd6762305fc50c84507c1041fa8285d1
 
 ARG SYFT_VERSION=1.18.1

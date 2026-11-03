@@ -4,6 +4,7 @@
 # (ADMIN_PASSWORD, WEBHOOK_SECRET). The container runs on the internal eval network (alias mock.internal for
 # the ssrf_mock server), all capabilities dropped, as an unprivileged user.
 # The pinned digest of the built image goes into data/eval_suites/eval-v2.yaml (tester.image_digest).
+# Build with `docker build --provenance=false --sbom=false` so the image id is reproducible (docs/EVALUATION.md 7).
 FROM python:3.13-slim@sha256:ae14d4ce8771606477a81446e7ef429edd6762305fc50c84507c1041fa8285d1
 
 RUN useradd --uid 10001 --create-home tester \
