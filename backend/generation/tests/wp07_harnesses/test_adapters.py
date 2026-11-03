@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import subprocess
 import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -13,8 +15,13 @@ from backend.generation.harnesses.base import BRIEF_PATH
 from backend.generation.harnesses.base import HOME_DIR
 from backend.generation.harnesses.base import captured_prompt
 from backend.generation.harnesses.base import command_script
+from backend.generation.harnesses.base import json_bytes
 from backend.generation.harnesses.codex import CONFIG_PATH as CODEX_CONFIG
 from backend.generation.harnesses.codex import INSTRUCTIONS_PATH as CODEX_INSTRUCTIONS
+from backend.generation.harnesses.gemini_cli import AUX_MODEL_ALIASES
+from backend.generation.harnesses.gemini_cli import SETTINGS_PATH as GEMINI_SETTINGS
+from backend.generation.harnesses.gemini_cli import SYSTEM_SETTINGS
+from backend.generation.harnesses.gemini_cli import WORKSPACE_GUARD
 from backend.generation.harnesses.opencode import CONFIG_PATH as OPENCODE_CONFIG
 
 from .conftest import ALL_HARNESSES
@@ -25,13 +32,14 @@ from .conftest import SMOKED
 from .conftest import make_ctx
 
 MODEL = "vendor/some-model-7b"
+IMAGES = Path(__file__).resolve().parents[2] / "images"
 
 
 def _render(harness: str, **kwargs):
     return registry.get(harness).render(make_ctx(harness, **kwargs))
 
 
-@pytest.mark.parametrize("harness", SMOKED)  # gemini-cli has no captured prompt yet (wave 3)
+@pytest.mark.parametrize("harness", SMOKED)
 def test_render_record_is_equal_for_every_run_of_a_cell(harness):
     """The run id stays out of the command and config files, so the plan-time hashes hold per cell (WP-10)."""
     adapter = registry.get(harness)
@@ -49,7 +57,7 @@ def test_render_matches_the_smoke_run_snapshot(harness):
     assert rendered.env == json.loads((fixture / "env.json").read_text())
 
 
-@pytest.mark.parametrize("harness", [h for h in ALL_HARNESSES if h != "gemini-cli"])
+@pytest.mark.parametrize("harness", ALL_HARNESSES)
 def test_brief_never_in_argv(harness):
     brief = "UNIQUE-BRIEF-MARKER build a todo app; kill python3 app.py"
     rendered = _render(harness, brief=brief)
@@ -60,7 +68,7 @@ def test_brief_never_in_argv(harness):
     assert rendered.stdin_path == BRIEF_PATH or BRIEF_PATH in rendered.command or harness == "mini-swe-agent"
 
 
-@pytest.mark.parametrize("harness", [h for h in ALL_HARNESSES if h != "gemini-cli"])
+@pytest.mark.parametrize("harness", ALL_HARNESSES)
 def test_render_is_deterministic_and_home_is_fresh(harness):
     first, second = _render(harness), _render(harness)
     assert first == second
@@ -69,7 +77,7 @@ def test_render_is_deterministic_and_home_is_fresh(harness):
         assert not path.startswith("/workspace"), path  # config lives outside the workspace
 
 
-@pytest.mark.parametrize("harness", [h for h in ALL_HARNESSES if h != "gemini-cli"])
+@pytest.mark.parametrize("harness", ALL_HARNESSES)
 def test_model_and_aux_models_are_the_run_model(harness):
     rendered = _render(harness, model=MODEL)
     blob = rendered.command + json.dumps(rendered.env) + b"".join(rendered.files.values()).decode("utf-8", "replace")
@@ -82,8 +90,6 @@ def test_model_and_aux_models_are_the_run_model(harness):
 
 def test_harness_side_cost_caps_are_never_set():
     for harness in ALL_HARNESSES:
-        if harness == "gemini-cli":
-            continue
         rendered = _render(harness)
         assert "--max-budget-usd" not in rendered.command
         if harness == "mini-swe-agent":
@@ -292,24 +298,156 @@ class TestQwenCode:
 
 
 class TestGeminiCli:
-    def test_renders_with_a_prompt_set_override(self):
-        rendered = _render("gemini-cli", system_prompt="Pinned.")
-        assert "node /run/harness/loopback.js" in rendered.command
+    def _settings(self, rendered):
+        return json.loads(rendered.files[GEMINI_SETTINGS])
+
+    def test_command_env_and_loopback(self):
+        rendered = _render("gemini-cli", model=MODEL)
+        assert rendered.command.endswith(f"exec gemini --skip-trust --approval-mode=yolo -o stream-json -m {MODEL}")
+        assert "(while :; do node /run/harness/loopback.js; sleep 0.2; done) &" in rendered.command
+        assert rendered.stdin_path == BRIEF_PATH  # piped stdin is the prompt (no -p)
         assert rendered.env["GOOGLE_GEMINI_BASE_URL"] == "http://127.0.0.1:18080"
         assert rendered.env["GEMINI_SANDBOX"] == "false"
-        settings = json.loads(rendered.files[f"{HOME_DIR}/.gemini/settings.json"])
-        assert settings["model"]["skipNextSpeakerCheck"] is True
-        assert "google_web_search" in settings["tools"]["exclude"]
-        assert b"llm-gateway:8080" in rendered.files["/run/harness/loopback.js"]
+        assert rendered.env["GEMINI_TELEMETRY_ENABLED"] == "false"
+        assert rendered.env["GEMINI_SYSTEM_MD"] == "/run/harness/gemini-system.md"
+        assert "GEMINI_WRITE_SYSTEM_MD" not in rendered.env
+        assert rendered.files["/run/harness/gemini-system.md"].decode() == captured_prompt("gemini-cli", "0.66.0")
+        forwarder = rendered.files["/run/harness/loopback.js"]
+        assert b"process.title = 'llmlab-loopback'" in forwarder
+        assert b"'llm-gateway:8080'.split(':')" in forwarder
+        assert b"server.listen(18080, '127.0.0.1')" in forwarder
 
-    def test_needs_a_capture(self):
-        from backend.generation.harnesses.base import CapturedPromptMissingError
+    def test_loopback_follows_the_gateway_wiring(self):
+        adapter = registry.get("gemini-cli")
+        ctx = dataclasses.replace(make_ctx("gemini-cli"), gateway=adapter.gateway_wiring("gw-7:9090"))
+        rendered = adapter.render(ctx)
+        assert b"'gw-7:9090'.split(':')" in rendered.files["/run/harness/loopback.js"]
+        assert rendered.env["GOOGLE_GEMINI_BASE_URL"] == "http://127.0.0.1:18080"
 
-        with pytest.raises(CapturedPromptMissingError):
-            _render("gemini-cli")
+    def test_user_settings_carry_only_per_run_values(self):
+        settings = self._settings(_render("gemini-cli", model=MODEL, max_turns=12))
+        assert set(settings) == {"model", "modelConfigs", "tools"}
+        assert settings["model"]["name"] == MODEL
+        assert settings["model"]["maxSessionTurns"] == 12
+        assert settings["tools"]["exclude"] == ["web_fetch", "google_web_search", "activate_skill", "invoke_agent"]
+        assert "core" not in settings["tools"]
+        # The static switches live in the image's system settings, never in a file the agent could edit.
+        assert not set(settings) & (set(SYSTEM_SETTINGS) - {"model", "tools"})
+
+    def test_every_auxiliary_model_alias_is_pinned_to_the_run_model(self):
+        overrides = self._settings(_render("gemini-cli", model=MODEL))["modelConfigs"]["overrides"]
+        pinned = {o["match"]["model"]: o["modelConfig"].get("model") for o in overrides}
+        for alias in AUX_MODEL_ALIASES:
+            assert pinned[alias] == MODEL, alias
+        main = next(o for o in overrides if o["match"]["model"] == MODEL)
+        assert main["modelConfig"] == {"generateContentConfig": {"maxOutputTokens": 8192}}  # frugal call cap
+        assert any("chat-compression-default" in knob for knob in registry.get("gemini-cli").facts.aux_model_knobs)
+
+    def test_turn_cap_and_tool_policy(self):
+        rendered = _render(
+            "gemini-cli",
+            max_turns=50,
+            tool_policy={"deny": ["write_file"], "allow": ["read_file", "run_shell_command"]},
+            policy_updates={"run.max_turns": 20},
+        )
+        settings = self._settings(rendered)
+        assert settings["model"]["maxSessionTurns"] == 20  # the stricter of preset and policy
+        assert "write_file" in settings["tools"]["exclude"]
+        assert settings["tools"]["core"] == ["read_file", "run_shell_command"]
+
+    def test_compression_threshold_is_the_native_rule_on_the_real_window(self):
+        adapter = registry.get("gemini-cli")
+        uncapped = make_ctx("gemini-cli", policy_updates={"context.max_context_tokens": None})
+        ctx = dataclasses.replace(uncapped, model_context_window=131_072)
+        assert adapter.compression_threshold(ctx) == round(0.5 * 131_072 / 1_048_576, 6)
+        capped = make_ctx("gemini-cli", policy_updates={"context.max_context_tokens": 64_000})
+        assert adapter.compression_threshold(capped) == round(0.5 * 64_000 / 1_048_576, 6)
+        off = make_ctx("gemini-cli", policy_updates={"context.compaction": "off"})
+        assert adapter.compression_threshold(off) == 1.0
+
+    def test_unmappable_knobs_are_reported(self):
+        adapter = registry.get("gemini-cli")
+        ctx = make_ctx(
+            "gemini-cli",
+            subagents=True,
+            policy_updates={"context.max_context_tokens": 64_000, "context.compaction": "auto"},
+        )
+        unsupported = adapter.unsupported_knobs(ctx)
+        # Compaction never fires in a headless single-prompt run (smoke probe); subagents stay off.
+        for key in ("context.max_context_tokens", "context.compaction", "subagents", "time.command_timeout_s"):
+            assert key in unsupported
+        assert "run.max_turns" not in unsupported
+        assert not adapter.capabilities.supports_compaction_control
+
+    def test_workspace_project_config_guard(self):
+        command = _render("gemini-cli").command
+        assert command.startswith(WORKSPACE_GUARD + "\n")
+        assert "-name GEMINI.md -print -quit" in command
+        assert "$(find" not in command.split("\n", 1)[0]  # find output is never word-split by a for loop
+        assert "exit 52" in command  # the CLI's own config-error code; a harness error, never silent
+
+    @pytest.mark.parametrize(
+        ("layout", "refused"),
+        [
+            ((), False),
+            (("src/app.py",), False),
+            (("node_modules/pkg/GEMINI.md",), False),
+            (("GEMINI.md",), True),
+            (("sub/GEMINI.md",), True),
+            (("a b/GEMINI.md",), True),
+            (("my docs/deep er/GEMINI.md",), True),
+            (("x\ty/GEMINI.md",), True),
+            (("*/GEMINI.md",), True),
+            ((".gemini/settings.json",), True),
+            ((".gemini/.env",), True),
+        ],
+    )
+    def test_workspace_guard_runs_under_sh(self, tmp_path, layout, refused):
+        """Execute the rendered guard (not substrings of it) under sh in a workspace laid out as given."""
+        command = _render("gemini-cli").command
+        guard = command[: len(WORKSPACE_GUARD)]
+        assert guard == WORKSPACE_GUARD
+        for rel in layout:
+            path = tmp_path / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("pinned prompt must not be bypassed\n")
+        result = subprocess.run(  # noqa: S603 - fixed argv, test-only
+            ["/bin/sh", "-c", guard + "\necho guard-passed"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if refused:
+            assert result.returncode == 52, result
+            assert "guard-passed" not in result.stdout
+            assert "refusing to run" in result.stderr
+        else:
+            assert result.returncode == 0, result
+            assert result.stdout.strip() == "guard-passed"
+
+    def test_system_settings_file_in_the_image_matches_the_adapter(self):
+        """The image bakes SYSTEM_SETTINGS (root-owned /etc/gemini-cli); the two copies may never drift."""
+        baked = IMAGES / "agent-gemini-cli" / "system-settings.json"
+        assert baked.read_bytes() == json_bytes(SYSTEM_SETTINGS)
+        dockerfile = (IMAGES / "agent-gemini-cli" / "Dockerfile").read_text()
+        assert "COPY --chown=root:root system-settings.json /etc/gemini-cli/settings.json" in dockerfile
+        assert SYSTEM_SETTINGS["privacy"]["usageStatisticsEnabled"] is False
+        assert SYSTEM_SETTINGS["telemetry"]["enabled"] is False
+        assert SYSTEM_SETTINGS["general"]["enableAutoUpdate"] is False
+        assert SYSTEM_SETTINGS["general"]["maxAttempts"] == 1  # retries belong to the gateway
+        assert SYSTEM_SETTINGS["model"] == {"skipNextSpeakerCheck": True, "disableLoopDetection": True}
+        assert SYSTEM_SETTINGS["experimental"]["enableAgents"] is False
+        assert SYSTEM_SETTINGS["skills"]["enabled"] is False
+        assert SYSTEM_SETTINGS["admin"]["mcp"]["enabled"] is False
+
+    def test_prompt_set_override_replaces_the_pin(self):
+        rendered = _render("gemini-cli", system_prompt="Pinned.")
+        assert rendered.files["/run/harness/gemini-system.md"] == b"Pinned."
 
 
-@pytest.mark.parametrize("harness", [h for h in ALL_HARNESSES if h != "gemini-cli"])
+@pytest.mark.parametrize("harness", ALL_HARNESSES)
 def test_render_record_leaves_the_brief_out(harness):
     adapter = registry.get(harness)
     record = adapter.render_record(_render(harness))

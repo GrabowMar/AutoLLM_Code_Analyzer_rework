@@ -12,6 +12,8 @@ a file, never in argv. It then:
 
 Paths are prefixed with ``$LLMLAB_ROOT`` (empty in a container), which is how ``FakeSandbox`` maps the
 in-container paths into a temporary directory. ``harness_context()`` builds a ``HarnessContext`` for tests.
+Termination is classified by the inherited ``HarnessAdapter.classify_termination`` (the section 5.1 rules,
+``harnesses.base.default_termination``), like every real adapter.
 """
 
 from __future__ import annotations
@@ -30,7 +32,6 @@ from typing import Literal
 from typing import cast
 
 from backend.generation import identity
-from backend.generation.contracts.harness import ExitInfo
 from backend.generation.contracts.harness import GatewayWiring
 from backend.generation.contracts.harness import HarnessCapabilities
 from backend.generation.contracts.harness import HarnessContext
@@ -42,7 +43,6 @@ from backend.generation.contracts.harness import Step
 from backend.generation.contracts.harness import Trajectory
 from backend.generation.contracts.harness import WireProtocol
 from backend.generation.contracts.library import HarnessPresetContent
-from backend.generation.contracts.outcome import Termination
 from backend.generation.contracts.resources import EffectivePolicy
 from backend.generation.contracts.resources import preset_content
 from backend.generation.harnesses.base import HarnessAdapter
@@ -374,35 +374,6 @@ class FakeHarness(HarnessAdapter):
             first_user_message_sha=identity.text_sha(user) if user is not None else None,
             calls_by_class=by_class,
         )
-
-    def classify_termination(self, exit_info: ExitInfo, trajectory: Trajectory) -> Termination:  # noqa: PLR0911
-        """The section 5.1 default rules (wall clock from elapsed time, never from the exit code)."""
-        if exit_info.cancelled:
-            return Termination.CANCELLED
-        if exit_info.oom_killed:
-            return Termination.OOM
-        if exit_info.elapsed_s >= exit_info.wall_clock_s - 2:
-            return Termination.WALL_CLOCK
-        if exit_info.idle_fired:
-            return Termination.IDLE
-        if exit_info.budget_exhausted:
-            return Termination.BUDGET
-        if exit_info.gateway_calls_ok == 0 and exit_info.gateway_calls_failed_transport:
-            return Termination.INFRA
-        if trajectory.ended_on_llm_error:
-            return Termination.LLM_ERROR
-        if trajectory.max_turns_hit:
-            return Termination.MAX_TURNS
-        code = exit_info.exit_code
-        if code is not None and code in self.facts.exit_codes:
-            meaning = self.facts.exit_codes[code]
-            if meaning in {t.value for t in Termination}:
-                return Termination(meaning)
-        if code == 0:
-            return Termination.COMPLETED
-        if code is None or code < 0 or code > 128 or code in self.facts.crash_codes:
-            return Termination.HARNESS_CRASH
-        return Termination.HARNESS_ERROR
 
     def normalize_options(self, options: dict[str, Any]) -> dict[str, Any]:
         """The fake has no options: unset values are dropped and the rest is kept as given."""

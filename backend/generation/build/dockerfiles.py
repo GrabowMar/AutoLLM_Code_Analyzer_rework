@@ -48,6 +48,7 @@ __all__ = [
     "normalize_image",
     "parse_from_lines",
     "pinned_bases",
+    "sidecar_images",
 ]
 
 STARTERS_ROOT: Final = Path(__file__).resolve().parent.parent / "data" / "starters"
@@ -111,6 +112,16 @@ def base_images(path: Path | None = None) -> dict[str, BaseImageSpec]:
     images = _load_yaml(path).get("images") or {}
     out: dict[str, BaseImageSpec] = {}
     for key, row in images.items():
+        ref = normalize_image(str(row["ref"]))[0]
+        out[str(key)] = BaseImageSpec(str(key), ref, _checked_digest(row.get("digest"), f"{path.name}:{key}"))
+    return out
+
+
+def sidecar_images(path: Path | None = None) -> dict[str, BaseImageSpec]:
+    """Pinned service images run next to an app (``sidecars`` in base_images.yaml), e.g. ``postgres``."""
+    path = path or BASE_IMAGES_PATH
+    out: dict[str, BaseImageSpec] = {}
+    for key, row in (_load_yaml(path).get("sidecars") or {}).items():
         ref = normalize_image(str(row["ref"]))[0]
         out[str(key)] = BaseImageSpec(str(key), ref, _checked_digest(row.get("digest"), f"{path.name}:{key}"))
     return out

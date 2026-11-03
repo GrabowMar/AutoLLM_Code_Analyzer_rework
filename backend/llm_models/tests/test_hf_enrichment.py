@@ -42,7 +42,9 @@ def _run_with_sampling(user, model, sampling):
     """A run of ``model`` whose frozen manifest records ``sampling`` (policy, forced/stripped params)."""
     run = GenerationRunFactory(created_by=user, model=model)
     manifest = run_manifest_content(run)
-    manifest["sampling"] = {"ref": "t07@1", "seed_forwarded": True, **sampling}
+    # Keep the run's own pinned sampling ref (run/manifest agreement); a bare ``name@N`` is not a pinned ref.
+    ref = (manifest.get("sampling") or {}).get("ref") or "t07@1#0123456789ab"
+    manifest["sampling"] = {"ref": ref, "seed_forwarded": True, **sampling}
     RunManifestFactory(run=run, manifest=manifest)
     return run
 

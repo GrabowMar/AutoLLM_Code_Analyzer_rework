@@ -236,8 +236,14 @@ def llm_error_tail(calls: Sequence[Mapping[str, Any]]) -> bool:
 
 
 def _detect_protocol(call: Mapping[str, Any]) -> str:
+    """The protocol of the logged ``request`` body.
+
+    The gateway logs the body it sent upstream: the native body in ``native`` / ``passthrough`` mode, but
+    the canonical chat body in ``translate`` mode (Gemini CLI, local endpoints), so a translated record is
+    read by its shape, not by its front protocol.
+    """
     front = call.get("front_protocol")
-    if isinstance(front, str) and front:
+    if isinstance(front, str) and front and call.get("protocol_mode") != "translate":
         return front
     request = call.get("request") or {}
     if "contents" in request:

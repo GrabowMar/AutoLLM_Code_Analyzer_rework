@@ -23,6 +23,7 @@ from backend.generation.contracts._base import Fraction
 from backend.generation.contracts._base import NonEmptyStr
 from backend.generation.contracts._base import NonNegFloat
 from backend.generation.contracts._base import NonNegInt
+from backend.generation.contracts._base import PinnedRefStr
 from backend.generation.contracts._base import PosInt
 from backend.generation.contracts._base import Sha256
 from backend.generation.contracts.slot import ContextPolicy
@@ -60,7 +61,7 @@ RunKind = Literal["app_agentic", "slot_single_shot", "slot_agent", "reference"]
 class FactorRecord(ContractModel):
     """One factor level: library levels use ``ref`` + ``content_hash``; enum factors use ``value``."""
 
-    ref: str | None = None
+    ref: PinnedRefStr | None = None
     content_hash: Sha256 | None = None
     value: str | None = None
 
@@ -87,7 +88,7 @@ class ManifestStudy(ContractModel):
 
 
 class ManifestTask(ContractModel):
-    ref: NonEmptyStr
+    ref: PinnedRefStr
     structured_hash: Sha256
     variant: Literal["minimal", "standard", "exhaustive"]
     prose_sha: Sha256
@@ -136,11 +137,23 @@ class ManifestSlot(ContractModel):
 
 
 class ManifestEndpoint(ContractModel):
+    """The serving endpoint, frozen at plan time.
+
+    ``num_ctx``, ``keep_alive``, ``api_flavor`` and ``capabilities`` change what a local model sees
+    (context size, residency, request dialect, whether ``think`` is sent). They are frozen here for local
+    endpoints (``None`` for OpenRouter); the LLM proxy takes a frozen value over the live endpoint row
+    (``inference.proxy_server.frozen_endpoint``). Recorded, not hashed into identity.
+    """
+
     id: int
     kind: NonEmptyStr
     served_model_name: str | None = None
     digest: str | None = None
     cost_basis: Literal["billed", "list_price", "free"]
+    num_ctx: PosInt | None = None
+    keep_alive: str | None = None
+    api_flavor: str | None = None
+    capabilities: list[str] | None = None
 
 
 class ManifestPricing(ContractModel):
@@ -159,7 +172,7 @@ class ManifestModel(ContractModel):
 
 
 class ManifestSampling(ContractModel):
-    ref: NonEmptyStr
+    ref: PinnedRefStr
     policy: Literal["provider_default", "explicit"]
     forced_params: dict[str, Any] = Field(default_factory=dict)
     stripped_params: list[str] = Field(default_factory=list)
@@ -168,7 +181,7 @@ class ManifestSampling(ContractModel):
 
 
 class ManifestResources(ContractModel):
-    ref: NonEmptyStr
+    ref: PinnedRefStr
     generation_policy_hash: Sha256
     budget_basis: Literal["usd", "tokens"]
     effective: dict[str, Any]  # class O values and the clamped effective policy (recorded, not hashed)
@@ -188,7 +201,7 @@ class ManifestGateway(ContractModel):
 class ManifestHarness(ContractModel):
     name: NonEmptyStr
     version: NonEmptyStr
-    preset_ref: NonEmptyStr
+    preset_ref: PinnedRefStr
     image: NonEmptyStr
     image_digest: NonEmptyStr
     config_files_sha: dict[str, Sha256] = Field(default_factory=dict)
@@ -205,7 +218,7 @@ class ManifestBaseImage(ContractModel):
 
 
 class ManifestStarter(ContractModel):
-    ref: NonEmptyStr
+    ref: PinnedRefStr
     tree_hash: Sha256
     base_images: list[ManifestBaseImage] = Field(default_factory=list)
 
@@ -231,7 +244,7 @@ class ManifestIdentity(ContractModel):
 
 
 class ManifestEvalSuite(ContractModel):
-    ref: NonEmptyStr
+    ref: PinnedRefStr
     content_hash: Sha256
 
 

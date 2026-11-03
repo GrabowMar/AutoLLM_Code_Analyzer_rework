@@ -1,0 +1,32 @@
+{# Spring Boot (Java 21, Maven): backend/ is the Maven project, packaged to one executable jar; the optional frontend build. #}
+{% include "dockerfiles/_frontend_stage.Dockerfile.jinja2" %}
+FROM {{ base.maven }} AS build
+WORKDIR /src
+{% if level == "bare" %}
+COPY . .
+RUN mkdir -p /out \
+    && if [ -f backend/pom.xml ]; then \
+         cd backend \
+         && mvn -B -q -DskipTests package \
+         && cp "$(find target -maxdepth 1 -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' | sort | head -n 1)" /out/app.jar; \
+       fi
+{% else %}
+COPY backend/pom.xml backend/
+RUN cd backend && mvn -B -q dependency:resolve
+COPY backend/ backend/
+RUN mkdir -p /out \
+    && cd backend \
+    && mvn -B -q -DskipTests package \
+    && cp "$(find target -maxdepth 1 -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' | sort | head -n 1)" /out/app.jar
+{% endif %}
+
+FROM {{ base.temurin_jre }}
+ENV PORT={{ run.port }}
+WORKDIR /app
+COPY --from=build /out/ ./
+{% if has_frontend %}
+COPY --from=frontend /app/frontend/dist frontend/dist
+{% endif %}
+RUN mkdir -p data
+EXPOSE {{ run.port }}
+CMD ["java", "-jar", "app.jar"]

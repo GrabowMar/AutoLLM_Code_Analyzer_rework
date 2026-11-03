@@ -470,6 +470,43 @@ def _auth_endpoint_check(ep: Mapping[str, Any], content: Mapping[str, Any]) -> d
     )
 
 
+def _token_schema(path: str) -> dict[str, Any] | None:
+    """A JSON schema requiring a non-empty string at a dotted ``token_json_path`` (``None`` for indexed paths)."""
+    names = path.removeprefix("$").lstrip(".").split(".")
+    if not names or any(not n or "[" in n for n in names):
+        return None
+    schema: dict[str, Any] = {"type": "string", "minLength": 1}
+    for name in reversed(names):
+        schema = {"type": "object", "required": [name], "properties": {name: schema}}
+    return schema
+
+
+def _with_login_credential(check: dict[str, Any], auth: AuthDriverConfig) -> dict[str, Any]:
+    """``<login>.ok`` must hand out the credential of the auth mode, not merely answer 2xx.
+
+    Without this, an app whose catch-all route answers every request with the SPA's ``index.html`` (200)
+    passes the login check (found on the Django minimal starter in the wave-3 conformance run). Bearer: a
+    non-empty string at ``token_json_path``; cookie: a ``Set-Cookie`` header.
+    """
+    request = check.get("request") or {}
+    if (
+        check.get("source") != "compiler"
+        or not str(check.get("id", "")).endswith(".ok")
+        or request.get("method") != "POST"
+        or request.get("path") != auth.login_path
+    ):
+        return check
+    expect = dict(check["expect"])
+    if auth.credential == "bearer":
+        schema = _token_schema(auth.token_json_path or "token")
+        if schema is None:
+            return check
+        expect["json_schema"] = {"allOf": [expect["json_schema"], schema]} if expect.get("json_schema") else schema
+    else:
+        expect["header_contains"] = {**(expect.get("header_contains") or {}), "Set-Cookie": ""}
+    return {**check, "expect": expect}
+
+
 def _with_body(req: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
     out = copy.deepcopy(req)
     if "json" in out:
@@ -913,6 +950,7 @@ def compile_content(
     for ep in content.get("endpoints") or []:
         checks += _endpoint_checks(ep, content)
     checks += _persistence_checks(content)
+    checks = [_with_login_credential(check, auth) for check in checks]
     by_id: dict[str, dict[str, Any]] = {}
     for check in checks:
         by_id.setdefault(check["id"], check)

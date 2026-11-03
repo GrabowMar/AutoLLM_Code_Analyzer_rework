@@ -174,6 +174,14 @@ _CORE_CODES: Final[tuple[IssueCode, ...]] = (
         alternatives=("info",),
     ),
     _c(
+        "parent_draw_pending",
+        "info",
+        "info",
+        _PLAN,
+        "parent_selection drew parents whose slot sets or template matches are not frozen yet; "
+        "freezing the plan creates them",
+    ),
+    _c(
         "manual_parent_selection",
         "info",
         "error",

@@ -53,7 +53,8 @@ export interface ModelComparisonRow {
   mss: number;
   empirical_quality: number | null;
   composite: number;
-  smoke_pass_rate: number | null;
+  /** Evaluation (EvalSuite) functional pass rate; null when no app of the model was evaluated. */
+  pass_rate: number | null;
   n_trials: number;
   /** Code issues the empirical score counts, by normalized level; null when no app of the model was measured. */
   findings: {

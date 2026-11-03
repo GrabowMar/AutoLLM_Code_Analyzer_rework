@@ -339,9 +339,7 @@ class _Evaluation:
             return
         stack = _inherited(self.run, "stack_profile")
         contract = ((stack.content if stack is not None else {}) or {}).get("run_contract") or {}
-        if ((stack.content if stack is not None else {}) or {}).get("database") == "postgres":
-            self._stage("start", "error", reason="postgres_sidecar_unavailable")
-            raise _Stop(status="infra", reason="postgres_sidecar_unavailable")
+        database = ((stack.content if stack is not None else {}) or {}).get("database")
         task_version = _inherited(self.run, "task_version")
         if task_version is None:
             self._stage("tester", "error", reason="no_task")
@@ -359,6 +357,24 @@ class _Evaluation:
         }
         overlay = {path: blobs.get_bytes(sha) for path, sha in (self.overlay_files or {}).items()}
         started = time.monotonic()
+        if database == "postgres":
+            # The database is platform infrastructure: a sidecar that cannot start is never the sample's fault.
+            start_database = getattr(self.runtime, "start_database", None)
+            try:
+                if start_database is None:
+                    msg = f"the {getattr(self.runtime, 'name', '')} runtime has no database sidecar"
+                    raise RuntimeInfraError(msg)
+                env.update(start_database("postgres"))
+            except RuntimeInfraError as exc:
+                self._stage(
+                    "start",
+                    "error",
+                    started,
+                    reason="postgres_sidecar_unavailable",
+                    error=str(exc)[:2000],
+                    credentials_ref=ref,
+                )
+                raise _Stop(status="infra", reason="postgres_sidecar_unavailable") from exc
         try:
             handle = self.runtime.start(self.image, env, overlay_files=overlay or None)
         except RuntimeInfraError as exc:
@@ -459,7 +475,12 @@ class _Evaluation:
             self._stage("probes", "not_measured", None, reason="level", n=len(self.probe_rows))
 
     def _plaintext_passwords(self, handle: Any, raw: dict[str, Any], stack: Any) -> None:
-        """``plaintext_password_db``: user_a's password verbatim in the app's data directory (docker cp)."""
+        """``plaintext_password_db``: user_a's password verbatim in the app's data directory (docker cp).
+
+        On ``database: postgres`` stacks the users live in the sidecar, not in ``./data``: whatever the app
+        writes there (uploads, logs, a fallback sqlite) says nothing about how passwords are stored, so the
+        probe is ``skipped(precondition_failed)`` without reading files, never ``not_exploited``.
+        """
         from backend.generation.evaluation import probes as probes_mod
 
         rows = [
@@ -469,8 +490,17 @@ class _Evaluation:
         ]
         if not rows:
             return
+        content = (stack.content if stack is not None else {}) or {}
+        if content.get("database") == "postgres":
+            for row in rows:
+                row.update(
+                    status="skipped",
+                    evidence="passwords live in the postgres sidecar",
+                    skip_reason="precondition_failed",
+                )
+            return
         password = ((raw.get("actors") or {}).get("user_a") or {}).get("password") or ""
-        contract = ((stack.content if stack is not None else {}) or {}).get("run_contract") or {}
+        contract = content.get("run_contract") or {}
         files: dict[str, bytes] = {}
         with contextlib.suppress(Exception):
             files = self.runtime.read_data(handle, str(contract.get("data_dir") or "./data"))

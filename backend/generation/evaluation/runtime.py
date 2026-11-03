@@ -24,6 +24,7 @@ import io
 import json
 import logging
 import os
+import secrets
 import socket
 import subprocess
 import sys
@@ -62,6 +63,13 @@ __all__ = [
 ]
 
 LABEL = "llmlab.evaluation"
+
+
+def _name_prefix() -> str:
+    """Container/network name prefix (``settings.EVAL_NAME_PREFIX``, default ``llmlab-eval``)."""
+    return str(getattr(settings, "EVAL_NAME_PREFIX", "") or "llmlab-eval")
+
+
 LOCAL_MARKER = "llmlab-local.json"
 
 
@@ -122,6 +130,8 @@ class EvalRuntime(Protocol):
     ) -> AppHandle: ...
 
     def wait_healthy(self, handle: AppHandle, path: str, timeout_s: float) -> bool: ...
+
+    def start_database(self, kind: str) -> dict[str, str]: ...
 
     def restart(self, handle: AppHandle) -> None: ...
 
@@ -251,6 +261,10 @@ class LocalProcessRuntime:
             stderr=subprocess.STDOUT,
         )
         handle.extra["log"] = log
+
+    def start_database(self, kind: str) -> dict[str, str]:
+        msg = f"the local runtime has no {kind} sidecar"
+        raise RuntimeInfraError(msg)
 
     def wait_healthy(self, handle: AppHandle, path: str, timeout_s: float) -> bool:
         deadline = time.monotonic() + timeout_s
@@ -405,7 +419,7 @@ class DockerEvalRuntime:
         if self.network is None:
             try:
                 self.network = self.client.networks.create(
-                    f"llmlab-eval-{self.short}",
+                    f"{_name_prefix()}-{self.short}",
                     driver="bridge",
                     internal=True,
                     labels=self.labels,
@@ -463,7 +477,7 @@ class DockerEvalRuntime:
         try:
             container = self.client.containers.create(
                 image,
-                name=f"llmlab-eval-app-{self.short}-{len(self.containers)}",
+                name=f"{_name_prefix()}-app-{self.short}-{len(self.containers)}",
                 environment=dict(env),
                 network=network.name,
                 labels=self.labels,
@@ -484,6 +498,54 @@ class DockerEvalRuntime:
             msg = f"starting the app container failed: {exc}"
             raise RuntimeInfraError(msg) from exc
         return AppHandle(image=image, env=dict(env), ref=container)
+
+    def start_database(self, kind: str) -> dict[str, str]:
+        """A database sidecar on the eval network (alias ``db``); returns the app's ``DATABASE_URL``.
+
+        Only ``postgres`` (the ``database: postgres`` profiles): the image is ``base_images.yaml``
+        ``sidecars.postgres`` pinned by digest (``build.dockerfiles.sidecar_images``), with a fresh password per
+        evaluation. It lives as long as the evaluation (an app restart keeps the data) and is removed by
+        ``close()``. Any failure raises ``RuntimeInfraError``.
+        """
+        from backend.generation.build import dockerfiles
+
+        if kind != "postgres":
+            msg = f"no {kind} sidecar"
+            raise RuntimeInfraError(msg)
+        password = secrets.token_hex(16)
+        try:
+            image = dockerfiles.sidecar_images()["postgres"].pinned
+            try:
+                self.client.images.get(image)
+            except Exception:  # noqa: BLE001 - not on the daemon yet: the platform pulls the pinned digest
+                self.client.images.pull(image)
+            network = self._network()
+            database = self.client.containers.create(
+                image,
+                name=f"{_name_prefix()}-db-{self.short}",
+                environment={"POSTGRES_USER": "app", "POSTGRES_PASSWORD": password, "POSTGRES_DB": "app"},
+                network=network.name,
+                labels=self.labels,
+                mem_limit="512m",
+                pids_limit=256,
+                security_opt=["no-new-privileges"],
+            )
+            self.containers.append(database)
+            network.disconnect(database)
+            network.connect(database, aliases=["db"])
+            database.start()
+        except Exception as exc:
+            msg = f"starting the postgres sidecar failed: {exc}"
+            raise RuntimeInfraError(msg) from exc
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            # TCP, not the socket: the image's init server listens on the socket only.
+            with contextlib.suppress(Exception):
+                if database.exec_run(["pg_isready", "-q", "-h", "127.0.0.1", "-U", "app"]).exit_code == 0:
+                    return {"DATABASE_URL": f"postgresql://app:{password}@db:5432/app"}
+            time.sleep(1.0)
+        msg = "the postgres sidecar did not become ready within 60s"
+        raise RuntimeInfraError(msg)
 
     def _exec_probe(self, handle: AppHandle, path: str) -> int | None:
         """HTTP status of ``path`` fetched from a short-lived tester container on the eval network."""

@@ -9,6 +9,7 @@ from typing import ClassVar
 import pytest
 
 from backend.generation.harnesses import registry
+from backend.generation.harnesses.gemini_cli import GeminiCliAdapter
 from backend.generation.harnesses.opencode import OpenCodeAdapter
 from backend.generation.harnesses.registry import HarnessRegistryError
 
@@ -24,13 +25,16 @@ def test_every_harness_is_registered_once():
     assert registry.DEFAULT_HARNESS == "opencode"
 
 
-def test_wave_2_enablement():
+def test_wave_2_enablement(settings):
+    settings.GATEWAY_TRANSLATORS = []
     enabled = {e.adapter.name for e in registry.entries() if e.enabled}
     assert enabled == {"opencode", "mini-swe-agent", "aider"}
     for item in registry.entries():
         if not item.enabled:
             assert item.blocked_reason, item.adapter.name
-    assert "wave 3" in registry.entry("gemini-cli").blocked_reason
+    gemini = registry.entry("gemini-cli").blocked_reason
+    assert "real-model smoke run" in gemini
+    assert "no gemini_generate translator yet" in gemini  # settings.GATEWAY_TRANSLATORS is empty
 
 
 def test_enabled_adapters_have_no_open_questions():
@@ -62,6 +66,34 @@ def test_registry_refuses_bad_exit_code_meanings_and_silent_blocks():
 
     with pytest.raises(HarnessRegistryError, match="blocked_reason"):
         registry.validate(SilentBlock())
+
+
+def test_translate_only_harness_waits_for_its_translator(settings):
+    """Gemini CLI is translate-only: blocked while WP-06's translator is missing, whatever its facts say."""
+    settings.GATEWAY_TRANSLATORS = []
+
+    class Ready(GeminiCliAdapter):
+        wants_enabled: ClassVar[bool] = True
+
+    adapter = Ready()
+    registry.validate(adapter)  # no open questions left: the registry accepts wants_enabled
+    assert not registry.servable(adapter, frozenset())
+    reason = registry._blocked_reason(adapter, (), frozenset())
+    assert reason == "the gateway has no gemini_generate translator yet (settings.GATEWAY_TRANSLATORS)"
+    assert registry._blocked_reason(adapter, (), frozenset({"gemini_generate"})) is None
+    assert registry.servable(adapter, frozenset({"gemini_generate"}))
+    # The real adapter keeps its own reason (no real-model smoke run yet) once the translator lands.
+    settings.GATEWAY_TRANSLATORS = ["gemini_generate"]
+    item = registry.entry("gemini-cli")
+    assert not item.enabled
+    assert "translator yet" not in item.blocked_reason
+    assert "real-model smoke run" in item.blocked_reason
+
+
+def test_passthrough_and_native_harnesses_are_servable_without_translators():
+    for adapter in registry.adapters():
+        if adapter.name != "gemini-cli":
+            assert registry.servable(adapter, frozenset()), adapter.name
 
 
 def test_operator_kill_switch(settings):
@@ -99,6 +131,7 @@ class TestPlanIssues:
         assert issues["harness_not_enabled"].cells == ["c0-u0-r0-main"]
 
     def test_passthrough_needs_a_remote_endpoint(self, settings):
+        settings.GATEWAY_TRANSLATORS = []
         issues = self.codes("claude-code", model_slug="anthropic/claude-x", endpoint_kind="local_proxy")
         assert "harness_protocol_unavailable_for_endpoint" in issues
         assert "harness_protocol_unavailable_for_endpoint" not in self.codes("claude-code", model_slug="anthropic/x")
@@ -106,8 +139,14 @@ class TestPlanIssues:
         local = self.codes("claude-code", model_slug="anthropic/claude-x", endpoint_kind="local_proxy")
         assert "harness_protocol_unavailable_for_endpoint" not in local
 
-    def test_gemini_needs_the_translator_everywhere(self):
+    def test_gemini_needs_the_translator_everywhere(self, settings):
+        settings.GATEWAY_TRANSLATORS = []
         assert "harness_protocol_unavailable_for_endpoint" in self.codes("gemini-cli", model_slug="google/gemini-x")
+        settings.GATEWAY_TRANSLATORS = ["gemini_generate"]
+        for kind in ("openrouter", "local_proxy"):
+            issues = self.codes("gemini-cli", model_slug="google/gemini-x", endpoint_kind=kind)
+            assert "harness_protocol_unavailable_for_endpoint" not in issues
+            assert "harness_not_enabled" in issues  # still awaiting the real-model smoke run
 
     def test_output_cap_below_harness_minimum(self):
         issues = self.codes("aider", model_slug="m", max_output_tokens=4096)

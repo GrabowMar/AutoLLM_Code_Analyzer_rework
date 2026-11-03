@@ -109,7 +109,7 @@ class SeedEntry:
     archived: bool = False
     tier: str | None = None
     compose: tuple[str, str] | None = None  # (stack slug, level) for starters composed by WP-05
-    phase: str = "A"  # compose.yaml phase; phase-B starters are wave-3 seams
+    phase: str = "A"  # compose.yaml phase (provenance); only phases outside build.starters.ACTIVE_PHASES defer
     source: str = ""
 
     @property
@@ -123,7 +123,7 @@ class SeedReport:
     unchanged: list[str] = field(default_factory=list)
     updated: list[str] = field(default_factory=list)  # mutable columns synced (name, description, archived)
     skipped: list[dict[str, Any]] = field(default_factory=list)  # conflicts with user slugs, missing seams
-    deferred: list[dict[str, Any]] = field(default_factory=list)  # phase-B (wave 3) starters of compose.yaml
+    deferred: list[dict[str, Any]] = field(default_factory=list)  # starters of a phase not in ACTIVE_PHASES
     errors: list[dict[str, Any]] = field(default_factory=list)
     lint_errors: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     warnings: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
@@ -404,6 +404,17 @@ def _composed_content(entry: SeedEntry, stack: Any = None) -> dict[str, Any] | N
     return dict(result) if isinstance(result, Mapping) else None
 
 
+def _phase_active(entry: SeedEntry) -> bool:
+    """True when the entry's compose.yaml phase is built (``build.starters.ACTIVE_PHASES``, WP-05)."""
+    from backend.generation.build.starters import ACTIVE_PHASES
+
+    return entry.phase in ACTIVE_PHASES
+
+
+def _inactive_reason(entry: SeedEntry) -> str:
+    return f"phase {entry.phase} starter (not in build.starters.ACTIVE_PHASES)"
+
+
 def _seed_one(entry: SeedEntry, report: SeedReport) -> None:
     rows = list(service.slug_rows(entry.kind, entry.slug))
     header_owned = entry.kind == "task" and TaskSpec.objects.filter(slug=entry.slug, is_system=False).exists()
@@ -413,8 +424,8 @@ def _seed_one(entry: SeedEntry, report: SeedReport) -> None:
     if entry.compose is not None:
         stack_slug = entry.compose[0]
         if not service.slug_rows("stack", stack_slug).filter(is_archived=False).exists():
-            if entry.phase != "A":
-                report.deferred.append({"key": entry.key, "reason": f"phase {entry.phase} starter (wave 3)"})
+            if not _phase_active(entry):
+                report.deferred.append({"key": entry.key, "reason": _inactive_reason(entry)})
             else:
                 reason = f"starter not composed: stack profile {stack_slug!r} is not seeded"
                 report.skipped.append({"key": entry.key, "reason": reason})
@@ -551,9 +562,10 @@ def lint_seed_data(
 ) -> dict[str, list[Any]]:
     """``{"<kind>:<slug>": [Issue]}`` for every entry of ``data_dir``, linted as system entities.
 
-    Phase-A starters that cannot be composed (stack missing, composition failing) get an ``error`` issue, never
-    a silent skip; phase-B starters whose stack is not written yet are not linted and, when ``deferred`` is
-    given, appended to it (the ``seed_library`` report lists the same entries as deferred).
+    Starters of an active phase (``build.starters.ACTIVE_PHASES``: A and B) that cannot be composed (stack
+    missing, composition failing) get an ``error`` issue, never a silent skip; starters of any other phase are
+    not linted and, when ``deferred`` is given, appended to it (the ``seed_library`` report lists the same
+    entries as deferred).
 
     Refs resolve to the stored version when it exists, else to the entry of the same slug in ``data_dir``
     (whatever version the file names: the seeder assigns versions), so the directory lints on an empty
@@ -601,11 +613,11 @@ def lint_seed_data(
                     pinned_ref=f"{stack_slug}@1#{hashes[('stack', stack_slug)][:12]}",
                 )
             if stack is None and not service.slug_rows("stack", stack_slug).exists():
-                if entry.phase != "A":
-                    # Phase-B starters (stack not written yet) are wave-3 seams: listed as deferred, as by
-                    # seed_library, and not counted among the linted entries.
+                if not _phase_active(entry):
+                    # A phase outside ACTIVE_PHASES: listed as deferred, as by seed_library, and not counted
+                    # among the linted entries.
                     if deferred is not None and entry.kind in wanted:
-                        deferred.append({"key": entry.key, "reason": f"phase {entry.phase} starter (wave 3)"})
+                        deferred.append({"key": entry.key, "reason": _inactive_reason(entry)})
                 elif entry.kind in wanted:
                     results[entry.key] = [
                         library_lint.make_issue(
@@ -622,7 +634,7 @@ def lint_seed_data(
             else:
                 failure = None if composed else "build.starters.compose returned no content"
             if failure is not None:
-                if entry.phase != "A":
+                if not _phase_active(entry):
                     if deferred is not None and entry.kind in wanted:
                         deferred.append({"key": entry.key, "reason": f"phase {entry.phase} starter: {failure}"})
                 elif entry.kind in wanted:

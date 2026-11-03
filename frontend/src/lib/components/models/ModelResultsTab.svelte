@@ -81,8 +81,6 @@
 			{ label: 'Prompt cache hits', value: fmtRate(res.cache_hit_ratio) },
 			{ label: 'LLM calls / app', value: res.mean_llm_calls != null ? res.mean_llm_calls.toFixed(1) : '—' },
 			{ label: 'Output speed', value: res.median_output_tps != null ? `${res.median_output_tps.toFixed(0)} tok/s` : '—', title: 'Median completion tokens per second of wall time (includes tool and build time)' },
-			{ label: 'Repair round used', value: fmtRate(gen.repair_rate) },
-			{ label: 'Continuations', value: String(gen.continuations_used) },
 		];
 	});
 
@@ -136,8 +134,8 @@
 	<EmptyState icon={FlaskConical} title="No measurements yet" description="Generate apps with this model — or add it to an experiment — to see build success, conformance, code findings and its ranking here.">
 		{#snippet action()}
 			<div class="flex flex-wrap justify-center gap-2">
-				<Button size="sm" variant="outline" href="/experiments/new">New experiment</Button>
-				<Button size="sm" href="/sample-generator?mode=agent&model={encodeURIComponent(slug)}"><Sparkles class="size-3.5" />Generate an app</Button>
+				<Button size="sm" variant="outline" href="/studies/new">New study</Button>
+				<Button size="sm" href="/studies/new?model={encodeURIComponent(slug)}"><Sparkles class="size-3.5" />Generate an app</Button>
 			</div>
 		{/snippet}
 	</EmptyState>
@@ -328,16 +326,16 @@
 		<div class="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
 			<Card.Root class="gap-0 overflow-clip py-0">
 				<Card.Header class="border-b border-border py-3">
-					<Card.Title class="text-sm font-medium">By app spec</Card.Title>
+					<Card.Title class="text-sm font-medium">By task</Card.Title>
 					<Card.Description class="text-xs">Conformance = the hidden API suite passed</Card.Description>
 				</Card.Header>
 				<Card.Content class="p-0">
 					{#if insights.templates.length === 0}
-						<p class="p-4 text-sm text-muted-foreground">No app-spec runs (custom prompts only).</p>
+						<p class="p-4 text-sm text-muted-foreground">No task runs yet.</p>
 					{:else}
 						<div class="overflow-x-auto">
 							<table>
-								<thead><tr><th>App spec</th><th class="num">Apps</th><th class="num">Completed</th><th class="num">Conformance</th></tr></thead>
+								<thead><tr><th>Task</th><th class="num">Apps</th><th class="num">Completed</th><th class="num">Conformance</th></tr></thead>
 								<tbody>
 									{#each insights.templates as t (t.slug)}
 										<tr>
@@ -361,17 +359,17 @@
 
 			<Card.Root class="gap-0 overflow-clip py-0">
 				<Card.Header class="border-b border-border py-3">
-					<Card.Title class="text-sm font-medium">Experiments</Card.Title>
-					<Card.Description class="text-xs">Designed experiments this model ran in</Card.Description>
+					<Card.Title class="text-sm font-medium">Studies</Card.Title>
+					<Card.Description class="text-xs">Studies this model ran in</Card.Description>
 				</Card.Header>
 				<Card.Content class="p-0">
 					{#if insights.experiments.length === 0}
-						<p class="p-4 text-sm text-muted-foreground">Not part of an experiment yet.</p>
+						<p class="p-4 text-sm text-muted-foreground">Not part of a study yet.</p>
 					{:else}
 						<ul class="divide-y divide-border">
 							{#each insights.experiments as e (e.id)}
 								<li>
-									<a href="/experiments/{e.id}" class="flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-muted/40">
+									<a href="/studies/{e.id}" class="flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-muted/40">
 										<span class="min-w-0 truncate">{e.name}</span>
 										<span class="flex shrink-0 items-center gap-2">
 											<span class="font-mono text-xs tabular-nums text-muted-foreground">{e.jobs} apps</span>

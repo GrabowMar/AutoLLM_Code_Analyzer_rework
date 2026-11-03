@@ -28,7 +28,7 @@ Python 3.13 with [uv](https://docs.astral.sh/uv/) (`pyproject.toml` + `uv.lock`)
 | Service | Picks up code changes | Notes |
 | --- | --- | --- |
 | `django` | `uvicorn --reload` | A reload kills threads running in it: interactive analysis runs, workspace provisioning, tool installs, report generation, container actions |
-| `executor` | No | Restart it after backend edits; drain first so running jobs are not interrupted ([Execution engine](/docs/EXECUTION)). The UI flags it as running older code |
+| `executor` | No | Restart it after backend edits; drain first so running generation runs are not interrupted ([Execution engine](/docs/EXECUTION)). The UI flags it as running older code |
 | `celeryworker`, `celerybeat`, `flower` | `watchfiles` restarts them on `.py` changes | |
 | `frontend` | Vite HMR | |
 
@@ -60,13 +60,10 @@ Other settings read from the environment, with their defaults (`config/settings/
 | --- | --- | --- |
 | `ACCOUNT_EMAIL_VERIFICATION` | `optional` (local), `mandatory` (production) | allauth email verification |
 | `DJANGO_ACCOUNT_ALLOW_REGISTRATION` | `True` | Allow self sign-up |
-| `GENERATION_DEFAULT_STACK` | `flask-react` | Stack used when neither the request nor its profile names one |
-| `AGENT_DEFAULT_HARNESS` | `opencode` | Harness for agent runs (`opencode`, `mini-swe-agent`, `aider`) |
-| `AGENT_MAX_LLM_REQUESTS`, `AGENT_WALL_CLOCK_SECONDS`, `AGENT_MAX_TOTAL_TOKENS`, `AGENT_MAX_COST_USD` | `100`, `3600`, `30000000`, `5.0` | Per-run agent budgets (experiments and jobs may override) |
-| `AGENT_MAX_CONCURRENT_RUNS` | `1` | Initial executor sandbox slots (editable at runtime by staff) |
-| `AGENT_SANDBOX_MEM_LIMIT`, `AGENT_SANDBOX_NANO_CPUS` | `3g`, `2000000000` | Per-sandbox caps, frozen into job snapshots |
-| `AGENT_AUTO_EVALUATE` | `True` | Grade every agent sample with the hidden conformance suite |
-| `AGENT_NETWORK_POLICY`, `AGENT_SAMPLING_POLICY` | `packages`, `provider_default` | Sandbox egress and sampling defaults |
+| `GENERATION_SEED_ON_MIGRATE` | `False` | Seed the generation library after every `migrate` (otherwise `just manage seed_library`) |
+| `AGENT_MAX_CONCURRENT_RUNS` | `1` | Initial executor sandbox slots (editable at runtime by staff; never frozen into a run) |
+| `AGENT_SANDBOX_MEM_LIMIT_MAX`, `AGENT_SANDBOX_NANO_CPUS_MAX` | `3g`, `2000000000` | Machine caps on what any budget preset may give one sandbox. Per-run budgets (requests, tokens, wall clock, USD, network policy, sampling policy) come from the study's budget preset ([Budget](/docs/BUDGET)), not from settings |
+| `AGENT_<HARNESS>_VERSION`, `AGENT_HARNESSES_DISABLED` | pinned releases, empty | Harness versions and the operator kill switch ([Harnesses](/docs/HARNESSES)) |
 | `EXECUTOR_TICK_SECONDS`, `EXECUTOR_LEASE_SECONDS`, `EXECUTOR_HEARTBEAT_SECONDS` | `2.0`, `90`, `20` | Executor loop timing |
 | `APPS_DIND_MEM_LIMIT`, `APPS_DIND_APP_RESERVE` | `4g`, `1g` | Memory rule for executor slots; keep the first equal to apps-dind's `mem_limit` |
 | `SAMPLE_BUILD_BACKEND`, `SAMPLE_BUILD_MEMORY`, `SAMPLE_BUILD_CPUS` | `buildkit`, `1536m`, `2` | Cached sample builds and resource caps ([Sample builds](/docs/SAMPLE_BUILDS)) |
@@ -75,8 +72,6 @@ Other settings read from the environment, with their defaults (`config/settings/
 | `INFERENCE_DIRECT_ALLOWED_TARGETS`, `INFERENCE_HOST_PUBLIC_IPS`, `INFERENCE_EXTRA_BLOCKED_CIDRS` | empty | Direct-endpoint allow and block lists ([Local models](/docs/LOCAL_MODELS)) |
 | `LLMLAB_PUBLIC_URL` | request host | Base URL the relay install commands point at |
 | `TRUSTED_PROXY_CIDRS` | empty | Proxies whose `X-Forwarded-For` hop is trusted for relay client IPs |
-| `STACK_REQUIRE_APPROVAL` | `False` | Non-staff stacks need staff approval |
-| `STACK_ALLOWED_PYTHON_IMAGES`, `STACK_ALLOWED_NODE_IMAGES` | `python:3.11-slim,python:3.12-slim,python:3.13-slim,python:3.14-slim`, `node:20-alpine,node:22-alpine,node:24-alpine` | Base-image allowlist for user stacks (the builtin stacks use `python:3.13-slim` and `node:24-alpine`; older tags stay listed so existing stacks and packages validate) |
 
 The compose file sets the apps daemon wiring itself (`APPS_DOCKER_HOST=tcp://apps-dind:2376`, `APPS_DOCKER_CERT_PATH`, `APPS_UPSTREAM_HOST=apps-dind`, `APPS_PROXY_PATH=True`) and the executor's LLM proxy (`LLM_PROXY_BIND`, `LLM_PROXY_UPSTREAM`). It interpolates these from your shell or a root `.env` file:
 
@@ -96,12 +91,12 @@ Django 6 project with django-ninja. Settings live in `config/settings/{base,loca
 | --- | --- |
 | `users`, `tokens`, `credentials` | Accounts (allauth headless + MFA, bootstrap admin), Bearer API tokens, encrypted per-user provider keys |
 | `llm_models` | Model catalog synced from OpenRouter, models.dev / Hugging Face enrichment |
-| `generation` | Generation jobs (agent, scaffolding, custom), experiments with schedules and post-runs, run presets, app specs, prompts, blocks, profiles, evaluation |
+| `generation` | The versioned library (tasks, stacks, starters, prompts, presets, eval suites, detectors), studies with schedules and post-runs, generation runs (agentic apps and slot variants) through the harness sandbox and LLM gateway, evaluation, slot mode, patterns and budgets ([Studies](/docs/STUDIES), [Generation process](/docs/GENERATION_PROCESS)) |
 | `execution` | The executor process: leader lock, scheduler, lanes and slots, leases, reconciler |
 | `inference` | LLM endpoints (OpenRouter, relay, direct), LLM request queue, the executor's internal LLM proxy, relay protocol |
 | `analysis` | Analyzer workspaces, tool catalog, analysis runs, findings, AI review |
 | `human_eval` | Human-evaluation tasks: design, participants and evaluator accounts, allocation, the participant portal API, hosting apps for testers, results, exports ([Human evaluation](/docs/HUMAN_EVALUATION)) |
-| `runtime` | Stacks, builds and runs generated apps as containers, app routing and proxying |
+| `runtime` | Builds and runs generated apps as containers ([Sample builds](/docs/SAMPLE_BUILDS)), app routing and proxying |
 | `statistics`, `rankings`, `reports` | Aggregation and study tables, model scoring, saved and study reports |
 | `integrations` | MCP server, cloud LLM providers, GitHub export, outbound webhooks |
 | `realtime` | Server-sent events stream over Redis pub/sub |
@@ -117,25 +112,26 @@ Scoring constants live in one place: `backend/rankings/services/constants.py` de
 
 ### Seed data and management commands
 
-Seeds sync after every `migrate` through `post_migrate` handlers; a seeding error is logged, never raised. Data files: `backend/analysis/data/tools/*.yaml` (tool catalog), `backend/generation/data/` (library), `backend/runtime/scaffolding/` (stacks). Seeding is idempotent by content hash: an edited app spec file updates its row in place with the next `version`, and an edited skeleton or `manifest.json` entry becomes a new stack version, so job snapshots (which embed both) always name the content they ran on.
+Seeds sync after every `migrate` through `post_migrate` handlers; a seeding error is logged, never raised. Data files: `backend/analysis/data/tools/*.yaml` (tool catalog) and `backend/generation/data/` (the generation library; seeded after `migrate` only when `GENERATION_SEED_ON_MIGRATE=true`). Library seeding is idempotent by content hash: changed seed content becomes the next version (existing versions are immutable) and user-owned slugs are never touched, so a run's manifest always pins the exact content it ran on ([The generation library](/docs/LIBRARY)).
 
 | Command | Purpose |
 | --- | --- |
-| `seed_analysis_tools`, `seed_generation_templates` | Re-run a seeder by hand |
-| `lint_generation_data` | Validate the generation library data files (app specs against `schema.json` and the v3 conventions; warnings are printed but do not fail it) |
+| `seed_analysis_tools`, `seed_library` | Re-run a seeder by hand |
+| `lint_library` | Validate the generation library data files |
+| `build_starters`, `refresh_cost_priors` | Build the stack starters' images and lock files ([Stacks](/docs/STACKS)); refresh the cost priors behind study estimates ([Budget](/docs/BUDGET)) |
+| `conformance_kit`, `oracle_validate` | Evaluation conformance kit and oracle validation ([Evaluation](/docs/EVALUATION)) |
 | `enrich_models` | Attach models.dev / Hugging Face metadata to the catalog and link local endpoint models to their catalog twins ([Models reference](/docs/MODELS_REFERENCE#enrichment-beyond-openrouter)) |
 | `import_external_covariates` | Import Epoch AI and LMArena covariates through the curated name map ([Models reference](/docs/MODELS_REFERENCE#research-covariates)) |
-| `backfill_call_telemetry`, `backfill_agent_trajectories` | Fill per-call telemetry and OpenRouter stats, and agent trajectory records, for earlier jobs ([Generation process](/docs/GENERATION_PROCESS#per-call-telemetry)) |
 | `seed_benchmarks` | Load benchmark results from a JSON fixture |
 | `run_executor`, `executor drain\|resume\|status`, `wait_for_migrations` | Executor process and control ([Execution engine](/docs/EXECUTION)) |
-| `sync_container_status`, `reconcile_app_routes` | Reconcile container rows with Docker; rewrite Traefik route files |
-| `export_study_tables`, `healing_ablation`, `study_report` | Study outputs ([Study tables](/docs/STUDY_TABLES)) |
+| `sync_container_status`, `reconcile_app_routes`, `benchmark_sample_builds` | Reconcile container rows with Docker; rewrite Traefik route files; measure sample builds ([Sample builds](/docs/SAMPLE_BUILDS)) |
+| `export_study_tables`, `study_report` | Study outputs ([Study tables](/docs/STUDY_TABLES)) |
 | `export_review_sample`, `score_review_sample` | Human review sample export and scoring |
 | `runautomationscheduler` | Legacy automation scheduler loop; nothing creates pipeline schedules any more |
 
 ## Frontend layout
 
-SvelteKit 2 with Svelte 5 runes, Tailwind 4 and adapter-node, in `frontend/`. App routes live under `src/routes/(app)/` (one directory per feature: `experiments`, `sample-generator`, `applications`, `analysis`, `analyzers`, `endpoints`, `models`, `templates`, `runtime`, `rankings`, `statistics`, `reports`, `docs`, `system`, `users`, ...), auth pages under `src/routes/(auth)/auth/`. Old URLs such as `/automation`, `/integrations` and `/settings` are redirects. API clients are in `src/lib/api/`, navigation in `src/lib/nav.ts`, settings sections in `src/lib/settings-sections.ts`. UI conventions are in `frontend/DESIGN_SYSTEM.md`.
+SvelteKit 2 with Svelte 5 runes, Tailwind 4 and adapter-node, in `frontend/`. App routes live under `src/routes/(app)/` (one directory per feature: `studies`, `library`, `samples`, `slots`, `budget`, `applications`, `analysis`, `analyzers`, `endpoints`, `models`, `runtime`, `rankings`, `statistics`, `reports`, `docs`, `system`, `users`, ...), auth pages under `src/routes/(auth)/auth/`. Old URLs such as `/experiments`, `/sample-generator`, `/templates`, `/automation`, `/integrations` and `/settings` are redirects (the v2 ones for one release). API clients are in `src/lib/api/`, navigation in `src/lib/nav.ts`, settings sections in `src/lib/settings-sections.ts`. UI conventions are in `frontend/DESIGN_SYSTEM.md`.
 
 In the local stack the Vite dev server on :8000 proxies `/api`, `/_allauth`, `/admin`, `/media` and `/apps` to django via `API_TARGET=http://django:8000`. Always develop against http://localhost:8000, not :8001.
 

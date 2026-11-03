@@ -27,9 +27,21 @@ EXPECTED_TOOLS = {
     "claude-code": ["Bash", "Edit", "Read"],
     "codex": ["exec_command", "request_user_input", "view_image", "write_stdin"],
     "qwen-code": ["edit", "get_goal", "notebook_edit", "read_file", "run_shell_command", "update_goal"],
+    "gemini-cli": [
+        "glob",
+        "grep_search",
+        "list_background_processes",
+        "list_directory",
+        "read_background_output",
+        "read_file",
+        "replace",
+        "run_shell_command",
+        "update_topic",
+        "write_file",
+    ],
 }
 # Harnesses whose native prompt is pinned from harnesses/captured/: the model saw exactly the capture.
-PINNED = {"opencode": "1.18.35", "codex": "0.166.0", "qwen-code": "0.26.6"}
+PINNED = {"opencode": "1.18.35", "codex": "0.166.0", "qwen-code": "0.26.6", "gemini-cli": "0.66.0"}
 
 
 def _exit(code: int, **kw) -> ExitInfo:
@@ -116,6 +128,17 @@ def test_max_turns_fixtures():
     assert code == 53  # documented: session turn cap
     assert qwen.classify_termination(_exit(code), trajectory) is Termination.MAX_TURNS
 
+    gemini = registry.get("gemini-cli")
+    outputs, calls, root = load_fixture("gemini-cli-0.66.0-max-turns")
+    trajectory = gemini.parse_trajectory(outputs, calls)
+    assert trajectory.max_turns_hit  # result{status: error, error.type: FatalTurnLimitedError}
+    code = json.loads((root / "exit.json").read_text())["exit_code"]
+    assert code == 53  # FatalTurnLimitedError's exit code in 0.66.0
+    assert gemini.classify_termination(_exit(code), trajectory) is Termination.MAX_TURNS
+    assert gemini.classify_termination(_exit(code), trajectory.model_copy(update={"max_turns_hit": False})) is (
+        Termination.MAX_TURNS  # the exit code alone maps too (facts.exit_codes)
+    )
+
 
 @pytest.mark.parametrize("harness", [h for h in SMOKED if h != "mini-swe-agent"])
 def test_incremental_parse_line_equals_batch(harness):
@@ -171,3 +194,28 @@ def test_codex_turn_failed_is_not_an_llm_error_by_itself():
     assert not trajectory.ended_on_llm_error
     assert parser.turn_failed
     assert "budget" in parser.turn_failed
+
+
+def test_gemini_through_the_real_gateway():
+    """Gemini CLI -> loopback -> the WP-06 gateway image (translate) -> a scripted chat upstream (offline).
+
+    The gateway logs the canonical chat body it sent upstream (``request``), so observed inputs are read by
+    the body's shape; the native system prompt is the gateway's ``native_system_prompt``.
+    """
+    adapter = registry.get("gemini-cli")
+    outputs, calls, root = load_fixture("gemini-cli-0.66.0-gateway")
+    assert {c["protocol_mode"] for c in calls} == {"translate"}
+    assert {c["front_protocol"] for c in calls} == {"gemini_generate"}
+    trajectory = adapter.parse_trajectory(outputs, calls)
+    assert [s.kind for s in trajectory.steps] == ["llm", "llm", "shell"]
+    assert trajectory.final_message == "Done. I created hello.txt in the workspace."
+    observed = adapter.observed_inputs(calls)
+    assert observed.tool_names == EXPECTED_TOOLS["gemini-cli"]
+    assert observed.first_user_message_sha is not None
+    _, scripted, _ = load_fixture(FIXTURE_DIRS["gemini-cli"])
+    # Same pinned prompt whichever path logged it (the gateway's native_system_prompt vs the scripted log).
+    assert observed.system_prompt_sha == adapter.observed_inputs(scripted).system_prompt_sha
+    assert captured_prompt("gemini-cli", "0.66.0").strip() in common.native_system_prompt_text(calls)
+    code = json.loads((root / "exit.json").read_text())["exit_code"]
+    assert adapter.classify_termination(_exit(code), trajectory) is Termination.COMPLETED
+    assert "hello.txt" in (root / "name_status.txt").read_text()

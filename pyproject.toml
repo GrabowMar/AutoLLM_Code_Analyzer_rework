@@ -87,8 +87,6 @@ line-length = 119
 # Exclude a variety of commonly ignored directories.
 extend-exclude = [
   "*/migrations/*.py",
-  # Frozen v2 reference code (never imported; deleted in v3 wave 3).
-  "backend/generation/_legacy/*",
   # Pattern-detector fixtures: deliberately vulnerable sample code, not project code.
   "backend/generation/data/detectors/tests/*",
   "staticfiles/*",
@@ -229,11 +227,9 @@ plugins = [
   "mypy_django_plugin.main",
 ]
 warn_unused_configs = true
-# The golden fixture trees are sample apps (their `backend/` would shadow the real package) and
-# generation/_legacy is read-only v2 reference code that imports deleted modules.
+# The golden fixture trees are sample apps (their `backend/` would shadow the real package).
 exclude = [
   "backend/generation/testing/golden_library/(parent_app|starters)/",
-  "backend/generation/_legacy/",
 ]
 overrides = [
   # Django migrations should not produce any errors:

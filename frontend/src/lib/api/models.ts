@@ -301,7 +301,8 @@ export interface ModelInsights {
       median_output_tps: number | null;
     };
     repair_rate: number | null;
-    continuations_used: number;
+    /** Always null in v3 (no continuation rounds); kept for the payload shape. */
+    continuations_used: number | null;
     engines: Record<string, number>;
     providers: Record<string, number>;
     terminations: Record<string, number>;

@@ -37,8 +37,14 @@ collected tree); a failed evaluation is retried with the runs API.
 `mode=overlay` (slot variants, spec 4.8) skips lock and build and starts the parent image with the slot files
 copied in; `mode=static_only` runs no app.
 
-Postgres stacks need a database sidecar that this version does not start: their evaluation is `infra_error`
-(`postgres_sidecar_unavailable`), never `start_fail`. Every phase-A stack uses SQLite.
+Postgres stacks (`database: postgres`, phase B) get a database sidecar on the eval network: the docker runtime's
+`start_database("postgres")` starts `base_images.yaml` `sidecars.postgres` (pinned by digest) as alias `db` with a
+fresh password, waits for `pg_isready` and passes `DATABASE_URL=postgresql://app:<pw>@db:5432/app` to the app; the
+sidecar outlives app restarts and is removed with the evaluation. A sidecar that cannot start (or a runtime without
+one, such as the local runtime) is `infra_error` (`postgres_sidecar_unavailable`), never `start_fail`. The
+`plaintext_password_db` probe reads the app's `./data` only, and the users live in the sidecar, so on postgres
+stacks it is `skipped(precondition_failed)` (evidence "passwords live in the postgres sidecar") without reading
+any file: other files under `./data` (uploads, logs, a fallback sqlite) never make it `not_exploited`.
 
 ## 2. The platform lock (spec 6.10)
 
@@ -72,6 +78,11 @@ no rule). A request body field named `username` (outside the auth endpoints) nam
 Compiled checks are tagged with `library.lint.tag_checks` (`stated_in`), hand-written ones read
 `TaskSpecVersion.derived.check_statedness`.
 
+The login check (`<login endpoint>.ok`) also requires the auth mode's credential, not just a 2xx: a non-empty
+string at `token_json_path` for bearer modes, a `Set-Cookie` header for cookie modes. Without it, an app whose
+catch-all route answers every request with the SPA's `index.html` (200) passed the login check (found on the
+Django minimal starter in the wave-3 conformance run).
+
 **Phases.** Persistence checks (`restart_before`) need the app restarted between their setup and their request.
 Phase `pre` runs every other check plus those setups and saves the state; the suite restarts the app; phase
 `post` logs the actors in again, runs the deferred checks, then the probes.
@@ -83,7 +94,9 @@ Phase `pre` runs every other check plus those setups and saves the state; the su
 - `capture: {name: "$.json.path"}` saves a value; later steps and the check's own request substitute `{name}`
   in the path and in any JSON string value that is exactly `"{name}"` (keeping the captured type). `{rand}`
   (per check) is substituted inside strings, `{oversize}` expands to 12 MiB, and `{user_a_username}`,
-  `{user_b_username}`, `{admin_username}`, `{admin_password}` name the actors.
+  `{user_b_username}`, `{admin_username}`, `{admin_password}` name the actors. A check that uses
+  `{user_a_username}` or `{user_b_username}` registers and logs in that actor first (the named account must exist;
+  if it cannot log in, the check is `skipped` with `auth:<actor>`).
 - `header_contains: {"Retry-After": ""}` means the header is present; otherwise a case-insensitive substring.
 - Multipart: `request.files: {"<field>": {"filename", "content", "content_type"}}` plus `form` fields.
 - Setup steps without `actor` run as the check's actor; `actor: anon` runs without credentials (an anonymous
@@ -107,7 +120,10 @@ Phase `pre` runs every other check plus those setups and saves the state; the su
    a 3xx is never redirected.
 2. An expected 400 or 422 accepts either (FastAPI answers 422).
 3. "Anonymous" expects 401 per the auth contract; a 403 is a contract failure.
-4. Oversize bodies accept 413 from the framework or the app.
+4. Oversize bodies accept 413 from the framework or the app. Bodies over 1 MiB are streamed in 64 KiB chunks and
+   the tester stops sending as soon as the app answers: many servers (gunicorn/Flask `MAX_CONTENT_LENGTH`, an
+   upload-size middleware) answer 413 from the headers and close the connection, and writing the rest would turn
+   that correct 413 into a broken pipe (`error`).
 5. Wrong-method behaviour (405 vs 404) is never checked.
 
 **Results and metrics** (`metrics.compute`): `agent_pass_rate` = passed / counted checks, where counted means every
@@ -164,8 +180,24 @@ deviation. Adherence never filters a sample.
 - **Conformance kit.** `manage.py conformance_kit` evaluates the kit tasks' references (`crud_todo_list`,
   `team_roles_multitenant`, `file_share_multipart`) on every fixed stack; each must pass 100% with no exploited
   probe (`TaskSpecVersion.oracle["kit:<stack ref>"]`). `conformance.coverage() -> {framework: bool}` feeds the
-  study resolver's `conformance_missing` issue. No reference tree exists yet (WP-04 wave 3), so every framework
-  is reported not covered and confirmatory app studies stay blocked until the kit passes.
+  study resolver's `conformance_missing` issue. Until the reference trees are in `data/tasks/` (WP-04), every
+  framework is reported not covered and confirmatory app studies stay blocked.
+- **Wave-3 run on real starters (2026-11-03).** Kit references for the four phase-A frameworks (one `<fw>-none`
+  stack each; 12 trees built on the minimal starters, held at `~/.cache/llmlab-v3-work/w3g9/refs/` for WP-04 to
+  adopt) ran through the docker runtime with the real `conformance_kit` command: flask, fastapi, django and
+  express each pass all three kit tasks (`agent_pass_rate == 1.0`, every probe `not_exploited`). They cover the
+  tolerances on real frameworks: Django `APPEND_SLASH` 301s (URLs with a trailing slash), FastAPI 422s, a
+  framework 413 (Flask `MAX_CONTENT_LENGTH`) and app 413s (FastAPI middleware, Django and Express
+  `Content-Length` checks), multipart through Flask, python-multipart, Django and the WHATWG `formData()` in Node,
+  and a platform lock (python-multipart added to a starter manifest). The starter baselines (`<fw>-none` and one
+  frontend stack per framework, minimal and bare) build, start and measure: minimal starters score 0.0 on
+  `crud_todo_list` (django-svelte scored 0.04 before the login-credential fix), bare starters end `start_fail`
+  (no app). Phase B: `go-none`, `spring-boot-none` and the three `*-react-postgres` minimal starters build, start
+  (postgres through the sidecar) and measure 0.0; go and spring-boot have no kit references yet, so
+  `coverage()` reports them not covered. `oracle_validate --runs 3` passes all 12 references with no flaky check.
+  The 17 probe kinds' mutant pairs validate on the docker runtime as well as locally. Two seed checks
+  needed an explicit setup actor (WP-04): `file_share_multipart` `shares.revoked` and `team_roles_multitenant`
+  `projects.cross_tenant`.
 - **Test-retest.** `retest.run_retests(study)` re-evaluates a seeded random `retest_fraction` of the study's
   tested runs under the same suite and selection (`retest_of` set); `GET /eval/retest/?study=` reports per-check
   and per-run agreement and Cohen's kappa (`None` when nothing was compared).
@@ -183,9 +215,14 @@ deviation. Adherence never filters a sample.
 - `local`: only the bundled standard-library apps (a `llmlab-local.json` marker at the tree root): the probe-kit
   validation and the WP-09 tests. It refuses any other tree, so a model's code never runs outside a sandbox.
 
-Rebuilding an image: `docker build -t llmlab-v3-wt/eval-tester:dev backend/generation/images/eval-tester` (same for
-`adherence-checker`), then re-pin the image ids in `backend/generation/data/eval_suites/eval-v2.yaml` (a new suite
-version on re-seed).
+Rebuilding an image: `docker build --provenance=false --sbom=false -t llmlab-v3-wt/eval-tester:dev
+backend/generation/images/eval-tester` (same for `adherence-checker`), then re-pin the image ids in
+`backend/generation/data/eval_suites/eval-v2.yaml` (a new suite version on re-seed). Without
+`--provenance=false`, BuildKit attaches an attestation manifest with a timestamp, so on a containerd-store daemon
+every rebuild of the same source gets a new image id and the pin breaks. The pinned ids are those of the host
+daemon (containerd snapshotter, where the image id is the manifest digest). A daemon with the classic store
+reports the config digest as the image id instead, so the images must be rebuilt and re-pinned on the daemon that
+runs evaluations.
 
 ## 8. API (spec 9.9)
 

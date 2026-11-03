@@ -1,6 +1,6 @@
 # Studies
 
-A **study** is a factorial design: factors × levels, units (task versions or slot targets), replicates, seeds, an evaluation level and an analysis plan. It replaces the v2 experiments and batches: an exploratory study is what a batch was, a confirmatory study is a pre-registered experiment. The engine lives in `backend/generation/study/` (WP-10); the API is under `/api/generation/studies/`.
+A **study** is a factorial design: factors × levels, units (task versions or slot targets), replicates, seeds, an evaluation level, a budget preset and an analysis plan. Every generated sample belongs to one: a quick one-off generation is an exploratory study launched in one call (`POST /studies/adhoc/`), a pre-registered comparison is a confirmatory study. Two modes share the engine: **app** (agentic whole-app generation, `app@1`: a coding-agent harness builds an app from a starter in a sandbox) and **slot** (`slot@1`: one validated part of frozen parent apps is regenerated many times to find the patterns models produce for it; see [Slot mode](/docs/SLOT_MODE)). The engine lives in `backend/generation/study/`; the API is under `/api/generation/studies/`.
 
 The life of a study:
 
@@ -46,18 +46,24 @@ A design (`contracts.plan.Design`, stored on `Study.design`) names:
 | `guidance` | guidance refs | both | `none` |
 | `prompt_set` | prompt-set refs (mode must match) | both | `app-default`, `slot-single-shot-default`, `slot-agent-default` |
 | `prose_variant` | `minimal`, `standard`, `exhaustive` | app | `standard` |
-| `harness_preset` | harness preset refs | app; slot agent | `opencode-native` |
+| `harness_preset` | harness preset refs | app; slot `restricted_agent` | `opencode-native` |
 | `sampling_preset` | sampling refs | both | `provider-default` (app), `t07` (slot) |
 | `resource_policy` | budget preset refs (class C/R knobs may vary) | both | `Design.resource_policy` |
 | `network_policy` | `none`, `packages` | app | the policy's `network_policy` |
-| `slot_executor` | `single_shot`, `agent` | slot | `single_shot` |
+| `slot_executor` | `single_shot` (one structured call per variant), `restricted_agent` (a harness limited to the target's files) | slot | `single_shot` |
 | `hole_mode` | `stub`, `remove`, `rewrite` | slot | `stub` |
 | `keep_docstring` | `true`, `false` | slot | `false` |
 | `context_policy` | a mode (`slot_file_only`, `related_files`, `full_app`, `interface_only`) or a `ContextPolicy` JSON | slot | `related_files` |
 
 Library levels may be written as `slug`, `slug@v` or `slug@v#hash12`. **A bare slug takes the latest non-archived version visible to the study owner at plan time** (`library.service.latest`; versioned refs go through `library.service.resolve_ref`, so a wrong `#hash12` or an invisible version is `lint_unknown_library_ref`); the plan pins every level to `slug@v#hash12`, and nothing is ever looked up as "latest" at run time. Every condition records every applicable factor (defaults included), so the manifest's `factors` are complete.
 
-The prose variant is a **factor**, never part of the unit: a unit written as `crud_todo_list@1:minimal` is the legacy shape and is flagged `prose_variant_in_unit` (error).
+The prose variant is a **factor**, never part of the unit: a unit written as `crud_todo_list@1:minimal` is refused with `prose_variant_in_unit` (error).
+
+### Harnesses, prompts and budget knobs
+
+* **Harness presets** choose the coding-agent harness and its profile. Enabled harnesses run in their own image behind the run's LLM gateway; a harness that is not enabled (an open fairness question, a missing translator, the operator kill switch) makes its conditions `harness_not_enabled`. A `<harness>-native` preset runs the harness as shipped; a `<harness>-controlled` preset equalises a few knobs (300 s command timeout, web tools denied, `max_turns` from the policy, subagents off, a pinned captured system prompt where the harness allows it). Controlled presets do not equalise system prompts or tool sets across harnesses, so a cross-harness factor is reported as a **harness bundle**; crossing harnesses with mixed native and controlled presets is `mixed_harness_profiles` (warn), and aider (an editor, not an agent) crossed with agentic harnesses is `harness_brief_differs`. See [Harnesses](/docs/HARNESSES).
+* **Prompts are library entities**, rendered at plan time from the pinned prompt set and its templates and fragments (task prose, stack, starter, style, auth contract, guidance, network policy). Budget numbers, seeds and ids never enter a prompt, so two budget presets render the same `prompt_hash`. An inline edit in the builder's cell drawer (`POST /studies/{id}/prompt-overrides/`, below) forks the template and its prompt set as new versions and swaps the study's level; the library and the prompt playground edit them directly ([Library](/docs/LIBRARY)).
+* **Budget presets** (`frugal`, the default; `standard`; `generous`) are versioned `ResourcePolicy` entities with about 75 knobs: run, call and context caps, reasoning, caching, provider routing and serving tier, time limits and retries, sandbox size, concurrency, cell and study caps, stop rules, the pilot and its gates, cache reuse and the estimate. Each knob has a validity class: C and R knobs (what the model sees or how it samples; what can truncate a run) are in the treatment view and so in `config_fingerprint`; O knobs are operational and only recorded; S knobs are stopping and design rules, in `prereg_hash`. The `resource_policy` factor may vary C/R knobs between conditions; knob edits in the builder save a custom version derived from the preset. The resolver turns each condition's preset into its effective policy (model and harness limits applied, one serving tier for the study, lint issues such as `context_cap_above_call_cap` or `estimate_exceeds_cap`). See [Budget](/docs/BUDGET).
 
 ### Drawn parents (slot)
 
@@ -118,9 +124,15 @@ The **study cap** typed at launch (`study_cap`: a number or `auto`) is stored in
 * **Gate**: p-values are confirmatory only for a locked confirmatory study whose plan declares the metric, with its pre-registered baseline (`analysis_plan.baseline`) and no deviation: `exclusions_differ`, `common_cells_off`, `fingerprint_filter` (the majority filter dropped cells), `stopped_early`, `multiplicity_family`, `exclusion_rate`, `differential_attrition`. `interim` withholds every p-value until the study ends. `significance_unreachable` tells when the units cannot reach significance under the plan's correction.
 * **Also**: `attrition` (per condition), `by_factor` (EMMs, `unbalanced` flag), `by_prose_variant` (stated / unstated pass rates), `common_pass_rate`, `retest_agreement`, and the issues `mixed_config_fingerprint`, `mixed_eval_suite`, `exclusion_rate`, `differential_attrition`, `few_clusters`.
 
+### Run-to-run variation
+
+The results average repeats away (the unit of analysis is the task or target unit); `GET /studies/{id}/variability/?fingerprint=&sensitivity=&format=json|csv` (`statistics/services/variability.py`) measures the repeats themselves, on the same current runs and options as the results. It is descriptive (no p-values, n on every figure): per (condition, unit) cell dispersion (SD, range, IQR, CV for ratio-scale metrics), the pooled within-cell SD per condition, variance components (condition, unit, condition × unit, repeat) by the method of moments, ICC(1) with a cluster-bootstrap CI and the design effect, pass@k and pass^k, check-level agreement within one tester version, code similarity within cells against a between-condition reference, finding overlap, bootstrap rank intervals and a precision planner (terminal studies only; while a study runs every block is `interim`). The pass rate is the latest evaluation's `agent_pass_rate`; an unmeasured run is null, never 0. `?format=csv` gives one row per (condition, unit) cell.
+
+Outside a study's cells, `GET /runs/{id}/replicates/` lists every visible run sharing the run's `config_fingerprint` (relation `self`, `retry`, `replay` (same `run_fingerprint`), `rerun` or `replicate`, with metrics and code similarity), and `GET /models/{model_id}/variability/` summarizes the spread within a model's same-setup groups.
+
 ## Analysis plans
 
-`study/analysis_plan.py` normalizes the plan (v2 keys kept for reports):
+`study/analysis_plan.py` normalizes the plan (plan format version 2; the keys the study report reads are kept):
 
 ```json
 {
@@ -154,8 +166,15 @@ Intention-to-treat is the default (`itt: true`, `exclusions.truncated: false`); 
 
 ## Identity changelog
 
-Changing any identity algorithm or constant (seed derivation, block order, `plan_hash`, `prereg_hash`, the resolver's pinning) requires a protocol bump and a line here.
+Changing any identity algorithm or constant (seed derivation, block order, `plan_hash`, `prereg_hash`, the resolver's pinning, the prompt renderer's output, the treatment view) requires a protocol bump and a line here.
+
+Two golden tests guard it, and a comment at the top of each says so:
+
+* `generation/tests/wp01_foundation/test_identity_algebra.py` feeds fixed literal inputs to `identity.compute_keys` and pins every key, the `canonical_json` vectors, `tree_hash` and `pinned_ref`;
+* `generation/tests/wp10_study/test_identity_golden.py` resolves one fixed design (2 tasks × 2 stacks × 2 models × 1 style × 1 auth mode × 2 prose variants × 2 repeats, `base_seed` 12345, `order_seed` 7, the `frugal` preset with its pilot) from the frozen golden library (`generation/testing/golden_library/`) with the real prompt renderer, effective policy, treatment view and harness environment, and pins every library `content_hash`, the `design_hash`, unit keys and condition hashes, every CRN seed (equal across prose variants), the full block order, the `task_hash`, `treatment_hash`, `prompt_hash`, `config_fingerprint` and `run_fingerprint` of three cells, and the `plan_hash`. Image digests are machine state and are pinned to fixed stand-ins there. Regenerate its constants (`GOLDEN_PLAN_DUMP=1` prints the observed values) only together with a protocol bump and a line below.
+
+The slot counterpart, `generation/tests/wp12_slot/test_slot_golden.py`, pins `target_hash`, the resolved-context sha and `normalized_sha` on the golden parent app.
 
 | Date | Change |
 | --- | --- |
-| 2026-11-03 | v3 resolver version 1: CRN seeds per (unit, repeat), repeat-major blocks, `plan_hash` and `prereg_hash` as in spec 3.1. |
+| 2026-11-03 | v3 resolver version 1: CRN seeds per (unit, repeat), repeat-major blocks, `plan_hash` and `prereg_hash` as in spec 3.1. Golden plan frozen: `plan_hash` `ca4041358c057f3a685110281526843a29246c44ff05670157bdeefb81bcbc27`. |

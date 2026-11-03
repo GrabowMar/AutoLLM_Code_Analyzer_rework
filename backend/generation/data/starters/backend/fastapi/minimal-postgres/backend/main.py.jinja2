@@ -1,0 +1,37 @@
+"""FastAPI entry point."""
+
+from pathlib import Path
+
+from fastapi import FastAPI
+{% if has_frontend %}
+from fastapi.responses import FileResponse
+
+DIST = (Path(__file__).resolve().parent.parent / "frontend" / "dist").resolve()
+{% else %}
+from fastapi.responses import HTMLResponse
+
+TEMPLATES = Path(__file__).resolve().parent / "templates"
+{% endif %}
+
+app = FastAPI()
+
+
+@app.get("/api/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+{% if has_frontend %}
+
+
+@app.get("/{path:path}", include_in_schema=False)
+def frontend(path: str = "") -> FileResponse:
+    target = (DIST / path).resolve()
+    if path and target.is_relative_to(DIST) and target.is_file():
+        return FileResponse(target)
+    return FileResponse(DIST / "index.html")
+{% else %}
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def index() -> str:
+    return (TEMPLATES / "index.html").read_text(encoding="utf-8")
+{% endif %}

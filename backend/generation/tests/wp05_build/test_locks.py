@@ -40,20 +40,35 @@ def test_every_checked_in_lock_matches_its_manifest():
         fragment, manifest = key.split(":", 1)
         manifest_bytes = (locks.dockerfiles.STARTERS_ROOT / fragment / manifest).read_bytes()
         assert entry["manifest_sha"] == identity.bytes_sha(manifest_bytes), key
+        spec = next(s for s in locks.lock_specs([fragment]) if s.manifest == manifest)
+        assert entry.get("inputs_sha") == spec.inputs_sha(), key
         lock = locks.LOCK_ROOT / fragment / entry["lock"]
         assert entry["lock_sha"] == identity.bytes_sha(lock.read_bytes()), key
         assert "@sha256:" in entry["image"]
 
 
 def test_python_locks_are_hashed_and_npm_locks_resolve_every_package():
+    seen = set()
     for key, entry in locks.lock_index().items():
         text = (locks.LOCK_ROOT / key.split(":", 1)[0] / entry["lock"]).read_text()
         if entry["lock"].endswith("requirements.lock"):
             assert "--hash=sha256:" in text
             assert "--generate-hashes" in entry["tool"]
+            seen.add("pypi")
+        elif entry["lock"].endswith("go.sum"):
+            assert " h1:" in text
+            assert "go mod tidy" in entry["tool"]
+            assert entry["image"].startswith("golang:1.25-")
+            seen.add("go")
+        elif entry["lock"].endswith("dependency-list.txt"):
+            assert "The following files have been resolved:" in text
+            assert "dependency:list" in entry["tool"]
+            seen.add("maven")
         else:
             assert '"lockfileVersion": 3' in text
             assert '"integrity": "sha512-' in text
+            seen.add("npm")
+    assert seen == {"pypi", "npm", "go", "maven"}
 
 
 def test_lock_specs_find_plain_manifests_only(fragment_root):
@@ -108,14 +123,69 @@ def test_missing_lock_is_an_error(fragment_root, tmp_path):
         locks.locks_for_fragment("backend/flask/minimal", root=fragment_root, lock_root=tmp_path / "none")
 
 
-def test_phase_b_ecosystems_are_skipped(tmp_path):
+def test_phase_b_ecosystems_are_skipped_when_not_requested(tmp_path):
     root = tmp_path / "starters"
     (root / "backend/go/minimal").mkdir(parents=True)
     (root / "backend/go/minimal/go.mod").write_text("module app\n")
     runner = FakeRunner()
-    records = locks.generate_locks(["backend/go/minimal"], runner, root=root, lock_root=tmp_path / "lock")
+    records = locks.generate_locks(
+        ["backend/go/minimal"],
+        runner,
+        root=root,
+        lock_root=tmp_path / "lock",
+        phases=("A",),
+    )
     assert records == [{"key": "backend/go/minimal:go.mod", "status": "skipped", "reason": "phase B"}]
     assert runner.calls == []
+
+
+def test_go_locks_get_the_module_sources_and_go_stale_with_them(tmp_path):
+    root = tmp_path / "starters"
+    module = root / "backend/go-stdlib/minimal/backend"
+    (module / "templates").mkdir(parents=True)
+    (module / "go.mod").write_text("module app\n\ngo 1.25.0\n")
+    (module / "db.go").write_text('package main\n\nimport _ "modernc.org/sqlite"\n')
+    (module / "main.go.jinja2").write_text("package main\n{% if x %}{% endif %}\n")
+    (module / "templates/index.html").write_text("<title>App</title>\n")
+    lock_root = tmp_path / "lock"
+    runner = FakeRunner()
+    records = locks.generate_locks(["backend/go-stdlib/minimal"], runner, root=root, lock_root=lock_root)
+    assert [r["status"] for r in records] == ["locked"]
+    image, files, script, outputs = runner.calls[0]
+    assert image.startswith("golang:1.25-trixie@sha256:")
+    assert set(files) == {"go.mod", "db.go", "templates/index.html"}  # templates (*.jinja2) are left out
+    assert "go mod tidy" in script
+    assert "go.mod is not tidy" in script
+    assert outputs == ["go.sum"]
+    entry = locks.lock_index(lock_root / "index.yaml")["backend/go-stdlib/minimal:backend/go.mod"]
+    assert entry["lock"] == "backend/go.sum"
+    assert entry["inputs_sha"]
+    assert locks.locks_for_fragment("backend/go-stdlib/minimal", root=root, lock_root=lock_root)
+
+    (module / "db.go").write_text('package main\n\nimport _ "example.com/other"\n')
+    with pytest.raises(locks.StaleLockError):
+        locks.locks_for_fragment("backend/go-stdlib/minimal", root=root, lock_root=lock_root)
+    assert [
+        r["status"]
+        for r in locks.generate_locks(["backend/go-stdlib/minimal"], runner, root=root, lock_root=lock_root)
+    ] == [
+        "locked",
+    ]
+
+
+def test_maven_locks_record_the_dependency_list(tmp_path):
+    root = tmp_path / "starters"
+    (root / "backend/spring-boot/minimal/backend/src").mkdir(parents=True)
+    (root / "backend/spring-boot/minimal/backend/pom.xml").write_text("<project/>\n")
+    (root / "backend/spring-boot/minimal/backend/src/A.java").write_text("class A {}\n")
+    runner = FakeRunner()
+    locks.generate_locks(["backend/spring-boot/minimal"], runner, root=root, lock_root=tmp_path / "lock")
+    image, files, script, outputs = runner.calls[0]
+    assert image.startswith("maven:3.9-eclipse-temurin-21@sha256:")
+    assert files == {"pom.xml": b"<project/>\n"}  # the pom alone decides the resolution
+    assert "dependency:resolve" in script
+    assert "dependency:list" in script
+    assert outputs == ["dependency-list.txt"]
 
 
 class _FakeContainer:

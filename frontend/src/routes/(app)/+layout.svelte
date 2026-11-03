@@ -93,12 +93,12 @@
 		<div
 			class="flex flex-1 flex-col min-w-0 transition-[padding] duration-200 ease-out motion-reduce:transition-none md:pl-[var(--app-sidebar-offset)]"
 		>
-			<AppHeader {auth} />
-			<!-- Header spend chip (WP-15): placed over the header bar, left of the theme toggle and account menu
-			     (AppHeader takes no actions snippet yet; see SAMPLE_GEN_V3_CHANGES "WP-15 → lead"). -->
-			<div class="pointer-events-none fixed right-[7.25rem] top-0 z-40 hidden h-12 items-center sm:flex">
-				<div class="pointer-events-auto"><SpendChip /></div>
-			</div>
+			<AppHeader {auth}>
+				{#snippet actions()}
+					<!-- Header spend chip (WP-15), left of the theme toggle and account menu. -->
+					<div class="hidden sm:flex"><SpendChip /></div>
+				{/snippet}
+			</AppHeader>
 			<div class="flex min-h-[calc(100dvh-3rem)] flex-1 flex-col p-3 sm:p-4 md:p-5 min-w-0 overflow-x-clip pt-[calc(3rem+0.75rem)] sm:pt-[calc(3rem+1rem)] md:pt-[calc(3rem+1.25rem)]">
 				{@render children()}
 			</div>

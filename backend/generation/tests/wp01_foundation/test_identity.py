@@ -318,3 +318,18 @@ class TestIdentityInputsValidation:
     def test_ref_requires_exactly_one_unit(self):
         with pytest.raises(ValueError, match="exactly one"):
             _replace(APP_INPUTS, protocol="ref@1", kind="reference", target={"target_hash": SHA})
+
+
+def test_prompt_hash_is_the_compute_keys_prompt_hash():
+    """WP-03 ask: one prompt-hash implementation, used by ``compute_keys`` and the preview."""
+    from backend.generation.prompts.engine import preview_prompt_hash
+
+    for inputs in (APP_INPUTS, SLOT_INPUTS):
+        assert identity.prompt_hash(inputs.stimuli) == compute_keys(inputs).prompt_hash
+        assert identity.prompt_hash(list(reversed(list(inputs.stimuli)))) == compute_keys(inputs).prompt_hash
+    texts = [("brief", "Build it."), ("system", "Be terse.")]
+    assert preview_prompt_hash(texts) == identity.prompt_hash([(r, identity.text_sha(t)) for r, t in texts])
+    with pytest.raises(ValueError, match="duplicate stimulus role"):
+        identity.prompt_hash([("brief", "a" * 64), ("brief", "b" * 64)])
+    with pytest.raises(ValueError, match="text_sha"):
+        identity.prompt_hash([("brief", "not-a-sha")])

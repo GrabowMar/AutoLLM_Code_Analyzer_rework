@@ -169,7 +169,8 @@ def test_composed_starters_go_through_build_starters(data_dir, monkeypatch):
     shutil.rmtree(starters_dir)
     starters_dir.mkdir()
     (starters_dir / "compose.yaml").write_text(
-        "starters:\n  - {stack: flask-react, levels: [minimal]}\n  - {stack: go-react, levels: [bare], phase: B}\n",
+        "starters:\n  - {stack: flask-react, levels: [minimal]}\n  - {stack: go-react, levels: [bare], phase: B}\n"
+        "  - {stack: go-react, levels: [full], phase: C}\n",
     )
     from backend.generation import blobs
     from backend.generation.build import starters
@@ -189,7 +190,14 @@ def test_composed_starters_go_through_build_starters(data_dir, monkeypatch):
     monkeypatch.setattr(starters, "compose", compose)
     report = seed_library(data_dir=data_dir)
     assert any(ref.startswith("flask-react-minimal@1#") for ref in report["created"])
-    assert report["deferred"] == [{"key": "starter:go-react-bare", "reason": "phase B starter (wave 3)"}]
+    # Phase B is active (build.starters.ACTIVE_PHASES): treated like phase A, so a missing stack is a skip.
+    assert {
+        "key": "starter:go-react-bare",
+        "reason": "starter not composed: stack profile 'go-react' is not seeded",
+    } in report["skipped"]
+    assert report["deferred"] == [
+        {"key": "starter:go-react-full", "reason": "phase C starter (not in build.starters.ACTIVE_PHASES)"},
+    ]
     starter = service.latest("starter", "flask-react-minimal")
     assert starter.stack_profile == service.latest("stack", "flask-react")
 
@@ -215,7 +223,8 @@ def test_lint_reports_phase_a_starters_that_cannot_be_composed(data_dir, monkeyp
         "starters:\n"
         "  - {stack: no-such-stack, levels: [minimal]}\n"
         "  - {stack: fastapi-vue, levels: [full]}\n"
-        "  - {stack: go-react, levels: [bare], phase: B}\n",
+        "  - {stack: go-react, levels: [bare], phase: B}\n"
+        "  - {stack: go-react, levels: [full], phase: C}\n",
     )
     from backend.generation.build import starters
 
@@ -230,13 +239,17 @@ def test_lint_reports_phase_a_starters_that_cannot_be_composed(data_dir, monkeyp
     assert [i.severity for i in results["starter:no-such-stack-minimal"]] == ["error"]
     assert [i.code for i in results["starter:fastapi-vue-full"]] == ["lint_starter_file_missing"]
     assert "WP-05: full level later" in results["starter:fastapi-vue-full"][0].message
-    assert "starter:go-react-bare" not in results
-    assert deferred == [{"key": "starter:go-react-bare", "reason": "phase B starter (wave 3)"}]
+    # Phase B is active: a phase-B starter whose stack is missing is an error like phase A, never deferred.
+    assert [i.code for i in results["starter:go-react-bare"]] == ["lint_unknown_library_ref"]
+    assert "starter:go-react-full" not in results
+    assert deferred == [
+        {"key": "starter:go-react-full", "reason": "phase C starter (not in build.starters.ACTIVE_PHASES)"},
+    ]
     with pytest.raises(CommandError):
         call_command("lint_library", "--data-dir", str(data_dir), "--kind", "starter")
     out = capsys.readouterr().out
     assert "lint_unknown_library_ref [compose.stack]" in out
-    assert "defer starter:go-react-bare: phase B starter (wave 3)" in out
+    assert "defer starter:go-react-full: phase C starter (not in build.starters.ACTIVE_PHASES)" in out
     assert "1 deferred (not linted)" in out
 
 

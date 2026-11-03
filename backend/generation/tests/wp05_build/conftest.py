@@ -12,8 +12,8 @@ import pytest
 
 from backend.generation.build import starters
 
+from .helpers import active_entries
 from .helpers import compose_entry
-from .helpers import phase_a_entries
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -31,8 +31,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 @pytest.fixture(scope="session")
 def composed() -> dict[str, starters.ComposedStarter]:
-    """Every phase-A starter composed in memory (no database, no blobs)."""
-    return {starters.starter_slug(e.stack, e.level): compose_entry(e) for e in phase_a_entries()}
+    """Every active (phase A and B) starter composed in memory (no database, no blobs)."""
+    return {starters.starter_slug(e.stack, e.level): compose_entry(e) for e in active_entries()}
 
 
 @pytest.fixture(scope="session")

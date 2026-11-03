@@ -1,0 +1,3 @@
+{% set layout = "- `backend/`: the Spring Boot app (Java 21, Maven; `backend/pom.xml`, sources in `backend/src/main/java/app/`, settings in `backend/src/main/resources/application.properties`). The image runs the executable jar that `mvn package` builds." %}
+{% set lock_note = "`backend/pom.xml` pins the Spring Boot parent, which manages every dependency version; `backend/dependency-list.txt` records the resolved runtime dependencies (`mvn dependency:list`)." %}
+{% include "common/README.md.jinja2" %}

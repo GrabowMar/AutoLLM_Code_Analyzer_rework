@@ -51,8 +51,6 @@ def test_native_and_controlled_presets(harness):
 def test_presets_render(smoke_ctx):
     """Every preset renders with the frugal policy (controlled ones pin a captured prompt where they ask to)."""
     for harness in ALL_HARNESSES:
-        if harness == "gemini-cli":
-            continue  # no captured prompt until wave 3
         for kind in ("native", "controlled"):
             content = _load(f"{harness}-{kind}")["content"]
             ctx = smoke_ctx(harness, **{k: v for k, v in content.items() if k not in {"harness", "harness_version"}})

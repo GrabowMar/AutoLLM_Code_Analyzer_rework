@@ -673,6 +673,11 @@ class RunFile(ValidatedModel):
                 condition=Q(origin=FileOrigin.DELETED) | ~Q(blob=""),
                 name="generation_runfile_blob_unless_deleted",
             ),
+            # Permission bits only (the collector stores ``st_mode & 0o777``); never a file-type word.
+            models.CheckConstraint(
+                condition=Q(mode__gte=0) & Q(mode__lte=0o7777),
+                name="generation_runfile_mode_permission_bits",
+            ),
         ]
         indexes = [models.Index(fields=["run", "origin"], name="runfile_run_origin")]
 

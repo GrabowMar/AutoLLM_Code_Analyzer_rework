@@ -1,0 +1,5 @@
+name: Stack fragment, Go + Vue (SQLite)
+role: fragment
+modes: [app, slot]
+variables: []
+tags: [stack]

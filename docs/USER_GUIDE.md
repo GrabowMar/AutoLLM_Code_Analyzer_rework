@@ -50,7 +50,7 @@ flowchart LR
   SL --> G
   G --> RS[Results section]
   N --> I[Rankings / Statistics]
-  RS --> P[Reports: Study Report]
+  RS --> P[Reports: Study report]
 ```
 
 ### First study: keys, models, design, preview, launch, inspect
@@ -87,7 +87,7 @@ More detail: [Local models](/docs/LOCAL_MODELS).
 ### Building a study report
 
 1. Run a study to completion (its evaluation level decides what is measured). Optionally add an `analysis` post-run with **completed** trigger in its **Operations** section.
-2. **Reports** → **New report** → **Study Report**.
+2. **Reports** → **New report** → **Study report**.
 3. Optionally choose a **Study** (default **All my apps**). With a locked study, its pre-registered analysis plan decides which comparisons are confirmatory.
 4. Set a **Random seed** so the report regenerates identically. Optionally tick **Bootstrap rank intervals over apps (slower)** and **Count AI-reviewer findings as issues**.
 5. Click **Generate report**. When it completes, download it as **Markdown**, **LaTeX** or **JSON**.
@@ -130,13 +130,13 @@ The catalog of models you can generate with.
 - **Filters**:
   - **Quick** filters: **Free**, **Vision**, **Functions**, **128K+ Context**, **Efficient**, **Used in Apps**.
   - Capability, **Price**, **Context** and **Provider** filters, and **Sort**.
-- **Actions**: **Sync** refreshes the catalog from OpenRouter, **Export** downloads it, **Covariates CSV** downloads one row of research covariates per model used in your jobs, **Import** opens the import page, **Rankings** opens Rankings.
+- **Actions**: **Sync** refreshes the catalog from OpenRouter, **Export** downloads it, **Covariates CSV** downloads one row of research covariates per model used in your runs, **Import** opens the import page, **Rankings** opens Rankings.
 - **Compare**: tick models in the table, then click **Compare (N)**.
 
 **Model detail** (`/models/<slug>`) has these tabs:
 
 - **Overview**: about, links to OpenRouter, models.dev and Hugging Face, and how this model has done on this platform. The facts list separates **Checkpoint parameters** (every tensor in the linked repo), **Reported total** and **Active parameters**, each with its source; an API model that models.dev lists as closed weights says the linked repo may differ from what is served. The **Hugging Face** card shows the repo as an ecosystem: downloads (30 days and all time), likes, trending, Spaces, derived repos and the base-model relation, license and gating, weight size and format, native quantization, Hugging Face inference providers, papers, and the commit and date fetched.
-- **Results**: ranking, resource use, code findings by tool, results per app spec, and the studies it was part of.
+- **Results**: ranking, resource use, code findings by tool, results per task (the **By app spec** card), and the studies it was part of (the **Experiments** card).
 - **Generation data**: what this platform recorded about how the model generates, over your runs: **Agent behaviour** per harness, **Providers and calls** (per-provider latency, throughput, cache hits, retries and errors), and **Same-setup variability** between runs that share a setup. Every figure shows its n; `—` or n/a means not measured.
 - **Benchmarks**: Artificial Analysis and Design Arena scores, then **external covariates** from Epoch AI (reported and active parameters, training compute and data, with Epoch's notes) and LMArena (rating with its interval on the leaderboard's range, rank of n, votes; the agent arena is a score, not Elo), each with a match badge (exact, variant, assumed), the curator's note and CC-BY attribution, and **Self-reported evaluations** from the Hugging Face repo, labelled self-reported and never normalized or ranked.
 - **Capabilities**: besides the capability flags, **Sampling defaults** (the authors' recommended sampling from `generation_config.json`, OpenRouter's defaults, and what your runs actually sent, with n) and **Architecture & size** (dense or MoE, layers, width, heads and KV heads, attention variant, experts per token, native and extended context, vocabulary, native precision, the parameter counts with their sources, and the weight files).
@@ -177,22 +177,26 @@ Reference: [Local models](/docs/LOCAL_MODELS).
 
 ### Library (`/library`)
 
-Every instrument a sample depends on is a versioned library entity: task specs (with their three prose variants), stack profiles, starters, styles, guidance, prompt templates and prompt sets, harness presets, sampling presets, budget presets, evaluation suites and pattern detectors. A version is immutable (`slug@version` plus a content hash); editing creates the next version, archiving replaces deleting, and studies pin exact versions. **Library** shows one card per kind; each entity page has its versions, a usage list and an editor. The **prompt playground** renders a prompt set with any context and diffs two renders. See [Library](/docs/LIBRARY).
+Every instrument a sample depends on is a versioned library entity: task specs (with their three prose variants), stack profiles, starters, styles, guidance, prompt templates and prompt sets, harness presets, sampling presets, budget presets, evaluation suites and pattern detectors. A version is immutable (`slug@version` plus a content hash); editing creates the next version, archiving replaces deleting, and studies pin exact versions. **Library** shows one card per kind; each entity page has its versions, a usage list and an editor. See [Library](/docs/LIBRARY).
+
+- **Prompts are editable.** Every prompt template and prompt set is a library entity: edit it in the library (a new version), try it in the **prompt playground** (render a prompt set with any context and diff two renders), or edit a span of a rendered brief in the study builder's cell drawer, which forks the owning template and prompt set as new versions for that study only. Budget numbers never appear in a prompt.
+- **Harness presets** pick the coding-agent harness (opencode, mini-swe-agent and aider are enabled; goose, qwen-code, claude-code, codex and gemini-cli stay disabled until their open questions close, and `GET /api/generation/harnesses/` says why) and its profile: `<harness>-native` runs the harness as shipped, `<harness>-controlled` equalises a few knobs (command timeout, web tools denied, subagents off, a pinned system prompt where possible); harnesses still differ in prompts and tools, so results label a harness factor a "harness bundle". See [Harnesses](/docs/HARNESSES).
+- **Budget presets** (`frugal`, the default; `standard`; `generous`) hold about 75 knobs: run, call and context caps, reasoning, caching, provider routing and serving tier, time limits and retries, sandbox size, concurrency, cell and study caps, stop rules, the pilot and its gates. The editor shows each knob's validity class: C and R knobs (what the model sees, or what can truncate a run) enter the run's `config_fingerprint`, O knobs are operational, S knobs are stopping rules frozen by a confirmatory lock. Editing a knob in the builder saves a custom version derived from the preset. See [Budget](/docs/BUDGET).
 
 ### Studies (`/studies`)
 
 - **List**: every study with mode (app or slot), kind (exploratory or confirmatory), status, progress, spend against the cap, exclusion rate and a lock badge for locked confirmatory studies. Filter by status, mode and kind.
-- **New study** (`/studies/new`) is the builder: **Mode & kind**, **Units** (tasks, or slot targets across parents of one task), the **factor table** (role and levels per factor, with price per Mtok and capability filters for models and "edit prompt" for prompt sets), **Replicates & seeds** (with a power helper), **Budget preset**, **Evaluation**, the **Analysis plan** (confirmatory only) and **Schedules / post-run**. The **plan rail** resolves the design on every change: counts, the estimate with a cost-by-level bar and the fit under the cap, the issues with quick fixes, and a cell sampler whose drawer shows the rendered stimuli with their source spans, the effective roles per harness, the effective parameters with their knob classes and a diff against another cell. **Freeze plan** persists the plan; **Start** opens the launch dialog (expected / p90 / worst case, the resolved cap, pilot information, typed confirmation above the threshold). Drafts autosave.
+- **New study** (`/studies/new`) is the builder: **Mode & kind**, **Units** (tasks, or slot targets across parents of one task), the **factor table** (role and levels per factor: model, harness preset, stack, starter level, style, auth mode, guidance, prompt set, prose variant, sampling preset, budget preset, network policy, and in slot mode the executor, hole mode and context policy; price per Mtok and capability filters for models and "edit prompt" for prompt sets), **Replicates & seeds** (with a power helper), **Budget preset** (the key limits always visible, every knob one click away), **Evaluation**, the **Analysis plan** (confirmatory only) and **Schedules / post-run**. The **plan rail** resolves the design on every change: counts, the estimate with a cost-by-level bar and the fit under the cap, the issues with quick fixes, and a cell sampler whose drawer shows the rendered stimuli with their source spans, the effective roles per harness, the effective parameters with their knob classes and a diff against another cell. **Freeze plan** persists the plan; **Start** opens the launch dialog (expected / p90 / worst case, the resolved cap, pilot information, typed confirmation above the threshold). Drafts autosave.
 - **Study record** (`/studies/<id>`) reads like a paper: **Abstract** (hypothesis, kind, lock and `prereg_hash`, headline results), **Method** (the design, the factor table, the evaluation level, the analysis plan and the cells table with the cell inspector; **Clone**), **Results** (gate, paired comparisons with the method used, the truncation sensitivity, attrition per condition, the condition × unit matrix, by-factor estimated marginal means, stated vs unstated pass rate per prose variant, test-retest agreement), **Patterns** (slot studies), **Data** (export zip, every run with its attempts, manifests) and **Operations** (endpoint lanes, the condition grid, live spend, pilot gates with **Expand**, pause / resume / cancel, top-up, schedules and post-runs).
 - A cell's current run is its **first usable** attempt: a top-up never replaces a usable run, and runs created beyond the plan are shown but never analysed.
 
 ### Slots (`/slots/new`)
 
-Slot mode regenerates one part of frozen parent apps many times. Choose parents (draw k at random among tested runs, or pick by hand; or **Generate a parent app**), freeze them, pick parts in the three-pane code view (file, region, symbol, endpoint handler or UI component), preview the holed text, the resolved context and the leak report, and **Create slot study**. Targets must be validated (their linked checks must discriminate) before a study can launch.
+Slot mode regenerates one part of frozen parent apps many times, to find the patterns models produce for the same part. Choose parents (draw k at random among tested runs, or pick by hand; or **Generate a parent app**), freeze them, pick parts in the three-pane code view (file, region, symbol, endpoint handler or UI component), preview the holed text, the resolved context and the leak report, and **Create slot study**. Targets must be validated (their linked checks must discriminate) before a study can launch. A slot study's factors add the executor (`single_shot`: one structured call per variant; `restricted_agent`: a harness limited to the target's files), the hole mode and the context policy; a `patterns` post-run clusters the variants and measures detector prevalence when the study completes. See [Slot mode](/docs/SLOT_MODE) and [Pattern analysis](/docs/PATTERNS).
 
 ### Budget (`/budget`)
 
-Your spend against your caps (including the 5 h and weekly quota caps of subscription endpoints), billed and list-price totals, and the burn per study. The header's spend chip shows the period spend and turns into a badge when a study is paused for budget, quota or a spend cap.
+Your spend against your caps (user, endpoint and provider spend caps in USD, list-price USD or tokens, including the 5 h and weekly quota caps of subscription endpoints), billed and list-price totals, and the burn per study. The header's spend chip shows the period spend and turns into a badge when a study is paused for budget, quota or a spend cap.
 
 ## Evaluate
 
@@ -236,7 +240,7 @@ The **Run summary** shows apps × tools = tool runs, how many would be skipped, 
   - **Code** is the app's source LOC by the study's definition (backend, frontend, tests apart). A note lists stored files in dependency, cache or scratch directories that the analysis leaves out; for a run from before that rule it says how many findings lie in them.
   - **Code findings** counts the app's own source; findings in test files are listed apart (+ N in test files). Clicking it filters to the app's source.
   - **Most frequent rules** shows each rule's prevalence: in how many analyzed apps that tool reported it, out of the apps the tool measured, and the same for this model ("12/12 apps · 4/4 of this model"). A switch picks the corpus (**Study** or **All my apps**), and the card states n and any caveats (interim while the study runs; this run's results that are not the ones counted).
-  - **Same setup**: for a finished job, the runs that share its configuration, findings first ([Studies](/docs/STUDIES#results)).
+  - **Same setup**: for a finished run, the runs that share its configuration, findings first ([Studies](/docs/STUDIES#results)).
 - **Findings**: filters by tool, level as reported, category, file and rule, a **Scope** facet (Code, with **App source** and **Test files** under it / Dependency advisories / Runtime) when the run has advisories, dynamic-tool or test-file findings, plus search and sort. Test-file rows get a **test file** chip, merged rows show their issue class, and a finding's detail shows its code part, issue class and prevalence. A row expands into everything the tool said: description, its suggested fix, code, location, rule documentation, CWE / OWASP, references, the vulnerable package and fixed versions, the HTTP request a scanner flagged, duplicates. **CSV** / **JSON** export the filtered findings. Levels are ordered by the tool's own word; a CVSS score printed as the level ranks by its band. The CSV export prefixes an apostrophe to text that a spreadsheet would run as a formula (starting with =, +, -, @, tab or CR), leaves numbers alone, and writes an empty level as unrated. A trivy advisory link is shown as rule documentation, not as a flagged request.
 - **Tools**: each tool in execution order with state, time, version, findings, warnings and errors; **Output** shows the command, exit code and raw output.
 - **Re-run**: all tools, or only those that measured nothing.
@@ -289,7 +293,7 @@ Reference: [Analyzer guide](/docs/ANALYZER_GUIDE).
 
 ### Runtime (`/runtime`)
 
-Lists the Docker containers of your generation jobs (staff see every user's). A dot shows whether the Docker daemon is online.
+Lists the Docker containers of your generated apps (staff see every user's). A dot shows whether the Docker daemon is online.
 
 - **List**: filter by status (**Pending**, **Building**, **Running**, **Stopped**, **Failed**, **Removed**). Each row has **Start**, **Stop**, **Restart** and **Remove**. **Remove** keeps the generated code.
 - **Container detail** (`/runtime/<id>`): the same actions, plus **Logs** and **Actions** (lifecycle history) tabs.
@@ -313,9 +317,9 @@ Puts empirical quality measured on this platform next to the metadata-based **MS
 Platform-wide analytics.
 
 - **Analysis Trends** and **Severity Distribution**.
-- **Model Comparison**: apps, success % (completed of finished generations; pending, running and cancelled jobs are not outcomes), smoke pass, empirical score, MSS and composite.
+- **Model Comparison**: apps, success % (completed of finished runs; pending, running and cancelled runs are not outcomes), **Smoke pass** (the evaluation's functional pass rate, `agent_pass_rate`, over usable runs; the preview smoke probe never feeds it), empirical score, MSS and composite.
 - **Tool Effectiveness**: scans (executions that measured the app: completed or not applicable), not measured (failed, cancelled, app not running), findings, average per measured scan (empty when none) and top rule.
-- **Top Findings** (one row per title, tool and the level that tool printed, `unrated` when it prints none; dependency advisories are marked dependency advisory, since they are package vulnerabilities, not code issues), **Code Generation Stats** (success rate over finished jobs; Source lines is source LOC; average times show — until something completed) and **Recent Activity**.
+- **Top Findings** (one row per title, tool and the level that tool printed, `unrated` when it prints none; dependency advisories are marked dependency advisory, since they are package vulnerabilities, not code issues), **Code Generation Stats** (success rate over finished runs; Source lines is source LOC; average times show — until something completed) and **Recent Activity**.
 - **Severity Distribution** is the platform's normalized level, labelled "normalized (heuristic)", not the tools' own labels.
 
 ### Reports (`/reports`)
@@ -326,14 +330,14 @@ Lists generated reports, with filters for **Type** and **Status**, **Sort**, and
 
 | Type | Configure |
 | --- | --- |
-| **Model Analysis** | Model |
-| **Template Comparison** | Template |
-| **Tool Analysis** | Tool name (blank aggregates all tools; an unknown name is rejected) and an optional window in days (blank: all runs) |
-| **Generation Analytics** / **Comprehensive** | Window (days) |
+| **Model analysis** | Model |
+| **Task comparison** | A library task and optionally one task version (versions are different stimuli); one row per model and treatment |
+| **Tool analysis** | Tool name (blank aggregates all tools; an unknown name is rejected) and an optional window in days (blank: all runs) |
+| **Generation analytics** / **Comprehensive** | Window (days) |
 | **Study conditions** | A study: per-condition summaries and the study results (leaderboard, paired comparisons, gate) |
-| **Study Report** | Optional study, random seed, bootstrap and AI-finding options. Produces paper-ready tables. |
+| **Study report** | Optional study, random seed, bootstrap and AI-finding options. Produces paper-ready tables. |
 
-Reports cover your own jobs and analyses (staff: everyone's). In **Comprehensive**, generation and tool analytics cover the window; the ranking sensitivity and platform totals are all-time.
+Reports cover your own runs and analyses (staff: everyone's). In **Comprehensive**, generation and tool analytics cover the window; the ranking sensitivity and platform totals are all-time.
 
 **Report detail** (`/reports/<id>`) shows a **Summary** and the report's curated tables, one card per table, exactly as the Markdown and LaTeX downloads have them. Tables have labelled columns, condition names, p-values with their interim/withheld/untested state, and '—' for values that were not measured. Reports with more than three tables get a table index. In the Summary a study conditions report whose conditions tie for the top mean pass rate, or a study report whose models (or conditions) tie for TOPSIS rank 1, names no leader and reads 'Tie: N … share the top' (re-read from the report's leaderboard or ranking, so reports stored before ties were detected read right too), and unmeasured values read '—', never 0. The tables come from `GET /api/reports/<id>/tables/`, the same tables as the Markdown and LaTeX downloads; a table cut at 500 rows says so in its note. A completed report downloads as **Markdown**, **LaTeX** or **JSON**. Reports without curated tables render every field: nested objects become their own tables, wide tables are split into parts, and severity buckets are labelled as the platform's normalized severity (a heuristic), not the tools' own levels. Fields holding the levels the tools printed (`reported_levels`) are shown as printed, in one cell, and never labelled normalized.
 

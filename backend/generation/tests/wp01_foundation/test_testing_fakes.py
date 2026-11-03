@@ -25,6 +25,7 @@ from backend.generation.testing.fake_gateway import STATE_KEYS
 from backend.generation.testing.fake_gateway import FakeGateway
 from backend.generation.testing.fake_gateway import ScriptedReply
 from backend.generation.testing.fake_gateway import ScriptedStateFile
+from backend.generation.testing.fake_gateway import attempt_ceiling
 from backend.generation.testing.fake_gateway import canned_call
 from backend.generation.testing.fake_gateway import estimate_tokens
 from backend.generation.testing.fake_gateway import gateway_config
@@ -112,6 +113,21 @@ def test_gateway_main_request_cap_exhausts_the_run_and_stays_exhausted():
         assert chat(gw)[0] == 400  # sticky
         assert [e["reason"] for e in gw.events() if e["event"] == "budget_exhausted"] == ["budget_exhausted:requests"]
         assert len(gw.calls()) == 2  # refused calls never reach the upstream
+
+
+def test_gateway_attempt_ceiling_stops_a_harness_looping_on_failed_calls():
+    """The real gateway's loop guard (``budget_exhausted:attempts``): failed calls count as attempts."""
+    ceiling = attempt_ceiling(1, 0)
+    assert ceiling == 22
+    replies = [ScriptedReply(status=500, error="boom") for _ in range(ceiling + 5)]
+    with FakeGateway(gateway_config(budget={"max_llm_requests": 1, "max_aux_requests": 0}), replies=replies) as gw:
+        assert {chat(gw)[0] for _ in range(ceiling)} == {500}
+        status, body = chat(gw)
+        state = gw.state()
+    assert status == 400
+    assert body["error"]["message"] == BUDGET_MESSAGE
+    assert state["budget_exhausted"] == "budget_exhausted:attempts"
+    assert state["requests_by_class"]["main"] == 0
 
 
 def test_gateway_request_classes_count_against_their_own_caps():

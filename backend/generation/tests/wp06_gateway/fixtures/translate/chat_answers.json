@@ -1,0 +1,355 @@
+{
+ "anthropic": {
+  "model": "anthropic/claude-sonnet-4.6",
+  "note": "Shapes of OpenRouter chat answers for anthropic/* models (reasoning.text + signature; cache read/write tokens). Values are synthetic; no paid call was made.",
+  "completion": {
+   "id": "gen-1762000000-anthropic",
+   "object": "chat.completion",
+   "created": 1762000000,
+   "model": "anthropic/claude-sonnet-4.6",
+   "provider": "Anthropic",
+   "choices": [
+    {
+     "index": 0,
+     "finish_reason": "tool_calls",
+     "native_finish_reason": "tool_use",
+     "message": {
+      "role": "assistant",
+      "content": "I'll create the file.",
+      "reasoning": "The user wants hello.txt. I will write it with one shell command.",
+      "reasoning_details": [
+       {
+        "type": "reasoning.text",
+        "text": "The user wants hello.txt. I will write it with one shell command.",
+        "signature": "EqoBCkgIBxABGAIiQKz3vYQdummySignatureForTests0123456789abcdefRIMZGl1bW15",
+        "format": "anthropic-claude-v1",
+        "index": 0
+       }
+      ],
+      "tool_calls": [
+       {
+        "id": "toolu_01XyZ",
+        "type": "function",
+        "function": {
+         "name": "Bash",
+         "arguments": "{\"command\":\"printf 'hi\\\\n' > /workspace/hello.txt\",\"description\":\"Write hello.txt\"}"
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "usage": {
+    "prompt_tokens": 5210,
+    "completion_tokens": 96,
+    "total_tokens": 5306,
+    "cost": 0.0168,
+    "prompt_tokens_details": {
+     "cached_tokens": 4096,
+     "cache_write_tokens": 900
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 40
+    }
+   }
+  },
+  "events": [
+   ": OPENROUTER PROCESSING\n\n",
+   "data: {\"id\": \"gen-1762000000-anthropic\", \"object\": \"chat.completion.chunk\", \"created\": 1762000000, \"model\": \"anthropic/claude-sonnet-4.6\", \"provider\": \"Anthropic\", \"choices\": [{\"index\": 0, \"delta\": {\"role\": \"assistant\", \"content\": \"\", \"reasoning\": \"The user wants hello.txt.\", \"reasoning_details\": [{\"type\": \"reasoning.text\", \"text\": \"The user wants hello.txt.\", \"format\": \"anthropic-claude-v1\", \"index\": 0}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000000-anthropic\", \"object\": \"chat.completion.chunk\", \"created\": 1762000000, \"model\": \"anthropic/claude-sonnet-4.6\", \"provider\": \"Anthropic\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \"\", \"reasoning\": \" I will write it with one shell command.\", \"reasoning_details\": [{\"type\": \"reasoning.text\", \"text\": \" I will write it with one shell command.\", \"format\": \"anthropic-claude-v1\", \"index\": 0}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000000-anthropic\", \"object\": \"chat.completion.chunk\", \"created\": 1762000000, \"model\": \"anthropic/claude-sonnet-4.6\", \"provider\": \"Anthropic\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \"\", \"reasoning_details\": [{\"type\": \"reasoning.text\", \"signature\": \"EqoBCkgIBxABGAIiQKz3vYQdummySignatureForTests0123456789abcdefRIMZGl1bW15\", \"format\": \"anthropic-claude-v1\", \"index\": 0}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000000-anthropic\", \"object\": \"chat.completion.chunk\", \"created\": 1762000000, \"model\": \"anthropic/claude-sonnet-4.6\", \"provider\": \"Anthropic\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \"I'll create\"}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000000-anthropic\", \"object\": \"chat.completion.chunk\", \"created\": 1762000000, \"model\": \"anthropic/claude-sonnet-4.6\", \"provider\": \"Anthropic\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \" the file.\"}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000000-anthropic\", \"object\": \"chat.completion.chunk\", \"created\": 1762000000, \"model\": \"anthropic/claude-sonnet-4.6\", \"provider\": \"Anthropic\", \"choices\": [{\"index\": 0, \"delta\": {\"tool_calls\": [{\"index\": 0, \"id\": \"toolu_01XyZ\", \"type\": \"function\", \"function\": {\"name\": \"Bash\", \"arguments\": \"\"}}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000000-anthropic\", \"object\": \"chat.completion.chunk\", \"created\": 1762000000, \"model\": \"anthropic/claude-sonnet-4.6\", \"provider\": \"Anthropic\", \"choices\": [{\"index\": 0, \"delta\": {\"tool_calls\": [{\"index\": 0, \"function\": {\"arguments\": \"{\\\"command\\\":\\\"printf 'hi\\\\\\\\n' > /workspace/hello.txt\\\",\"}}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000000-anthropic\", \"object\": \"chat.completion.chunk\", \"created\": 1762000000, \"model\": \"anthropic/claude-sonnet-4.6\", \"provider\": \"Anthropic\", \"choices\": [{\"index\": 0, \"delta\": {\"tool_calls\": [{\"index\": 0, \"function\": {\"arguments\": \"\\\"description\\\":\\\"Write hello.txt\\\"}\"}}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000000-anthropic\", \"object\": \"chat.completion.chunk\", \"created\": 1762000000, \"model\": \"anthropic/claude-sonnet-4.6\", \"provider\": \"Anthropic\", \"choices\": [{\"index\": 0, \"delta\": {}, \"finish_reason\": \"tool_calls\", \"native_finish_reason\": \"tool_use\"}]}\n\n",
+   "data: {\"id\": \"gen-1762000000-anthropic\", \"object\": \"chat.completion.chunk\", \"created\": 1762000000, \"model\": \"anthropic/claude-sonnet-4.6\", \"provider\": \"Anthropic\", \"choices\": [], \"usage\": {\"prompt_tokens\": 5210, \"completion_tokens\": 96, \"total_tokens\": 5306, \"cost\": 0.0168, \"prompt_tokens_details\": {\"cached_tokens\": 4096, \"cache_write_tokens\": 900}, \"completion_tokens_details\": {\"reasoning_tokens\": 40}}}\n\n",
+   "data: [DONE]\n\n"
+  ],
+  "expect_details": [
+   {
+    "type": "reasoning.text",
+    "text": "The user wants hello.txt. I will write it with one shell command.",
+    "signature": "EqoBCkgIBxABGAIiQKz3vYQdummySignatureForTests0123456789abcdefRIMZGl1bW15",
+    "format": "anthropic-claude-v1",
+    "index": 0
+   }
+  ]
+ },
+ "openai": {
+  "model": "openai/gpt-5.1-codex",
+  "note": "Shapes of OpenRouter chat answers for openai/* reasoning models (reasoning.summary + reasoning.encrypted). Synthetic values.",
+  "completion": {
+   "id": "gen-1762000001-openai",
+   "object": "chat.completion",
+   "created": 1762000001,
+   "model": "openai/gpt-5.1-codex",
+   "provider": "OpenAI",
+   "system_fingerprint": null,
+   "choices": [
+    {
+     "index": 0,
+     "finish_reason": "tool_calls",
+     "native_finish_reason": "completed",
+     "message": {
+      "role": "assistant",
+      "content": null,
+      "reasoning": "**Creating the file**\n\nOne printf is enough.",
+      "reasoning_details": [
+       {
+        "type": "reasoning.summary",
+        "summary": "**Creating the file**\n\nOne printf is enough.",
+        "format": "openai-responses-v1",
+        "index": 0
+       },
+       {
+        "type": "reasoning.encrypted",
+        "data": "gAAAAABpDummyEncryptedReasoningBlobForTests==",
+        "id": "rs_0d1e2f",
+        "format": "openai-responses-v1",
+        "index": 1
+       }
+      ],
+      "tool_calls": [
+       {
+        "id": "call_Abc123",
+        "type": "function",
+        "function": {
+         "name": "exec_command",
+         "arguments": "{\"cmd\":\"printf 'hi\\\\n' > hello.txt\"}"
+        }
+       },
+       {
+        "id": "call_Def456",
+        "type": "function",
+        "function": {
+         "name": "exec_command",
+         "arguments": "{\"cmd\":\"ls\"}"
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "usage": {
+    "prompt_tokens": 3021,
+    "completion_tokens": 210,
+    "total_tokens": 3231,
+    "cost": 0.00589,
+    "prompt_tokens_details": {
+     "cached_tokens": 2944
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 128
+    }
+   }
+  },
+  "events": [
+   ": OPENROUTER PROCESSING\n\n",
+   "data: {\"id\": \"gen-1762000001-openai\", \"object\": \"chat.completion.chunk\", \"created\": 1762000001, \"model\": \"openai/gpt-5.1-codex\", \"provider\": \"OpenAI\", \"choices\": [{\"index\": 0, \"delta\": {\"role\": \"assistant\", \"content\": null, \"reasoning\": \"**Creating the file**\", \"reasoning_details\": [{\"type\": \"reasoning.summary\", \"summary\": \"**Creating the file**\", \"format\": \"openai-responses-v1\", \"index\": 0}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000001-openai\", \"object\": \"chat.completion.chunk\", \"created\": 1762000001, \"model\": \"openai/gpt-5.1-codex\", \"provider\": \"OpenAI\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": null, \"reasoning\": \"\\n\\nOne printf is enough.\", \"reasoning_details\": [{\"type\": \"reasoning.summary\", \"summary\": \"\\n\\nOne printf is enough.\", \"format\": \"openai-responses-v1\", \"index\": 0}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000001-openai\", \"object\": \"chat.completion.chunk\", \"created\": 1762000001, \"model\": \"openai/gpt-5.1-codex\", \"provider\": \"OpenAI\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": null, \"reasoning_details\": [{\"type\": \"reasoning.encrypted\", \"data\": \"gAAAAABpDummyEncryptedReasoningBlobForTests==\", \"id\": \"rs_0d1e2f\", \"format\": \"openai-responses-v1\", \"index\": 1}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000001-openai\", \"object\": \"chat.completion.chunk\", \"created\": 1762000001, \"model\": \"openai/gpt-5.1-codex\", \"provider\": \"OpenAI\", \"choices\": [{\"index\": 0, \"delta\": {\"tool_calls\": [{\"index\": 0, \"id\": \"call_Abc123\", \"type\": \"function\", \"function\": {\"name\": \"exec_command\", \"arguments\": \"{\\\"cmd\\\":\\\"printf\"}}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000001-openai\", \"object\": \"chat.completion.chunk\", \"created\": 1762000001, \"model\": \"openai/gpt-5.1-codex\", \"provider\": \"OpenAI\", \"choices\": [{\"index\": 0, \"delta\": {\"tool_calls\": [{\"index\": 0, \"function\": {\"arguments\": \" 'hi\\\\\\\\n' > hello.txt\\\"}\"}}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000001-openai\", \"object\": \"chat.completion.chunk\", \"created\": 1762000001, \"model\": \"openai/gpt-5.1-codex\", \"provider\": \"OpenAI\", \"choices\": [{\"index\": 0, \"delta\": {\"tool_calls\": [{\"index\": 1, \"id\": \"call_Def456\", \"type\": \"function\", \"function\": {\"name\": \"exec_command\", \"arguments\": \"{\\\"cmd\\\":\\\"ls\\\"}\"}}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000001-openai\", \"object\": \"chat.completion.chunk\", \"created\": 1762000001, \"model\": \"openai/gpt-5.1-codex\", \"provider\": \"OpenAI\", \"choices\": [{\"index\": 0, \"delta\": {}, \"finish_reason\": \"tool_calls\", \"native_finish_reason\": \"completed\"}]}\n\n",
+   "data: {\"id\": \"gen-1762000001-openai\", \"object\": \"chat.completion.chunk\", \"created\": 1762000001, \"model\": \"openai/gpt-5.1-codex\", \"provider\": \"OpenAI\", \"choices\": [], \"usage\": {\"prompt_tokens\": 3021, \"completion_tokens\": 210, \"total_tokens\": 3231, \"cost\": 0.00589, \"prompt_tokens_details\": {\"cached_tokens\": 2944}, \"completion_tokens_details\": {\"reasoning_tokens\": 128}}}\n\n",
+   "data: [DONE]\n\n"
+  ],
+  "expect_details": [
+   {
+    "type": "reasoning.summary",
+    "summary": "**Creating the file**\n\nOne printf is enough.",
+    "format": "openai-responses-v1",
+    "index": 0
+   },
+   {
+    "type": "reasoning.encrypted",
+    "data": "gAAAAABpDummyEncryptedReasoningBlobForTests==",
+    "id": "rs_0d1e2f",
+    "format": "openai-responses-v1",
+    "index": 1
+   }
+  ]
+ },
+ "open_weights": {
+  "model": "deepseek/deepseek-v4.1-flash",
+  "note": "Shapes of OpenRouter chat answers for open-weights models (reasoning.text without a signature). Synthetic values.",
+  "completion": {
+   "id": "gen-1762000002-deepseek",
+   "object": "chat.completion",
+   "created": 1762000002,
+   "model": "deepseek/deepseek-v4.1-flash",
+   "provider": "DeepInfra",
+   "system_fingerprint": "fp_ds",
+   "choices": [
+    {
+     "index": 0,
+     "finish_reason": "stop",
+     "native_finish_reason": "stop",
+     "message": {
+      "role": "assistant",
+      "content": "Done. hello.txt contains a greeting.",
+      "reasoning": "Okay, the file already exists, so I just report.",
+      "reasoning_details": [
+       {
+        "type": "reasoning.text",
+        "text": "Okay, the file already exists, so I just report.",
+        "format": "unknown",
+        "index": 0
+       }
+      ]
+     }
+    }
+   ],
+   "usage": {
+    "prompt_tokens": 1880,
+    "completion_tokens": 31,
+    "total_tokens": 1911,
+    "cost": 9.13e-05
+   }
+  },
+  "events": [
+   ": OPENROUTER PROCESSING\n\n",
+   "data: {\"id\": \"gen-1762000002-deepseek\", \"object\": \"chat.completion.chunk\", \"created\": 1762000002, \"model\": \"deepseek/deepseek-v4.1-flash\", \"provider\": \"DeepInfra\", \"choices\": [{\"index\": 0, \"delta\": {\"role\": \"assistant\", \"content\": \"\", \"reasoning\": \"Okay, the file already exists,\", \"reasoning_details\": [{\"type\": \"reasoning.text\", \"text\": \"Okay, the file already exists,\", \"format\": \"unknown\", \"index\": 0}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000002-deepseek\", \"object\": \"chat.completion.chunk\", \"created\": 1762000002, \"model\": \"deepseek/deepseek-v4.1-flash\", \"provider\": \"DeepInfra\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \"\", \"reasoning\": \" so I just report.\", \"reasoning_details\": [{\"type\": \"reasoning.text\", \"text\": \" so I just report.\", \"format\": \"unknown\", \"index\": 0}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000002-deepseek\", \"object\": \"chat.completion.chunk\", \"created\": 1762000002, \"model\": \"deepseek/deepseek-v4.1-flash\", \"provider\": \"DeepInfra\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \"Done. hello.txt\"}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000002-deepseek\", \"object\": \"chat.completion.chunk\", \"created\": 1762000002, \"model\": \"deepseek/deepseek-v4.1-flash\", \"provider\": \"DeepInfra\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \" contains a greeting.\"}, \"finish_reason\": \"stop\", \"native_finish_reason\": \"stop\"}]}\n\n",
+   "data: {\"id\": \"gen-1762000002-deepseek\", \"object\": \"chat.completion.chunk\", \"created\": 1762000002, \"model\": \"deepseek/deepseek-v4.1-flash\", \"provider\": \"DeepInfra\", \"choices\": [], \"usage\": {\"prompt_tokens\": 1880, \"completion_tokens\": 31, \"total_tokens\": 1911, \"cost\": 9.13e-05}}\n\n",
+   "data: [DONE]\n\n"
+  ],
+  "expect_details": [
+   {
+    "type": "reasoning.text",
+    "text": "Okay, the file already exists, so I just report.",
+    "format": "unknown",
+    "index": 0
+   }
+  ]
+ },
+ "local": {
+  "model": "qwen3-coder:30b",
+  "note": "Shape of the executor LLM proxy's answers for a local Ollama model (plain reasoning string, no reasoning_details, no cost; one chunk per field, as inference.ollama_native.stream_chunks emits).",
+  "completion": {
+   "id": "chatcmpl-local-7",
+   "object": "chat.completion",
+   "created": 1762000003,
+   "model": "qwen3-coder:30b",
+   "choices": [
+    {
+     "index": 0,
+     "finish_reason": "tool_calls",
+     "message": {
+      "role": "assistant",
+      "content": "",
+      "reasoning": "I need a shell call.",
+      "tool_calls": [
+       {
+        "id": "call_local_0",
+        "type": "function",
+        "function": {
+         "name": "run_shell_command",
+         "arguments": "{\"command\": \"ls\"}"
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "usage": {
+    "prompt_tokens": 2400,
+    "completion_tokens": 44,
+    "total_tokens": 2444
+   }
+  },
+  "events": [
+   "data: {\"id\": \"chatcmpl-local-7\", \"object\": \"chat.completion.chunk\", \"created\": 1762000003, \"model\": \"qwen3-coder:30b\", \"choices\": [{\"index\": 0, \"delta\": {\"role\": \"assistant\", \"reasoning\": \"I need a shell call.\"}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"chatcmpl-local-7\", \"object\": \"chat.completion.chunk\", \"created\": 1762000003, \"model\": \"qwen3-coder:30b\", \"choices\": [{\"index\": 0, \"delta\": {\"tool_calls\": [{\"index\": 0, \"id\": \"call_local_0\", \"type\": \"function\", \"function\": {\"name\": \"run_shell_command\", \"arguments\": \"{\\\"command\\\": \\\"ls\\\"}\"}}]}, \"finish_reason\": \"tool_calls\"}]}\n\n",
+   "data: {\"id\": \"chatcmpl-local-7\", \"object\": \"chat.completion.chunk\", \"created\": 1762000003, \"model\": \"qwen3-coder:30b\", \"choices\": [], \"usage\": {\"prompt_tokens\": 2400, \"completion_tokens\": 44, \"total_tokens\": 2444}}\n\n",
+   "data: [DONE]\n\n"
+  ],
+  "expect_details": [],
+  "expect_reasoning": "I need a shell call."
+ },
+ "google": {
+  "model": "google/gemini-3-pro-preview",
+  "note": "Shapes of OpenRouter chat answers for google/* thinking models (reasoning.text + reasoning.encrypted thought signature bound to the tool call id). Synthetic values.",
+  "completion": {
+   "id": "gen-1762000004-google",
+   "object": "chat.completion",
+   "created": 1762000004,
+   "model": "google/gemini-3-pro-preview",
+   "provider": "Google AI Studio",
+   "choices": [
+    {
+     "index": 0,
+     "finish_reason": "tool_calls",
+     "native_finish_reason": "STOP",
+     "message": {
+      "role": "assistant",
+      "content": "",
+      "reasoning": "**Planning** I'll run one command.",
+      "reasoning_details": [
+       {
+        "type": "reasoning.text",
+        "text": "**Planning** I'll run one command.",
+        "format": "google-gemini-v1",
+        "index": 0
+       },
+       {
+        "type": "reasoning.encrypted",
+        "data": "CiQBjz1rX2DummyThoughtSignatureForTestsAAAA",
+        "id": "tool_run_shell_command_k3",
+        "format": "google-gemini-v1",
+        "index": 0
+       }
+      ],
+      "tool_calls": [
+       {
+        "id": "tool_run_shell_command_k3",
+        "type": "function",
+        "function": {
+         "name": "run_shell_command",
+         "arguments": "{\"command\":\"ls\"}"
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "usage": {
+    "prompt_tokens": 8000,
+    "completion_tokens": 150,
+    "total_tokens": 8150,
+    "cost": 0.0115,
+    "completion_tokens_details": {
+     "reasoning_tokens": 120
+    }
+   }
+  },
+  "events": [
+   ": OPENROUTER PROCESSING\n\n",
+   "data: {\"id\": \"gen-1762000004-google\", \"object\": \"chat.completion.chunk\", \"created\": 1762000004, \"model\": \"google/gemini-3-pro-preview\", \"provider\": \"Google AI Studio\", \"choices\": [{\"index\": 0, \"delta\": {\"role\": \"assistant\", \"content\": \"\", \"reasoning\": \"**Planning** I'll run one command.\", \"reasoning_details\": [{\"type\": \"reasoning.text\", \"text\": \"**Planning** I'll run one command.\", \"format\": \"google-gemini-v1\", \"index\": 0}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000004-google\", \"object\": \"chat.completion.chunk\", \"created\": 1762000004, \"model\": \"google/gemini-3-pro-preview\", \"provider\": \"Google AI Studio\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \"\", \"reasoning_details\": [{\"type\": \"reasoning.encrypted\", \"data\": \"CiQBjz1rX2DummyThoughtSignatureForTestsAAAA\", \"id\": \"tool_run_shell_command_k3\", \"format\": \"google-gemini-v1\", \"index\": 0}], \"tool_calls\": [{\"index\": 0, \"id\": \"tool_run_shell_command_k3\", \"type\": \"function\", \"function\": {\"name\": \"run_shell_command\", \"arguments\": \"{\\\"command\\\":\\\"ls\\\"}\"}}]}, \"finish_reason\": null}]}\n\n",
+   "data: {\"id\": \"gen-1762000004-google\", \"object\": \"chat.completion.chunk\", \"created\": 1762000004, \"model\": \"google/gemini-3-pro-preview\", \"provider\": \"Google AI Studio\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \"\"}, \"finish_reason\": \"tool_calls\", \"native_finish_reason\": \"STOP\"}]}\n\n",
+   "data: {\"id\": \"gen-1762000004-google\", \"object\": \"chat.completion.chunk\", \"created\": 1762000004, \"model\": \"google/gemini-3-pro-preview\", \"provider\": \"Google AI Studio\", \"choices\": [], \"usage\": {\"prompt_tokens\": 8000, \"completion_tokens\": 150, \"total_tokens\": 8150, \"cost\": 0.0115, \"completion_tokens_details\": {\"reasoning_tokens\": 120}}}\n\n",
+   "data: [DONE]\n\n"
+  ],
+  "expect_details": [
+   {
+    "type": "reasoning.text",
+    "text": "**Planning** I'll run one command.",
+    "format": "google-gemini-v1",
+    "index": 0
+   },
+   {
+    "type": "reasoning.encrypted",
+    "data": "CiQBjz1rX2DummyThoughtSignatureForTestsAAAA",
+    "id": "tool_run_shell_command_k3",
+    "format": "google-gemini-v1",
+    "index": 0
+   }
+  ]
+ }
+}

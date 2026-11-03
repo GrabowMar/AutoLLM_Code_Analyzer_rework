@@ -26,15 +26,15 @@ grade it with a hidden test suite, and score the code with 33 analysis tools.
 
 Benchmarks tell you how a model scores on puzzles; they say little about
 the quality of a full application it builds. Here the experiment is
-end-to-end: you pick an app spec and a set of models (from
+end-to-end: you pick a task and a set of models (from
 [OpenRouter][openrouter], or your own Ollama / OpenAI-compatible server),
 and for each model the platform
 
-1. **generates** the app. In the primary *agent* mode a coding-agent
-   harness (OpenCode, mini-swe-agent or Aider) works on a stack skeleton in
-   an isolated sandbox, with the model behind a budget-enforcing gateway;
-   template and single-prompt modes cover one-shot comparisons
-   ([generation](docs/GENERATION_PROCESS.md)),
+1. **generates** the app: a coding-agent harness (OpenCode, mini-swe-agent,
+   Aider, …) works on a stack starter in an isolated sandbox, with the model
+   behind a budget-enforcing gateway; *slot mode* regenerates one part of a
+   generated app many times to find patterns
+   ([generation](docs/GENERATION_PROCESS.md), [slot mode](docs/SLOT_MODE.md)),
 2. **grades** it: the built app is deployed with no network and checked by
    a hidden conformance suite the model never saw,
 3. **runs it** in its own container so you can click through the live app,
@@ -45,14 +45,15 @@ and for each model the platform
    ([analyzer guide](docs/ANALYZER_GUIDE.md)),
 5. **compares** the results in statistics, rankings and study reports.
 
-Comparisons are run as **experiments**: apps × conditions (model, harness,
-sampling preset, profile) × repeats, with a pre-registered baseline, a
-reproducibility seed, a live monitor, cron schedules and post-run analysis
-([experiments](docs/EXPERIMENTS.md)). A dedicated executor process runs every
-job under leases and fair capacity lanes, so runs survive web restarts
+Comparisons are run as **studies**: tasks × conditions (model, stack,
+harness preset, prompts, budget preset, …) × repeats, with an analysis plan,
+reproducibility seeds, cost estimates and spend caps, a live monitor, cron
+schedules and post-run analysis ([studies](docs/STUDIES.md),
+[budget](docs/BUDGET.md)). A dedicated executor process runs every generation
+run under leases and fair capacity lanes, so runs survive web restarts
 ([execution](docs/EXECUTION.md)). Study tooling covers deduplicated findings,
-build-healing ablation, a manual-review sample and Markdown/LaTeX study
-reports ([study tables](docs/STUDY_TABLES.md)).
+a manual-review sample and Markdown/LaTeX study reports
+([study tables](docs/STUDY_TABLES.md)).
 
 Outward, the platform exposes a REST API with personal tokens, an MCP server
 for Claude, ChatGPT and other MCP clients, GitHub export and webhooks

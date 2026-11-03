@@ -1,0 +1,5 @@
+name: Stack fragment, Go + React (SQLite)
+role: fragment
+modes: [app, slot]
+variables: []
+tags: [stack]

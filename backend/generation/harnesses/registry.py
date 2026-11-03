@@ -1,7 +1,9 @@
 """Harness registry: every adapter, and whether a study may use it (spec sections 5.3 and 6.15).
 
-An adapter is **enabled** only when it asks to be (``wants_enabled``), its facts have no open questions
-and the operator has not switched it off (``settings.AGENT_HARNESSES_DISABLED``). Registering an adapter
+An adapter is **enabled** only when it asks to be (``wants_enabled``), its facts have no open questions,
+the gateway can serve its front protocol for some endpoint (a translate-only harness needs its translator
+in ``settings.GATEWAY_TRANSLATORS``) and the operator has not switched it off
+(``settings.AGENT_HARNESSES_DISABLED``). Registering an adapter
 that asks to be enabled while ``facts.open_questions`` is non-empty is refused (``HarnessRegistryError``):
 an unverified harness must never reach a study by accident. A disabled adapter is still listed, with its
 ``blocked_reason``, and the plan resolver turns it into the issue ``harness_not_enabled``
@@ -45,6 +47,7 @@ __all__ = [
     "is_enabled",
     "plan_issues",
     "require_enabled",
+    "servable",
 ]
 
 ADAPTER_CLASSES: Final[tuple[type[HarnessAdapter], ...]] = (
@@ -109,15 +112,33 @@ def validate(adapter: HarnessAdapter) -> None:
         raise HarnessRegistryError(msg)
 
 
-def _blocked_reason(adapter: HarnessAdapter, disabled: Iterable[str]) -> str | None:
+ENDPOINT_KINDS: Final = ("openrouter", "local_proxy")
+
+
+def servable(adapter: HarnessAdapter, translators: frozenset[str]) -> bool:
+    """True when the gateway can serve the adapter's front protocol for at least one endpoint kind."""
+    return any(adapter.protocol_mode(endpoint_kind=kind, translators=translators) for kind in ENDPOINT_KINDS)
+
+
+def _blocked_reason(
+    adapter: HarnessAdapter,
+    disabled: Iterable[str],
+    translators: frozenset[str] = frozenset(),
+) -> str | None:
     if adapter.name in set(disabled):
         return "disabled by the operator (AGENT_HARNESSES_DISABLED)"
     if adapter.facts.open_questions:
         reason = adapter.blocked_reason or "facts have open questions"
         return f"{reason}; open questions: " + "; ".join(adapter.facts.open_questions)
+    reasons = []
     if not adapter.wants_enabled:
-        return adapter.blocked_reason
-    return None
+        reasons.append(adapter.blocked_reason)
+    if not servable(adapter, translators):
+        # A translate-only harness (Gemini CLI) waits for WP-06's translator, whatever its facts say.
+        reasons.append(
+            f"the gateway has no {adapter.protocol} translator yet (settings.GATEWAY_TRANSLATORS)",
+        )
+    return "; ".join(r for r in reasons if r) or None
 
 
 @cache
@@ -140,9 +161,10 @@ def entries() -> list[RegistryEntry]:
     from django.conf import settings
 
     disabled = tuple(getattr(settings, "AGENT_HARNESSES_DISABLED", ()) or ())
+    translators = _gateway_translators()
     out = []
     for adapter in _adapters():
-        reason = _blocked_reason(adapter, disabled)
+        reason = _blocked_reason(adapter, disabled, translators)
         out.append(RegistryEntry(adapter=adapter, enabled=reason is None, blocked_reason=reason))
     return out
 

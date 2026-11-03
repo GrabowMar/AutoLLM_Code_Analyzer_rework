@@ -1,6 +1,6 @@
 # Models reference
 
-How the model catalog is populated and enriched (models.dev, Hugging Face, Epoch AI, LMArena), what the model page measures, which research covariates it exports, and how OpenRouter keys are resolved when a job runs.
+How the model catalog is populated and enriched (models.dev, Hugging Face, Epoch AI, LMArena), what the model page measures, which research covariates it exports, and how OpenRouter keys are resolved when a run starts.
 
 ## The model catalog
 
@@ -13,7 +13,7 @@ How the model catalog is populated and enriched (models.dev, Hugging Face, Epoch
 
 Each row stores provider, display name, capability flags (function calling, vision, streaming, JSON mode), context window and max output tokens, per-token pricing, the raw payload (`capabilities_json`) and structured `metadata`. Endpoint models also carry `served_model_name`, digest, quantization, parameter size, family, an optional `num_ctx_override`, and `is_available` / `is_hidden`. A derived `cost_efficiency` score (0 to 1, free models score 1.0) feeds the rankings.
 
-Visibility goes through `LLMModel.objects.visible_to(user)`: everyone sees the OpenRouter catalog plus models of endpoints they may use, and staff see every row. An invisible model is a 404 everywhere, including job and condition creation.
+Visibility goes through `LLMModel.objects.visible_to(user)`: everyone sees the OpenRouter catalog plus models of endpoints they may use, and staff see every row. An invisible model is a 404 everywhere, including run and condition creation.
 
 ## Syncing from OpenRouter
 
@@ -101,7 +101,7 @@ Unknown or unparseable values are null, never a guessed number. A transient fail
 
 `active` comes from the first source that applies:
 
-1. `model_card_manual`: `CURATED_PARAMS` in `backend/llm_models/services/hf_metadata.py`, a hand-kept table that quotes each model card (DeepSeek-V4.1-Flash, DeepSeek-V4-Pro, GLM-5.3-Flash and Qwen3.8-Flash-Next so far). Add an entry by hand when a new model enters an experiment.
+1. `model_card_manual`: `CURATED_PARAMS` in `backend/llm_models/services/hf_metadata.py`, a hand-kept table that quotes each model card (DeepSeek-V4.1-Flash, DeepSeek-V4-Pro, GLM-5.3-Flash and Qwen3.8-Flash-Next so far). Add an entry by hand when a new model enters a study.
 2. `name_pattern`: the name states it (`30B-A3B`), rounded as in the name.
 3. `dense`: `config.json` was read and describes a dense model, so active = every checkpoint parameter. For a multimodal checkpoint that is an upper bound for text tokens, since the encoder runs only on images or audio.
 4. `config_estimate`: checkpoint total minus the inactive routed experts, `L_moe × (E − k) × 3 × hidden × moe_intermediate` (assumes SwiGLU experts). It is an estimate and can differ from published figures (DeepSeek-V3-style models: about 40.1B against the stated 37B, because it counts the MTP layer).
@@ -128,7 +128,7 @@ The Capabilities tab's **Sampling defaults** card puts three things side by side
 - **OpenRouter default**: the catalog's `default_parameters`, the reasoning default (on or off) and its effort; "not served via OpenRouter" for local models.
 - **What your runs sent**: `GET /api/models/detail/<slug>/sampling/`.
 
-The endpoint covers your jobs of the model (the insights scope, every status). For agent runs it reads what the gateway forced on every call (`resolved_bundle.gateway.forced_params`) and the sampling policy: under `provider_default` the gateway strips every other sampling key, so a key that was not forced was not sent and the provider's default applied. Template modes read the frozen `resolved_bundle.llm` (legacy jobs: their own fields). Under `harness_native`, or for a run that recorded no policy, an unforced key may have come from the harness, so it counts as unknown, never as "not sent". It returns `n_jobs`, `by_mode`, `policies`, `sources`, `params` (per key: `n_sent`, `n_not_sent`, `n_unknown` and the values sent with their counts), `harness_sampling_stripped` (keys the gateway removed, with job and call counts) and the sampling `presets` used.
+The endpoint covers your runs of the model (the insights scope, every status; `beyond_plan` runs left out) and reads each run's frozen manifest: `sampling.forced_params` (what the gateway forced on every call), `sampling.policy` and `sampling.stripped_params`. Under `provider_default` the gateway strips every other sampling key, so a key that was not forced was not sent and the provider's default applied. Under `harness_native`, or for a run without a manifest (`not_recorded`), an unforced key may have come from the harness, so it counts as unknown, never as "not sent". It returns `n_jobs` (runs), `by_mode` (run kinds; both key names kept for the model page), `policies`, `sources`, `params` (per key: `n_sent`, `n_not_sent`, `n_unknown` and the values sent with their counts), `harness_sampling_stripped` (keys the gateway removed, with run counts) and the sampling `presets` used.
 
 The authors' recommendation is stored, not applied: a run uses it only if a sampling preset sets those values.
 
@@ -155,20 +155,20 @@ A record a local route inherits from its catalog twin is always reported as `ass
 
 **Curating and importing:**
 
-1. `python manage.py import_external_covariates --suggest` prints the closest names in each source (difflib scores) for the models used in jobs and the local models, or for `--model` / `--job`. It writes nothing.
+1. `python manage.py import_external_covariates --suggest` prints the closest names in each source (difflib scores) for the models used in runs and the local models, or for `--model` / `--run`. It writes nothing.
 2. Edit the map entry: the exact names, `match`, and a note with the evidence.
 3. Run with `--dry-run`: it downloads, matches and prints each model's status, and warns about used models without an entry and twins missing from the database.
 4. Run it for real.
 
 ```bash
-python manage.py import_external_covariates [--epoch] [--lmarena] [--dry-run] [--model MODEL_ID ...] [--job JOB_UUID ...] [--suggest] [--map PATH]
+python manage.py import_external_covariates [--epoch] [--lmarena] [--dry-run] [--model MODEL_ID ...] [--run RUN_UUID ...] [--suggest] [--map PATH]
 ```
 
 | Flag | Effect |
 | --- | --- |
 | `--epoch`, `--lmarena` | Import only this source (default: both) |
 | `--model` (repeatable) | Only this model id |
-| `--job` (repeatable) | Only the model of this job |
+| `--run` (repeatable) | Only the model of this generation run |
 | `--suggest` | Print candidate names for curation; no writes |
 | `--map PATH` | Use another map file |
 | `--dry-run` | Download and match; write nothing |
@@ -179,7 +179,7 @@ Values are copied as the sources have them, errors included; the map notes flag 
 
 ### Covariates export
 
-`GET /api/models/covariates/?used_only=true|false&format=json|csv` (`backend/llm_models/services/model_covariates.py`) returns one row per model you can see. `used_only` (default `true`) keeps models with at least one of your jobs. JSON adds the column order, the sources with their licenses and reading notes; `format=csv` downloads `model_covariates_<used|all>_<YYYYMMDD>.csv` with formula-safe cells, `true`/`false` booleans, `;`-joined lists and empty cells for unknown values. Another format is a 400. The **Covariates CSV** button on the Models page downloads the used-only CSV.
+`GET /api/models/covariates/?used_only=true|false&format=json|csv` (`backend/llm_models/services/model_covariates.py`) returns one row per model you can see. `used_only` (default `true`) keeps models with at least one of your generation runs. JSON adds the column order, the sources with their licenses and reading notes; `format=csv` downloads `model_covariates_<used|all>_<YYYYMMDD>.csv` with formula-safe cells, `true`/`false` booleans, `;`-joined lists and empty cells for unknown values. Another format is a 400. The **Covariates CSV** button on the Models page downloads the used-only CSV.
 
 The 73 columns, in groups (exact order: `COLUMNS` in that module):
 
@@ -194,9 +194,9 @@ The 73 columns, in groups (exact order: `COLUMNS` in that module):
 | Epoch AI | `epoch_model`, `epoch_publication_date`, `epoch_parameters`, `epoch_active_params`, `epoch_training_compute_flop`, `epoch_training_dataset_size`, `epoch_confidence`, `epoch_accessibility`, `epoch_match`, `epoch_fetched_at` |
 | LMArena | `lmarena_webdev_name`, `lmarena_webdev_rating` with `_lower` / `_upper`, `lmarena_webdev_votes`, `lmarena_webdev_rank`, `lmarena_webdev_n_ranked`, `lmarena_text_coding_rating`, `lmarena_text_coding_votes`, `lmarena_agent_score` with `_lower` / `_upper`, `lmarena_publish_date`, `lmarena_match`, `lmarena_fetched_at` |
 | Recommended sampling | `recommended_temperature`, `recommended_top_p`, `recommended_top_k`, `recommended_sampling_boilerplate` (`generation_config.json` was generated from the model config): the authors' recommendation, not what a run used |
-| This platform | `n_jobs`, `n_completed_jobs` (your jobs) |
+| This platform | `n_jobs`, `n_completed_jobs` (your generation runs; key names kept) |
 
-The unit is the model, never the job. Null means not known, never 0. A local route takes its model-intrinsic covariates (openness, license, parameters, architecture, popularity, recommended sampling, external scores) from its catalog twin and lists them in `inherited_fields`; `checkpoint` and `reported` parameter counts are different quantities ([Parameter counts](#parameter-counts)).
+The unit is the model, never the run. Null means not known, never 0. A local route takes its model-intrinsic covariates (openness, license, parameters, architecture, popularity, recommended sampling, external scores) from its catalog twin and lists them in `inherited_fields`; `checkpoint` and `reported` parameter counts are different quantities ([Parameter counts](#parameter-counts)).
 
 ## Model page data
 
@@ -205,18 +205,18 @@ The unit is the model, never the job. Null means not known, never 0. A local rou
 | `GET /api/models/detail/<slug>/` | The catalog row, with `twin` for local endpoint models ([catalog twins](#local-endpoint-models-and-catalog-twins)) |
 | `GET /api/models/detail/<slug>/sampling/` | The sampling parameters your runs of this model sent ([Sampling defaults](#sampling-defaults)) |
 | `GET /api/models/covariates/?used_only=&format=json\|csv` | One covariate row per model ([Covariates export](#covariates-export)) |
-| `GET /api/models/detail/<slug>/insights/` | What the platform measured for **your** jobs with this model: build success and conformance with Wilson intervals, tokens, cost (per kLOC of source code), findings of each job's latest result per tool (by tool, with the tools' own labels; level counts are the normalized heuristic, with unrated tools' findings counted as `unrated` and dependency advisories in their own group), per-template results, experiments, ranking positions, plus global catalog percentiles (price, context, Artificial Analysis indices) and local benchmark results (`backend/llm_models/services/insights.py`) |
+| `GET /api/models/detail/<slug>/insights/` | What the platform measured for **your** generation runs with this model: build success and conformance with Wilson intervals, tokens, cost (per kLOC of source code), findings of each run's latest result per tool (by tool, with the tools' own labels; level counts are the normalized heuristic, with unrated tools' findings counted as `unrated` and dependency advisories in their own group), per-template results, experiments, ranking positions, plus global catalog percentiles (price, context, Artificial Analysis indices) and local benchmark results (`backend/llm_models/services/insights.py`) |
 | `GET /api/models/detail/<slug>/endpoints/?refresh=` | Live OpenRouter provider list (empty for endpoint models) |
 | `GET /api/models/detail/<slug>/related/` | Other models from the same provider and source |
 | `GET /api/models/comparison/?models=a,b,…` | Side-by-side data for up to 6 models |
 
-The model page's **Generation data** tab (`?tab=generation`) shows what this platform recorded about how the model generated, over your jobs (`model_id` is the model's numeric pk):
+The model page's **Generation data** tab (`?tab=generation`) shows what this platform recorded about how the model generated, over your generation runs (`model_id` is the model's numeric pk):
 
 | Panel | Endpoint | Shows |
 | --- | --- | --- |
 | Agent behaviour | `GET /api/generation/models/<model_id>/behaviour/` | Trajectory summaries per harness: actions, builds, tests, servers, context growth ([Trajectory and behaviour metrics](/docs/GENERATION_PROCESS#trajectory-and-behaviour-metrics)) |
 | Providers and calls | `GET /api/generation/models/<model_id>/call-telemetry/?mode=` | Per upstream provider: TTFT, decode and end-to-end speed, call duration, cache hits, reasoning share, retries, errors, stats coverage ([Per-call telemetry](/docs/GENERATION_PROCESS#per-call-telemetry)) |
-| Same-setup variability | `GET /api/generation/models/<model_id>/variability/` | Spread between runs that share a setup, and whether seeded replays reproduced ([Run-to-run variation](/docs/EXPERIMENTS#run-to-run-variation)) |
+| Same-setup variability | `GET /api/generation/models/<model_id>/variability/` | Spread between runs that share a setup, and whether seeded replays reproduced ([Run-to-run variation](/docs/STUDIES#run-to-run-variation)) |
 
 All three are descriptive (n everywhere, no tests). For a local endpoint model they cover the route's own runs only: its catalog twin's runs are never pooled with them.
 
@@ -224,11 +224,11 @@ The list endpoint `GET /api/models/` filters by `search`, `provider`, `capabilit
 
 ## API key resolution
 
-Every OpenRouter call made for a user resolves its key through `backend/credentials/services/resolver.py`. That covers generation jobs (including the key handed to an agent sandbox's gateway), experiment launch checks, and the `llm_review` analyzer.
+Every OpenRouter call made for a user resolves its key through `backend/credentials/services/resolver.py`. That covers generation runs (including the key handed to an agent sandbox's gateway), study launch checks, and the `llm_review` analyzer.
 
 1. The user's own key, stored encrypted under **Settings → API keys** (`PUT /api/credentials/openrouter/`), wins if set.
 2. Otherwise the deployment-wide `OPENROUTER_API_KEY` env var is used, but only while `OPENROUTER_ALLOW_GLOBAL_KEY_FALLBACK` is `True` (the default).
-3. Otherwise the call fails with "No OpenRouter API key is configured for this account." Experiment launch reports this as `missing_api_key`.
+3. Otherwise the call fails with "No OpenRouter API key is configured for this account." Study launch reports this as `missing_api_key`.
 
 Catalog sync and refresh skip step 2 (see above). Models on your own endpoints need no OpenRouter key: their access is resolved per endpoint by `backend/inference/access.py`.
 

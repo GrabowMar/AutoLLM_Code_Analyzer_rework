@@ -103,3 +103,10 @@ def test_gateway_translators_setting_is_defined_and_only_lists_working_translato
             pytest.fail(f"{name} is listed in GATEWAY_TRANSLATORS but its translator is unavailable")
         except Exception:  # noqa: BLE001,S110 -- a real translator may reject the empty body
             pass
+
+
+def test_listed_translators_ship_in_the_gateway_image():
+    from backend.generation.tests.wp06_gateway.support import common
+
+    assert set(settings.GATEWAY_TRANSLATORS) <= set(common.TRANSLATORS)
+    assert set(settings.GATEWAY_TRANSLATORS) == {"anthropic_messages", "openai_responses", "gemini_generate"}

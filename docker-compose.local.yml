@@ -159,6 +159,8 @@ services:
       LLM_GATEWAY_EGRESS_SUBNET: "${LLM_GATEWAY_EGRESS_SUBNET:-10.213.0.0/24}"
       LLMPROXY_SUBNET: "${LLMPROXY_SUBNET:-172.30.99.0/29}"
       APPS_DIND_LLMPROXY_ADDR: "${APPS_DIND_LLMPROXY_ADDR:-172.30.99.3}"
+      # Firewall exception for sandbox gateways -> the dependency caches (WP-05 depcache).
+      DEPCACHE_SUBNET: "${DEPCACHE_SUBNET:-172.30.98.0/28}"
     volumes:
       - apps_dind_data:/var/lib/docker
       - apps_dind_certs:/certs
@@ -167,6 +169,9 @@ services:
       llmproxy:
         # Override together with LLMPROXY_SUBNET / LLM_PROXY_ADDR (same subnet).
         ipv4_address: "${APPS_DIND_LLMPROXY_ADDR:-172.30.99.3}"
+      depcache:
+        # Fixed, outside the caches' .2-.5, so a dynamic address never takes a cache's static one.
+        ipv4_address: "${APPS_DIND_DEPCACHE_ADDR:-172.30.98.14}"
     # Keep APPS_DIND_MEM_LIMIT equal to this cap (django/executor read it).
     mem_limit: ${APPS_DIND_MEM_LIMIT:-4g}
     cpus: ${APPS_DIND_CPUS:-4}

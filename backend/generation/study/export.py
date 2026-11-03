@@ -5,8 +5,9 @@ per run, every attempt and beyond-plan run included and labelled; ``started_at``
 ``same_author``, request classes and truncation), ``attrition.csv`` (``runs.queries.attrition``),
 ``files.csv`` (app scope through ``RunView.files``), ``evaluations.jsonl`` (every ``RunEvaluation``, retests
 included), ``locks/<run>.json`` (the recorded ``resolved_lock``; ``recorded: false`` when none was resolved,
-never "no dependencies") and, for slot studies, ``patterns/`` from WP-13's exporter when it is available
-(``patterns/README.txt`` says so otherwise). Missing measurements are empty cells, never 0.
+never "no dependencies") and, for slot studies, ``patterns/`` from ``export.services.patterns`` (the latest
+completed pattern run's export; ``patterns/README.txt`` always states ``exported``, ``not_measured`` or ``error``).
+Missing measurements are empty cells, never 0.
 """
 
 from __future__ import annotations
@@ -252,12 +253,8 @@ def export_zip(study: Study) -> tempfile.SpooledTemporaryFile:
 
 
 def _patterns(archive: zipfile.ZipFile, study: Study) -> None:
-    try:
-        from backend.generation.patterns import export as pattern_export
+    """``patterns/`` from the pattern exporter: always at least ``README.txt`` (exported / not_measured / error)."""
+    from backend.export.services.patterns import study_pattern_files
 
-        files = pattern_export.study_files(study)  # type: ignore[attr-defined]
-    except (ImportError, AttributeError, NotImplementedError):
-        archive.writestr("patterns/README.txt", "Pattern export is not available yet (WP-13).\n")
-        return
-    for name, data in files.items():
+    for name, data in study_pattern_files(study).items():
         archive.writestr(f"patterns/{name}", data)

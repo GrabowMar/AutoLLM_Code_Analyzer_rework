@@ -176,19 +176,29 @@ def manifest_payload() -> dict:
             "model": {"value": "deepseek/deepseek-v4.1-flash"},
             "stack_profile": {"ref": PIN, "content_hash": SHA},
         },
-        "task": {"ref": "crud_todo_list@1", "structured_hash": SHA, "variant": "standard", "prose_sha": SHA2},
+        "task": {
+            "ref": "crud_todo_list@1#" + "c" * 12,
+            "structured_hash": SHA,
+            "variant": "standard",
+            "prose_sha": SHA2,
+        },
         "model": {
             "slug": "deepseek/deepseek-v4.1-flash",
             "endpoint": {"id": 1, "kind": "openrouter", "cost_basis": "billed"},
             "pricing": {"input_per_mtok": 0.1, "output_per_mtok": 0.3, "source": "openrouter", "as_of": "2026-11-01"},
         },
         "sampling": {
-            "ref": "t07@1",
+            "ref": "t07@1#" + "d" * 12,
             "policy": "explicit",
             "forced_params": {"temperature": 0.7},
             "seed_forwarded": True,
         },
-        "resources": {"ref": "frugal@1", "generation_policy_hash": SHA, "budget_basis": "usd", "effective": {}},
+        "resources": {
+            "ref": "frugal@1#" + "e" * 12,
+            "generation_policy_hash": SHA,
+            "budget_basis": "usd",
+            "effective": {},
+        },
         "gateway": {
             "image_digest": "sha256:" + "1" * 64,
             "front_protocol": "openai_chat",
@@ -199,7 +209,7 @@ def manifest_payload() -> dict:
         "harness": {
             "name": "opencode",
             "version": "1.18.35",
-            "preset_ref": "opencode-native@1",
+            "preset_ref": "opencode-native@1#" + "f" * 12,
             "image": "agent-opencode",
             "image_digest": "sha256:" + "2" * 64,
             "command_sha": SHA,
@@ -218,7 +228,10 @@ def manifest_payload() -> dict:
             ],
             SHA,
         ),
-        "planned_evaluation": {"eval_suite": {"ref": "eval-v2@1", "content_hash": SHA}, "eval_level": "security"},
+        "planned_evaluation": {
+            "eval_suite": {"ref": "eval-v2@1#" + "0" * 12, "content_hash": SHA},
+            "eval_level": "security",
+        },
         "network_policy": "packages",
         "sandbox": {"memory": "2g", "nano_cpus": 1_000_000_000},
         "created_at": "2026-11-03T00:00:00Z",
@@ -732,6 +745,58 @@ def test_manifest_reference_runs_need_no_model():
         payload[key] = None
     payload.update(protocol="ref@1", kind="reference")
     manifest.RunManifest.model_validate(payload)
+
+
+# Follow-up #4: every library ref of a manifest is pinned (slug@v#hash12); a bare slug@v is refused.
+MANIFEST_REF_PATHS = (
+    ("task", "ref"),
+    ("sampling", "ref"),
+    ("resources", "ref"),
+    ("harness", "preset_ref"),
+    ("starter", "ref"),
+)
+
+
+@pytest.mark.parametrize(("section", "field"), MANIFEST_REF_PATHS)
+def test_manifest_library_refs_must_be_pinned(section, field):
+    payload = manifest_payload()
+    manifest.RunManifest.model_validate(payload)
+    payload[section] = {**payload[section], field: "x@1"}
+    with pytest.raises(ValidationError, match=field):
+        manifest.RunManifest.model_validate(payload)
+
+
+def test_manifest_factor_and_eval_suite_refs_must_be_pinned():
+    with pytest.raises(ValidationError):
+        manifest.FactorRecord.model_validate({"ref": "x@1", "content_hash": SHA})
+    with pytest.raises(ValidationError):
+        manifest.ManifestEvalSuite.model_validate({"ref": "eval-v2@1", "content_hash": SHA})
+    payload = manifest_payload()
+    payload["planned_evaluation"]["eval_suite"]["ref"] = "eval-v2@1"
+    with pytest.raises(ValidationError):
+        manifest.RunManifest.model_validate(payload)
+
+
+def test_manifest_endpoint_freezes_local_serving_settings():
+    endpoint = manifest.ManifestEndpoint.model_validate(
+        {
+            "id": 3,
+            "kind": "ollama",
+            "served_model_name": "qwen3:8b",
+            "cost_basis": "free",
+            "num_ctx": 32768,
+            "keep_alive": "30m",
+            "api_flavor": "native",
+            "capabilities": ["completion", "tools"],
+        },
+    )
+    assert endpoint.num_ctx == 32768
+    assert (
+        manifest.ManifestEndpoint.model_validate({"id": 1, "kind": "openrouter", "cost_basis": "billed"}).num_ctx
+        is None
+    )
+    with pytest.raises(ValidationError):
+        manifest.ManifestEndpoint.model_validate({"id": 1, "kind": "ollama", "cost_basis": "free", "num_ctx": 0})
 
 
 def test_factor_record_has_one_form():

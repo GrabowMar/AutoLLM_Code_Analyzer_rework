@@ -6,8 +6,11 @@ every byte it sends out goes through here. The gateway
 * serves the harness's own **front protocol** (``GatewayConfig.front_protocol``): OpenAI chat completions
   natively (opencode, mini-swe-agent, aider, goose, qwen-code); Anthropic Messages (Claude Code) and
   OpenAI Responses (Codex) in **passthrough** to OpenRouter's native ``/messages`` and ``/responses``,
-  with the policy applied on the native body. Translators (Gemini; Anthropic and Responses for local
-  endpoints) are wave 3 and refused at startup until then;
+  with the policy applied on the native body, or in **translate** mode (any upstream, e.g. local
+  endpoints); Gemini ``generateContent`` (Gemini CLI) in translate mode only. Translate maps the native
+  body to canonical chat (``protocols/<front>.to_chat``), applies the chat policy, forwards to
+  ``/chat/completions`` and maps the answer back (``from_chat`` / ``StreamTranslator``); budgets,
+  request classes and the call record are the canonical ones, so they are identical across fronts;
 * holds the real upstream credential (the agent has a dummy key) and pins the model, sampling, seed,
   ``max_tokens``, reasoning, provider routing, ``session_id`` and ``cache_control`` handling, so the
   harness cannot drift its parameters or switch to a cheaper "small model";
@@ -75,6 +78,8 @@ from protocols.common import contains_images
 from protocols.common import json_or_none
 from protocols.common import sha
 from protocols.common import text_sha
+from protocols.translation import chat_error_text
+from protocols.translation import completion_sse
 
 GATEWAY_VERSION = 3
 EX_CONFIG = 78
@@ -325,6 +330,16 @@ def _is_boundary(tail: bytes) -> bool:
     return not tail or tail.endswith((b"\n\n", b"\r\n\r\n"))
 
 
+@dataclass
+class Exchange:
+    """A translated call: the native request, what its URL says (``request_options``) and the
+    ``translation_dropped`` counts, filled by ``to_chat`` and then by the answer's translator."""
+
+    native_body: Mapping[str, Any]
+    options: dict[str, Any]
+    dropped: dict[str, int]
+
+
 # =====================================================================================
 # The gateway
 # =====================================================================================
@@ -358,6 +373,9 @@ class Gateway:
             raise ConfigError(msg)
         assert upstream_cls is not None
         self.front = FRONTS[self.policy.front]
+        # The wire protocol to the upstream: the front itself, or canonical chat when translating.
+        self.translate = self.policy.mode == "translate"
+        self.wire: ModuleType = openai_chat if self.translate else self.front
         self.logs = LogWriter(log_dir)
         self.upstream = upstream_cls(self.policy, api_key=api_key, token=upstream_token, referer=referer, title=title)
         self.limits = budget_rules.BudgetLimits.from_config(self.policy.raw)
@@ -430,9 +448,24 @@ class Gateway:
                 self.refuse(handler, "unsupported_request", str(exc))
                 return
         request_class, raw_class = budget_rules.request_class(policy.request_class_source, headers)
-        upstream_body, diff = self.front.apply_policy_native(body, policy)
+        exchange: Exchange | None = None
+        if self.translate:
+            options_of = getattr(self.front, "request_options", None)
+            target = urlsplit(handler.path)
+            options = options_of(target.path, target.query) if options_of else {}
+            try:
+                chat_body, dropped = self.front.to_chat(body, **options)
+            except ValueError as exc:
+                self.refuse(handler, "unsupported_request", str(exc))
+                return
+            exchange = Exchange(body, options, dict(dropped))
+            # The canonical policy on the canonical body: identical for every translated front.
+            upstream_body, diff = openai_chat.apply_policy_native(chat_body, policy)
+            est_prompt = budget_rules.estimate_tokens(openai_chat.prompt_text(chat_body))
+        else:
+            upstream_body, diff = self.front.apply_policy_native(body, policy)
+            est_prompt = budget_rules.estimate_tokens(self.front.prompt_text(body))
         upstream_body = self.upstream.prepare(upstream_body)
-        est_prompt = budget_rules.estimate_tokens(self.front.prompt_text(body))
         try:
             reservation = self.ledger.reserve(request_class, est_prompt, policy.upstream_max_tokens)
         except budget_rules.Refusal as refusal:
@@ -452,7 +485,7 @@ class Gateway:
                     first_main = not self._system_prompt_logged
                     self._system_prompt_logged = True
             try:
-                outcome = self._forward(handler, upstream_body, headers, reservation, progress)
+                outcome = self._forward(handler, upstream_body, headers, reservation, progress, exchange)
             except BaseException as exc:
                 # A gateway failure after the upstream answered is still a call the upstream bills.
                 outcome = Outcome(
@@ -477,6 +510,7 @@ class Gateway:
                 started=started,
                 rate_wait=rate_wait,
                 first_main=first_main,
+                exchange=exchange,
             )
 
     def _refused(self, handler: Handler, refusal: budget_rules.Refusal, request_class: str, est: int) -> None:
@@ -501,7 +535,7 @@ class Gateway:
         """Open the upstream request, retrying transient failures before any byte reaches the harness."""
         retries = 0
         statuses = self.upstream.retry_statuses()
-        path = self.upstream.path(self.front.UPSTREAM_PATH)
+        path = self.upstream.path(self.wire.UPSTREAM_PATH)
         while True:
             conn = None
             try:
@@ -531,6 +565,7 @@ class Gateway:
         harness_headers: Mapping[str, str],
         reservation: budget_rules.Reservation,
         progress: dict[str, Any] | None = None,
+        exchange: Exchange | None = None,
     ) -> Outcome:
         progress = {} if progress is None else progress
         stream = bool(body.get("stream"))
@@ -541,16 +576,51 @@ class Gateway:
         )
         data = json.dumps(body).encode()
         if not stream:
-            return self._non_stream(handler, data, headers, progress)
-        return self._stream(handler, data, headers, progress)
+            return self._non_stream(handler, data, headers, progress, exchange)
+        return self._stream(handler, data, headers, progress, exchange)
 
     def _summary(self, raw: bytes) -> dict[str, Any]:
         payload = json_or_none(raw)
         if isinstance(payload, Mapping):
-            return self.front.summarize(payload)
+            return self.wire.summarize(payload)
         return {"error": raw[:2000].decode(errors="replace") or "empty upstream response"}
 
-    def _non_stream(self, handler: Handler, data: bytes, headers: dict[str, str], progress: dict[str, Any]) -> Outcome:
+    # -- translate mode: native answers from canonical ones ------------------------------------------
+
+    def _native_error(self, status: int, payload: Any, raw: bytes) -> tuple[int, dict[str, Any]]:
+        """An upstream chat error (or an unusable answer) in the front's native error shape."""
+        if isinstance(payload, Mapping):
+            message, code = chat_error_text(payload)
+        else:
+            message, code = (raw[:500].decode(errors="replace") or "empty upstream response"), None
+        return self.front.upstream_error(status if status >= 400 else 502, message, code)
+
+    @staticmethod
+    def _is_answer(status: int, payload: Any) -> bool:
+        return (
+            status < 400 and isinstance(payload, Mapping) and not (payload.get("error") and not payload.get("choices"))
+        )
+
+    def _send_translated(self, handler: Handler, status: int, raw: bytes, exchange: Exchange) -> bool:
+        payload = json_or_none(raw)
+        if self._is_answer(status, payload):
+            native = self.front.from_chat(payload, exchange.native_body, dropped=exchange.dropped, **exchange.options)
+            return handler.send_json(status, native)
+        return handler.send_json(*self._native_error(status, payload, raw))
+
+    def _translator(self, exchange: Exchange | None) -> Any:
+        if exchange is None:
+            return None
+        return self.front.StreamTranslator(exchange.native_body, dropped=exchange.dropped, **exchange.options)
+
+    def _non_stream(
+        self,
+        handler: Handler,
+        data: bytes,
+        headers: dict[str, str],
+        progress: dict[str, Any],
+        exchange: Exchange | None = None,
+    ) -> Outcome:
         try:
             conn, resp, retries = self._open(data, headers, stream=False)
         except UpstreamUnavailableError as exc:
@@ -574,7 +644,10 @@ class Gateway:
             )
         conn.close()
         ctype = resp.getheader("Content-Type", "application/json")
-        client_gone = not handler.send_raw(resp.status, ctype, raw)
+        if exchange is not None:
+            client_gone = not self._send_translated(handler, resp.status, raw, exchange)
+        else:
+            client_gone = not handler.send_raw(resp.status, ctype, raw)
         return Outcome(
             resp.status,
             self._summary(raw),
@@ -584,7 +657,16 @@ class Gateway:
             upstream_status=resp.status,
         )
 
-    def _stream(self, handler: Handler, data: bytes, headers: dict[str, str], progress: dict[str, Any]) -> Outcome:
+    def _stream(
+        self,
+        handler: Handler,
+        data: bytes,
+        headers: dict[str, str],
+        progress: dict[str, Any],
+        exchange: Exchange | None = None,
+    ) -> Outcome:
+        translator = self._translator(exchange)
+        native_ctype = getattr(translator, "content_type", "text/event-stream")
         box: dict[str, Any] = {}
         ready = threading.Event()
 
@@ -605,7 +687,7 @@ class Gateway:
             # The upstream is silent before its first byte (queueing, retries, a long think): keep the
             # harness's stream alive with protocol-native pings.
             if not started_stream:
-                alive = handler.start_stream("text/event-stream")
+                alive = handler.start_stream(native_ctype)
                 started_stream = True
             if alive:
                 alive = handler.write_chunk(self.front.PING)
@@ -615,7 +697,9 @@ class Gateway:
             if not started_stream:
                 handler.send_json(status, payload)
             elif alive:
-                handler.write_chunk(self.front.stream_error(status, payload))
+                handler.write_chunk(
+                    translator.fail(status, payload) if translator else self.front.stream_error(status, payload),
+                )
                 handler.end_stream()
             return Outcome(502, {}, exc.retries, transport_error=True, error=str(exc), stream=True)
         conn, resp, retries = box["result"]
@@ -623,8 +707,8 @@ class Gateway:
         ctype = resp.getheader("Content-Type", "application/json")
         if resp.status < 400 and "text/event-stream" in ctype:
             if not started_stream:
-                alive = handler.start_stream(ctype)
-            return self._relay(handler, conn, resp, retries, alive=alive)
+                alive = handler.start_stream(native_ctype if translator else ctype)
+            return self._relay(handler, conn, resp, retries, alive=alive, translator=translator)
         # An error (or a non-SSE body) where a stream was asked for.
         try:
             raw = resp.read()
@@ -633,7 +717,16 @@ class Gateway:
         finally:
             conn.close()
         gone = not alive
-        if not started_stream:
+        if translator is not None:
+            gone = not self._stream_translated(
+                handler,
+                translator,
+                resp.status,
+                raw,
+                started=started_stream,
+                alive=alive,
+            )
+        elif not started_stream:
             gone = not handler.send_raw(resp.status, ctype, raw)
         elif alive:
             payload = json_or_none(raw)
@@ -654,9 +747,47 @@ class Gateway:
             upstream_status=resp.status,
         )
 
-    def _relay(self, handler: Handler, conn: Any, resp: Any, retries: int, *, alive: bool) -> Outcome:
-        """Relay upstream SSE bytes unchanged, adding pings at event boundaries while upstream is silent."""
-        accumulator = self.front.StreamAccumulator()
+    def _stream_translated(
+        self,
+        handler: Handler,
+        translator: Any,
+        status: int,
+        raw: bytes,
+        *,
+        started: bool,
+        alive: bool,
+    ) -> bool:
+        """A non-SSE upstream answer where the harness asked for a stream: a whole completion is
+        re-encoded as the native stream, an error as the native error (in-stream once started)."""
+        payload = json_or_none(raw)
+        if self._is_answer(status, payload):
+            if not started:
+                alive = handler.start_stream(translator.content_type)
+            if alive:
+                alive = handler.write_chunk(translator.feed(completion_sse(payload)) + translator.finish())
+                handler.end_stream()
+            return alive
+        err_status, native = self._native_error(status, payload, raw)
+        if not started:
+            return handler.send_json(err_status, native)
+        if alive:
+            alive = handler.write_chunk(translator.fail(err_status, native))
+            handler.end_stream()
+        return alive
+
+    def _relay(
+        self,
+        handler: Handler,
+        conn: Any,
+        resp: Any,
+        retries: int,
+        *,
+        alive: bool,
+        translator: Any = None,
+    ) -> Outcome:
+        """Relay upstream SSE bytes unchanged (or through the front's translator), adding pings at event
+        boundaries while the upstream is silent. A translator only ever writes whole native events."""
+        accumulator = self.wire.StreamAccumulator()
         chunks: queue.Queue[bytes | BaseException | None] = queue.Queue()
 
         def reader() -> None:
@@ -680,7 +811,7 @@ class Gateway:
                 try:
                     item = chunks.get(timeout=self.ping_interval_s)
                 except queue.Empty:
-                    if alive and _is_boundary(tail):
+                    if alive and (translator is not None or _is_boundary(tail)):
                         alive = handler.write_chunk(self.front.PING)
                     if not alive:
                         break
@@ -694,12 +825,17 @@ class Gateway:
                     first_byte = time.time()
                 accumulator.feed(item)
                 tail = (tail + item)[-4:]
-                if alive:
-                    alive = handler.write_chunk(item)
+                out = translator.feed(item) if translator is not None else item
+                if alive and out:
+                    alive = handler.write_chunk(out)
                 if not alive:
                     break  # the harness went away: closing the upstream connection ends the call
         finally:
             conn.close()
+        if alive and translator is not None:
+            closing = translator.finish(error)
+            if closing:
+                alive = handler.write_chunk(closing)
         if alive:
             handler.end_stream()
         summary = accumulator.summary()
@@ -732,6 +868,7 @@ class Gateway:
         started: float,
         rate_wait: float,
         first_main: bool,
+        exchange: Exchange | None = None,
     ) -> None:
         summary = outcome.summary
         usage = summary.get("normalized_usage")
@@ -774,7 +911,7 @@ class Gateway:
             "attribution": self._attribution(headers),
             "front_protocol": self.policy.front,
             "protocol_mode": self.policy.mode,
-            "requested_model": native_body.get("model"),
+            "requested_model": native_body.get("model") or (exchange.options.get("model") if exchange else None),
             "requested_reasoning": self.front.requested_reasoning(native_body),
             "upstream_model": upstream_body.get("model"),
             "response_model": summary.get("model") if ok else None,
@@ -800,7 +937,7 @@ class Gateway:
             "upstream_max_tokens": reservation.max_tokens,
             "upstream_retries": outcome.retries,
             "rate_wait_s": round(rate_wait, 3),
-            "translation_dropped": {},
+            "translation_dropped": self._translation_dropped(exchange),
             "policy_diff": dict(diff),
             "native_request_sha": sha(native_body),
             "native_system_prompt": system_prompt,
@@ -809,6 +946,16 @@ class Gateway:
             "response": {k: v for k, v in summary.items() if k != "normalized_usage"},
         }
         self.logs.call(record)
+
+    def _translation_dropped(self, exchange: Exchange | None) -> dict[str, int]:
+        """What translation could not carry. ``cache_control`` markers it lost do not count when the
+        policy strips every marker anyway (``prompt_cache`` ``off`` / ``auto``)."""
+        if exchange is None:
+            return {}
+        out = {key: int(n) for key, n in exchange.dropped.items() if n}
+        if self.policy.prompt_cache in ("off", "auto"):
+            out.pop("cache_control", None)
+        return dict(sorted(out.items()))
 
     def connect_allowed(self, host: str, port: int) -> bool:
         """Registries on 443, or an exact dependency-cache ``host:port``."""

@@ -56,9 +56,10 @@ API_ERROR_CODES: Final = frozenset(
         "hash_mismatch",
         "not_evaluable",
         "not_implemented",
-        "plan_conflict",
         "run_active",
         "slug_exists",
+        # wave 3: WP-10 study overrides (plan_conflict is gone: plans are unique per study)
+        "prompt_set_ambiguous",
     },
 )
 

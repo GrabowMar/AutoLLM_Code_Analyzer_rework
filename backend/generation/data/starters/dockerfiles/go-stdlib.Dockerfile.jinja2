@@ -1,0 +1,30 @@
+{# Go 1.25 (standard library net/http): backend/ is the main module, built to one binary (cgo stays on: the golang trixie build stage has gcc and the debian trixie-slim runtime the same glibc, so cgo drivers such as mattn/go-sqlite3 work); the optional frontend build. #}
+{% include "dockerfiles/_frontend_stage.Dockerfile.jinja2" %}
+FROM {{ base.go }} AS build
+ENV GOTOOLCHAIN=local
+WORKDIR /src
+{% if level == "bare" %}
+COPY . .
+RUN mkdir -p /out backend \
+    && cd backend \
+    && if [ ! -f go.mod ]; then go mod init app && go mod tidy; fi \
+    && if [ ! -f go.sum ]; then go mod download all; fi \
+    && go build -trimpath -o /out/server .
+{% else %}
+COPY backend/go.mod backend/go.sum* backend/
+RUN cd backend && if [ -f go.sum ]; then go mod download; else go mod download all; fi
+COPY backend/ backend/
+RUN mkdir -p /out && cd backend && go build -trimpath -o /out/server .
+{% endif %}
+
+FROM {{ base.debian }}
+ENV PORT={{ run.port }}
+WORKDIR /app
+COPY --from=build /src/backend backend/
+COPY --from=build /out/server /usr/local/bin/server
+{% if has_frontend %}
+COPY --from=frontend /app/frontend/dist frontend/dist
+{% endif %}
+RUN mkdir -p data
+EXPOSE {{ run.port }}
+CMD ["server"]

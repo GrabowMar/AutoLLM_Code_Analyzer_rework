@@ -1,0 +1,4 @@
+{% set layout = "- `backend/`: the Go module (package `main`, built with Go 1.25 and started as one binary). The Dockerfile runs `go mod init app` when there is no `backend/go.mod`; dependencies go in `backend/go.mod` and `backend/go.sum`." %}
+{% set manifest = "go.mod" %}
+{% set entry = "the binary built from `backend/` (`go build .`), which must start the server on port " ~ run.port %}
+{% include "common/README.md.jinja2" %}

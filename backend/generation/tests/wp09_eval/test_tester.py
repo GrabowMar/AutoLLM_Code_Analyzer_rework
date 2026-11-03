@@ -280,3 +280,159 @@ def test_webhook_routes_are_signed_except_in_auth_checks() -> None:
         server.shutdown()
         server.server_close()
     assert statuses(result) == {"webhooks.payments.ok": "pass", "webhooks.unsigned": "pass"}
+
+
+# --- SPA catch-all (wave-3 conformance finding) -------------------------------------------------
+
+
+class _CatchAll(http.server.BaseHTTPRequestHandler):
+    """Answers every method and path with the SPA's index.html (200), like the Django minimal starter."""
+
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *_args: Any) -> None:
+        return
+
+    def _html(self) -> None:
+        length = int(self.headers.get("Content-Length") or 0)
+        self.rfile.read(length)
+        data = b"<!doctype html><title>app</title><div id=app></div>"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    do_GET = do_POST = do_PATCH = do_DELETE = do_PUT = _html  # noqa: N815 - http.server handler names
+
+
+@pytest.mark.parametrize("mode", ["contract_bearer", "cookie_session"])
+def test_spa_catch_all_never_passes_the_login_check(mode: str) -> None:
+    from backend.generation.evaluation import acceptance
+    from backend.generation.tests.wp09_eval.test_compiler import STACK
+    from backend.generation.tests.wp09_eval.test_compiler import task_content
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _CatchAll)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        plan = acceptance.plan_json(acceptance.compile_content(task_content("crud_todo_list"), mode, STACK))
+        plan["base_url"] = f"http://127.0.0.1:{server.server_address[1]}"
+        plan["probes"] = []
+        result = load_tester().run_plan(plan)
+    finally:
+        server.shutdown()
+        server.server_close()
+    got = statuses(result)
+    assert got["auth.login.ok"] == "fail"
+    assert "pass" not in {
+        status for cid, status in got.items() if cid not in ("health", "index_served", "spa_fallback")
+    }
+
+
+# --- username placeholders register the named actor (wave-3 conformance finding) ----------------
+
+
+class _Members(http.server.BaseHTTPRequestHandler):
+    """Register/login plus ``POST /api/members`` that only accepts registered usernames."""
+
+    protocol_version = "HTTP/1.1"
+    users: set[str] = set()
+
+    def log_message(self, *_args: Any) -> None:
+        return
+
+    def do_GET(self) -> None:
+        self._send(200, {"status": "ok"})
+
+    def do_POST(self) -> None:
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        if self.path == "/api/auth/register":
+            self.users.add(body["username"])
+            self._send(201, {"username": body["username"]})
+        elif self.path == "/api/auth/login":
+            self._send(200, {"token": "t-" + body["username"]})
+        elif body.get("username") in self.users:
+            self._send(201, {"username": body["username"]})
+        else:
+            self._send(404, {"error": "no such user"})
+
+    def _send(self, status: int, body: dict[str, Any]) -> None:
+        data = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def test_a_username_placeholder_registers_that_actor_first() -> None:
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Members)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        check = {**_check("add_b", "/api/members", {"username": "{user_b_username}"}, 201), "actor": "user_a"}
+        plan = {
+            "compiler_version": 1,
+            "base_url": f"http://127.0.0.1:{server.server_address[1]}",
+            "auth": {
+                "mode": "contract_bearer",
+                "register_path": "/api/auth/register",
+                "login_path": "/api/auth/login",
+            },
+            "checks": [check],
+            "probes": [],
+        }
+        result = load_tester().run_plan(plan)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert statuses(result) == {"add_b": "pass"}
+
+
+# --- an early 413 before the body is read (wave-3 conformance finding) --------------------------
+
+
+class _EarlyReject(http.server.BaseHTTPRequestHandler):
+    """Answers 413 from the headers alone and closes without reading the body (gunicorn/Flask behaviour)."""
+
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *_args: Any) -> None:
+        return
+
+    def do_POST(self) -> None:
+        if int(self.headers.get("Content-Length") or 0) > 1024 * 1024:
+            data = b'{"error": "too large"}'
+            self.send_response(413)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(data)
+            self.wfile.flush()
+            self.close_connection = True
+            return
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        self.send_response(201)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+
+def test_an_early_413_is_read_not_a_broken_pipe() -> None:
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _EarlyReject)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        plan = {
+            "compiler_version": 1,
+            "base_url": f"http://127.0.0.1:{server.server_address[1]}",
+            "auth": {"mode": "contract_bearer"},
+            "checks": [_check("oversize", "/api/upload", {"blob": "{oversize}"}, 413, "negative")],
+            "probes": [],
+        }
+        result = load_tester().run_plan(plan)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert statuses(result) == {"oversize": "pass"}

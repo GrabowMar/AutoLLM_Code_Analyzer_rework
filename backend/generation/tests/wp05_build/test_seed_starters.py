@@ -1,6 +1,6 @@
 """Seeding the stack fragments, profiles and starters, and the ``build_starters`` command (spec 11.1, 11.4).
 
-Done-when check: every phase-A (profile, level) starter is seeded.
+Done-when check: every (profile, level) starter of compose.yaml (phase A and, since wave 3, phase B) is seeded.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from backend.generation.models import Starter
 from backend.generation.models import choices
 from backend.generation.testing import factories
 
-from .helpers import phase_a_entries
+from .helpers import active_entries
 
 pytestmark = pytest.mark.django_db
 
@@ -35,16 +35,16 @@ def _statuses(records) -> dict[str, list[str]]:
     return out
 
 
-def test_seed_stack_library_seeds_every_phase_a_starter():
+def test_seed_stack_library_seeds_every_starter():
     records = seeding.seed_stack_library()
     statuses = _statuses(records)
     assert "error" not in statuses, [r for r in records if r.status == "error"]
-    assert PromptTemplate.objects.filter(slug__startswith="stack-").count() == 16
+    assert PromptTemplate.objects.filter(slug__startswith="stack-").count() == 16 + 11
     assert PromptTemplate.objects.filter(slug="run-contract-free").exists()
-    assert StackProfile.objects.count() == 17
-    expected = {starters.starter_slug(e.stack, e.level) for e in phase_a_entries()}
+    assert StackProfile.objects.count() == 17 + 11
+    expected = {starters.starter_slug(e.stack, e.level) for e in active_entries()}
     assert set(Starter.objects.values_list("slug", flat=True)) == expected
-    assert len(expected) == 33
+    assert len(expected) == 33 + 22
     for starter in Starter.objects.select_related("stack_profile"):
         assert starter.is_system
         assert starter.visibility == choices.Visibility.SYSTEM
@@ -52,9 +52,7 @@ def test_seed_stack_library_seeds_every_phase_a_starter():
         assert starter.level == starter.content["level"]
         for entry in starter.content["files"].values():
             assert isinstance(blobs.get_bytes(entry["blob"]), bytes)  # every file blob is stored (raises if not)
-    assert set(statuses.get("skipped", [])) == {
-        starters.starter_slug(e.stack, e.level) for e in starters.compose_plan() if e.phase == "B"
-    }
+    assert statuses.get("skipped", []) == []
 
 
 def test_seeding_is_idempotent_and_versions_on_change(monkeypatch):
@@ -120,8 +118,8 @@ def test_build_starters_check_and_seed_commands():
     out = io.StringIO()
     call_command("build_starters", "--check", "--json", stdout=out)
     report = json.loads(out.getvalue())
-    assert {row["status"] for row in report} == {"ok", "skipped"}
-    assert sum(row["status"] == "ok" for row in report) == 33
+    assert {row["status"] for row in report} == {"ok"}
+    assert sum(row["status"] == "ok" for row in report) == 33 + 22
 
     out = io.StringIO()
     call_command("build_starters", "--with-stacks", "--stack", "express-react", "--dry-run", stdout=out)
@@ -155,11 +153,30 @@ def test_build_starters_lock_uses_the_docker_runner(monkeypatch):
     assert runs == [
         [
             "backend/django/minimal",
+            "backend/django/minimal-postgres",
             "backend/express/minimal",
+            "backend/express/minimal-postgres",
             "backend/fastapi/minimal",
+            "backend/fastapi/minimal-postgres",
             "backend/flask/minimal",
+            "backend/go-stdlib/minimal",
+            "backend/spring-boot/minimal",
             "frontend/react/minimal",
             "frontend/svelte/minimal",
             "frontend/vue/minimal",
         ],
     ]
+
+
+def test_phase_b_starters_seed_and_resolve():
+    seeding.seed_stack_library(stacks=["go-vue", "spring-boot-none", "express-react-postgres"])
+    for stack, lockfile in (
+        ("go-vue", "backend/go.sum"),
+        ("spring-boot-none", "backend/dependency-list.txt"),
+        ("express-react-postgres", "backend/package-lock.json"),
+    ):
+        profile = StackProfile.objects.latest(stack)
+        starter = starters.find_starter(profile, "minimal")
+        assert starter is not None, stack
+        assert lockfile in starter.content["lockfiles"]
+        assert starters.find_starter(profile, "bare") is not None

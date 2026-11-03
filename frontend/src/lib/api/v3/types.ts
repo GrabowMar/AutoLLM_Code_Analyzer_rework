@@ -3070,6 +3070,13 @@ export interface SlotSetOut {
     agent_pass_rate: number | null;
   } | null;
   selection: SlotSetSelectionOut;
+  /** Levels fixed by the parent run (read from its manifest columns; WP-12 `slot.api.parent_levels`). */
+  parent_levels: {
+    stack_profile: string | null;
+    starter_level: "bare" | "minimal" | "full" | null;
+    auth_mode: string | null;
+    prose_variant: string | null;
+  };
   notes: string;
   created_at: string;
 }
