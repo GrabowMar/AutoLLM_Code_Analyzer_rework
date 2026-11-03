@@ -85,12 +85,12 @@ ANALYSIS_WORKSPACE_MEM = "1g"  # runtime/services/docker_manager.py
 SCHEDULE_MIN_INTERVAL_S = 900
 
 # --- WP-02a --- v2 compatibility (delete each setting together with its last reader)
-# Read only by v2 code that WP-02a deletes or re-points. In v3 the harness comes from the design's
-# HarnessPreset, evaluation from Design.evaluation and the network policy from the ResourcePolicy.
-AGENT_DEFAULT_HARNESS = _env.str("AGENT_DEFAULT_HARNESS", default="opencode")
-AGENT_AUTO_EVALUATE = _env.bool("AGENT_AUTO_EVALUATE", default=True)
-AGENT_NETWORK_POLICY = _env.str("AGENT_NETWORK_POLICY", default="packages")
-# v2 names of the machine limits (generation/services/agent/config.py, execution/capacity.py).
+# In v3 the harness comes from the design's HarnessPreset, evaluation from Design.evaluation and the
+# network policy from the ResourcePolicy. AGENT_DEFAULT_HARNESS, AGENT_AUTO_EVALUATE and
+# AGENT_NETWORK_POLICY were removed with their last readers (generation/_legacy/services/agent/).
+# The worker registers the retained OpenRouter stats task from its service module (no generation/tasks.py).
+CELERY_IMPORTS = ("backend.generation.services.openrouter_stats",)
+# v2 names of the machine limits (execution/capacity.py).
 AGENT_SANDBOX_MEM_LIMIT = AGENT_SANDBOX_MEM_LIMIT_MAX
 AGENT_SANDBOX_NANO_CPUS = AGENT_SANDBOX_NANO_CPUS_MAX
 

@@ -65,7 +65,13 @@ def test_inventory_and_chat_through_the_pump(pumps, staff, fake):
     def call(i):
         try:
             results.append(
-                chat(access, messages=[{"role": "user", "content": f"hi {i}"}], params={"max_tokens": 32}, seed=5),
+                chat(
+                    access,
+                    messages=[{"role": "user", "content": f"hi {i}"}],
+                    params={"max_tokens": 32},
+                    seed=5,
+                    source="analysis",
+                ),
             )
         finally:
             connection.close()
@@ -81,7 +87,7 @@ def test_inventory_and_chat_through_the_pump(pumps, staff, fake):
     stats = fake.snapshot()
     assert stats["max_concurrency"] <= 2
     assert all(o["seed"] == 5 and o["num_ctx"] == 8192 for o in stats["options"])
-    rows = LLMRequest.objects.filter(endpoint=pumps, source="scaffolding")
+    rows = LLMRequest.objects.filter(endpoint=pumps, source="analysis")
     assert set(rows.values_list("status", "pump_owner")) == {("done", "exec-test")}
     assert all(r.body is None for r in rows)
 
@@ -93,7 +99,7 @@ def test_upstream_http_error_maps_to_access_error(pumps, staff):
 
     missing = replace(access, served_model_name="not-pulled:1b")
     with pytest.raises(LLMAccessError) as exc:
-        chat(missing, messages=[{"role": "user", "content": "x"}], params={}, seed=None)
+        chat(missing, messages=[{"role": "user", "content": "x"}], params={}, seed=None, source="analysis")
     assert exc.value.code == "upstream_error"
     assert exc.value.status_code == 404
 
@@ -107,7 +113,14 @@ def test_cancel_aborts_the_inflight_call(pumps, staff, fake):
 
     def call():
         try:
-            chat(access, messages=[{"role": "user", "content": "slow"}], params={}, seed=1, cancel_check=cancel.is_set)
+            chat(
+                access,
+                messages=[{"role": "user", "content": "slow"}],
+                params={},
+                seed=1,
+                source="analysis",
+                cancel_check=cancel.is_set,
+            )
         except LLMAccessError as exc:
             errors.append(exc.code)
         finally:

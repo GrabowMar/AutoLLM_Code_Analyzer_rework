@@ -12,7 +12,8 @@ from backend.analysis.models import AnalysisRun
 from backend.analysis.tests.factories import AnalysisRunFactory
 from backend.analysis.tests.factories import FindingFactory
 from backend.analysis.tests.factories import ToolResultFactory
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
+from backend.generation.runs.view import run_view
 from backend.human_eval.models import Assignment
 from backend.human_eval.models import EvalTask
 from backend.human_eval.models import EvalTaskApp
@@ -20,6 +21,10 @@ from backend.human_eval.services import context
 from backend.human_eval.services import hosting
 from backend.human_eval.services.errors import HumanEvalServiceError
 from backend.human_eval.services.instruments import SUS_QUESTION_IDS
+from backend.human_eval.tests.factories import SPEC_API_ENDPOINTS
+from backend.human_eval.tests.factories import UI_REQUIREMENTS
+from backend.human_eval.tests.factories import eval_task_content
+from backend.human_eval.tests.factories import eval_task_version
 from backend.human_eval.tests.factories import make_open_task
 from backend.human_eval.tests.factories import workbench_assignment
 from backend.human_eval.tests.factories import workbench_design
@@ -65,22 +70,16 @@ def _item_of(task: EvalTask, app: EvalTaskApp):
 # --- spec -------------------------------------------------------------------
 
 
-def test_spec_dict_prefers_the_frozen_snapshot_then_the_live_spec():
+def test_spec_dict_is_the_runs_task_dict():
     task = _task(n_apps=1)
-    job = _apps(task)[0].job
-    frozen = context.spec_dict(job)
-    assert frozen == job.resolved_bundle["app_requirement"]
-
-    job.resolved_bundle = {}
-    job.app_requirement.backend_requirements = ["Live requirement"]
-    job.app_requirement.save()
-    live = context.spec_dict(job)
-    assert live["backend_requirements"] == ["Live requirement"]
-
-    job.app_requirement = None
-    assert context.spec_dict(job) is None
+    run = _apps(task)[0].job
+    spec = context.spec_dict(run)
+    assert spec == run_view(run).task_dict()
+    assert spec["title"] == "Item tracker"
+    assert spec["variant"] == "standard"
+    assert spec["prose"] == "A todo app. Each user sees only their own todos."
     assert context.spec_dict(None) is None
-    assert context.spec_view(job) is None
+    assert context.spec_view(None) is None
 
 
 def test_spec_view_has_only_the_app_spec_view_fields():
@@ -89,58 +88,65 @@ def test_spec_view_has_only_the_app_spec_view_fields():
     assert set(view) == {
         "name",
         "description",
-        "backend_requirements",
+        "prose",
         "frontend_requirements",
-        "admin_requirements",
         "api_endpoints",
         "admin_api_endpoints",
     }
-    assert view["backend_requirements"] == ["Users can register and log in", "Users can create, edit and delete items"]
-    assert view["api_endpoints"][0] == {
-        "method": "GET",
-        "path": "/api/items",
-        "description": "List the user's items",
-        "auth": "user",
-    }
-    assert set(view["admin_api_endpoints"][0]) == {"method", "path", "description", "auth"}
+    assert view["name"] == "Item tracker"
+    assert view["prose"] == "A todo app. Each user sees only their own todos."
+    assert view["frontend_requirements"] == UI_REQUIREMENTS
+    assert [f"{e['method']} {e['path']}" for e in view["api_endpoints"]] == [
+        f"{e['method']} {e['path']}" for e in SPEC_API_ENDPOINTS
+    ]
+    assert view["api_endpoints"][2] == {"method": "GET", "path": "/api/items", "description": "", "auth": "user"}
+    assert view["admin_api_endpoints"] == [
+        {"method": "GET", "path": "/api/admin/users", "description": "", "auth": "admin"},
+    ]
 
 
 # --- requirement items ------------------------------------------------------------
 
 
+def _spec(endpoints=(), ui=()):
+    return {"structured": {"endpoints": list(endpoints), "ui": list(ui)}}
+
+
 def test_requirement_items_ids_text_and_order():
-    spec = {
-        "backend_requirements": ["Users can log in", "Users can log in", "  ", {"text": "Dict requirement"}],
-        "admin_requirements": ["Admins see users"],
-        "api_endpoints": [
-            {"method": "get", "path": "/api/items", "description": "List items"},
-            {"method": "POST", "path": "/api/items"},
-            {"method": "", "path": "/broken"},
+    spec = _spec(
+        endpoints=[
+            {"id": "a", "method": "get", "path": "/api/items", "auth": "user"},
+            {"id": "b", "method": "POST", "path": "/api/items", "auth": "user"},
+            {"id": "c", "method": "", "path": "/broken", "auth": "user"},
+            {"id": "d", "method": "DELETE", "path": "/api/admin/users/{id}", "auth": "admin"},
         ],
-        "admin_api_endpoints": [{"method": "DELETE", "path": "/api/admin/users/<id>", "description": "Remove"}],
-    }
+        ui=[
+            {"id": "u1", "text": "Users can log in"},
+            {"id": "u2", "text": "Users can log in"},
+            {"id": "u3", "text": " "},
+        ],
+    )
     items = context.requirement_items(
         spec,
-        ["api", "backend", "admin_api"],
+        ["api", "frontend", "admin_api"],
         [{"id": "readme", "text": "Has a README"}, {"id": "empty", "text": " "}],
     )
-    assert [item["source"] for item in items] == ["api", "api", "backend", "backend", "admin_api", "custom"]
-    assert items[0]["text"] == "GET /api/items — List items"
+    assert [item["source"] for item in items] == ["api", "api", "frontend", "admin_api", "custom"]
+    assert items[0]["text"] == "GET /api/items"
     assert items[1]["text"] == "POST /api/items"
     assert items[2]["text"] == "Users can log in"  # listed once
-    assert items[3]["text"] == "Dict requirement"
+    assert items[3]["text"] == "DELETE /api/admin/users/{id}"  # admin endpoints only in admin_api
     assert items[-1] == {"id": "c_readme", "source": "custom", "text": "Has a README"}
     assert re.fullmatch(r"ep_[0-9a-f]{10}", items[0]["id"])
-    assert re.fullmatch(r"b_[0-9a-f]{10}", items[2]["id"])
-    assert re.fullmatch(r"aep_[0-9a-f]{10}", items[4]["id"])
-    # The key of an endpoint is "METHOD /path" (its description does not change the id).
+    assert re.fullmatch(r"f_[0-9a-f]{10}", items[2]["id"])
+    assert re.fullmatch(r"aep_[0-9a-f]{10}", items[3]["id"])
     assert items[0]["id"] == context.requirement_id("api", "GET /api/items")
-    assert items[2]["id"] == context.requirement_id("backend", "Users can log in")
-    assert context.requirement_id("backend", "x") != context.requirement_id("frontend", "x")
-    assert context.requirement_items(None, ["backend"], []) == []
+    assert items[2]["id"] == context.requirement_id("frontend", "Users can log in")
+    assert context.requirement_id("api", "x") != context.requirement_id("frontend", "x")
+    assert context.requirement_items(None, ["frontend"], []) == []
 
 
-def test_requirement_ids_are_stable_across_apps_with_the_same_spec():
+def test_requirement_ids_are_stable_across_apps_with_the_same_task():
     task = _task(n_apps=3)
     contexts = []
     for app in _apps(task):
@@ -148,13 +154,13 @@ def test_requirement_ids_are_stable_across_apps_with_the_same_spec():
         contexts.append(context.build_context(assignment)["blocks"]["reqs"]["requirements"]["single"])
     ids = [[item["id"] for item in items] for items in contexts]
     assert ids[0] == ids[1] == ids[2]
-    assert len(ids[0]) == 2 + 3 + 1  # backend + api endpoints + custom
+    assert len(ids[0]) == len(UI_REQUIREMENTS) + len(SPEC_API_ENDPOINTS) + 1  # frontend + api endpoints + custom
     assert ids[0][-1] == "c_readme"
 
-    # Another spec text yields other ids; the shared text keeps its id.
+    # Another task text yields other ids; the shared text keeps its id.
     other = context.requirement_items(
-        {"backend_requirements": ["Users can register and log in", "New"]},
-        ["backend"],
+        _spec(ui=[{"id": "x", "text": UI_REQUIREMENTS[0]}, {"id": "y", "text": "New"}]),
+        ["frontend"],
         [],
     )
     assert other[0]["id"] == ids[0][0]
@@ -324,7 +330,7 @@ def test_review_finding_never_carries_the_normalized_severity():
     assert context.review_finding(finding)["docs_url"] == ""
 
 
-def test_review_finding_dast_fields_and_scaffolding_paths():
+def test_review_finding_dast_fields_and_workspace_paths():
     task = _task(n_apps=1)
     job = _apps(task)[0].job
     dast = workbench_findings(
@@ -345,19 +351,9 @@ def test_review_finding_dast_fields_and_scaffolding_paths():
     assert payload["param"] == "id"
     assert payload["evidence"] == "<script>"
 
-    # Scaffolding (blob layout) jobs: analysis names the blobs backend_code.py / frontend_code.jsx.
-    job.mode = GenerationJob.Mode.SCAFFOLDING
-    job.result_data = {"backend_code": "print(1)\n", "frontend_code": "export default 1;\n"}
-    job.save(update_fields=["mode", "result_data"])
-    blob = workbench_findings(job, "heval-bandit", 1)[0]
-    blob.file_path = "backend_code.py"
-    assert context.review_finding(blob, job=job)["file_path"] == "backend/app.py"
-    blob.file_path = "frontend_code.jsx"
-    assert context.review_finding(blob, job=job)["file_path"] == "frontend/App.jsx"
-    # Jobs with a real file map keep their paths.
-    job.result_data = {"files": {"backend_code.py": "x = 1\n"}}
-    blob.file_path = "backend_code.py"
-    assert context.review_finding(blob, job=job)["file_path"] == "backend_code.py"
+    # Workspace prefixes of analysis paths are dropped: the path names a file of the source viewer's tree.
+    dast.file_path = "/work/backend/app.py"
+    assert context.review_finding(dast)["file_path"] == "backend/app.py"
 
 
 # --- context ------------------------------------------------------------------------
@@ -394,12 +390,10 @@ def test_context_is_frozen_at_first_open():
     frozen = assignment.context
     first_ids = [item["id"] for item in frozen["blocks"]["reqs"]["requirements"]["single"]]
 
-    # Later changes to the spec, instructions and findings never reach the stored context.
-    spec = app.job.app_requirement
-    spec.backend_requirements = ["Something else entirely"]
-    spec.save()
-    app.job.resolved_bundle = {}
-    app.job.save(update_fields=["resolved_bundle"])
+    # Later changes to the task, instructions and findings never reach the stored context.
+    changed = eval_task_content()
+    changed["ui"] = [{"id": "ui.other", "text": "Something else entirely", "endpoints": []}]
+    GenerationRun.objects.filter(pk=app.job_id).update(task_version=eval_task_version(content=changed))
     task.instructions = "New instructions"
     task.save(update_fields=["instructions"])
     workbench_findings(app.job, "heval-sast-new", 3)
@@ -590,9 +584,9 @@ def test_first_open_freezes_the_spec_and_review_findings_for_every_later_rater()
     context.open_assignment(first)
     first.refresh_from_db()
 
-    # Later the researcher deletes the analysis runs and even the generation job (task app job → NULL).
+    # Later the researcher deletes the analysis runs and even the generation run (task app job → NULL).
     AnalysisRun.objects.filter(generation_job_id=app.job_id).delete()
-    GenerationJob.objects.filter(pk=app.job_id).delete()
+    GenerationRun.objects.filter(pk=app.job_id).delete()
     app.refresh_from_db()
     assert app.job_id is None
 
@@ -604,8 +598,8 @@ def test_first_open_freezes_the_spec_and_review_findings_for_every_later_rater()
     assert second.context["blocks"]["reqs"] == first.context["blocks"]["reqs"]
     assert len(second.context["blocks"]["sec"]["findings"]["single"]) == 3
     sources = {item["source"] for item in second.context["blocks"]["reqs"]["requirements"]["single"]}
-    assert sources == {"backend", "api", "custom"}  # the spec items survived the job's deletion
-    assert context.app_spec_view(app)["name"] == app.snapshot["spec"]["name"]  # the participant's spec view too
+    assert sources == {"frontend", "api", "custom"}  # the task's items survived the run's deletion
+    assert context.app_spec_view(app)["name"] == app.snapshot["spec"]["title"]  # the participant's spec view too
 
 
 def test_review_findings_survive_a_deleted_analysis_run():
@@ -649,17 +643,18 @@ def test_frozen_spec_prefers_the_snapshot_copy():
     app = _apps(task)[0]
     live = context.spec_dict(app.job)
     assert "spec" not in app.snapshot
-    assert context.frozen_spec(app) == live  # apps without a frozen copy: the job's spec
-    app.snapshot = {**app.snapshot, "spec": {**live, "name": "Frozen name", "backend_requirements": ["Only this"]}}
-    assert context.frozen_spec(app)["name"] == "Frozen name"
-    assert context.app_spec_view(app)["backend_requirements"] == ["Only this"]
+    assert context.frozen_spec(app) == live  # apps without a frozen copy: the run's task
+    frozen_ui = {**live["structured"], "ui": [{"id": "only", "text": "Only this"}]}
+    app.snapshot = {**app.snapshot, "spec": {**live, "title": "Frozen name", "structured": frozen_ui}}
+    assert context.frozen_spec(app)["title"] == "Frozen name"
+    assert context.app_spec_view(app)["frontend_requirements"] == ["Only this"]
     app.snapshot = {**app.snapshot, "spec": None}  # the app had no spec at first open: never a later one
     assert context.frozen_spec(app) is None
     assert context.app_spec_view(app) is None
     app.snapshot = {key: value for key, value in app.snapshot.items() if key != "spec"}
     app.save(update_fields=["snapshot"])
     frozen_app = EvalTaskApp.objects.select_related("job").get(pk=app.pk)
-    frozen_app.snapshot = {**frozen_app.snapshot, "spec": {"backend_requirements": ["Only this"]}}
+    frozen_app.snapshot = {**frozen_app.snapshot, "spec": {"structured": {"ui": [{"id": "o", "text": "Only this"}]}}}
     frozen_app.save(update_fields=["snapshot"])
     assignment = workbench_assignment(task)
     built = context.build_context(assignment)

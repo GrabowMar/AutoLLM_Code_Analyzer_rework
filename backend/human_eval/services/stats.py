@@ -22,6 +22,8 @@ not depend on how many others were computed before it.
   resampler (cluster bootstraps: items with all their comparisons, or apps within
   groups).
 - :func:`binomial_two_sided` — exact two-sided binomial test against p = 0.5.
+- :func:`wilcoxon_p` — Wilcoxon signed-rank p (exact up to 25 non-zero deltas, normal approximation
+  with tie and continuity correction above).
 - :func:`cluster_bootstrap_mean_ci` / :func:`bootstrap_diff_ci` — percentile
   bootstraps over clusters (apps are the unit of analysis), None below three.
 """
@@ -533,3 +535,77 @@ def bootstrap_bt(
         for key, strength in fitted.items():
             logs[key].append(math.log(strength))
     return {key: percentile_ci(values) for key, values in logs.items()}
+
+
+# ---------------------------------------------------------------------------
+# Wilcoxon signed-rank test
+# ---------------------------------------------------------------------------
+
+_EXACT_WILCOXON_MAX_N = 25
+
+
+def _ranks(values: list[float]) -> list[float]:
+    """Average ranks (1-based) of *values*, ties sharing their mean rank."""
+    order = sorted(range(len(values)), key=values.__getitem__)
+    ranks = [0.0] * len(values)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        rank = (i + j + 2) / 2
+        for k in range(i, j + 1):
+            ranks[order[k]] = rank
+        i = j + 1
+    return ranks
+
+
+def wilcoxon_p(deltas: list[float], alternative: str = "two-sided") -> float | None:  # noqa: PLR0911
+    """Wilcoxon signed-rank p for *deltas* (zeros dropped; average ranks for ties).
+
+    ``alternative`` is ``two-sided`` (default), ``greater`` (deltas tend to be
+    positive) or ``less``. Exact (the null distribution of W+ by dynamic
+    programming over doubled ranks, so tied half-ranks stay integers) up to 25
+    non-zero deltas; the normal approximation with tie and continuity
+    correction above.
+    """
+    if alternative not in ("two-sided", "greater", "less"):
+        msg = f"Unknown alternative {alternative!r}"
+        raise ValueError(msg)
+    nonzero = [d for d in deltas if d != 0]
+    n = len(nonzero)
+    if n == 0:
+        return None
+    ranks = _ranks([abs(d) for d in nonzero])
+    w_plus = sum(r for r, d in zip(ranks, nonzero, strict=True) if d > 0)
+    total = sum(ranks)
+    if n <= _EXACT_WILCOXON_MAX_N:
+        doubled = [round(2 * r) for r in ranks]
+        counts = Counter({0: 1})
+        for r in doubled:
+            nxt: Counter = Counter()
+            for s, c in counts.items():
+                nxt[s] += c
+                nxt[s + r] += c
+            counts = nxt
+        observed = round(2 * w_plus)
+        if alternative == "greater":
+            return min(1.0, sum(c for s, c in counts.items() if s >= observed) / 2**n)
+        if alternative == "less":
+            return min(1.0, sum(c for s, c in counts.items() if s <= observed) / 2**n)
+        mirrored = round(2 * total) - observed
+        lo, hi = min(observed, mirrored), max(observed, mirrored)
+        extreme = sum(c for s, c in counts.items() if s <= lo or s >= hi)
+        return min(1.0, extreme / 2**n)
+    mean = total / 2
+    tie_groups = Counter(ranks).values()
+    variance = n * (n + 1) * (2 * n + 1) / 24 - sum(t**3 - t for t in tie_groups) / 48
+    if variance <= 0:
+        return None
+    sd = math.sqrt(variance)
+    if alternative == "greater":
+        return min(1.0, 0.5 * math.erfc(((w_plus - mean - 0.5) / sd) / math.sqrt(2)))
+    if alternative == "less":
+        return min(1.0, 0.5 * math.erfc(((mean - w_plus - 0.5) / sd) / math.sqrt(2)))
+    z = (abs(w_plus - mean) - 0.5) / sd
+    return min(1.0, math.erfc(max(z, 0.0) / math.sqrt(2)))

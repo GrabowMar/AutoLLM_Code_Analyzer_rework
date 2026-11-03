@@ -1,4 +1,8 @@
-"""Memory rule, slot clamping, the /api/execution/ views and the executor management commands."""
+"""Memory rule, slot clamping, the /api/execution/ views and the executor management commands.
+
+The views are called through ninja's ``TestClient`` on ``api_views.router`` (authenticated as the given
+user), so these tests do not depend on the whole project URLconf.
+"""
 
 from __future__ import annotations
 
@@ -15,14 +19,33 @@ from backend.execution import capacity
 from backend.execution.models import ExecutorInstance
 from backend.execution.models import ExecutorSettings
 from backend.execution.tests.conftest import make_endpoint
-from backend.execution.tests.conftest import make_job
 from backend.execution.tests.conftest import make_model
-from backend.execution.tests.conftest import running_experiment
-from backend.generation.models import GenerationJob
+from backend.execution.tests.conftest import make_run
+from backend.execution.tests.conftest import running_study
+from backend.generation.models import GenerationRun
+from backend.generation.models.choices import RunStatus
 from backend.users.tests.factories import UserFactory
 
-S = GenerationJob.Status
-API = "/api/execution"
+S = RunStatus
+API = ""
+
+
+class _RouterClient:
+    """``client.get(path, params)`` / ``client.patch(path, body, content_type=...)`` on the execution router."""
+
+    def __init__(self, user):
+        from ninja.testing import TestClient
+
+        from backend.execution.api_views import router
+
+        self.user = user
+        self._client = TestClient(router)
+
+    def get(self, path, params=None):
+        return self._client.get(path, query_params=params or {}, auth=self.user, user=self.user)
+
+    def patch(self, path, body, content_type="application/json"):
+        return self._client.patch(path, data=body, auth=self.user, user=self.user)
 
 
 def _row(**kw):
@@ -72,16 +95,14 @@ class TestMemoryRule:
 @pytest.mark.django_db
 class TestApi:
     @pytest.fixture
-    def staff(self, client):
+    def staff(self):
         user = UserFactory(is_staff=True)
-        client.force_login(user)
-        return client, user
+        return _RouterClient(user), user
 
     @pytest.fixture
-    def member(self, client):
+    def member(self):
         user = UserFactory()
-        client.force_login(user)
-        return client, user
+        return _RouterClient(user), user
 
     def test_settings_are_staff_only(self, member):
         client, _ = member
@@ -116,12 +137,12 @@ class TestApi:
             last_seen_at=timezone.now(),
             config={"circuit_open": [endpoint.pk], "blocked_by_endpoint": {str(endpoint.pk): "residency_wait"}},
         )
-        experiment = running_experiment(user)
-        make_job(user, make_model(endpoint, "qwen"), experiment=experiment, sequence=0)
-        make_job(
+        study = running_study(user)
+        make_run(user, make_model(endpoint, "qwen"), study=study, sequence=0)
+        make_run(
             user,
             make_model(),
-            experiment=experiment,
+            study=study,
             status=S.RUNNING,
             phase="running",
             lease_owner="exec:1",
@@ -137,7 +158,7 @@ class TestApi:
         assert slugs[endpoint.slug]["status"] == "degraded"
         assert slugs[endpoint.slug]["blocked_reason"] == "residency_wait"
         assert slugs["openrouter"]["jobs"]["used"] == 1
-        assert [(e["running"], e["pending"]) for e in data["experiments"]] == [(1, 1)]
+        assert [(e["id"], e["running"], e["pending"]) for e in data["studies"]] == [(str(study.id), 1, 1)]
 
     def test_offline_executor(self, member, system_ep):
         client, _ = member
@@ -154,24 +175,35 @@ class TestApi:
             "leader": None,
             "code_stale": False,
             "draining": False,
-            "draining_remaining": {"jobs": 0, "post_runs": 0},
+            "draining_remaining": {"runs": 0, "post_runs": 0},
         }
 
-    def test_queue_lists_own_jobs_with_reasons(self, member, system_ep):
+    def test_queue_lists_own_runs_with_reasons(self, member, system_ep):
         client, user = member
         offline = make_endpoint(user, online=False, kind="openai_compatible", api_flavor="openai")
-        stuck = make_job(user, make_model(offline, "m"))
-        ready = make_job(user, make_model())
-        backoff = make_job(user, make_model(), run_after=timezone.now() + timedelta(minutes=5))
+        stuck = make_run(user, make_model(offline, "m"))
+        ready = make_run(user, make_model())
+        backoff = make_run(user, make_model(), run_after=timezone.now() + timedelta(minutes=5))
         other = UserFactory()
-        make_job(other, make_model(), queued_at=timezone.now() - timedelta(hours=1))
+        make_run(other, make_model(), queued_at=timezone.now() - timedelta(hours=1))
         data = client.get(f"{API}/queue/").json()
-        reasons = {i["job_id"]: i["blocked_reason"] for i in data["items"]}
+        reasons = {i["run_id"]: i["blocked_reason"] for i in data["items"]}
         assert reasons == {str(ready.id): None, str(stuck.id): "endpoint_offline", str(backoff.id): "retry_backoff"}
-        assert data["items"][0]["job_id"] == str(ready.id)
+        assert data["items"][0]["run_id"] == str(ready.id)
+        assert data["items"][0]["kind"] == "slot_single_shot"
         assert data["others_ahead"] == {"openrouter": 1, offline.slug: 0}
-        assert GenerationJob.objects.filter(status=S.RUNNING).count() == 0
-        assert client.get(f"{API}/queue/", {"experiment_id": "nope"}).status_code == 400
+        assert GenerationRun.objects.filter(status=S.RUNNING).count() == 0
+        assert client.get(f"{API}/queue/", {"study_id": "nope"}).status_code == 400
+
+    def test_post_run_slots_go_up_to_two(self, staff, settings):
+        settings.APPS_DIND_MEM_LIMIT = "64g"
+        client, _ = staff
+        ok = client.patch(f"{API}/settings/", json.dumps({"post_run_slots": 2}), content_type="application/json")
+        assert ok.status_code == 200
+        assert ok.json()["post_run_slots"] == 2
+        too_many = client.patch(f"{API}/settings/", json.dumps({"post_run_slots": 3}), content_type="application/json")
+        assert too_many.status_code == 422
+        assert capacity.SLOT_BOUNDS["post_run_slots"] == (0, 2)
 
 
 @pytest.mark.django_db

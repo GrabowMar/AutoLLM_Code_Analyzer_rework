@@ -15,7 +15,9 @@ from requests.structures import CaseInsensitiveDict
 
 from backend.credentials.models import Provider
 from backend.credentials.models import UserApiCredential
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.tests.factories import GenerationRunFactory
+from backend.generation.tests.factories import RunManifestFactory
+from backend.generation.tests.factories import run_manifest_content
 from backend.inference.models import LLMEndpoint
 from backend.llm_models.models import LLMModel
 from backend.llm_models.services import hf_metadata
@@ -30,9 +32,19 @@ from backend.llm_models.services.hf import HfClient
 from backend.llm_models.services.hf import hf_token_for
 from backend.llm_models.services.hf import is_hf_url
 from backend.llm_models.tests.factories import LLMModelFactory
+from backend.users.tests.factories import UserFactory
 
 REQUESTS_GET = "backend.llm_models.services.hf.requests.get"
 FAKE_TOKEN = "hf_test_not_a_real_token"  # noqa: S105 — test fixture, never a real secret
+
+
+def _run_with_sampling(user, model, sampling):
+    """A run of ``model`` whose frozen manifest records ``sampling`` (policy, forced/stripped params)."""
+    run = GenerationRunFactory(created_by=user, model=model)
+    manifest = run_manifest_content(run)
+    manifest["sampling"] = {"ref": "t07@1", "seed_forwarded": True, **sampling}
+    RunManifestFactory(run=run, manifest=manifest)
+    return run
 
 
 def _resp(status=200, payload=None, headers=None):
@@ -766,51 +778,33 @@ class TestModelApi:
     def test_sampling_usage_reports_what_runs_sent(self, client, user):
         client.force_login(user)
         model = LLMModelFactory(model_id="acme/coder-1", canonical_slug="acme_coder-1")
-        agent_gateway = {
-            "forced_params": {"seed": 1, "max_tokens": 32000},
-            "sampling_policy": "provider_default",
-        }
-        GenerationJobFactory(
-            created_by=user,
-            model=model,
-            mode="agent",
-            resolved_bundle={"gateway": agent_gateway, "llm": {"max_tokens": 32000}},
-            result_data={
-                "agent": {"sampling_policy": "provider_default", "harness_sampling_stripped": {"temperature": 3}},
-            },
+        _run_with_sampling(
+            user,
+            model,
+            {"policy": "provider_default", "forced_params": {"seed": 1}, "stripped_params": ["temperature"]},
         )
-        GenerationJobFactory(
-            created_by=user,
-            model=model,
-            mode="agent",
-            resolved_bundle={
-                "gateway": {"forced_params": {"temperature": 0.3, "seed": 2}},
-                "llm": {"temperature": 0.3},
-            },
-        )
-        GenerationJobFactory(
-            created_by=user,
-            model=model,
-            mode="scaffolding",
-            resolved_bundle={"llm": {"temperature": 0.3, "top_p": 0.9, "max_tokens": 32000}},
-        )
-        GenerationJobFactory(model=model, mode="custom", resolved_bundle={"llm": {"temperature": 1.5}})  # someone else
+        _run_with_sampling(user, model, {"policy": "explicit", "forced_params": {"temperature": 0.3, "seed": 2}})
+        _run_with_sampling(user, model, {"policy": "explicit", "forced_params": {"temperature": 0.3, "top_p": 0.9}})
+        # A run without a manifest recorded nothing.
+        GenerationRunFactory(created_by=user, model=model)
+        _run_with_sampling(UserFactory(), model, {"policy": "explicit", "forced_params": {"temperature": 1.5}})
 
         resp = client.get("/api/models/detail/acme_coder-1/sampling/")
 
         assert resp.status_code == HTTPStatus.OK
         data = resp.json()
-        assert data["n_jobs"] == 3
-        assert data["policies"] == {"provider_default": 1, "not_recorded": 1, "template_mode": 1}
+        assert data["n_jobs"] == 4
+        assert data["by_mode"] == {"app_agentic": 4}
+        assert data["policies"] == {"provider_default": 1, "explicit": 2, "not_recorded": 1}
         temperature = next(p for p in data["params"] if p["key"] == "temperature")
         assert temperature["values"] == [{"value": 0.3, "n": 2}]
-        assert temperature["n_not_sent"] == 1
-        assert temperature["n_unknown"] == 0
+        # Known not sent only under provider_default; the manifest-less run is unknown.
+        assert (temperature["n_not_sent"], temperature["n_unknown"]) == (1, 1)
         top_p = next(p for p in data["params"] if p["key"] == "top_p")
         assert top_p["n_sent"] == 1
-        # The run without a recorded policy forced no top_p, but its harness may have sent one.
-        assert (top_p["n_not_sent"], top_p["n_unknown"]) == (1, 1)
-        assert data["harness_sampling_stripped"] == [{"key": "temperature", "jobs": 1, "calls": 3}]
+        # Explicit runs that forced no top_p: their harness may have sent one.
+        assert (top_p["n_not_sent"], top_p["n_unknown"]) == (1, 2)
+        assert data["harness_sampling_stripped"] == [{"key": "temperature", "jobs": 1, "calls": None}]
 
     def test_sampling_usage_requires_auth(self, client):
         LLMModelFactory(model_id="acme/coder-1", canonical_slug="acme_coder-1")
@@ -1008,15 +1002,10 @@ class TestReviewRegressionsEnrichment:
         distill.save()
         assert link_local_models() == 1
 
-    def test_sampling_usage_harness_native_runs_are_unknown_not_unsent(self, client, user):
+    def test_sampling_usage_explicit_runs_are_unknown_not_unsent(self, client, user):
         client.force_login(user)
         model = LLMModelFactory(model_id="acme/coder-2", canonical_slug="acme_coder-2")
-        GenerationJobFactory(
-            created_by=user,
-            model=model,
-            mode="agent",
-            resolved_bundle={"gateway": {"forced_params": {"top_p": 0.9}, "sampling_policy": "harness_native"}},
-        )
+        _run_with_sampling(user, model, {"policy": "explicit", "forced_params": {"top_p": 0.9}})
         data = client.get("/api/models/detail/acme_coder-2/sampling/").json()
         params = {p["key"]: p for p in data["params"]}
         assert (params["top_p"]["n_sent"], params["top_p"]["n_not_sent"], params["top_p"]["n_unknown"]) == (1, 0, 0)

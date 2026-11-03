@@ -1,15 +1,6 @@
-from backend.generation.services.backend_scanner import BackendScanner
-from backend.generation.services.backend_scanner import scan_backend_response
-from backend.generation.services.code_parser import extract_python_code
-from backend.generation.services.code_parser import parse_result_to_structured
-from backend.generation.services.openrouter_client import OpenRouterClient
-from backend.generation.services.openrouter_client import OpenRouterError
+"""Shared generation infrastructure retained from v2 (spec section 2.1).
 
-__all__ = [
-    "BackendScanner",
-    "OpenRouterClient",
-    "OpenRouterError",
-    "extract_python_code",
-    "parse_result_to_structured",
-    "scan_backend_response",
-]
+Only provider plumbing lives here: the OpenRouter client and generation-stats fetcher, per-call telemetry,
+LLM parameter helpers, sampling-preset layering and the code profile. Run content is read through
+:mod:`backend.generation.runs.view`, never from these modules.
+"""

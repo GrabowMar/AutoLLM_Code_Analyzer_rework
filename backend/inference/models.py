@@ -238,7 +238,7 @@ class LLMRequest(models.Model):
         EXPIRED = "expired", _("Expired")
 
     class Source(models.TextChoices):
-        SCAFFOLDING = "scaffolding", _("Scaffolding")
+        SLOT_CALL = "slot_call", _("Slot call")
         AGENT_PROXY = "agent_proxy", _("Agent proxy")
         ANALYSIS = "analysis", _("Analysis")
         WARMUP = "warmup", _("Warm-up")

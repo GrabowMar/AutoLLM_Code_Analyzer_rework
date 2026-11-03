@@ -1,7 +1,4 @@
-"""WP-01 testing infrastructure: every factory builds a valid (``full_clean``) row.
-
-Until WP-02a/WP-02b land, run with ``--ds=backend.generation.tests.wp01_foundation.settings_u1``.
-"""
+"""WP-01 testing infrastructure: every factory builds a valid (``full_clean``) row."""
 
 from __future__ import annotations
 
@@ -180,12 +177,5 @@ def test_tests_factories_shim_reexports_exactly_the_v3_names():
     assert shim.__all__ == factories.__all__
     for name in shim.__all__:
         assert getattr(shim, name) is getattr(factories, name)
-    v2_names = {
-        "GenerationJobFactory",
-        "ExperimentFactory",
-        "ExperimentConditionFactory",
-        "GenerationProfileFactory",
-        "AppRequirementTemplateFactory",
-        "ContentBlockFactory",
-    }
-    assert v2_names.isdisjoint(dir(shim))
+    # That the shim exports none of the removed v2 factory names is checked in
+    # ``generation/tests/migrations/test_v2_names_gone.py``.

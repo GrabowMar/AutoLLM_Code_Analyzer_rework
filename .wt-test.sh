@@ -7,12 +7,16 @@
 #   .wt-test.sh --venv-mount               print the venv `-v` spec a test container would use
 #
 # Location-independent: WT is the directory holding this script, so a sub-worktree tests its own code.
-# Test DB: llmlab_wt_<DBSUFFIX> on the shared postgres (one suffix per role, so runs are parallel-safe).
+# Test DB: llmlab_wt_<DBSUFFIX> on the shared (or a private, see WT_PG) postgres; one suffix per role.
 # Env file: $WT/.wt/wt.env (gitignored, mode 600) when present, else $STATE_DIR/wt.env.
 # Venv: the volume llmlab_wt_samplegen_venv, mounted read-write, once `--init-venv` has built AND verified
 # it (the marker $STATE_DIR/llmlab_wt_samplegen_venv.ready holds the sha256 of the uv.lock it was synced
 # from). Until then, and while it is rebuilt, the devcontainer venv is mounted read-only (the old behaviour).
 # WT_VENV=devcontainer forces the old venv; WT_VENV=worktree refuses to run without the new one.
+# Postgres: WT_PG=shared uses the stack's postgres (host from the env file); WT_PG=private starts a
+# throwaway postgres for this run only (same image, --shm-size=$WT_PG_SHM (default 1g), data on tmpfs,
+# removed on exit). WT_PG=auto (the default) picks private when the shared postgres's /dev/shm is at
+# least 90% used, which makes every new connection fail with "could not resize shared memory segment".
 set -euo pipefail
 
 WT="$(cd "$(dirname "$0")" && pwd)"
@@ -118,7 +122,47 @@ ENV_FILE="$WT/.wt/wt.env"
 [ -f "$ENV_FILE" ] || die "no env file ($WT/.wt/wt.env or $STATE_DIR/wt.env)"
 MOUNT=$(venv_mount)
 
-exec docker run --rm -i --network "$NETWORK" --env-file "$ENV_FILE" -e POSTGRES_DB="llmlab_wt_$SUF" \
+SHARED_PG=${WT_PG_SHARED_CONTAINER:-llmlab-postgres-1}
+PG_IMAGE=${WT_PG_IMAGE:-llmlab/postgres:local}
+PG_MODE=${WT_PG:-auto}
+if [ "$PG_MODE" = auto ]; then
+    # Read-only probe of the shared container; any failure keeps the shared postgres.
+    shm_pct=$(docker exec "$SHARED_PG" df --output=pcent /dev/shm 2>/dev/null | tail -1 | tr -dc 0-9 || true)
+    if [ -n "$shm_pct" ] && [ "$shm_pct" -ge 90 ]; then
+        echo ".wt-test.sh: $SHARED_PG /dev/shm is ${shm_pct}% full; using a private postgres (WT_PG=shared to override)" >&2
+        PG_MODE=private
+    else
+        PG_MODE=shared
+    fi
+fi
+PG_ARGS=()
+case "$PG_MODE" in
+    shared) ;;
+    private)
+        PG_NAME="llmlab-wtpg-$SUF-$$"
+        cleanup_pg() { docker rm -f "$PG_NAME" >/dev/null 2>&1 || true; }
+        trap cleanup_pg EXIT
+        trap 'exit 130' INT TERM
+        docker run -d --rm --name "$PG_NAME" --network "$NETWORK" --env-file "$ENV_FILE" -e POSTGRES_DB="llmlab_wt_$SUF" \
+            --shm-size="${WT_PG_SHM:-1g}" --tmpfs /var/lib/postgresql:rw,size="${WT_PG_TMPFS:-4g}" \
+            "$PG_IMAGE" >/dev/null || die "cannot start private postgres from $PG_IMAGE"
+        # The image's init server listens on the socket only: a TCP check waits for the real one.
+        for _ in $(seq 1 60); do
+            if docker exec "$PG_NAME" sh -c 'pg_isready -q -h 127.0.0.1 -U "$POSTGRES_USER"' 2>/dev/null; then
+                break
+            fi
+            sleep 1
+        done
+        docker exec "$PG_NAME" sh -c 'pg_isready -q -h 127.0.0.1 -U "$POSTGRES_USER"' ||
+            die "private postgres $PG_NAME did not become ready"
+        PG_ARGS=(-e POSTGRES_HOST="$PG_NAME")
+        ;;
+    *) die "WT_PG must be auto, shared or private (got '$PG_MODE')" ;;
+esac
+
+# Not exec'd, so the EXIT trap can remove a private postgres.
+docker run --rm -i --network "$NETWORK" --env-file "$ENV_FILE" ${PG_ARGS[@]+"${PG_ARGS[@]}"} \
+    -e POSTGRES_DB="llmlab_wt_$SUF" \
     -e DJANGO_SETTINGS_MODULE=config.settings.test \
     -v "$WT:/app" -v "$MOUNT" \
     -e VIRTUAL_ENV="$VENV" -e PATH="$VENV/bin:/usr/local/bin:/usr/bin:/bin" \

@@ -27,36 +27,39 @@ INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
 INSTRUCTIONS = """\
-LLM Lab generates one application per LLM from a requirement template, runs it in a
-sandbox and scores the code with static-analysis tools; rankings and experiments compare
-models on measured findings.
+LLM Lab runs studies: factorial designs that have LLMs build applications (or fill slots in
+existing ones) from versioned tasks, evaluate them in a sandbox and score the code with
+static-analysis tools; rankings and study results compare models on measured outcomes.
 
 Typical flows:
-- Compare models on a task: search_models → list_app_templates → generate_apps (model_ids x
-  app_requirement_ids) → poll get_generation_job → analyze (generation_job_id, tool_slugs from
-  list_analyzers) → list_findings / rankings.
-- Rigorous comparison: preview_experiment (free) → create_experiment(launch=true) →
-  experiment_status → experiment_results.
+- Rigorous comparison: list_studies / get_study → resolve_study (free dry-run with a cost
+  estimate) → launch_study(plan_hash) → list_runs(study=…) → get_run.
+- Analyse a sample: analyze (generation_job_id = the run id, tool_slugs from list_analyzers)
+  → get_analysis_run → list_findings / rankings.
 - Anything else the web UI can do: find_api_operations → describe_api_operation → call_api.
-Generation and agent runs spend the user's LLM credits — confirm scope with the user first and
-prefer the free preview tools. Docs: search_docs / read_doc, or the llmlab://docs/* resources.
+Some study and run tools appear only once their API is published; until then use
+find_api_operations with the query "studies" or "runs".
+Generation spends the user's LLM credits — confirm scope with the user first and prefer the free
+resolve/preview tools. Docs: search_docs / read_doc, or the llmlab://docs/* resources.
 """
 
 PROMPTS: dict[str, dict[str, Any]] = {
     "compare_models": {
-        "description": "Benchmark a few models on one app template and summarise which writes the best code.",
+        "description": "Benchmark a few models on one task with a study and summarise which writes the best code.",
         "arguments": [
-            {"name": "task", "description": "What the app should do, or a template name.", "required": True},
+            {"name": "task", "description": "What the app should do, or a task name.", "required": True},
             {"name": "models", "description": "Comma-separated model names or slugs.", "required": True},
         ],
         "template": (
             "Use the LLM Lab tools to compare these models: {models}.\n"
             "Task: {task}\n\n"
-            "1. Find the models (search_models) and the closest app template (list_app_templates).\n"
-            "2. Tell me the plan and estimated cost before starting anything that spends credits.\n"
-            "3. Generate the apps (generate_apps), wait for the jobs, then analyze each one with the "
+            "1. Find the models (search_models) and the closest task (find_api_operations 'tasks').\n"
+            "2. Set up a study and dry-run it (resolve_study); tell me the plan and estimated cost before "
+            "launching anything that spends credits.\n"
+            "3. Launch it (launch_study), wait for the runs (list_runs), then analyze each one with the "
             "default analyzers.\n"
-            "4. Summarise per model: build success, findings by severity, notable issues, and a verdict."
+            "4. Summarise per model: outcome (build/start/tested), findings as each tool labelled them, "
+            "notable issues, and a verdict. Report runs without measurements as not measured, never as clean."
         ),
     },
     "triage_findings": {
@@ -68,20 +71,20 @@ PROMPTS: dict[str, dict[str, Any]] = {
             "impact and propose a concrete fix for the top five."
         ),
     },
-    "experiment_report": {
-        "description": "Write an executive summary of an experiment's results.",
-        "arguments": [{"name": "experiment_id", "description": "Experiment id.", "required": True}],
+    "study_report": {
+        "description": "Write an executive summary of a study's results.",
+        "arguments": [{"name": "study_id", "description": "Study id.", "required": True}],
         "template": (
-            "Read experiment {experiment_id} (get_experiment, experiment_status, experiment_results). "
+            "Read study {study_id} (get_study, then its results through find_api_operations 'study results'). "
             "Write a one-page summary: hypothesis, design, which conditions won with effect sizes and "
-            "confidence, caveats (failed cells, small n), and a recommendation."
+            "confidence, caveats (attrition, excluded or not-measured runs, small n), and a recommendation."
         ),
     },
     "platform_health": {
         "description": "Check what is running, queued or stuck, and whether anything needs attention.",
         "arguments": [],
         "template": (
-            "Check LLM Lab's health: execution_queue, list_generation_jobs (status=running and "
+            "Check LLM Lab's health: execution_queue, list_runs (status=running and "
             "status=failed, newest first), list_containers and list_endpoints. Report anything stuck, "
             "failing repeatedly or offline, and suggest the next action."
         ),

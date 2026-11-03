@@ -280,16 +280,16 @@ def test_cluster_membership_does_not_depend_on_input_order():
     assert all(memberships(list(order)) == expected for order in permutations(findings))
 
 
-def test_cluster_dict_names_the_job_and_the_levels_tools_printed():
+def test_cluster_dict_names_the_run_and_the_levels_tools_printed():
     clusters = cluster_findings(
         [
-            _f("bandit", "B105", 10, run="job-1", severity="low", tool_severity="LOW"),
-            _f("gitleaks", "generic-api-key", 10, run="job-1", severity="high", category="secrets"),
+            _f("bandit", "B105", 10, run="run-1", severity="low", tool_severity="LOW"),
+            _f("gitleaks", "generic-api-key", 10, run="run-1", severity="high", category="secrets"),
         ],
     )
     d = clusters[0].to_dict()
-    assert d["job_id"] == "job-1"
-    assert "run_id" not in d
+    assert d["run_id"] == "run-1"
+    assert "job_id" not in d
     assert d["reported_levels"] == ["bandit:LOW", "gitleaks:unrated"]
     assert d["severity"] == "high"  # normalized maximum
 

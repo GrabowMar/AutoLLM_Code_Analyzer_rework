@@ -16,12 +16,13 @@ from backend.execution.models import RuntimeBuildLease
 from backend.execution.registry import JobRegistry
 from backend.execution.scheduler import Scheduler
 from backend.execution.tests.conftest import free
-from backend.execution.tests.conftest import make_job
 from backend.execution.tests.conftest import make_model
+from backend.execution.tests.conftest import make_run
 from backend.execution.tests.conftest import slots
 from backend.execution.workers import WorkerContext
 from backend.execution.workers import run_preview_build
-from backend.generation.models import GenerationJob
+from backend.generation.models.choices import RunPhase
+from backend.generation.models.choices import RunStatus
 from backend.runtime.models import ContainerAction
 from backend.runtime.models import ContainerInstance
 from backend.runtime.tests.factories import ContainerActionFactory
@@ -47,14 +48,14 @@ def _owner():
 
 def test_preview_takes_eval_capacity_and_blocks_sandbox(user, system_ep):
     action = _preview()
-    sandbox = make_job(user, make_model(), lane="sandbox")
+    sandbox = make_run(user, make_model(), lane="sandbox")
     result = Scheduler(OWNER).tick(slots(exclusive_eval=True), free())
     assert result.preview_builds == [action.pk]
     assert result.claimed == []
     assert result.snapshot.eval_used == 1
     sandbox.refresh_from_db()
     action.refresh_from_db()
-    assert sandbox.status == GenerationJob.Status.PENDING
+    assert sandbox.status == RunStatus.PENDING
     assert action.status == ContainerAction.Status.RUNNING
     assert RuntimeBuildLease.objects.get(pk=action.pk).owner == OWNER
     assert capacity.snapshot().eval_used == 1
@@ -62,12 +63,12 @@ def test_preview_takes_eval_capacity_and_blocks_sandbox(user, system_ep):
 
 def test_preview_waits_for_existing_sandbox(user, system_ep):
     action = _preview()
-    make_job(
+    make_run(
         user,
         make_model(),
         lane="sandbox",
-        status=GenerationJob.Status.RUNNING,
-        phase=GenerationJob.Phase.RUNNING,
+        status=RunStatus.RUNNING,
+        phase=RunPhase.RUNNING,
         lease_owner=OWNER,
     )
     result = Scheduler(OWNER).tick(slots(exclusive_eval=True), free())
@@ -78,15 +79,15 @@ def test_preview_waits_for_existing_sandbox(user, system_ep):
 
 def test_generation_evaluation_keeps_precedence(user, system_ep):
     action = _preview()
-    waiting = make_job(
+    waiting = make_run(
         user,
         make_model(),
-        status=GenerationJob.Status.RUNNING,
-        phase=GenerationJob.Phase.EVAL_QUEUED,
+        status=RunStatus.RUNNING,
+        phase=RunPhase.EVAL_QUEUED,
         stage_entered_at=timezone.now(),
     )
     result = Scheduler(OWNER).tick(slots(eval_slots=1), free())
-    assert [claim.job_id for claim in result.claimed] == [waiting.pk]
+    assert [claim.run_id for claim in result.claimed] == [waiting.pk]
     assert result.preview_builds == []
     action.refresh_from_db()
     assert action.status == ContainerAction.Status.PENDING

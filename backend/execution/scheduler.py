@@ -1,12 +1,18 @@
 """The claim algorithm (spec §C.4): capacity snapshot → evaluation claims → lane heads → admission → apply.
 
-Runs on the leader only. Lanes are keyed by ``(experiment or "adhoc:<user>",
+Runs on the leader only. Lanes are keyed by ``(study or "adhoc:<user>",
 endpoint)`` and are strict head-of-line in their frozen order (``sequence``
-for experiments, enqueue order for ad-hoc jobs), so a lane's run order is
+for studies, enqueue order for ad-hoc runs), so a lane's run order is
 reproducible; the scheduler is work-conserving *across* lanes. Fair share is
-per user first, then per experiment; priority orders lanes. Residency K is
+per user first, then per study; priority orders lanes. Residency K is
 always enforced, with a starvation guard (drain-for-swap) so model affinity
 never starves another lane for more than ``EXECUTOR_STARVATION_S``.
+
+Runs of a study are claimed while the study is ``piloting`` or ``running``; its
+``max_parallel`` caps its active runs and ``execution_options`` carries the
+policy's concurrency knobs (``max_resident_models``, ``warmup``). Evaluation
+is claimed by phase (``status=running, phase=eval_queued``), never by lane, so
+``reference`` runs created in that state are claimed like any other.
 
 Only the chosen rows are locked (``FOR UPDATE SKIP LOCKED``), then claimed
 with one conditional UPDATE; rows a concurrent cancel or pause holds are
@@ -45,7 +51,7 @@ ENDPOINT_FULL = "endpoint_full"
 MODEL_NOT_SERVED = "model_not_served"
 RESIDENCY_WAIT = "residency_wait"
 WARMING_MODEL = "warming_model"
-EXPERIMENT_CAP = "experiment_cap"
+STUDY_CAP = "study_cap"
 CIRCUIT_OPEN = "circuit_open"
 DRAINING = "draining"
 RETRY_BACKOFF = "retry_backoff"
@@ -53,74 +59,75 @@ RETRY_BACKOFF = "retry_backoff"
 MAX_LANE_DEPTH = 64
 WARMUP_VALID_S = 600  # a finished warm-up admits heads of its model for this long
 
+# Study statuses whose runs may be claimed (a pilot runs its pilot cells).
+CLAIMABLE_STUDY_STATUSES = ("piloting", "running")
+
 _LANE_SQL = """
 SELECT * FROM (
-  SELECT j.id, j.lane, coalesce(j.endpoint_id, %(system_ep)s) AS ep, j.model_id, j.experiment_id, j.sequence,
-         j.priority, j.queued_at, j.created_by_id, j.attempt, j.condition_id, j.app_requirement_id,
-         j.repeat_index, j.batch_id,
-         coalesce(j.resolved_bundle->'endpoint'->>'served_model_name', '') AS served_name,
-         coalesce(j.resolved_bundle->'endpoint'->>'digest', '') AS snapshot_digest,
-         x.launched_at, x.max_concurrency AS exp_max_concurrency, x.execution_options,
+  SELECT j.id, j.lane, coalesce(j.endpoint_id, %(system_ep)s) AS ep, j.model_id, j.study_id, j.sequence,
+         j.priority, j.queued_at, j.created_by_id, j.attempt, j.condition_id, j.cell_id, j.task_version_id,
+         j.slot_target_id, j.repeat_index, j.pinned_served_name AS served_name, j.pinned_digest AS snapshot_digest,
+         x.launched_at, x.max_parallel AS study_max_parallel, x.execution_options, x.scheduling,
          row_number() OVER (
-           PARTITION BY coalesce(j.experiment_id::text, 'adhoc:' || j.created_by_id::text),
+           PARTITION BY coalesce(j.study_id::text, 'adhoc:' || j.created_by_id::text),
                         coalesce(j.endpoint_id, %(system_ep)s)
-           ORDER BY CASE WHEN j.experiment_id IS NULL THEN NULL ELSE j.sequence END NULLS LAST,
+           ORDER BY CASE WHEN j.study_id IS NULL THEN NULL ELSE j.sequence END NULLS LAST,
                     j.queued_at, j.sequence NULLS LAST, j.id
          ) AS rn
-  FROM generation_generationjob j LEFT JOIN generation_experiment x ON x.id = j.experiment_id
+  FROM generation_run j LEFT JOIN generation_study x ON x.id = j.study_id
   WHERE j.status = 'pending' AND j.queued_at IS NOT NULL
     AND (j.run_after IS NULL OR j.run_after <= now())
-    AND (j.experiment_id IS NULL OR x.status = 'running')
+    AND (j.study_id IS NULL OR x.status IN ('piloting', 'running'))
     %(extra)s
 ) t WHERE rn <= %(depth)s
 ORDER BY rn
 """
 
+# Both claims return the same columns, in the order Claimed.from_row reads them.
 _EVAL_CLAIM_SQL = """
 WITH c AS (
-  SELECT id FROM generation_generationjob
+  SELECT id FROM generation_run
   WHERE status = 'running' AND phase = 'eval_queued'
   ORDER BY priority DESC, stage_entered_at NULLS FIRST, id
   LIMIT %s FOR UPDATE SKIP LOCKED
 )
-UPDATE generation_generationjob j
+UPDATE generation_run j
 SET phase = 'evaluating', lease_owner = %s, lease_expires_at = now() + %s * interval '1 second',
     heartbeat_at = now(), stage_entered_at = now(), updated_at = now()
 FROM c WHERE j.id = c.id
-RETURNING j.id, j.attempt, j.experiment_id, j.batch_id, j.endpoint_id, j.condition_id, j.app_requirement_id,
-          j.repeat_index, j.status, j.phase
+RETURNING j.id, j.attempt, j.lane, j.study_id, j.endpoint_id, j.condition_id, j.cell_id, j.repeat_index
 """
 
 _LOCK_SQL = """
-SELECT j.id FROM generation_generationjob j
+SELECT j.id FROM generation_run j
 WHERE j.id = ANY(%s::uuid[]) AND j.status = 'pending' AND j.queued_at IS NOT NULL
-  AND (j.experiment_id IS NULL OR EXISTS (
-        SELECT 1 FROM generation_experiment x WHERE x.id = j.experiment_id AND x.status = 'running'))
+  AND (j.study_id IS NULL OR EXISTS (
+        SELECT 1 FROM generation_study x WHERE x.id = j.study_id AND x.status IN ('piloting', 'running')))
 ORDER BY j.id
 FOR UPDATE OF j SKIP LOCKED
 """
 
 _CLAIM_SQL = """
-UPDATE generation_generationjob
+UPDATE generation_run j
 SET status = 'running', phase = 'running', started_at = now(), lease_owner = %(owner)s,
     lease_expires_at = now() + %(lease)s * interval '1 second', heartbeat_at = now(), stage_entered_at = now(),
     updated_at = now(),
-    execution = coalesce(execution, '{}'::jsonb)
+    execution = coalesce(j.execution, '{}'::jsonb)
       || jsonb_build_object(
            'started_seq', nextval('execution_start_seq'),
-           'queued_at', queued_at,
+           'queued_at', j.queued_at,
            'claimed_at', now(),
            'queue_seconds', round(extract(epoch FROM now() - (
-             CASE WHEN attempt > 0
+             CASE WHEN j.attempt > 0
                   -- a retried attempt waits from when it became eligible again (requeue + backoff),
                   -- not from the first attempt's queued_at
-                  THEN greatest(coalesce((execution->>'requeued_at')::timestamptz, queued_at),
-                                coalesce(run_after, queued_at))
-                  ELSE queued_at END))::numeric, 2),
+                  THEN greatest(coalesce((j.execution->>'requeued_at')::timestamptz, j.queued_at),
+                                coalesce(j.run_after, j.queued_at))
+                  ELSE j.queued_at END))::numeric, 2),
            'executor', %(owner)s::text)
-      || coalesce((%(extras)s::jsonb) -> (id::text), '{}'::jsonb)
-WHERE id = ANY(%(ids)s::uuid[])
-RETURNING id, attempt, lane, experiment_id, batch_id, endpoint_id, condition_id, app_requirement_id, repeat_index
+      || coalesce((%(extras)s::jsonb) -> (j.id::text), '{}'::jsonb)
+WHERE j.id = ANY(%(ids)s::uuid[])
+RETURNING j.id, j.attempt, j.lane, j.study_id, j.endpoint_id, j.condition_id, j.cell_id, j.repeat_index
 """
 
 
@@ -130,25 +137,27 @@ class LaneRow:
     lane: str
     ep: int
     model_id: int | None
-    experiment_id: Any
+    study_id: Any
     sequence: int | None
     priority: int
     queued_at: datetime
     user_id: int
     attempt: int
     condition_id: int | None
-    app_id: int | None
+    cell_id: int | None
+    task_version_id: int | None
+    slot_target_id: Any
     repeat_index: int | None
-    batch_id: Any
     served_name: str
     digest: str
     launched_at: datetime | None
-    exp_max_concurrency: int | None
+    study_max_parallel: int | None
     execution_options: dict[str, Any]
+    scheduling: str | None = None
 
     @property
     def lane_key(self) -> tuple[str, int]:
-        owner = str(self.experiment_id) if self.experiment_id else f"adhoc:{self.user_id}"
+        owner = str(self.study_id) if self.study_id else f"adhoc:{self.user_id}"
         return (owner, self.ep)
 
     @property
@@ -163,25 +172,39 @@ class LaneRow:
 
 @dataclass
 class Claimed:
-    job_id: Any
+    run_id: Any
     lane: str  # "sandbox" | "llm" | "eval"
     attempt: int
-    experiment_id: Any = None
-    batch_id: Any = None
+    study_id: Any = None
     endpoint_id: int | None = None
     condition_id: int | None = None
-    app_id: int | None = None
+    cell_id: int | None = None
     repeat_index: int | None = None
+
+    @classmethod
+    def from_row(cls, row: tuple, lane: str | None = None) -> Claimed:
+        """From a claim's RETURNING row (``id, attempt, lane, study_id, endpoint_id, condition_id, cell_id,
+        repeat_index``)."""
+        return cls(
+            run_id=row[0],
+            attempt=row[1],
+            lane=lane or row[2],
+            study_id=row[3],
+            endpoint_id=row[4],
+            condition_id=row[5],
+            cell_id=row[6],
+            repeat_index=row[7],
+        )
 
 
 @dataclass
 class LaneState:
     key: tuple[str, int]
-    experiment_id: Any
+    study_id: Any
     user_id: int
     endpoint_id: int
     pending_in_window: int
-    head_job: Any
+    head_run: Any
     reason: str | None = None
 
 
@@ -190,7 +213,7 @@ class TickResult:
     claimed: list[Claimed] = field(default_factory=list)
     preview_builds: list[Any] = field(default_factory=list)
     lanes: dict[tuple[str, int], LaneState] = field(default_factory=dict)
-    admitted_order: list[Any] = field(default_factory=list)  # dry runs: job ids in admission order
+    admitted_order: list[Any] = field(default_factory=list)  # dry runs: run ids in admission order
     snapshot: CapacitySnapshot | None = None
 
     def blocked(self) -> dict[tuple[str, int], str]:
@@ -210,15 +233,13 @@ def lane_key_str(key: tuple[str, int]) -> str:
 
 
 def read_lane_heads(system_ep: int, depth: int, *, user_id: int | None = None) -> list[LaneRow]:
-    """§C.4 step 3: the first ``depth`` pending jobs of every lane (no locks)."""
-    params: dict[str, Any] = {"system_ep": system_ep, "depth": int(depth), "extra": ""}
-    sql = _LANE_SQL
+    """§C.4 step 3: the first ``depth`` pending runs of every lane (no locks)."""
+    params: dict[str, Any] = {"system_ep": system_ep, "depth": int(depth)}
     if user_id is not None:
-        sql = sql.replace("%(extra)s", "AND j.created_by_id = %(user_id)s")
+        sql = _LANE_SQL.replace("%(extra)s", "AND j.created_by_id = %(user_id)s")
         params["user_id"] = user_id
     else:
-        sql = sql.replace("%(extra)s", "")
-    params.pop("extra")
+        sql = _LANE_SQL.replace("%(extra)s", "")
     with connection.cursor() as cursor:
         cursor.execute(sql, params)
         columns = [c.name for c in cursor.description]
@@ -234,21 +255,23 @@ def read_lane_heads(system_ep: int, depth: int, *, user_id: int | None = None) -
                 lane=row["lane"],
                 ep=row["ep"],
                 model_id=row["model_id"],
-                experiment_id=row["experiment_id"],
+                study_id=row["study_id"],
                 sequence=row["sequence"],
                 priority=row["priority"],
                 queued_at=row["queued_at"],
                 user_id=row["created_by_id"],
                 attempt=row["attempt"],
                 condition_id=row["condition_id"],
-                app_id=row["app_requirement_id"],
+                cell_id=row["cell_id"],
+                task_version_id=row["task_version_id"],
+                slot_target_id=row["slot_target_id"],
                 repeat_index=row["repeat_index"],
-                batch_id=row["batch_id"],
-                served_name=row["served_name"],
-                digest=row["snapshot_digest"],
+                served_name=row["served_name"] or "",
+                digest=row["snapshot_digest"] or "",
                 launched_at=row["launched_at"],
-                exp_max_concurrency=row["exp_max_concurrency"],
+                study_max_parallel=row["study_max_parallel"],
                 execution_options=options or {},
+                scheduling=row["scheduling"],
             ),
         )
     return out
@@ -326,20 +349,7 @@ class Scheduler:
         with transaction.atomic(), connection.cursor() as cursor:
             cursor.execute(_EVAL_CLAIM_SQL, [limit, self.executor_id, self.lease_seconds])
             rows = cursor.fetchall()
-        return [
-            Claimed(
-                job_id=r[0],
-                lane="eval",
-                attempt=r[1],
-                experiment_id=r[2],
-                batch_id=r[3],
-                endpoint_id=r[4],
-                condition_id=r[5],
-                app_id=r[6],
-                repeat_index=r[7],
-            )
-            for r in rows
-        ]
+        return [Claimed.from_row(r, lane="eval") for r in rows]
 
     # ── step 4: selection ──────────────────────────────────────────────
 
@@ -359,7 +369,7 @@ class Scheduler:
             lanes.setdefault(row.lane_key, deque()).append(row)
         for key, queue in lanes.items():
             head = queue[0]
-            result.lanes[key] = LaneState(key, head.experiment_id, head.user_id, head.ep, len(queue), head.id)
+            result.lanes[key] = LaneState(key, head.study_id, head.user_id, head.ep, len(queue), head.id)
         for key in list(self.residency_wait_since):
             if key not in lanes:
                 del self.residency_wait_since[key]
@@ -376,11 +386,11 @@ class Scheduler:
             "llm": min(slots.llm_job_threads - snap.llm_used, pool_free.get("llm", 0)),
         }
         ep_active = Counter(snap.ep_active)
-        exp_active = Counter(snap.exp_active)
+        study_active = Counter(snap.study_active)
         user_active = Counter(snap.user_active)
         resident = {ep: set(models) for ep, models in snap.resident.items()}
         running_models: dict[int, set[str]] = {}
-        # Models of running jobs (resident minus outstanding warm-ups) are known to be loaded.
+        # Models of running runs (resident minus outstanding warm-ups) are known to be loaded.
         for ep, models in resident.items():
             warming = {n for n, w in snap.warmups.get(ep, {}).items() if w.outstanding}
             running_models[ep] = models - warming
@@ -394,7 +404,7 @@ class Scheduler:
         def endpoint_load(head: LaneRow) -> float:
             """Share of what this endpoint can really take (its job cap, at most the lane's threads).
 
-            Lanes of one experiment tie on priority and fair share forever (each
+            Lanes of one study tie on priority and fair share forever (each
             admission raises both together), so without this the lane with the
             largest cap (the OpenRouter row, cap 64 > llm threads) would take
             every free thread while local endpoints sit idle.
@@ -414,7 +424,7 @@ class Scheduler:
             return (
                 -head.priority,
                 user_active[head.user_id],
-                exp_active[head.experiment_id] if head.experiment_id else 0,
+                study_active[head.study_id] if head.study_id else 0,
                 endpoint_load(head),
                 affinity,
                 warm,
@@ -435,7 +445,7 @@ class Scheduler:
                 snap,
                 free,
                 ep_active,
-                exp_active,
+                study_active,
                 resident,
                 running_models,
                 swap,
@@ -458,11 +468,11 @@ class Scheduler:
             ep_active[head.ep] += 1
             resident.setdefault(head.ep, set()).add(head.model_key)
             running_models.setdefault(head.ep, set()).add(head.model_key)
-            if head.experiment_id:
-                exp_active[head.experiment_id] += 1
+            if head.study_id:
+                study_active[head.study_id] += 1
             user_active[head.user_id] += 1
             if lanes[key]:
-                state.head_job = lanes[key][0].id
+                state.head_run = lanes[key][0].id
             state.pending_in_window = len(lanes[key])
         return chosen, extras
 
@@ -484,7 +494,7 @@ class Scheduler:
           the moment the swap lands and the endpoint swaps back after one batch).
         - A lane whose model is not served is not waiting for residency: its clock goes.
         - When the starved head itself cannot run for another reason (model not
-          served, its experiment's cap), the swap is abandoned for this tick and the
+          served, its study's cap), the swap is abandoned for this tick and the
           lanes it held are re-evaluated, so the endpoint never idles on it.
         """
         starved = swap.get(head.ep)
@@ -496,7 +506,7 @@ class Scheduler:
             return
         if reason == MODEL_NOT_SERVED:
             self.residency_wait_since.pop(key, None)
-        if starved is not None and starved[0] == key and reason in (MODEL_NOT_SERVED, EXPERIMENT_CAP):
+        if starved is not None and starved[0] == key and reason in (MODEL_NOT_SERVED, STUDY_CAP):
             del swap[head.ep]
             for other in [k for k in held_by_swap if k[1] == head.ep]:
                 held_by_swap.discard(other)
@@ -521,7 +531,7 @@ class Scheduler:
         snap: CapacitySnapshot,
         free: dict[str, int],
         ep_active: Counter,
-        exp_active: Counter,
+        study_active: Counter,
         resident: dict[int, set[str]],
         running_models: dict[int, set[str]],
         swap: dict[int, tuple[tuple[str, int], str]],
@@ -554,13 +564,9 @@ class Scheduler:
                 return RESIDENCY_WAIT, None
             if k is not None and model not in on_ep and len(on_ep) >= k:
                 return RESIDENCY_WAIT, None
-        # 5. experiment cap
-        if (
-            head.experiment_id
-            and head.exp_max_concurrency
-            and exp_active[head.experiment_id] >= (head.exp_max_concurrency)
-        ):
-            return EXPERIMENT_CAP, None
+        # 5. study cap (Study.max_parallel)
+        if head.study_id and head.study_max_parallel and study_active[head.study_id] >= head.study_max_parallel:
+            return STUDY_CAP, None
         # 6. prefetch (Ollama, warm-up on): admit once the model is loaded
         extra: dict[str, Any] | None = None
         if ep.kind == "ollama" and not ep.is_system and head.warmup_enabled:
@@ -595,15 +601,15 @@ class Scheduler:
 
     def _enqueue_warmup(self, head: LaneRow, ep) -> str | None:
         """Queue one ``warmup`` LLMRequest for the head's model; returns an error text when that failed."""
-        from backend.generation.models import GenerationJob
+        from backend.generation.models import GenerationRun
 
         try:
             from backend.inference.access import resolve_access
             from backend.inference.requests import enqueue
 
-            job = GenerationJob.objects.select_related("model__endpoint", "created_by").get(id=head.id)
-            access = resolve_access(job.created_by, job.model)
-            body = warmup_body(head.served_name, job, access, ep)
+            run = GenerationRun.objects.select_related("model__endpoint", "created_by").get(id=head.id)
+            access = resolve_access(run.created_by, run.model)
+            body = warmup_body(head.served_name, access, ep)
             enqueue(
                 access,
                 "/api/generate",
@@ -614,7 +620,7 @@ class Scheduler:
                 digest=head.digest,
                 model_name=head.served_name,
             )
-        except Exception as exc:  # noqa: BLE001 — a failed warm-up is non-fatal: the job is admitted cold
+        except Exception as exc:  # noqa: BLE001 — a failed warm-up is non-fatal: the run is admitted cold
             logger.warning("Warm-up of %s on endpoint %s failed: %s", head.served_name, ep.slug, exc)
             return f"{type(exc).__name__}: {exc}"[:300]
         logger.info("Warming %s on endpoint %s", head.served_name, ep.slug)
@@ -640,45 +646,20 @@ class Scheduler:
             )
             rows = cursor.fetchall()
         by_id = {str(r[0]): r for r in rows}
-        claimed = []
-        for row in chosen:  # keep admission order
-            r = by_id.get(str(row.id))
-            if r is None:
-                continue
-            claimed.append(
-                Claimed(
-                    job_id=r[0],
-                    lane=r[2],
-                    attempt=r[1],
-                    experiment_id=r[3],
-                    batch_id=r[4],
-                    endpoint_id=r[5],
-                    condition_id=r[6],
-                    app_id=r[7],
-                    repeat_index=r[8],
-                ),
-            )
-        return claimed
+        # Keep admission order.
+        return [Claimed.from_row(by_id[str(row.id)]) for row in chosen if str(row.id) in by_id]
 
 
-def warmup_body(served_name: str, job, access, ep) -> dict[str, Any]:
-    """The ``/api/generate`` warm-up body: the same ``num_ctx`` (and keep-alive) the job's chat calls send.
+def warmup_body(served_name: str, access, ep) -> dict[str, Any]:
+    """The ``/api/generate`` warm-up body: the ``num_ctx`` (and keep-alive) the run's chat calls send.
 
-    Ollama reloads a runner whose options differ from the request's
-    (``num_ctx`` among them), so a warm-up at the server's default context
-    would be thrown away by the job's first ``/api/chat`` and the real load
-    would land on the agent's wall clock. Mirrors where each mode's chat calls
-    take their parameters: agents through the LLM proxy from the frozen
-    ``resolved_bundle["endpoint"]`` section, other modes from the live access.
+    Ollama reloads a runner whose options differ from the request's (``num_ctx`` among them), so a
+    warm-up at the server's default context would be thrown away by the first ``/api/chat`` and the
+    real load would land on the run's wall clock. The values come from the live access (the v3
+    manifest pins no per-endpoint context; WP-11's gateway config should match them).
     """
-    from backend.generation.models import GenerationJob
-
-    section: dict[str, Any] = {}
-    if job.mode == GenerationJob.Mode.AGENT:
-        frozen = (job.resolved_bundle or {}).get("endpoint")
-        section = frozen if isinstance(frozen, dict) else {}
-    num_ctx = section.get("num_ctx") or access.num_ctx
-    keep_alive = section.get("keep_alive") or access.keep_alive or ep.keep_alive
+    num_ctx = access.num_ctx
+    keep_alive = access.keep_alive or ep.keep_alive
     body: dict[str, Any] = {"model": served_name, "prompt": "", "keep_alive": keep_alive}
     if num_ctx:
         body["options"] = {"num_ctx": int(num_ctx)}

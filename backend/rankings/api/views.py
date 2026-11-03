@@ -33,22 +33,22 @@ def list_rankings(
     include_free: bool = True,
     has_benchmarks: bool = False,
     prompt_hash: str | None = None,
-    bundle_key: str | None = None,
-    experiment_id: str | None = None,
+    config_fingerprint: str | None = None,
+    study_id: str | None = None,
 ):
     per_page = min(max(per_page, 10), 100)
     page = max(page, 1)
-    if experiment_id:
+    if study_id:
         try:
-            experiment_id = str(uuid.UUID(experiment_id))
+            study_id = str(uuid.UUID(study_id))
         except ValueError as exc:
             # A malformed id is the caller's error, not a server error.
-            raise HttpError(400, "experiment_id must be a UUID") from exc
+            raise HttpError(400, "study_id must be a UUID") from exc
 
     rankings = services.aggregate_rankings(
         prompt_hash=prompt_hash,
-        bundle_key=bundle_key,
-        experiment_id=experiment_id,
+        config_fingerprint=config_fingerprint,
+        study_id=study_id,
     )
     filtered = services.filter_rankings(
         rankings,

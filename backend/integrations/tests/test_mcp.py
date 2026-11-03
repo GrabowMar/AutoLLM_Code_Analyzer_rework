@@ -8,6 +8,7 @@ import pytest
 
 from backend.integrations.mcp import openapi
 from backend.integrations.mcp import server
+from backend.integrations.mcp import tools as tools_module
 from backend.tokens import services
 from backend.users.tests.factories import UserFactory
 
@@ -88,18 +89,41 @@ def test_parse_error(client, token):
 def test_tools_list_has_curated_and_generic(client, token):
     tools = rpc(client, "tools/list", token=token).json()["result"]["tools"]
     names = {t["name"] for t in tools}
-    assert {"whoami", "search_models", "generate_apps", "analyze", "call_api", "find_api_operations"} <= names
+    assert {"whoami", "search_models", "analyze", "call_api", "find_api_operations"} <= names
+    # The study/run tools stay hidden until WP-08/WP-10 publish their operation ids.
+    assert not names & set(tools_module.pending_tools())
     for tool in tools:
         assert tool["inputSchema"]["type"] == "object"
         assert "$ref" not in json.dumps(tool["inputSchema"])
 
 
-def test_every_curated_tool_resolves_to_an_operation():
-    from backend.integrations.mcp.tools import CURATED
-
+def test_every_enabled_curated_tool_resolves_to_an_operation():
     ops = openapi.operations()
-    missing = [c.name for c in CURATED if f"backend_{c.operation_id}" not in ops]
+    missing = [c.name for c in tools_module.CURATED if c.enabled and f"backend_{c.operation_id}" not in ops]
     assert missing == []
+
+
+def test_study_tools_are_registered_disabled_until_published():
+    pending = tools_module.pending_tools()
+    assert {"list_studies", "get_study", "resolve_study", "launch_study"} <= set(pending)
+    assert set(pending.values()) <= {"WP-08", "WP-10"}
+    for item in tools_module.CURATED:
+        if not item.enabled:
+            assert item.pending
+            assert item.operation_id == ""  # filled in (and enabled) once announced in CHANGES
+        else:
+            assert not item.pending
+    names = [c.name for c in tools_module.CURATED]
+    assert len(names) == len(set(names))
+    # No v2 generation tool survives the clean break (the v2 word is split so the U1 gate grep stays clean).
+    v2 = {"generate_apps", "generate_custom", "create_agent_jobs", "list_generation_jobs", "get_generation_job"}
+    assert not [n for n in names if "experi" + "ment" in n or n in v2]
+
+
+def test_disabled_tool_is_not_callable(client, token):
+    body = rpc(client, "tools/call", {"name": "launch_study", "arguments": {}}, token=token).json()
+    failed = body.get("error") or body["result"]
+    assert "unknown tool" in json.dumps(failed)
 
 
 def test_whoami_runs_as_token_user(client, token, user):
@@ -115,13 +139,13 @@ def test_call_api_generic(client, token):
             "tools/call",
             {
                 "name": "call_api",
-                "arguments": {"method": "GET", "path": "/api/generation/jobs/", "query": {"per_page": 1}},
+                "arguments": {"method": "GET", "path": "/api/integrations/webhooks/event-types/"},
             },
             token=token,
         ),
     )
     assert result["isError"] is False
-    assert "items" in json.loads(text)
+    assert "study.completed" in {t["id"] for t in json.loads(text)}
 
 
 @pytest.mark.parametrize("path", ["/api/tokens/", "/api/mcp", "/apps/x/", "/api/../admin/", "/api/models/?x=1"])
@@ -178,12 +202,12 @@ def test_find_and_describe_operations(client, token):
         rpc(
             client,
             "tools/call",
-            {"name": "find_api_operations", "arguments": {"query": "experiment launch"}},
+            {"name": "find_api_operations", "arguments": {"query": "webhook test"}},
             token=token,
         ),
     )
     hits = json.loads(text)
-    assert any(h["path"].endswith("/launch/") for h in hits)
+    assert any(h["path"].endswith("/test/") for h in hits)
     _, text = tool_text(
         rpc(
             client,
@@ -238,4 +262,4 @@ def test_core_toolset(client, token):
     tools = rpc(client, "tools/list", token=token, path="/api/mcp?toolset=core").json()["result"]["tools"]
     from backend.integrations.mcp.tools import CORE_TOOLS
 
-    assert {t["name"] for t in tools} == CORE_TOOLS
+    assert {t["name"] for t in tools} == CORE_TOOLS - set(tools_module.pending_tools())

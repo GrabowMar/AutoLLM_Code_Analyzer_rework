@@ -1,51 +1,93 @@
-"""Job snapshots (owner A): the de-blinding key frozen on each task app.
+"""Run snapshots (owner A): the de-blinding key frozen on each task app.
 
 ``EvalTaskApp.snapshot`` records what the app *was* when it entered the study, so
-analysis and exports never read live job data (spec §5.2, R1):
+analysis and exports never read live run data (spec §5.2, R1). Everything is read
+through ``generation.runs.view`` (``RunView``), never from run columns directly:
 
-- **taken when the app is added** (:func:`job_snapshot` with ``full=False``): model,
-  condition, experiment, app spec, functional summary, evaluator version, plus the
-  ``spec_content_hash`` that names the spec version (cheap: no ``result_data``);
+- **taken when the app is added** (:func:`run_snapshot` with ``full=False``): model,
+  condition, study, task (``app_slug`` / ``app_name`` / ``task_ref`` / ``prose_variant``),
+  stack, kind, harness, the functional summary of the latest evaluation
+  (:func:`functional_summary`), the evaluation suite and tester versions, plus
+  ``spec_content_hash`` (the run's ``task_hash``: task version and prose variant);
 - **re-taken at first open** (``full=True``, :func:`full_snapshots` for a whole pool):
-  additionally ``functional.by_category``, the api/admin conformance ``checks``
+  additionally ``functional.by_category``, the endpoint ``checks``
   (``name, category, passed``), ``static_findings`` and the blinding scan.
 
-``static_findings = {count, loc, tools, by_tool}`` counts non-dependency findings of
-static, non-AI tools in the latest measured ``ToolResult`` per (job, tool);
-``tools`` lists the tools that measured the job (so per-kLOC comparisons can keep
-only tools present for every app) and ``by_tool`` their counts; ``loc`` is
-``loc_from_job(job)["total_loc"]``. Findings are never deduplicated here.
+``functional`` comes from ``RunView.latest_evaluation()``. Missing data is never a pass
+rate of 0: an unevaluated run, a ``not_measured`` / ``error`` evaluation or a tester result
+with ``measured=false`` has ``pass_rate=None`` (``status`` says why).
+
+``static_findings = {count, loc, loc_model, tools, by_tool}`` counts non-dependency findings
+of static, non-AI tools in the latest ``ToolResult`` per (run, tool) that measured the run
+(completed; a not-applicable tool is not measured, never a zero); ``tools`` lists the tools
+that measured the run (so per-kLOC comparisons can keep only tools present
+for every app) and ``by_tool`` their counts. Analysis runs on the whole app tree, so ``loc``
+is the app-scope source LOC (``RunView.loc("app")``); ``loc_model`` is the model's own
+contribution. Either is None when the run has no collected tree (never 0). Findings are
+never deduplicated here.
 
 ``blinding_scan = {source: [...], findings: [...]}`` lists the model / provider tokens
 (:func:`model_tokens`) found in the generated source exactly as the portal's source
-viewer serves it (:func:`source_texts`: file paths and texts from ``source.job_files``;
+viewer serves it (:func:`source_texts`: file paths and texts from ``source.run_files``;
 case-insensitive) and, once the finding sample is drawn, in the sampled findings' text. It feeds the
 ``model_name_in_source`` open warning; generated code never changes, so the scan is
 done once per app.
 
-Group key: ``f"{app_slug}:{spec_content_hash[:12]}"``; an app without a spec gets its
+Group key: ``f"{app_slug}:{spec_content_hash[:12]}"``; an app without a task gets its
 own app id (never paired) — see :func:`group_key`.
 """
 
 from __future__ import annotations
 
-import hashlib
 import re
 from typing import TYPE_CHECKING
 from typing import Any
 
 from backend.human_eval.services import source as source_service
-from backend.human_eval.services.design import canonical_json
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
+    from backend.generation.models import RunEvaluation
+    from backend.generation.runs.view import RunView
     from backend.human_eval.models import EvalTaskApp
 
-NON_SAMPLE_STATUSES = frozenset({"infra_error", "not_applicable"})
-DEPLOYED_STATUSES = frozenset({"passed", "failed"})
-UNDEPLOYED_STATUSES = frozenset({"build_failed", "start_failed"})
+#: Keys of the light snapshot (taken when an app is added); the full snapshot adds :data:`FULL_KEYS`.
+BASE_KEYS = (
+    "run_id",
+    "model_id",
+    "model_name",
+    "provider",
+    "condition_id",
+    "condition_label",
+    "study_id",
+    "study_name",
+    "app_slug",
+    "app_name",
+    "task_ref",
+    "prose_variant",
+    "stack",
+    "auth_mode",
+    "unit_key",
+    "repeat_index",
+    "kind",
+    "harness",
+    "functional",
+    "evaluator_version",
+    "tester_version",
+    "created_at",
+    "spec_content_hash",
+    "run_fingerprint",
+)
+FULL_KEYS = ("checks", "static_findings", "blinding_scan")
+FUNCTIONAL_KEYS = ("status", "pass_rate", "deployed", "source")
+#: ``functional.source`` of a summary read from a ``RunEvaluation`` (the automated evaluation suite).
+EVAL_SOURCE = "eval_suite"
+#: Run outcomes that mean the app never got deployed (no evaluation can have a pass rate).
+UNDEPLOYED_OUTCOMES = frozenset({"build_fail", "start_fail"})
+#: Run outcomes reported as the functional status when no evaluation measured the run.
+OUTCOME_STATUSES = frozenset({"build_fail", "start_fail", "infra_error", "output_invalid", "excluded"})
 ENDPOINT_CHECK_CATEGORIES = ("api", "admin")
 #: Upper bound of generated text scanned per app for model names (characters).
 MAX_SCAN_CHARS = 8 * 1024 * 1024
@@ -104,32 +146,21 @@ _PARENTHESIS = re.compile(r"\(.*?\)")
 
 
 # ---------------------------------------------------------------------------
-# Spec
+# Task (the app spec)
 # ---------------------------------------------------------------------------
 
 
-def spec_dict(job: GenerationJob) -> dict[str, Any] | None:
-    """The app spec the job was generated from: the frozen ``resolved_bundle`` copy first, else the live row."""
-    bundle = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
-    spec = bundle.get("app_requirement")
-    if isinstance(spec, dict):
-        return spec
-    if job.app_requirement_id is None:
+def spec_dict(run: GenerationRun | None) -> dict[str, Any] | None:
+    """The task the run was generated from (``RunView.task_dict()``: structured task + the chosen prose)."""
+    if run is None:
         return None
-    from backend.generation.services.profile_resolver import app_requirement_to_dict
+    from backend.generation.runs.view import run_view
 
-    return app_requirement_to_dict(job.app_requirement)
-
-
-def spec_content_hash(spec: dict[str, Any] | None) -> str | None:
-    """sha256 of the canonical JSON of the spec dict (None without a spec)."""
-    if not spec:
-        return None
-    return hashlib.sha256(canonical_json(spec).encode("utf-8")).hexdigest()
+    return run_view(run).task_dict()
 
 
 def group_key(snapshot: dict[str, Any], app_id: Any) -> str:
-    """``f"{app_slug}:{spec_content_hash[:12]}"``, or the app's own id when it has no spec (never paired)."""
+    """``f"{app_slug}:{spec_content_hash[:12]}"``, or the app's own id when it has no task (never paired)."""
     slug = snapshot.get("app_slug") or ""
     digest = snapshot.get("spec_content_hash") or ""
     if slug and digest:
@@ -138,7 +169,7 @@ def group_key(snapshot: dict[str, Any], app_id: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Functional summary
+# Functional summary (latest evaluation)
 # ---------------------------------------------------------------------------
 
 
@@ -151,159 +182,182 @@ def _number(value: Any) -> float | None:
         return None
 
 
-def functional_summary(metrics: Any) -> dict[str, Any]:
-    """TS ``FunctionalSummary`` of ``job.metrics["functional"]`` (conformance verdict or smoke probe).
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
-    ``pass_rate`` is None for ungraded runs (infra_error / not_applicable); ``deployed`` is the
-    conformance verdict's own flag (derived from the status for older verdicts), None for smoke.
+
+def evaluation_result(evaluation: RunEvaluation | None) -> dict[str, Any]:
+    """The evaluation's ``EvalResult`` when it measured the app, else ``{}`` (nothing to report)."""
+    from backend.generation.models import choices
+
+    if evaluation is None or evaluation.status != choices.EvaluationStatus.MEASURED:
+        return {}
+    result = _dict(evaluation.result)
+    return result if result.get("measured") is True else {}
+
+
+def functional_summary(view: RunView, evaluation: RunEvaluation | None) -> dict[str, Any]:
+    """TS ``FunctionalSummary`` of the run's latest evaluation (``RunView.latest_evaluation()``).
+
+    ``pass_rate`` is the tester's ``agent_pass_rate`` and only set when the evaluation measured the app;
+    ``deployed`` is the start stage's verdict (False for build/start failures, None when unknown).
+    ``status``: ``tested`` (measured), the evaluation status (``pending``, ``running``, ``not_measured``,
+    ``error``) or the run outcome when the app was never deployed or no evaluation exists.
     """
-    functional = metrics.get("functional") if isinstance(metrics, dict) else None
-    if not isinstance(functional, dict):
-        return {"status": None, "pass_rate": None, "deployed": None, "source": None}
-    conformance = functional.get("source") == "conformance"
-    status = functional.get("status") if isinstance(functional.get("status"), str) else None
-    pass_rate = None if status in NON_SAMPLE_STATUSES else _number(functional.get("pass_rate"))
-    deployed = None
-    if conformance:
-        stored = functional.get("deployed")
-        if isinstance(stored, bool):
-            deployed = stored
-        elif status in DEPLOYED_STATUSES:
-            deployed = True
-        elif status in UNDEPLOYED_STATUSES:
-            deployed = False
+    outcome = view.outcome or ""
+    deployed: bool | None = False if outcome in UNDEPLOYED_OUTCOMES else None
+    if evaluation is None:
+        status = outcome if outcome in OUTCOME_STATUSES else None
+        return {"status": status, "pass_rate": None, "deployed": deployed, "source": None}
+    result = evaluation_result(evaluation)
+    start = _dict(_dict(evaluation.stages).get("start")).get("status")
+    if start == "ok":
+        deployed = True
+    elif start == "fail":
+        deployed = False
+    if result:
+        status = "tested"
+    elif outcome in UNDEPLOYED_OUTCOMES:
+        status = outcome
+    else:
+        status = str(evaluation.status)
+    pass_rate = _number(_dict(result.get("metrics")).get("agent_pass_rate")) if result else None
+    return {"status": status, "pass_rate": pass_rate, "deployed": deployed, "source": EVAL_SOURCE}
+
+
+def _endpoints_by_id(task: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    structured = _dict((task or {}).get("structured"))
     return {
-        "status": status if conformance else None,
-        "pass_rate": pass_rate,
-        "deployed": deployed,
-        "source": "conformance" if conformance else "smoke",
+        str(endpoint["id"]): endpoint
+        for endpoint in structured.get("endpoints") or []
+        if isinstance(endpoint, dict) and endpoint.get("id")
     }
 
 
-def _evaluation(job: GenerationJob) -> dict[str, Any]:
-    data = job.result_data if isinstance(job.result_data, dict) else {}
-    evaluation = data.get("evaluation")
-    return evaluation if isinstance(evaluation, dict) else {}
+def endpoint_checks(result: dict[str, Any], task: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Per task endpoint, whether the tester's checks of it passed: ``{name, category, passed, endpoint_id}``.
 
-
-def endpoint_checks(evaluation: dict[str, Any]) -> list[dict[str, Any]]:
-    """The api/admin conformance checks as ``{name, category, passed}`` (names are ``"METHOD /path"``)."""
+    ``name`` is ``"METHOD /path"`` (the key of the participants' endpoint requirement items),
+    ``category`` ``admin`` for admin endpoints, else ``api``. Only checks that ran (``pass`` / ``fail``)
+    and are not flaky count; an endpoint passes when every one of its counted checks passed. Endpoints
+    without a counted check are left out (not measured, never a fail).
+    """
+    endpoints = _endpoints_by_id(task)
+    flaky = set(result.get("flaky_checks") or [])
+    verdicts: dict[str, bool] = {}
+    for check in result.get("checks") or []:
+        if not isinstance(check, dict) or check.get("id") in flaky:
+            continue
+        endpoint_id = check.get("endpoint")
+        if endpoint_id not in endpoints or check.get("status") not in ("pass", "fail"):
+            continue
+        verdicts[endpoint_id] = verdicts.get(endpoint_id, True) and check["status"] == "pass"
     checks = []
-    for check in evaluation.get("checks") or []:
-        if not isinstance(check, dict) or check.get("category") not in ENDPOINT_CHECK_CATEGORIES:
-            continue
+    for endpoint_id, passed in verdicts.items():
+        endpoint = endpoints[endpoint_id]
         checks.append(
-            {"name": str(check.get("name") or ""), "category": check["category"], "passed": bool(check.get("passed"))},
+            {
+                "name": f"{str(endpoint.get('method') or '').upper()} {endpoint.get('path') or ''}",
+                "category": "admin" if endpoint.get("auth") == "admin" else "api",
+                "passed": passed,
+                "endpoint_id": endpoint_id,
+            },
         )
-    return checks
+    return sorted(checks, key=lambda check: (check["category"], check["name"]))
 
 
-def checks_by_category(evaluation: dict[str, Any]) -> dict[str, dict[str, int]]:
-    """``{category: {passed, total}}`` of every conformance check (the stored summary, else counted)."""
-    summary = evaluation.get("summary")
-    stored = summary.get("by_category") if isinstance(summary, dict) else None
-    if isinstance(stored, dict) and stored:
-        result: dict[str, dict[str, int]] = {}
-        for category, counts in stored.items():
-            if isinstance(counts, dict):
-                result[str(category)] = {
-                    "passed": int(counts.get("passed") or 0),
-                    "total": int(counts.get("total") or 0),
-                }
-        return result
-    result = {}
-    for check in evaluation.get("checks") or []:
-        if not isinstance(check, dict):
-            continue
-        entry = result.setdefault(str(check.get("category") or ""), {"passed": 0, "total": 0})
-        entry["total"] += 1
-        entry["passed"] += int(bool(check.get("passed")))
-    return result
+def checks_by_category(result: dict[str, Any]) -> dict[str, dict[str, int]]:
+    """``{category: {passed, total}}`` of the tester's checks (its ``metrics.by_category`` summary)."""
+    by_category = _dict(_dict(result.get("metrics")).get("by_category"))
+    return {
+        str(category): {"passed": int(counts.get("passed") or 0), "total": int(counts.get("n") or 0)}
+        for category, counts in sorted(by_category.items())
+        if isinstance(counts, dict)
+    }
 
 
 # ---------------------------------------------------------------------------
 # Snapshot
 # ---------------------------------------------------------------------------
 
-
-def _harness(job: GenerationJob) -> str:
-    bundle = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
-    harness = bundle.get("harness")
-    if isinstance(harness, dict) and harness.get("name"):
-        return str(harness["name"])
-    condition = job.condition if job.condition_id else None
-    if condition is not None and condition.harness:
-        return str(condition.harness)
-    return ""
+#: Run relations the snapshot reads (select them to avoid queries).
+RUN_RELATIONS = ("model", "study", "condition__model")
 
 
-def _condition_label(job: GenerationJob) -> str:
-    if job.condition_id is None:
+def condition_label(condition: Any) -> str:
+    """A study condition's label, else its model id."""
+    if condition is None:
         return ""
-    from backend.generation.services.experiments import condition_label
-
-    return condition_label(job.condition)
+    return str(condition.label or (condition.model.model_id if condition.model_id else ""))
 
 
-def _base_snapshot(job: GenerationJob) -> dict[str, Any]:
-    model = job.model if job.model_id else None
-    experiment = job.experiment if job.experiment_id else None
-    spec = spec_dict(job)
-    functional_raw = job.metrics.get("functional") if isinstance(job.metrics, dict) else None
-    functional_raw = functional_raw if isinstance(functional_raw, dict) else {}
+def _base_snapshot(run: GenerationRun, view: RunView) -> dict[str, Any]:
+    model = run.model if run.model_id else None
+    study = run.study if run.study_id else None
+    task = view.task
+    evaluation = view.latest_evaluation()
+    result = evaluation_result(evaluation)
     return {
+        "run_id": view.id,
         "model_id": model.model_id if model is not None else "",
         "model_name": model.model_name if model is not None else "",
         "provider": model.provider if model is not None else "",
-        "condition_id": job.condition_id,
-        "condition_label": _condition_label(job),
-        "experiment_id": str(experiment.id) if experiment is not None else None,
-        "experiment_name": experiment.name if experiment is not None else "",
-        "app_slug": str((spec or {}).get("slug") or ""),
-        "app_name": str((spec or {}).get("name") or ""),
-        "repeat_index": job.repeat_index,
-        "mode": job.mode,
-        "harness": _harness(job),
-        "functional": functional_summary(job.metrics),
-        "evaluator_version": functional_raw.get("evaluator_version"),
-        "tester_sha256": functional_raw.get("tester_sha256"),
-        "created_at": job.created_at.isoformat() if job.created_at else None,
-        "spec_content_hash": spec_content_hash(spec),
+        "condition_id": view.condition_id,
+        "condition_label": condition_label(run.condition if run.condition_id else None),
+        "study_id": view.study_id,
+        "study_name": study.name if study is not None else "",
+        "app_slug": task.slug if task is not None else "",
+        "app_name": task.title if task is not None else "",
+        "task_ref": task.ref if task is not None else None,
+        "prose_variant": (task.variant or None) if task is not None else None,
+        "stack": view.stack.ref if view.stack is not None else None,
+        "auth_mode": view.auth_mode,
+        "unit_key": view.unit_key,
+        "repeat_index": view.repeat_index,
+        "kind": view.kind,
+        "harness": view.harness[0] if view.harness else "",
+        "functional": functional_summary(view, evaluation),
+        "evaluator_version": evaluation.eval_suite.ref if evaluation is not None else None,
+        "tester_version": result.get("tester_version") if result else None,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+        "spec_content_hash": (task.task_hash or None) if task is not None else None,
+        "run_fingerprint": view.fingerprints.get("run_fingerprint") or None,
     }
 
 
-def job_snapshot(job: GenerationJob, *, full: bool = True) -> dict[str, Any]:
-    """The snapshot dict of a GenerationJob (stored in ``EvalTaskApp.snapshot``).
+def run_snapshot(run: GenerationRun, *, full: bool = True) -> dict[str, Any]:
+    """The snapshot dict of a GenerationRun (stored in ``EvalTaskApp.snapshot``).
 
-    ``full=False`` (when the app is added) skips the parts that need ``result_data`` and the
-    analysis tables; first open re-takes the full snapshot. Select ``model``, ``experiment``,
-    ``app_requirement`` and ``condition__model`` (+ profile / harness preset) to avoid queries.
+    ``full=False`` (when the app is added) skips the parts that need the code tree and the
+    analysis tables; first open re-takes the full snapshot. Select :data:`RUN_RELATIONS` to avoid queries.
     """
     if full:
-        return full_snapshots([job])[str(job.id)]
-    return _base_snapshot(job)
+        return full_snapshots([run])[str(run.pk)]
+    from backend.generation.runs.view import run_view
+
+    return _base_snapshot(run, run_view(run))
 
 
-def full_snapshots(jobs: Iterable[GenerationJob]) -> dict[str, dict[str, Any]]:
-    """Full snapshots of many jobs keyed by ``str(job.id)`` (static findings in a few batched queries)."""
-    jobs = list(jobs)
-    findings = static_findings_by_job(jobs)
+def full_snapshots(runs: Iterable[GenerationRun]) -> dict[str, dict[str, Any]]:
+    """Full snapshots of many runs keyed by ``str(run.pk)`` (static findings in a few batched queries)."""
+    from backend.generation.runs.view import run_view
+
+    runs = list(runs)
+    views = {str(run.pk): run_view(run) for run in runs}
+    findings = static_findings_by_run(runs, views)
     snapshots: dict[str, dict[str, Any]] = {}
-    for job in jobs:
-        snapshot = _base_snapshot(job)
-        evaluation = _evaluation(job)
-        if snapshot["evaluator_version"] is None:
-            snapshot["evaluator_version"] = evaluation.get("evaluator_version")
-        if snapshot["tester_sha256"] is None:
-            snapshot["tester_sha256"] = evaluation.get("tester_sha256")
-        snapshot["functional"]["by_category"] = checks_by_category(evaluation)
-        snapshot["checks"] = endpoint_checks(evaluation)
-        snapshot["static_findings"] = findings[str(job.id)]
+    for run in runs:
+        view = views[str(run.pk)]
+        snapshot = _base_snapshot(run, view)
+        result = evaluation_result(view.latest_evaluation())
+        snapshot["functional"]["by_category"] = checks_by_category(result)
+        snapshot["checks"] = endpoint_checks(result, view.task_dict())
+        snapshot["static_findings"] = findings[str(run.pk)]
         snapshot["blinding_scan"] = {
-            "source": scan_text(source_texts(job), model_tokens(snapshot)),
+            "source": scan_text(source_texts(run), model_tokens(snapshot)),
             "findings": [],
         }
-        snapshots[str(job.id)] = snapshot
+        snapshots[str(run.pk)] = snapshot
     return snapshots
 
 
@@ -313,37 +367,42 @@ def full_snapshots(jobs: Iterable[GenerationJob]) -> dict[str, dict[str, Any]]:
 
 
 def _measured(status: str, summary: Any) -> bool:
+    """Whether a tool result measured the app: completed, and not flagged ``tool_applicable: false``.
+
+    A tool with no applicable file (``skipped`` / ``not_applicable``) is **not measured** in v3 (spec 8.8):
+    it is left out of ``tools``, never counted as a true zero.
+    """
     from backend.analysis.models import ToolResult
 
-    if status == ToolResult.Status.COMPLETED:
-        return True
-    return (
-        status == ToolResult.Status.SKIPPED
-        and isinstance(summary, dict)
-        and summary.get("skip_reason") == ("not_applicable")
-    )
+    if status != ToolResult.Status.COMPLETED:
+        return False
+    return not (isinstance(summary, dict) and summary.get("tool_applicable") is False)
 
 
-def static_findings_by_job(jobs: Iterable[GenerationJob]) -> dict[str, dict[str, Any]]:
-    """``{str(job_id): {count, loc, tools, by_tool}}`` for static, non-AI, non-dependency analysis.
+def static_findings_by_run(
+    runs: Iterable[GenerationRun],
+    views: dict[str, RunView] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """``{str(run_id): {count, loc, loc_model, tools, by_tool}}`` for static, non-AI, non-dependency analysis.
 
-    Latest measured ``ToolResult`` per (job, tool) (``ToolResult.latest_ids_per_job``); AI tools
-    (kind ``ai``), dynamic tools (``analysis_mode == "dynamic"``) and dependency scanners (tool
-    category ``dependencies``) are left out, as are findings with category ``dependency``.
+    The latest ``ToolResult`` per (run, tool) (``ToolResult.latest_ids_per_job``), kept when it measured the
+    run (:func:`_measured`). AI tools (kind ``ai``), dynamic tools (``analysis_mode == "dynamic"``) and
+    dependency scanners (tool category ``dependencies``) are left out, as are findings with category ``dependency``.
     """
     from django.db.models import Count
 
     from backend.analysis.models import AnalyzerTool
     from backend.analysis.models import Finding
     from backend.analysis.models import ToolResult
-    from backend.reports.services.loc import loc_from_job
+    from backend.generation.runs.view import run_view
 
-    jobs = list(jobs)
+    runs = list(runs)
+    views = views or {}
     result: dict[str, dict[str, Any]] = {}
-    if not jobs:
+    if not runs:
         return result
     rows = list(
-        ToolResult.objects.filter(id__in=ToolResult.latest_ids_per_job([job.id for job in jobs])).values(
+        ToolResult.objects.filter(id__in=ToolResult.latest_ids_per_job([run.pk for run in runs])).values(
             "id",
             "tool_slug",
             "category",
@@ -379,15 +438,17 @@ def static_findings_by_job(jobs: Iterable[GenerationJob]) -> dict[str, dict[str,
         .values("result_id")
         .annotate(n=Count("id"))
     }
-    per_job: dict[str, dict[str, int]] = {}
+    per_run: dict[str, dict[str, int]] = {}
     for row in kept:
-        tools = per_job.setdefault(str(row["run__generation_job_id"]), {})
+        tools = per_run.setdefault(str(row["run__generation_job_id"]), {})
         tools[row["tool_slug"]] = counts.get(str(row["id"]), 0)
-    for job in jobs:
-        tools = per_job.get(str(job.id), {})
-        result[str(job.id)] = {
+    for run in runs:
+        tools = per_run.get(str(run.pk), {})
+        view = views.get(str(run.pk)) or run_view(run)
+        result[str(run.pk)] = {
             "count": sum(tools.values()),
-            "loc": loc_from_job(job).get("total_loc"),
+            "loc": view.loc("app"),
+            "loc_model": view.loc("model"),
             "tools": sorted(tools),
             "by_tool": dict(sorted(tools.items())),
         }
@@ -400,7 +461,7 @@ def static_findings_by_job(jobs: Iterable[GenerationJob]) -> dict[str, dict[str,
 
 
 def model_tokens(snapshot: dict[str, Any]) -> list[str]:
-    """Lower-case tokens that name the job's model or provider (for the ``model_name_in_source`` warning).
+    """Lower-case tokens that name the run's model or provider (for the ``model_name_in_source`` warning).
 
     From the provider, the model id (``provider/slug:variant``) and the display name
     (``"Provider: Name (date)"``): the whole slug and name plus their leading word (the model
@@ -449,14 +510,13 @@ def scan_text(texts: Iterable[str], tokens: Iterable[str]) -> list[str]:
     return sorted(found)
 
 
-def source_texts(job: GenerationJob) -> list[str]:
-    """What the portal's source viewer shows of the job: every file path (the tree), then every file's text.
+def source_texts(run: GenerationRun | None) -> list[str]:
+    """What the portal's source viewer shows of the run: every file path (the tree), then every file's text.
 
-    Read through ``source.job_files`` itself, so the scan follows the viewer's layout rules exactly
-    (an all-blank ``files`` map falls back to the scaffolding blobs, then ``content``). Paths come
-    first: they are short and must never fall behind :data:`MAX_SCAN_CHARS`.
+    Read through ``source.run_files`` itself, so the scan covers exactly what participants can open.
+    Paths come first: they are short and must never fall behind :data:`MAX_SCAN_CHARS`.
     """
-    files = source_service.job_files(job)
+    files = source_service.run_files(run)
     return [*files.keys(), *files.values()]
 
 

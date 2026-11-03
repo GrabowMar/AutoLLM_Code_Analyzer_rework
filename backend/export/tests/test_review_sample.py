@@ -14,60 +14,69 @@ from backend.analysis.tests.factories import AnalyzerToolFactory
 from backend.analysis.tests.factories import FindingFactory
 from backend.analysis.tests.factories import ToolResultFactory
 from backend.export.services import review_sample as svc
-from backend.generation.models import GenerationJob
-from backend.generation.tests.factories import AppRequirementTemplateFactory
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation import blobs
+from backend.generation.models import GenerationRun
+from backend.generation.models import choices
+from backend.generation.testing import content
+from backend.generation.testing import factories
 from backend.llm_models.tests.factories import LLMModelFactory
+from backend.reports.tests.helpers import add_file
+from backend.reports.tests.helpers import evaluate
+from backend.reports.tests.helpers import make_run
 from backend.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
+
+# The default task: 7 endpoints and 1 UI requirement (testing/content.py:task_content).
+TASK_REQUIREMENTS = len(content.task_content()["endpoints"]) + len(content.task_content()["ui"])
+
+
+def _analysis(run):
+    return AnalysisRunFactory(
+        created_by=run.created_by,
+        generation_job=run,
+        source_code={},
+        status=AnalysisRun.Status.COMPLETED,
+    )
 
 
 @pytest.fixture
 def population():
     user = UserFactory()
-    app = AppRequirementTemplateFactory(
-        slug="todo",
-        backend_requirements=["Todo model", "CRUD API"],
-        frontend_requirements=["List view"],
-    )
+    task = factories.TaskSpecVersionFactory.create()
     models = [LLMModelFactory(model_id=f"vendor/m{i}") for i in range(3)]
     jobs = []
     for i, model in enumerate(models):
         for r in range(4 + i):
-            jobs.append(
-                GenerationJobFactory(
-                    created_by=user,
-                    mode="scaffolding",
-                    status=GenerationJob.Status.COMPLETED,
-                    model=model,
-                    app_requirement=app,
-                    repeat_index=r,
-                    result_data={
-                        "files": {"app.py": f"print({r})\n", "frontend/src/App.jsx": "export default 1\n"},
-                        "evaluation": {
-                            "status": "passed" if r % 2 else "build_failed",
-                            "summary": {"pass_rate": r / 10},
-                        },
-                    },
-                ),
+            run = make_run(
+                user,
+                model,
+                task,
+                code=None,
+                files={"app.py": f"print({r})\n", "frontend/src/App.jsx": "export default 1\n"},
+                repeat_index=r,
+                outcome=choices.Outcome.TESTED if r % 2 else choices.Outcome.BUILD_FAIL,
             )
-    # Not eligible: failed, no code.
-    GenerationJobFactory(created_by=user, mode="scaffolding", status=GenerationJob.Status.FAILED, model=models[0])
+            # Passing apps pass every check; build failures were measured (every check failed).
+            evaluate(run, passed=4 if r % 2 else 0, failed=0 if r % 2 else 1)
+            jobs.append(run)
+    # Not eligible: an infra error (no model outcome) and a run still in flight.
+    make_run(user, models[0], task, status=choices.RunStatus.FAILED)
+    make_run(user, models[0], task, status=choices.RunStatus.RUNNING, code=None)
     return user, jobs
 
 
 def test_selection_is_stratified_and_reproducible(population):
     _user, jobs = population
-    a, info = svc.select_sample(GenerationJob.objects.all(), size=6, stratify=("model",), seed=7)
-    b, _ = svc.select_sample(GenerationJob.objects.all(), size=6, stratify=("model",), seed=7)
-    c, _ = svc.select_sample(GenerationJob.objects.all(), size=6, stratify=("model",), seed=8)
+    a, info = svc.select_sample(GenerationRun.objects.all(), size=6, stratify=("model",), seed=7)
+    b, _ = svc.select_sample(GenerationRun.objects.all(), size=6, stratify=("model",), seed=7)
+    c, _ = svc.select_sample(GenerationRun.objects.all(), size=6, stratify=("model",), seed=8)
     assert [j.id for j in a] == [j.id for j in b]
     assert {j.id for j in a} != {j.id for j in c}
     assert info["population"] == len(jobs)
     assert sorted(s["sampled"] for s in info["strata"]) == [2, 2, 2]
 
-    per, info = svc.select_sample(GenerationJob.objects.all(), per_stratum=3, stratify=("model",), seed=1)
+    per, info = svc.select_sample(GenerationRun.objects.all(), per_stratum=3, stratify=("model",), seed=1)
     assert len(per) == 9
     assert all(s["sampled"] == 3 for s in info["strata"])
 
@@ -81,11 +90,7 @@ def test_allocation_never_exceeds_a_stratum():
 def test_zip_is_blind_and_complete(population):
     _user, jobs = population
     AnalyzerToolFactory(slug="llm_review", kind="ai", category="ai")
-    run = AnalysisRunFactory(
-        created_by=jobs[0].created_by,
-        generation_job=jobs[0],
-        status=AnalysisRun.Status.COMPLETED,
-    )
+    run = _analysis(jobs[0])
     FindingFactory(result=ToolResultFactory(run=run, tool_slug="llm_review"), title="AI says SQLi", file_path="app.py")
     FindingFactory(
         result=ToolResultFactory(run=run, tool_slug="bandit"),
@@ -99,23 +104,29 @@ def test_zip_is_blind_and_complete(population):
     names = set(zf.namelist())
     assert {"README.md", "manifest.json", "key.csv", "labels/ai_findings.csv", "labels/apps.csv"} <= names
     assert any(n.startswith("apps/S001/code/") for n in names)
-    assert "apps/S001/REQUIREMENTS.md" in names
+    assert {"apps/S001/REQUIREMENTS.md", "apps/S001/files.csv", "apps/S001/resolved_lock.json"} <= names
+    # The manifest names the model: it stays with the key, never in the app folder.
+    assert "key/S001/manifest.json" in names
+    assert not any(n.startswith("apps/") and n.endswith("manifest.json") for n in names)
     labels = zf.read("labels/apps.csv").decode() + zf.read("labels/requirements.csv").decode()
-    assert "vendor/" not in labels
-    assert "passed" not in labels
+    app_files = "".join(zf.read(n).decode() for n in names if n.startswith("apps/") and not n.endswith(".jsx"))
+    assert "vendor/" not in labels + app_files
+    assert "measured" not in labels
+    files = list(csv.DictReader(io.StringIO(zf.read("apps/S001/files.csv").decode())))
+    assert list(files[0])[:4] == ["path", "origin", "sha", "loc"]
     key = list(csv.DictReader(io.StringIO(zf.read("key.csv").decode())))
     assert {k["model"] for k in key} <= {"vendor/m0"}
     ai = list(csv.DictReader(io.StringIO(zf.read("labels/ai_findings.csv").decode())))
     assert [r["title"] for r in ai] == ["AI says SQLi"]
     assert manifest["counts"]["static_issues"] == 1
-    assert manifest["counts"]["requirements"] == 9
+    assert manifest["counts"]["requirements"] == 3 * TASK_REQUIREMENTS
     assert manifest["format_version"] == svc.SAMPLE_FORMAT_VERSION
     static = list(csv.DictReader(io.StringIO(zf.read("labels/static_issues.csv").decode())))
     assert static[0]["tool_severity"] == "bandit:unrated"
     assert static[0]["normalized_severity"] == "high"
     assert "severity" not in static[0]
     assert ai[0]["tool_severity"] == "unrated"
-    runs_by_job = {k["job_id"]: k["analysis_run_ids"] for k in key}
+    runs_by_job = {k["run_id"]: k["analysis_run_ids"] for k in key}
     assert runs_by_job[str(jobs[0].id)] == str(run.id)
     assert runs_by_job[str(jobs[1].id)] == ""  # not analyzed
 
@@ -143,7 +154,7 @@ def test_scoring_filled_labels(population):
     _user, jobs = population
     AnalyzerToolFactory(slug="llm_review", kind="ai", category="ai")
     for job in jobs[:4]:
-        run = AnalysisRunFactory(created_by=job.created_by, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+        run = _analysis(job)
         FindingFactory(result=ToolResultFactory(run=run, tool_slug="llm_review"), severity="high", file_path="app.py")
     data, _ = svc.build_review_sample(jobs[:4], size=4, stratify=(), seed=0)
     key = {
@@ -157,12 +168,13 @@ def test_scoring_filled_labels(population):
         row["human_verdict"] = next(verdicts)
 
     def app(row):
-        # The human agrees with the conformance tester on every app.
-        row["human_functional"] = "works" if key[row["sample_id"]]["conformance_status"] == "passed" else "broken"
+        # The human agrees with the evaluation on every app.
+        all_passed = float(key[row["sample_id"]]["eval_pass_rate"]) == 1.0
+        row["human_functional"] = "works" if all_passed else "broken"
         row["human_quality"] = "4"
 
     def req(row):
-        row["human_met"] = "yes" if row["requirement_id"] != "F1" else "no"
+        row["human_met"] = "yes" if row["requirement_id"] != "U1" else "no"
 
     filled = _rewrite(data, {"labels/ai_findings.csv": ai, "labels/apps.csv": app, "labels/requirements.csv": req})
     scores = svc.score_review_labels(filled)
@@ -175,7 +187,9 @@ def test_scoring_filled_labels(population):
     assert "by_severity" not in scores["ai_findings"]
     assert scores["functional"]["cohens_kappa"] == 1.0
     assert scores["functional"]["labelled"] == 4
-    assert scores["compliance"]["mean_human_compliance"] == pytest.approx(2 / 3, abs=1e-3)
+    expected = (TASK_REQUIREMENTS - 1) / TASK_REQUIREMENTS
+    assert scores["compliance"]["mean_human_compliance"] == pytest.approx(expected, abs=1e-3)
+    assert scores["compliance"]["paired_apps"] == 4
     assert scores["quality"]["mean"] == 4.0
 
 
@@ -211,7 +225,7 @@ def test_findings_come_from_the_latest_result_per_tool(population):
     """A partial re-run must not shrink the sheet to the re-run tools (runner-3)."""
     _user, jobs = population
     job = jobs[0]
-    full = AnalysisRunFactory(created_by=job.created_by, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+    full = _analysis(job)
     FindingFactory(
         result=ToolResultFactory(run=full, tool_slug="bandit"),
         rule_id="B105",
@@ -226,7 +240,7 @@ def test_findings_come_from_the_latest_result_per_tool(population):
         line_number=40,
         title="semgrep eval",
     )
-    rerun = AnalysisRunFactory(created_by=job.created_by, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+    rerun = _analysis(job)
     FindingFactory(
         result=ToolResultFactory(run=rerun, tool_slug="bandit"),
         rule_id="B201",
@@ -252,19 +266,18 @@ def test_findings_come_from_the_latest_result_per_tool(population):
 
 def test_dependency_advisories_get_their_own_sheet(population):
     """Advisories leave static_issues, merge across scanners by alias, and say who chose the package."""
-    from backend.runtime.models import Stack
-
-    Stack.objects.create(slug="dep-stack", version=1, files={"requirements.txt": "Flask==3.0.0\n"})
+    stack = factories.StackProfileFactory.create()
+    starter_files = {"requirements.txt": {"blob": blobs.put_text("Flask==3.0.0\n"), "mode": 0o644}}
+    starter = factories.StarterFactory.create(
+        stack_profile=stack,
+        content=content.starter_content(stack.pinned_ref, files=starter_files),
+    )
     _user, jobs = population
     job = jobs[0]
-    job.result_data = {
-        **job.result_data,
-        "files": {**job.result_data["files"], "requirements.txt": "flask==3.0.0\nleftpad==0.1\n"},
-    }
-    job.stack_slug = "dep-stack"
-    job.resolved_bundle = {"stack": {"slug": "dep-stack", "version": 1}}
-    job.save(update_fields=["result_data", "stack_slug", "resolved_bundle"])
-    run = AnalysisRunFactory(created_by=job.created_by, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+    add_file(job, "requirements.txt", "flask==3.0.0\nleftpad==0.1\n", origin=choices.FileOrigin.MODIFIED)
+    GenerationRun.objects.filter(pk=job.pk).update(starter=starter, stack_profile=stack)
+    job.refresh_from_db()
+    run = _analysis(job)
 
     results: dict = {}
 
@@ -314,16 +327,15 @@ def test_dependency_advisories_get_their_own_sheet(population):
     assert leftpad["tool_severity"] == "osv-scanner:7.5;trivy:HIGH"
     assert leftpad["title"].startswith("'@")  # neutralized for spreadsheets
     origins = {r["package"]: r["origin"] for r in deps}
-    assert origins == {"leftpad": "model", "flask": "scaffold", "transitive-lib": "transitive"}
+    assert origins == {"leftpad": "model", "flask": "starter", "transitive-lib": "transitive"}
     assert manifest["counts"]["dependency_issues"] == 3
 
 
 def test_dependency_cap_takes_model_added_advisories_first(population):
     _user, jobs = population
     job = jobs[0]
-    job.result_data = {**job.result_data, "files": {**job.result_data["files"], "requirements.txt": "mine==1\n"}}
-    job.save(update_fields=["result_data"])
-    run = AnalysisRunFactory(created_by=job.created_by, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+    add_file(job, "requirements.txt", "mine==1\n")
+    run = _analysis(job)
     result = ToolResultFactory(run=run, tool_slug="pip-audit")
     for i, package in enumerate(["mine", "a", "b", "c", "d"]):
         FindingFactory(
@@ -355,7 +367,7 @@ def test_runtime_and_test_code_issues_are_split_as_in_the_study(population):
     AnalyzerToolFactory(slug="zap", analysis_mode="dynamic")
     _user, jobs = population
     job = jobs[0]
-    run = AnalysisRunFactory(created_by=job.created_by, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+    run = _analysis(job)
     zap = ToolResultFactory(run=run, tool_slug="zap")
     for path in ("/assets/index.js", "/", "/api/items"):
         FindingFactory(
@@ -401,7 +413,7 @@ def test_runtime_and_test_code_issues_are_split_as_in_the_study(population):
     assert xfo["tools"] == "zap"
     assert manifest["counts"]["runtime_issues"] == 2
     assert manifest["counts"]["test_code_issues_not_sampled"] == 1
-    assert manifest["format_version"] == svc.SAMPLE_FORMAT_VERSION == 3
+    assert manifest["format_version"] == svc.SAMPLE_FORMAT_VERSION == 4
 
     verdicts = iter(["TP", "FP"])
 
@@ -417,9 +429,47 @@ def test_runtime_cap_draws_issue_classes(population):
     AnalyzerToolFactory(slug="nuclei", analysis_mode="dynamic")
     _user, jobs = population
     job = jobs[0]
-    run = AnalysisRunFactory(created_by=job.created_by, generation_job=job, status=AnalysisRun.Status.COMPLETED)
+    run = _analysis(job)
     result = ToolResultFactory(run=run, tool_slug="nuclei")
     for i in range(5):
         FindingFactory(result=result, rule_id=f"t{i}", file_path="/", tool_specific_data={"issue_key": f"class-{i}"})
     data, _ = svc.build_review_sample([job], size=1, stratify=(), seed=0, blind=False, max_runtime_per_app=2)
     assert len(_sheet(data, "labels/runtime_issues.csv")) == 2
+
+
+def test_population_is_the_studys_current_runs_and_refuses_other_users():
+    from backend.reports.tests.helpers import cell_run
+    from backend.reports.tests.helpers import make_cell
+    from backend.reports.tests.helpers import make_condition
+    from backend.reports.tests.helpers import make_study
+    from backend.reports.tests.helpers import make_unit
+
+    owner, stranger = UserFactory(), UserFactory()
+    study, plan = make_study(owner)
+    cell = make_cell(make_condition(plan, LLMModelFactory()), make_unit(plan))
+    infra = cell_run(cell, owner, attempt=1, status=choices.RunStatus.FAILED)
+    current = cell_run(cell, owner, attempt=2)
+    cell_run(cell, owner, attempt=3, beyond_plan=True)
+    make_run(owner, LLMModelFactory())  # outside the study
+
+    runs = list(svc.review_population(owner, study_id=str(study.id)))
+    assert [r.id for r in runs] == [current.id]
+    assert infra.id not in {r.id for r in svc.review_population(None, study_id=str(study.id))}
+    with pytest.raises(ValueError, match="Study not found"):
+        svc.review_population(stranger, study_id=str(study.id))
+    with pytest.raises(ValueError, match="Study not found"):
+        svc.review_population(None, study_id="00000000-0000-0000-0000-000000000000")
+
+
+def test_a_not_measured_evaluation_has_no_automated_verdict(population):
+    _user, jobs = population
+    evaluate(jobs[1], measured=False)
+    data, _ = svc.build_review_sample([jobs[1]], size=1, stratify=(), seed=0, blind=False)
+    (key,) = _sheet(data, "key.csv")
+    assert (key["eval_status"], key["eval_pass_rate"], key["deployed"]) == ("not_measured", "", "")
+
+    def app(row):
+        row["human_functional"] = "works"
+
+    scores = svc.score_review_labels(_rewrite(data, {"labels/apps.csv": app}))
+    assert scores["functional"]["labelled"] == 0

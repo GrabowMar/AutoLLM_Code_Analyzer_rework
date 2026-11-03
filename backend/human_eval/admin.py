@@ -28,7 +28,7 @@ class EvalTaskAdmin(admin.ModelAdmin):
     list_display = ("title", "mode", "status", "created_by", "opened_at", "closed_at", "created_at")
     list_filter = ("status", "mode")
     search_fields = ("title", "id", "created_by__email")
-    raw_id_fields = ("created_by", "experiment")
+    raw_id_fields = ("created_by", "study")
     readonly_fields = (
         "id",
         "design",

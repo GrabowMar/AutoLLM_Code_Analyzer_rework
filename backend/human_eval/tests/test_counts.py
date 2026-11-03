@@ -147,20 +147,21 @@ def test_make_open_task_single():
     assert len({app.group_key for app in apps}) == 1
     snapshot = apps[0].snapshot
     for key in (
+        "run_id",
         "model_id",
         "model_name",
         "provider",
         "condition_id",
         "condition_label",
-        "experiment_id",
-        "experiment_name",
+        "study_id",
+        "study_name",
         "app_slug",
         "app_name",
         "repeat_index",
-        "mode",
+        "kind",
         "functional",
         "evaluator_version",
-        "tester_sha256",
+        "tester_version",
         "created_at",
         "checks",
         "spec_content_hash",
@@ -169,8 +170,8 @@ def test_make_open_task_single():
         assert key in snapshot
     assert set(snapshot["functional"]) == {"status", "pass_rate", "deployed", "source", "by_category"}
     assert apps[0].group_key == f"{snapshot['app_slug']}:{snapshot['spec_content_hash'][:12]}"
-    assert apps[0].job.metrics["functional"]["source"] == "conformance"
-    assert apps[0].job.app_requirement is not None
+    assert snapshot["functional"]["source"] == "eval_suite"
+    assert apps[0].job.task_version is not None
     assert all(app.snapshot["condition_id"] is not None for app in apps)
     assert [app.job.repeat_index for app in apps] == [0, 0, 1]
     items = EvalItem.objects.filter(task=task)
@@ -192,7 +193,7 @@ def test_make_open_task_pairwise_pairs_across_conditions_only():
 def test_make_open_task_options():
     settings = {"allocation": {"strategy": "all"}, "hosting": {"isolation": "exclusive", "reset": "per_assignment"}}
     task = make_open_task(n_apps=2, conditions=0, settings=settings)
-    assert task.experiment is None
+    assert task.study_id is None
     assert task.settings["allocation"]["strategy"] == "all"
     assert task.settings["hosting"]["reset"] == "per_assignment"
     assert all(app.snapshot["condition_id"] is None for app in task.apps.all())

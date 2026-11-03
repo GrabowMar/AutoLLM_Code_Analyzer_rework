@@ -1,29 +1,29 @@
-"""Who chose a dependency: the stack scaffold or the model.
+"""Who chose a dependency: the starter or the model.
 
 Dependency advisories (osv-scanner, pip-audit, npm-audit, trivy) describe
-packages, not lines the model wrote. A scaffold that pins an old Flask-CORS
+packages, not lines the model wrote. A starter that pins an old Flask-CORS
 gives every app built on it the same advisories, so counting them against
-the model measures the template. These helpers split an app's dependency
+the model measures the starter. These helpers split an app's dependency
 advisories into the model's (:meth:`DependencyOwnership.is_models`) and the
-rest: what the scaffold's own version specs install, and transitive packages
+rest: what the starter's own version specs install, and transitive packages
 nobody declared directly.
 
 An advisory is the model's when it is in a package the model added (declared
-in the app's ``requirements*.txt``/``package.json`` but not in its stack's
-scaffold), in a transitive package that the app's lockfile shows only
-model-added packages pull in, or in a scaffold package whose version spec the
-model changed, when the scaffold's own spec would not install a vulnerable
-version (``axios`` pinned to ``1.6.8`` while the scaffold's ``^1.6.0``
+in the app's ``requirements*.txt``/``package.json`` but not in its
+starter), in a transitive package that the app's lockfile shows only
+model-added packages pull in, or in a starter package whose version spec the
+model changed, when the starter's own spec would not install a vulnerable
+version (``axios`` pinned to ``1.6.8`` while the starter's ``^1.6.0``
 installs a fixed 1.x).
 
-What the scaffold's spec installs is taken from the scope's evidence
-(:class:`DependencyScope`): an exact scaffold pin installs that version; a
+What the starter's spec installs is taken from the scope's evidence
+(:class:`DependencyScope`): an exact starter pin installs that version; a
 range installs what the scope's apps that kept that range installed (their
 lockfiles, the versions the scanners found), else the newest version in the
 range other apps in scope installed. So two apps on the same installed
 version get the same owner whatever their pin style. A transitive package
-under a scaffold package the model re-pinned is judged the same way, from
-what the apps that kept the scaffold's spec installed. With no evidence in
+under a starter package the model re-pinned is judged the same way, from
+what the apps that kept the starter's spec installed. With no evidence in
 scope (a single app) a range is assumed to install its newest version, which
 is fixed when a fix lies within the range.
 """
@@ -31,6 +31,7 @@ is fixed when a fix lies within the range.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from dataclasses import field
@@ -41,7 +42,10 @@ from typing import Any
 from backend.analysis.services.base import is_non_source_path
 
 if TYPE_CHECKING:
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
+    from backend.generation.models import Starter
+
+logger = logging.getLogger(__name__)
 
 _REQ_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*(.*)$")
 _NPM_SECTIONS = ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
@@ -315,7 +319,7 @@ def _affected(v: Version, fixes: list[Version]) -> bool:
     return any(_range_start(prev, fix) <= v < fix for prev, fix in pairwise(fixes))
 
 
-def scaffold_spec_affected(spec: str, fixed_versions: list[str]) -> bool | None:
+def starter_spec_affected(spec: str, fixed_versions: list[str]) -> bool | None:
     """Whether a fresh install of *spec* gets a vulnerable version (``None``: the spec cannot be read).
 
     An exact pin installs that version; a range installs its newest version,
@@ -358,12 +362,12 @@ def _cluster_installed(cluster: Any) -> set[Version]:
     return _versions(m.get("installed_version") for m in cluster.members)
 
 
-def _same_spec(declared: str, scaffold: str) -> bool:
-    """Whether a declared spec is the scaffold's own (``^1.6`` is ``^1.6.0``)."""
-    if declared == scaffold:
+def _same_spec(declared: str, starter: str) -> bool:
+    """Whether a declared spec is the starter's own (``^1.6`` is ``^1.6.0``)."""
+    if declared == starter:
         return True
     bounds = spec_range(declared)
-    return bounds is not None and bounds == spec_range(scaffold)
+    return bounds is not None and bounds == spec_range(starter)
 
 
 def _all_affected(versions: set[Version], fixes: list[str]) -> bool | None:
@@ -376,7 +380,7 @@ def _all_affected(versions: set[Version], fixes: list[str]) -> bool | None:
 
 @dataclass
 class DependencyOwnership:
-    """One app's declared dependencies next to its scaffold's, for attributing advisories.
+    """One app's declared dependencies next to its starter's, for attributing advisories.
 
     ``installed`` is what the app has installed (its lockfile, its exact pins
     and the versions the scanners found); ``scope`` links the other apps of
@@ -384,14 +388,14 @@ class DependencyOwnership:
     """
 
     app: dict[str, str]
-    scaffold: dict[str, str]
+    starter: dict[str, str]
     requirers: dict[str, set[str]] = field(default_factory=dict)
     installed: dict[str, set[Version]] = field(default_factory=dict)
     scope: DependencyScope | None = field(default=None, repr=False, compare=False)
 
     def model_added(self) -> set[str]:
-        """Packages the app declares that its scaffold does not."""
-        return set(self.app) - set(self.scaffold)
+        """Packages the app declares that its starter does not."""
+        return set(self.app) - set(self.starter)
 
     def _roots(self, package: str) -> set[str]:
         """The declared packages the lockfile shows pulling *package* in (directly or through others)."""
@@ -414,16 +418,16 @@ class DependencyOwnership:
         roots = self._roots(package)
         if not roots:
             return False  # no lockfile shows who pulls it in
-        scaffold_roots = {r: self.scaffold[r] for r in roots if r in self.scaffold}
-        if not scaffold_roots:
+        starter_roots = {r: self.starter[r] for r in roots if r in self.starter}
+        if not starter_roots:
             return True  # only model-added packages pull it in
-        changed = [r for r, spec in scaffold_roots.items() if not _same_spec(self.app[r], spec)]
+        changed = [r for r, spec in starter_roots.items() if not _same_spec(self.app[r], spec)]
         fixes = _cluster_fixes(cluster)
         if not changed or self.scope is None or fixes is None:
-            return False  # the scaffold's own packages pull it in
-        # The model re-pinned a scaffold package that pulls it in: the model's
-        # only if the apps that kept the scaffold's specs installed a fixed version.
-        return _all_affected(self.scope.resolved_transitive(package, scaffold_roots), fixes) is False
+            return False  # the starter's own packages pull it in
+        # The model re-pinned a starter package that pulls it in: the model's
+        # only if the apps that kept the starter's specs installed a fixed version.
+        return _all_affected(self.scope.resolved_transitive(package, starter_roots), fixes) is False
 
     def is_models(self, cluster: Any) -> bool:
         """Whether a dependency advisory cluster is in a version of a package the model chose."""
@@ -432,41 +436,41 @@ class DependencyOwnership:
             return False
         if package not in self.app:
             return self._transitive_is_models(package, cluster)
-        if package not in self.scaffold:
+        if package not in self.starter:
             return True
-        if _same_spec(self.app[package], self.scaffold[package]):
-            return False  # the scaffold's own spec
+        if _same_spec(self.app[package], self.starter[package]):
+            return False  # the starter's own spec
         return self._changed_spec_is_models(package, cluster)
 
     def _changed_spec_is_models(self, package: str, cluster: Any) -> bool:
-        """The model changed the scaffold's spec: the advisory is the scaffold's if its own spec installs it too."""
-        scaffold = self.scaffold[package]
+        """The model changed the starter's spec: the advisory is the starter's if its own spec installs it too."""
+        starter = self.starter[package]
         fixes = _cluster_fixes(cluster)
         if fixes is None:
             return False
         if self.scope is None:
-            return scaffold_spec_affected(scaffold, fixes) is False
-        affected = _all_affected(self.scope.resolved(package, scaffold), fixes)
+            return starter_spec_affected(starter, fixes) is False
+        affected = _all_affected(self.scope.resolved(package, starter), fixes)
         if affected is not None:
             return not affected
-        # Nothing in scope shows what the scaffold's range installs. A version
+        # Nothing in scope shows what the starter's range installs. A version
         # the range allows is the model's only when a newer one in the range,
         # installed by other apps in scope, is fixed: pinning what the range
-        # installed at the time is the scaffold's choice, not the model's.
+        # installed at the time is the starter's choice, not the model's.
         installed = _cluster_installed(cluster) or self.installed.get(package, set())
-        bounds = spec_range(scaffold)
+        bounds = spec_range(starter)
         if installed and bounds is not None and all(bounds[0] <= v < bounds[1] for v in installed):
             in_range = {v for v in self.scope.seen(package, besides=self) if bounds[0] <= v < bounds[1]}
             if in_range:
                 newer = {v for v in in_range if v > max(installed)}
                 return bool(newer) and _all_affected({max(newer)}, fixes) is False
         # No evidence at all: the range is taken to install its newest version.
-        return scaffold_spec_affected(scaffold, fixes) is False
+        return starter_spec_affected(starter, fixes) is False
 
 
 @dataclass
 class DependencyScope:
-    """What the apps of one study scope declare and install: the evidence of what a scaffold spec installs."""
+    """What the apps of one study scope declare and install: the evidence of what a starter spec installs."""
 
     apps: list[DependencyOwnership]
 
@@ -502,9 +506,9 @@ class DependencyScope:
 
 
 def dependency_scope(ownerships: dict[str, DependencyOwnership], clusters: Any = ()) -> DependencyScope:
-    """Link the ownerships of one scope (``{job id: ownership}``) so changed specs are judged on the scope's evidence.
+    """Link the ownerships of one scope (``{run id: ownership}``) so changed specs are judged on the scope's evidence.
 
-    *clusters* (the scope's advisory clusters, ``run_id`` = job id) add the
+    *clusters* (the scope's advisory clusters, ``run_id`` = the GenerationRun id) add the
     installed versions the scanners found to their app's ``installed``. Pass
     every app of the compared scope at once, as for the issue tables.
     """
@@ -519,59 +523,84 @@ def dependency_scope(ownerships: dict[str, DependencyOwnership], clusters: Any =
     return scope
 
 
-def _stack_key(job: GenerationJob) -> tuple[str, Any]:
-    stack = (job.resolved_bundle or {}).get("stack") or {}
-    return (stack.get("slug") or job.stack_slug or "", stack.get("version"))
+def _starter_of(run: GenerationRun) -> Starter | None:
+    """The starter the run's tree grew from (a slot variant's is its parent's)."""
+    if run.starter_id is not None:
+        return run.starter
+    parent = run.parent_run if run.parent_run_id is not None else None
+    return parent.starter if parent is not None and parent.starter_id is not None else None
 
 
-def _scaffold_specs(slug: str, version: int | None) -> dict[str, str]:
-    from backend.runtime.services.scaffolding import get_stack_row
-
-    row = get_stack_row(slug, version) if slug else None
-    if row is None and slug:
-        row = get_stack_row(slug)
-    return manifest_specs(row.files or {}) if row is not None else {}
+def _is_manifest(path: str) -> bool:
+    base = path.rsplit("/", 1)[-1].lower()
+    return base == "package.json" or (base.startswith("requirements") and base.endswith(".txt"))
 
 
-def scaffold_specs(job: GenerationJob, memo: dict | None = None) -> dict[str, str]:
-    """``{package: spec}`` the job's stack scaffold declares (the stack version the job pinned, else the latest).
+def _starter_manifest_specs(starter: Starter | None) -> dict[str, str]:
+    """``{package: spec}`` the starter's own ``requirements*.txt``/``package.json`` declare (its pinned version)."""
+    if starter is None:
+        return {}
+    from backend.generation import blobs
 
-    *memo* caches stack lookups across the jobs of one call.
+    files: dict[str, str] = {}
+    entries = (starter.content or {}).get("files") if isinstance(starter.content, dict) else None
+    for path, entry in (entries or {}).items():
+        if not _is_manifest(path) or "node_modules/" in path or not isinstance(entry, dict) or not entry.get("blob"):
+            continue
+        try:
+            files[path] = blobs.get_text(entry["blob"])
+        except (OSError, LookupError, ValueError):
+            logger.warning("starter %s: manifest blob of %s is missing", starter.pk, path)
+    return manifest_specs(files)
+
+
+def starter_specs(run: GenerationRun, memo: dict | None = None) -> dict[str, str]:
+    """``{package: spec}`` the run's starter declares (the starter version pinned in the run).
+
+    *memo* caches starter reads across the runs of one call.
     """
-    key = _stack_key(job)
+    starter = _starter_of(run)
+    key = getattr(starter, "pk", None)
     if memo is None:
-        return _scaffold_specs(*key)
+        return _starter_manifest_specs(starter)
     if key not in memo:
-        memo[key] = _scaffold_specs(*key)
+        memo[key] = _starter_manifest_specs(starter)
     return memo[key]
 
 
-def scaffold_packages(job: GenerationJob, memo: dict | None = None) -> frozenset[str]:
-    """Packages the job's stack scaffold declares (the stack version the job pinned, else the latest)."""
-    return frozenset(scaffold_specs(job, memo))
+def starter_packages(run: GenerationRun, memo: dict | None = None) -> frozenset[str]:
+    """Packages the run's starter declares."""
+    return frozenset(starter_specs(run, memo))
 
 
-def job_files(job: GenerationJob) -> dict[str, str]:
-    """The job's generated files as analyzed (agent/copilot jobs keep a per-file map).
+def run_files(run: GenerationRun) -> dict[str, str]:
+    """The run's app tree as analyzed (``RunView.code_files("app")``), without dependency or cache dirs.
 
-    Files inside dependency, cache or scratch directories are left out, as the
-    analysis run leaves them out: a package an agent unpacked to read its docs
-    does not declare the app's dependencies.
+    Files inside dependency, cache or scratch directories are left out, as the analysis leaves them out: a
+    package an agent unpacked to read its docs does not declare the app's dependencies.
     """
-    data = job.result_data if isinstance(job.result_data, dict) else {}
-    files = data.get("files")
-    if not isinstance(files, dict):
-        return {}
+    from backend.generation.runs.view import run_view
+
+    return _analyzed(run_view(run).code_files("app"))
+
+
+def _analyzed(files: dict[str, str]) -> dict[str, str]:
     return {k: v for k, v in files.items() if isinstance(v, str) and not is_non_source_path(k)}
 
 
-def dependency_ownership(job: GenerationJob, memo: dict | None = None) -> DependencyOwnership:
-    """The job's declared dependencies, its scaffold's, its lockfile graph and what it has installed.
+def dependency_ownership(
+    run: GenerationRun,
+    memo: dict | None = None,
+    *,
+    files: dict[str, str] | None = None,
+) -> DependencyOwnership:
+    """The run's declared dependencies, its starter's, its lockfile graph and what it has installed.
 
-    Link the ownerships of one scope with :func:`dependency_scope` so a
-    changed scaffold spec is judged on what the scope's apps installed.
+    *files* is the run's app-scope ``{path: text}`` when the caller read it in bulk
+    (``run_views_code(runs, "app")``); else it is read here. Link the ownerships of one scope with
+    :func:`dependency_scope` so a changed starter spec is judged on what the scope's apps installed.
     """
-    files = job_files(job)
+    files = _analyzed(files) if files is not None else run_files(run)
     app = manifest_specs(files)
     requirers, lock = _lock_graph(files)
     installed = {name: _versions(found) for name, found in lock.items()}
@@ -581,15 +610,15 @@ def dependency_ownership(job: GenerationJob, memo: dict | None = None) -> Depend
             installed.setdefault(name, set()).add(bounds[0])
     return DependencyOwnership(
         app=app,
-        scaffold=scaffold_specs(job, memo),
+        starter=starter_specs(run, memo),
         requirers=requirers,
         installed=installed,
     )
 
 
-def model_added_packages(job: GenerationJob, memo: dict | None = None) -> set[str]:
-    """Packages the app declares that its scaffold does not: the model's own dependency choices."""
-    return manifest_packages(job_files(job)) - scaffold_packages(job, memo)
+def model_added_packages(run: GenerationRun, memo: dict | None = None) -> set[str]:
+    """Packages the app declares that its starter does not: the model's own dependency choices."""
+    return manifest_packages(run_files(run)) - starter_packages(run, memo)
 
 
 def cluster_package(cluster: Any) -> str:

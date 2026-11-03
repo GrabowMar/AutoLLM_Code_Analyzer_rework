@@ -18,8 +18,12 @@ from backend.credentials.models import Provider
 from backend.credentials.models import UserApiCredential
 from backend.credentials.models import ValidationStatus
 from backend.credentials.services.validator import validate_for_provider
-from backend.generation.tests.factories import AppRequirementTemplateFactory
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation import blobs
+from backend.generation.models.choices import FileOrigin
+from backend.generation.testing.content import task_content
+from backend.generation.testing.factories import GenerationRunFactory
+from backend.generation.testing.factories import RunFileFactory
+from backend.generation.testing.factories import TaskSpecVersionFactory
 from backend.integrations.services import github
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.users.tests.factories import UserFactory
@@ -92,24 +96,43 @@ def token(owner):
     return cred
 
 
+@pytest.fixture(autouse=True)
+def _blob_root(settings, tmp_path):
+    settings.GENERATION_BLOBS_ROOT = str(tmp_path / "blobs")
+
+
+def add_file(run, path: str, content: bytes | str, origin=FileOrigin.AUTHORED, **extra):
+    data = content.encode() if isinstance(content, str) else content
+    return RunFileFactory.create(
+        run=run,
+        path=path,
+        blob=blobs.put_bytes(data),
+        size=len(data),
+        origin=origin,
+        **extra,
+    )
+
+
 @pytest.fixture
 def job(owner):
-    return GenerationJobFactory.create(
+    """A tested app run: two starter files, two files the model wrote, junk and an oversized file."""
+    content = task_content(title="Todo App")
+    run = GenerationRunFactory.create(
+        tested=True,
         created_by=owner,
-        status="completed",
         model=LLMModelFactory.create(model_id="acme/coder-1", model_name="Coder One"),
-        app_requirement=AppRequirementTemplateFactory.create(name="Todo App", slug="todo"),
-        result_data={
-            "result_schema_version": 2,
-            "files": {
-                "backend/app.py": "print('hi')\n",
-                "frontend/src/App.jsx": "export default () => null;\n",
-                "node_modules/left-pad/index.js": "junk",
-                "backend/__pycache__/app.cpython-313.pyc": "junk",
-                "big.txt": "x" * (github.MAX_FILE_BYTES + 1),
-            },
-        },
+        task_version=TaskSpecVersionFactory.create(content=content),
     )
+    add_file(run, "Dockerfile", "FROM python:3.13-slim\n", origin=FileOrigin.STARTER, excluded="non_source")
+    add_file(run, "run.sh", "#!/bin/sh\nexec python backend/app.py\n", origin=FileOrigin.STARTER, mode=0o755)
+    add_file(run, "backend/app.py", "print('hi')\n")
+    add_file(run, "frontend/src/App.jsx", "export default () => null;\n", origin=FileOrigin.MODIFIED)
+    add_file(run, "frontend/dist/app.js", "built", origin=FileOrigin.ARTIFACT)
+    add_file(run, "node_modules/left-pad/index.js", "junk", excluded="vendored")
+    add_file(run, "backend/__pycache__/app.cpython-313.pyc", "junk", excluded="binary")
+    add_file(run, "big.txt", "x" * (github.MAX_FILE_BYTES + 1))
+    RunFileFactory.create(run=run, path="backend/old.py", blob="", size=0, origin=FileOrigin.DELETED)
+    return run
 
 
 @pytest.fixture
@@ -214,7 +237,7 @@ def test_export_repo_single_commit(client, token, job, findings):
     with patch.object(github.requests, "request", fake):
         resp = _post(
             client,
-            {"application_id": str(job.id), "repo_name": "todo-app", "include_scaffold": False},
+            {"application_id": str(job.id), "repo_name": "todo-app", "scope": "model"},
         )
     assert resp.status_code == 200, resp.content
     data = resp.json()
@@ -232,10 +255,11 @@ def test_export_repo_single_commit(client, token, job, findings):
     readme = next(e["content"] for e in tree if e["path"] == "README.md")
     assert "acme/coder-1" in readme
     assert "Todo App" in readme
+    assert f"| Run id | `{job.id}` |" in readme
     # The level the tool printed (bandit's findings here carry none), never the normalized bucket.
     assert "| `bandit` | unrated | 2 |" in readme
     assert "Severity" not in readme
-    assert set(data["skipped"]) >= {"big.txt", "node_modules/left-pad/index.js"}
+    assert set(data["skipped"]) == {"big.txt"}  # model scope: vendored, artifact and starter rows are not in it
 
     commit = fake.find("POST", "/git/commits")[0][2]
     assert commit["parents"] == []
@@ -245,22 +269,45 @@ def test_export_repo_single_commit(client, token, job, findings):
     assert not fake.find("POST", "/code-scanning/sarifs")
 
 
-def test_export_repo_uses_blobs_for_binary(owner, token, job):
-    with (
-        patch.object(
-            github,
-            "_scaffolded_file_map",
-            return_value=({"logo.png": b"\x89PNG\x00\xff", "run.sh": b"#!/bin/sh\n"}, {"run.sh"}),
-        ),
-        patch.object(github.requests, "request", fake := FakeGitHub()),
-    ):
-        github.export_to_repo(owner, job.id, "bin-app")
+def test_export_repo_app_scope_is_the_buildable_tree(owner, token, job):
+    add_file(job, "static/logo.png", b"\x89PNG\x00\xff", excluded="binary")
+    with patch.object(github.requests, "request", fake := FakeGitHub()):
+        result = github.export_to_repo(owner, job.id, "bin-app")
     tree = {e["path"]: e for e in fake.find("POST", "/git/trees")[0][2]["tree"]}
-    assert "sha" in tree["logo.png"]
-    assert "content" not in tree["logo.png"]
+    assert set(tree) == {
+        "Dockerfile",
+        "run.sh",
+        "backend/app.py",
+        "frontend/src/App.jsx",
+        "static/logo.png",
+        "README.md",
+    }
+    assert "sha" in tree["static/logo.png"]
+    assert "content" not in tree["static/logo.png"]
     assert tree["run.sh"]["mode"] == "100755"
+    assert tree["backend/app.py"]["mode"] == "100644"
     blob = fake.find("POST", "/git/blobs")[0][2]
     assert base64.b64decode(blob["content"]) == b"\x89PNG\x00\xff"
+    # Junk paths are dropped even in app scope; artifacts and deleted paths are never in the tree.
+    assert set(result["skipped"]) == {
+        "big.txt",
+        "node_modules/left-pad/index.js",
+        "backend/__pycache__/app.cpython-313.pyc",
+    }
+
+
+def test_missing_blob_is_skipped_not_exported_empty(owner, job):
+    RunFileFactory.create(run=job, path="backend/lost.py", blob="f" * 64, size=10, origin=FileOrigin.AUTHORED)
+    app = github.collect_app_files(job, scope="model")
+    assert "backend/lost.py" in app.skipped
+    assert "backend/lost.py" not in app.files
+
+
+def test_run_without_files_has_nothing_to_export(owner, token):
+    run = GenerationRunFactory.create(created_by=owner)
+    with pytest.raises(github.GitHubError) as exc:
+        github.export_to_repo(owner, run.id, "empty")
+    assert exc.value.status_code == 400
 
 
 def test_export_repo_with_sarif(client, token, job, findings):
@@ -268,7 +315,7 @@ def test_export_repo_with_sarif(client, token, job, findings):
     with patch.object(github.requests, "request", fake):
         resp = _post(
             client,
-            {"application_id": str(job.id), "repo_name": "todo-app", "upload_sarif": True, "include_scaffold": False},
+            {"application_id": str(job.id), "repo_name": "todo-app", "upload_sarif": True, "scope": "model"},
         )
     data = resp.json()
     assert data["sarif"]["uploaded"] is True
@@ -303,7 +350,7 @@ def test_build_sarif_keeps_only_results_code_scanning_can_place(owner, job):
         file_path="/tmp/workspace/backend/app.py",  # noqa: S108
         line_number=3,
     )
-    # A file the repository does not contain (e.g. a scaffold file left out of the export).
+    # A file the repository does not contain (e.g. a starter file left out of a model-scope export).
     Finding.objects.create(result=bandit, title="elsewhere", rule_id="B105", file_path="backend/missing.py")
     zap = ToolResult.objects.create(run=run, tool_slug="zap", status="completed")
     for path in ("/", "/assets/index.js"):
@@ -394,7 +441,7 @@ def test_sarif_unavailable_is_a_warning(client, token, job, findings, status):
     with patch.object(github.requests, "request", fake):
         resp = _post(
             client,
-            {"application_id": str(job.id), "repo_name": "todo-app", "upload_sarif": True, "include_scaffold": False},
+            {"application_id": str(job.id), "repo_name": "todo-app", "upload_sarif": True, "scope": "model"},
         )
     assert resp.status_code == 200
     sarif = resp.json()["sarif"]
@@ -406,7 +453,7 @@ def test_sarif_without_analysis(client, token, job):
     with patch.object(github.requests, "request", FakeGitHub()):
         resp = _post(
             client,
-            {"application_id": str(job.id), "repo_name": "todo-app", "upload_sarif": True, "include_scaffold": False},
+            {"application_id": str(job.id), "repo_name": "todo-app", "upload_sarif": True, "scope": "model"},
         )
     assert resp.status_code == 200
     assert "no completed analysis" in resp.json()["sarif"]["message"]
@@ -467,12 +514,6 @@ def test_unauthenticated():
     assert Client().get("/api/integrations/github/status/").status_code == 401
 
 
-def test_scaffold_failure_falls_back_to_raw_files(owner, job):
-    with patch("backend.runtime.services.scaffolding.apply_scaffold", side_effect=RuntimeError("boom")):
-        app = github.collect_app_files(job, include_scaffold=True)
-    assert set(app.files) == {"backend/app.py", "frontend/src/App.jsx"}
-
-
 # ── gist export ───────────────────────────────────────────────────────
 
 
@@ -484,12 +525,12 @@ def test_export_gist(client, token, job):
     assert resp.json()["url"] == "https://gist.github.com/octo/abc"
     body = fake.find("POST", "/gists")[0][2]
     assert body["public"] is False
-    assert set(body["files"]) == {"backend__app.py", "frontend__src__App.jsx", "README.md"}
+    assert set(body["files"]) == {"backend__app.py", "frontend__src__App.jsx", "README.md"}  # model scope only
 
 
 def test_gist_too_large(client, token, job):
-    job.result_data["files"] = {f"f{i}.py": "x = 1\n" for i in range(github.GIST_MAX_FILES + 1)}
-    job.save()
+    for i in range(github.GIST_MAX_FILES + 1):
+        add_file(job, f"f{i}.py", "x = 1\n")
     with patch.object(github.requests, "request", FakeGitHub()):
         resp = _post(client, {"application_id": str(job.id), "target": "gist"})
     assert resp.status_code == 413

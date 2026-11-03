@@ -1,4 +1,4 @@
-"""The runs API behind the analysis pages: list/stats, batches, preview, re-run, bulk actions, findings."""
+"""The runs API behind the analysis pages: list/stats, launches, preview, re-run, bulk actions, findings."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from backend.analysis.tests.factories import AnalysisRunFactory
 from backend.analysis.tests.factories import AnalyzerToolFactory
 from backend.analysis.tests.factories import FindingFactory
 from backend.analysis.tests.factories import ToolResultFactory
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.analysis.tests.factories import generation_run
 from backend.runtime.tests.factories import ContainerInstanceFactory
 from backend.users.tests.factories import UserFactory
 
@@ -29,11 +29,12 @@ def no_dispatch(monkeypatch):
     return calls
 
 
-def _job(user, files=None):
-    return GenerationJobFactory(
-        created_by=user,
-        status="completed",
-        result_data={"files": files or {"app.py": "import os\n", "templates/index.html": "<p>hi</p>\n"}},
+def _job(user, files=None, origins=None):
+    """A completed generation run whose collected app tree is *files*."""
+    return generation_run(
+        user,
+        files=files or {"app.py": "import os\n", "templates/index.html": "<p>hi</p>\n"},
+        origins=origins,
     )
 
 
@@ -58,7 +59,7 @@ def test_list_shows_target_and_live_progress(api_client, user):
     items = {i["id"]: i for i in api_client.get("/api/analysis/runs/").json()["items"]}
 
     live = items[str(active.id)]
-    assert live["target"]["kind"] == "job"
+    assert live["target"]["kind"] == "run"
     assert live["target"]["job_id"] == str(job.id)
     assert live["phase"] == runner.PHASE_TOOLS
     assert live["progress"] == {"total": 3, "done": 1, "running": ["b"], "findings": 1}
@@ -116,7 +117,11 @@ def test_create_names_the_run_after_its_app(api_client, user, no_dispatch):
     body = _post(api_client, "/runs/", {"tool_slugs": ["bandit"], "generation_job_id": str(job.id)}).json()
     assert body["name"] == body["target"]["label"]
     # One line each ("import os\n"): a trailing newline does not start another line.
-    assert body["source_files"] == [{"path": "app.py", "lines": 1}, {"path": "templates/index.html", "lines": 1}]
+    assert body["source_files"] == [
+        {"path": "app.py", "lines": 1, "origin": "authored"},
+        {"path": "templates/index.html", "lines": 1, "origin": "authored"},
+    ]
+    assert body["target"]["task_title"] == job.task_version.content["title"]
     assert no_dispatch == [[body["id"]]]
 
 
@@ -130,12 +135,12 @@ def test_batch_queues_one_run_per_app(api_client, user, no_dispatch):
     )
     assert resp.status_code == 200, resp.content
     body = resp.json()
-    runs = list(AnalysisRun.objects.filter(batch_id=body["batch_id"]))
+    runs = list(AnalysisRun.objects.filter(launch_id=body["launch_id"]))
     assert {str(r.generation_job_id) for r in runs} == {str(j.id) for j in jobs}
     assert all(r.tool_slugs == ["bandit"] for r in runs)
     # One queue for the whole batch, in the order given.
     assert no_dispatch == [body["run_ids"]]
-    listed = api_client.get(f"/api/analysis/runs/?batch_id={body['batch_id']}").json()
+    listed = api_client.get(f"/api/analysis/runs/?launch_id={body['launch_id']}").json()
     assert listed["total"] == 2
 
 
@@ -334,7 +339,8 @@ def test_list_and_detail_fill_counters_older_runs_lack(api_client, user):
 
     items = {i["id"]: i for i in api_client.get("/api/analysis/runs/").json()["items"]}
     summary = items[str(old.id)]["summary"]
-    # The DAST tool found the app down: no runtime measurement, so None, not 0.
+    # The DAST tool found the app down: no runtime measurement, so None, not 0 (hadolint was not applicable:
+    # not a measurement either).
     assert (summary["code_findings"], summary["dependency_findings"], summary["runtime_findings"]) == (1, 2, None)
     assert (summary["tools_not_applicable"], summary["tools_unmeasured"]) == (1, 1)
     restated = items[str(stored.id)]["summary"]

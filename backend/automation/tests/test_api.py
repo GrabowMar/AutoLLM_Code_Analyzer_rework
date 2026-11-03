@@ -31,7 +31,7 @@ def _automation_api_mounted() -> bool:
 
 
 # Spec §H: /api/automation/ is unmounted (automation is now Schedules and
-# Post-run on experiments); the app, its tables and engine stay.
+# Post-run on studies); the app, its tables and engine stay.
 pytestmark = pytest.mark.skipif(not _automation_api_mounted(), reason="automation API unmounted")
 
 

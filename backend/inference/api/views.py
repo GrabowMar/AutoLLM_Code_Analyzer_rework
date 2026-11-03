@@ -115,9 +115,10 @@ def _is_staff(request) -> bool:
 
 
 def _active_job_counts(endpoints: list[LLMEndpoint]) -> dict[int, int]:
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
+    from backend.generation.models.choices import RunStatus
 
-    running = GenerationJob.objects.filter(status=GenerationJob.Status.RUNNING)
+    running = GenerationRun.objects.filter(status=RunStatus.RUNNING)
     counts = dict(
         running.filter(endpoint_id__in=[e.pk for e in endpoints])
         .values("endpoint_id")
@@ -482,16 +483,16 @@ def update_endpoint(request, endpoint_id: int, data: EndpointUpdate):
 
 @router.delete("/endpoints/{endpoint_id}/", response={200: dict, 409: dict})
 def delete_endpoint(request, endpoint_id: int):
-    from backend.generation.models import ExperimentCondition
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
+    from backend.generation.models import StudyCondition
     from backend.llm_models.models import LLMModel
 
     endpoint = _owned(request, endpoint_id)
     if endpoint.is_system:
         raise HttpError(400, "The OpenRouter endpoint cannot be deleted.")
     in_use = (
-        GenerationJob.objects.filter(Q(endpoint=endpoint) | Q(model__endpoint=endpoint)).exists()
-        or ExperimentCondition.objects.filter(model__endpoint=endpoint).exists()
+        GenerationRun.objects.filter(Q(endpoint=endpoint) | Q(model__endpoint=endpoint)).exists()
+        or StudyCondition.objects.filter(model__endpoint=endpoint).exists()
         or LLMRequest.objects.filter(endpoint=endpoint).exists()
     )
     if in_use:

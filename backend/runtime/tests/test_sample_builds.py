@@ -23,17 +23,26 @@ from backend.runtime.tests.factories import ContainerInstanceFactory
 from backend.users.tests.factories import UserFactory
 
 
+def _run(**attrs):
+    """The fields ``build_identity`` and the cache key read from a GenerationRun (no database row needed)."""
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        kind="app_agentic",
+        protocol="app@1",
+        parent_run_id=None,
+        stack_profile=None,
+        starter=None,
+        resolved_lock_blob="",
+        **attrs,
+    )
+
+
 @pytest.fixture
 def sample_builder(monkeypatch, settings):
     settings.SAMPLE_BUILD_BACKEND = "legacy"
     settings.SAMPLE_IMAGE_CACHE_TTL_S = 604800
     settings.SAMPLE_IMAGE_CACHE_BYTES = 5 * 1024**3
-    job = SimpleNamespace(
-        id=uuid.uuid4(),
-        created_by_id=UserFactory().pk,
-        resolved_bundle={"stack": {"slug": "generic-python", "version": 1}},
-        source="print('first sample')",
-    )
+    job = _run(created_by_id=UserFactory().pk, source="print('first sample')")
     client = MagicMock()
     client.info.return_value = {"OSType": "linux", "Architecture": "amd64", "ID": "test-daemon"}
     client.containers.list.return_value = []
@@ -47,8 +56,8 @@ def sample_builder(monkeypatch, settings):
 
     client.images.get.side_effect = image_get
 
-    def prepare(job, path, *, healing, report):
-        report.mode = healing or "full"
+    def prepare(job, path, **_options):
+        # Stands in for generation.build.context.prepare_build_dir (the app tree, verbatim).
         (path / "Dockerfile").write_text("FROM python:3.13-slim\nCOPY . /app\n")
         (path / ".dockerignore").write_text("__pycache__\n")
         (path / "app.py").write_text(job.source)
@@ -115,16 +124,17 @@ def test_peek_reserves_hit_without_building_a_miss(sample_builder):
 
 
 @pytest.mark.django_db
-def test_changed_source_owner_healing_and_backend_invalidate(sample_builder, settings):
+def test_changed_source_owner_lock_and_backend_invalidate(sample_builder, settings):
     env = sample_builder
     results = [sample_builds.build_sample(env.job, client=env.client)]
     env.job.source = "print('changed')"
     results.append(sample_builds.build_sample(env.job, client=env.client))
     env.job.created_by_id = UserFactory().pk
     results.append(sample_builds.build_sample(env.job, client=env.client))
-    results.append(sample_builds.build_sample(env.job, client=env.client, healing="none"))
+    env.job.resolved_lock_blob = "a" * 64  # a new resolved lock is a new build identity
+    results.append(sample_builds.build_sample(env.job, client=env.client))
     settings.SAMPLE_BUILD_BACKEND = "buildkit"
-    results.append(sample_builds.build_sample(env.job, client=env.client, healing="none"))
+    results.append(sample_builds.build_sample(env.job, client=env.client))
 
     assert len({result.build_key for result in results}) == 5
     assert len(env.builds) == 5
@@ -218,13 +228,13 @@ def test_cancelled_wait_does_not_build(sample_builder):
 
 def test_context_hash_ignores_mtime_but_covers_build_files_and_rejects_links(tmp_path, settings):
     settings.SAMPLE_BUILD_BACKEND = "legacy"
-    job = SimpleNamespace(id=uuid.uuid4(), created_by_id=1, resolved_bundle={})
+    job = _run(created_by_id=1)
     (tmp_path / "Dockerfile").write_text("FROM scratch")
     source = tmp_path / "app.py"
     source.write_text("print('same')")
 
     def key():
-        return sample_builds._context_key(job, tmp_path, platform="linux/amd64", daemon_id="d", healing="full")
+        return sample_builds._context_key(job, tmp_path, platform="linux/amd64", daemon_id="d")
 
     first = key()
     os.utime(source, (1, 1))

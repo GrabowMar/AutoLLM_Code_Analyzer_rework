@@ -15,10 +15,10 @@ import re
 from pathlib import PurePosixPath
 from typing import Any
 
-from backend.analysis.models import AnalysisRun
 from backend.analysis.models import AnalyzerTool
+from backend.analysis.services.base import is_non_source_path
 
-# Most recent completed jobs considered: enough to describe what the user's
+# Most recent completed generation runs considered: enough to describe what the user's
 # models generate without scanning a whole archive on every page load.
 MAX_APPS = 200
 
@@ -88,21 +88,23 @@ def detect_technologies(files: dict[str, str]) -> set[str]:
 
 
 def app_coverage(user) -> dict[str, Any]:
-    """Technology and per-tool fit counts over *user*'s recent generated apps."""
-    from backend.analysis.services.runner import _materialize
+    """Technology and per-tool fit counts over *user*'s recent generated apps (their app scope)."""
     from backend.analysis.services.runner import nonempty_files
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
+    from backend.generation.models import choices
+    from backend.generation.runs.view import run_views_code
 
-    jobs = (
-        GenerationJob.objects.filter(created_by=user, status=GenerationJob.Status.COMPLETED)
-        .only("id", "result_data")
-        .order_by("-created_at")[:MAX_APPS]
+    runs = list(
+        GenerationRun.objects.filter(created_by=user, status=choices.RunStatus.COMPLETED)
+        .exclude(tree_hash="")
+        .order_by("-created_at")
+        .only("id", "kind", "parent_run_id")[:MAX_APPS],
     )
     per_app: list[set[str]] = []
-    for job in jobs:
-        code = AnalysisRun(generation_job=job).get_code_for_analysis()
+    for code in run_views_code(runs, "app").values():
+        files = {path: text for path, text in code.items() if not is_non_source_path(path)}
         # An empty file (e.g. an empty requirements.txt) gives no tool anything to read.
-        techs = detect_technologies(nonempty_files(_materialize(code)))
+        techs = detect_technologies(nonempty_files(files))
         if techs:
             per_app.append(techs)
 

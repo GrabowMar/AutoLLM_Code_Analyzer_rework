@@ -1,8 +1,4 @@
-"""v3 models: library immutability, derived columns, contract validation and database constraints.
-
-Until WP-02a/WP-02b land, run with ``--ds=backend.generation.tests.wp01_foundation.settings_u1``
-(see that module).
-"""
+"""v3 models: library immutability, derived columns, contract validation and database constraints."""
 
 from __future__ import annotations
 

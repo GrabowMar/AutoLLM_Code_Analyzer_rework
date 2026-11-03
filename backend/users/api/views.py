@@ -62,7 +62,7 @@ def retrieve_current_user(request):
 
 @router.get("/me/activity/", response=UserActivitySchema)
 def current_user_activity(request):
-    """Counts and the most recent applications, analyses, experiments and reports of the current user."""
+    """Counts and the most recent samples, analyses, studies and reports of the current user."""
     return user_activity(request.auth)
 
 

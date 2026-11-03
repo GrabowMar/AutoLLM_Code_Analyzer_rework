@@ -123,27 +123,27 @@ def _job_create(api_client, job_id):
 
 
 def test_create_run_rejects_another_users_job(api_client, user, monkeypatch):
-    from backend.generation.tests.factories import GenerationJobFactory
+    from backend.analysis.tests.factories import generation_run
     from backend.users.tests.factories import UserFactory
 
     monkeypatch.setattr(runner, "dispatch", lambda run_id: None)
-    foreign = GenerationJobFactory(created_by=UserFactory())
+    foreign = generation_run(UserFactory())
     assert _job_create(api_client, foreign.id).status_code == 404
     assert _job_create(api_client, "not-a-uuid").status_code == 404
     assert not AnalysisRun.objects.exists()
 
-    own = GenerationJobFactory(created_by=user)
+    own = generation_run(user)
     assert _job_create(api_client, own.id).status_code == 200
 
 
 def test_staff_may_analyze_any_job(api_client, user, monkeypatch):
-    from backend.generation.tests.factories import GenerationJobFactory
+    from backend.analysis.tests.factories import generation_run
     from backend.users.tests.factories import UserFactory
 
     monkeypatch.setattr(runner, "dispatch", lambda run_id: None)
     user.is_staff = True
     user.save()
-    foreign = GenerationJobFactory(created_by=UserFactory())
+    foreign = generation_run(UserFactory())
     assert _job_create(api_client, foreign.id).status_code == 200
 
 

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 STALE_PENDING_AFTER = timedelta(minutes=10)
 STALE_GENERATING_AFTER = timedelta(hours=1)
 INTERRUPTED_MESSAGE = (
-    "Interrupted: generation did not finish (the worker process restarted or the job was lost). "
+    "Interrupted: generation did not finish (the worker process restarted or the thread was lost). "
     "Generate the report again."
 )
 
@@ -69,7 +69,7 @@ def create_and_run(
     user=None,
     expires_in_days: int | None = 30,
 ) -> Report:
-    """Create a Report row and generate it synchronously in the caller's thread (experiment post-runs).
+    """Create a Report row and generate it synchronously in the caller's thread (study post-runs).
 
     A generator failure is recorded on the row (``failed``), never raised.
     """
@@ -173,18 +173,18 @@ def _validate_config(report_type: str, config: dict[str, Any], user=None) -> Non
 
     required: dict[str, list[str]] = {
         "model_analysis": ["model_id"],
-        "template_comparison": ["template_slug"],
-        "experiment_report": ["experiment_id"],
+        "template_comparison": ["task_slug"],
+        "experiment_report": ["study_id"],
     }
     for key in required.get(report_type, []):
         if not (config or {}).get(key):
             msg = f"Missing required config key for {report_type}: {key}"
             raise ValueError(msg)
-    if report_type in ("experiment_report", "study_report") and (config or {}).get("experiment_id"):
-        from .generators import owned_experiment
+    if report_type in ("experiment_report", "study_report") and (config or {}).get("study_id"):
+        from .generators import owned_study
 
-        # Raises ValueError("Experiment not found") for another user's experiment.
-        owned_experiment(config["experiment_id"], user)
+        # Raises ValueError("Study not found") for another user's study.
+        owned_study(config["study_id"], user)
     if report_type == "study_report" and (config or {}).get("ranking_criteria"):
         from backend.statistics.services.mcdm import criteria_from_config
 
@@ -206,7 +206,7 @@ def _default_title(report_type: str, config: dict[str, Any]) -> str:  # noqa: PL
         slug = config.get("model_id") or config.get("model_slug", "?")
         return f"Model analysis: {slug}"
     if report_type == "template_comparison":
-        return f"Template comparison: {config.get('template_slug', '?')}"
+        return f"Task comparison: {config.get('task_slug', '?')}"
     if report_type == "tool_analysis":
         return f"Tool analysis: {config.get('tool_name') or 'all tools'}"
     if report_type == "generation_analytics":
@@ -214,9 +214,9 @@ def _default_title(report_type: str, config: dict[str, Any]) -> str:  # noqa: PL
     if report_type == "comprehensive":
         return f"Comprehensive report ({config.get('days', 30)}d)"
     if report_type == "experiment_report":
-        return f"Experiment report: {config.get('experiment_id', '?')}"
+        return f"Study conditions: {config.get('study_id', '?')}"
     if report_type == "study_report":
-        scope = config.get("experiment_id") or config.get("batch_id") or "all my apps"
+        scope = config.get("study_id") or ("selected runs" if config.get("run_ids") else "all my apps")
         return f"Study report: {scope}"
     return "Report"
 
@@ -228,16 +228,17 @@ def _make_summary(report_type: str, data: dict[str, Any]) -> dict[str, Any]:  # 
         gen = data.get("generation", {})
         return {
             "model_id": (data.get("model") or {}).get("model_id"),
-            "total_jobs": gen.get("total_jobs", 0),
+            "total_runs": gen.get("total_runs", 0),
             # None: nothing finished / nothing analyzed (unmeasured is not zero).
             "success_rate": gen.get("success_rate"),
             "runs_analyzed": data.get("runs_analyzed"),
             "total_findings": data.get("total_findings"),
-            "total_loc": (data.get("loc") or {}).get("total_loc", 0),
+            # None: no run's tree was collected (unknown, not zero).
+            "total_loc": (data.get("loc") or {}).get("total_loc"),
         }
     if report_type == "template_comparison":
         return {
-            "template_slug": (data.get("template") or {}).get("slug"),
+            "task_slug": (data.get("task") or {}).get("slug"),
             "model_count": data.get("total_models", 0),
         }
     if report_type == "tool_analysis":
@@ -264,7 +265,7 @@ def _make_summary(report_type: str, data: dict[str, Any]) -> dict[str, Any]:  # 
         # condition there is nothing to lead.
         top = [r for r in board if abs(r["pass_rate_mean"] - best) < 1e-9] if best is not None else []
         return {
-            "experiment_id": (data.get("experiment") or {}).get("id"),
+            "study_id": (data.get("study") or {}).get("id"),
             "condition_count": data.get("total_conditions", 0),
             "leader": top[0].get("label") if len(top) == 1 else None,
             "leader_pass_rate": best,
@@ -276,13 +277,13 @@ def _make_summary(report_type: str, data: dict[str, Any]) -> dict[str, Any]:  # 
         ranking = (data.get("ranking") or {}).get("ranking") or []
         # TOPSIS ranks are competition ranks: every row ranked 1 shares the top,
         # and ranking[0] of a tie is only the alphabetically first. A tie names
-        # no leader (as the experiment report's summary decides it).
+        # no leader (as the study conditions report's summary decides it).
         if ranking and all("topsis_rank" in r for r in ranking):
             top = [r.get("model") for r in ranking if r.get("topsis_rank") == 1]
         else:
             top = [ranking[0].get("model")] if ranking else []
         return {
-            "jobs": funnel.get("jobs", 0),
+            "runs": funnel.get("runs", 0),
             "models": len((data.get("protocol") or {}).get("models") or []),
             "deploy_rate": (funnel.get("deploy_rate") or {}).get("rate"),
             "functional_rate": (funnel.get("functional_rate") or {}).get("rate"),

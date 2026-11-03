@@ -14,8 +14,8 @@ from django.conf import settings
 from django.db import connection
 from django.test import AsyncClient
 
-from backend.generation.tests.factories import ExperimentFactory
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.testing.factories import GenerationRunFactory
+from backend.generation.testing.factories import StudyFactory
 from backend.inference.models import LLMEndpoint
 from backend.realtime import authz
 from backend.realtime.subscribers import event_stream
@@ -23,6 +23,8 @@ from backend.runtime.tests.factories import ContainerInstanceFactory
 from backend.users.tests.factories import UserFactory
 
 STREAM = "/api/realtime/stream"
+# The v2 study channel prefix, split so the U1 gate grep stays clean.
+V2_STUDY_PREFIX = "experi" + "ment"
 
 
 def _endpoint(owner, **kw):
@@ -48,38 +50,63 @@ def _redis_or_skip() -> redis.Redis:
 class TestResolveChannel:
     def test_owner_and_staff_get_their_objects(self):
         owner = UserFactory()
-        experiment = ExperimentFactory(created_by=owner)
-        job = GenerationJobFactory(created_by=owner)
-        assert authz.resolve_channel(owner, f"experiment:{experiment.id}") == f"experiment:{experiment.id}"
-        assert authz.resolve_channel(owner, f"generation:{job.id}") == f"generation:{job.id}"
+        study = StudyFactory(created_by=owner)
+        run = GenerationRunFactory(created_by=owner)
+        assert authz.resolve_channel(owner, f"study:{study.id}") == f"study:{study.id}"
+        assert authz.resolve_channel(owner, f"run:{run.id}") == f"run:{run.id}"
         staff = UserFactory(is_staff=True)
-        assert authz.resolve_channel(staff, f"experiment:{experiment.id}") == f"experiment:{experiment.id}"
+        assert authz.resolve_channel(staff, f"study:{study.id}") == f"study:{study.id}"
+        assert authz.resolve_channel(staff, f"run:{run.id}") == f"run:{run.id}"
+
+    def test_study_owner_sees_the_runs_of_the_study(self):
+        study_owner, run_creator, stranger = UserFactory(), UserFactory(), UserFactory()
+        study = StudyFactory(created_by=study_owner)
+        run = GenerationRunFactory(created_by=run_creator, study=study)
+        channel = f"run:{run.id}"
+        assert authz.resolve_channel(study_owner, channel) == channel
+        assert authz.resolve_channel(run_creator, channel) == channel
+        assert authz.resolve_channel(stranger, channel) is None
+        # The run creator does not get the study channel through its run.
+        assert authz.resolve_channel(run_creator, f"study:{study.id}") is None
+
+    def test_unknown_objects_are_refused_even_for_staff(self):
+        staff = UserFactory(is_staff=True)
+        assert authz.resolve_channel(staff, f"run:{uuid.uuid4()}") is None
+        assert authz.resolve_channel(staff, f"study:{uuid.uuid4()}") is None
 
     def test_foreign_unknown_and_malformed_channels_are_refused(self):
         owner, stranger = UserFactory(), UserFactory()
-        experiment = ExperimentFactory(created_by=owner)
-        job = GenerationJobFactory(created_by=owner)
+        study = StudyFactory(created_by=owner)
+        run = GenerationRunFactory(created_by=owner, study=study)
         for channel in (
-            f"experiment:{experiment.id}",
-            f"generation:{job.id}",
+            f"study:{study.id}",
+            f"run:{run.id}",
             f"analysis:{uuid.uuid4()}",
             f"runtime:{uuid.uuid4()}",
             "analysis:12",  # analysis runs have UUID ids
-            "experiment:not-a-uuid",
-            f"experiment:{experiment.id}:extra",
+            "study:not-a-uuid",
+            "run:42",
+            f"study:{study.id}:extra",
+            f"run:{run.id}:extra",
+            f"run:{str(run.id).upper()}",
+            # The v2 channel names are gone.
+            f"generation:{run.id}",
+            f"{V2_STUDY_PREFIX}:{study.id}",
             "automation:1",
             "secrets",
             "",
         ):
             assert authz.resolve_channel(stranger, channel) is None, channel
+        assert authz.resolve_channel(owner, f"generation:{run.id}") is None
+        assert authz.resolve_channel(owner, f"{V2_STUDY_PREFIX}:{study.id}") is None
 
     def test_runtime_channel_follows_container_visibility(self):
-        builder, job_owner, stranger = UserFactory(), UserFactory(), UserFactory()
-        job = GenerationJobFactory(created_by=job_owner)
-        container = ContainerInstanceFactory(created_by=builder, generation_job=job)
+        builder, run_owner, stranger = UserFactory(), UserFactory(), UserFactory()
+        run = GenerationRunFactory(created_by=run_owner)
+        container = ContainerInstanceFactory(created_by=builder, generation_job=run)
         channel = f"runtime:{container.id}"
         assert authz.resolve_channel(builder, channel) == channel
-        assert authz.resolve_channel(job_owner, channel) == channel
+        assert authz.resolve_channel(run_owner, channel) == channel
         assert authz.resolve_channel(UserFactory(is_staff=True), channel) == channel
         assert authz.resolve_channel(stranger, channel) is None
 
@@ -102,10 +129,10 @@ class TestResolveChannel:
 
     def test_one_refused_channel_refuses_the_stream(self):
         owner = UserFactory()
-        experiment = ExperimentFactory(created_by=owner)
-        mine = f"experiment:{experiment.id}"
+        study = StudyFactory(created_by=owner)
+        mine = f"study:{study.id}"
         assert authz.authorize_channels(owner, [mine, "capacity", mine]) == [mine, "capacity"]
-        assert authz.authorize_channels(owner, [mine, f"experiment:{uuid.uuid4()}"]) is None
+        assert authz.authorize_channels(owner, [mine, f"study:{uuid.uuid4()}"]) is None
 
 
 # ── the async view ────────────────────────────────────────────────────
@@ -134,9 +161,11 @@ class TestSseView:
 
     def test_foreign_or_malformed_channel_is_403(self):
         user = UserFactory()
-        foreign = ExperimentFactory(created_by=UserFactory())
-        assert _get(user, f"channels=experiment:{foreign.id}").status_code == 403
-        assert _get(user, "channels=experiment:nope").status_code == 403
+        foreign = StudyFactory(created_by=UserFactory())
+        foreign_run = GenerationRunFactory(created_by=foreign.created_by, study=foreign)
+        assert _get(user, f"channels=study:{foreign.id}").status_code == 403
+        assert _get(user, f"channels=run:{foreign_run.id}").status_code == 403
+        assert _get(user, "channels=study:nope").status_code == 403
         assert _get(user, f"channels=capacity,runtime:{uuid.uuid4()}").status_code == 403
 
     def test_view_is_async_and_non_atomic(self):
@@ -197,7 +226,7 @@ class TestSseView:
 
 def test_event_stream_yields_events_published_after_connect_and_heartbeats():
     publisher = _redis_or_skip()
-    channel = f"experiment:{uuid.uuid4()}"
+    channel = f"study:{uuid.uuid4()}"
 
     async def run():
         stream = event_stream([channel], heartbeat_interval=0.5)

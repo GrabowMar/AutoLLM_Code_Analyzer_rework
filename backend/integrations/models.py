@@ -61,10 +61,10 @@ class WebhookSubscription(models.Model):
     secret_hint = models.CharField(_("secret hint"), max_length=16, blank=True, default="")
     telegram_chat_id = models.CharField(_("Telegram chat id"), max_length=64, blank=True, default="")
     events = models.JSONField(_("events"), default=list, blank=True)
-    include_experiment_jobs = models.BooleanField(
-        _("include experiment jobs"),
+    include_study_runs = models.BooleanField(
+        _("include study runs"),
         default=False,
-        help_text=_("Also send generation.* events for the individual jobs of an experiment."),
+        help_text=_("Also send run.* events for the individual runs of a study."),
     )
     enabled = models.BooleanField(_("enabled"), default=True)
     last_success_at = models.DateTimeField(_("last success at"), null=True, blank=True)

@@ -1,25 +1,23 @@
-"""Run order of an experiment's cells (spec §C.5).
+"""Run order of a study's cells (spec §C.5; v3 ``Study.scheduling``).
 
-Policies:
+Policies (``Study.scheduling``):
 
 - ``interleaved``: within each repeat block, every cell shuffled (randomised
   complete blocks). Residency K is still enforced at admission, so on an
   endpoint with finite K this thrashes model loads.
 - ``blocked``: within each repeat block, the model order is shuffled, then
-  each model's conditions, then each condition's apps. A model's cells are
+  each model's conditions, then each condition's units. A model's cells are
   contiguous within a block; the model order is re-drawn per block.
-- ``grouped``: model-major. One random condition order (models contiguous);
-  each condition runs all of its cells, repeat-major, apps shuffled per block.
-  Cheapest in swaps, confounded with time.
-- ``auto``: resolved per endpoint group: ``blocked`` for conditions on
-  endpoints with a finite K, ``interleaved`` otherwise (OpenRouter).
+- ``auto`` (default): resolved per endpoint group: ``blocked`` for conditions on
+  endpoints with a finite K (residency-aware blocking for local endpoints),
+  ``interleaved`` otherwise (OpenRouter).
 
 Randomness is drawn **per repeat block** (``random.Random(hash((order_seed,
 r)))``) over **all** cells, not only the pending ones, and positions are laid
 out with fixed strides, so a top-up or retry keeps each cell's original
 position and adding replicates never moves an existing cell (new repeat blocks
 come after the current maximum). Seeds and common random numbers do not depend
-on the order: they are per cell (``experiment_cell_seed``).
+on the order: they are per cell (``StudyCell.seed``).
 """
 
 from __future__ import annotations
@@ -31,13 +29,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-POLICIES = ("auto", "interleaved", "blocked", "grouped")
-EFFECTIVE_POLICIES = ("interleaved", "blocked", "grouped")
+POLICIES = ("auto", "interleaved", "blocked")
+EFFECTIVE_POLICIES = ("interleaved", "blocked")
 
-# grouped: sequence = condition_rank * GROUP_STRIDE + repeat * n_apps + app position.
-GROUP_STRIDE = 100_000
-
-# A cell is the triple condition id, app requirement id, repeat index.
+# A cell is the triple condition id, unit id, repeat index.
 Cell = tuple[int, int, int]
 
 
@@ -45,46 +40,46 @@ Cell = tuple[int, int, int]
 class ConditionInfo:
     """What ordering needs to know about one condition."""
 
-    model_key: Any  # cells of one model are kept together under blocked / grouped
+    model_key: Any  # cells of one model are kept together under blocked
     endpoint_key: str  # endpoint slug ("openrouter" for the catalog)
     finite_k: bool  # the endpoint limits resident models (auto -> blocked)
 
 
-def order_seed(experiment: Any) -> int:
-    """The experiment's run-order seed (same formula as ``services.experiments._order_seed``)."""
-    if getattr(experiment, "base_seed", None) is not None:
-        return int(experiment.base_seed)
-    return int(experiment.id.int % 2_147_483_647)
+def order_seed(study: Any) -> int:
+    """The study's run-order seed (``Study.order_seed``; the id when unset)."""
+    if getattr(study, "order_seed", None) is not None:
+        return int(study.order_seed)
+    return int(study.id.int % 2_147_483_647)
 
 
-def resident_limit(endpoint: Any, experiment: Any = None) -> int | None:
-    """K for ``endpoint`` under ``experiment``: the tighter of the endpoint's and the experiment's limit.
+def resident_limit(endpoint: Any, study: Any = None) -> int | None:
+    """K for ``endpoint`` under ``study``: the tighter of the endpoint's and ``execution_options.max_resident_models``.
 
     The system (OpenRouter) endpoint serves everything and has no residency.
     """
     if endpoint is None or getattr(endpoint, "is_system", False):
         return None
     limits = [getattr(endpoint, "max_resident_models", None)]
-    options = getattr(experiment, "execution_options", None) or {}
+    options = getattr(study, "execution_options", None) or {}
     if isinstance(options, dict):
         limits.append(options.get("max_resident_models"))
     finite = [int(v) for v in limits if isinstance(v, int) and not isinstance(v, bool) and v > 0]
     return min(finite) if finite else None
 
 
-def condition_info(experiment: Any, condition_ids: Iterable[int]) -> dict[int, ConditionInfo]:
-    """One query: model, endpoint and residency of each condition."""
-    from backend.generation.models import ExperimentCondition
+def condition_info(study: Any, condition_ids: Iterable[int]) -> dict[int, ConditionInfo]:
+    """One query: model, endpoint and residency of each ``StudyCondition``."""
+    from backend.generation.models import StudyCondition
 
     info: dict[int, ConditionInfo] = {}
-    rows = ExperimentCondition.objects.filter(id__in=set(condition_ids)).select_related("model__endpoint")
+    rows = StudyCondition.objects.filter(id__in=set(condition_ids)).select_related("model__endpoint")
     for condition in rows:
         model = condition.model
         endpoint = getattr(model, "endpoint", None) if model is not None else None
         info[condition.id] = ConditionInfo(
             model_key=model.pk if model is not None else f"condition:{condition.id}",
             endpoint_key=endpoint.slug if endpoint is not None else "openrouter",
-            finite_k=resident_limit(endpoint, experiment) is not None,
+            finite_k=resident_limit(endpoint, study) is not None,
         )
     return info
 
@@ -99,7 +94,7 @@ def effective_policy(policy: str, info: ConditionInfo | None) -> str:
 
 
 def policies_by_endpoint(policy: str, conditions: Mapping[int, ConditionInfo]) -> dict[str, str]:
-    """``{endpoint_slug: effective policy}`` (``GenerationBatch.request.schedule.policy_effective_by_endpoint``)."""
+    """``{endpoint_slug: effective policy}`` (what ``auto`` resolved to, per endpoint group)."""
     return {info.endpoint_key: effective_policy(policy, info) for info in conditions.values()}
 
 
@@ -112,7 +107,7 @@ def _sort_key(value: Any) -> tuple[str, str]:
 
 
 def cell_sequence(
-    experiment: Any,
+    study: Any,
     cells: Iterable[Cell],
     policy: str,
     *,
@@ -125,16 +120,12 @@ def cell_sequence(
     others ``interleaved``). ``conditions`` overrides the per-condition lookup
     (one query otherwise).
     """
-    cells = sorted({(int(c), int(a), int(r)) for c, a, r in cells})
+    cells = sorted({(int(c), int(u), int(r)) for c, u, r in cells})
     if not cells:
         return {}
     if conditions is None:
-        conditions = condition_info(experiment, {c for c, _a, _r in cells})
-    seed = order_seed(experiment)
-
-    by_policy: dict[str, list[Cell]] = {name: [] for name in EFFECTIVE_POLICIES}
-    for cell in cells:
-        by_policy[effective_policy(policy, conditions.get(cell[0]))].append(cell)
+        conditions = condition_info(study, {c for c, _u, _r in cells})
+    seed = order_seed(study)
 
     def model_of(condition_id: int) -> Any:
         info = conditions.get(condition_id)
@@ -142,14 +133,14 @@ def cell_sequence(
 
     result: dict[Cell, int] = {}
     # interleaved and blocked share the per-repeat-block layout and RNG.
-    block_size = len({(c, a) for c, a, _r in cells})
+    block_size = len({(c, u) for c, u, _r in cells})
     blocks: dict[int, dict[str, list[Cell]]] = {}
-    for name in ("interleaved", "blocked"):
-        for cell in by_policy[name]:
-            blocks.setdefault(cell[2], {}).setdefault(name, []).append(cell)
+    for cell in cells:
+        name = effective_policy(policy, conditions.get(cell[0]))
+        blocks.setdefault(cell[2], {}).setdefault(name, []).append(cell)
     for repeat in sorted(blocks):
         # Each policy group draws from its own copy of the block's RNG, so an endpoint group's order
-        # does not depend on which other groups share the experiment.
+        # does not depend on which other groups share the study.
         ordered: list[Cell] = []
         interleaved = sorted(blocks[repeat].get("interleaved", []))
         _block_rng(seed, repeat).shuffle(interleaved)
@@ -157,9 +148,6 @@ def cell_sequence(
         ordered.extend(_blocked_order(blocks[repeat].get("blocked", []), _block_rng(seed, repeat), model_of))
         for position, cell in enumerate(ordered):
             result[cell] = repeat * block_size + position
-
-    if by_policy["grouped"]:
-        result.update(_grouped_sequence(by_policy["grouped"], seed, model_of))
     return result
 
 
@@ -174,45 +162,14 @@ def _blocked_order(cells: Sequence[Cell], rng: random.Random, model_of) -> list[
         condition_ids = sorted(by_model[model])
         rng.shuffle(condition_ids)
         for condition_id in condition_ids:
-            apps = list(by_model[model][condition_id])
-            rng.shuffle(apps)
-            ordered.extend(apps)
+            units = list(by_model[model][condition_id])
+            rng.shuffle(units)
+            ordered.extend(units)
     return ordered
 
 
-def _grouped_sequence(cells: Sequence[Cell], seed: int, model_of) -> dict[Cell, int]:
-    rng0 = _block_rng(seed, 0)
-    by_model: dict[Any, set[int]] = {}
-    for condition_id, _app, _repeat in cells:
-        by_model.setdefault(model_of(condition_id), set()).add(condition_id)
-    models = sorted(by_model, key=_sort_key)
-    rng0.shuffle(models)
-    condition_order: list[int] = []
-    for model in models:
-        condition_ids = sorted(by_model[model])
-        rng0.shuffle(condition_ids)
-        condition_order.extend(condition_ids)
-    rank = {condition_id: index for index, condition_id in enumerate(condition_order)}
-    n_apps = len({a for _c, a, _r in cells})
-
-    result: dict[Cell, int] = {}
-    per_block: dict[tuple[int, int], list[Cell]] = {}
-    for cell in cells:
-        per_block.setdefault((cell[0], cell[2]), []).append(cell)
-    for (condition_id, repeat), block in per_block.items():
-        apps = sorted(block)
-        _block_rng(seed, repeat, condition_id).shuffle(apps)
-        for position, cell in enumerate(apps):
-            offset = repeat * n_apps + position
-            if offset >= GROUP_STRIDE:
-                msg = "grouped policy supports at most 100000 cells per condition"
-                raise ValueError(msg)
-            result[cell] = rank[condition_id] * GROUP_STRIDE + offset
-    return result
-
-
 def estimate_swaps(models_in_order: Iterable[Any], resident_limit: int | None) -> int:
-    """Model loads on one endpoint when its jobs run in this order with at most ``resident_limit`` models resident.
+    """Model loads on one endpoint when its runs run in this order with at most ``resident_limit`` models resident.
 
     Least-recently-used eviction; the first load of each model counts. With no
     limit every distinct model loads once.

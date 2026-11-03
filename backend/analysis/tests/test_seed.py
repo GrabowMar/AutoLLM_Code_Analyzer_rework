@@ -171,7 +171,7 @@ def _semgrep_args(config: dict | None) -> list[str]:
     return done.stdout.splitlines()
 
 
-def test_semgrep_scans_test_dirs_and_skips_the_scaffold_bind():
+def test_semgrep_scans_test_dirs_and_skips_the_starter_bind():
     args = _semgrep_args(None)
     # Its built-in .semgrepignore would silently skip tests/ (every other tool scans it).
     assert "--x-ignore-semgrepignore-files" in args

@@ -6,8 +6,9 @@ import pytest
 from django.core.cache import cache
 
 from backend.generation.models import GenerationArtifact
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.testing.factories import GenerationRunFactory
 from backend.statistics.services import similarity as sim
+from backend.statistics.tests.helpers import make_run
 
 
 @pytest.fixture(autouse=True)
@@ -50,82 +51,68 @@ class TestPureMeasures:
         assert sim.normalize_path("C:\\x\\y.py") == "C:/x/y.py"
 
 
-def _agent_result(files: dict[str, str], origins: dict[str, str]) -> dict:
-    return {
-        "files": files,
-        "agent": {
-            "workspace": {
-                "manifest": {
-                    p: {"origin": origins.get(p, "added"), "sha256": f"sha-{p}-{len(t)}"} for p, t in files.items()
-                },
-            },
-        },
-    }
-
-
-class TestAgentSourceMap:
-    def test_keeps_only_agent_written_non_test_source(self):
+class TestModelSource:
+    def test_keeps_only_non_test_source(self):
         files = {
             "app.py": "print('hi')\n",
             "requirements.txt": "flask\n",  # not source
             "frontend/package-lock.json": "{}",  # not source
-            "frontend/src/main.jsx": "render()\n",  # scaffold
             "tests/test_app.py": "def test(): pass\n",  # test code
             "frontend/node_modules/x/index.js": "x\n",  # non-source dir
-            "frontend/src/App.jsx": "export default 1\n",  # modified scaffold file: the agent wrote it
+            "frontend/src/App.jsx": "export default 1\n",
         }
-        out, info = sim.agent_source_map(
-            _agent_result(files, {"frontend/src/main.jsx": "scaffold", "frontend/src/App.jsx": "modified"}),
+        assert sorted(sim.model_source_map(files)) == ["app.py", "frontend/src/App.jsx"]
+
+    @pytest.mark.django_db
+    def test_store_reads_the_model_scope_only(self):
+        """Starter files the model left alone, artifacts and excluded rows are not the model's code."""
+        run = make_run(
+            files={
+                "app.py": "print('hi')\n",
+                "frontend/src/main.jsx": "render()\n",
+                "frontend/src/App.jsx": "export default 1\n",
+                "dist/bundle.js": "var x = 1;\n",
+            },
+            origins={
+                "frontend/src/main.jsx": "starter",
+                "frontend/src/App.jsx": "modified",
+                "dist/bundle.js": "artifact",
+            },
         )
-        assert sorted(out) == ["app.py", "frontend/src/App.jsx"]
-        assert info["origin"] == "manifest"
-        assert info["approximate"] is False
-        assert info["scaffold_excluded"] == 1
-        assert info["sha"]["app.py"] == "sha-app.py-12"
+        store = sim.SourceStore()
+        feats = store.features(str(run.pk))
+        assert feats.paths == frozenset({"app.py", "frontend/src/App.jsx"})
+        assert store.loc[str(run.pk)]["total_loc"] == 2
 
-    def test_template_mode_subtracts_skeleton_else_is_approximate(self):
-        data = {"files": {"app.py": "mine\n", "frontend/src/main.jsx": "skeleton\n"}}
-        out, info = sim.agent_source_map(data, skeleton={"frontend/src/main.jsx": "skeleton"})
-        assert list(out) == ["app.py"]
-        assert (info["origin"], info["approximate"], info["scaffold_excluded"]) == ("skeleton", False, 1)
-        out, info = sim.agent_source_map(data)
-        assert sorted(out) == ["app.py", "frontend/src/main.jsx"]
-        assert (info["origin"], info["approximate"]) == ("unfiltered", True)
-
-    def test_single_blob_has_no_paths(self):
-        out, info = sim.agent_source_map({"backend_code": "x = 1\n", "frontend_code": ""})
-        assert out == {"backend": "x = 1\n"}
-        assert (info["origin"], info["has_paths"], info["approximate"]) == ("blob", False, True)
-        feats = sim.source_features({"backend_code": "x = 1\n"})
-        other = sim.source_features({"backend_code": "x = 1\n"})
-        result = sim.compare_sources(feats, other)
-        assert result["path_jaccard"] is None
-        assert result["identical_files"] is None
-        assert result["shingle_jaccard"] == 1.0
-        assert result["ast_jaccard"] == 1.0
+    @pytest.mark.django_db
+    def test_a_run_without_a_tree_has_no_loc(self):
+        run = GenerationRunFactory(status="failed")
+        store = sim.SourceStore()
+        store.load([str(run.pk)])
+        assert store.loc[str(run.pk)]["total_loc"] is None
+        # A collected tree where the model wrote nothing is a measured 0.
+        untouched = make_run(files={"app.py": "x = 1\n"}, origins={"app.py": "starter"})
+        store.load([str(untouched.pk)])
+        assert store.loc[str(untouched.pk)]["total_loc"] == 0
 
 
 class TestCompareSources:
     def test_hand_computed_pair(self):
-        a = sim.source_features(
-            _agent_result({"app.py": "x = 1\n", "util.py": "y = 2\n"}, {}),
-        )
-        b = sim.source_features(
-            _agent_result({"app.py": "x = 1\n", "other.py": "z = 3\n"}, {}),
-        )
+        a = sim.source_features({"app.py": "x = 1\n", "util.py": "y = 2\n"})
+        b = sim.source_features({"app.py": "x = 1\n", "other.py": "z = 3\n"})
         result = sim.compare_sources(a, b)
         # Paths {app, util} vs {app, other}: 1 / 3.
         assert result["path_jaccard"] == pytest.approx(0.3333, abs=1e-4)
-        assert result["identical_files"] == 1  # app.py, same manifest sha
+        assert result["identical_files"] == 1  # app.py, same content hash
         # Lines {x = 1, y = 2} vs {x = 1, z = 3}: 1 / 3.
         assert result["line_jaccard"] == pytest.approx(0.3333, abs=1e-4)
         # Each file is 3 tokens (< k): one shingle per file -> {x=1, y=2} vs {x=1, z=3}.
         assert result["shingle_jaccard"] == pytest.approx(0.3333, abs=1e-4)
+        assert result["ast_jaccard"] is not None
         assert (result["files_a"], result["files_b"]) == (2, 2)
-        assert result["approximate"] is False
 
     def test_empty_sources_compare_as_none(self):
-        empty = sim.source_features(_agent_result({"app.py": "x\n"}, {"app.py": "scaffold"}))
+        empty = sim.source_features({"requirements.txt": "flask\n"})
         result = sim.compare_sources(empty, empty)
         assert result["shingle_jaccard"] is None
         assert result["path_jaccard"] is None
@@ -134,8 +121,8 @@ class TestCompareSources:
 @pytest.mark.django_db
 class TestPairCache:
     def test_pairs_are_computed_once_and_cached(self, django_assert_max_num_queries):
-        a = GenerationJobFactory(status="completed", result_data=_agent_result({"app.py": "a = 1\nb = 2\n"}, {}))
-        b = GenerationJobFactory(status="completed", result_data=_agent_result({"app.py": "a = 1\nc = 3\n"}, {}))
+        a = make_run(files={"app.py": "a = 1\nb = 2\n"})
+        b = make_run(files={"app.py": "a = 1\nc = 3\n"})
         first = sim.pair_similarities([(str(a.id), str(b.id))])
         value = first[(str(a.id), str(b.id))]
         assert value["path_jaccard"] == 1.0
@@ -146,10 +133,7 @@ class TestPairCache:
         assert again[(str(b.id), str(a.id))] == value
 
     def test_store_loads_loc_and_bounded_features(self):
-        jobs = [
-            GenerationJobFactory(status="completed", result_data=_agent_result({"app.py": f"v{i} = {i}\n"}, {}))
-            for i in range(4)
-        ]
+        jobs = [make_run(files={"app.py": f"v{i} = {i}\n"}) for i in range(4)]
         store = sim.SourceStore(capacity=2)
         store.load([str(j.id) for j in jobs])
         assert all(store.loc[str(j.id)]["total_loc"] == 1 for j in jobs)
@@ -196,7 +180,7 @@ class TestFindingSets:
         from backend.analysis.tests.factories import FindingFactory
         from backend.analysis.tests.factories import ToolResultFactory
 
-        job = GenerationJobFactory(status="completed")
+        job = make_run()
         run = AnalysisRunFactory(
             created_by=job.created_by,
             generation_job=job,
@@ -207,6 +191,13 @@ class TestFindingSets:
         ruff = ToolResultFactory(run=run, tool_slug="ruff")
         audit = ToolResultFactory(run=run, tool_slug="pip-audit")
         failed = ToolResultFactory(run=run, tool_slug="bandit", status=ToolResult.Status.FAILED)
+        # Not applicable measured nothing either (spec 8.8).
+        ToolResultFactory(
+            run=run,
+            tool_slug="eslint",
+            status=ToolResult.Status.SKIPPED,
+            summary={"skip_reason": "not_applicable", "measurement": "not_measured"},
+        )
         FindingFactory(result=ruff, rule_id="F401", file_path="/work/app.py", category="quality")
         FindingFactory(result=ruff, rule_id="F401", file_path="tests/test_x.py", category="quality")
         FindingFactory(result=audit, rule_id="GHSA-1", file_path="requirements.txt", category="dependency")
@@ -221,11 +212,12 @@ class TestFindingSets:
 @pytest.mark.django_db
 class TestCallDivergence:
     @staticmethod
-    def _calls(job, contents):
+    def _calls(job, contents, *, attempt=1, prefix="agent"):
         for i, content in enumerate(contents, start=1):
             GenerationArtifact.objects.create(
-                job=job,
-                stage=f"agent_call_{i:04d}",
+                run=job,
+                attempt=attempt,
+                stage=f"{prefix}_call_{i:04d}",
                 response_payload={
                     "status": 200,
                     "provider": "P1",
@@ -235,8 +227,8 @@ class TestCallDivergence:
             )
 
     def test_first_divergent_call_ignores_random_tool_call_ids(self):
-        a = GenerationJobFactory(status="completed")
-        b = GenerationJobFactory(status="completed")
+        a = GenerationRunFactory(tested=True)
+        b = GenerationRunFactory(tested=True)
         self._calls(a, ["one", "two", "three"])
         self._calls(b, ["one", "two!", "three", "four"])
         probe = sim.call_divergence(str(a.id), str(b.id))
@@ -250,9 +242,9 @@ class TestCallDivergence:
         assert sim.call_divergence(str(b.id), str(a.id))["calls_a"] == 4
 
     def test_identical_sequences_reproduce_and_shorter_one_diverges_after_its_end(self):
-        a = GenerationJobFactory(status="completed")
-        b = GenerationJobFactory(status="completed")
-        c = GenerationJobFactory(status="completed")
+        a = GenerationRunFactory(tested=True)
+        b = GenerationRunFactory(tested=True)
+        c = GenerationRunFactory(tested=True)
         self._calls(a, ["x", "y"])
         self._calls(b, ["x", "y"])
         self._calls(c, ["x"])
@@ -260,8 +252,19 @@ class TestCallDivergence:
         assert sim.call_divergence(str(a.id), str(b.id))["first_divergent_call"] is None
         assert sim.call_divergence(str(a.id), str(c.id))["first_divergent_call"] == 2
 
+    def test_only_the_last_attempt_and_call_stages_count(self):
+        a = GenerationRunFactory(tested=True)
+        b = GenerationRunFactory(tested=True)
+        self._calls(a, ["old", "older"], attempt=1)
+        self._calls(a, ["x", "y"], attempt=2)
+        self._calls(b, ["x", "y"], prefix="slot")
+        GenerationArtifact.objects.create(run=b, stage="evaluation_log", response_payload={"content": "z"})
+        probe = sim.call_divergence(str(a.id), str(b.id))
+        assert probe["reproduced"] is True
+        assert (probe["calls_a"], probe["calls_b"]) == (2, 2)
+
     def test_runs_without_calls_are_not_comparable(self):
-        a = GenerationJobFactory(status="completed")
-        b = GenerationJobFactory(status="completed")
+        a = GenerationRunFactory(tested=True)
+        b = GenerationRunFactory(tested=True)
         probe = sim.call_divergence(str(a.id), str(b.id))
         assert (probe["comparable"], probe["reproduced"], probe["first_divergent_call"]) == (False, False, None)

@@ -20,11 +20,11 @@ class Report(models.Model):
 
     class Type(models.TextChoices):
         MODEL_ANALYSIS = "model_analysis", _("Model analysis")
-        TEMPLATE_COMPARISON = "template_comparison", _("Template comparison")
+        TASK_COMPARISON = "template_comparison", _("Task comparison")
         TOOL_ANALYSIS = "tool_analysis", _("Tool analysis")
         GENERATION_ANALYTICS = "generation_analytics", _("Generation analytics")
         COMPREHENSIVE = "comprehensive", _("Comprehensive")
-        EXPERIMENT_REPORT = "experiment_report", _("Experiment report")
+        STUDY_CONDITIONS = "experiment_report", _("Study conditions")
         STUDY_REPORT = "study_report", _("Study report")
 
     class Status(models.TextChoices):

@@ -203,7 +203,7 @@ def _resolve(model_id: str, user: User | None):
 
 
 def _chat(access, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
-    """One review call; local models queue behind experiment calls (``analysis`` claims last).
+    """One review call; local models queue behind study calls (``analysis`` claims last).
 
     A local call is a queued ``LLMRequest`` that a relay or pump can only
     claim once it is committed. Inside a request transaction (the tool's

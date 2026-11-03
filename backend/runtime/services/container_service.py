@@ -26,7 +26,7 @@ from backend.runtime.services import traefik_router
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
     from backend.runtime.services.sample_builds import SampleBuildResult
     from backend.users.models import User
 
@@ -37,7 +37,7 @@ def visible_containers(user):
     """ContainerInstance rows *user* may see/control through the API or proxy.
 
     A container belongs to whoever built it (``created_by``) and to the owner
-    of its generation job; staff see every container. Internal callers
+    of its ``GenerationRun`` (``generation_job``); staff see every container. Internal callers
     (analysis runner, executor, evaluation) query the model directly and are
     not scoped.
     """
@@ -186,18 +186,20 @@ def _do_build(
     action.update_progress(10)
     publish_container_status(container)
 
-    job = container.generation_job
+    run = container.generation_job  # the GenerationRun (forward FK name kept, spec D5)
     tag = f"backend/{container.name}:latest"
     cid = ""
 
     try:
         action.update_progress(40)
         queued_seconds = max(0, (timezone.now() - action.created_at).total_seconds())
-        if job is not None:
+        if run is not None:
+            # The app tree comes from the run's RunFile rows through the build seam
+            # (runtime.services.build_context -> generation.build.context.prepare_build_dir).
             from backend.runtime.services.sample_builds import build_sample
 
             built = cached_build or build_sample(
-                job,
+                run,
                 client=docker_manager.client(),
                 force_rebuild=bool((container.config or {}).get("force_rebuild")),
                 cancelled=cancelled,
@@ -207,7 +209,6 @@ def _do_build(
             build_log = built.log
             container.metadata = {
                 **(container.metadata or {}),
-                "healing": built.healing,
                 "build": {**built.metrics(), "admission_seconds": round(queued_seconds, 3)},
             }
         else:
@@ -272,11 +273,11 @@ def _do_build(
         traefik_router.write_route(container)
 
         smoke_note = ""
-        if job is not None:
+        if run is not None:
             from backend.runtime.services import smoke
 
             try:
-                smoke_result = smoke.run_smoke(job, container)
+                smoke_result = smoke.run_smoke(run, container)
                 smoke_note = (
                     f"\n\nSmoke test: {'PASSED' if smoke_result.get('passed') else 'FAILED'}"
                     f" ({smoke_result.get('endpoints_ok', 0)}/{smoke_result.get('endpoints_checked', 0)}"
@@ -460,12 +461,15 @@ def _do_health(action: ContainerAction, container: ContainerInstance) -> None:
 
 
 def build_for_job(
-    job: GenerationJob,
+    job: GenerationRun,
     user: User | None,
     *,
     force_rebuild: bool = False,
 ) -> ContainerInstance:
-    """Create a ContainerInstance for *job* and kick off a build action.
+    """Create a ContainerInstance for the run *job* and kick off a build action.
+
+    The image is built from the run's app tree (``RunFile`` rows; slot variants get the parent
+    tree with their slot files over it) through ``runtime.services.build_context``.
 
     In bridge mode (DOCKER_APPS_NETWORK set) the app is reached via a unique
     subdomain through Traefik and needs no host port, so ``app_port`` is left

@@ -1,8 +1,8 @@
 """Batch fan-out utilities.
 
-``expand_batch(batch_id)``  — creates one PipelineRun + BatchItem per
+``expand_batch(batch_pk)``  — creates one PipelineRun + BatchItem per
 matrix combination.
-``update_batch_status(batch_id)`` — recomputes aggregate from item statuses.
+``update_batch_status(batch_pk)`` — recomputes aggregate from item statuses.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from backend.automation.engine.runner import execute_run
 logger = logging.getLogger(__name__)
 
 
-def expand_batch(batch_id: Any) -> list[Any]:
+def expand_batch(batch_pk: Any) -> list[Any]:
     """Create PipelineRun + BatchItem for every matrix combination.
 
     The Batch.config must contain::
@@ -45,13 +45,13 @@ def expand_batch(batch_id: Any) -> list[Any]:
     from backend.automation.models import PipelineStep
     from backend.automation.models import PipelineStepRun
 
-    batch = Batch.objects.get(id=batch_id)
+    batch = Batch.objects.get(id=batch_pk)
     config = batch.config
     pipeline_id = config.get("pipeline_id")
     matrix = config.get("matrix", {})
 
     if not pipeline_id:
-        msg = f"Batch {batch_id} has no pipeline_id in config"
+        msg = f"Batch {batch_pk} has no pipeline_id in config"
         raise ValueError(msg)
 
     pipeline = Pipeline.objects.get(id=pipeline_id)
@@ -100,16 +100,16 @@ def expand_batch(batch_id: Any) -> list[Any]:
         t = threading.Thread(target=execute_run, args=(run_id,), daemon=True)
         t.start()
 
-    logger.info("Batch %s expanded: %d runs launched", batch_id, len(run_ids))
+    logger.info("Batch %s expanded: %d runs launched", batch_pk, len(run_ids))
     return run_ids
 
 
-def update_batch_status(batch_id: Any) -> str:
+def update_batch_status(batch_pk: Any) -> str:
     """Recompute Batch.status from its BatchItems. Returns new status string."""
     from backend.automation.models import Batch
     from backend.automation.models import BatchItem
 
-    batch = Batch.objects.get(id=batch_id)
+    batch = Batch.objects.get(id=batch_pk)
     items = list(BatchItem.objects.filter(batch=batch))
 
     if not items:

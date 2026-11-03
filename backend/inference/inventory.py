@@ -12,8 +12,8 @@ model:
   (``openai_compatible``: ``endpoint.assume_tools``);
 - models missing upstream become ``is_available=False`` (never deleted);
 - a digest change records the old digest in ``metadata.digest_history`` and
-  pauses experiments whose pending jobs froze the old digest
-  (``experiment_automation.pause_for_digest_drift``).
+  pauses the piloting/running studies whose active plan uses that model
+  (``pause_studies_for_digest_drift``: ``status=paused``, reason ``rule:digest_drift``).
 
 Standby relay sessions only update their own ``models`` list.
 """
@@ -380,17 +380,60 @@ def update_loaded(endpoint: LLMEndpoint, loaded: Any) -> None:
     LLMEndpoint.objects.filter(pk=endpoint.pk).update(loaded_models=[{**m, "at": now} for m in parsed])
 
 
-def _pause_for_drift(model_ids: list[int]) -> None:
-    from backend.generation.services.experiment_automation import pause_for_digest_drift
-    from backend.llm_models.models import LLMModel
+DRIFT_PAUSE_REASON = "rule:digest_drift"
 
-    for model in LLMModel.objects.filter(pk__in=model_ids):
-        try:
-            pause_for_digest_drift(model)
-        except NotImplementedError:
-            logger.warning("pause_for_digest_drift is not implemented yet; %s changed digest", model.model_id)
-        except Exception:
-            logger.exception("Pausing experiments after a digest change of %s failed", model.model_id)
+
+def _pause_for_drift(model_ids: list[int]) -> None:
+    """Pause every piloting/running study whose active plan uses a model whose digest just changed.
+
+    Runs from ``transaction.on_commit`` after an inventory changed a digest (Appendix A #1: a study must
+    not silently keep running on a changed model). It never raises into the relay inventory caller; a
+    failure is logged as an error.
+    """
+    try:
+        paused = pause_studies_for_digest_drift(model_ids)
+    except Exception:
+        logger.exception("Pausing studies after a digest change of models %s failed", model_ids)
+        return
+    if paused:
+        logger.warning("Paused studies %s: digest changed for models %s", paused, model_ids)
+
+
+def pause_studies_for_digest_drift(model_ids: list[int]) -> list[int]:
+    """Set ``status=paused`` (reason ``rule:digest_drift``) on the affected studies; returns their ids.
+
+    A study is affected when it is ``piloting`` or ``running`` and a condition of its active plan (any
+    condition when it has no active plan yet) runs one of ``model_ids``. Each paused study gets a
+    ``state`` event on ``study:<id>`` after commit.
+    """
+    from django.db.models import F
+    from django.db.models import Q
+
+    from backend.generation.models import Study
+    from backend.generation.models.choices import StudyStatus
+    from backend.realtime.events import publish_study_event
+
+    if not model_ids:
+        return []
+    active = (StudyStatus.PILOTING, StudyStatus.RUNNING)
+    uses_model = Q(conditions__model_id__in=model_ids) & (
+        Q(active_plan__isnull=True) | Q(conditions__plan_id=F("active_plan_id"))
+    )
+    with transaction.atomic():
+        ids = list(
+            Study.objects.filter(pk__in=Study.objects.filter(uses_model, status__in=active).values("pk"))
+            .select_for_update()
+            .values_list("pk", flat=True),
+        )
+        if not ids:
+            return []
+        # Re-check the status under the row lock: a concurrent cancel/complete wins.
+        ids = list(Study.objects.filter(pk__in=ids, status__in=active).values_list("pk", flat=True))
+        Study.objects.filter(pk__in=ids).update(status=StudyStatus.PAUSED, pause_reason=DRIFT_PAUSE_REASON)
+        for study_id in ids:
+            event = {"type": "state", "status": StudyStatus.PAUSED.value, "pause_reason": DRIFT_PAUSE_REASON}
+            transaction.on_commit(lambda study_id=study_id, event=event: publish_study_event(study_id, event))
+    return ids
 
 
 def models_for_display(endpoint: LLMEndpoint) -> list[LLMModel]:

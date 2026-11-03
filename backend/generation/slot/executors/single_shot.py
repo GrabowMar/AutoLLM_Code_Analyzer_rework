@@ -1,4 +1,4 @@
-"""Single-shot slot calls: strict JSON output, no healing, no repair (spec sections 7.6 and D13).
+"""Single-shot slot calls: strict JSON output, used as returned (no repair) (spec sections 7.6 and D13).
 
 Skeleton written by WP-01 (signatures from docs/design/SAMPLE_GEN_V3.md); WP-12 implements it.
 """

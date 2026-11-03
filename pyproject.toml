@@ -87,6 +87,8 @@ line-length = 119
 # Exclude a variety of commonly ignored directories.
 extend-exclude = [
   "*/migrations/*.py",
+  # Frozen v2 reference code (never imported; deleted in v3 wave 3).
+  "backend/generation/_legacy/*",
   "staticfiles/*",
 ]
 lint.select = [

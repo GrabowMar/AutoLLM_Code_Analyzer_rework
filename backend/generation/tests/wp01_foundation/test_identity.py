@@ -269,7 +269,7 @@ class TestIdentityInputsValidation:
         "changes",
         [
             {"protocol": "app@2"},
-            {"kind": "scaffold"},
+            {"kind": "no_such_kind"},
             {"kind": "slot_agent"},  # kind/protocol mismatch
             {"task": None},
             {"target": {"target_hash": SHA}},
