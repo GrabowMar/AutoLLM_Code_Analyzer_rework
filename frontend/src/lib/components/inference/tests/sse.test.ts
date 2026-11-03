@@ -48,7 +48,7 @@ afterEach(() => {
 describe("subscribe", () => {
   it("registers the rework event names", () => {
     for (const name of [
-      "job",
+      "run",
       "tick",
       "state",
       "post_run",
@@ -65,24 +65,18 @@ describe("subscribe", () => {
   it("delivers named and default events and reports state", () => {
     const events: SseEvent[] = [];
     const states: SseState[] = [];
-    const stop = subscribe(
-      ["experiment:1", "capacity"],
-      (e) => events.push(e),
-      {
-        onState: (s) => states.push(s),
-      },
-    );
+    const stop = subscribe(["study:1", "capacity"], (e) => events.push(e), {
+      onState: (s) => states.push(s),
+    });
     const es = FakeEventSource.instances[0];
-    expect(es.url).toBe(
-      "/api/realtime/stream?channels=experiment%3A1%2Ccapacity",
-    );
+    expect(es.url).toBe("/api/realtime/stream?channels=study%3A1%2Ccapacity");
 
     es.onopen?.();
     es.emit("tick", { type: "tick", eta_seconds: 5 });
-    es.emit("message", { type: "job", job_id: "j" });
+    es.emit("message", { type: "run", run_id: "r" });
     es.emit("message", { no_type: true });
     es.emit("capacity", "not json");
-    expect(events.map((e) => e.type)).toEqual(["tick", "job", "update"]);
+    expect(events.map((e) => e.type)).toEqual(["tick", "run", "update"]);
     expect(events[0].data.eta_seconds).toBe(5);
     expect(states).toEqual(["open"]);
 
@@ -126,7 +120,7 @@ describe("subscribe", () => {
 
   it("works without options (legacy callers)", () => {
     const seen: string[] = [];
-    const stop = subscribe(["generation:x"], (e) => seen.push(e.type));
+    const stop = subscribe(["run:x"], (e) => seen.push(e.type));
     FakeEventSource.instances[0].emit("status", { status: "running" });
     expect(seen).toEqual(["status"]);
     stop();

@@ -1,0 +1,12 @@
+name: PrimeVue
+description: Vue components from PrimeVue.
+content:
+  system: component-library
+  library:
+    name: PrimeVue
+    packages: [primevue, '@primevue/themes']
+    frameworks: [vue]
+  fragment: style-primevue@1
+  adherence:
+    required_markers: [primevue]
+  compatible_frontends: [vue]

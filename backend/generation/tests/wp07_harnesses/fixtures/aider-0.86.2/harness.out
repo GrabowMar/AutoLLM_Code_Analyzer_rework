@@ -1,0 +1,23 @@
+Analytics have been permanently disabled.
+Detected dumb terminal, disabling fancy input and pretty output.
+
+Update git name with: git config user.name "Your Name"
+Update git email with: git config user.email "you@example.com"
+Aider v0.86.2
+Model: openai/deepseek/deepseek-v4.1-flash with diff edit format
+Git repo: .git with 1 files
+Repo-map: using 1024 tokens, auto refresh
+Added README.md to the chat.
+
+hello.txt
+```text
+<<<<<<< SEARCH
+=======
+hello from the scripted upstream
+>>>>>>> REPLACE
+```
+
+Tokens: 1.0k sent, 50 received.
+
+hello.txt
+Applied edit to hello.txt

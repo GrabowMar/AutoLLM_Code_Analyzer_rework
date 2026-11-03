@@ -1,0 +1,15 @@
+name: App brief (default)
+description: 'Neutral agent brief: task prose, stack, styling, accounts, run contract, network sentence and guidance;
+  no evaluation claims and no budget numbers.'
+role: brief
+modes:
+- app
+variables:
+- task
+- stack
+- starter
+- style
+- auth_contract
+- guidance
+- network
+- budget_neutral

@@ -1,0 +1,9 @@
+name: Model's choice, editorial tone
+description: No styling prescription, with the editorial visual tone.
+content:
+  system: model-choice
+  tone: editorial
+  tone_text: 'Editorial: typography first, a serif display face for headings, a narrow reading column and a calm
+    palette.'
+  fragment: style-model-choice@1
+  compatible_frontends: [react, vue, svelte, none, free]

@@ -1,0 +1,11 @@
+name: Cross-site scripting probe exploited
+description: Maps the evaluation's XSS probes (CWE-79) of the variant to a feature.
+content:
+  engine: probe
+  languages: []
+  rule: ''
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-xss
+  polarity: insecure
+  cwe: [cwe-79]
+  description: A CWE-79 probe was exploited against the assembled app.

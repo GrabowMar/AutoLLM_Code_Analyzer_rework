@@ -1,0 +1,5 @@
+name: Stack fragment, Flask (server-rendered, SQLite)
+role: fragment
+modes: [app, slot]
+variables: []
+tags: [stack]

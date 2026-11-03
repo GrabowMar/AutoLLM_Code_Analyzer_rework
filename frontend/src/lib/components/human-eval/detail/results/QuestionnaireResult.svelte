@@ -6,7 +6,7 @@
 	 *
 	 * Props: `result` (QuestionnaireBlockResult), `section`, `ctx`.
 	 */
-	import StudyFigure from '$lib/components/experiments/study/StudyFigure.svelte';
+	import StudyFigure from '$lib/components/studies/study/StudyFigure.svelte';
 	import type { QuestionnaireBlockResult } from '$lib/api/human-eval';
 	import { INSTRUMENT_LABELS, formatScore } from '../../format';
 	import AppScoreTable from './AppScoreTable.svelte';

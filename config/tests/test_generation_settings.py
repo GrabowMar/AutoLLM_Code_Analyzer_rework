@@ -113,10 +113,10 @@ class TestSettingsLayout:
         assert settings_lines
         assert all(first_marker < n < end_marker for n, _ in settings_lines), settings_lines
 
-    def test_machine_limit_aliases_track_the_max(self):
-        # v2 readers (execution/capacity.py) keep working until WP-02a re-points them.
-        assert django_settings.AGENT_SANDBOX_MEM_LIMIT == django_settings.AGENT_SANDBOX_MEM_LIMIT_MAX
-        assert django_settings.AGENT_SANDBOX_NANO_CPUS == django_settings.AGENT_SANDBOX_NANO_CPUS_MAX
+    def test_the_v2_machine_limit_aliases_are_gone(self):
+        # Removed in wave 2 with their last reader (execution/capacity.py reads the *_MAX limits).
+        assert not hasattr(django_settings, "AGENT_SANDBOX_MEM_LIMIT")
+        assert not hasattr(django_settings, "AGENT_SANDBOX_NANO_CPUS")
 
 
 class TestStorageRoots:

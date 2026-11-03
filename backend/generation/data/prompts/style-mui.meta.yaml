@@ -1,0 +1,7 @@
+name: 'Style fragment: MUI'
+role: fragment
+modes:
+- app
+- slot
+variables:
+- style

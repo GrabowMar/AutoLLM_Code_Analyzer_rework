@@ -1,0 +1,5 @@
+name: Slot single-shot (default)
+description: Strict-JSON single-shot slot prompts. Slot studies default to the t07 sampling preset.
+content:
+  mode: slot
+  roles: {slot_single_shot_system: slot-single-shot-system@1, slot_single_shot_user: slot-single-shot-user@1}

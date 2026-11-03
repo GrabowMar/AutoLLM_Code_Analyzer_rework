@@ -330,6 +330,7 @@ def build_sample(
                     cache_namespace=namespace,
                     timeout_s=getattr(settings, "SAMPLE_BUILD_TIMEOUT_S", 1200),
                     cancelled=cancelled,
+                    build_contexts=report.build_context_args(),
                 )
                 image = client.images.get(result.image_id)
                 now = timezone.now()

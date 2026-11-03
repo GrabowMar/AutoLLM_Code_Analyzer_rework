@@ -28,6 +28,7 @@ from django.conf import settings
 from django.db import connection
 from django.test import Client
 
+from backend.generation.testing.fake_gateway import gateway_config
 from backend.inference import proxy_server
 from backend.inference.access import LLMAccessError
 from backend.inference.access import resolve_access
@@ -266,19 +267,25 @@ def test_agent_proxy_path_through_gateway_overlay(stack, tmp_path):
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         gateway_port = sock.getsockname()[1]
-    config = {
-        "upstream": f"http://127.0.0.1:{server.server_address[1]}/v1",
-        "model": model.model_id,
-        "forced_params": {"seed": 77, "max_tokens": 128},
-        "stripped_params": ["seed", "provider"],
-        "budget": {"max_requests": 5},
-        "port": gateway_port,
-        "log_path": str(tmp_path / "calls.jsonl"),
-        "events_path": str(tmp_path / "events.jsonl"),
-    }
+    # The v3 GatewayConfig (WP-01 contract) plus the env-based runtime keys of the overlay.
+    config = gateway_config(
+        run_id=str(job.pk),
+        session_id=str(job.pk),
+        upstream={
+            "kind": "local_proxy",
+            "base_url": f"http://127.0.0.1:{server.server_address[1]}/v1",
+            "endpoint_id": endpoint.pk,
+        },
+        model={"upstream_model": model.model_id},
+        sampling={"seed": 77},
+        call={"max_output_tokens": 128},
+        budget={"max_llm_requests": 5, "cost_basis": "free"},
+    ).model_dump(mode="json")
     env = {
         **os.environ,
         "GATEWAY_CONFIG": json.dumps(config),
+        "GATEWAY_PORT": str(gateway_port),
+        "GATEWAY_LOG_DIR": str(tmp_path),
         "LLMLAB_UPSTREAM_TOKEN": proxy_token(job),
         "OPENROUTER_API_KEY": "",
         "PYTHONPATH": str(GATEWAY_DIR),

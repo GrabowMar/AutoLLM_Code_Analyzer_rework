@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-  cellCodeLabels,
-  cellCodeTones,
+  cellStateLabels,
+  cellStateTones,
   cellTone,
   liveStatuses,
+  outcomeLabels,
+  outcomeTones,
   statusTone,
+  type CellState,
+  type RunOutcome,
 } from "$lib/constants/colors";
 
 describe("pipeline tones", () => {
@@ -23,27 +27,22 @@ describe("pipeline tones", () => {
     expect(statusTone("failed")).toBe("danger");
     expect(statusTone(undefined)).toBe("neutral");
   });
-  it("covers every cell code", () => {
-    const codes = [
-      "p",
-      "b",
-      "w",
-      "r",
-      "q",
-      "e",
-      "c",
-      "f",
-      "u",
-      "x",
-      "k",
-    ] as const;
-    for (const code of codes) {
-      expect(cellCodeTones[code]).toBeDefined();
-      expect(cellCodeLabels[code]).toBeTruthy();
+  it("tones cells by state, and done cells by their run outcome", () => {
+    for (const state of Object.keys(cellStateTones) as CellState[]) {
+      expect(cellStateTones[state]).toBeDefined();
+      expect(cellStateLabels[state]).toBeTruthy();
     }
-    expect(cellTone("c")).toBe("success");
-    expect(cellTone("f")).toBe("danger");
-    expect(cellTone("x")).toBe("warning");
+    for (const outcome of Object.keys(outcomeTones) as RunOutcome[]) {
+      expect(outcomeLabels[outcome]).toBeTruthy();
+    }
+    expect(cellTone("done", "tested")).toBe("success");
+    expect(cellTone("done", "build_fail")).toBe("danger");
+    // Attrition is missing data, never a failure.
+    expect(cellTone("done", "infra_error")).toBe("warning");
+    expect(cellTone("infra_pending")).toBe("warning");
+    // A done cell without a known outcome is never shown as success.
+    expect(cellTone("done")).toBe("neutral");
+    expect(cellTone("running")).toBe("info");
     expect(cellTone("?")).toBe("neutral");
     expect(cellTone(null)).toBe("neutral");
   });

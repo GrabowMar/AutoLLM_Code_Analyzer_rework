@@ -1,0 +1,6 @@
+Style the frontend with Bootstrap 5 classes and components; avoid other CSS frameworks.
+{% if style.tone_text %}
+Visual tone: {{ style.tone_text }}
+{% endif %}{% if style.accessibility == "wcag-aa" %}
+The interface meets WCAG 2.1 level AA (contrast, keyboard access, labels).
+{% endif %}

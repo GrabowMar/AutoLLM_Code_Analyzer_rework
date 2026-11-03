@@ -1,0 +1,6 @@
+name: 'Guidance fragment: generic security hint'
+role: fragment
+modes:
+- app
+- slot
+variables: []

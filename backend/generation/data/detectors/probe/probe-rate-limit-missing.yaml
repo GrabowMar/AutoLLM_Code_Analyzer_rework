@@ -1,0 +1,11 @@
+name: Missing login rate limiting probe exploited
+description: Maps the evaluation's rate_limit_missing probes (CWE-307) of the variant to a feature (one per probe kind).
+content:
+  engine: probe
+  languages: []
+  rule: 'kind:rate_limit_missing'
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-rate-limit-missing
+  polarity: insecure
+  cwe: [cwe-307]
+  description: A rate_limit_missing probe was exploited against the assembled app.

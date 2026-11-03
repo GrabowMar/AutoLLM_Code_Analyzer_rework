@@ -222,6 +222,23 @@ class Study(ValidatedModel):
     reserved_usd = _money(_("reserved (USD)"), digits=12)
     spent_tokens = models.BigIntegerField(_("spent tokens"), default=0)
     reserved_tokens = models.BigIntegerField(_("reserved tokens"), default=0)
+    # WP-10: the study cap resolved at launch (the policy's ``study.max_cost_usd``, ``auto`` resolved from the
+    # estimate, or the launch request's ``study_cap``); NULL = no USD cap. Read by the scheduler (WP-11); may
+    # be raised later ("raise cap") without touching the locked design.
+    cap_usd = models.DecimalField(
+        _("study cap (USD)"),
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Resolved at launch from the budget preset (auto -> estimate) or the launch request",
+    )
+    cap_tokens = models.BigIntegerField(
+        _("study cap (tokens)"),
+        null=True,
+        blank=True,
+        help_text="The budget preset's study.max_total_tokens at launch; NULL = no token cap",
+    )
     cloned_from = models.ForeignKey(
         "self",
         on_delete=models.SET_NULL,
@@ -357,7 +374,7 @@ class StudyPlan(ValidatedModel):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     study = models.ForeignKey(Study, on_delete=models.CASCADE, related_name="plans")
-    plan_hash = sha_field(_("plan hash"), unique=True)
+    plan_hash = sha_field(_("plan hash"), db_index=True)
     design_hash = sha_field(_("design hash"))
     status = models.CharField(_("status"), max_length=12, choices=PlanStatus.choices, default=PlanStatus.DRAFT)
     payload_blob = sha_field(_("payload blob"), help_text="The full ResolvedPlan JSON in the blob store")
@@ -383,6 +400,11 @@ class StudyPlan(ValidatedModel):
         verbose_name = _("Study plan")
         verbose_name_plural = _("Study plans")
         ordering = ["-created_at"]
+        # Unique per study, not globally: ``plan_hash`` does not include the study, so an exact clone (an
+        # exact replication) freezes the same plan hash under its own study (WP-10 ask).
+        constraints = [
+            models.UniqueConstraint(fields=["study", "plan_hash"], name="generation_studyplan_study_plan_hash_uniq"),
+        ]
         indexes = [models.Index(fields=["study", "status", "-created_at"], name="studyplan_study_status")]
 
     def __str__(self) -> str:
@@ -412,11 +434,23 @@ class StudyPlan(ValidatedModel):
 
 
 class StudyCondition(ValidatedModel):
-    """One combination of treatment levels in a plan."""
+    """One combination of treatment levels in a plan (identity columns frozen; ``paused`` stays mutable)."""
 
     CONTRACT_FIELDS: ClassVar[dict[str, Contract]] = {
         "levels": Contract(ResolvedCondition.model_fields["levels"].annotation),
     }
+    IMMUTABLE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "study",
+        "plan",
+        "index",
+        "label",
+        "condition_hash",
+        "levels",
+        "model",
+        "harness_preset",
+        "treatment_hash",
+        "is_baseline",
+    )
 
     study = models.ForeignKey(Study, on_delete=models.CASCADE, related_name="conditions")
     plan = models.ForeignKey(StudyPlan, on_delete=models.RESTRICT, related_name="conditions")
@@ -438,6 +472,8 @@ class StudyCondition(ValidatedModel):
     pause_reason = models.CharField(_("pause reason"), max_length=40, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
+    objects = FrozenFieldsQuerySet.as_manager()
+
     class Meta:
         verbose_name = _("Study condition")
         verbose_name_plural = _("Study conditions")
@@ -457,9 +493,28 @@ class StudyCondition(ValidatedModel):
             fill_or_check(self, "condition_hash", identity.condition_hash(levels), errors)
         return errors
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            self.refuse_changes(
+                self.IMMUTABLE_FIELDS,
+                "plan conditions are frozen",
+                update_fields=kwargs.get("update_fields"),
+            )
+        super().save(*args, **kwargs)
 
-class StudyUnit(models.Model):
-    """The blocking unit of a plan: a task version (app mode) or a slot target (slot mode)."""
+
+class StudyUnit(ValidatedModel):
+    """The blocking unit of a plan: a task version (app mode) or a slot target (slot mode). Frozen."""
+
+    IMMUTABLE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "study",
+        "plan",
+        "index",
+        "unit_key",
+        "task_version",
+        "slot_target",
+        "unit_order",
+    )
 
     study = models.ForeignKey(Study, on_delete=models.CASCADE, related_name="units")
     plan = models.ForeignKey(StudyPlan, on_delete=models.RESTRICT, related_name="units")
@@ -481,6 +536,8 @@ class StudyUnit(models.Model):
     )
     unit_order = models.PositiveIntegerField(_("unit order"), help_text="Seeded order used by the block sequence")
 
+    objects = FrozenFieldsQuerySet.as_manager()
+
     class Meta:
         verbose_name = _("Study unit")
         verbose_name_plural = _("Study units")
@@ -499,8 +556,17 @@ class StudyUnit(models.Model):
     def __str__(self) -> str:
         return self.unit_key
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            self.refuse_changes(
+                self.IMMUTABLE_FIELDS,
+                "plan units are frozen",
+                update_fields=kwargs.get("update_fields"),
+            )
+        super().save(*args, **kwargs)
 
-class StudyCell(models.Model):
+
+class StudyCell(ValidatedModel):
     """``(condition, unit, stage, repeat_index)``: one planned sample, which may have several runs.
 
     ``stage`` is part of the key (a deviation from section 3.6, see CHANGES): pilot repeats are numbered
@@ -508,7 +574,21 @@ class StudyCell(models.Model):
     stage stays mutable: ``pilot.reuse_as_main`` flips a pilot cell to ``main`` in place. The expand step
     (WP-10) must then not also create the main r=0 cell it replaces (it skips the repeat indices the reused
     pilot cells take); otherwise the flip collides with the existing main row and raises IntegrityError.
+
+    The plan identity columns are frozen (``IMMUTABLE_FIELDS``); ``stage``, ``state``, ``exclusion_reason``,
+    ``current_run``, the money columns, ``adaptive_n`` and ``beyond_plan`` stay mutable.
     """
+
+    IMMUTABLE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "study",
+        "plan",
+        "condition",
+        "unit",
+        "repeat_index",
+        "block_index",
+        "seed",
+        "sequence",
+    )
 
     study = models.ForeignKey(Study, on_delete=models.CASCADE, related_name="cells")
     plan = models.ForeignKey(StudyPlan, on_delete=models.RESTRICT, related_name="cells")
@@ -545,6 +625,13 @@ class StudyCell(models.Model):
         default=False,
         help_text="This condition x unit was stopped by a precision rule",
     )
+    beyond_plan = models.BooleanField(
+        _("beyond plan"),
+        default=False,
+        help_text="A replicate added after launch (add_replicates): not part of the planned sample",
+    )
+
+    objects = FrozenFieldsQuerySet.as_manager()
 
     class Meta:
         verbose_name = _("Study cell")
@@ -568,6 +655,15 @@ class StudyCell(models.Model):
 
     def __str__(self) -> str:
         return f"cell c{self.condition_id}/u{self.unit_id}/r{self.repeat_index}/{self.stage}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            self.refuse_changes(
+                self.IMMUTABLE_FIELDS,
+                "plan cells are frozen",
+                update_fields=kwargs.get("update_fields"),
+            )
+        super().save(*args, **kwargs)
 
 
 class StudyPromptOverride(ValidatedModel):

@@ -1,0 +1,7 @@
+# The tester ships as a standalone stdlib script in its own image (not a package of this project): it prints
+# its report line, uses plain open() for /in and /out, and keeps flat dispatch helpers.
+extend = "../../../../pyproject.toml"
+cache-dir = "../../../../.ruff_cache"
+
+[lint]
+extend-ignore = ["INP001", "EXE001", "T201", "PTH", "PLR0911", "PLR0912", "PLR0915", "C901", "SIM105", "PLW2901", "PLR1714", "PIE810", "EM101", "EM102", "TRY003", "ERA001"]

@@ -9,6 +9,12 @@ paths = [
   '''(^|/)\.envs/.*\.example$''',
   # Golden-library fixture: content hashes (sha256 hex) of test library entities, not secrets.
   '''backend/generation/testing/golden_library/hashes\.json$''',
+  # Starter tree hashes (sha256 hex) pinned by the WP-05 tests.
+  '''backend/generation/tests/wp05_build/starter_hashes\.json$''',
+  # Recorded harness/gateway fixtures: prompt_cache_key UUIDs and prompt text, no credentials.
+  '''backend/generation/tests/wp07_harnesses/fixtures/''',
+  # Pattern-detector fixtures: deliberately vulnerable sample code (fake literal secrets).
+  '''backend/generation/data/detectors/tests/''',
 ]
 
 [[rules]]

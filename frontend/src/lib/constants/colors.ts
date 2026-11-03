@@ -4,8 +4,6 @@
  * Render statuses with <StatusBadge>, not with these classes directly.
  */
 
-import type { CellCode } from "$lib/api/types/experiments";
-
 export type Tone = "success" | "warning" | "danger" | "info" | "neutral";
 
 export const toneClasses: Record<Tone, string> = {
@@ -41,6 +39,31 @@ const statusTones: Record<string, Tone> = {
   start_failed: "danger",
   infra_error: "warning",
   not_applicable: "neutral",
+  // v3 run outcomes (spec 6.12): an infra error or an excluded run is attrition
+  // (missing data), a build/start/output failure is a measured failure.
+  tested: "success",
+  output_invalid: "danger",
+  build_fail: "danger",
+  start_fail: "danger",
+  excluded: "neutral",
+  // Evaluation status: "not measured" is missing data, never a pass or a zero.
+  measured: "success",
+  not_measured: "warning",
+  // v3 terminations (spec 5.1); "completed" and "cancelled" are listed elsewhere.
+  wall_clock: "warning",
+  idle_timeout: "warning",
+  max_turns: "warning",
+  harness_crash: "danger",
+  llm_error: "danger",
+  infra_interrupted: "warning",
+  oom_killed: "danger",
+  // Study lifecycle (draft/running/paused/completed/cancelled are listed elsewhere).
+  planned: "neutral",
+  piloting: "info",
+  stopped: "warning",
+  // Study cell states (planned/queued/running/excluded are listed elsewhere).
+  done: "success",
+  infra_pending: "warning",
   harness_error: "danger",
   failed: "danger",
   error: "danger",
@@ -109,45 +132,66 @@ export function statusTone(
   return overrides?.[key] ?? statusTones[key] ?? "neutral";
 }
 
+/** Study cell states (`StudyCell.state`, spec 3). */
+export type CellState =
+  | "planned"
+  | "queued"
+  | "running"
+  | "done"
+  | "infra_pending"
+  | "excluded";
+
+/** Run outcomes (`GenerationRun.outcome`, spec 6.12); "" while the run has none. */
+export type RunOutcome =
+  | "output_invalid"
+  | "build_fail"
+  | "start_fail"
+  | "tested"
+  | "infra_error"
+  | "excluded";
+
 /**
- * Experiment cell state codes (`CellsPayload.cells[i][3]`, spec §F.1):
- * p pending, b backoff, w waiting for model prefetch, r running, q eval_queued,
- * e evaluating, c completed-pass, f completed-fail, u completed-ungraded,
- * x failed (no result), k cancelled.
+ * An infra error (`infra_pending`, `infra_error`) or an excluded cell is attrition: missing data
+ * (warning / neutral), never a failure. Build, start and output failures are measured failures.
  */
-export type { CellCode };
-
-/** A failed run is missing data (warning), distinct from a graded fail (danger). */
-export const cellCodeTones: Record<CellCode, Tone> = {
-  p: "neutral",
-  b: "warning",
-  w: "info",
-  r: "info",
-  q: "neutral",
-  e: "info",
-  c: "success",
-  f: "danger",
-  u: "neutral",
-  x: "warning",
-  k: "neutral",
+export const cellStateTones: Record<CellState, Tone> = {
+  planned: "neutral",
+  queued: "neutral",
+  running: "info",
+  done: "success",
+  infra_pending: "warning",
+  excluded: "neutral",
 };
 
-export const cellCodeLabels: Record<CellCode, string> = {
-  p: "Pending",
-  b: "Retrying after backoff",
-  w: "Waiting for model to load",
-  r: "Running",
-  q: "Queued for evaluation",
-  e: "Evaluating",
-  c: "Passed",
-  f: "Failed tests",
-  u: "Completed, not graded",
-  x: "Run failed",
-  k: "Cancelled",
+export const cellStateLabels: Record<CellState, string> = {
+  planned: "Planned",
+  queued: "Queued",
+  running: "Running",
+  done: "Done",
+  infra_pending: "Infrastructure retry pending",
+  excluded: "Excluded",
 };
 
-/** Cell codes whose work is in flight (pulse like `liveStatuses`). */
-export const liveCellCodes: ReadonlySet<CellCode> = new Set(["r", "e", "w"]);
+export const outcomeTones: Record<RunOutcome, Tone> = {
+  tested: "success",
+  output_invalid: "danger",
+  build_fail: "danger",
+  start_fail: "danger",
+  infra_error: "warning",
+  excluded: "neutral",
+};
+
+export const outcomeLabels: Record<RunOutcome, string> = {
+  tested: "Tested",
+  output_invalid: "Output invalid",
+  build_fail: "Build failed",
+  start_fail: "Start failed",
+  infra_error: "Infrastructure error",
+  excluded: "Excluded",
+};
+
+/** Cell states whose work is in flight (pulse like `liveStatuses`). */
+export const liveCellStates: ReadonlySet<CellState> = new Set(["running"]);
 
 /** Solid fill per tone for small status squares (grids, slot meters). */
 export const toneFillClasses: Record<Tone, string> = {
@@ -158,8 +202,18 @@ export const toneFillClasses: Record<Tone, string> = {
   neutral: "bg-muted-foreground/30",
 };
 
-export function cellTone(code: string | null | undefined): Tone {
-  return cellCodeTones[(code ?? "") as CellCode] ?? "neutral";
+/**
+ * The tone of a study cell: a done cell is coloured by its current run's outcome (a done cell
+ * without a known outcome is neutral, never "success"); any other cell by its state.
+ */
+export function cellTone(
+  state: string | null | undefined,
+  outcome?: string | null,
+): Tone {
+  if (state === "done") {
+    return outcomeTones[(outcome ?? "") as RunOutcome] ?? "neutral";
+  }
+  return cellStateTones[(state ?? "") as CellState] ?? "neutral";
 }
 
 /** Findings severity. Critical is solid so it reads apart from high without a sixth hue. */

@@ -48,14 +48,12 @@
 	];
 
 	const SOURCE_TITLES: Record<string, string> = {
-		backend: 'Backend',
 		frontend: 'Frontend',
-		admin: 'Admin',
 		api: 'API endpoints',
 		admin_api: 'Admin API endpoints',
 		custom: 'Additional checks'
 	};
-	const SOURCE_ORDER = ['frontend', 'backend', 'admin', 'api', 'admin_api', 'custom'];
+	const SOURCE_ORDER = ['frontend', 'api', 'admin_api', 'custom'];
 
 	const groups = $derived.by(() => {
 		const map = new Map<string, RequirementItem[]>();

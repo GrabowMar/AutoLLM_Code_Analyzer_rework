@@ -52,6 +52,7 @@ __all__ = [
     "condition_hash",
     "crn_seed",
     "design_hash",
+    "detector_set_hash",
     "library_content_hash",
     "normalize_text",
     "pinned_ref",
@@ -350,6 +351,28 @@ def target_hash(
             "interface": dict(interface),
         },
     )
+
+
+DETECTOR_SET_HASH_VERSION: Final = 1
+
+
+def detector_set_hash(detectors: Iterable[tuple[str, str]]) -> str:
+    """``PatternRun.detector_set_hash``: ``H({"version": 1, "detectors": sorted([[slug@version, content_hash]])})``.
+
+    ``detectors`` are ``(ref, full content_hash)`` pairs; a pinned ref (``slug@v#hash12``) is reduced to
+    ``slug@version``. Order-independent, duplicates collapse, and the hash commits to every detector's
+    full content hash. This is the value ``analysis_plan.patterns.detector_set_hash`` must hold for a
+    planned PatternRun (section 7.9 step 9).
+    """
+    pairs: set[tuple[str, str]] = set()
+    for ref, content_hash in detectors:
+        base = str(ref).split("#", 1)[0]
+        slug, sep, version = base.partition("@")
+        if not slug or not sep or not version.isdigit() or int(version) < 1:
+            msg = f"detector ref must be slug@version, got {ref!r}"
+            raise ValueError(msg)
+        pairs.add((base, _require_sha(content_hash, f"content hash of {base}")))
+    return H({"version": DETECTOR_SET_HASH_VERSION, "detectors": [list(pair) for pair in sorted(pairs)]})
 
 
 def crn_seed(base_seed: int, unit_key: str, repeat_index: int) -> int:

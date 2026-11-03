@@ -324,6 +324,7 @@ def finish_stage(run: GenerationRun, outcome: str) -> bool:
     if outcome == OUTCOME_INFRA_INTERRUPTED:
         return infra_retry(run, REASON_INFRA_INTERRUPTED, error=run.error_message or "")
 
+    leaving_generation = run.phase == P.RUNNING
     now = timezone.now()
     execution = run.execution if isinstance(run.execution, dict) else {}
     if outcome == OUTCOME_CANCELLED and not run.outcome:
@@ -376,13 +377,50 @@ def finish_stage(run: GenerationRun, outcome: str) -> bool:
         _clear_responses(run.id, run.attempt)
     except DatabaseError:
         logger.exception("Clearing LLM responses of run %s failed", run.id)
+    if leaving_generation:
+        settle_spend(run)
     if terminal:
         refresh_cell(run.cell_id)
     publish_run(run)
+    if terminal:
+        after_run_finished(run)
     if terminal and run.study_id:
         maybe_complete_study(run.study_id)
     _wake()
     return True
+
+
+# ── budget hooks (generation/budget, WP-11) ────────────────────────────
+
+
+def settle_spend(run: GenerationRun, attempt: int | None = None) -> None:
+    """Settle the ledger for the attempt whose generation stage just ended (idempotent; never raises).
+
+    The agentic runner settles first when it records the attempt (spec 6.9); this call is the safety net,
+    and the reconciler settles whatever both missed.
+    """
+    if run.kind == "reference":
+        return
+    from backend.generation.budget import ledger
+
+    try:
+        ledger.settle_attempt(run, attempt=attempt)
+    except Exception:
+        logger.exception("Settling the spend of run %s failed (the reconciler retries)", run.id)
+
+
+def after_run_finished(run: GenerationRun) -> None:
+    """A run reached a terminal state: refresh its cost priors and evaluate the study's stop rules."""
+    from backend.generation.budget import priors
+    from backend.generation.budget import stop_rules
+
+    if run.kind != "reference":
+        priors.refresh_for_run(run)
+    if run.study_id:
+        try:
+            stop_rules.evaluate_by_id(run.study_id)
+        except Exception:
+            logger.exception("Evaluating the stop rules of study %s failed", run.study_id)
 
 
 # ── infra retries ──────────────────────────────────────────────────────
@@ -439,6 +477,9 @@ def infra_retry(run: GenerationRun, reason: str, error: str = "") -> bool:
 
     now = timezone.now()
     attempt = run.attempt
+    # The attempt's LLM spend is settled before its metrics are wiped (the next attempt reserves afresh).
+    if run.phase in (P.RUNNING, P.NONE) and run.status == S.RUNNING:
+        settle_spend(run)
     with transaction.atomic():
         row = (
             GenerationRun.objects.select_for_update()
@@ -527,6 +568,8 @@ def infra_retry(run: GenerationRun, reason: str, error: str = "") -> bool:
     if not requeued:
         refresh_cell(row["cell_id"])
     publish_run(run)
+    if not requeued:
+        after_run_finished(run)
     if not requeued and row["study_id"]:
         maybe_complete_study(row["study_id"])
     _wake()
@@ -674,33 +717,45 @@ def cancel_runs(qs, scope: str = "all", *, study: Study | None = None) -> dict[s
 
 # ── study completion ───────────────────────────────────────────────────
 
+# A study with a pending stop (``stop_reason`` set by a balanced budget stop or a stop rule) ends
+# ``stopped`` once idle, from ``running`` or ``piloting``; otherwise a running study ends ``completed``.
 _COMPLETE_SQL = """
-UPDATE generation_study SET status = 'completed', completed_at = now(), updated_at = now()
-WHERE id = %s AND status = 'running'
+UPDATE generation_study
+SET status = CASE WHEN stop_reason IS NOT NULL AND stop_reason <> 'null'::jsonb THEN 'stopped' ELSE 'completed' END,
+    completed_at = now(), updated_at = now()
+WHERE id = %s
+  AND (status = 'running'
+       OR (status = 'piloting' AND stop_reason IS NOT NULL AND stop_reason <> 'null'::jsonb))
   AND NOT EXISTS (
     SELECT 1 FROM generation_run j WHERE j.study_id = %s AND j.status IN ('pending', 'running')
   )
+RETURNING status, stop_reason
 """
 
 
 def maybe_complete_study(study_id: Any) -> bool:
-    """Mark a RUNNING study COMPLETED when it has no active runs (idempotent, spec §F.5).
+    """Mark a study COMPLETED (or STOPPED, when a stop is pending) once it has no active runs (idempotent).
 
-    ``UPDATE … SET status='completed', completed_at=now() WHERE id=:id AND status='running' AND NOT
-    EXISTS (active runs)``; only on rowcount 1 is the ``state`` event published. A piloting study is
-    never completed here (its pilot gates decide, WP-10/WP-11). Post-runs attached at launch become
-    claimable once the study is completed (``workers.claimable_post_runs``). Returns True when it completed.
+    Only on a real transition are the events published: ``state`` and, for a stop, ``stopped`` with the
+    stop reason's code (``budget``, ``rule:<code>``). A piloting study is never completed here (its pilot
+    gates decide, WP-10/WP-11), but a piloting study with a pending stop is stopped. Post-runs attached at
+    launch become claimable once the study is completed or stopped. Returns True when it transitioned.
     """
     if study_id is None:
         return False
     with connection.cursor() as cursor:
         cursor.execute(_COMPLETE_SQL, [str(study_id), str(study_id)])
-        completed = cursor.rowcount == 1
-    if not completed:
+        row = cursor.fetchone()
+    if row is None:
         return False
+    status, stop_reason = row
     from backend.realtime.events import publish_study_event
 
-    publish_study_event(study_id, {"type": "state", "status": "completed", "pause_reason": ""})
+    if status == "stopped":
+        reason = stop_reason if isinstance(stop_reason, dict) else json.loads(stop_reason or "{}")
+        code = str((reason or {}).get("code") or "stopped")
+        publish_study_event(study_id, {"type": "stopped", "reason": code})
+    publish_study_event(study_id, {"type": "state", "status": status, "pause_reason": ""})
     _wake()  # a post-run may now be claimable
-    logger.info("Study %s completed", study_id)
+    logger.info("Study %s %s", study_id, status)
     return True

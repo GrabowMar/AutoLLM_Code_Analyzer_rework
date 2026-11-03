@@ -1,0 +1,26 @@
+# App
+
+## Run contract
+
+- The app is built from `Dockerfile` in this directory and the container listens on port {{ run.port }}.
+- The API is served under `{{ run.api_prefix }}`. `GET {{ run.health_path }}` answers `{"status": "ok"}` once the app is ready.
+{% if has_frontend %}
+- The backend also serves the frontend build at `/`.
+{% else %}
+- The user interface is served by the backend, starting at `/`.
+{% endif %}
+- Persistent data lives in `{{ run.data_dir }}` (relative to the working directory `/app`).
+
+## Layout
+
+{{ layout }}
+{% if has_frontend %}
+- `frontend/`: a Vite project{% if level != "bare" %} ({{ frontend_label }}){% endif %}. `npm run build` writes `frontend/dist`, which the image copies next to the backend.
+{% endif %}
+{% if level == "bare" %}
+
+The `Dockerfile` installs the dependencies it finds (`backend/{{ manifest }}`{% if has_frontend %}, `frontend/package.json`{% endif %}) and starts {{ entry }}.
+{% else %}
+
+Dependencies are pinned: {{ lock_note }}{% if has_frontend %} The frontend uses `frontend/package-lock.json` (`npm ci`).{% endif %} When you change dependencies, update the lock file as well (or remove it).
+{% endif %}

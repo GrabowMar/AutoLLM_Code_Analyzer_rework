@@ -148,15 +148,15 @@ describe("requirements blocks", () => {
     id: "reqs",
     type: "requirements",
     title: "Requirements",
-    sources: ["backend"],
+    sources: ["frontend"],
     custom: [],
     note: "required_unless_met",
   };
   const context: BlockContext = {
     requirements: {
       single: [
-        { id: "b_1", source: "backend", text: "Login" },
-        { id: "b_2", source: "backend", text: "Logout" },
+        { id: "b_1", source: "frontend", text: "Login" },
+        { id: "b_2", source: "frontend", text: "Logout" },
         { id: "c_x", source: "custom", text: "Looks right" },
       ],
     },

@@ -1,13 +1,7 @@
+// v2 experiment pages → the study record (Experiment was renamed Study; old tab names still resolve).
+import { redirect } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
-import { resolveExperimentTab } from "$lib/components/experiments/study/tabs";
 
-export const ssr = false;
-
-/**
- * `?tab=summary|method|results|data|operations` (older names — overview,
- * design, runs, automation — still resolve; unknown values: the default).
- */
-export const load: PageLoad = ({ params, url }) => ({
-  id: params.id,
-  tab: resolveExperimentTab(url.searchParams.get("tab")),
-});
+export const load: PageLoad = ({ params, url }) => {
+  redirect(308, `/studies/${encodeURIComponent(params.id)}${url.search}`);
+};

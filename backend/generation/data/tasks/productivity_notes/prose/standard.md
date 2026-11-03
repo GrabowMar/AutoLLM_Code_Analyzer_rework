@@ -1,0 +1,30 @@
+Build a notes app with a JSON API under `/api` and a web frontend. Notes are public to read; signed-in users write notes with tags and pin the important ones; only a note's author may change or delete it.
+
+API:
+
+- `POST /api/auth/register` creates an account from a `username` and a `password`; `POST /api/auth/login` signs in with the `username` and `password`. How a signed-in user is recognised on later requests is described in the account section.
+- `GET /api/notes` lists notes, pinned first and then most recently updated, as a paged list (query parameters: `tag`, `author`, `q`, `page`, `page_size`).
+- `POST /api/notes` adds a note by the signed-in user.
+- `GET /api/notes/{id}` returns one note.
+- `PATCH /api/notes/{id}` changes only the fields it is given; only the author may do this.
+- `DELETE /api/notes/{id}` deletes a note; only the author may do this.
+- `GET /api/tags` lists every tag in use with the number of notes carrying it, most used first.
+
+Data:
+
+- A note is returned as an object with `id`, `title`, `content`, `tags`, `pinned`, `created_at`, `updated_at`, `author`.
+- `GET /api/notes` returns `{"items": [...], "total": n, "page": n, "page_size": n}`; each item in `items` is a note.
+- `GET /api/tags` returns `{"items": [...]}`; each item in `items` is an object with `tag` and `count`.
+
+Rules:
+
+- Anyone may read notes; only the author may change or delete one.
+- `updated_at` changes on every update.
+- Note content is plain text and is shown as such.
+
+Web frontend:
+
+- Registration and sign-in forms; the signed-in username and a sign-out button.
+- A note list (pinned ones marked) with a search box, an author filter, paging and a tag cloud whose tags filter the list.
+- A note page that shows the content as plain text with line breaks kept.
+- Create and edit forms with a tag input, showing the API's validation messages; delete with confirmation on the user's own notes.

@@ -1,0 +1,7 @@
+name: 'Style fragment: Tailwind CSS'
+role: fragment
+modes:
+- app
+- slot
+variables:
+- style

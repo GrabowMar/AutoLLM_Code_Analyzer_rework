@@ -1,0 +1,7 @@
+name: 'Auth contract: defined by the task'
+description: 'Spec 8.4 spec_defined: renders the task''s auth_flow.'
+role: fragment
+modes:
+- app
+variables:
+- task

@@ -1,42 +1,60 @@
 /**
- * SSE event payloads (spec §F.6). Published by backend/realtime/events.py
- * (`publish_experiment_event`, `publish_endpoint_event`, `publish_capacity`).
- * `publish()` adds `channel` and `published_at` to every payload.
+ * SSE event payloads and the event names the stream listener registers (`lib/api/sse.ts`).
+ *
+ * - `run:<uuid>` and `study:<uuid>` (they replace the v2 job and experiment channels) mirror
+ *   `backend/generation/contracts/events.py`. Their payload types live with the v3 API types
+ *   (`lib/api/v3/types.ts`: `RunEvent` in WP-16's block, `StudyEvent` and its members in WP-15's)
+ *   and are re-exported here, so there is one definition per event.
+ * - `endpoint:<id>` / `endpoint:<id>:public` and `capacity` mirror `backend/realtime/events.py`.
+ *
+ * `publish()` adds `channel` and `published_at` to every payload. Payloads never carry other
+ * tenants' model names, hosts or addresses.
  */
 
 import type { Lanes } from "./execution";
-import type {
-  CellsPayload,
-  PauseReason,
-  PostRunStatus,
-  ProgressCounts,
-  ExperimentStatusV2,
-} from "./experiments";
+import {
+  RUN_EVENT_TYPES,
+  STUDY_EVENT_TYPES,
+  type RunEvent,
+  type StudyEvent,
+} from "../v3/types";
+
+export type {
+  BudgetAlertEvent,
+  PausedEvent,
+  RunEvent,
+  SpendEvent,
+  StoppedEvent,
+  StudyEvent,
+  StudyPostRunEvent,
+  StudyRunEvent,
+  StudyStateEvent,
+  StudyTickEvent,
+} from "../v3/types";
+export { RUN_EVENT_TYPES, STUDY_EVENT_TYPES };
 
 interface EventEnvelope {
   channel?: string;
   published_at?: string;
 }
 
-// ── experiment:<id> ───────────────────────────────────────────────────
-
-export interface JobEvent extends EventEnvelope {
-  type: "job";
-  job_id: string;
-  condition_id: number | null;
-  app_id: number | null;
-  repeat_index: number | null;
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
-  phase: "" | "queued" | "running" | "eval_queued" | "evaluating";
-  attempt: number;
-  endpoint_id: number | null;
-  pass_rate?: number | null;
-  ts: string;
+/** `run:<uuid>` (staff, the run's creator, or the creator of its study). */
+export function runChannel(runId: string): string {
+  return `run:${runId}`;
 }
 
+/** `study:<uuid>` (the study's creator or staff). */
+export function studyChannel(studyId: string): string {
+  return `study:${studyId}`;
+}
+
+export type RunEventType = RunEvent["type"];
+export type StudyEventType = StudyEvent["type"];
+
 /**
- * The executor's per-lane tick payload. Only `id` is guaranteed: the executor
- * sends what it computes cheaply every tick, so a client merges the keys present.
+ * The executor's per-lane entry of a study `tick` (`StudyTickEvent.endpoints[]`). Only `id` is
+ * guaranteed: the executor sends what it computes cheaply every tick, so a client merges the
+ * keys present.
  */
 export interface TickEndpoint {
   id: number;
@@ -48,50 +66,6 @@ export interface TickEndpoint {
   blocked_reason?: string | null;
   circuit?: "closed" | "open";
 }
-
-/**
- * `tick` on `experiment:<id>`: current-attempt-per-cell rollups (same meaning as
- * REST status). `throughput`, `eta_seconds` and `cells.retried` may be absent:
- * keep the last REST values for them.
- */
-export interface TickEvent extends EventEnvelope {
-  type: "tick";
-  counts: ProgressCounts;
-  cells?: Partial<{
-    total: number;
-    done: number;
-    failed_final: number;
-    in_flight: number;
-    retried: number;
-  }>;
-  throughput?: {
-    completed_last_15m: number;
-    completed_last_60m: number;
-    per_hour_ewma: number;
-  };
-  eta_seconds?: number | null;
-  bottleneck?: string | null;
-  endpoints?: TickEndpoint[];
-}
-
-export interface StateEvent extends EventEnvelope {
-  type: "state";
-  status: ExperimentStatusV2;
-  pause_reason: PauseReason | string;
-}
-
-export interface PostRunEvent extends EventEnvelope {
-  type: "post_run";
-  id: number;
-  status: PostRunStatus;
-  progress: {
-    analysis_done?: number;
-    analysis_total?: number;
-    analysis_failed?: number;
-  };
-}
-
-export type ExperimentEvent = JobEvent | TickEvent | StateEvent | PostRunEvent;
 
 // ── endpoint:<id> (owner/staff) and endpoint:<id>:public ──────────────
 
@@ -150,21 +124,19 @@ export interface CapacityEvent extends EventEnvelope {
 }
 
 export type ReworkEvent =
-  | ExperimentEvent
+  | RunEvent
+  | StudyEvent
   | EndpointChannelEvent
   | CapacityEvent;
 export type ReworkEventType = ReworkEvent["type"];
 
 /** SSE event names the stream listener must register (sse.ts). */
 export const REWORK_EVENT_TYPES: readonly ReworkEventType[] = [
-  "job",
-  "tick",
-  "state",
-  "post_run",
-  "endpoint",
-  "session",
-  "capacity",
-] as const;
-
-/** Re-exported for consumers that patch the grid from `job` events. */
-export type { CellsPayload };
+  ...new Set<ReworkEventType>([
+    ...RUN_EVENT_TYPES,
+    ...STUDY_EVENT_TYPES,
+    "endpoint",
+    "session",
+    "capacity",
+  ]),
+];

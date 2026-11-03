@@ -1,0 +1,7 @@
+name: 'Style fragment: shadcn/ui'
+role: fragment
+modes:
+- app
+- slot
+variables:
+- style

@@ -1,0 +1,8 @@
+name: Model's choice, brutalist tone
+description: No styling prescription, with the brutalist visual tone.
+content:
+  system: model-choice
+  tone: brutalist
+  tone_text: 'Brutalist: raw high-contrast blocks, heavy borders, monospace type and no rounded corners or gradients.'
+  fragment: style-model-choice@1
+  compatible_frontends: [react, vue, svelte, none, free]

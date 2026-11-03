@@ -15,6 +15,7 @@ from backend.generation.runs.view import current_runs
 from backend.generation.runs.view import run_view
 from backend.generation.runs.view import run_views
 from backend.generation.runs.view import run_views_code
+from backend.generation.runs.view import run_views_files
 from backend.generation.runs.view import source_loc
 from backend.generation.testing import factories
 
@@ -218,6 +219,26 @@ def test_run_views_code_uses_one_row_query_and_reads_each_blob_once(app_run, var
     assert len(reads) == len(set(reads))
 
 
+def test_run_views_files_matches_single_reader_with_one_query(app_run, variant):
+    other = factories.GenerationRunFactory()
+    runs = GenerationRun.objects.filter(pk__in=[app_run.pk, variant.pk, other.pk])
+    for scope in ("model", "app", "slot"):
+        with CaptureQueriesContext(connection) as ctx:
+            bulk = run_views_files(runs, scope)
+        assert len(ctx.captured_queries) == 2  # the run triples, then one RunFile query (parents included)
+        assert bulk[str(other.pk)] == []
+        assert bulk[str(app_run.pk)] == run_view(app_run).files(scope)
+        assert bulk[str(variant.pk)] == run_view(variant).files(scope)
+    assert any(entry.origin == PARENT_ORIGIN for entry in run_views_files([variant], "app")[str(variant.pk)])
+
+
+def test_source_loc_is_the_reports_rule():
+    from backend.reports.services import loc
+
+    for path, text in (("app/main.py", "import os\n# c\n\nx = 1\n"), ("tests/test_a.py", "x = 1\n")):
+        assert source_loc(path, text) == loc.source_loc(path, text)
+
+
 # -- run_views ----------------------------------------------------------------------------------------------
 
 
@@ -350,7 +371,18 @@ def test_latest_evaluation_is_none_when_never_evaluated(app_run):
     assert run_view(app_run).latest_evaluation() is None
 
 
-# -- current runs (temporary) -----------------------------------------------------------------------------
+# -- current runs (runs.queries) -----------------------------------------------------------------------------------
+
+
+def test_current_runs_is_runs_queries(monkeypatch):
+    from backend.generation.runs import queries
+
+    seen = []
+    monkeypatch.setattr(queries, "current_runs", lambda study, stage="main": seen.append((study, stage)) or "qs")
+    assert current_runs("s", stage="pilot") == "qs"
+    assert seen == [("s", "pilot")]
+    assert not hasattr(view_module, "_current_runs_tmp")
+    assert not hasattr(view_module, "_reports_loc")
 
 
 def test_current_runs_takes_the_first_usable_attempt_per_cell():

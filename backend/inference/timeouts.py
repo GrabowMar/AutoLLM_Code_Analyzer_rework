@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# images/llm-gateway/gateway.py: UPSTREAM_RETRIES = CONFIG.get("upstream_retries", 4).
-# Snapshots never set upstream_retries, so the gateway default applies.
+# images/llm-gateway: the retries per call are GatewayConfig.retries.upstream_retries (per run, from its
+# ResourcePolicy; 0-8). The timeout chain below is sized for this many upstream retries.
 GATEWAY_UPSTREAM_RETRIES = 4
 # LLMRequest.max_attempts default.
 REQUEST_MAX_ATTEMPTS = 3

@@ -304,3 +304,41 @@ def test_cancelled_build_never_launches_backend(settings, tmp_path):
     ):
         build_backend.build(str(tmp_path), "sample:1", client=_client(), cancelled=lambda: True)
     backend.assert_not_called()
+
+
+def test_buildkit_passes_named_contexts_before_the_context_path(settings, tmp_path):
+    """Frozen base pins reach ``docker buildx build`` so a tag-only FROM is never re-resolved (WP-05 ask)."""
+    settings.SAMPLE_BUILD_BACKEND = "buildkit"
+    settings.APPS_DOCKER_HOST = ""
+    client = _client()
+    client.containers.get.return_value.stats.return_value = {}
+    calls = []
+
+    def command(args, env, **kwargs):
+        calls.append(args)
+        return 0, "ok\n"
+
+    pin = "--build-context=python:3.13-slim=docker-image://python:3.13-slim@sha256:" + "a" * 64
+    with (
+        patch.object(build_backend, "_ensure_builder", return_value="llmlab-samples"),
+        patch.object(build_backend, "_command", side_effect=command),
+    ):
+        build_backend.build(str(tmp_path), "sample:1", client=client, build_contexts=["--build-context", pin])
+
+    args = calls[0]
+    assert args[-1] == str(tmp_path.resolve())
+    assert args[-3:-1] == ["--build-context", pin]
+
+
+def test_legacy_refuses_pinned_bases_as_infra(settings, tmp_path):
+    settings.SAMPLE_BUILD_BACKEND = "legacy"
+    client = _client()
+    with pytest.raises(build_backend.BuildFailure) as error:
+        build_backend.build(
+            str(tmp_path),
+            "sample:1",
+            client=client,
+            build_contexts=["--build-context", "a=docker-image://a@x"],
+        )
+    assert error.value.infra_suspected is True
+    client.api.build.assert_not_called()

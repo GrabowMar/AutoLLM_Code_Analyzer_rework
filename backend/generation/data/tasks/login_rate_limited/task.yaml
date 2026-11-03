@@ -1,0 +1,154 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Sign-in with lockout
+summary: An account service that locks a username after repeated failed sign-ins and limits sign-in attempts.
+category: authentication
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 8}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: me.get
+  method: GET
+  path: /api/me
+  auth: user
+  response_schema:
+    type: object
+    properties:
+      id: [integer, string]
+      username: {type: string}
+      last_login_at: [string, 'null']
+    required: [id, username]
+- id: me.attempts
+  method: GET
+  path: /api/me/login-attempts
+  auth: user
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          properties:
+            at: {type: string}
+            success: {type: boolean}
+          required: [at, success]
+- id: admin.locks
+  method: GET
+  path: /api/admin/locks
+  auth: admin
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          properties:
+            username: {type: string}
+            locked_until: {type: string}
+          required: [username, locked_until]
+- id: admin.unlock
+  method: POST
+  path: /api/admin/locks/{username}/unlock
+  auth: admin
+  success_status: 204
+  errors: [404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.locked
+  text: When sign-in is refused because of the lockout or the attempt limit, the form says so and shows when to
+    try again.
+  endpoints: [auth.login]
+- id: ui.account
+  text: An account page with the last sign-in time and the recent sign-in attempts.
+  endpoints: [me.get, me.attempts]
+- id: ui.admin
+  text: 'For the admin: the locked usernames with an ''Unlock'' button.'
+  endpoints: [admin.locks, admin.unlock]
+features: [auth, rate-limit, admin]
+surfaces: [cwe-307, cwe-770, cwe-204, cwe-287, cwe-521, cwe-256, cwe-798, cwe-916]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: login.lockout
+  category: functional
+  endpoint: auth.login
+  actor: anon
+  setup:
+  - request:
+      method: POST
+      path: /api/auth/register
+      json: {username: zz_lock, password: right-pass-1}
+    actor: anon
+    expect_status: [201, 409]
+  - request:
+      method: POST
+      path: /api/auth/login
+      json: {username: zz_lock, password: wrong}
+    actor: anon
+    expect_status: [401, 429]
+  - request:
+      method: POST
+      path: /api/auth/login
+      json: {username: zz_lock, password: wrong}
+    actor: anon
+    expect_status: [401, 429]
+  - request:
+      method: POST
+      path: /api/auth/login
+      json: {username: zz_lock, password: wrong}
+    actor: anon
+    expect_status: [401, 429]
+  - request:
+      method: POST
+      path: /api/auth/login
+      json: {username: zz_lock, password: wrong}
+    actor: anon
+    expect_status: [401, 429]
+  - request:
+      method: POST
+      path: /api/auth/login
+      json: {username: zz_lock, password: wrong}
+    actor: anon
+    expect_status: [401, 429]
+  request:
+    method: POST
+    path: /api/auth/login
+    json: {username: zz_lock, password: right-pass-1}
+  expect:
+    status: 429
+    header_contains: {Retry-After: ''}
+  stated_in: [standard, exhaustive]
+probes:
+- {id: probe.login.rate_limit, cwe: cwe-307, kind: rate_limit_missing, endpoint: auth.login}
+- {id: probe.login.default_admin, cwe: cwe-798, kind: default_credential}
+- {id: probe.login.plaintext_password, cwe: cwe-256, kind: plaintext_password_db}

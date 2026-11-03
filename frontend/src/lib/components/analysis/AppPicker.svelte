@@ -1,5 +1,7 @@
 <script lang="ts" module>
-	/** A generated app picked for analysis (what the summary and chips need). */
+	import type { RunListOut } from '$lib/api/v3/types';
+
+	/** A generated app (GenerationRun) picked for analysis (what the summary and chips need). */
 	export interface PickedApp {
 		id: string;
 		app: string;
@@ -10,50 +12,65 @@
 
 	export const MAX_APPS = 100;
 
-	export function toPicked(j: {
-		id: string;
-		template_name?: string | null;
-		model_name?: string | null;
-		stack_slug?: string | null;
-		created_at?: string | null;
-	}): PickedApp {
+	/**
+	 * A run row as the picker reads it. `task` / `task_title` are optional: the runs list may not
+	 * carry them (then the row falls back to the stack and kind).
+	 */
+	export type PickerRun = RunListOut & { task?: string | null; task_title?: string | null };
+
+	const KIND_LABELS: Record<string, string> = {
+		app_agentic: 'Agentic app',
+		slot_single_shot: 'Slot variant',
+		slot_agent: 'Slot variant (agent)',
+		reference: 'Reference',
+	};
+
+	export function kindLabel(kind: string): string {
+		return KIND_LABELS[kind] ?? kind.replace(/_/g, ' ');
+	}
+
+	export function toPicked(run: PickerRun): PickedApp {
+		const stack = run.labels?.stack_profile ?? '';
 		return {
-			id: j.id,
-			app: j.template_name ?? '',
-			model: j.model_name ?? '',
-			stack: j.stack_slug ?? '',
-			created_at: j.created_at ?? null,
+			id: run.id,
+			app: run.task_title || run.task || run.labels?.task || '',
+			model: run.model ?? run.labels?.model ?? '',
+			stack,
+			created_at: run.created_at ?? null,
 		};
 	}
 </script>
 
 <script lang="ts">
 	/**
-	 * AppPicker — choose completed generated apps to analyze: server-side search
-	 * (app, model, stack, ID), "app running" filter (dynamic tools need it),
-	 * paging, select page / clear, and removable chips for the selection (kept
-	 * across pages and searches). Each row shows whether the app's container is
-	 * running.
+	 * AppPicker — choose generated apps (GenerationRuns with a collected tree) to analyze: filter by
+	 * study and outcome (default: every usable run, i.e. tested or a measured build/start/output
+	 * failure), or show only apps whose container runs (dynamic tools need it); paging, select
+	 * page / clear, and removable chips for the selection (kept across pages and filters). Each
+	 * row shows whether the app's container is running.
 	 *
 	 * Props: `selected` (bindable `PickedApp[]`, replaced on change), `running`
-	 * (bindable output: job ids whose container runs, for the summary).
+	 * (bindable output: run ids whose container runs, for the summary).
 	 */
 	import { onMount, untrack } from 'svelte';
-	import { Input } from '$lib/components/ui/input';
+	import * as Select from '$lib/components/ui/select';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Segmented } from '$lib/components/ui/segmented';
 	import { Button } from '$lib/components/ui/button';
-	import Search from '@lucide/svelte/icons/search';
 	import X from '@lucide/svelte/icons/x';
 	import AppWindow from '@lucide/svelte/icons/app-window';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import LoadingState from '$lib/components/LoadingState.svelte';
 	import PaginationBar from '$lib/components/PaginationBar.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { modelNamePrefix, shortModelName, tableFrame } from '$lib/components/table';
 	import { formatApiError, isAbortError } from '$lib/api/core';
-	import { getGenerationJobs, type GenerationJobList } from '$lib/api/generation';
+	import { getSample, listSamples } from '$lib/api/v3/samples';
+	import { listStudies } from '$lib/api/v3/studies';
+	import type { RunListQuery, RunOut, StudyListOut } from '$lib/api/v3/types';
 	import { getContainers } from '$lib/api/runtime';
+	import { outcomeLabels, type RunOutcome } from '$lib/constants/colors';
 	import { formatDate } from '$lib/utils/formatters';
 	import { cn } from '$lib/utils';
 
@@ -65,18 +82,45 @@
 	let { selected = $bindable(), running = $bindable(new Set()) }: Props = $props();
 
 	const PER_PAGE = 10;
-	let items = $state<GenerationJobList[]>([]);
+	/** Runs shown in "App running" mode (one request per running container). */
+	const MAX_RUNNING = 50;
+	const ANALYZABLE: RunOutcome[] = ['tested', 'build_fail', 'start_fail', 'output_invalid'];
+
+	let items = $state<PickerRun[]>([]);
 	let total = $state(0);
 	let pages = $state(1);
 	let pageNo = $state(1);
 	let loading = $state(true);
 	let error = $state('');
-	let search = $state('');
-	let searchText = $state('');
+	let study = $state('');
+	/** '' = every usable run; else one outcome. */
+	let outcome = $state<RunOutcome | ''>('');
 	let scope = $state<'all' | 'running'>('all');
 	let ctl: AbortController | null = null;
 
+	let studies = $state<StudyListOut[]>([]);
+	const studyItems = $derived(
+		studies.map((x) => ({ value: x.id, label: x.name, description: `${x.status} · ${x.mode} mode · ${x.cells_done}/${x.cells_total} cells` }))
+	);
+	const outcomeItems = ANALYZABLE.map((o) => ({ value: o, label: outcomeLabels[o] }));
+
 	const selectedIds = $derived(new Set(selected.map((a) => a.id)));
+
+	/** Running containers' runs, fetched one by one (few run at a time), newest first. */
+	let runningRows: (PickerRun & Pick<RunOut, 'study'>)[] = [];
+	let runningRowsFor = '';
+
+	async function loadRunningRows(signal: AbortSignal): Promise<(PickerRun & Pick<RunOut, 'study'>)[]> {
+		const key = [...running].sort().join(',');
+		if (key === runningRowsFor) return runningRows;
+		const ids = [...running].slice(0, MAX_RUNNING);
+		const found = await Promise.allSettled(ids.map((id) => getSample(id, { signal })));
+		runningRows = found
+			.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
+			.sort((x, y) => (y.created_at ?? '').localeCompare(x.created_at ?? ''));
+		runningRowsFor = key;
+		return runningRows;
+	}
 
 	async function load() {
 		ctl?.abort();
@@ -84,21 +128,26 @@
 		ctl = mine;
 		loading = true;
 		try {
-			const data = await getGenerationJobs(
-				{
-					status: 'completed',
-					page: pageNo,
-					per_page: PER_PAGE,
-					search: search || undefined,
-					container_status: scope === 'running' ? 'running' : undefined,
-					sort_by: 'created_desc',
-				},
-				{ signal: mine.signal }
-			);
-			items = data.items;
-			total = data.total;
-			pages = data.pages;
-			pageNo = data.page;
+			if (scope === 'running') {
+				await loadRunning();
+				const rows = (await loadRunningRows(mine.signal)).filter(
+					(r) => (!study || r.study?.study_id === study) && (!outcome || r.outcome === outcome)
+				);
+				total = rows.length;
+				pages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
+				pageNo = Math.min(pageNo, pages);
+				items = rows.slice((pageNo - 1) * PER_PAGE, pageNo * PER_PAGE);
+			} else {
+				const query: RunListQuery = { page: pageNo, page_size: PER_PAGE };
+				if (study) query.study = study;
+				if (outcome) query.outcome = outcome;
+				else query.usable = true;
+				const data = await listSamples(query, { signal: mine.signal });
+				items = data.items as PickerRun[];
+				total = data.total;
+				pages = Math.max(1, Math.ceil(data.total / data.page_size));
+				pageNo = data.page;
+			}
 			error = '';
 		} catch (e) {
 			if (isAbortError(e) && mine.signal.aborted) return;
@@ -117,26 +166,23 @@
 		}
 	}
 
-	const queryKey = $derived(`${pageNo}|${search}|${scope}`);
+	const queryKey = $derived(`${pageNo}|${study}|${outcome}|${scope}`);
 	$effect(() => {
 		void queryKey;
 		untrack(() => void load());
 	});
-	onMount(() => void loadRunning());
+	onMount(() => {
+		void loadRunning();
+		listStudies({ page_size: 100 })
+			.then((res) => (studies = res.items.filter((x) => x.status !== 'draft')))
+			.catch(() => {
+				// The study filter is optional: without it every run is listed.
+			});
+	});
 
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	function onSearch(value: string) {
-		searchText = value;
-		clearTimeout(timer);
-		timer = setTimeout(() => {
-			search = value.trim();
-			pageNo = 1;
-		}, 300);
-	}
-
-	function toggle(job: GenerationJobList, on: boolean) {
-		if (on && !selectedIds.has(job.id) && selected.length < MAX_APPS) selected = [...selected, toPicked(job)];
-		else if (!on) selected = selected.filter((a) => a.id !== job.id);
+	function toggle(run: PickerRun, on: boolean) {
+		if (on && !selectedIds.has(run.id) && selected.length < MAX_APPS) selected = [...selected, toPicked(run)];
+		else if (!on) selected = selected.filter((a) => a.id !== run.id);
 	}
 
 	const pageAllSelected = $derived(items.length > 0 && items.every((j) => selectedIds.has(j.id)));
@@ -152,21 +198,48 @@
 		}
 	}
 
+	const anyFilter = $derived(!!(study || outcome || scope === 'running'));
+	function clearFilters() {
+		study = '';
+		outcome = '';
+		scope = 'all';
+		pageNo = 1;
+	}
+
 	let showAllChips = $state(false);
 	const chips = $derived(showAllChips ? selected : selected.slice(0, 12));
 </script>
 
 <div class="space-y-3">
-	<div class="flex flex-wrap items-center gap-2">
-		<div class="relative min-w-52 flex-1">
-			<Search class="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-			<Input
-				type="search"
-				value={searchText}
-				oninput={(e) => onSearch((e.currentTarget as HTMLInputElement).value)}
-				placeholder="Search app, model, stack or job ID…"
-				aria-label="Search generated apps"
-				class="h-9 pl-8"
+	<div class="flex flex-wrap items-center gap-2" role="search" aria-label="Filter generated apps">
+		<div class="w-full sm:w-64">
+			<Select.Simple
+				size="sm"
+				class="h-9"
+				value={study}
+				placeholder="Every study and ad-hoc run"
+				clearLabel="Every study and ad-hoc run"
+				items={studyItems}
+				onValueChange={(v) => {
+					study = v;
+					pageNo = 1;
+				}}
+				aria-label="Study"
+			/>
+		</div>
+		<div class="w-full sm:w-52">
+			<Select.Simple
+				size="sm"
+				class="h-9"
+				value={outcome}
+				placeholder="Every usable outcome"
+				clearLabel="Every usable outcome"
+				items={outcomeItems}
+				onValueChange={(v) => {
+					outcome = v as RunOutcome | '';
+					pageNo = 1;
+				}}
+				aria-label="Outcome"
 			/>
 		</div>
 		<Segmented
@@ -178,7 +251,7 @@
 				pageNo = 1;
 			}}
 			items={[
-				{ value: 'all', label: 'All completed' },
+				{ value: 'all', label: 'All apps' },
 				{ value: 'running', label: 'App running', title: 'Apps whose container runs now: dynamic tools (ZAP, Nuclei, Wapiti) can scan them' },
 			]}
 		/>
@@ -211,14 +284,14 @@
 		<EmptyState
 			compact
 			icon={AppWindow}
-			title={search || scope === 'running' ? 'No apps match' : 'No completed apps yet'}
-			description={search || scope === 'running' ? undefined : 'Generate an app first, or paste code instead.'}
+			title={anyFilter ? 'No apps match' : 'No generated apps yet'}
+			description={anyFilter ? undefined : 'Run a study (or generate a single app) first, or paste code instead.'}
 		>
 			{#snippet action()}
-				{#if search || scope === 'running'}
-					<Button variant="outline" size="sm" onclick={() => { search = ''; searchText = ''; scope = 'all'; pageNo = 1; }}>Show all apps</Button>
+				{#if anyFilter}
+					<Button variant="outline" size="sm" onclick={clearFilters}>Show all apps</Button>
 				{:else}
-					<Button variant="outline" size="sm" href="/sample-generator">Generate an app</Button>
+					<Button variant="outline" size="sm" href="/studies/new">New study</Button>
 				{/if}
 			{/snippet}
 		</EmptyState>
@@ -231,30 +304,34 @@
 							<th class="w-8"><Checkbox checked={pageAllSelected} indeterminate={pageSomeSelected} onCheckedChange={(v) => togglePage(!!v)} aria-label="Select all apps on this page" /></th>
 							<th>App</th>
 							<th>Model</th>
-							<th>Mode</th>
+							<th>Outcome</th>
 							<th>Created</th>
 							<th title="Whether the app's container runs now (needed by dynamic tools)">App</th>
 						</tr>
 					</thead>
 					<tbody>
-						{#each items as job (job.id)}
-							{@const on = selectedIds.has(job.id)}
-							{@const provider = modelNamePrefix(job.model_name)}
+						{#each items as run (run.id)}
+							{@const on = selectedIds.has(run.id)}
+							{@const picked = toPicked(run)}
+							{@const modelName = run.model ?? run.labels?.model ?? ''}
+							{@const provider = modelNamePrefix(modelName)}
 							<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (the checkbox is the keyboard path) -->
-							<tr class="row-link" data-selected={on} onclick={(e) => { if (!(e.target as HTMLElement).closest('button, a')) toggle(job, !on); }}>
-								<td class="w-8"><Checkbox checked={on} onCheckedChange={(v) => toggle(job, !!v)} aria-label="Select {job.template_name ?? job.id}" disabled={!on && selected.length >= MAX_APPS} /></td>
+							<tr class="row-link" data-selected={on} onclick={(e) => { if (!(e.target as HTMLElement).closest('button, a')) toggle(run, !on); }}>
+								<td class="w-8"><Checkbox checked={on} onCheckedChange={(v) => toggle(run, !!v)} aria-label="Select {picked.app || picked.stack || run.id}" disabled={!on && selected.length >= MAX_APPS} /></td>
 								<td class="max-w-0 w-[30%]">
-									<span class="block truncate font-medium">{job.template_name ?? job.stack_slug ?? '—'}</span>
-									<span class="cell-sub block truncate font-mono text-[11px] text-muted-foreground">{job.stack_slug ?? ''} · {job.id.slice(0, 8)}</span>
+									<span class="block truncate font-medium">{picked.app || picked.stack || kindLabel(run.kind)}</span>
+									<span class="cell-sub block truncate font-mono text-[11px] text-muted-foreground">{[kindLabel(run.kind), picked.app ? picked.stack : '', run.id.slice(0, 8)].filter(Boolean).join(' · ')}</span>
 								</td>
 								<td class="max-w-0 w-[30%]">
-									<span class="block truncate" title={job.model_name ?? ''}>{shortModelName(job.model_name) || '—'}</span>
+									<span class="block truncate" title={modelName}>{shortModelName(modelName) || '—'}</span>
 									{#if provider}<span class="cell-sub block truncate text-[11px] text-muted-foreground">{provider}</span>{/if}
 								</td>
-								<td class="text-xs capitalize text-muted-foreground">{job.mode}</td>
-								<td class="whitespace-nowrap text-xs text-muted-foreground">{formatDate(job.completed_at ?? job.created_at)}</td>
+								<td class="text-xs">
+									{#if run.outcome}<StatusBadge status={run.outcome} label={outcomeLabels[run.outcome as RunOutcome] ?? run.outcome} />{:else}<span class="text-muted-foreground">{run.status}</span>{/if}
+								</td>
+								<td class="whitespace-nowrap text-xs text-muted-foreground">{formatDate(run.created_at)}</td>
 								<td class="whitespace-nowrap text-xs">
-									{#if running.has(job.id)}
+									{#if running.has(run.id)}
 										<span class="inline-flex items-center gap-1 text-success-fg"><span class="status-dot status-dot-live h-1.5 w-1.5" aria-hidden="true"></span>running</span>
 									{:else}
 										<span class="text-muted-foreground">stopped</span>
@@ -266,7 +343,7 @@
 				</table>
 			</div>
 			<PaginationBar
-				resultsText="{total} completed app{total === 1 ? '' : 's'}{selected.length ? ` · ${selected.length} selected` : ''}"
+				resultsText="{total} app{total === 1 ? '' : 's'}{selected.length ? ` · ${selected.length} selected` : ''}"
 				page={pageNo}
 				{pages}
 				onGoToPage={(p) => (pageNo = p)}
@@ -274,7 +351,7 @@
 			/>
 		</div>
 		{#if selected.length >= MAX_APPS}
-			<p class="text-xs text-warning-fg">A batch analyzes at most {MAX_APPS} apps.</p>
+			<p class="text-xs text-warning-fg">One launch analyzes at most {MAX_APPS} apps.</p>
 		{/if}
 	{/if}
 </div>

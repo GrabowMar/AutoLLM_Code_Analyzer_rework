@@ -90,7 +90,7 @@ def test_unresolvable_bare_fragment_ref_is_reported_at_its_location():
 
 def test_lint_requires_every_auth_and_network_fragment_in_app_mode():
     content = samples.prompt_set_content(fragments={})
-    issues = lint.lint("prompt_set", content)
+    issues = lint.lint("prompt_set", content, resolve=False)
     assert _codes(issues) == ["lint_prompt_fragment_missing"] * len(REQUIRED)
     assert {issue.data["key"] for issue in issues} == REQUIRED
     assert {issue.path for issue in issues} == {f"fragments.{key}" for key in REQUIRED}
@@ -98,33 +98,35 @@ def test_lint_requires_every_auth_and_network_fragment_in_app_mode():
 
     partial = samples.prompt_set_content()
     del partial["fragments"]["auth_contract.spec_defined"]
-    assert [issue.data["key"] for issue in lint.lint("prompt_set", partial)] == ["auth_contract.spec_defined"]
+    assert [issue.data["key"] for issue in lint.lint("prompt_set", partial, resolve=False)] == [
+        "auth_contract.spec_defined",
+    ]
 
 
 def test_lint_accepts_a_complete_app_set_with_or_without_the_budget_sentence():
     content = samples.prompt_set_content()
-    assert lint.lint("prompt_set", content) == []
+    assert lint.lint("prompt_set", content, resolve=False) == []
     content["fragments"]["budget_neutral"] = samples.fake_ref("budget-neutral@1")
-    assert lint.lint("prompt_set", content) == []
+    assert lint.lint("prompt_set", content, resolve=False) == []
 
 
 def test_lint_does_not_require_fragments_in_slot_mode_but_checks_roles():
-    assert lint.lint("prompt_set", samples.prompt_set_content(mode="slot")) == []
+    assert lint.lint("prompt_set", samples.prompt_set_content(mode="slot"), resolve=False) == []
     agent = samples.prompt_set_content(mode="slot", roles={"slot_agent_brief": samples.fake_ref("a@1")})
-    assert lint.lint("prompt_set", agent) == []
+    assert lint.lint("prompt_set", agent, resolve=False) == []
     half = samples.prompt_set_content(mode="slot", roles={"slot_single_shot_user": samples.fake_ref("u@1")})
-    assert _codes(lint.lint("prompt_set", half)) == ["lint_prompt_role_missing"]
+    assert _codes(lint.lint("prompt_set", half, resolve=False)) == ["lint_prompt_role_missing"]
     no_brief = samples.prompt_set_content(roles={"system": samples.fake_ref("s@1")})
-    assert _codes(lint.lint("prompt_set", no_brief)) == ["lint_prompt_role_missing"]
+    assert _codes(lint.lint("prompt_set", no_brief, resolve=False)) == ["lint_prompt_role_missing"]
 
 
 def test_lint_reports_invalid_content_instead_of_raising():
-    assert _codes(lint.lint("prompt_set", {"mode": "app"})) == ["lint_content_invalid"]
+    assert _codes(lint.lint("prompt_set", {"mode": "app"}, resolve=False)) == ["lint_content_invalid"]
 
 
-def test_lint_of_other_kinds_is_still_wp03s():
-    with pytest.raises(NotImplementedError):
-        lint.lint("task", {})
+def test_lint_of_other_kinds_reports_invalid_content():
+    # WP-03 implemented the other kinds (wave 2); an empty task is invalid content, never a crash.
+    assert "lint_content_invalid" in _codes(lint.lint("task", {}, resolve=False))
 
 
 # -- golden fixture ---------------------------------------------------------------------------------
@@ -132,7 +134,7 @@ def test_lint_of_other_kinds_is_still_wp03s():
 
 @pytest.mark.parametrize("entry", LIBRARY.of("prompt_set"), ids=lambda e: e.slug)
 def test_golden_prompt_sets_lint_clean(entry):
-    assert lint.lint("prompt_set", entry.content) == []
+    assert lint.lint("prompt_set", entry.content, resolve=False) == []
 
 
 def test_golden_app_set_pins_every_fragment_to_a_fragment_template():

@@ -1,0 +1,228 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Event calendar
+summary: A shared calendar of upcoming events, browsable by day, week or month.
+category: scheduling
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Event
+  fields:
+  - {name: title, type: string, required: true, max_length: 200}
+  - {name: description, type: text, max_length: 2000}
+  - {name: location, type: string, max_length: 200}
+  - {name: start_time, type: datetime, required: true}
+  - {name: end_time, type: datetime}
+  - {name: created_at, type: datetime}
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: events.list
+  method: GET
+  path: /api/events
+  auth: public
+  query:
+  - {name: start_date, type: date, semantics: filter}
+  - {name: end_date, type: date, semantics: filter}
+  response_schema:
+    type: object
+    required: [items, total]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id, title, start_time, created_by]
+          properties:
+            id:
+              type: [integer, string]
+            title: {type: string, maxLength: 200, minLength: 1}
+            description:
+              type: [string, 'null']
+              maxLength: 2000
+            location:
+              type: [string, 'null']
+              maxLength: 200
+            start_time: {type: string, format: date-time}
+            end_time:
+              type: [string, 'null']
+              format: date-time
+            created_at:
+              type: [string, 'null']
+              format: date-time
+            created_by: {type: string}
+      total: {type: integer}
+  errors: [400]
+- id: events.create
+  method: POST
+  path: /api/events
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      title: {type: string, maxLength: 200, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      location:
+        type: [string, 'null']
+        maxLength: 200
+      start_time: {type: string, format: date-time}
+      end_time:
+        type: [string, 'null']
+        format: date-time
+    required: [title, start_time]
+  response_schema:
+    type: object
+    required: [id, title, start_time, created_by]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 200, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      location:
+        type: [string, 'null']
+        maxLength: 200
+      start_time: {type: string, format: date-time}
+      end_time:
+        type: [string, 'null']
+        format: date-time
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      created_by: {type: string}
+  errors: [400]
+- id: events.get
+  method: GET
+  path: /api/events/{id}
+  auth: public
+  response_schema:
+    type: object
+    required: [id, title, start_time, created_by]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 200, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      location:
+        type: [string, 'null']
+        maxLength: 200
+      start_time: {type: string, format: date-time}
+      end_time:
+        type: [string, 'null']
+        format: date-time
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      created_by: {type: string}
+  errors: [404]
+- id: events.replace
+  method: PUT
+  path: /api/events/{id}
+  auth: user
+  request_schema:
+    type: object
+    properties:
+      title: {type: string, maxLength: 200, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      location:
+        type: [string, 'null']
+        maxLength: 200
+      start_time: {type: string, format: date-time}
+      end_time:
+        type: [string, 'null']
+        format: date-time
+    required: [title, start_time]
+  response_schema:
+    type: object
+    required: [id, title, start_time, created_by]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 200, minLength: 1}
+      description:
+        type: [string, 'null']
+        maxLength: 2000
+      location:
+        type: [string, 'null']
+        maxLength: 200
+      start_time: {type: string, format: date-time}
+      end_time:
+        type: [string, 'null']
+        format: date-time
+      created_at:
+        type: [string, 'null']
+        format: date-time
+      created_by: {type: string}
+  errors: [400, 404]
+- id: events.delete
+  method: DELETE
+  path: /api/events/{id}
+  auth: user
+  success_status: 204
+  errors: [404]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.views
+  text: Month, week and day views with navigation to the previous and next period and a 'Today' button.
+  endpoints: [events.list]
+- id: ui.detail
+  text: Clicking an event shows its details.
+  endpoints: [events.get]
+- id: ui.forms
+  text: 'For signed-in users: create and edit forms with date-time pickers that show the API''s validation messages;
+    delete with confirmation.'
+  endpoints: [events.create, events.replace, events.delete]
+features: [auth, filter, scheduling]
+surfaces: [cwe-79, cwe-862, cwe-20, cwe-89]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: events.utc
+  category: functional
+  endpoint: events.create
+  request:
+    method: POST
+    path: /api/events
+    json: {title: Standup, start_time: '2030-05-01T09:00:00'}
+  expect:
+    status: 201
+    json_contains: {start_time: '2030-05-01T09:00:00Z'}
+  stated_in: [standard, exhaustive]
+probes:
+- id: probe.events.xss
+  cwe: cwe-79
+  kind: xss_stored
+  endpoint: events.create
+  params: {field: description, view_endpoint: events.get}

@@ -1,61 +1,72 @@
-"""Overlay for non-OpenRouter upstreams: http(s) by scheme, optional bearer, no OpenRouter-only fields.
+"""Overlay for the executor's local LLM proxy upstream (``GatewayConfig.upstream.kind = "local_proxy"``).
 
-The base ``gateway.py`` is frozen (its content is part of every agent
-run_fingerprint), so local endpoints reuse it unchanged and patch three
-module-level hooks that it looks up at call time:
+The base ``gateway.py`` owns every policy, budget, retry and log rule; this overlay only registers the
+``local_proxy`` upstream adapter, so local endpoints take the same canonical path as OpenRouter runs:
 
-* ``_open_upstream``: plain HTTP or HTTPS by the upstream URL's scheme, the
-  per-job proxy token (``LLMLAB_UPSTREAM_TOKEN``) as bearer, and none of the
-  OpenRouter attribution headers;
-* ``_rewrite``: the policy is applied as usual, then the OpenRouter
-  ``usage: {include: true}`` accounting flag is dropped;
-* ``RETRY_STATUSES``: no 500 (an Ollama 500 is usually an out-of-memory model
-  load, not transient) and no 408 (the proxy owns timeouts); 504 stays so a
-  proxy long-wait re-attaches to the same upstream request.
+* transport: plain HTTP or HTTPS by the upstream URL's scheme, the per-run proxy token
+  (``LLMLAB_UPSTREAM_TOKEN``) as bearer, none of the OpenRouter attribution headers;
+* body: the OpenRouter-only fields are dropped (``usage``, ``provider``, ``session_id``, the ``:floor``
+  suffix, ``cache_control`` markers), since the proxy builds the endpoint's own body;
+* headers for the proxy's budget backstop (``budget_rules``, local proxy parity):
+  ``X-LLMLab-Request-Class`` and ``X-LLMLab-Call-Index`` (a gateway retry of the same call keeps its
+  index, so the proxy never reserves twice for one call);
+* retries: no 500 (an Ollama 500 is usually an out-of-memory model load, not transient) and no 408 (the
+  proxy owns timeouts); 504 is always retried, because a proxy 504 means "still waiting, re-attach".
+
+Only ``openai_chat`` runs in ``native`` mode on local endpoints until the wave-3 translators land.
 """
 
 # Standalone script baked into its own image (no package).
-# ruff: noqa: INP001, PTH100, PTH120
+# ruff: noqa: INP001
 
-import http.client
-import os
-import ssl
+from __future__ import annotations
+
 import sys
+from collections.abc import Mapping
+from pathlib import Path
+from typing import TYPE_CHECKING
+from typing import Any
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import gateway as g
+from protocols.common import strip_cache_control
 
-TOKEN = os.environ.get("LLMLAB_UPSTREAM_TOKEN", "")
-g.RETRY_STATUSES = {429, 502, 503, 504}
-_base_rewrite = g._rewrite  # noqa: SLF001
+if TYPE_CHECKING:
+    from protocols import budget_rules
 
-
-def _rewrite(body):
-    body, diff = _base_rewrite(body)
-    body.pop("usage", None)  # OpenRouter accounting flag
-    return body, diff
+OPENROUTER_ONLY = ("usage", "provider", "session_id", "models", "route", "transforms")
+NO_RETRY = frozenset({500, 408})
 
 
-def _open_upstream(self, data, stream):
-    u = g.UPSTREAM
-    if u.scheme == "https":
-        conn = http.client.HTTPSConnection(
-            u.hostname,
-            u.port or 443,
-            timeout=g.UPSTREAM_TIMEOUT,
-            context=ssl.create_default_context(),
-        )
-    else:
-        conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=g.UPSTREAM_TIMEOUT)
-    headers = {"Content-Type": "application/json", "Accept": "text/event-stream" if stream else "application/json"}
-    if TOKEN:
-        headers["Authorization"] = f"Bearer {TOKEN}"
-    conn.request("POST", u.path.rstrip("/") + "/chat/completions", body=data, headers=headers)
-    return conn, conn.getresponse()
+class LocalProxyUpstream(g.OpenRouterUpstream):
+    kind = "local_proxy"
+
+    def retry_statuses(self) -> set[int]:
+        return (self.policy.retry_statuses() - NO_RETRY) | {504}
+
+    def prepare(self, body: dict[str, Any]) -> dict[str, Any]:
+        for key in OPENROUTER_ONLY:
+            body.pop(key, None)
+        model = body.get("model")
+        if isinstance(model, str) and model.endswith(":floor"):
+            body["model"] = model.removesuffix(":floor")
+        strip_cache_control(body)
+        return body
+
+    def headers(self, *, stream: bool, native: Mapping[str, str], reservation: budget_rules.Reservation) -> dict:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream" if stream else "application/json",
+            "X-LLMLab-Request-Class": reservation.request_class,
+            "X-LLMLab-Call-Index": str(reservation.index),
+        }
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        return headers
 
 
-g._rewrite = _rewrite  # noqa: SLF001
-g.Handler._open_upstream = _open_upstream  # noqa: SLF001
+g.UPSTREAMS["local_proxy"] = LocalProxyUpstream
 
 if __name__ == "__main__":
-    g.main()
+    sys.exit(g.main())

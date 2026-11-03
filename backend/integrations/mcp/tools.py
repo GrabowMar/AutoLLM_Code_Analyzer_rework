@@ -6,10 +6,10 @@ schema from the operation's OpenAPI definition. The three generic tools
 every other operation, so an agent can do anything the UI can.
 
 A curated tool whose operation is not published yet is listed with ``enabled=False`` and the
-work package that publishes it (``pending``); it is neither listed nor callable. The v3 study and
-run tools wait for the ninja operation ids WP-10 (``study/api.py``) and WP-08 (``runs/api.py``)
-announce in ``docs/design/SAMPLE_GEN_V3_CHANGES.md``; set ``operation_id`` and drop ``enabled=False``
-then (``test_mcp`` fails for an enabled tool whose operation does not resolve).
+work package that publishes it (``pending``); it is neither listed nor callable. An enabled tool
+whose operation does not resolve fails ``test_mcp``. Operation ids are given without ninja's
+``backend_`` prefix; explicit ids (``operation_id=`` on the route, e.g. the v3 study tools'
+``generation_studies_*``) resolve as written.
 """
 
 from __future__ import annotations
@@ -56,50 +56,38 @@ CURATED: tuple[Curated, ...] = (
         "llm_models_api_views_get_model_comparison",
         "Side-by-side comparison of several models (pricing, context, capabilities, scores).",
     ),
-    # ── studies and runs (v3; disabled until their operation ids are published) ───
+    # ── studies and runs (v3: WP-10 study/api.py, WP-08 runs/api.py) ──────────
     Curated(
         "list_studies",
-        "",
+        "generation_studies_list",
         "Studies (factorial designs over models x tasks x treatments). Filter by status, mode or kind.",
-        enabled=False,
-        pending="WP-10",
     ),
     Curated(
         "get_study",
-        "",
+        "generation_studies_get",
         "One study: its design, active plan, analysis plan and lock state.",
-        enabled=False,
-        pending="WP-10",
     ),
     Curated(
         "resolve_study",
-        "",
+        "generation_studies_resolve",
         "Free dry-run of a study's design: conditions, units, cells, cost estimate and issues. "
         "Its `plan_hash` is what launch_study takes.",
-        enabled=False,
-        pending="WP-10",
     ),
     Curated(
         "launch_study",
-        "",
+        "generation_studies_launch",
         "Launch a resolved study plan (`plan_hash` from resolve_study). "
         "Costs LLM credits; confirm with the user first.",
-        enabled=False,
-        pending="WP-10",
     ),
     Curated(
         "list_runs",
-        "",
+        "generation_runs_api_list_runs",
         "Generation runs (samples), filterable by study, condition, kind, outcome and model.",
-        enabled=False,
-        pending="WP-08",
     ),
     Curated(
         "get_run",
-        "",
+        "generation_runs_api_get_run",
         "One run: status, outcome, validity, metrics and its latest evaluation.",
-        enabled=False,
-        pending="WP-08",
     ),
     # ── runtime (run the generated app) ────────────────────────────────
     Curated(
@@ -257,13 +245,20 @@ class Caller:
     core_only: bool = False
 
 
+def resolve_operation(ops: dict[str, openapi.Operation], operation_id: str) -> openapi.Operation | None:
+    """A curated id → its operation: ninja's generated ``backend_<id>`` or an explicit ``<id>``."""
+    if not operation_id:
+        return None
+    return ops.get(f"backend_{operation_id}") or ops.get(operation_id)
+
+
 def _curated_index() -> dict[str, tuple[Curated, openapi.Operation]]:
     ops = openapi.operations()
     index: dict[str, tuple[Curated, openapi.Operation]] = {}
     for item in CURATED:
         if not item.enabled:
             continue
-        op = ops.get(f"backend_{item.operation_id}")
+        op = resolve_operation(ops, item.operation_id)
         if op is not None:  # an operation renamed upstream just drops its tool
             index[item.name] = (item, op)
     return index

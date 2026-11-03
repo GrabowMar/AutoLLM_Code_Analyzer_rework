@@ -1,0 +1,8 @@
+{% extends "dockerfiles/_python.Dockerfile.jinja2" %}
+{% block command %}
+{% if level == "bare" %}
+CMD ["sh", "-c", "python backend/manage.py migrate --noinput && exec python backend/manage.py runserver 0.0.0.0:{{ run.port }} --noreload"]
+{% else %}
+CMD ["sh", "-c", "python backend/manage.py migrate --noinput && exec gunicorn --bind 0.0.0.0:{{ run.port }} --pythonpath backend config.wsgi:application"]
+{% endif %}
+{% endblock %}

@@ -168,6 +168,31 @@ def _execute(
         connection.close()
 
 
+def _run_env(run: GenerationRun) -> tuple[dict[str, str], dict[str, str] | None]:
+    """The hosted app's credentials env from ``evaluation.credentials(run)`` and its metadata stamp.
+
+    ``ADMIN_PASSWORD`` / ``SECRET_KEY`` come from the run's stored record (spec 8.6), never a default. A
+    missing or unreadable record (``CredentialsUnavailableError``, ``NotImplementedError`` or any error)
+    starts the app without them and without a stamp, so consumers report the login as ``not_measured``.
+    The stamp holds only the password's sha256, never the password itself.
+    """
+    from backend.generation import evaluation
+    from backend.human_eval.services.credentials import RUNTIME_ENV_SOURCE
+    from backend.human_eval.services.credentials import password_fingerprint
+
+    try:
+        record = evaluation.credentials(run)
+    except Exception:  # noqa: BLE001 - no record means no credentials, never a default
+        logger.info("No credentials record for run %s; hosting without admin credentials", run.pk)
+        return {}, None
+    password = record.get("admin_password") if isinstance(record, dict) else None
+    secret = record.get("secret_key") if isinstance(record, dict) else None
+    if not isinstance(password, str) or not password or not isinstance(secret, str) or not secret:
+        return {}, None
+    env = {"ADMIN_PASSWORD": password, "SECRET_KEY": secret}
+    return env, {"source": RUNTIME_ENV_SOURCE, "admin_password_sha256": password_fingerprint(password)}
+
+
 def _do_build(
     action: ContainerAction,
     container: ContainerInstance,
@@ -232,6 +257,17 @@ def _do_build(
 
         ports: dict[str, int] = {}
         env: dict[str, str] = {}
+        runtime_stamp: dict[str, str] | None = None
+        if run is not None:
+            env, runtime_stamp = _run_env(run)
+        # A stale stamp from an earlier start must never vouch for this container's env.
+        from backend.human_eval.services.credentials import RUNTIME_ENV_KEY
+
+        metadata = dict(container.metadata or {})
+        metadata.pop(RUNTIME_ENV_KEY, None)
+        if runtime_stamp is not None:
+            metadata[RUNTIME_ENV_KEY] = runtime_stamp
+        container.metadata = metadata
         if container.app_port and not apps_network:
             ports["8000/tcp"] = container.app_port
 
@@ -248,7 +284,7 @@ def _do_build(
             network=apps_network,
         )
         container.container_id = cid
-        container.save(update_fields=["image", "container_id"])
+        container.save(update_fields=["image", "container_id", "metadata"])
 
         ok, detail = _verify_running(container)
         container.metadata = {

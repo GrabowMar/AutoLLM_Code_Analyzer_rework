@@ -1,0 +1,16 @@
+name: Parameterized SQL execute (Python)
+description: execute() is called with a SQL string literal and a separate parameters argument.
+content:
+  engine: ts_query
+  languages: [python]
+  rule: |
+    (call
+      function: (attribute attribute: (identifier) @fn)
+      arguments: (argument_list . (string) @sql . (_) @params)
+      (#match? @fn "^(execute|executemany)$")
+      (#match? @sql "(?i)(select|insert|update|delete)")) @match
+  tool: {name: tree-sitter, version: 0.26.0}
+  feature_key: py-parameterized-sql
+  polarity: secure
+  cwe: [cwe-89]
+  description: execute()/executemany() receives a literal SQL string plus a parameters argument.

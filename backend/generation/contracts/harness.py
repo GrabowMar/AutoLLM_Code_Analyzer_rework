@@ -105,6 +105,7 @@ class HarnessContext:
     preset: HarnessPresetContent
     policy: EffectivePolicy
     slot: SlotAgentContext | None = None  # slot agent only
+    model_context_window: int | None = None  # the model's context length (manifest); None = unknown
 
 
 @dataclass(frozen=True)

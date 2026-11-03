@@ -1641,11 +1641,11 @@ def study_variability_csv(payload: dict[str, Any]) -> str:
 
 def _current_in_cells(members: list[Any]) -> set[str]:
     """Ids of the members that are their cell's current run (``runs.view.current_runs``)."""
-    from backend.generation.runs.view import current_runs
+    from backend.statistics.services.runs import study_current_runs
 
     current: set[str] = set()
     for study_id, stage in {(m.study_id, m.cell.stage) for m in members if m.cell_id is not None and m.study_id}:
-        current.update(str(pk) for pk in current_runs(study_id, stage).values_list("pk", flat=True))
+        current.update(str(pk) for pk in study_current_runs(study_id, stage).values_list("pk", flat=True))
     return current
 
 

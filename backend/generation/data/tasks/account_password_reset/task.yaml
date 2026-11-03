@@ -1,0 +1,160 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Password reset
+summary: Accounts with an email address can reset a forgotten password through a token sent by email.
+category: authentication
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+  - {name: email, type: email, unique: true, max_length: 254}
+- name: OutboxMessage
+  fields:
+  - {name: to, type: email}
+  - {name: subject, type: string}
+  - {name: body, type: text}
+  - {name: sent_at, type: datetime}
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 8}
+      email: {type: string, format: email, maxLength: 254}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: me.get
+  method: GET
+  path: /api/me
+  auth: user
+  response_schema:
+    type: object
+    properties:
+      id: [integer, string]
+      username: {type: string}
+      email: [string, 'null']
+    required: [id, username]
+- id: me.update
+  method: PATCH
+  path: /api/me
+  auth: user
+  request_schema:
+    type: object
+    properties:
+      email: {type: string, format: email, maxLength: 254}
+    required: [email]
+  errors: [400, 409]
+- id: me.password
+  method: POST
+  path: /api/me/password
+  auth: user
+  success_status: 204
+  request_schema:
+    type: object
+    properties:
+      current_password: {type: string}
+      new_password: {type: string, minLength: 8, maxLength: 128}
+    required: [current_password, new_password]
+  errors: [400, 403]
+- id: reset.request
+  method: POST
+  path: /api/auth/password-reset
+  auth: public
+  success_status: 202
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      email: {type: string}
+  errors: [400]
+- id: reset.confirm
+  method: POST
+  path: /api/auth/password-reset/confirm
+  auth: public
+  success_status: 204
+  request_schema:
+    type: object
+    properties:
+      token: {type: string}
+      new_password: {type: string, minLength: 8, maxLength: 128}
+    required: [token, new_password]
+  errors: [400]
+- id: outbox.list
+  method: GET
+  path: /api/outbox
+  auth: public
+  query:
+  - {name: to, type: string, semantics: filter, required: true}
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: [integer, string]
+            to:
+              type: [string, 'null']
+              format: email
+            subject:
+              type: [string, 'null']
+            body:
+              type: [string, 'null']
+            sent_at:
+              type: [string, 'null']
+              format: date-time
+  errors: [400]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.forgot
+  text: A 'Forgot password?' form that always answers 'If the account exists, a reset link is on its way'.
+  endpoints: [reset.request]
+- id: ui.reset
+  text: A `/reset` page that reads the token from the link and asks for the new password twice.
+  endpoints: [reset.confirm]
+- id: ui.account
+  text: An account page with the email address, an edit form and a change-password form.
+  endpoints: [me.get, me.update, me.password]
+- id: ui.mailbox
+  text: A simple 'Mailbox' page that shows the outbox messages for an address, standing in for an email client.
+  endpoints: [outbox.list]
+features: [auth, password-reset, email-mock]
+surfaces: [cwe-640, cwe-330, cwe-204, cwe-307, cwe-613, cwe-620, cwe-521, cwe-256, cwe-916]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: reset.unknown.same_response
+  category: functional
+  endpoint: reset.request
+  actor: anon
+  request:
+    method: POST
+    path: /api/auth/password-reset
+    json: {email: nobody-zz@example.com}
+  expect: {status: 202}
+  stated_in: [standard, exhaustive]
+probes:
+- {id: probe.reset.plaintext_password, cwe: cwe-256, kind: plaintext_password_db}
+- {id: probe.reset.rate_limit, cwe: cwe-307, kind: rate_limit_missing, endpoint: reset.request}

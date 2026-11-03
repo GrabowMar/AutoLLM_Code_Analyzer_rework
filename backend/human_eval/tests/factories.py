@@ -427,12 +427,14 @@ def make_open_task(
     design: dict[str, Any] | None = None,
     settings: dict[str, Any] | None = None,
     conditions: int = 2,
+    condition_label: str = "Condition",
 ) -> EvalTask:
     """An OPEN (frozen) task with ``n_apps`` completed runs, task apps, snapshots and items.
 
     - ``conditions`` study conditions (each its own LLM model; the first is the baseline); app ``i``
       uses condition ``i % conditions`` and ``repeat_index = i // conditions``. ``conditions=0``
-      builds model-only runs without a study.
+      builds model-only runs without a study. Conditions are labelled ``f"{condition_label} {i + 1}"``
+      (set at creation: plan conditions are frozen, so a test cannot rename them afterwards).
     - every run implements the same task version, so all apps share one ``group_key``
       (``f"{slug}:{spec_content_hash[:12]}"``); labels are ``App 01``..; each run has a measured
       evaluation (odd apps fail the admin endpoint check).
@@ -452,7 +454,7 @@ def make_open_task(
 
     from backend.human_eval.services import snapshot as snapshot_service
 
-    study, _, runs = make_eval_runs(owner, n_apps, conditions, label="Condition")
+    study, _, runs = make_eval_runs(owner, n_apps, conditions, label=condition_label)
     snapshots_by_run = snapshot_service.full_snapshots(runs)
 
     now = timezone.now()

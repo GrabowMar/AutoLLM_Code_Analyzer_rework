@@ -1,0 +1,21 @@
+name: JWT alg none or verification disabled (PyJWT)
+description: jwt.decode() is called with signature verification turned off or accepts the none algorithm, or a token is issued with alg none.
+content:
+  engine: semgrep
+  languages: [python]
+  rule: |
+    rules:
+      - id: jwt-decode-without-verification
+        languages: [python]
+        severity: ERROR
+        message: JWT signature verification disabled or alg none
+        pattern-either:
+          - pattern: 'jwt.decode(..., options={..., "verify_signature": False, ...}, ...)'
+          - pattern: jwt.decode(..., verify=False, ...)
+          - pattern: 'jwt.decode(..., algorithms=[..., "none", ...], ...)'
+          - pattern: 'jwt.encode(..., algorithm="none", ...)'
+  tool: {name: semgrep, version: 1.x}
+  feature_key: py-jwt-none-or-no-verify
+  polarity: insecure
+  cwe: [cwe-347]
+  description: PyJWT decode() with signature verification disabled or the none algorithm allowed, or encode() with alg none.

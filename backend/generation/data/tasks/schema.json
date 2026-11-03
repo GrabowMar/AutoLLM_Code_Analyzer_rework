@@ -545,7 +545,7 @@
         },
         "success_status": {
           "default": 200,
-          "maximum": 299,
+          "maximum": 399,
           "minimum": 200,
           "title": "Success Status",
           "type": "integer"

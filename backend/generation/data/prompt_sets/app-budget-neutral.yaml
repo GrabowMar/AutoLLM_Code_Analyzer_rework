@@ -1,0 +1,8 @@
+name: App (default + budget sentence)
+description: The default app brief plus the neutral budget sentence of spec 4.1.
+content:
+  mode: app
+  roles: {brief: brief-app-default@1}
+  fragments: {auth_contract.contract_bearer: auth-contract-contract_bearer@1, auth_contract.cookie_session: auth-contract-cookie_session@1,
+    auth_contract.spec_defined: auth-contract-spec_defined@1, network.none: network-none@1, network.packages: network-packages@1,
+    budget_neutral: budget-neutral@1}

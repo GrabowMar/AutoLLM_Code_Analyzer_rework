@@ -32,6 +32,21 @@ if TYPE_CHECKING:
 
     from backend.generation.runs.view import RunView
 
+
+def study_current_runs(study: Any, stage: str = "main") -> QuerySet[GenerationRun]:
+    """``runs.view.current_runs`` for a Study **or its id** (``runs.queries.current_runs`` needs the Study).
+
+    An unknown id gives no runs (never another study's).
+    """
+    from backend.generation.models import Study
+
+    if not isinstance(study, Study):
+        study = Study.objects.filter(pk=study).only("pk", "active_plan_id").first()
+        if study is None:
+            return GenerationRun.objects.none()
+    return current_runs(study, stage)
+
+
 # The identifying columns of every per-run row (:func:`run_labels`).
 RUN_LABEL_KEYS = (
     "run_id",
@@ -75,7 +90,7 @@ def _current_ids(qs: QuerySet[GenerationRun], stage: str) -> set[Any]:
     studies = qs.filter(cell__isnull=False, cell__stage=stage).values_list("study_id", flat=True).distinct()
     for study_id in studies:
         if study_id is not None:
-            ids.update(current_runs(study_id, stage).values_list("pk", flat=True))
+            ids.update(study_current_runs(study_id, stage).values_list("pk", flat=True))
     return ids
 
 
@@ -98,7 +113,7 @@ def study_runs(
     """
     qs = GenerationRun.objects.filter(beyond_plan=False)
     if study_id:
-        qs = current_runs(study_id, stage) if current_only else qs.filter(study_id=study_id)
+        qs = study_current_runs(study_id, stage) if current_only else qs.filter(study_id=study_id)
     elif current_only:
         scoped = _owner_scoped(qs, user)
         if run_ids is not None:

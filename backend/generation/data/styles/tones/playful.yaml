@@ -1,0 +1,3 @@
+# Tone catalogue entry (not a library entity). A style with this tone copies `tone` (the slug) and `tone_text`.
+{name: Playful, description: 'Visual tone preset: playful.', tone_text: 'Playful: rounded shapes, bright friendly
+    colours, gentle animations and a casual tone in labels.'}

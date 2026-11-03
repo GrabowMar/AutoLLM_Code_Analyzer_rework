@@ -313,6 +313,11 @@ _LIBRARY_LINT_CODES: Final[tuple[IssueCode, ...]] = (
     _c("lint_starter_unpinned_image", "error", "error", _LINT, "a starter FROM is not digest-pinned"),
     _c("lint_starter_file_missing", "error", "error", _LINT, "the dockerfile or a lockfile is not in files"),
     _c("lint_starter_stack_mismatch", "error", "error", _LINT, "the starter tree does not match its stack profile"),
+    # --- added by WP-03 (CHANGES "WP-03 decisions")
+    _c("lint_starter_blob_missing", "error", "error", _LINT, "a starter file's blob is not in the blob store"),
+    _c("lint_template_render_error", "error", "error", _LINT, "the template fails to render with the given context"),
+    _c("lint_detector_rule_invalid", "error", "error", _LINT, "a detector rule does not compile or parse"),
+    _c("lint_vocabulary_fallback", "info", "info", _LINT, "tasks/vocab.yaml is missing: the built-in vocabulary"),
 )
 _CODES: Final[tuple[IssueCode, ...]] = (*_CORE_CODES, *_LIBRARY_LINT_CODES)
 

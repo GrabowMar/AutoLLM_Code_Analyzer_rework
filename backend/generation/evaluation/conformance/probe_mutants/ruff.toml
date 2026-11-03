@@ -1,0 +1,7 @@
+# The probe mutant reference app: a standalone stdlib app that is vulnerable on purpose in its mutant variants
+# (SQL built from strings, plaintext passwords, ...). Never imported by the backend; run as a process/image.
+extend = "../../../../../pyproject.toml"
+cache-dir = "../../../../../.ruff_cache"
+
+[lint]
+extend-ignore = ["INP001", "EXE001", "T201", "PTH", "PLR0911", "PLR0912", "PLR0915", "C901", "S105", "S608", "S104", "E501", "EM101", "EM102", "TRY003"]

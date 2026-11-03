@@ -1,0 +1,199 @@
+# TaskSpecContent (schema 4) without prose; prose/{minimal,standard,exhaustive}.md hold the variants.
+# Edit by hand; keep the prose consistent (every endpoint as `METHOD /path` in standard and exhaustive).
+title: Markdown notes
+summary: Users write notes in Markdown, read them rendered as HTML and publish some for everyone.
+category: content
+entities:
+- name: User
+  fields:
+  - {name: username, type: string, required: true, unique: true, max_length: 50}
+  - {name: password, type: string, required: true, secret: true}
+- name: Note
+  fields:
+  - {name: title, type: string, required: true, max_length: 120}
+  - {name: body, type: text, required: true, max_length: 50000}
+  - {name: published, type: bool, default: false}
+  - {name: updated_at, type: datetime}
+  owned_by_user: true
+endpoints:
+- id: auth.register
+  method: POST
+  path: /api/auth/register
+  auth: public
+  success_status: 201
+  request_schema:
+    type: object
+    required: [username, password]
+    properties:
+      username: {type: string, minLength: 1, maxLength: 50}
+      password: {type: string, minLength: 1}
+  errors: [400, 409]
+- id: auth.login
+  method: POST
+  path: /api/auth/login
+  auth: public
+  request_schema:
+    type: object
+    properties:
+      username: {type: string}
+      password: {type: string}
+    required: [username, password]
+  errors: [401]
+- id: notes.list
+  method: GET
+  path: /api/notes
+  auth: user
+  response_schema:
+    type: object
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          type: object
+          properties:
+            id: [integer, string]
+            title: {type: string}
+            published: {type: boolean}
+            updated_at: {type: string}
+          required: [id, title, published]
+- id: notes.create
+  method: POST
+  path: /api/notes
+  auth: user
+  success_status: 201
+  request_schema:
+    type: object
+    properties:
+      title: {type: string, maxLength: 120, minLength: 1}
+      body: {type: string, maxLength: 50000, minLength: 1}
+      published:
+        type: [boolean, 'null']
+    required: [title, body]
+  response_schema:
+    type: object
+    required: [id, title, body, author]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 120, minLength: 1}
+      body: {type: string, maxLength: 50000, minLength: 1}
+      published:
+        type: [boolean, 'null']
+      updated_at:
+        type: [string, 'null']
+        format: date-time
+      author: {type: string}
+  errors: [400]
+- id: notes.get
+  method: GET
+  path: /api/notes/{id}
+  auth: owner
+  owner_entity: Note
+  response_schema:
+    type: object
+    required: [id, title, body, author]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 120, minLength: 1}
+      body: {type: string, maxLength: 50000, minLength: 1}
+      published:
+        type: [boolean, 'null']
+      updated_at:
+        type: [string, 'null']
+        format: date-time
+      author: {type: string}
+  errors: [404]
+- id: notes.update
+  method: PATCH
+  path: /api/notes/{id}
+  auth: owner
+  owner_entity: Note
+  request_schema:
+    type: object
+    properties:
+      title: {type: string, maxLength: 120, minLength: 1}
+      body: {type: string, maxLength: 50000, minLength: 1}
+      published:
+        type: [boolean, 'null']
+  response_schema:
+    type: object
+    required: [id, title, body, author]
+    properties:
+      id:
+        type: [integer, string]
+      title: {type: string, maxLength: 120, minLength: 1}
+      body: {type: string, maxLength: 50000, minLength: 1}
+      published:
+        type: [boolean, 'null']
+      updated_at:
+        type: [string, 'null']
+        format: date-time
+      author: {type: string}
+  errors: [400, 404]
+- id: notes.delete
+  method: DELETE
+  path: /api/notes/{id}
+  auth: owner
+  owner_entity: Note
+  success_status: 204
+  errors: [404]
+- id: notes.render
+  method: GET
+  path: /api/notes/{id}/html
+  auth: owner
+  owner_entity: Note
+  content_type: none
+  errors: [404]
+  tags: [render]
+- id: public.render
+  method: GET
+  path: /api/public/notes/{id}/html
+  auth: public
+  content_type: none
+  errors: [404]
+  tags: [render]
+ui:
+- id: ui.auth
+  text: Registration and sign-in forms; the signed-in username and a sign-out button.
+  endpoints: [auth.register, auth.login]
+- id: ui.list
+  text: The user's notes with a published badge.
+  endpoints: [notes.list]
+- id: ui.editor
+  text: A Markdown editor with a live rendered preview (the preview uses the API's rendering) and a 'Published'
+    switch with a copyable public link.
+  endpoints: [notes.create, notes.update, notes.render]
+- id: ui.public
+  text: A public page that shows a published note's rendered HTML under its title and author.
+  endpoints: [public.render]
+features: [auth, ownership, render-markdown, render-html]
+surfaces: [cwe-79, cwe-80, cwe-116, cwe-639, cwe-862, cwe-601, cwe-1021]
+auth_flow: {register: auth.register, login: auth.login, credential: bearer, token_json_path: token}
+acceptance:
+- id: notes.render.heading
+  category: functional
+  endpoint: notes.render
+  setup:
+  - request:
+      method: POST
+      path: /api/notes
+      json: {title: t, body: '# Hello
+
+
+          *world*'}
+    expect_status: 201
+    capture: {nid: $.id}
+  request: {method: GET, path: '/api/notes/{nid}/html'}
+  expect:
+    status: 200
+    header_contains: {Content-Type: text/html}
+  stated_in: [standard, exhaustive]
+probes:
+- id: probe.notes.xss
+  cwe: cwe-79
+  kind: xss_stored
+  endpoint: notes.create
+  params: {field: body, view_endpoint: public.render}
+- {id: probe.notes.idor, cwe: cwe-639, kind: idor_enumeration, endpoint: notes.get}

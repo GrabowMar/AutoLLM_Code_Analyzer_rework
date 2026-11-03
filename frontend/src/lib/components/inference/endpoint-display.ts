@@ -50,7 +50,7 @@ export const BLOCKED_REASON_LABELS: Record<BlockedReason, string> = {
   model_not_served: "Model not on the relay",
   residency_wait: "Waiting for a model swap slot",
   warming_model: "Loading model",
-  experiment_cap: "Experiment concurrency cap reached",
+  study_cap: "Study concurrency cap reached",
   circuit_open: "Paused after repeated errors",
   draining: "Executor draining",
   retry_backoff: "Retrying after backoff",

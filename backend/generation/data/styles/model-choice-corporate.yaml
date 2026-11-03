@@ -1,0 +1,8 @@
+name: Model's choice, corporate tone
+description: No styling prescription, with the corporate visual tone.
+content:
+  system: model-choice
+  tone: corporate
+  tone_text: 'Corporate: a sober blue-grey palette, dense tables and forms, clear hierarchy and formal labels.'
+  fragment: style-model-choice@1
+  compatible_frontends: [react, vue, svelte, none, free]

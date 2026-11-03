@@ -90,15 +90,46 @@ SCHEDULE_MIN_INTERVAL_S = 900
 # AGENT_NETWORK_POLICY were removed with their last readers (generation/_legacy/services/agent/).
 # The worker registers the retained OpenRouter stats task from its service module (no generation/tasks.py).
 CELERY_IMPORTS = ("backend.generation.services.openrouter_stats",)
-# v2 names of the machine limits (execution/capacity.py).
-AGENT_SANDBOX_MEM_LIMIT = AGENT_SANDBOX_MEM_LIMIT_MAX
-AGENT_SANDBOX_NANO_CPUS = AGENT_SANDBOX_NANO_CPUS_MAX
+# The v2 aliases AGENT_SANDBOX_MEM_LIMIT / AGENT_SANDBOX_NANO_CPUS were removed in wave 2 (no readers left;
+# execution/capacity.py reads the *_MAX machine limits).
 
 # --- WP-03 --- library services, prompt engine, seeding
+# Seed content (spec 11.1): tasks/, prompts/, stacks/, starters/, ... read by `seed_library` / `lint_library`.
+GENERATION_LIBRARY_DATA_DIR = _env.str(
+    "GENERATION_LIBRARY_DATA_DIR",
+    default=str(Path(__file__).resolve().parents[3] / "backend" / "generation" / "data"),
+)
+# Seed the library after `migrate` (apps.py post-migrate hook). Off unless the environment turns it on: the
+# dev stack sets GENERATION_SEED_ON_MIGRATE=true; tests seed explicitly (a seeded test DB would collide with
+# factory slugs in every other suite).
+GENERATION_SEED_ON_MIGRATE = _env.bool("GENERATION_SEED_ON_MIGRATE", default=False)
 
 # --- WP-05 --- stacks, starters, build context, dependency caches
+# Free-choice FROM allowlist (build/dockerfiles.py; spec 6.10): a YAML file of {ref, digest} rows. Empty means
+# the shipped generation/data/starters/allowed_bases.yaml. Its refs are rendered into the free-choice brief and
+# hashed into treatment_hash (allowed_bases_sha), so pointing this elsewhere changes the treatment.
+SAMPLE_BUILD_ALLOWED_BASES = _env.str("SAMPLE_BUILD_ALLOWED_BASES", default="")
+# Read-only pull-through dependency caches (compose depcache block; build/depcache.py). URLs as reached from
+# inside a sandbox (through the gateway's CONNECT allowlist). Empty = not deployed: runs whose policy asks for
+# caches.dependency_cache=shared_ro then use the public registries and record depcache_unavailable.
+DEPCACHE_NPM_URL = _env.str("DEPCACHE_NPM_URL", default="")
+DEPCACHE_PYPI_URL = _env.str("DEPCACHE_PYPI_URL", default="")
+DEPCACHE_GOPROXY_URL = _env.str("DEPCACHE_GOPROXY_URL", default="")
+DEPCACHE_MAVEN_URL = _env.str("DEPCACHE_MAVEN_URL", default="")
+# Health probe of the caches before a sandbox starts (seconds per endpoint; 0 disables the probe).
+DEPCACHE_PROBE_TIMEOUT_S = _env.float("DEPCACHE_PROBE_TIMEOUT_S", default=2.0)
+# Docker daemon for `manage.py build_starters --lock` and the docker-marked starter tests. Empty means the apps
+# daemon (APPS_DOCKER_HOST, i.e. apps-dind), which is where the spec runs them.
+STARTERS_DOCKER_HOST = _env.str("STARTERS_DOCKER_HOST", default="")
 
 # --- WP-06 --- gateway
+# Keepalive interval during upstream silence (seconds); the sandbox passes it as GATEWAY_PING_INTERVAL_S.
+LLM_GATEWAY_PING_INTERVAL_S = _env.float("LLM_GATEWAY_PING_INTERVAL_S", default=10.0)
+# Front protocols whose gateway translate mode is enabled (read by harnesses.registry and
+# study.environment with getattr(..., ())). A protocol is listed only once its translator passes the
+# golden fixtures (wave 3); the gateway refuses translate configs for unlisted ones at startup, so this
+# is deliberately not env-driven.
+GATEWAY_TRANSLATORS: list[str] = []
 
 # --- WP-07 --- harness adapters and images
 # Harness releases baked into the sandbox images (images/agent-*). Changing one changes the image tag and
@@ -106,17 +137,68 @@ AGENT_SANDBOX_NANO_CPUS = AGENT_SANDBOX_NANO_CPUS_MAX
 AGENT_OPENCODE_VERSION = _env.str("AGENT_OPENCODE_VERSION", default="1.18.35")
 AGENT_MINI_SWE_AGENT_VERSION = _env.str("AGENT_MINI_SWE_AGENT_VERSION", default="2.4.6")
 AGENT_AIDER_VERSION = _env.str("AGENT_AIDER_VERSION", default="0.86.2")
+AGENT_CLAUDE_CODE_VERSION = _env.str("AGENT_CLAUDE_CODE_VERSION", default="2.1.316")
+AGENT_CODEX_VERSION = _env.str("AGENT_CODEX_VERSION", default="0.166.0")
+AGENT_GOOSE_VERSION = _env.str("AGENT_GOOSE_VERSION", default="1.57.0")
+AGENT_QWEN_CODE_VERSION = _env.str("AGENT_QWEN_CODE_VERSION", default="0.26.6")
+AGENT_GEMINI_CLI_VERSION = _env.str("AGENT_GEMINI_CLI_VERSION", default="0.66.0")
+# Operator kill switch: harness names listed here are reported enabled=False (blocked_reason "disabled by
+# the operator") whatever their facts say, e.g. AGENT_HARNESSES_DISABLED=codex,claude-code.
+AGENT_HARNESSES_DISABLED = _env.list("AGENT_HARNESSES_DISABLED", default=[])
 
 # --- WP-08 --- agentic run pipeline
+# Sandbox backend of the agentic stage (agentic/sandbox.py:get_backend). Only "docker" (the apps daemon) ships.
+GENERATION_SANDBOX_BACKEND = _env.str("GENERATION_SANDBOX_BACKEND", default="docker")
+# Supervisor tick (seconds) and idle detection: the idle clock advances only while no gateway call is in
+# flight and the agent's CPU stays below AGENT_IDLE_CPU_FRACTION of one CPU over AGENT_IDLE_CPU_WINDOW_S
+# (spec 6.5). The timeout itself is the policy knob time.idle_timeout_s.
+AGENT_SUPERVISOR_TICK_S = _env.float("AGENT_SUPERVISOR_TICK_S", default=2.0)
+AGENT_IDLE_CPU_FRACTION = _env.float("AGENT_IDLE_CPU_FRACTION", default=0.05)
+AGENT_IDLE_CPU_WINDOW_S = _env.float("AGENT_IDLE_CPU_WINDOW_S", default=10.0)
+# Backstop after wall clock + the 15 s kill grace, should the in-container timeout fail.
+AGENT_SANDBOX_GRACE_S = _env.int("AGENT_SANDBOX_GRACE_S", default=60)
+AGENT_GATEWAY_MEM_LIMIT = _env.str("AGENT_GATEWAY_MEM_LIMIT", default="256m")
+# Informational static checks of collected samples (collector; never gating): the esbuild frontend validator
+# image (images/frontend-validator) runs only when this is on and the apps daemon is reachable.
+GENERATION_FRONTEND_VALIDATOR = _env.bool("GENERATION_FRONTEND_VALIDATOR", default=True)
 
 # --- WP-09 --- evaluation
+# Where evaluations run (evaluation/runtime.py): "docker" (production; apps daemon, internal eval network) or
+# "local" (bundled stdlib apps only: the conformance kit and the WP-09 tests; refuses any other tree).
+EVAL_RUNTIME = _env.str("EVAL_RUNTIME", default="docker")
+# Tester and adherence-checker images; their digests must equal the ones pinned in the suite content
+# (EvalSuiteContent.tester/adherence_checker.image_digest), else the evaluation is infra_error:image_digest_mismatch.
+EVAL_TESTER_IMAGE = _env.str("EVAL_TESTER_IMAGE", default="llmlab-v3-wt/eval-tester:dev")
+EVAL_ADHERENCE_IMAGE = _env.str("EVAL_ADHERENCE_IMAGE", default="llmlab-v3-wt/adherence-checker:dev")
+# Resource caps of the evaluated app container.
+EVAL_APP_MEM_LIMIT = _env.str("EVAL_APP_MEM_LIMIT", default="1g")
+EVAL_APP_CPUS = _env.float("EVAL_APP_CPUS", default=1.0)
 
 # --- WP-10 --- study engine
 
 # --- WP-11 --- budget, ledger, stop rules, execution integration
+# Live spend: the sandbox supervisor polls each gateway's state.json every BUDGET_LIVE_POLL_S seconds,
+# scaled by ceil(running / 8) (spec 4.5). Budget presets, caps and stop rules are library rows, not env.
+BUDGET_LIVE_POLL_S = _env.float("BUDGET_LIVE_POLL_S", default=10.0)
 
 # --- WP-12 --- slot mode
+# Batch serving of single-shot slot calls (slot/executors/batch_submitter.py, spec 7.6). OpenRouter's batch API
+# (POST /api/beta/batches) is beta and only documented second-hand: keep False until its docs are verified.
+# While False, routing.serving_tier=auto_batch resolves to standard (note batch_unsupported) and run_batch refuses.
+BATCH_BACKENDS_VERIFIED = _env.bool("BATCH_BACKENDS_VERIFIED", default=False)
+# Poll interval and expiry of a submitted batch (seconds). Unanswered cells of an expired batch end as
+# infra_error:batch_expired and are not retried automatically (a standard-tier retry changes the condition).
+BATCH_POLL_S = _env.int("BATCH_POLL_S", default=60)
+BATCH_EXPIRY_S = _env.int("BATCH_EXPIRY_S", default=24 * 3600)
 
 # --- WP-13 --- pattern analysis
+# Where Semgrep detectors run (analysis/services/rulepack.py): "workspace" = the study owner's analyzer
+# workspace container (semgrep from the tool shop), "local" = a semgrep binary on this host.
+PATTERNS_SEMGREP_BACKEND = _env.str("PATTERNS_SEMGREP_BACKEND", default="workspace")
+# Wall-clock limit of one rule-pack invocation (all semgrep detectors over all variants of a pattern run).
+PATTERNS_SEMGREP_TIMEOUT_S = _env.int("PATTERNS_SEMGREP_TIMEOUT_S", default=600)
+# Pooled permutation test: exact enumeration up to this many targets (2^T arrangements), else Monte Carlo.
+PATTERNS_EXACT_PERMUTATION_MAX_TARGETS = _env.int("PATTERNS_EXACT_PERMUTATION_MAX_TARGETS", default=20)
+PATTERNS_PERMUTATION_DRAWS = _env.int("PATTERNS_PERMUTATION_DRAWS", default=10_000)
 
 # --- end of WP blocks ---

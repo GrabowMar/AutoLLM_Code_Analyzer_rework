@@ -1,0 +1,9 @@
+# App
+
+## Run contract
+
+- Write a `Dockerfile` in this directory that builds and starts the whole app; it is built as written. Its `FROM` lines may only name the base images listed in the task brief.
+- The container listens on port {{ run.port }}.
+- The API is served under `{{ run.api_prefix }}`. `GET {{ run.health_path }}` answers `{"status": "ok"}` once the app is ready.
+- The user interface is served from `/` on the same port.
+- Persistent data lives in `{{ run.data_dir }}`.

@@ -44,7 +44,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import NumberField from '$lib/components/generator/composer/NumberField.svelte';
+	import NumberField from '$lib/components/studies/shared/NumberField.svelte';
 	import {
 		CONNECTION_LABELS,
 		DiscoveredModelsTable,

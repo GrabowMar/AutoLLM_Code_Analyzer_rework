@@ -1,67 +1,60 @@
 # Execution engine
 
-Every generation job, its evaluation, experiment schedules and post-runs run in one leader process, the executor, which claims work from Postgres under leases.
+Every generation run, its evaluation, study schedules and post-runs run in one leader process, the executor, which claims work from Postgres under leases. Budget admission (blocks, reservations, spend caps) happens inside the claim; see [Budget](/docs/BUDGET).
 
-The executor is `python manage.py run_executor` (compose service `executor`). The web process (`django`) only writes rows and rings a Redis doorbell (`executor:wake`) after the transaction commits; nothing runs in the web process. Code lives in `backend/execution/`. How experiments decide the run order is in [Experiments](/docs/EXPERIMENTS#scheduling-policies); local endpoints and the relay are in [Local models](/docs/LOCAL_MODELS). The other background services (Celery, beat) are in [Background services](/docs/BACKGROUND_SERVICES).
+The executor is `python manage.py run_executor` (compose service `executor`). The web process (`django`) only writes rows and rings a Redis doorbell (`executor:wake`) after the transaction commits; nothing runs in the web process. Code lives in `backend/execution/`. How a study decides the run order is in [Studies](/docs/STUDIES); local endpoints and the relay are in [Local models](/docs/LOCAL_MODELS). The other background services (Celery, beat) are in [Background services](/docs/BACKGROUND_SERVICES).
 
 ## Process
 
 | Part | What it does |
 |---|---|
 | Leader lock | `pg_try_advisory_lock(EXECUTOR_LEADER_LOCK_KEY)` on a dedicated connection at start; a second instance exits with code 1. The lock is re-checked in `pg_locks` every tick; if it is gone (Postgres restart, dropped connection) the executor stops claiming, expires its own leases and exits with code 1, and Docker starts it again. It is a guard, not high availability: exactly one executor runs. |
-| Main loop | `BLPOP executor:wake` for at most `EXECUTOR_TICK_SECONDS` (2 s), then: lost-job check → `Scheduler.tick` → submit claims to pools. `reconcile()` every 15 s, schedules and post-runs every 30 s, a daily LLM request purge (clears `body`/`response` of rows older than `LLM_REQUEST_RETENTION_DAYS`, 7). `ExecutorSettings` is re-read every tick. A Redis error sleeps one tick (never busy-spins); Postgres stays the only source of truth. |
-| Heartbeat | Every `EXECUTOR_HEARTBEAT_SECONDS` (20 s): `ExecutorInstance.last_seen_at` + status blob (`config`: effective slots, open circuits, blocked reasons). Renews `lease_expires_at` (+`EXECUTOR_LEASE_SECONDS`, 90 s) **only for jobs in the in-process registry**, and leases of running post-runs. |
-| Pools | `sandbox` (agent runs), `eval` (evaluations), `llm` (scaffolding / custom), `post` (post-runs) and `schedule` (schedule actions: one thread of short DB work). Admission uses `min(slots − used in DB, really free threads)`. |
-| Live events | Every 2 s at most, only when changed: `tick` per active experiment, `endpoint:<id>` state per local endpoint (owner payload plus the redacted `endpoint:<id>:public` copy). `capacity` at most every 5 s; its `executor.code_stale` is true once the code on disk differs from what this executor started with. |
-| LLM proxy, direct pumps | `inference.proxy_server.serve` and `inference.pump.run_direct_pumps` threads, started after leadership is won (see [Local models](/docs/LOCAL_MODELS#5-how-a-call-flows)). The proxy is required: if it cannot bind `LLM_PROXY_BIND` or stops, the executor exits with code 1 (a restart loop in `docker compose ps`/logs, not a silently "online" executor whose local agent runs all fail). The pumps supervise their own threads. |
+| Main loop | `BLPOP executor:wake` for at most `EXECUTOR_TICK_SECONDS` (2 s), then: lost-run check → `Scheduler.tick` (evaluations first, then generation claims with budget admission) → submit claims to pools. `reconcile()` every 15 s, the study stop rules every 60 s, schedules and post-runs every 30 s, a daily LLM request purge. `ExecutorSettings` is re-read every tick. A Redis error sleeps one tick (never busy-spins); Postgres stays the only source of truth. |
+| Heartbeat | Every `EXECUTOR_HEARTBEAT_SECONDS` (20 s): `ExecutorInstance.last_seen_at` + status blob (`config`: effective slots, open circuits, blocked reasons). Renews `lease_expires_at` (+`EXECUTOR_LEASE_SECONDS`, 90 s) **only for runs in the in-process registry**, and leases of running post-runs. |
+| Pools | `sandbox` (agentic runs and restricted slot agents), `eval` (evaluations and preview builds), `llm` (single-shot slot calls and batch submissions), `post` (post-runs) and `schedule` (schedule actions). Admission uses `min(slots − used in DB, really free threads)`. |
+| Live events | Every 2 s at most, only when changed: `tick` per active study on `study:<id>`, `endpoint:<id>` state per local endpoint. `capacity` at most every 5 s; its `executor.code_stale` is true once the code on disk differs from what this executor started with. |
+| LLM proxy, direct pumps | `inference.proxy_server.serve` and `inference.pump.run_direct_pumps` threads, started after leadership is won. The proxy is required: if it cannot bind `LLM_PROXY_BIND` or stops, the executor exits with code 1. |
 
-The executor runs with `CONN_MAX_AGE=0`; every worker closes its DB connection when it finishes, so idle threads hold none. `ExecutorInstance.code_version` is a sha1 over path, mtime and size of `backend/**/*.py`; the capacity API and experiment status compare the live leader's value with the web process's (`code_stale`).
+The executor runs with `CONN_MAX_AGE=0`; every worker closes its DB connection when it finishes. `ExecutorInstance.code_version` is a sha1 over path, mtime and size of `backend/**/*.py`; the capacity API compares the live leader's value with the web process's (`code_stale`).
 
 ### Restart policy and exits
 
-The `executor` service (both compose files) has `restart: unless-stopped`. It exits with code 1, and Docker restarts it, when: a second instance holds the leader lock; the lock is lost (Postgres restart, dropped lock connection); the LLM proxy cannot bind; or `wait_for_migrations` gives up after 600 s. The executor never migrates: locally django's `/start` does; production `/start` does not migrate at all, so run `manage.py migrate` after a deploy (see [Deployment guide](/docs/deployment-guide)). Nothing is lost while it is down: jobs stay `PENDING` and its leases are requeued as `executor_lost` on the next start.
-
-### Compose commands
-
-Commands below use bare `docker compose`. There is no default compose file in the repo: run them through `just` (which exports `COMPOSE_FILE=docker-compose.local.yml`), set `COMPOSE_FILE` yourself, or pass the same `-f` files the stack was started with. Mixing a different file set recreates containers.
-
-Locally the executor runs `bash /app/compose/local/django/start-executor` from the bind-mounted repo, so it starts on an existing `llmlab/django:local` image and picks up script changes without a rebuild. Production runs the image's `/start-executor`. The django image's baked-in `/start` picks up changes only after a rebuild (`just build`, or `docker compose build django`); a rebuild marks django, celeryworker, celerybeat and flower for recreation on the next `up`.
+The `executor` service has `restart: unless-stopped`. It exits with code 1, and Docker restarts it, when: a second instance holds the leader lock; the lock is lost; the LLM proxy cannot bind; or `wait_for_migrations` gives up after 600 s. The executor never migrates. Nothing is lost while it is down: runs stay `PENDING`, their reservations stay in the ledger, and its leases are requeued as `executor_lost` on the next start.
 
 ### Drain and restart
 
-Backend edits do not reload the executor (no `--reload`). The capacity strip shows "Executor on old code" when the web process's code version differs from the running executor's. To restart safely:
+Backend edits do not reload the executor. To restart safely:
 
 ```bash
-docker compose exec django /entrypoint python manage.py executor drain     # stop claiming jobs, post-runs and schedules
+docker compose exec django /entrypoint python manage.py executor drain     # stop claiming runs, post-runs and schedules
 docker compose exec django /entrypoint python manage.py executor status    # wait for "safe_to_restart": true
 docker compose restart executor
 docker compose exec django /entrypoint python manage.py executor resume
 ```
 
-`docker compose exec` skips the image's entrypoint, which is what builds `DATABASE_URL`, so call `/entrypoint` explicitly (or use `just manage executor status`, which starts a one-off container).
+`docker compose exec` skips the image's entrypoint, which builds `DATABASE_URL`, so call `/entrypoint` explicitly (or `just manage executor status`).
 
-`safe_to_restart` is true when no job and no post-run is running. Drain is the `draining` flag of `ExecutorSettings` (also settable through the settings API); pending jobs report `draining` as their blocked reason.
-
-`SIGTERM` (a plain restart) gives LLM calls 20 s, then expires every lease the instance holds (jobs, post-runs, pump-leased LLM requests) and sets `stopped_at`. Running sandboxes are not awaited: the next start reaps their containers and requeues the jobs as `executor_lost` (same snapshot and seed; this does not consume the experiment's infra retries).
-
-## Job lifecycle
+## Run lifecycle
 
 ```
-PENDING (queued_at set) ──claim──► RUNNING/running (lease) ──agent: sandbox done──► RUNNING/eval_queued (no lease)
-   ▲                                  │ llm lane (or no evaluation)                    │ eval claim
-   │  infra failure / executor_lost   ▼                                                ▼
-   └───────── attempt+1, run_after ── COMPLETED / FAILED ◄─────────────────── RUNNING/evaluating (lease)
+PENDING (queued_at set) ──claim + budget──► RUNNING/running (lease, reservation) ──generation done──► RUNNING/eval_queued
+   ▲                                          │ settle the attempt's spend                             │ eval claim (eval_parallel)
+   │  infra failure / executor_lost           ▼                                                        ▼
+   └──── attempt+1, run_after, fresh ──── COMPLETED / FAILED / CANCELLED ◄──────────────────── RUNNING/evaluating (lease)
+         reservation
 ```
 
-- `queued_at IS NOT NULL` means the executor owns the row. Thread-era rows (`queued_at IS NULL`) are never touched by the reconciler; requeue them explicitly (`execution.api.requeue_legacy_jobs`, or `POST …/jobs/requeue-legacy/` on an experiment).
-- Lanes: `(experiment or adhoc:<user>, endpoint)`, strict head-of-line in the frozen `sequence` (experiments) or enqueue order (ad-hoc). Across lanes the scheduler is work-conserving. Lane heads are ordered by: priority, then fair share per user, then per experiment, then endpoint load (active jobs over what the endpoint can take, so the OpenRouter lane does not take every free thread while local endpoints idle), then model affinity (already resident), then a warm model, then launch time.
-- Only the chosen rows are locked (`FOR UPDATE SKIP LOCKED`) and claimed with one conditional UPDATE; rows a concurrent cancel or pause holds are reconsidered on the next tick.
-- Every write a worker makes goes through `transitions.guarded_save` (`WHERE status='running' AND lease_owner=me AND attempt=a`); a 0-row result raises `LeaseLost` and the worker stops quietly. `finish_stage` runs as separate autocommit steps (job → LLM responses → batch → events → experiment completion → wake).
-- Cancel (`transitions.cancel_jobs`): PENDING and `phase=running` become CANCELLED at once; the running worker keeps its `lease_owner` (and its slot) until it notices and exits. Jobs waiting for or in evaluation finish.
+- `queued_at IS NOT NULL` means the executor owns the row (`execution.api.enqueue_runs`, called on commit by launch, top-up and retry). Reference runs have no generation stage: `execution.api.enqueue_evaluation` puts them straight into `running/eval_queued`, where the evaluation claim (by phase, never by lane) picks them up.
+- **Lanes** follow the run kind: `sandbox` for `app_agentic` and `slot_agent`, `llm` for `slot_single_shot`. Lane queues are keyed `(study or adhoc:<user>, endpoint)`, strict head-of-line in the plan's claim `sequence` (repeat-major blocks, see [Budget](/docs/BUDGET#blocks-and-reservations)). Across lanes the scheduler is work-conserving; heads are ordered by priority, fair share per user and per study, endpoint load, model affinity, a warm model and launch time.
+- Runs of a study are claimed while it is `piloting` or `running`. Runs of a **paused condition** (`StudyCondition.paused`, set by a `pause_condition` stop rule) are invisible to the lanes: they never block the other conditions.
+- Only the chosen rows are locked (`FOR UPDATE SKIP LOCKED`). Inside the same transaction the budget admission (`generation.budget.claims.admit`) locks each study row, reserves blocks and moves each run's slice, and may refuse a run; a refused run stops its lane for the tick (head-of-line), and the rest are claimed with one conditional UPDATE.
+- Every write a worker makes goes through `transitions.guarded_save`; a 0-row result raises `LeaseLost` and the worker stops quietly. `finish_stage` runs as separate autocommit steps: run row → LLM responses → **settle the attempt's spend** (when the generation stage ended) → the cell's current run → events → cost priors and stop rules (terminal) → study completion → wake.
+- Cancel (`transitions.cancel_runs`): PENDING and `phase=running` become `cancelled` with outcome `excluded:cancelled`; the running worker keeps its `lease_owner` (and its slot) until it exits. Runs waiting for or in evaluation finish.
+- A study ends `completed` when it is `running` with no active run, or `stopped` (from `running` or `piloting`) when a stop is pending (`Study.stop_reason`, set by a balanced budget stop or a `stop` rule). Both publish `state`; a stop also publishes `stopped {reason}`.
 
 ### Blocked reasons
 
-A pending job that is not admitted reports why (tick events, `GET /api/execution/queue/`, the Overview tab's endpoint lanes):
+A pending run that is not admitted reports why (tick events, `GET /api/execution/queue/`):
 
 | Reason | Meaning |
 |---|---|
@@ -70,86 +63,65 @@ A pending job that is not admitted reports why (tick events, `GET /api/execution
 | `circuit_open` | Three infra failures on the endpoint within 5 minutes; closed again after 60 s. |
 | `endpoint_full` | The endpoint is at its job cap (`max_active_jobs`, else `max_concurrency`). |
 | `model_not_served` | The live session does not serve the frozen `(name, digest)`. |
-| `residency_wait` | Starting this model would exceed the endpoint's resident-model limit K. After `EXECUTOR_STARVATION_S` (600 s) the starvation guard drains the endpoint for a swap. |
+| `residency_wait` | Starting this model would exceed the resident-model limit (the endpoint's, or the study's `max_resident_models`). After `EXECUTOR_STARVATION_S` the starvation guard drains the endpoint for a swap. |
 | `warming_model` | An Ollama prefetch (warm-up) of the model is in progress. |
-| `experiment_cap` | The experiment's `max_concurrency` is reached. |
+| `study_cap` | `Study.max_parallel` (`concurrency.study_max_parallel`) is reached. |
+| `study_endpoint_cap`, `study_model_cap`, `study_provider_cap` | The study's `concurrency.per_endpoint` / `per_model` / `per_provider` (pinned `routing.only` provider) limit is reached. |
+| `budget` | The block cannot start under the study cap (USD, tokens, runs or wall hours); `on_budget_exhausted` was applied. |
+| `cell_budget`, `budget_stop` | The run was excluded (cell cap reached; or a balanced stop). |
+| `spend_cap`, `quota` | A blocking SpendCap would be exceeded; the study is paused (quota for 5 h / weekly model caps) and resumes when the window frees. |
 | `draining` | The executor is draining. |
-| `retry_backoff` | A requeued job waiting for its `run_after`. |
+| `retry_backoff` | A requeued run waiting for its `run_after`. |
+
+### Per-study concurrency
+
+`Study.max_parallel` and `Study.execution_options` are copied from the effective budget preset at launch (`budget.policy.execution_options`): `per_endpoint`, `per_model`, `per_provider`, `rpm_per_model` (enforced by the gateway's shared token bucket, `GatewayConfig.rate_limit`), `max_resident_models`, `eval_parallel` (a study's evaluations in flight; enforced in the evaluation claim) and `warmup`.
 
 ### Slots and the memory rule
 
-`ExecutorSettings` (singleton, re-read every tick) holds:
+`ExecutorSettings` (singleton, re-read every tick):
 
 | Setting | Default | Bounds |
 |---|---|---|
 | `sandbox_slots` | `AGENT_MAX_CONCURRENT_RUNS` (else 1) | 0..8 |
 | `eval_slots` | 1 | 0..4 |
 | `llm_job_threads` | 16 | 1..32 |
-| `post_run_slots` | 1 | 0..1 (the analyzer workspace is shared) |
+| `post_run_slots` | 1 | 0..2 |
 | `draining` | false | |
 
-Staff edit them on `/endpoints` (capacity card), at `PATCH /api/execution/settings/`, or in the admin. The rule:
-
 ```
-sandbox_slots × (AGENT_SANDBOX_MEM_LIMIT + 256m) + eval_slots × EVAL_SLOT_MEM
+sandbox_slots × (AGENT_SANDBOX_MEM_LIMIT_MAX + 256m) + eval_slots × max(EVAL_SLOT_MEM, SAMPLE_BUILD_MEMORY)
   + post_run_slots × ANALYSIS_WORKSPACE_MEM + APPS_DIND_APP_RESERVE ≤ 0.95 × APPS_DIND_MEM_LIMIT
 ```
 
-Defaults: `AGENT_SANDBOX_MEM_LIMIT` 3g, `EVAL_SLOT_MEM` 1536m, `ANALYSIS_WORKSPACE_MEM` 1g, `APPS_DIND_APP_RESERVE` 1g, `APPS_DIND_MEM_LIMIT` 4g. `APPS_DIND_MEM_LIMIT` is authoritative (keep it equal to apps-dind's `mem_limit`; `docker info` inside apps-dind reports host RAM). A PATCH that breaks the rule is refused with the arithmetic (`{detail, arithmetic, mem_limit, required}`), except for the minimal one-sandbox / one-evaluation configuration. When even that does not fit (the default 4g apps-dind), sandbox runs and evaluations **take turns** (`exclusive_eval`), and post-runs wait while either is busy. A rule broken only by the post-run term is allowed; post-runs then wait while sandbox and evaluation are busy.
+`AGENT_SANDBOX_MEM_LIMIT_MAX` is the largest sandbox any budget preset may ask for: effective policies clamp `sandbox.memory` to it (so the generous preset's 4g becomes 3g on the default host, note `sandbox_clamped_to_machine`). A PATCH that breaks the rule is refused with the arithmetic, except for the minimal one-sandbox / one-evaluation configuration; when even that does not fit, sandbox runs and evaluations take turns (`exclusive_eval`).
 
 ## Leases and reconciliation
 
-`reconcile()` runs at leader start and every 15 s (each step isolated: one failing never stops the rest):
+`reconcile()` runs at leader start and every 15 s (each step isolated):
 
-0. **Lost jobs** (every tick): owned by this executor, not in the registry, stage entered > 30 s ago → `infra_retry(executor_lost)`; a lost evaluation goes back to `eval_queued`.
-1. **Expired leases** (and every lease owned by another executor id: only one leader exists): sandbox runs have their containers reaped, then `executor_lost`; evaluations go back to `eval_queued` at most `EVAL_MAX_REQUEUES` (2) times, then end ungraded (`evaluation.status = infra_error`); cancelled rows just release the lease.
-2. **Orphan containers** (every 4th pass): containers labelled `llmlab.agent-run` / `llmlab.evaluation` whose job is not running under a live lease and not in the registry, older than 2 minutes (`llmlab.started`).
-3. Pump leases of dead instances (`requeue_pump_orphans`), and LLM request leases (`inference.requests.requeue_expired`).
-4. Stale relay sessions end (`timeout`, `inference.tokens.reap_stale_sessions`: acked leases use an attempt); a standby session is promoted.
-5. Sessions of expired relay tokens end (`token_expired`, `inference.tokens.reap_expired_tokens`).
+0. **Lost runs** (every tick): owned by this executor, not in the registry, stage entered > 30 s ago → `infra_retry(executor_lost)`; a lost evaluation goes back to `eval_queued`.
+1. **Expired leases**: sandbox runs have their containers reaped, then `executor_lost`; evaluations go back to `eval_queued` at most `EVAL_MAX_REQUEUES` times, then end `infra_error:eval_lost`.
+2. **Orphan containers** (every 4th pass).
+3. Pump leases of dead instances and LLM request leases.
+4. Stale relay sessions end; a standby session is promoted.
+5. Sessions of expired relay tokens end.
 6. Executor instances silent for 90 s are marked stopped.
-7. Completion sweep: running experiments with no active job complete (`maybe_complete_experiment`, idempotent: one post-run per completion); pending jobs and generation runs of cancelled experiments are cancelled (rows an experiment cancel skipped while a claim held them).
-8. Schedules more than one period overdue are fast-forwarded (no burst; `experiment_automation.fast_forward_schedules`).
+7. **Completion sweep**: running studies with no active run complete; stopping ones stop; stray runs of cancelled studies are cancelled.
+8. **Ledger repair** (`budget.ledger.reconcile`): every attempt that ended but still holds a reservation is settled; block reservations whose cells all finished are released.
+9. **Spend-cap resume** (`budget.claims.resume_paused_for_caps`): studies paused for `quota` / `spend_cap` resume once their next run fits every cap.
+
+Every 60 s the executor also evaluates the stop rules of every piloting or running study (`budget.stop_rules.evaluate_active`); they also run after every terminal transition.
 
 ## Retries
 
 | Reason | When | Budget |
 |---|---|---|
-| `executor_lost` | lease expired, lost-job check, executor restart | `EXECUTOR_LOST_RETRIES` (10), counted in `execution.executor_lost_count`; does not consume `infra_retries`; retried after 5 s |
-| `submit_failed` | the claimed job could not be handed to a pool | `infra_retries` |
-| `infra` | sandbox/apps-dind failures; no successful LLM call and a transport error (gateway 502, proxy 503/504, relay lease expiry); scaffolding `LLMAccessError` with a retryable code before any successful call | `experiment.infra_retries` (default 2; ad-hoc 2), backoff `30 s × 2^n` |
-| `infra_interrupted` | local endpoints only: the run ended after the proxy returned an infra error, or a scaffolding call failed after a successful one | as `infra`; exhausted → COMPLETED with validity `invalid: infra_interrupted` |
+| `executor_lost` | lease expired, lost-run check, executor restart | `EXECUTOR_LOST_RETRIES` (10), counted in `execution.executor_lost_count`; does not consume `infra_retries` |
+| `submit_failed` | the claimed run could not be handed to a pool | `retries.infra_retries` |
+| `infra`, `infra_interrupted` | sandbox or gateway failures, zero successful calls for an infra reason, transport errors | `retries.infra_retries` of the run's budget preset (2 without one), backoff `30 s × 2^n` |
 
-A retry requeues the **same row** (`attempt + 1`, same snapshot, seed and cell): pairing survives. Artifacts of the attempt are deleted; agent evidence of attempt `n > 0` lives under `GENERATION_RUNS_ROOT/<job_id>/a<n>/`; sandbox names carry `-a<attempt>`. Anything else (model 4xx, OpenRouter runs with a successful call) is a sample or a failure, never retried. `infra` and `infra_interrupted` failures feed the endpoint's circuit breaker (3 within 5 minutes open it for 60 s).
-
-The executor only claims jobs of **running** experiments. A manual Retry of a failed or cancelled cell (`POST /api/generation/jobs/{id}/retry/`) therefore reopens a completed or cancelled experiment, as a top-up does; a paused one stays paused until it is resumed.
-
-Validity notes added by the executor (kept through the evaluation stage): `infra_retried` (warn, attempt > 0), `relay_interruptions` (info), `contended` (warn, LLM queue wait > 10 % of the wall clock), `infra_interrupted` (exclude).
-
-## Timeout chain (local models)
-
-Per endpoint, from `request_timeout_s` (default 900 s, 30..7200; `inference.timeouts.chain`):
-
-| Timeout | Formula | Default |
-|---|---|---|
-| Request deadline | timeout × 3 (max attempts) + 600 s | 3300 s |
-| Gateway socket timeout | timeout + 300 s | 1200 s |
-| Proxy non-stream wait | gateway − 60 s (then 504; the gateway retries and re-attaches by dedupe key) | 1140 s |
-| Harness client timeout | gateway × 5 (4 gateway retries + 1) + 60 s | 6060 s |
-
-The chain guarantees the harness never gives up before the endpoint does.
-
-## Network settings
-
-The compose files derive the executor's `LLM_PROXY_BIND` (`${LLM_PROXY_ADDR}:8090`, default `172.30.99.2:8090`), `LLM_PROXY_UPSTREAM` and `LLM_GATEWAY_EGRESS_SUBNET` (default `10.213.0.0/24`) from the same variables apps-dind's firewall uses. To move the networks (e.g. a subnet collision on the host), set them together in the shell or `.env` used by compose: `LLMPROXY_SUBNET`, `LLM_PROXY_ADDR` and `APPS_DIND_LLMPROXY_ADDR` (both inside that subnet), and optionally `LLM_GATEWAY_EGRESS_SUBNET`. Recreate apps-dind and the executor afterwards.
-
-## Production compose
-
-`docker-compose.production.yml` has no apps-dind: sandboxes and gateways run on the host daemon, which cannot reach the internal `llmproxy` network. Local-model **agent** runs are therefore refused there (`LLM_LOCAL_AGENT_RUNS`, default on only when `APPS_DOCKER_HOST` is set; the job fails at once with a non-retryable error). OpenRouter agent runs and local-model scaffolding runs (the executor calls the relay/endpoint itself) work. Traefik routes `/api/` straight to django, so the adapter-node `BODY_SIZE_LIMIT` does not apply there.
-
-## apps-dind firewall exception
-
-Gateways of local-model agent runs join the nested network `llmlab-gw-egress` (bridge `llmlab-gwegr`, `10.213.0.0/24`, inter-container traffic off). The only new path out of apps-dind is `llmlab-gwegr → <LLM_PROXY_ADDR>:8090` (the executor's proxy on the internal `llmproxy` network); the rest of that subnet and apps-dind's own `llmproxy` address are rejected (`compose/local/apps-dind/entrypoint.sh`).
+A retry requeues the **same row** (`attempt + 1`, same manifest and seed). The attempt's spend is settled first and kept in `execution.attempts[]` / `prior_attempts_*`; the next attempt reserves fresh budget from what is left (never from its block) and is refused as `excluded:cell_budget` when the cell's spend plus the need exceeds `cell.max_cost_usd`. An exhausted run ends `FAILED` with `outcome=infra_error` (not usable).
 
 ## API
 
@@ -157,26 +129,13 @@ All under `/api/execution/`:
 
 | Route | Who | What |
 |---|---|---|
-| `GET /capacity/` | any user | Executor status (online, leader, `code_stale`, draining and what is left), effective slots, memory limits and warnings, lane usage, visible endpoints (other tenants' models only as counts), own experiments (staff: all) with an ETA from the last 30 minutes' throughput. Patched live by the SSE `capacity` channel. |
-| `GET /queue/?experiment_id&endpoint&limit` | any user | The caller's next pending jobs (limit 1..200, default 50) with `blocked_reason` (a dry run of the scheduler, no locks) and `others_ahead` per endpoint (a count only). |
-| `GET/PATCH /settings/` | staff | Slot settings and drain; a PATCH that breaks the memory rule is a 400 with the arithmetic. |
+| `GET /capacity/` | any user | Executor status, effective slots, memory limits and warnings, lane usage, visible endpoints, own studies (staff: all). |
+| `GET /queue/?study_id&endpoint&limit` | any user | The caller's next pending runs with `blocked_reason` (a dry run of the scheduler: no locks, no budget admission). |
+| `GET/PATCH /settings/` | staff | Slot settings and drain. |
 
 ## Test patch targets
 
-- Views keep `backend.generation.api.views.custom.dispatch_job`, `…custom.has_resolvable_key`, `…jobs.dispatch_job` and `…jobs.dispatch_evaluation` (all now enqueue: nothing runs in the web process).
-- To keep the doorbell out of Redis: `backend.execution.api.wake`.
-- To assert ordering, read `GenerationJob.sequence` / `queued_at` (there is no `run_queue` any more); experiment launches set `sequence` from `execution.sequence.cell_sequence`.
-- To run jobs in a test: `Executor(sync_pools=True, start_proxy=False, start_pumps=False, redis_client=<fake>)`, then `acquire_leadership()`, `startup()` and `tick()` (or `run()` with `max_ticks` / `stop_when_idle`); or `GenerationService().execute(job)` (inline claim, evaluation inline).
-- LLM calls: `backend.inference.chat.chat` and `backend.inference.access.resolve_access`; agent sandboxes: `backend.generation.services.agent.runner.AgentSandbox` and `backend.inference.gateway_wiring.for_job`; evaluation: `backend.generation.services.evaluation.runner.evaluate_job` (takes a `save=` keyword).
-
-More on running the test suite is in the [Development guide](/docs/development-guide).
-
-## Manual smoke test
-
-Recreating apps-dind and starting the executor interrupts running work; do it when the stack is idle.
-
-1. `docker compose up -d executor` (see "Compose commands" for the file set; the executor starts on the existing image, no `--build` needed); `manage.py executor status` (through `/entrypoint`, as above) shows `online: true`; `/api/execution/capacity/` shows the leader and no stale code.
-2. Launch a 1-model × 1-app OpenRouter agent experiment: the job goes pending → running → eval_queued → evaluating → completed; the sandbox slot frees before evaluation starts.
-3. `docker compose restart executor` during a run: the job is requeued as `executor_lost` (attempt 1) and completes; no orphan containers remain.
-4. Local endpoint: see [Local models](/docs/LOCAL_MODELS) (relay, fake Ollama), then run one agent experiment per harness and check `calls.jsonl`, lanes and evaluation.
-5. In apps-dind: a container on `bridge` cannot reach `<LLM_PROXY_ADDR>:8090`; one on `llmlab-gw-egress` can; from that network `postgres:5432`, `django:8000` and the apps-dind daemon port are refused, and another gateway's `:8080` is unreachable.
+- To keep the doorbell out of Redis: `backend.execution.api.wake`; SSE: `backend.realtime.events.publish`.
+- To run claims in a test: `Scheduler(owner).tick(EffectiveSlots(...), {"sandbox": n, "eval": n, "llm": n})`; wrap it in `django_capture_on_commit_callbacks(execute=True)` to run the after-commit work (events, block closing). `backend/generation/tests/wp11_budget/conftest.py` has `make_study` (a launched study tree with blocks) and a `tick` fixture.
+- Stages: `backend.generation.agentic.dispatch.run_stage` (generation) and `backend.generation.evaluation.suite.run_eval_stage` (evaluation); post-runs: `backend.generation.study.automation.run_post_run`.
+- To run runs end to end: `Executor(sync_pools=True, start_proxy=False, start_pumps=False, redis_client=<fake>)`, then `acquire_leadership()`, `startup()` and `tick()`.

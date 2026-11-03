@@ -2,7 +2,7 @@
  * SSE subscription utility for realtime task progress.
  *
  * Usage:
- *   const cleanup = subscribe(['generation:42', 'capacity'], (e) => {
+ *   const cleanup = subscribe(['run:<id>', 'capacity'], (e) => {
  *     console.log(e.type, e.data);
  *   }, { onState: (s) => (live = s === 'open') });
  *   // later…
@@ -37,7 +37,7 @@ export const SSE_EVENT_NAMES: readonly string[] = [
 /**
  * Subscribe to one or more SSE channels.
  *
- * @param channels  Channel strings, e.g. `['generation:1', 'analysis:2']`
+ * @param channels  Channel strings, e.g. `['run:<id>', 'study:<id>', 'capacity']`
  * @param onEvent   Callback invoked for each server-sent event
  * @param options   `onState(state)` connection-state callback
  * @returns         A cleanup function that closes the connection

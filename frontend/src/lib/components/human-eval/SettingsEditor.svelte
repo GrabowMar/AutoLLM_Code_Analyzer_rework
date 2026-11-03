@@ -23,7 +23,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Label } from '$lib/components/ui/label';
 	import { Segmented } from '$lib/components/ui/segmented';
-	import NumberField from '$lib/components/generator/composer/NumberField.svelte';
+	import NumberField from '$lib/components/studies/shared/NumberField.svelte';
 	import Lock from '@lucide/svelte/icons/lock';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type {

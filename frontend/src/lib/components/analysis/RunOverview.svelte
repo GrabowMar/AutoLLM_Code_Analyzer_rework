@@ -2,12 +2,13 @@
 	/**
 	 * RunOverview — a run at a glance: what it covered (tools measured / failed /
 	 * skipped, code size, time), what needs attention (failed tools, dynamic tools
-	 * skipped because the app was down, truncated generated code), findings by the
+	 * skipped because the app was down, a truncated generation run), findings by the
 	 * level each tool reported and by tool, the most affected files and rules, and
 	 * the metric tools' figures. Every count links into the Findings tab.
 	 *
 	 * With the run's context (`GET runs/{id}/context/`): code size is the study's
-	 * source LOC by layer (stored files the tools never saw noted apart), code
+	 * source LOC of the model scope by layer, with the whole app tree's LOC beside
+	 * it (stored files the tools never saw noted apart), code
 	 * findings in test files are counted apart, each frequent rule shows how
 	 * common it is across the corpus, and the replicate context card compares
 	 * the app with the other runs of its setup.
@@ -47,8 +48,6 @@
 		rulePrevalenceLines,
 		runScopeCounts,
 		sortLevels,
-		toolsMeasuredNote,
-		truncationNote,
 	} from './format';
 
 	interface Props {
@@ -83,12 +82,36 @@
 		onretrycontext,
 	}: Props = $props();
 
+	/**
+	 * A tool with nothing in scope to read (`skip_reason: not_applicable`, `tool_applicable: false`) is
+	 * **not measured** (spec 8.8), never a zero; re-running it cannot change that (the tree is immutable).
+	 */
+	function isNotApplicable(result: RunToolResult | undefined): boolean {
+		return !!result && (result.summary?.skip_reason === 'not_applicable' || result.summary?.tool_applicable === false);
+	}
+	/** A completed result that measured the code (not a not-measured summary). */
+	function isMeasured(result: RunToolResult | undefined): boolean {
+		return result?.status === 'completed' && result.summary?.measurement !== 'not_measured' && !isNotApplicable(result);
+	}
+
 	const states = $derived(run.tool_slugs.map((slug) => ({ slug, result: results.get(slug), state: resultState(results.get(slug)) })));
-	const measured = $derived(states.filter((s) => s.state.measured).length);
+	const measured = $derived(states.filter((s) => isMeasured(s.result)).length);
 	const failed = $derived(states.filter((s) => s.result?.status === 'failed'));
 	const appDown = $derived(states.filter((s) => s.result?.summary?.skip_reason === 'app_not_running'));
-	const notApplicable = $derived(states.filter((s) => s.result?.summary?.skip_reason === 'not_applicable'));
-	const unmeasured = $derived(states.filter((s) => s.result && !s.state.measured && !s.state.live));
+	const notApplicable = $derived(states.filter((s) => isNotApplicable(s.result)));
+	/** Re-runnable: finished without a measurement for a reason a re-run can fix (not "nothing to read"). */
+	const unmeasured = $derived(
+		states.filter((s) => s.result && !isMeasured(s.result) && !isNotApplicable(s.result) && !s.state.live && s.result.status !== 'pending')
+	);
+	const measuredNote = $derived(
+		[
+			failed.length ? `${failed.length} failed` : '',
+			unmeasured.length - failed.length > 0 ? `${unmeasured.length - failed.length} not measured` : '',
+			notApplicable.length ? `${notApplicable.length} had nothing to read (not measured)` : '',
+		]
+			.filter(Boolean)
+			.join(' · ') || 'all measured'
+	);
 	const active = $derived(isActive(run.status));
 
 	/** Finished, and no tool measured anything: zero findings is not a clean result. */
@@ -129,12 +152,22 @@
 	const scopeItems = $derived(
 		(context?.scopes_available ?? []).map((sc) => ({
 			value: sc,
-			label: sc === 'experiment' ? 'Experiment' : 'All my apps',
-			title: sc === 'experiment' ? "The app's experiment (current attempts)" : 'Every app of yours with a finished analysis',
+			label: sc === 'study' ? 'Study' : 'All my apps',
+			title:
+				sc === 'study'
+					? "The app's study: the current run of each main-stage cell"
+					: 'Every app of yours with a finished analysis (the current run of each study cell, plus ad-hoc runs)',
 		}))
 	);
-	const jobId = $derived(run.target.kind === 'job' ? (run.target.job_id ?? null) : null);
-	const truncated = $derived(truncationNote((run.summary?.truncated_inputs ?? []) as string[]));
+	/** The analyzed GenerationRun (null for pasted code or a deleted app). */
+	const jobId = $derived(run.target.kind === 'run' ? (run.target.job_id ?? null) : null);
+	/** `summary.truncated_inputs` = `[validity.termination]` when the generation run was truncated. */
+	const truncatedBy = $derived(((run.summary?.truncated_inputs ?? []) as string[]).filter(Boolean));
+	const truncated = $derived(
+		truncatedBy.length
+			? `The generation run was truncated (${truncatedBy.map((t) => t.replace(/_/g, ' ')).join(', ')}): these findings describe an app that may be unfinished. Truncated runs stay in the study sample (intention-to-treat).`
+			: ''
+	);
 	const metrics = $derived((run.summary?.metrics_by_tool ?? {}) as Record<string, Record<string, any>>);
 	const hasMetrics = $derived(Object.values(metrics).some((m) => m && Object.keys(m).length > 0));
 
@@ -167,7 +200,7 @@
 					<Globe class="mt-0.5 size-4 shrink-0" />
 					<p class="min-w-0 flex-1">
 						{appDown.length} dynamic tool{appDown.length === 1 ? ' was' : 's were'} skipped because the app wasn't running ({appDown.map((f) => toolName(f.slug)).join(', ')}).
-						{#if run.target.job_id}Start it on the <a class="underline underline-offset-2" href="/applications/{run.target.job_id}">app page</a>, then re-run them.{/if}
+						{#if run.target.job_id}Start it on the <a class="underline underline-offset-2" href="/samples/{run.target.job_id}">sample page</a>, then re-run them.{/if}
 					</p>
 				</div>
 			{/if}
@@ -205,16 +238,19 @@
 			<span class="kpi-label">Tools measured</span>
 			<span class="kpi-value">{measured}<span class="text-base text-muted-foreground">/{run.tool_slugs.length}</span></span>
 			<span class="text-[11px] text-muted-foreground">
-				{#if active}running{:else}{toolsMeasuredNote({ total: run.tool_slugs.length, measured, failed: failed.length, notApplicable: notApplicable.length })}{/if}
+				{#if active}running{:else}{measuredNote}{/if}
 			</span>
 		</button>
 		<div class="kpi-card" style="--kpi-accent: var(--chart-3)">
 			{#if loc}
-				<span class="kpi-label">Code · {loc.files} source file{loc.files === 1 ? '' : 's'}</span>
+				<span class="kpi-label">{loc.scope === 'model' ? 'Model code' : 'Code'} · {loc.files} source file{loc.files === 1 ? '' : 's'}</span>
 				<span
 					class="kpi-value"
-					title="Non-empty, non-comment lines of source files, test files apart: the study's LOC (the per-kLOC denominator). Stored: {run.source_files.length} files, {codeLines.toLocaleString()} raw lines incl. manifests and lockfiles."
+					title="Non-empty, non-comment lines of source files, test files apart: the study's LOC (the per-kLOC denominator){loc.scope === 'model' ? ', counted over what the model wrote or changed' : ''}. Stored: {run.source_files.length} files, {codeLines.toLocaleString()} raw lines incl. manifests and lockfiles."
 				>{loc.total.toLocaleString()}<span class="text-base text-muted-foreground"> LOC</span></span>
+				{#if loc.scope === 'model' && loc.app_total != null}
+					<span class="truncate text-[11px] text-muted-foreground" title="Source LOC of the whole app tree the tools read (starter included)">{loc.app_total.toLocaleString()} LOC in the whole app</span>
+				{/if}
 				<span
 					class="truncate text-[11px] text-muted-foreground"
 					title="Source lines: backend {loc.by_layer.backend?.toLocaleString() ?? '—'}, frontend {loc.by_layer.frontend?.toLocaleString() ?? '—'}; test code counted apart: {loc.by_layer.tests?.toLocaleString() ?? 'unknown (no file paths)'} lines in {loc.test_files ?? '—'} files"
@@ -224,11 +260,11 @@
 			{:else if run.source_files.length > 0}
 				<span class="kpi-label">Code</span>
 				<span class="kpi-value">{run.source_files.length}<span class="text-base text-muted-foreground"> files</span></span>
-				<span class="truncate text-[11px] text-muted-foreground">{codeLines.toLocaleString()} lines{run.target.stack_slug ? ` · ${run.target.stack_slug}` : ''}</span>
+				<span class="truncate text-[11px] text-muted-foreground">{codeLines.toLocaleString()} lines{run.target.stack_ref ? ` · ${run.target.stack_ref}` : ''}</span>
 			{:else}
 				<span class="kpi-label">Code</span>
 				<span class="kpi-value text-base">{run.target.kind === 'deleted' ? 'App deleted' : '—'}</span>
-				<span class="truncate text-[11px] text-muted-foreground">{run.target.stack_slug ?? ''}</span>
+				<span class="truncate text-[11px] text-muted-foreground">{run.target.stack_ref ?? ''}</span>
 			{/if}
 		</div>
 		<div class="kpi-card" style="--kpi-accent: var(--chart-5)">
@@ -353,7 +389,7 @@
 							<Card.Title class="text-base">Most frequent rules</Card.Title>
 							{#if context?.scope}
 								<Card.Description class="text-xs">
-									How common each rule is in {context.scope_label} (n = {context.n} analyzed app{context.n === 1 ? '' : 's'}{context.model_n != null ? `, ${context.model_n} of this model` : ''}): apps whose latest result of that tool reports it, over the apps the tool measured.{context.interim ? ' Interim: the experiment is still running.' : ''}
+									How common each rule is in {context.scope_label} (n = {context.n} analyzed app{context.n === 1 ? '' : 's'}{context.model_n != null ? `, ${context.model_n} of this model` : ''}): apps whose latest result of that tool reports it, over the apps the tool measured.{context.interim ? ' Interim: the study is still running.' : ''}
 								</Card.Description>
 							{/if}
 						</div>

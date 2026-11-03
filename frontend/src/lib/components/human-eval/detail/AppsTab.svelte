@@ -31,6 +31,8 @@
 	import {
 		addTaskApps,
 		appHostingAction,
+		functionalSourceLabel,
+		functionalStatusLabel,
 		getTaskHosting,
 		humanEvalErrorBody,
 		listTaskApps,
@@ -327,13 +329,13 @@
 	// ── add apps (draft) ────────────────────────────────────────────
 	let addOpen = $state(false);
 	let addSelected = $state<string[]>([]);
-	let addExperiment = $state<string | null>(null);
+	let addStudy = $state<string | null>(null);
 	let adding = $state(false);
-	const existingJobIds = $derived(apps.map((a) => a.job_id).filter((id): id is string => !!id));
+	const existingRunIds = $derived(apps.map((a) => a.run_id).filter((id): id is string => !!id));
 
 	function openAdd() {
 		addSelected = [];
-		addExperiment = task.experiment?.id ?? null;
+		addStudy = task.study?.id ?? null;
 		addOpen = true;
 	}
 
@@ -341,7 +343,7 @@
 		adding = true;
 		try {
 			const before = apps.length;
-			await addTaskApps(task.id, whole && addExperiment ? { experiment_id: addExperiment, current_only: true } : { job_ids: addSelected });
+			await addTaskApps(task.id, whole && addStudy ? { study_id: addStudy, current_only: true } : { run_ids: addSelected });
 			await load(true);
 			const added = apps.length - before;
 			toast.success(added > 0 ? `Added ${plural(added, 'app')}` : 'Those apps were already in the pool');
@@ -459,7 +461,7 @@
 						<tr>
 							<th class="col-sticky">App</th>
 							<th>Model · condition</th>
-							<th title="Automated functional check of the generated app (conformance suite or smoke test)">Functional</th>
+							<th title="Automated functional check of the generated app (the EvalSuite tester); not measured is never a pass or a 0">Functional</th>
 							<th>Hosting</th>
 							<th class="num" title="Submitted / in progress / skipped (platform unavailable)">Ratings</th>
 							<th title="Inactive apps get no new assignments">Active</th>
@@ -477,8 +479,8 @@
 									<span class="cell-sub block text-xs text-muted-foreground" title="Spec group: {app.group_key || 'none'}">
 										{app.app_name || app.app_slug || 'no spec'}{repeatSuffix(app.repeat_index)}
 									</span>
-									{#if app.job_id}
-										<a class="cell-sub block text-[11px] text-muted-foreground hover:text-primary" href="/applications/{app.job_id}">job {app.job_id.slice(0, 8)}</a>
+									{#if app.run_id}
+										<a class="cell-sub block text-[11px] text-muted-foreground hover:text-primary" href="/samples/{app.run_id}">run {app.run_id.slice(0, 8)}</a>
 									{/if}
 								</td>
 								<td class="max-w-64">
@@ -489,14 +491,14 @@
 								</td>
 								<td>
 									{#if app.functional.status}
-										<StatusBadge status={app.functional.status} />
+										<StatusBadge status={app.functional.status} label={functionalStatusLabel(app.functional.status)} />
 									{:else}
-										<span class="text-xs text-muted-foreground">not checked</span>
+										<span class="text-xs text-muted-foreground">not measured</span>
 									{/if}
 									<span class="cell-sub block text-xs text-muted-foreground">
 										{#if app.functional.pass_rate != null}{formatShare(app.functional.pass_rate)} pass{/if}
 										{#if app.functional.deployed === false} · not deployed{:else if app.functional.deployed === true} · deployed{/if}
-										{#if app.functional.source} · {app.functional.source}{/if}
+										{#if functionalSourceLabel(app.functional.source)} · {functionalSourceLabel(app.functional.source)}{/if}
 									</span>
 								</td>
 								<td class="min-w-48"><HostingCell {info} {reachable} /></td>
@@ -520,7 +522,7 @@
 									<div class="flex items-center justify-end gap-0.5">
 										{#each hostingActions(info) as action (action)}
 											{@const Icon = ACTION_ICONS[action]}
-											{@const disabled = !!working || !app.job_id || (action === 'start' && closedOrArchived)}
+											{@const disabled = !!working || !app.run_id || (action === 'start' && closedOrArchived)}
 											<Button
 												variant="ghost"
 												size="sm"
@@ -589,16 +591,16 @@
 	<Dialog.Content class="max-h-[90vh] max-w-4xl overflow-y-auto">
 		<Dialog.Header>
 			<Dialog.Title>Add apps</Dialog.Title>
-			<Dialog.Description>Pick completed generation jobs. Apps already in the pool are skipped.</Dialog.Description>
+			<Dialog.Description>Pick completed app runs, or add a whole study. Apps already in the pool are skipped.</Dialog.Description>
 		</Dialog.Header>
 		<div class="py-2">
-			<AppPoolPicker bind:selected={addSelected} bind:experimentId={addExperiment} excludeJobIds={existingJobIds} />
+			<AppPoolPicker bind:selected={addSelected} bind:studyId={addStudy} excludeRunIds={existingRunIds} />
 		</div>
 		<Dialog.Footer class="flex-wrap gap-2">
 			<Button variant="outline" size="sm" disabled={adding} onclick={() => (addOpen = false)}>Cancel</Button>
-			{#if addExperiment}
-				<Button variant="outline" size="sm" disabled={adding} onclick={() => addApps(true)} title="Every current attempt of the experiment's cells">
-					Add whole experiment
+			{#if addStudy}
+				<Button variant="outline" size="sm" disabled={adding} onclick={() => addApps(true)} title="The current run of every main-stage cell of the study">
+					Add whole study
 				</Button>
 			{/if}
 			<Button size="sm" disabled={adding || addSelected.length === 0} aria-busy={adding} onclick={() => addApps(false)}>

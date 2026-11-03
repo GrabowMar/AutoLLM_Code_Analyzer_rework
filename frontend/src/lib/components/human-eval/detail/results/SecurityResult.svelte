@@ -12,7 +12,7 @@
 	 *
 	 * Props: `result` (SecurityBlockResult), `section`, `ctx`.
 	 */
-	import StudyFigure from '$lib/components/experiments/study/StudyFigure.svelte';
+	import StudyFigure from '$lib/components/studies/study/StudyFigure.svelte';
 	import { severityColors } from '$lib/constants/colors';
 	import type { SecurityBlockResult } from '$lib/api/human-eval';
 	import { cn } from '$lib/utils';

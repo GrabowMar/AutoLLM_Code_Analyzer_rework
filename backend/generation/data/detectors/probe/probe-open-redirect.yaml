@@ -1,0 +1,11 @@
+name: Open redirect probe exploited
+description: Maps the evaluation's open_redirect probes (CWE-601) of the variant to a feature (one per probe kind).
+content:
+  engine: probe
+  languages: []
+  rule: 'kind:open_redirect'
+  tool: {name: eval-tester, version: '1'}
+  feature_key: probe-open-redirect
+  polarity: insecure
+  cwe: [cwe-601]
+  description: A open_redirect probe was exploited against the assembled app.

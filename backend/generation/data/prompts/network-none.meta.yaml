@@ -1,0 +1,6 @@
+name: 'Network sentence: none'
+role: fragment
+modes:
+- app
+- slot
+variables: []

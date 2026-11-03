@@ -1,0 +1,11 @@
+name: Vue v-html directive
+description: A Vue template renders raw HTML with v-html.
+content:
+  engine: regex
+  languages: [vue]
+  rule: '\sv-html\s*='
+  tool: {name: re, version: py3.13}
+  feature_key: vue-v-html
+  polarity: insecure
+  cwe: [cwe-79]
+  description: The template uses the v-html directive.

@@ -1,0 +1,17 @@
+name: subprocess with shell=True (Python)
+description: A subprocess call passes shell=True, so the command string is interpreted by a shell.
+content:
+  engine: ts_query
+  languages: [python]
+  rule: |
+    (call
+      function: (attribute object: (identifier) @mod attribute: (identifier) @fn)
+      arguments: (argument_list (keyword_argument name: (identifier) @kw value: (true)))
+      (#eq? @mod "subprocess")
+      (#match? @fn "^(run|call|check_call|check_output|Popen)$")
+      (#eq? @kw "shell")) @match
+  tool: {name: tree-sitter, version: 0.26.0}
+  feature_key: py-subprocess-shell-true
+  polarity: insecure
+  cwe: [cwe-78]
+  description: subprocess.run/call/check_call/check_output/Popen is called with shell=True.

@@ -34,7 +34,7 @@ just up
 | `django` | http://localhost:8001 | API backend; the frontend proxies `/api`, `/_allauth`, `/admin`, `/media` and `/apps` to it |
 | `mailpit` | http://localhost:8025 | Catches all outgoing email |
 | `flower` | http://localhost:5555 | Celery dashboard (credentials from bootstrap, in `.envs/.local/.django`) |
-| `executor` | internal | Runs every generation job, evaluation, experiment schedule and post-run |
+| `executor` | internal | Runs every generation run, evaluation, study schedule and post-run |
 | `apps-dind` | internal | Sandbox Docker daemon for apps, sandboxes and workspaces |
 | `postgres`, `redis`, `celeryworker`, `celerybeat` | internal | Database, broker and pub/sub, background tasks |
 
@@ -45,7 +45,7 @@ On startup the django container runs `python manage.py migrate`. After every mig
 1. Open http://localhost:8000. On an empty database the sign-up page creates the **initial admin account**: a superuser whose email is `admin@<DJANGO_DOMAIN>` (`admin@example.com` with the template's `DJANGO_DOMAIN`), which you then sign in with. `just manage createsuperuser` works too if you prefer your own email. Later sign-ups create normal accounts; locally email verification is optional and the mails land in mailpit.
 2. Add your OpenRouter key under **Settings → API keys** (`/users/settings#credentials`). It is stored encrypted and takes precedence over the global fallback key.
 3. Open **Models** and sync the catalog. Sync is staff-only and uses the staff user's own key, not the global fallback.
-4. Generate something: a single app from **Sample Generator**, or a planned set of runs from **Experiments** (see [Experiments](/docs/EXPERIMENTS)). The executor picks the job up within a few seconds.
+4. Generate something: create a **study** (one task, one stack and one model is enough), preview its plan (every rendered prompt, the seeds and the cost estimate), and launch it (see [Studies](/docs/STUDIES)). The executor picks the runs up within a few seconds. The same flow is one API call: `POST /api/generation/studies/adhoc/` with a design.
 5. Open the finished app under **Applications** and start an analysis. The first run provisions your personal analyzer workspace container (building the `backend/analyzer-base:latest` image) and installs the selected tools, so it takes a while; later runs reuse it.
 
 > [!NOTE]

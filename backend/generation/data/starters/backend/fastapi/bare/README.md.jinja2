@@ -1,0 +1,4 @@
+{% set layout = "- `backend/`: the FastAPI app. `backend/main.py` is the entry file; dependencies go in `backend/requirements.txt`." %}
+{% set manifest = "requirements.txt" %}
+{% set entry = "`python backend/main.py`, which must start the server on port " ~ run.port %}
+{% include "common/README.md.jinja2" %}

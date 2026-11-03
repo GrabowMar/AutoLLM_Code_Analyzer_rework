@@ -26,11 +26,14 @@ export interface WizardDraft {
   mode: TaskMode;
   design: TaskDesign;
   settings: TaskSettings;
-  jobIds: string[];
-  experimentId: string | null;
+  /** GenerationRun ids picked individually. */
+  runIds: string[];
+  /** The linked study (its current main-stage runs join the pool), or null. */
+  studyId: string | null;
 }
 
-export const DRAFT_KEY = "llmlab:human-eval:new-task";
+/** v3 drafts (run and study ids); a stored v2 draft (job / experiment ids) is never read. */
+export const DRAFT_KEY = "llmlab:human-eval:new-task:v3";
 
 /**
  * Used only when neither the environment nor a preset could be loaded; the
@@ -92,8 +95,8 @@ export function emptyDraft(
     mode: "single",
     design: emptyDesign(environment),
     settings: defaultSettings(environment),
-    jobIds: [],
-    experimentId: null,
+    runIds: [],
+    studyId: null,
   };
 }
 
@@ -148,13 +151,10 @@ export function parseDraft(raw: string | null): WizardDraft | null {
       mode: d.mode,
       design: normalizeDesign(d.design as Partial<TaskDesign>),
       settings: d.settings as unknown as TaskSettings,
-      jobIds: Array.isArray(d.jobIds)
-        ? d.jobIds.filter((x): x is string => typeof x === "string")
+      runIds: Array.isArray(d.runIds)
+        ? d.runIds.filter((x): x is string => typeof x === "string")
         : [],
-      experimentId:
-        typeof d.experimentId === "string" && d.experimentId
-          ? d.experimentId
-          : null,
+      studyId: typeof d.studyId === "string" && d.studyId ? d.studyId : null,
     };
   } catch {
     return null;
@@ -192,8 +192,8 @@ export function hasContent(draft: WizardDraft): boolean {
     !!draft.title.trim() ||
     !!draft.description.trim() ||
     !!draft.instructions.trim() ||
-    draft.jobIds.length > 0 ||
-    !!draft.experimentId ||
+    draft.runIds.length > 0 ||
+    !!draft.studyId ||
     draft.design.blocks.length > 0
   );
 }
@@ -207,8 +207,8 @@ export function createInput(draft: WizardDraft): TaskCreateInput {
     design: draft.design,
     settings: draft.settings,
   };
-  if (draft.experimentId) input.experiment_id = draft.experimentId;
-  if (draft.jobIds.length) input.job_ids = [...draft.jobIds];
+  if (draft.studyId) input.study_id = draft.studyId;
+  if (draft.runIds.length) input.run_ids = [...draft.runIds];
   return input;
 }
 
@@ -224,7 +224,7 @@ export interface DraftNote {
 export function draftNotes(draft: WizardDraft): DraftNote[] {
   const notes: DraftNote[] = [];
   const { design, settings, mode } = draft;
-  if (draft.jobIds.length === 0 && !draft.experimentId) {
+  if (draft.runIds.length === 0 && !draft.studyId) {
     notes.push({
       level: "warning",
       text: "No apps yet. Add them now or later on the Apps tab; the task cannot open without apps.",

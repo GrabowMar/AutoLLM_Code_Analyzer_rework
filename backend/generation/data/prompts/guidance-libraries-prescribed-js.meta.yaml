@@ -1,0 +1,7 @@
+name: 'Guidance fragment: prescribed JavaScript libraries'
+role: fragment
+modes:
+- app
+- slot
+variables:
+- guidance

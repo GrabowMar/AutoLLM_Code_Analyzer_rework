@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 from django.utils import timezone
 
@@ -232,21 +234,50 @@ def test_study_conditions_report_measures_every_condition_with_one_instrument_se
     assert any("jscpd (1 of 2 runs)" in note for note in data["notes"])
 
 
-def test_study_results_are_reported_as_unavailable_not_empty(monkeypatch):
-    """Until the study results land, the report says so instead of an empty (clean-looking) leaderboard."""
+_RESULTS_KEYS = {
+    "metric",
+    "sensitivity",
+    "itt",
+    "exclude_truncated",
+    "planned_repeats",
+    "stopped_early",
+    "common_cells",
+    "fingerprint_filter",
+    "baseline_condition_id",
+    "baseline_source",
+    "interim",
+    "balanced",
+    "leaderboard",
+    "matrix",
+    "paired",
+    "gate",
+    "attrition",
+    "by_factor",
+    "issues",
+    "notes",
+    "generated_at",
+}
+
+
+def test_study_results_are_embedded():
+    """The report embeds the study's Results payload (WP-10 ``study_results``), intention-to-treat by default."""
     user = UserFactory()
-    study, _unit, _a, _b = _two_condition_study(user)
+    study, unit, cond_a, cond_b = _two_condition_study(user)
+    run_a = cell_run(make_cell(cond_a, unit), user)
+    analyze(run_a, {"bandit": high(1)})
 
     data = generators.generate_study_conditions_report({"study_id": str(study.id)}, user=user)
-    assert data["results"] is None
-    assert any("not available" in note for note in data["notes"])
 
-    monkeypatch.setattr(
-        "backend.generation.study.results.study_results",
-        lambda s: {"leaderboard": [], "notes": [], "interim": True},
-    )
-    data = generators.generate_study_conditions_report({"study_id": str(study.id)}, user=user)
-    assert data["results"]["interim"] is True
+    results = data["results"]
+    assert isinstance(results, dict)
+    assert set(results) >= _RESULTS_KEYS
+    assert results["itt"] is True
+    assert results["exclude_truncated"] is False
+    assert results["planned_repeats"] == study.repeats
+    assert results["baseline_condition_id"] == cond_a.id
+    datetime.fromisoformat(results["generated_at"])
+    assert {row["condition_id"] for row in results["leaderboard"]} == {cond_a.id, cond_b.id}
+    assert not any("not available" in note for note in data["notes"])
 
 
 def test_coverage_note_names_runs_no_tool_measured():

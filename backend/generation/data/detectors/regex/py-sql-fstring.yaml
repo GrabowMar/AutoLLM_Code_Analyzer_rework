@@ -1,0 +1,11 @@
+name: SQL built with an f-string (Python)
+description: An SQL statement passed to execute() is built with an f-string (string interpolation into SQL).
+content:
+  engine: regex
+  languages: [python]
+  rule: 'execute\(\s*f["'']'
+  tool: {name: re, version: py3.13}
+  feature_key: py-sql-fstring
+  polarity: insecure
+  cwe: [cwe-89]
+  description: An SQL statement passed to execute() is built with an f-string.

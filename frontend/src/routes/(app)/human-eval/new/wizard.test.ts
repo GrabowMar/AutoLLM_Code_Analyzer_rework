@@ -6,6 +6,7 @@ import {
   applyScratch,
   createInput,
   designFingerprint,
+  DRAFT_KEY,
   draftNotes,
   emptyDraft,
   fallbackSettings,
@@ -51,11 +52,11 @@ const preset: Preset = {
 
 describe("starting points", () => {
   it("applies a preset's mode, design and settings but keeps typed fields", () => {
-    const draft = { ...emptyDraft(null), title: "My study", jobIds: ["j1"] };
+    const draft = { ...emptyDraft(null), title: "My study", runIds: ["r1"] };
     const next = applyPreset(draft, preset);
     expect(next.start).toBe("security-assessment");
     expect(next.title).toBe("My study");
-    expect(next.jobIds).toEqual(["j1"]);
+    expect(next.runIds).toEqual(["r1"]);
     expect(next.design.blocks).toHaveLength(1);
     expect(next.design).not.toBe(preset.design);
     expect(next.settings.hosting.reset).toBe("per_assignment");
@@ -109,7 +110,7 @@ describe("stored drafts", () => {
     const draft = {
       ...applyPreset(emptyDraft(null), preset),
       title: "T",
-      experimentId: "exp-1",
+      studyId: "study-1",
     };
     expect(parseDraft(JSON.stringify(draft))).toEqual(draft);
     expect(parseDraft(null)).toBeNull();
@@ -122,10 +123,28 @@ describe("stored drafts", () => {
     ).toBeNull();
   });
 
+  it("never restores a v2 draft's job or experiment ids", () => {
+    const v2 = {
+      ...emptyDraft(null),
+      jobIds: ["j1"],
+      experimentId: "exp-1",
+    } as Record<string, unknown>;
+    delete v2.runIds;
+    delete v2.studyId;
+    const parsed = parseDraft(JSON.stringify(v2));
+    expect(parsed?.runIds).toEqual([]);
+    expect(parsed?.studyId).toBeNull();
+    expect(parsed).not.toHaveProperty("jobIds");
+    expect(parsed).not.toHaveProperty("experimentId");
+    expect(DRAFT_KEY).toMatch(/:v3$/);
+  });
+
   it("knows an untouched draft has nothing to restore", () => {
     expect(hasContent(emptyDraft(null))).toBe(false);
     expect(hasContent({ ...emptyDraft(null), title: " x " })).toBe(true);
     expect(hasContent({ ...emptyDraft(null), start: "" })).toBe(true);
+    expect(hasContent({ ...emptyDraft(null), studyId: "s" })).toBe(true);
+    expect(hasContent({ ...emptyDraft(null), runIds: ["r"] })).toBe(true);
   });
 });
 
@@ -138,16 +157,19 @@ describe("createInput", () => {
     });
     expect(input.title).toBe("Study");
     expect(input.description).toBe("d");
-    expect(input).not.toHaveProperty("experiment_id");
-    expect(input).not.toHaveProperty("job_ids");
+    expect(input).not.toHaveProperty("study_id");
+    expect(input).not.toHaveProperty("run_ids");
     const withApps = createInput({
       ...emptyDraft(null),
       title: "S",
-      jobIds: ["a"],
-      experimentId: "e",
+      runIds: ["a"],
+      studyId: "s",
     });
-    expect(withApps.job_ids).toEqual(["a"]);
-    expect(withApps.experiment_id).toBe("e");
+    expect(withApps.run_ids).toEqual(["a"]);
+    expect(withApps.study_id).toBe("s");
+    // The v2 keys are never sent (clean break).
+    expect(withApps).not.toHaveProperty("job_ids");
+    expect(withApps).not.toHaveProperty("experiment_id");
   });
 });
 
@@ -161,7 +183,7 @@ describe("draftNotes", () => {
   it("flags shared app state as a warning only when security testing is designed", () => {
     const security = {
       ...applyPreset(emptyDraft(null), preset),
-      jobIds: ["a"],
+      runIds: ["a"],
     };
     security.settings = {
       ...security.settings,
@@ -172,7 +194,7 @@ describe("draftNotes", () => {
     );
     expect(note?.level).toBe("warning");
 
-    const rating = { ...emptyDraft(null), jobIds: ["a"] };
+    const rating = { ...emptyDraft(null), runIds: ["a"] };
     rating.design = { ...rating.design, blocks: [newBlock("rating", [])] };
     expect(
       draftNotes(rating).find((n) => n.text.includes("shared app state"))
@@ -181,7 +203,7 @@ describe("draftNotes", () => {
   });
 
   it("flags pairwise designs without a pairwise block and disallowed blocks", () => {
-    const d = { ...emptyDraft(null), mode: "pairwise" as const, jobIds: ["a"] };
+    const d = { ...emptyDraft(null), mode: "pairwise" as const, runIds: ["a"] };
     d.design = { ...d.design, blocks: [newBlock("rating", [])] };
     const texts = draftNotes(d).map((n) => n.text);
     expect(texts).toContain("Pairwise tasks need a pairwise preference block.");

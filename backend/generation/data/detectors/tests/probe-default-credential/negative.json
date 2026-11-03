@@ -1,0 +1,17 @@
+{
+  "probes": [
+    {
+      "id": "p-default_credential",
+      "cwe": "cwe-1392",
+      "kind": "default_credential",
+      "status": "not_exploited"
+    },
+    {
+      "id": "p-other",
+      "cwe": "cwe-611",
+      "kind": "xxe",
+      "status": "exploited",
+      "evidence": "fixture"
+    }
+  ]
+}

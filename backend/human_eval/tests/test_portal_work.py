@@ -196,7 +196,8 @@ def test_blinding_settings_hide_spec_and_credentials_and_show_source():
 
 
 def test_portal_assignment_never_reveals_who_built_the_app():
-    task = make_open_task(n_apps=2, mode="pairwise")
+    # Plan conditions are frozen: the sentinel label is set when the condition is created.
+    task = make_open_task(n_apps=2, mode="pairwise", condition_label="ZzCondition")
     item = task.items.get()
     for index, app in enumerate((item.app_a, item.app_b)):
         model = app.job.model
@@ -204,8 +205,7 @@ def test_portal_assignment_never_reveals_who_built_the_app():
         model.model_name = f"ZzSecretModel {index}"
         model.provider = "ZzSecretProvider"
         model.save()
-        app.job.condition.label = f"ZzCondition {index}"
-        app.job.condition.save()
+        assert app.job.condition.label.startswith("ZzCondition")
     Study.objects.filter(pk=task.study_id).update(name="ZzStudyName")
     assignment, client = _work(task, item=item)
     context.open_assignment(assignment)

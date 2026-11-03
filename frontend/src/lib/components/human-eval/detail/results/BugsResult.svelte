@@ -6,7 +6,7 @@
 	 *
 	 * Props: `result` (BugsBlockResult), `section`, `ctx`.
 	 */
-	import StudyFigure from '$lib/components/experiments/study/StudyFigure.svelte';
+	import StudyFigure from '$lib/components/studies/study/StudyFigure.svelte';
 	import type { BugsBlockResult } from '$lib/api/human-eval';
 	import { formatScore, humanize, zeroBasedDomain } from '../../format';
 	import GroupScoreFigure from './GroupScoreFigure.svelte';

@@ -73,15 +73,15 @@ Rules (see `src/lib/components/charts/theme.ts`):
 
 ```svelte
 <div class="space-y-4">
-  <PageHeader title="Experiments" description="One sentence on what this page is for."
-              back={{ href: '/experiments', label: 'Experiments' }}>   <!-- detail/create pages only -->
+  <PageHeader title="Studies" description="One sentence on what this page is for."
+              back={{ href: '/studies', label: 'Studies' }}>   <!-- detail/create pages only -->
     {#snippet meta()}<StatusBadge status={x.status} />{/snippet}         <!-- optional -->
-    {#snippet actions()}<Button href="/experiments/new" size="sm"><Plus />New experiment</Button>{/snippet}
+    {#snippet actions()}<Button href="/studies/new" size="sm"><Plus />New study</Button>{/snippet}
   </PageHeader>
 
   {#if error}<ErrorAlert message={error} onretry={load} />{/if}
-  {#if loading}<LoadingState label="loading experiments" />
-  {:else if items.length === 0}<EmptyState title="No experiments yet" description="…">{#snippet action()}…{/snippet}</EmptyState>
+  {#if loading}<LoadingState label="loading studies" />
+  {:else if items.length === 0}<EmptyState title="No studies yet" description="…">{#snippet action()}…{/snippet}</EmptyState>
   {:else} …content… {/if}
 </div>
 ```
@@ -131,7 +131,7 @@ One labelled divider for the whole app, in the sidebar's group motif: `[number] 
 then an optional `lead` flush below. Styles are `.section-heading*` in `app.css`.
 
 - **`lg`** (default) — a section of the page on the canvas: mono number, serif `text-xl` title, ink rule. The
-  experiment page's numbered sections (`StudySection` wraps it). Sections sit `space-y-10` apart; heading → body
+  study page's numbered sections (`StudySection` wraps it). Sections sit `space-y-10` apart; heading → body
   `space-y-3`.
 - **`sm`** — mono caps label + lighter rule: a group of cards on the canvas (Settings' Account / Preferences /
   Connections, Docs' "Start here") or a group inside a card (endpoint form, spec editor, "Key findings", "History").
@@ -163,7 +163,7 @@ then an optional `lead` flush below. Styles are `.section-heading*` in `app.css`
 
 ### Settings page (`/users/settings`)
 
-Laid out like the Generation Library (`/templates`): `PageHeader`, a bookmark rail card in the Library nav's
+Laid out like the Library (`/library`): `PageHeader`, a bookmark rail card in the Library nav's
 shape (`.section-label` groups, active = `bg-primary/10 text-primary` + left tick, a status dot where the
 Library shows counts), and every section as one card — heading strip (serif title, `?` popover with the
 description, `StatusBadge`, copy-link) with its rows flush below — in a single scrolling list.
@@ -209,93 +209,71 @@ Import from `$lib/components/table`. Base `table`/`th`/`td` styles are global (`
 - One primary next step per row (Open, Provision, Edit) as a ghost button; no outline buttons repeated per row.
 - Hide columns that are empty on the whole page, and say so in the toolbar.
 
-## Generation building blocks (`src/lib/components/generator/`)
+## Study building blocks (`src/lib/components/studies/`)
 
-Shared by the composer, batch pages, Library and experiments; import from `$lib/components/generator`.
+Import from `$lib/components/studies` (or a single component by path); the generic pickers come from
+`$lib/components/studies/shared`, the Budget preset editor and library pickers from `$lib/components/library`.
 Each file documents its props at the top. Conventions: selections are `$bindable` and replaced (never
-mutated); `onchange` fires only on user edits; catalogs load once per page (`loadModelCatalog`,
-`loadAppSpecCatalog`, `loadPresets` — browser-only caches); loading uses an inline spinner or
-`LoadingState`, failures `ErrorAlert` with retry.
+mutated); `onchange` fires only on user edits; catalogs load once per page (`loadModelCatalog` — a
+browser-only cache); loading uses an inline spinner or `LoadingState`, failures `ErrorAlert` with retry.
 
-| Component              | Use for                                                                                                         |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `ModelPicker`          | models from the whole catalog; `mode` single/multi, `requireTools` pins ineligible picks with "Remove N"        |
-| `AppSpecPicker`        | app specs (graded tasks): search, category chips, difficulty, select shown / clear                              |
-| `StackSelect`          | stack slug; own unapproved stacks marked "Pending approval — only you can run it"; `defaultSlug`                |
-| `PresetPicker`         | one harness / sampling / budget preset; `pinned` keeps an old version ("v1 · latest is v3 · Use latest")        |
-| `HarnessOptionsEditor` | schema-driven harness options; sparse (default values are removed)                                              |
-| `LLMParamsEditor`      | sparse sampling params; blank = inherit, placeholder "0.3 · mode default"; `mode` hides fields that don't apply |
-| `ProfilePicker`        | scaffolding prompt profile or "Auto" (with suggestions) and a rendered-prompt preview                           |
-| `OpenRouterKeyBanner`  | key status: own key, deployment fallback, missing, rejected, or "couldn't check" (never a false "required")     |
+| Component / module                        | Use for                                                                                                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `StudyBuilder`                            | the single-page design form (`/studies/new`): numbered `ComposerSection`s; sticky `PlanRail` from 56rem, `StartBar` below                  |
+| `ComposerSection`, `ComposerSectionNav`   | one numbered step (`done` / `meta` / `invalid` / `collapsible`); the section index above the plan on the rail                              |
+| `FactorTable`, `LevelPicker`              | factors × levels; the role (crossed / fixed / fraction) follows the level count; an empty factor shows "default: …"                        |
+| `ResourcePolicyPicker`                    | tier cards (Frugal / Standard / Generous) + Custom + `ResourcePolicyEditor`; "Save as preset" pins a new immutable preset                  |
+| `EvaluationSection`                       | the evaluation level and what it measures; unmeasured parts preview as "not measured", never as 0                                          |
+| `PlanRail`                                | `RunFormula`, estimate vs cap with `CostByLevelBar`, issues with quick fixes, cell sampler → `ResolvedCellDrawer` / `CellDetailView`       |
+| `LaunchDialog`                            | the cost confirmation before Start: expected / p90 / worst case; typed p90 confirmation above the preset's threshold                       |
+| `study/StudyMasthead`                     | the study page header (replaces `PageHeader` there): accession id, hypothesis, spec strip                                                  |
+| `study/StudySection`, `study/StudyFigure` | a numbered section ("2.3 Conditions ───") with a lead; a numbered figure / table with title, controls and a caption                        |
+| `study/tabs.ts`                           | the record's sections in paper order, numbered per mode, plus the aliases older links use                                                  |
+| `monitor/*`                               | `LiveSpendStrip`, `PilotGateCard`, `ConditionGrid`, `FailureSummary`, `ActivityFeed`, `RunStreamPanel`, `CapacityStrip`                    |
+| `monitor/live.svelte.ts`                  | `StudyLive`: SSE + polling fallback feeding the monitor pieces; never hand-roll polling on study pages                                     |
+| `budget/*`                                | `LedgerTable`, `SpendCharts`, `CapsCard`: the spend ledger, spend charts, caps vs spent                                                    |
+| `layout/SpendChip`                        | the top-bar spend indicator                                                                                                                |
+| `shared/*`                                | generic pickers moved from v2 `generator/`: `ModelPicker`, `LLMParamsEditor`, `HarnessOptionsEditor`, `OpenRouterKeyBanner`, `NumberField` |
 
+- **Steps**: required steps pass `done` (the number badge turns into a check) and `meta` ("3 selected"); a
+  step holding an unapplied value passes `invalid` (alert badge, red border). Optional steps are
+  `collapsible`: folded to a one-line `summary` of what applies now ("Frugal v1 · … · no overrides") unless
+  the draft already overrides something; the body stays mounted so its fields keep validating, and an
+  `invalid` step unfolds itself.
+- **Rail** (≥ 56rem container): `ComposerSectionNav` above the plan. The plan opens with `RunFormula` —
+  `2 tasks × 2 models × 1 harness × 3 repeats = 12 cells` — whose empty factors are dashed and link to their
+  step (neutral, no error before the user acts). Narrower, the plan follows the form and `StartBar` sticks
+  to the bottom.
 - Sparse editors never emit `null`/`''`; a field holding a value that wasn't applied (out of range, bad
   JSON) sets the bindable `invalid` output — block submit on it.
-- Vocabulary: **Harness preset**, **Sampling preset**, **Budget preset**; sampling settings apply
-  identically to every model (per-model support is shown in previews, not tuned per model).
-- After creating a preset outside a picker, call `invalidatePresets(kind)`; mounted pickers reload.
-  "Manage" links open `/templates?tab=presets&kind=…` in a new tab and refresh on window focus.
+- Vocabulary: **Harness preset**, **Sampling preset**, **Budget preset** (the `ResourcePolicy` library
+  kind; never "resource policy" in UI copy); sampling settings apply identically to every model
+  (per-model support is shown in previews, not tuned per model).
+- Presets are library kinds. After creating or versioning any library entity outside a picker, call
+  `invalidateLibrary(kind)` from `$lib/components/library`; mounted pickers and lists reload. "Manage"
+  links open `/library/{kind}` (the API kind name: `harness-presets`, `sampling-presets`,
+  `resource-policies`, …) in a new tab and refresh on window focus.
 - API errors: show `formatApiError(e)` (handles `{detail}`, 422 `{detail: [{loc, msg}]}`, `{message}`,
   `{detail, remediation}`); map 422s onto fields with `apiFieldErrors(e)`; ignore `isAbortError(e)` from
   superseded requests.
+- Scaling to ~30 models: condition labels are `model · harness`; compare against one baseline, never N² pairs.
+- Cell squares carry meaning by shape as well as hue (solid = finished, ring = waiting) and always have an
+  `aria-label`/`title`.
+- Statistics: never show a pooled pass rate across conditions; p-values only when results are not interim;
+  anything not measured is "—" / "not measured", never 0.
 
-### Sample-generator composer (`generator/composer/`)
-
-All three modes (agent, template scaffolding, single prompt) share one layout:
-
-- **Steps** are `ComposerSection`s. Required steps pass `done` (the number badge turns into a check) and
-  `meta` ("3 selected"); a step holding an unapplied value passes `invalid` (alert badge, red border).
-- **Optional steps** (model settings, budget) are `collapsible`: folded to a one-line `summary` of what
-  applies right now ("Provider defaults v1 · no overrides · …") unless the draft already overrides
-  something. The body stays mounted so its fields keep validating, and an `invalid` step unfolds itself.
-- **Rail** (≥ 56rem container): `ComposerSectionNav` (the experiments composer's section index) above the
-  Run summary. The summary opens with `RunFormula` — `2 app specs × 2 models × 1 harness × 3 trials = 12
-runs` — whose empty factors are dashed and link to their step; it replaces the old checklist (neutral, no
-  error before the user acts). Narrower, the summary follows the form and `StartBar` sticks to the bottom.
-
-## Experiments building blocks (`src/lib/components/experiments/`)
-
-Import from `$lib/components/experiments`. Endpoint pieces (`SlotMeter`, `EndpointChip`, …) come from
-`$lib/components/inference`.
-
-| Component / module            | Use for                                                                                                             |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `ExperimentComposer`          | the single-page design form (`/experiments/new`); sticky `PlanRail` on ≥ 56rem, `StartBar` below                    |
-| `ComposerSectionNav`          | the composer's section index above the Plan: current step, required done / to do, invalid flags                     |
-| `ExperimentRow`               | one experiment in a list (progress, ETA, endpoints, inline lifecycle buttons)                                       |
-| `CapacityStrip`               | one-line executor / lanes / endpoint capacity summary                                                               |
-| `monitor/ConditionGrid`       | condition × app × repeat squares (CSS grid, sticky label column, endpoint groups); `framed={false}` inside a figure |
-| `monitor/EndpointLane`        | one endpoint's live slots, loaded models, this user's active jobs, blocked reason                                   |
-| `monitor/FailureSummary`      | Abstract: failed runs grouped by error message, with a likely cause (`failureHint`) and a run link                  |
-| `Leaderboard`, `PairedDeltas` | results: ranked conditions with CIs (table only); Δ vs the baseline as an ink forest plot                           |
-| `study/StudyMasthead`         | the experiment page header (replaces `PageHeader` there): accession id, hypothesis, spec strip                      |
-| `study/StudySection`          | a numbered section ("2.3 Conditions ───") with a lead: a `<section>` around a `SectionHeading`                      |
-| `study/StudyFigure`           | a numbered figure / table ("Figure 1", "Table M2") with title, controls and a caption                               |
-| `study/PassRatePlot`          | dot-and-whisker figure of pass rate with 95% CIs (stacked rows on phones)                                           |
-| `study/StudyRecord`           | the Abstract's record panel (dates, design counts, provenance, copyable reference)                                  |
-| `study/findings.ts`           | design shape, accession id and the Abstract's key findings / limitations (pure, unit-tested)                        |
-| `study/results.svelte.ts`     | `ResultsFeed`: one tab's `GET /results/` (abort-on-supersede, tick throttle)                                        |
-| `ComparabilityTable`          | what each condition actually runs with; differing columns highlighted                                               |
-| `live.svelte.ts`              | `ExperimentLive`: SSE + polling fallback; never hand-roll polling on experiment pages                               |
-| `cells.ts`, `format.ts`       | cell codes (`CELL_STATES` square styles), progress mapping, ETA / hours / Δ / p formats                             |
-
-- Scaling to ~30 models: everything is grouped by endpoint (picker, selection chips, plan rows, lanes, grid);
-  condition labels are `model · harness`; compare against one baseline, never N² pairs.
-- Cell squares carry meaning by shape as well as hue (solid = finished, ring = waiting, dashed = waiting
-  for a model load) and always have an `aria-label`/`title`.
-- Statistics: never show a pooled pass rate across conditions; p-values only when results are not interim.
-
-### Experiment page (`/experiments/[id]`) — the study record
+### Study page (`/studies/[id]`) — the study record
 
 Laid out like a paper, not a dashboard (ui-ux-pro-max query `"scientific research experiment results academic
 paper data" --design-system --density 7 --variance 3 --motion 2`, mapped onto this system's tokens and fonts):
 
-- **Masthead** (`StudyMasthead`): eyebrow `EXPERIMENT · AGENT · EXP-955A5BD5` (first UUID block as an accession
+- **Masthead** (`StudyMasthead`): eyebrow `STUDY · APP · STU-955A5BD5` (first UUID block as an accession
   number), serif title, status + registered / launched / finished, the hypothesis as a serif-italic pull quote
   with an ochre (`accent-2`) rule, then a spec strip — Design (`k conditions × n apps × r repeats = N cells`) ·
   Baseline · Outcome · Randomisation — then the data-collection strip (counts, ETA, `LiveStrip`) and the tabs.
-- **Sections** (`?tab=`, numbered in the tab row): 1 Abstract (`summary`) · 2 Method (`method`) · 3 Results ·
-  4 Data (`data`) · 5 Operations (`operations`). Older names (`overview`, `design`, `runs`, `automation`) still
-  resolve (`study/tabs.ts`). Science first: execution limits, endpoints, activity and automation live in
+- **Sections** (`?tab=`, numbered in the tab row from what the mode shows): Abstract (`summary`) · Method
+  (`method`) · Results · Patterns (slot studies only) · Data (`data`) · Operations (`operations`). Older names
+  (`overview`, `design`, `plan`, `runs`, `monitor`, `budget`, `automation`) still resolve (`study/tabs.ts`). Science first: execution limits, endpoints, activity and automation live in
   Operations, never in Method.
 - **Abstract**: description and a generated paragraph (design, baseline, outcome, estimator) in the display
   serif (15px, `max-w-3xl`), a status sentence, numbered key findings and a "Limitations" list derived from the
@@ -311,6 +289,48 @@ paper data" --design-system --density 7 --variance 3 --motion 2`, mapped onto th
 - **Results** opens with the analysis specification ("Pre-registered — common cells only · …"); any URL option
   turns it into "Exploratory" with a way back to the pre-registered analysis. Server notes are lettered footnotes.
 - Sections whose parts can be hidden number themselves from what is shown (no "5.1 → 5.3" gaps).
+
+## Library building blocks (`src/lib/components/library/`)
+
+The Library (`/library`, `/library/[kind]`, `/library/[kind]/[slug]`, `/library/prompts/playground`) and the
+pieces the Study builder, sample and slot screens reuse. Import from `$lib/components/library`; each file
+documents its props at the top. API types and clients are `$lib/api/v3/{types,library,harnesses}.ts`.
+
+| Component / module                                 | Use for                                                                                                       |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `PinnedRefBadge`                                   | any library reference: mono `slug@v`, hash in the tooltip, "latest vN" when older; links to the version       |
+| `LibraryRefPicker`                                 | pick one / several entities of a kind; emits **pinned** refs; an older pin stays selected with "Use latest"   |
+| `ResourcePolicyEditor`, `KnobField`                | the Budget preset editor: Key limits always visible, accordion groups, class badges, overrides vs a base      |
+| `PromptTemplateEditor`                             | a Jinja template: variable autocomplete, declared-variable lint, live render on a sample cell, diff vs base   |
+| `StimulusText`                                     | rendered prompt text with its source spans tinted by owner (legend, click-through to the owning entity)       |
+| `PromptPlayground`, `RenderContextPicker`          | render any prompt set on any cell; compare two cells (per-role diff, prompt hash)                             |
+| `TaskEditor` (+ `task.ts`)                         | the structured TaskSpec editor (Entities / Endpoints / UI / Acceptance / Probes / Prose ×3 / Preview)         |
+| `ContentEditor`                                    | the right editor or viewer per kind, with a "Raw JSON" switch                                                 |
+| `VersionHistory`, `VersionDiff`                    | versions of a slug (pick two to compare); unified + structured diffs with line numbers                        |
+| `LibraryNav`, `LibraryList`                        | the kind rail (grouped by what each kind answers about a run) and a kind's table with server-side filters     |
+| `PackagesDialog`                                   | YAML package v4 export (with dependencies) and import (dry run first, never overwrites)                       |
+| `libraryStore`, `invalidateLibrary`                | per-kind cache shared by pickers, badges and counts; `ensureMe()`, `ensureKnobs()` (KNOB_META + tier presets) |
+| `policy.ts`, `spans.ts`, `diff.ts`, `variables.ts` | pure helpers (unit-tested): knob paths/groups/classes/summary line, span segmentation, diffs, autocomplete    |
+
+- **Immutability is visible.** Saving always says "Save as vN+1"; old versions open read-only (`?v=`) with a
+  link to the latest and a compare action; archiving hides a slug from pickers but never deletes a version.
+  Seeded (system) rows are read-only for non-staff; the action is **Fork**, which records `derived_from`.
+- **References are pinned.** Show refs with `PinnedRefBadge` (mono), never a bare name; pickers store the
+  pinned form `slug@v#hash12` returned by the API.
+- **Budget preset vocabulary.** Tiers are **Frugal** (the default for new studies), **Standard**, **Generous**
+  and **Custom**; the one-line summary is `summaryLine()` ("Frugal v1 · $0.30/run · auto study cap · 2 parallel
+  · effort low · no overrides", the same text the backend's `summary_line` returns). The **Key limits** group
+  (study cap incl. `auto`, run cap, cell cap, max parallel, reasoning, serving tier, pilot on/off; repeats live in
+  the study) is always visible; the other knobs sit in accordion groups that open when they hold an override.
+- **Validity classes are labelled, not colour-coded.** C/R knobs carry an outlined "affects treatment" badge
+  (indigo text) whose tooltip explains the class; S knobs "study design"; O knobs only their class letter.
+  Editing a C/R knob of a preset used by studies (or in a cloned/running study) shows the warning "New
+  fingerprint — not comparable with earlier runs". Overrides show "Base: <value>" with a Reset.
+- **Budget never enters a prompt.** The playground and editors say so where it matters; the render context has no
+  budget, seed or id, so changing only the Budget preset leaves the prompt hash unchanged.
+- **Disabled harnesses are listed with their blocked reason**, never hidden.
+- Validation is server-side and live: drafts are posted to `/library/{kind}/validate/` (debounced, aborted when
+  superseded) and the issues (registered codes, never invented severities) are listed beside the editor.
 
 ## Analysis building blocks (`src/lib/components/analysis/`)
 
