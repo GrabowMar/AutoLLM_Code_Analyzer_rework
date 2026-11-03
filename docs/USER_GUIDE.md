@@ -114,11 +114,11 @@ More detail: [Human evaluation](/docs/HUMAN_EVALUATION).
 Shows lab-wide activity.
 
 - **Header stats**: models in use, apps, analyses and findings. Each one links to its page.
-- **Buttons**: **Generate app**, **New analysis**, **Refresh dashboard**, and, for staff only, a **Maintenance** menu with **Sync models**, **Clear caches**, **Clear stuck jobs** and **Open system panel**.
+- **Buttons**: **Generate app**, **New analysis**, **Refresh dashboard**, and, for staff only, a **Maintenance** menu with **Sync models**, **Clear caches**, **Clear stuck runs** and **Open system panel**. **Generate app** opens the study builder (`/studies/new`).
 - **Panels**:
   - **Analysis Activity** (trend) and **Finding Severity**.
   - **Analyzer Health**: one tile per analyzer.
-  - **Recent Analyses** and **Recent Generation Jobs**, each with **View all**.
+  - **Recent Analyses** and **Recent Samples**, each with **View all**.
   - **Recent Activity** feed.
 
 ## Generate
@@ -136,7 +136,7 @@ The catalog of models you can generate with.
 **Model detail** (`/models/<slug>`) has these tabs:
 
 - **Overview**: about, links to OpenRouter, models.dev and Hugging Face, and how this model has done on this platform. The facts list separates **Checkpoint parameters** (every tensor in the linked repo), **Reported total** and **Active parameters**, each with its source; an API model that models.dev lists as closed weights says the linked repo may differ from what is served. The **Hugging Face** card shows the repo as an ecosystem: downloads (30 days and all time), likes, trending, Spaces, derived repos and the base-model relation, license and gating, weight size and format, native quantization, Hugging Face inference providers, papers, and the commit and date fetched.
-- **Results**: ranking, resource use, code findings by tool, results per task (the **By app spec** card), and the studies it was part of (the **Experiments** card).
+- **Results**: ranking, resource use, code findings by tool, results per task (the **By task** card), and the studies it was part of (the **Studies** card).
 - **Generation data**: what this platform recorded about how the model generates, over your runs: **Agent behaviour** per harness, **Providers and calls** (per-provider latency, throughput, cache hits, retries and errors), and **Same-setup variability** between runs that share a setup. Every figure shows its n; `—` or n/a means not measured.
 - **Benchmarks**: Artificial Analysis and Design Arena scores, then **external covariates** from Epoch AI (reported and active parameters, training compute and data, with Epoch's notes) and LMArena (rating with its interval on the leaderboard's range, rank of n, votes; the agent arena is a score, not Elo), each with a match badge (exact, variant, assumed), the curator's note and CC-BY attribution, and **Self-reported evaluations** from the Hugging Face repo, labelled self-reported and never normalized or ranked.
 - **Capabilities**: besides the capability flags, **Sampling defaults** (the authors' recommended sampling from `generation_config.json`, OpenRouter's defaults, and what your runs actually sent, with n) and **Architecture & size** (dense or MoE, layers, width, heads and KV heads, attention variant, experts per token, native and extended context, vocabulary, native precision, the parameter counts with their sources, and the weight files).
@@ -317,7 +317,7 @@ Puts empirical quality measured on this platform next to the metadata-based **MS
 Platform-wide analytics.
 
 - **Analysis Trends** and **Severity Distribution**.
-- **Model Comparison**: apps, success % (completed of finished runs; pending, running and cancelled runs are not outcomes), **Smoke pass** (the evaluation's functional pass rate, `agent_pass_rate`, over usable runs; the preview smoke probe never feeds it), empirical score, MSS and composite.
+- **Model Comparison**: apps, success % (completed of finished runs; pending, running and cancelled runs are not outcomes), **Pass rate** (the evaluation's functional pass rate, `agent_pass_rate`, over usable runs; the preview smoke probe never feeds it), empirical score, MSS and composite.
 - **Tool Effectiveness**: scans (executions that measured the app: completed or not applicable), not measured (failed, cancelled, app not running), findings, average per measured scan (empty when none) and top rule.
 - **Top Findings** (one row per title, tool and the level that tool printed, `unrated` when it prints none; dependency advisories are marked dependency advisory, since they are package vulnerabilities, not code issues), **Code Generation Stats** (success rate over finished runs; Source lines is source LOC; average times show — until something completed) and **Recent Activity**.
 - **Severity Distribution** is the platform's normalized level, labelled "normalized (heuristic)", not the tools' own labels.
@@ -367,7 +367,7 @@ The System Monitor refreshes every 10 seconds. Other users see "Staff access req
   - **Celery**: workers, active, scheduled and reserved tasks, and queue lengths.
   - **Database**: connections, commits, deadlocks and the top tables by size.
 - **Application Stats**: counts by status and in the last 24 hours.
-- **Maintenance Actions**: **Clear Stuck Analysis Tasks**, **Clear Stuck Generation Jobs**, **Purge Orphan Containers** and **Clear All Caches**. Each one asks for confirmation.
+- **Maintenance Actions**: **Clear Stuck Analysis Runs**, **Clear Stuck Generation Runs** (fails generation runs never queued, or whose executor lease expired, more than 60 minutes ago, as `infra_error`), **Purge Orphan Containers** and **Clear All Caches**. Each one asks for confirmation.
 
 ## Account
 

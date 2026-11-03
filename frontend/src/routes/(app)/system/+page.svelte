@@ -150,8 +150,8 @@ return `${m}m`;
 const dockerTones: Partial<Record<string, Tone>> = { ...containerTones, exited: 'danger', stopped: 'danger', dead: 'danger', paused: 'warning' };
 
 const modelSections = [
-{ key: 'analysis_tasks', label: 'Analysis Tasks' },
-{ key: 'generation_jobs', label: 'Generation Jobs' },
+{ key: 'analysis_runs', label: 'Analysis Runs' },
+{ key: 'generation_runs', label: 'Generation Runs' },
 { key: 'reports', label: 'Reports' },
 { key: 'container_instances', label: 'Container Instances' },
 ];
@@ -159,14 +159,14 @@ const modelSections = [
 const maintenanceActions = [
 {
 id: 'clear-stuck-analysis',
-label: 'Clear Stuck Analysis Tasks',
-desc: 'Mark pending/running tasks older than 60m as failed',
+label: 'Clear Stuck Analysis Runs',
+desc: 'Mark pending/running analysis runs older than 60m as failed',
 fn: () => clearStuckAnalysis(60) as Promise<Record<string, unknown>>,
 },
 {
 id: 'clear-stuck-generation',
-label: 'Clear Stuck Generation Jobs',
-desc: 'Mark pending/running jobs older than 60m as failed',
+label: 'Clear Stuck Generation Runs',
+desc: 'Fail generation runs never queued, or whose executor lease expired, more than 60m ago (infra_error)',
 fn: () => clearStuckGeneration(60) as Promise<Record<string, unknown>>,
 },
 {

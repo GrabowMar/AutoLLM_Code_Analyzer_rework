@@ -37,7 +37,6 @@ from protocols.common import json_or_none
 from protocols.common import pin_model
 from protocols.common import sse_event
 from protocols.common import strip_cache_control
-from protocols.translation import STREAM_ENDED_EARLY
 from protocols.translation import ChatStreamReader
 from protocols.translation import ChatTurn
 from protocols.translation import Dropped
@@ -46,7 +45,7 @@ from protocols.translation import TranslationError
 from protocols.translation import TurnBuilder
 from protocols.translation import as_dropped
 from protocols.translation import assistant_reasoning
-from protocols.translation import chat_error_text
+from protocols.translation import completion_failure
 from protocols.translation import decode_token
 from protocols.translation import detail_text
 from protocols.translation import encode_token
@@ -58,6 +57,7 @@ from protocols.translation import parse_arguments
 from protocols.translation import synthetic_detail
 from protocols.translation import text_of_parts
 from protocols.translation import tool_call_id
+from protocols.translation import turn_failure
 from protocols.translation import turn_from_completion
 
 NAME = "openai_responses"
@@ -662,10 +662,22 @@ def from_chat(
 ) -> dict[str, Any]:
     """A chat completion -> a Responses object (an error payload -> the OpenAI error shape)."""
     drops = as_dropped(dropped)
-    if chat_response.get("error") and not chat_response.get("choices"):
-        message, code = chat_error_text(chat_response)
-        return upstream_error(502, message, code)[1]
+    failure = completion_failure(chat_response)
+    if failure is not None and not chat_response.get("choices"):
+        return upstream_error(502, *failure)[1]
     turn = turn_from_completion(chat_response)
+    if failure is not None:
+        # A failed turn (finish_reason=error): the ``failed`` Response a stream would end with, with the
+        # partial output and ``error: {code, message}``; the gateway sends it with HTTP 502.
+        message, code = failure
+        return _response_object(
+            turn,
+            _output_items(turn, _custom_tool_names(request_json), drops),
+            request_json,
+            status="failed",
+            usage=_usage_from_chat(turn.usage) if turn.usage else None,
+            error_obj={"code": code or "upstream_error", "message": message},
+        )
     output = _output_items(turn, _custom_tool_names(request_json), drops)
     status, incomplete = _status(turn)
     if isinstance(dropped, dict):
@@ -902,9 +914,9 @@ class StreamTranslator:
         if self._late:  # details that arrived after their reasoning item closed
             self._fragments = self._late
             out += self._open_item("reasoning") + self._close()
-        problem = failure or turn.error
-        if problem or turn.finish_reason in (None, "error"):
-            message, code = chat_error_text({"error": problem}) if problem else (STREAM_ENDED_EARLY, None)
+        broken = turn_failure(turn, failure)
+        if broken is not None:
+            message, code = broken
             failed = _response_object(
                 turn,
                 self._items,

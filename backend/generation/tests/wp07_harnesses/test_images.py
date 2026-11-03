@@ -16,7 +16,9 @@ from pathlib import Path
 
 import pytest
 
+from backend.generation.build import dockerfiles
 from backend.generation.harnesses import registry
+from backend.generation.library.seeding import load_seed_entries
 
 from .conftest import ALL_HARNESSES
 from .conftest import FIXTURES
@@ -58,6 +60,23 @@ def test_every_agent_image_was_built():
     built = {build["image"] for name, build in BUILDS.items() if name != "agent-base"}
     assert built == {f"agent-{h}" for h in ALL_HARNESSES}
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", BUILDS["agent-base"]["image_id"])
+
+
+def test_agent_base_toolchains_are_the_starter_base_images():
+    """The agent's Go/JDK/Maven are copied from the exact images the go-stdlib and spring-boot builds use.
+
+    Go stays at the release verified in wave 3 (lead decision: no upgrade beyond what built and smoke-started):
+    ``golang:1.25-trixie`` at its recorded digest, which ships go1.25.14 (``fixtures/images.json``), and every
+    go stack profile says ``runtime: go1.25``.
+    """
+    bases = dockerfiles.base_images()
+    froms = re.findall(r"^FROM (\S+) AS (\w+)$", (IMAGES / "agent-base" / "Dockerfile").read_text(), re.MULTILINE)
+    assert {stage: ref for ref, stage in froms} == {"go": bases["go"].pinned, "maven": bases["maven"].pinned}
+    assert bases["go"].ref == "golang:1.25-trixie"
+    assert BUILDS["agent-base"]["toolchains"].startswith("go1.25.")
+    go_stacks = [e for e in load_seed_entries(kinds=["stack"]) if e.content["backend"]["language"] == "go"]
+    assert go_stacks
+    assert {e.content["backend"]["runtime"] for e in go_stacks} == {"go1.25"}
 
 
 def test_facts_versions_name_the_pin():

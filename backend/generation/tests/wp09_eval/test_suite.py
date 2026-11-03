@@ -21,7 +21,9 @@ from backend.generation.evaluation import retest
 from backend.generation.evaluation import suite as suite_mod
 from backend.generation.evaluation.runtime import BuildOutcome
 from backend.generation.evaluation.runtime import LocalProcessRuntime
+from backend.generation.evaluation.runtime import RuntimeInfraError
 from backend.generation.evaluation.runtime import TesterCrashError as CrashError
+from backend.generation.evaluation.runtime import split_pg_dump
 from backend.generation.models import EvalBaseline
 from backend.generation.models import GenerationRun
 from backend.generation.models import RunEvaluation
@@ -243,22 +245,37 @@ def test_postgres_profile_without_a_sidecar_is_infra_error_never_start_fail(gold
     assert suite_mod.outcome_of(row) == (choices.Outcome.INFRA_ERROR, "postgres_sidecar_unavailable")
 
 
-@pytest.mark.usefixtures("postgres_stack")
-@pytest.mark.parametrize("vuln", ["", "plaintext_password_db"])
-def test_postgres_profile_plaintext_password_probe_is_skipped_never_clean(golden: Any, vuln: str) -> None:
-    """A non-empty ./data (uploads, logs, a fallback sqlite) must not turn into a silent ``not_exploited``."""
+class DumpRuntime(SidecarRuntime):
+    """A sidecar whose ``pg_dump`` is the bundled app's SQLite file (the app keeps its users there locally)."""
+
+    def __init__(self, tables: dict[str, bytes] | None = None, error: str | None = None) -> None:
+        super().__init__()
+        self.tables, self.error = tables, error
+        self.handle: Any = None
+        self.dumps = 0
+
+    def start(self, image: str, env: Any, **kwargs: Any) -> Any:
+        self.handle = super().start(image, env, **kwargs)
+        return self.handle
+
+    def dump_database(self) -> dict[str, bytes]:
+        self.dumps += 1
+        if self.error:
+            raise RuntimeInfraError(self.error)
+        if self.tables is not None:
+            return self.tables
+        db = super().read_data(self.handle, "./data").get("app.db", b"")
+        return {"postgres:public.users": db} if db else {}
+
+    def read_data(self, handle: Any, data_dir: str) -> dict[str, bytes]:
+        return {"uploads/avatar.png": b"\x89PNG not a password", "app.log": b"started"}
+
+
+def _plaintext_run(golden: Any, vuln: str) -> GenerationRun:
     from backend.generation.testing.factories import TaskSpecVersionFactory
 
-    class DataRuntime(SidecarRuntime):
-        data_reads = 0
-
-        def read_data(self, handle: Any, data_dir: str) -> dict[str, bytes]:
-            self.data_reads += 1
-            return {"uploads/avatar.png": b"\x89PNG not a password", "app.log": b"started"}
-
-    runtime = DataRuntime()
     version = TaskSpecVersionFactory(content=conformance.kit_task_content())
-    run = baseline.reference_run(
+    return baseline.reference_run(
         reference_of=choices.ReferenceOf.ORACLE,
         task_version=version,
         stack=golden.get("stack", "flask-react"),
@@ -267,14 +284,84 @@ def test_postgres_profile_plaintext_password_probe_is_skipped_never_clean(golden
         files=kit_tree(LLMLAB_VULN=vuln) if vuln else kit_tree(),
         suite=suite_of(golden),
     )
-    row = suite_mod.evaluate(run, suite_of(golden), probes=["probe.kit.plaintext_password"], runtime=runtime)
+
+
+@pytest.mark.usefixtures("postgres_stack")
+@pytest.mark.parametrize(("vuln", "status"), [("", "not_exploited"), ("plaintext_password_db", "exploited")])
+def test_postgres_profile_plaintext_password_probe_reads_the_sidecar_dump(golden: Any, vuln: str, status: str) -> None:
+    runtime = DumpRuntime()
+    row = suite_mod.evaluate(
+        _plaintext_run(golden, vuln),
+        suite_of(golden),
+        probes=["probe.kit.plaintext_password"],
+        runtime=runtime,
+    )
     assert row.status == choices.EvaluationStatus.MEASURED
     probes = row.result["probes"]
-    assert [(p["kind"], p["status"], p["skip_reason"]) for p in probes] == [
-        ("plaintext_password_db", "skipped", "precondition_failed"),
-    ]
-    assert probes[0]["evidence"] == "passwords live in the postgres sidecar"
-    assert runtime.data_reads == 0
+    assert [(p["kind"], p["status"], p["skip_reason"]) for p in probes] == [("plaintext_password_db", status, None)]
+    assert "postgres:public.users" in probes[0]["evidence"]
+    assert runtime.dumps == 1
+    assert row.result["metrics"]["probes_tested"] == 1
+
+
+@pytest.mark.usefixtures("postgres_stack")
+def test_postgres_dump_without_user_a_is_skipped_never_clean(golden: Any) -> None:
+    """Rows that do not hold user_a (logs, uploads, an empty schema) must not turn into ``not_exploited``."""
+    runtime = DumpRuntime(tables={"postgres:public.audit_log": b"1\tstarted\n"})
+    row = suite_mod.evaluate(
+        _plaintext_run(golden, ""),
+        suite_of(golden),
+        probes=["probe.kit.plaintext_password"],
+        runtime=runtime,
+    )
+    probes = row.result["probes"]
+    assert [(p["status"], p["skip_reason"]) for p in probes] == [("skipped", "precondition_failed")]
+    assert row.result["metrics"]["probes_tested"] == 0
+
+
+@pytest.mark.usefixtures("postgres_stack")
+def test_postgres_dump_failure_is_a_probe_error_never_clean(golden: Any) -> None:
+    runtime = DumpRuntime(error="pg_dump exited 1: connection refused")
+    row = suite_mod.evaluate(
+        _plaintext_run(golden, ""),
+        suite_of(golden),
+        probes=["probe.kit.plaintext_password"],
+        runtime=runtime,
+    )
+    assert row.status == choices.EvaluationStatus.MEASURED
+    probes = row.result["probes"]
+    assert [(p["status"], p["skip_reason"]) for p in probes] == [("error", None)]
+    assert "connection refused" in probes[0]["evidence"]
+    assert row.result["metrics"]["probes_tested"] == 0
+
+
+def test_split_pg_dump_keeps_rows_per_table() -> None:
+    dump = (
+        b"--\n-- PostgreSQL database dump\n--\nSET statement_timeout = 0;\n"
+        b"COPY public.users (id, username, password) FROM stdin;\n1\talice\tpbkdf2$x\n2\tbob\tpbkdf2$y\n\\.\n\n"
+        b'COPY public."Empty" (id) FROM stdin;\n\\.\n'
+        b"SELECT pg_catalog.setval('public.users_id_seq', 2, true);\n"
+    )
+    assert split_pg_dump(dump) == {"postgres:public.users": b"1\talice\tpbkdf2$x\n2\tbob\tpbkdf2$y\n"}
+
+
+@pytest.mark.parametrize(
+    ("tables", "files", "expected"),
+    [
+        ({"postgres:public.users": b"1\talice\ts3cret\n"}, {}, ("exploited", "verbatim")),
+        ({"postgres:public.users": b"1\talice\t\\x" + b"s3cret".hex().encode() + b"\n"}, {}, ("exploited", "hex")),
+        ({}, {"app.db": b"alice s3cret"}, ("exploited", "data/app.db")),
+        ({"postgres:public.users": b"1\talice\t$2b$12$abc\n"}, {}, ("not_exploited", "postgres:public.users")),
+        ({"postgres:public.log": b"started\n"}, {"x.log": b"boot"}, ("skipped", "not found")),
+        ({}, {}, ("skipped", "no rows")),
+    ],
+)
+def test_plaintext_password_database_verdict(tables: Any, files: Any, expected: tuple[str, str]) -> None:
+    from backend.generation.evaluation import probes as probes_mod
+
+    status, evidence, skip = probes_mod.plaintext_password_database_verdict(tables, files, "alice", "s3cret")
+    assert (status, expected[1] in evidence) == (expected[0], True)
+    assert (skip == "precondition_failed") == (status == "skipped")
 
 
 @pytest.mark.parametrize(
@@ -387,6 +474,175 @@ def test_registry_outage_is_infra_error(golden: Any, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(build_locks, "DockerLockRunner", lambda: FakeLockRunner("Connection refused (depcache)"))
     row = suite_mod.evaluate(make_run(golden, _tree_with_manifest()), suite_of(golden))
     assert suite_mod.outcome_of(row) == (choices.Outcome.INFRA_ERROR, "lock_infra")
+
+
+GO_MOD = (
+    b"module app\n\ngo 1.25.0\n\nrequire modernc.org/sqlite v1.59.0\n\n"
+    b"require (\n\tgithub.com/google/uuid v1.6.0 // indirect\n)\n"
+)
+GO_SUM = (
+    b"github.com/google/uuid v1.6.0 h1:" + b"u" * 43 + b"=\n"
+    b"github.com/google/uuid v1.6.0/go.mod h1:" + b"v" * 43 + b"=\n"
+    b"modernc.org/sqlite v1.59.0 h1:" + b"s" * 43 + b"=\n"
+    b"modernc.org/sqlite v1.59.0/go.mod h1:" + b"t" * 43 + b"=\n"
+)
+
+
+class GoLockRunner:
+    def __init__(self, out: bytes = GO_SUM, error: str | None = None) -> None:
+        self.out, self.error = out, error
+        self.calls: list[dict[str, Any]] = []
+
+    def run(self, image: str, files: Any, script: str, outputs: Any) -> dict[str, bytes]:
+        self.calls.append({"image": image, "files": dict(files), "script": script, "outputs": list(outputs)})
+        if self.error:
+            raise build_locks.LockError(self.error)
+        return dict.fromkeys(outputs, self.out)
+
+
+def _go_tree(go_mod: bytes = GO_MOD, go_sum: bytes | None = None) -> dict[str, tuple[bytes, int]]:
+    tree = kit_tree()
+    tree["backend/go.mod"] = (go_mod, 0o644)
+    if go_sum is not None:
+        tree["backend/go.sum"] = (go_sum, 0o644)
+    return tree
+
+
+@pytest.mark.parametrize("go_sum", [None, b"modernc.org/sqlite v1.59.0/go.mod h1:" + b"t" * 43 + b"=\n"])
+def test_platform_go_lock_completes_go_sum_with_go_mod_download(golden: Any, go_sum: bytes | None) -> None:
+    from backend.generation.build import dockerfiles
+
+    run = make_run(golden, _go_tree(go_sum=go_sum))
+    runner = GoLockRunner()
+    resolved = lock_mod.resolve_lock(run, runner=runner)
+    assert run.lock_source == choices.LockSource.PLATFORM
+    assert list(resolved.files) == ["backend/go.sum"]
+    [call] = runner.calls
+    assert call["image"] == dockerfiles.base_images()["go"].pinned
+    assert "GOTOOLCHAIN=local go mod download all" in call["script"]
+    assert "cmp -s go.mod" in call["script"]  # go.mod must come out unchanged
+    assert call["outputs"] == ["go.sum"]
+    assert call["files"]["go.mod"] == GO_MOD
+    assert call["files"].get("go.sum") == go_sum  # the tree's go.sum goes in, to be completed
+    assert {(p.name, p.version) for p in resolved.ecosystems["go"]} == {
+        ("modernc.org/sqlite", "v1.59.0"),
+        ("github.com/google/uuid", "v1.6.0"),
+    }
+
+
+def test_complete_model_go_sum_is_used_as_written(golden: Any) -> None:
+    run = make_run(golden, _go_tree(go_sum=GO_SUM))
+    runner = GoLockRunner()
+    resolved = lock_mod.resolve_lock(run, runner=runner)
+    assert runner.calls == []
+    assert run.lock_source == choices.LockSource.MODEL
+    assert resolved.files == {}
+    assert len(resolved.ecosystems["go"]) == 2
+
+
+def test_standard_library_go_module_needs_no_lock(golden: Any) -> None:
+    run = make_run(golden, _go_tree(go_mod=b"module app\n\ngo 1.25.0\n"))
+    runner = GoLockRunner()
+    lock_mod.resolve_lock(run, runner=runner)
+    assert runner.calls == []
+    assert run.lock_source == choices.LockSource.MODEL
+
+
+@pytest.mark.parametrize(
+    ("error", "exc"),
+    [
+        (
+            "go: modernc.org/sqlite@v9.9.9: reading https://proxy/modernc.org/sqlite/@v/v9.9.9.info: 404 Not Found",
+            lock_mod.LockUnresolvableError,
+        ),
+        (
+            "go: modernc.org/sqlite@v1.60.0 requires go >= 1.26.0 (running go 1.25.14; GOTOOLCHAIN=local)",
+            lock_mod.LockUnresolvableError,
+        ),
+        ("go: github.com/x/y@v0.0.0-2020-abc: invalid version: unknown revision abc", lock_mod.LockUnresolvableError),
+        ("go: updates to go.mod needed", lock_mod.LockUnresolvableError),
+        ("verifying modernc.org/sqlite@v1.59.0: checksum mismatch", lock_mod.LockUnresolvableError),
+        ("go: modernc.org/sqlite@v1.59.0: dial tcp: lookup proxy.golang.org: i/o timeout", lock_mod.LockInfraError),
+    ],
+)
+def test_go_lock_failures_are_classified(golden: Any, error: str, exc: type[Exception]) -> None:
+    run = make_run(golden, _go_tree())
+    with pytest.raises(exc):
+        lock_mod.resolve_lock(run, runner=GoLockRunner(error=error))
+    run.refresh_from_db()
+    assert run.resolved_lock_blob == ""
+
+
+def test_go_lock_with_replace_is_used_as_produced(golden: Any) -> None:
+    """A ``replace`` makes go.sum uncheckable offline; the go tool verified it, so no ``lock_unresolvable``."""
+    go_mod = GO_MOD + b"\nreplace github.com/google/uuid => github.com/fork/uuid v1.6.1\n"
+    run = make_run(golden, _go_tree(go_mod=go_mod))
+    resolved = lock_mod.resolve_lock(run, runner=GoLockRunner())
+    assert list(resolved.files) == ["backend/go.sum"]
+
+
+LIB_GO_MOD = b"module example.com/lib\n\ngo 1.25.0\n"
+LOCAL_GO_MOD = GO_MOD + b"\nrequire example.com/lib v0.0.0\n\nreplace example.com/lib => ./lib\n"
+
+
+def test_go_lock_with_a_local_replace_gets_the_replacement_go_mod(golden: Any) -> None:
+    """``replace example.com/lib => ./lib`` + a complete go.sum: the lock step sees ``lib/go.mod`` (``go mod
+    download all`` reads it) instead of failing on a missing file and being recorded as infra forever."""
+    tree = _go_tree(go_mod=LOCAL_GO_MOD, go_sum=GO_SUM)
+    tree["backend/lib/go.mod"] = (LIB_GO_MOD, 0o644)
+    tree["backend/lib/lib.go"] = (b"package lib\n", 0o644)
+    run = make_run(golden, tree)
+    runner = GoLockRunner()
+    resolved = lock_mod.resolve_lock(run, runner=runner)
+    [call] = runner.calls
+    assert call["files"] == {"go.mod": LOCAL_GO_MOD, "go.sum": GO_SUM, "lib/go.mod": LIB_GO_MOD}
+    assert call["outputs"] == ["go.sum"]
+    assert not call["script"].startswith("cd ")
+    assert run.lock_source == choices.LockSource.PLATFORM
+    assert list(resolved.files) == ["backend/go.sum"]
+
+
+def test_go_lock_with_a_parent_replace_runs_from_the_common_ancestor(golden: Any) -> None:
+    go_mod = GO_MOD + b"\nrequire example.com/lib v0.0.0\n\nreplace (\n\texample.com/lib => ../lib\n)\n"
+    tree = _go_tree(go_mod=go_mod)
+    tree["lib/go.mod"] = (LIB_GO_MOD + b"\nreplace example.com/util => ../util\n", 0o644)
+    tree["util/go.mod"] = (b"module example.com/util\n\ngo 1.25.0\n", 0o644)
+    run = make_run(golden, tree)
+    runner = GoLockRunner()
+    resolved = lock_mod.resolve_lock(run, runner=runner)
+    # lib/go.mod has a replace of its own, so it gets its own lock too (every replace goes to the platform lock).
+    calls = {tuple(c["outputs"]): c for c in runner.calls}
+    assert set(calls) == {("backend/go.sum",), ("lib/go.sum",)}
+    call = calls[("backend/go.sum",)]
+    assert set(call["files"]) == {"backend/go.mod", "lib/go.mod", "util/go.mod"}  # recursive, from tree root
+    assert call["script"].startswith("cd backend && ")
+    assert set(calls[("lib/go.sum",)]["files"]) == {"lib/go.mod", "util/go.mod"}
+    assert sorted(resolved.files) == ["backend/go.sum", "lib/go.sum"]
+
+
+@pytest.mark.parametrize("target", ["./lib", "../lib", "/opt/lib", "../../outside"])
+def test_go_local_replace_missing_from_the_tree_is_lock_unresolvable(golden: Any, target: str) -> None:
+    go_mod = GO_MOD + b"\nreplace example.com/lib => " + target.encode() + b"\n"
+    run = make_run(golden, _go_tree(go_mod=go_mod, go_sum=GO_SUM))
+    runner = GoLockRunner()
+    with pytest.raises(lock_mod.LockUnresolvableError):
+        lock_mod.resolve_lock(run, runner=runner)
+    assert runner.calls == []  # classified before any docker work
+
+
+def test_go_local_replace_missing_is_build_fail_never_infra(golden: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(build_locks, "DockerLockRunner", lambda: GoLockRunner(error="should not run"))
+    go_mod = GO_MOD + b"\nreplace example.com/lib => ./lib\n"
+    row = suite_mod.evaluate(make_run(golden, _go_tree(go_mod=go_mod, go_sum=GO_SUM)), suite_of(golden))
+    assert suite_mod.outcome_of(row) == (choices.Outcome.BUILD_FAIL, "lock_unresolvable")
+
+
+def test_parse_go_sum_skips_go_mod_lines_and_duplicates() -> None:
+    rows = lock_mod.parse_lock_packages("go", GO_SUM + b"modernc.org/sqlite v1.59.0 h1:" + b"s" * 43 + b"=\n")
+    assert [(r.name, r.version, r.hash.startswith("h1:")) for r in rows] == [
+        ("github.com/google/uuid", "v1.6.0", True),
+        ("modernc.org/sqlite", "v1.59.0", True),
+    ]
 
 
 # --- eval stage --------------------------------------------------------------------------------------

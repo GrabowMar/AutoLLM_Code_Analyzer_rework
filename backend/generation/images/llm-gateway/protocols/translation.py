@@ -44,6 +44,7 @@ SYNTHETIC = "synthetic"
 # Finish reasons of the canonical format.
 CHAT_FINISH = ("stop", "length", "tool_calls", "content_filter", "error")
 STREAM_ENDED_EARLY = "upstream stream ended before the turn finished"
+FINISHED_WITH_ERROR = "upstream ended the turn with finish_reason=error"
 
 
 class TranslationError(ValueError):
@@ -271,6 +272,8 @@ class ChatStreamReader:
                 continue
             delta = choice.get("delta") or choice.get("message") or {}
             events.extend(delta_events(delta))
+            if choice.get("error") and not payload.get("error"):
+                events.append(("error", choice["error"]))  # OpenRouter's mid-generation error on the choice
             if choice.get("finish_reason"):
                 events.append(("finish", choice["finish_reason"]))
         if payload.get("usage"):
@@ -314,6 +317,8 @@ def completion_events(payload: Mapping[str, Any]) -> list[tuple[Any, ...]]:
     choices = payload.get("choices") or []
     choice = choices[0] if choices and isinstance(choices[0], Mapping) else {}
     events.extend(delta_events(choice.get("message") or {}))
+    if choice.get("error") and not payload.get("error"):
+        events.append(("error", choice["error"]))
     if choice.get("finish_reason"):
         events.append(("finish", choice["finish_reason"]))
     if payload.get("usage"):
@@ -415,6 +420,26 @@ def chat_error_text(payload: Any) -> tuple[str, str | None]:
     return "upstream error", None
 
 
+def completion_failure(payload: Any) -> tuple[str, str | None] | None:
+    """``(message, code)`` when a non-streamed chat completion is a failed turn, else ``None``.
+
+    A failed turn is an error object (top level, or OpenRouter's ``choices[0].error``) or
+    ``finish_reason == "error"``, even with partial content: every front answers it with its native error
+    (as a stream that ends that way does), never with a normal-looking answer."""
+    if not isinstance(payload, Mapping):
+        return None
+    choices = payload.get("choices") or []
+    choice = choices[0] if choices and isinstance(choices[0], Mapping) else {}
+    err = payload.get("error") or choice.get("error")
+    if err:
+        return chat_error_text({"error": err})
+    if choice.get("finish_reason") == "error":
+        native = choice.get("native_finish_reason")
+        message = f"{FINISHED_WITH_ERROR} ({native})" if native and native != "error" else FINISHED_WITH_ERROR
+        return message, None
+    return None
+
+
 CONTEXT_OVERFLOW_HINTS = (
     "context length",
     "context_length",
@@ -454,6 +479,19 @@ def text_of_parts(parts: Any, *, keys: tuple[str, ...] = ("text",)) -> str:
     return "".join(out)
 
 
+def turn_failure(turn: ChatTurn, failure: Any = None) -> tuple[str, str | None] | None:
+    """``(message, code)`` when a streamed turn failed (transport ``failure``, an error event,
+    ``finish_reason == "error"`` or no finish at all), else ``None``."""
+    problem = failure or turn.error
+    if problem:
+        return chat_error_text({"error": problem})
+    if turn.finish_reason == "error":
+        return FINISHED_WITH_ERROR, None
+    if turn.finish_reason is None:
+        return STREAM_ENDED_EARLY, None
+    return None
+
+
 def finish_from_chat(turn: ChatTurn) -> str:
     """The canonical finish of a turn (tool calls make an unspecified or ``stop`` finish ``tool_calls``)."""
     finish = turn.finish_reason or ("error" if turn.error else "stop")
@@ -469,9 +507,14 @@ def completion_sse(payload: Mapping[str, Any]) -> bytes:
     chunk: dict[str, Any] = {
         k: payload[k] for k in ("id", "model", "provider", "created") if payload.get(k) is not None
     }
-    chunk["choices"] = [
-        {"index": 0, "delta": dict(choice.get("message") or {}), "finish_reason": choice.get("finish_reason")},
-    ]
+    out_choice: dict[str, Any] = {
+        "index": 0,
+        "delta": dict(choice.get("message") or {}),
+        "finish_reason": choice.get("finish_reason"),
+    }
+    if choice.get("error"):
+        out_choice["error"] = choice["error"]
+    chunk["choices"] = [out_choice]
     if payload.get("usage"):
         chunk["usage"] = payload["usage"]
     if payload.get("error"):

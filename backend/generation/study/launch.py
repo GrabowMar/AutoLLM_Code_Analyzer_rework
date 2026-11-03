@@ -119,6 +119,7 @@ _KIND_MODELS: Final = {
     "prompt_set": "PromptSet",
     "sampling_preset": "SamplingPreset",
     "resource_policy": "ResourcePolicy",
+    "eval_suite": "EvalSuite",
 }
 
 
@@ -566,6 +567,91 @@ def _prereg(study: Study, bundle: PlanBundle, policy: ResourcePolicyContent, pla
     )
 
 
+def _eval_stages(study: Study) -> dict[str, bool]:
+    from backend.generation.evaluation.levels import stages_for
+
+    return stages_for(design_rules.parse_design(study.design).evaluation)
+
+
+def _queue_baselines(study: Study, bundle: PlanBundle, units: dict[int, StudyUnit]) -> int:
+    """Queue the starter baseline of every (starter, task version, auth mode) of the plan (spec 8.5).
+
+    App studies whose evaluation runs the baseline stage only. All cells of the plan count (the main stage of a
+    piloted study too), so a later stage needs no baseline of its own. ``queue_baseline`` (WP-09) skips a
+    triple that already has an ``EvalBaseline``; a triple whose baseline run is still pending or running is
+    skipped here. A failure to queue one is logged and leaves that ``baseline_pass_rate`` ``None`` (not
+    measured, never 0); it never blocks the launch.
+    """
+    queue = get_deps().queue_baseline
+    if queue is None or study.mode != "app" or not _eval_stages(study).get("baseline"):
+        return 0
+    from backend.generation.models import EvalSuite
+    from backend.generation.models import Starter
+    from backend.generation.models.choices import ReferenceOf
+    from backend.generation.models.choices import RunKind
+
+    triples: dict[tuple[str, int, str, str], None] = {}
+    for cell in bundle.plan.cells:
+        manifest = cell.manifest
+        unit = units.get(cell.unit_index)
+        if manifest is None or manifest.starter is None or unit is None or unit.task_version_id is None:
+            continue
+        suite_ref = manifest.planned_evaluation.eval_suite.ref
+        auth_mode = str(cell.levels.get("auth_mode") or "contract_bearer")
+        triples[(manifest.starter.ref, unit.task_version_id, auth_mode, suite_ref)] = None
+    rows = _Rows()
+    queued = 0
+    for starter_ref, task_version_id, auth_mode, suite_ref in triples:
+        try:
+            with transaction.atomic():
+                slug, _, rest = starter_ref.partition("@")
+                starter = Starter.objects.get(slug=slug, version=int(rest.split("#", 1)[0]))
+                suite = rows.get("eval_suite", suite_ref)
+                if GenerationRun.objects.filter(
+                    kind=RunKind.REFERENCE,
+                    reference_of=ReferenceOf.STARTER_BASELINE,
+                    starter=starter,
+                    task_version_id=task_version_id,
+                    auth_mode=auth_mode,
+                    execution__eval_suite=suite.pinned_ref,
+                    status__in=(RunStatus.PENDING, RunStatus.RUNNING),
+                ).exists():
+                    continue
+                task_version = _unit_task_version(units, task_version_id)
+                if queue(starter, task_version, auth_mode, suite) is not None:
+                    queued += 1
+        except (EvalSuite.DoesNotExist, Starter.DoesNotExist, ValueError) as exc:
+            logger.warning("study %s: no starter baseline for %s (%s)", study.pk, starter_ref, exc)
+        except Exception:
+            logger.exception("study %s: queueing the starter baseline of %s failed", study.pk, starter_ref)
+    return queued
+
+
+def _unit_task_version(units: dict[int, StudyUnit], task_version_id: int) -> Any:
+    return next(u.task_version for u in units.values() if u.task_version_id == task_version_id)
+
+
+def _attach_retest(study: Study) -> StudyPostRun | None:
+    """A ``completed``-triggered post-run that re-evaluates ``Design.evaluation.retest_fraction`` of the runs.
+
+    Test-retest agreement (``evaluation.retest.run_retests``, WP-09; spec 8.5) needs the tester, so app
+    studies whose evaluation runs the functional stage only. It is an ``analysis`` post-run with no tools,
+    no report and ``retest: true`` (``study.automation.run_post_run``); the executor starts it once the
+    study is completed or stopped.
+    """
+    design = design_rules.parse_design(study.design)
+    if study.mode != "app" or design.evaluation.retest_fraction <= 0 or not _eval_stages(study).get("functional"):
+        return None
+    if study.post_runs.filter(kind=PostRunKind.ANALYSIS, config__retest=True).exists():
+        return None
+    return StudyPostRun.objects.create(
+        study=study,
+        kind=PostRunKind.ANALYSIS,
+        trigger=PostRunTrigger.COMPLETED,
+        config={"tool_slugs": [], "only_passing": False, "report": False, "retest": True},
+    )
+
+
 def launch(
     study: Study,
     plan_hash: str,
@@ -629,6 +715,8 @@ def launch(
                 trigger=PostRunTrigger.COMPLETED,
                 config={"detectors": "default"},
             )
+        _queue_baselines(locked, bundle, units)
+        _attach_retest(locked)
         _enqueue_on_commit(run_ids)
         _publish_state(locked)
     study.refresh_from_db()

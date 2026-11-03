@@ -12,7 +12,9 @@ from an area that has not landed yet (the worker then puts the post-run back to 
   fires a burst of catch-up runs (the no-burst rule; v2's reconciler fast-forward is folded in here).
   Draining stops schedule firing. ``skip_if_active`` skips a fire while the study (or, for
   ``clone_and_run``, a clone it launched) still has pending or running runs, or is paused.
-* **Post-runs** (``StudyPostRun``): ``analysis`` runs the configured analyzers sequentially over the study's
+* **Post-runs** (``StudyPostRun``): ``analysis`` first re-evaluates the retest sample when its config says
+  ``retest: true`` (``evaluation.retest.run_retests``; an app study gets such a post-run, with no tools and
+  no report, at launch), then runs the configured analyzers sequentially over the study's
   usable current main-stage runs that a configured tool has not measured yet (``only_passing`` keeps runs
   with pass rate 1), then the study conditions report; ``patterns`` runs the post-run's pattern analysis,
   creating it first when the post-run has none (WP-13: ``patterns.create_pattern_run(..., queue=False)`` pins
@@ -73,7 +75,7 @@ CRON_PREVIEW_RUNS: Final = 5
 MAX_REPLICATES_PER_FIRE: Final = 5
 DEFAULT_NAME_TEMPLATE: Final = "{name} {date}"
 _ACTIVE: Final = (RunStatus.PENDING, RunStatus.RUNNING)
-_ANALYSIS_DEFAULTS: Final = {"tool_slugs": [], "only_passing": False, "report": True}
+_ANALYSIS_DEFAULTS: Final = {"tool_slugs": [], "only_passing": False, "report": True, "retest": False}
 
 
 class ScheduleError(ValueError):
@@ -358,11 +360,14 @@ def normalize_post_run_config(kind: str, config: dict[str, Any] | None) -> dict[
     if not isinstance(tools, list) or not all(isinstance(t, str) and t for t in tools):
         msg = "tool_slugs must be a list of analyzer slugs"
         raise ScheduleError(msg)
-    return {
+    out = {
         "tool_slugs": list(dict.fromkeys(tools)),
         "only_passing": bool(raw.get("only_passing", False)),
         "report": bool(raw.get("report", True)),
     }
+    if raw.get("retest"):
+        out["retest"] = True
+    return out
 
 
 def create_post_run(study: Study, *, kind: str, trigger: str, config: dict[str, Any] | None) -> StudyPostRun:
@@ -434,6 +439,18 @@ def analysis_targets(study: Study, *, only_passing: bool, tool_slugs: list[str])
             run.missing_tool_slugs = missing  # type: ignore[attr-defined]
             targets.append(run)
     return targets
+
+
+def _run_retests(post_run: StudyPostRun, study: Study) -> None:
+    """Re-evaluate the study's retest sample (``evaluation.retest.run_retests``, WP-09; spec 8.5).
+
+    ``retest_agreement`` (results) reads the rows; runs already retested are skipped, so a post-run that
+    restarts after a lost lease does not retest twice.
+    """
+    from backend.generation.evaluation.retest import run_retests
+
+    created = run_retests(study)
+    _save(post_run, progress={**dict(post_run.progress or {}), "retests": len(created)})
 
 
 def _run_analyses(post_run: StudyPostRun, study: Study, config: dict[str, Any]) -> bool:
@@ -530,6 +547,8 @@ def run_post_run(post_run: StudyPostRun) -> None:
             _run_patterns(post_run, study, study.created_by)
         else:
             settings_ = {**_ANALYSIS_DEFAULTS, **config}
+            if settings_.get("retest"):
+                _run_retests(post_run, study)
             if not _run_analyses(post_run, study, settings_):
                 return  # lease lost: the new owner finishes it
             if settings_.get("report"):

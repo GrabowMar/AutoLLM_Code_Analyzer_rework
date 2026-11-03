@@ -89,6 +89,8 @@ extend-exclude = [
   "*/migrations/*.py",
   # Pattern-detector fixtures: deliberately vulnerable sample code, not project code.
   "backend/generation/data/detectors/tests/*",
+  # Task oracle / conformance-kit reference apps (spec 8.5, 11.1): sample apps evaluated as data, not project code.
+  "backend/generation/data/tasks/*/reference/*",
   "staticfiles/*",
 ]
 lint.select = [
@@ -227,9 +229,10 @@ plugins = [
   "mypy_django_plugin.main",
 ]
 warn_unused_configs = true
-# The golden fixture trees are sample apps (their `backend/` would shadow the real package).
+# The golden fixture trees and the task reference apps are sample apps (their `backend/` would shadow the real package).
 exclude = [
   "backend/generation/testing/golden_library/(parent_app|starters)/",
+  "backend/generation/data/tasks/[^/]+/reference/",
 ]
 overrides = [
   # Django migrations should not produce any errors:

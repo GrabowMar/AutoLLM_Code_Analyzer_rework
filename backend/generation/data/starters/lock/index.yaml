@@ -67,7 +67,7 @@ locks:
   backend/spring-boot/minimal:backend/pom.xml:
     image: maven:3.9-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320
     lock: backend/dependency-list.txt
-    lock_sha: a6c8b4edb76e4c9098b6b462016e49802373719767c423907bc8cd3381738696
+    lock_sha: c2d89c69e126a10e9b76424c83ef4bdbc0f35b464db4638f64282967192ed026
     manifest: backend/pom.xml
     manifest_sha: 143cca6e24cdc6b700b167aea426b9965b5a5adf5db3988f5c5c8f651d65a919
     tool: mvn -q -B dependency:resolve && mvn -q -B dependency:list -DoutputFile=dependency-list.txt -DincludeScope=runtime

@@ -10,7 +10,10 @@ Spec sections 6.13, 6.14, 9.4, 13.4 and Appendix A #11-#17. The single implement
   measures functional checks; truncated runs (budget, wall clock, idle, max turns) are **included**.
   ``sensitivity=exclude_truncated`` repeats the analysis without them (``paired.sensitivity`` names the
   conditions whose direction or significance changes). A tested run whose evaluation was not measured is
-  ``not_measured`` (never 0); ``infra_error`` and ``excluded`` runs are attrition (reported per condition).
+  ``not_measured`` (never 0), and so is a ``tested`` run with ``outcome_reason`` ``not_tested:<level>`` (built
+  at a level without the tester); ``infra_error`` and ``excluded`` runs are attrition (reported per condition).
+* **common_pass_rate** is computed here from ``RunEvaluation.result.checks``: the pass rate over the checks
+  every auth mode of a unit reports (:func:`_common_pass_rates`).
 * **Complete blocks.** Paired and by-condition figures use the cells of complete blocks only
   (``budget.report.complete_blocks``): a budget stop or an unfinished block never compares one condition's
   finished cells with another's missing ones (``n_missing.incomplete_block``); the gate embeds
@@ -74,6 +77,7 @@ _TERMINAL: Final = ("completed", "cancelled", "stopped")
 _MODEL_FAILURES: Final = (Outcome.BUILD_FAIL, Outcome.START_FAIL, Outcome.OUTPUT_INVALID)
 _STOP_REASONS: Final = ("budget_stop", "stopped_by_rule", "cancelled")
 _FUNCTIONAL_LEVELS: Final = ("functional", "security", "full")
+NOT_TESTED_PREFIX: Final = "not_tested:"
 NOTE_INTERIM: Final = "Interim: the study has not ended; p-values are withheld until it completes"
 NOTE_POST_HOC: Final = "Baseline chosen post hoc; p-values exploratory"
 NOTE_NO_PREREGISTERED: Final = "No pre-registered baseline; the first condition is used (exploratory)"
@@ -149,6 +153,55 @@ def _functional_measured(design: dict[str, Any]) -> bool:
     return evaluation.get("eval_level", "security") in _FUNCTIONAL_LEVELS
 
 
+def _not_tested(reason: str | None) -> bool:
+    """``outcome_reason`` ``not_tested:<level>`` (WP-09): ``tested`` at a level without the tester."""
+    return (reason or "").startswith(NOT_TESTED_PREFIX)
+
+
+def _counted_checks(result: dict[str, Any]) -> dict[str, bool]:
+    """``{check id: passed}`` of the checks a pass rate counts (``evaluation.metrics.compute``: no infra
+    checks, no flaky ones)."""
+    flaky = set(result.get("flaky_checks") or [])
+    return {
+        str(check["id"]): check.get("status") == "pass"
+        for check in result.get("checks") or []
+        if isinstance(check, dict)
+        and check.get("id")
+        and check.get("category") != "infra"
+        and check["id"] not in flaky
+    }
+
+
+def _common_pass_rates(
+    evaluations: dict[Any, dict[str, Any]],
+    runs: dict[Any, dict[str, Any]],
+    unit_of: dict[Any, Any],
+) -> dict[Any, float | None]:
+    """``common_pass_rate`` per run: the pass rate over the checks common to every auth mode of the study.
+
+    Computed from ``RunEvaluation.result.checks`` (WP-09 leaves the metric ``None`` in one evaluation). For
+    each unit, the check ids of an auth mode are those its measured evaluations report; the common set is
+    their intersection over the unit's auth modes, so an auth-mode-specific check (``anon_401``,
+    ``other_user``, ...) never makes conditions with different auth modes incomparable. An auth mode with no
+    measured evaluation of the unit contributes no set. ``None`` when a run has no common check.
+    """
+    checks: dict[Any, dict[str, bool]] = {}
+    ids_by_unit: dict[Any, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    for run_id, evaluation in evaluations.items():
+        result = evaluation["result"] if isinstance(evaluation["result"], dict) else {}
+        run = runs.get(run_id)
+        if run is None or evaluation["status"] != "measured" or not result.get("measured"):
+            continue
+        checks[run_id] = _counted_checks(result)
+        ids_by_unit[unit_of.get(run_id)][run["auth_mode"] or "contract_bearer"] |= set(checks[run_id])
+    common = {unit: set.intersection(*by_mode.values()) if by_mode else set() for unit, by_mode in ids_by_unit.items()}
+    out: dict[Any, float | None] = {}
+    for run_id, verdicts in checks.items():
+        shared = [passed for cid, passed in verdicts.items() if cid in common.get(unit_of.get(run_id), set())]
+        out[run_id] = (sum(shared) / len(shared)) if shared else None
+    return out
+
+
 def _load(study: Study, metric: str) -> tuple[list[_Cell], dict[int, bool]]:
     """Main-stage cells with their current run; plus ``seed_forwarded`` per condition id."""
     from backend.generation.models import GenerationRun
@@ -185,6 +238,7 @@ def _load(study: Study, metric: str) -> tuple[list[_Cell], dict[int, bool]]:
             "execution",
             "duration_seconds",
             "attempt",
+            "auth_mode",
         )
     }
     evaluations: dict[Any, dict[str, Any]] = {}
@@ -194,6 +248,8 @@ def _load(study: Study, metric: str) -> tuple[list[_Cell], dict[int, bool]]:
         .values("run_id", "status", "result", "eval_suite__slug", "eval_suite__version")
     ):
         evaluations.setdefault(row["run_id"], row)
+    unit_of = {row["current_id"]: row["unit_id"] for row in rows if row["current_id"]}
+    common_rates = _common_pass_rates(evaluations, runs, unit_of)
     providers: dict[Any, set[str]] = defaultdict(set)
     for run_id, served in RunAttempt.objects.filter(run_id__in=ids).values_list("run_id", "served"):
         providers[run_id] |= {p for p in ((served or {}).get("providers") or {}) if p != "unknown"}
@@ -236,9 +292,14 @@ def _load(study: Study, metric: str) -> tuple[list[_Cell], dict[int, bool]]:
             cell.suite = f"{evaluation['eval_suite__slug']}@{evaluation['eval_suite__version']}"
             result = evaluation["result"] if isinstance(evaluation["result"], dict) else {}
             if evaluation["status"] == "measured" and result.get("measured"):
-                cell.eval_metrics = result.get("metrics") or {}
+                cell.eval_metrics = {
+                    **(result.get("metrics") or {}),
+                    "common_pass_rate": common_rates.get(run["pk"]),
+                }
         if run["status"] in (RunStatus.PENDING, RunStatus.RUNNING):
             cell.code = "p"
+        elif run["usable"] and run["outcome"] == Outcome.TESTED and _not_tested(run["outcome_reason"]):
+            cell.code = "u"  # built (and started) at a level without the tester: not measured, never 0
         elif run["usable"] and run["outcome"] == Outcome.TESTED:
             summary = metrics.get("eval") if isinstance(metrics.get("eval"), dict) else {}
             value = _float(cell.eval_metrics.get(key))

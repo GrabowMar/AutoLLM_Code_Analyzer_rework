@@ -58,12 +58,14 @@ def test_runs_report_kinds_outcomes_studies_and_tasks():
 
     data = model_insights(model, user)
 
-    assert data["generation"]["jobs_total"] == 2
-    assert data["generation"]["by_mode"] == {"app_agentic": 2}
+    assert data["generation"]["runs_total"] == 2
+    assert data["generation"]["by_kind"] == {"app_agentic": 2}
     assert data["generation"]["by_outcome"] == {"tested": 1, "infra_error": 1}
-    assert data["generation"]["repair_rate"] is None
-    assert [(s["name"], s["jobs"]) for s in data["experiments"]] == [("Harness study", 1)]
-    slugs = {t["slug"] for t in data["templates"]}
+    # v2 shapes are gone: no repair/continuation keys, no `experiments`/`templates`.
+    assert not {"repair_rate", "continuations_used", "jobs_total", "by_mode", "engines"} & data["generation"].keys()
+    assert not {"experiments", "templates"} & data.keys()
+    assert [(s["name"], s["runs"]) for s in data["studies"]] == [("Harness study", 1)]
+    slugs = {t["slug"] for t in data["tasks"]}
     assert run.task_version.task.slug in slugs
 
 

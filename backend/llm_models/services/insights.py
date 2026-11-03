@@ -43,7 +43,7 @@ UNRATED = "unrated"
 RANKINGS_CACHE_SECONDS = 60
 CATALOG_CACHE_SECONDS = 600
 TOP_RULES = 10
-TOP_TEMPLATES = 12
+TOP_TASKS = 12
 
 # Artificial Analysis indices OpenRouter embeds in the catalog payload.
 AA_INDICES = ("intelligence_index", "coding_index", "agentic_index")
@@ -192,10 +192,10 @@ def _generation_stats(runs) -> dict[str, Any]:
     prompt_sum = sum(series["prompt_tokens"])
 
     return {
-        "jobs_total": total,
+        "runs_total": total,
         "by_status": by_status,
-        # Run kinds (app_agentic, slot_single_shot, ...); the key name is kept for the model page.
-        "by_mode": by_kind,
+        # Run kinds (app_agentic, slot_single_shot, ...).
+        "by_kind": by_kind,
         "by_outcome": by_outcome,
         "completed": completed,
         "success": _rate(completed, finished),
@@ -223,24 +223,21 @@ def _generation_stats(runs) -> dict[str, Any]:
             "mean_lines_of_code": _mean(series["lines_of_code"]),
             "median_output_tps": _median(series["output_tps"]),
         },
-        # v3 runs have no repair rounds or continuations: not measured, never 0.
-        "repair_rate": None,
-        "continuations_used": None,
-        "engines": dict(harnesses.most_common()),
+        "harnesses": dict(harnesses.most_common()),
         "providers": dict(_providers([run.id for run in done]).most_common()),
         "terminations": dict(terminations.most_common()),
-        "first_job_at": runs.order_by("created_at").values_list("created_at", flat=True).first(),
-        "last_job_at": runs.order_by("-created_at").values_list("created_at", flat=True).first(),
+        "first_run_at": runs.order_by("created_at").values_list("created_at", flat=True).first(),
+        "last_run_at": runs.order_by("-created_at").values_list("created_at", flat=True).first(),
     }
 
 
-def _template_breakdown(runs) -> list[dict[str, Any]]:
+def _task_breakdown(runs) -> list[dict[str, Any]]:
     """Per task: runs, completed runs and the functional rate of the measured evaluations."""
     rows = (
         runs.exclude(task_version__isnull=True)
         .values("task_version__task__slug")
         .annotate(n=Count("id"), name=Max("task_version__name"))
-        .order_by("-n", "task_version__task__slug")[:TOP_TEMPLATES]
+        .order_by("-n", "task_version__task__slug")[:TOP_TASKS]
     )
     out: list[dict[str, Any]] = []
     for row in rows:
@@ -263,7 +260,7 @@ def _template_breakdown(runs) -> list[dict[str, Any]]:
             {
                 "slug": row["task_version__task__slug"],
                 "name": row["name"],
-                "jobs": int(row["n"]),
+                "runs": int(row["n"]),
                 "completed": completed,
                 "functional": _rate(passed, evaluated),
             },
@@ -283,7 +280,7 @@ def _studies(runs) -> list[dict[str, Any]]:
             "id": str(r["study_id"]),
             "name": r["study__name"],
             "status": r["study__status"],
-            "jobs": int(r["n"]),
+            "runs": int(r["n"]),
             "created_at": r["study__created_at"],
         }
         for r in rows
@@ -400,7 +397,7 @@ def _analysis_stats(jobs) -> dict[str, Any]:
         )
 
     return {
-        "analyzed_jobs": ToolResult.objects.filter(id__in=latest).values("run__generation_job_id").distinct().count(),
+        "analyzed_runs": ToolResult.objects.filter(id__in=latest).values("run__generation_job_id").distinct().count(),
         "findings_static": static,
         "findings_ai": ai,
         "findings_dependency": dependency,
@@ -565,9 +562,8 @@ def model_insights(model: LLMModel, user: AbstractBaseUser | None) -> dict[str, 
         runs = runs.filter(created_by=user)
     return {
         "generation": _generation_stats(runs),
-        "templates": _template_breakdown(runs),
-        # The studies this model ran in (key name kept for the model page).
-        "experiments": _studies(runs),
+        "tasks": _task_breakdown(runs),
+        "studies": _studies(runs),
         "analysis": _analysis_stats(runs),
         "ranking": _ranking_stats(model, user),
         "catalog": _catalog_context(model),

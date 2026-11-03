@@ -75,7 +75,7 @@ function insights(): ModelInsights {
     median: 262_144,
   });
   return {
-    generation: { jobs_total: 0 },
+    generation: { runs_total: 0 },
     ranking: null,
     catalog: {
       input_price: pct(null, null),

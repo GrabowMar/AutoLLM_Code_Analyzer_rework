@@ -478,10 +478,11 @@ def test_recorded_gemini_cli_requests_translate_without_loss():
         assert chat["messages"][0]["role"] == "system"
         assert chat["reasoning"] == {"max_tokens": 8192}
         assert all(t["function"]["parameters"].get("type") == "object" for t in chat["tools"])
-    chat, _ = gemini_generate.to_chat(second["body"], stream=True)
+    chat, _ = gemini_generate.to_chat(second["body"], stream=True, model="google/gemini-2.5-pro")
     assistant, tool = chat["messages"][-2:]
     assert tool["tool_call_id"] == assistant["tool_calls"][0]["id"] == "run_shell_command_1793724095801_0"
-    # Gemini CLI's own placeholder signature is forwarded as a native Gemini detail, never lost.
+    # Gemini CLI's own placeholder signature goes to a Google upstream as a native Gemini detail (there it
+    # means "skip validation"); for any other upstream it is dropped (test_wave3_followups.py).
     assert assistant["reasoning_details"] == [
         {
             "type": "reasoning.encrypted",

@@ -207,6 +207,27 @@ export function findModel(
   );
 }
 
+/**
+ * Model factor levels for `?model=` / `?models=a,b` links (endpoint page, model page): each ref
+ * resolved with `findModel` to its `model_id`, in link order, duplicates dropped. A ref the
+ * catalog does not know is kept verbatim only when it looks like a model id (contains `/`), so
+ * the plan's lint names it; an unknown bare pk is dropped and returned in `unknown`.
+ */
+export function modelLevelsFromRefs(
+  models: LLMModelSummary[],
+  refs: string[],
+): { levels: string[]; unknown: string[] } {
+  const levels: string[] = [];
+  const unknown: string[] = [];
+  for (const ref of refs) {
+    const found = findModel(models, ref);
+    const level = found?.model_id ?? (ref.includes("/") ? ref : null);
+    if (level === null) unknown.push(ref);
+    else if (!levels.includes(level)) levels.push(level);
+  }
+  return { levels, unknown };
+}
+
 export interface ModelEligibilityRules {
   /** A selected harness needs native tool calling. */
   requireTools?: boolean;

@@ -200,12 +200,12 @@ class TestModelInsightsAPI:
         assert resp.status_code == HTTPStatus.OK
         data = resp.json()
         gen = data["generation"]
-        assert gen["jobs_total"] == 2
+        assert gen["runs_total"] == 2
         assert gen["success"]["rate"] == pytest.approx(0.5)
         assert gen["functional"]["successes"] == 1
         assert gen["resources"]["cache_hit_ratio"] == pytest.approx(0.5)
         assert gen["resources"]["cost_per_kloc"] == pytest.approx(0.25)
-        assert gen["engines"] == {"opencode": 1}
+        assert gen["harnesses"] == {"opencode": 1}
         assert data["ranking"]["positions"]["composite"]["rank"] >= 1
         assert data["catalog"]["catalog_size"] == 1
 
