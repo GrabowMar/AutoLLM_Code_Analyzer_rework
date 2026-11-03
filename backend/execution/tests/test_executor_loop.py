@@ -98,6 +98,56 @@ class TestLeadership:
         assert leader.exit_code == 1
         assert GenerationJob.objects.filter(status=S.RUNNING).count() == 0
 
+
+class TestPreviewBuilds:
+    def test_preview_is_run_by_eval_pool_before_a_sandbox_in_small_daemon(self, leader, user, system_ep, settings):
+        from backend.execution.models import RuntimeBuildLease
+        from backend.runtime.models import ContainerAction
+        from backend.runtime.tests.factories import ContainerActionFactory
+
+        settings.APPS_DIND_MEM_LIMIT = "4g"
+        action = ContainerActionFactory(action_type=ContainerAction.ActionType.BUILD)
+        job = make_job(user, make_model(), lane="sandbox")
+
+        def execute(action_id, *, claimed, cancelled):
+            assert action_id == action.pk
+            assert claimed
+            assert not cancelled()
+            assert leader.pools["eval"].inflight == 1
+            assert RuntimeBuildLease.objects.filter(action=action).exists()
+            action.mark_completed()
+
+        with (
+            mock.patch("backend.runtime.services.container_service._execute", side_effect=execute) as build,
+            mock.patch("backend.execution.workers.run_job") as generation,
+        ):
+            leader.tick()
+        build.assert_called_once()
+        generation.assert_not_called()
+        job.refresh_from_db()
+        assert job.status == S.PENDING
+        assert not RuntimeBuildLease.objects.exists()
+
+    def test_pending_preview_prevents_stop_when_idle(self, leader):
+        from backend.runtime.models import ContainerAction
+        from backend.runtime.tests.factories import ContainerActionFactory
+
+        ContainerActionFactory(action_type=ContainerAction.ActionType.BUILD)
+        assert not leader._idle()
+
+    def test_heartbeat_renews_preview_worker_lease(self, leader):
+        from backend.execution import runtime_builds
+        from backend.execution.models import RuntimeBuildLease
+        from backend.runtime.models import ContainerAction
+        from backend.runtime.tests.factories import ContainerActionFactory
+
+        action = ContainerActionFactory(action_type=ContainerAction.ActionType.BUILD)
+        runtime_builds.claim(leader.executor_id, 1)
+        leader.registry.add(action.pk, 0, "preview")
+        RuntimeBuildLease.objects.filter(action=action).update(expires_at=timezone.now())
+        leader.heartbeat()
+        assert not runtime_builds.cancelled(action.pk, leader.executor_id)
+
     def test_a_proxy_that_cannot_bind_stops_the_executor(self, settings):
         # TEST-NET-3 address: not on any interface here -> EADDRNOTAVAIL, like a
         # misconfigured LLM_PROXY_BIND or a container without the llmproxy network.

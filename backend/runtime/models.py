@@ -350,3 +350,38 @@ class Stack(models.Model):
 
     def __str__(self) -> str:
         return f"{self.slug} v{self.version}"
+
+
+class SampleBuildArtifact(models.Model):
+    """One immutable image generation shared by a sample's evaluation and previews.
+
+    Refreshing creates another row rather than changing an image tag that an
+    existing container may still reference. The service serializes producers
+    for each build key; multiple generations of that key are intentional.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    build_key = models.CharField(max_length=64, db_index=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sample_build_artifacts",
+    )
+    image_tag = models.CharField(max_length=250, unique=True)
+    image_id = models.CharField(max_length=100)
+    image_bytes = models.PositiveBigIntegerField(default=0)
+    platform = models.CharField(max_length=80)
+    metadata = models.JSONField(default=dict, blank=True)
+    built_at = models.DateTimeField()
+    expires_at = models.DateTimeField(db_index=True)
+    last_used_at = models.DateTimeField(db_index=True)
+    # Covers the hand-off between returning an image and creating a container.
+    reserved_until = models.DateTimeField(db_index=True)
+
+    class Meta:
+        ordering = ["-built_at"]
+
+    def __str__(self) -> str:
+        return self.image_tag

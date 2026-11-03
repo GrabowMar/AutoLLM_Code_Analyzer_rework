@@ -24,7 +24,10 @@ from backend.runtime.services import port_allocator
 from backend.runtime.services import traefik_router
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from backend.generation.models import GenerationJob
+    from backend.runtime.services.sample_builds import SampleBuildResult
     from backend.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -62,8 +65,10 @@ def create_action(
     container: ContainerInstance,
     action_type: str,
     user: User | None = None,
+    *,
+    cached_build: SampleBuildResult | None = None,
 ) -> ContainerAction:
-    """Persist a ContainerAction and dispatch it in a daemon thread."""
+    """Persist an action; builds are admitted by the executor after commit."""
     action = ContainerAction.objects.create(
         action_id=f"act_{uuid.uuid4().hex[:12]}",
         container=container,
@@ -71,21 +76,56 @@ def create_action(
         status=ContainerAction.Status.PENDING,
         triggered_by=user,
     )
-    _dispatch(action.id)
+    if action_type == ContainerAction.ActionType.BUILD and cached_build is not None:
+        from backend.execution.runtime_builds import claim_cached_start
+
+        owner = claim_cached_start(action)
+        if owner is not None:
+            transaction.on_commit(lambda: _dispatch_cached_start(action.id, owner, cached_build))
+    elif action_type == ContainerAction.ActionType.BUILD:
+        from backend.execution.api import wake_preview_build
+
+        wake_preview_build(action.id)
+    else:
+        transaction.on_commit(lambda: _dispatch(action.id))
     return action
 
 
-def _dispatch(action_id) -> None:
-    dispatch_in_thread(_execute, action_id, name=f"container-action-{action_id}")
+def _dispatch_cached_start(action_id, owner: str, cached_build: SampleBuildResult) -> None:
+    from backend.execution import runtime_builds
+
+    try:
+        dispatch_in_thread(
+            runtime_builds.run_cached_start,
+            action_id,
+            owner,
+            cached_build,
+            name=f"cached-preview-{action_id}",
+        )
+    except Exception as exc:
+        logger.exception("Dispatching cached preview %s failed", action_id)
+        runtime_builds.submission_failed(action_id, owner, str(exc))
 
 
-def _execute(action_id) -> None:
+def _dispatch(action_id, **kwargs) -> None:
+    dispatch_in_thread(_execute, action_id, name=f"container-action-{action_id}", **kwargs)
+
+
+def _execute(
+    action_id,
+    *,
+    claimed: bool = False,
+    cancelled: Callable[[], bool] | None = None,
+    cached_build: SampleBuildResult | None = None,
+) -> None:
     try:
         with transaction.atomic():
             action = ContainerAction.objects.select_for_update().get(id=action_id)
-            if action.status != ContainerAction.Status.PENDING:
+            expected = ContainerAction.Status.RUNNING if claimed else ContainerAction.Status.PENDING
+            if action.status != expected:
                 return
-            action.mark_running()
+            if not claimed:
+                action.mark_running()
 
         container = action.container
         if container is None:
@@ -95,7 +135,7 @@ def _execute(action_id) -> None:
         action_type = action.action_type
 
         if action_type == ContainerAction.ActionType.BUILD:
-            _do_build(action, container)
+            _do_build(action, container, cancelled=cancelled, cached_build=cached_build)
         elif action_type == ContainerAction.ActionType.START:
             _do_start(action, container)
         elif action_type == ContainerAction.ActionType.STOP:
@@ -128,7 +168,13 @@ def _execute(action_id) -> None:
         connection.close()
 
 
-def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
+def _do_build(
+    action: ContainerAction,
+    container: ContainerInstance,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+    cached_build: SampleBuildResult | None = None,
+) -> None:
     if not docker_manager.ping():
         action.mark_failed("Docker daemon unavailable")
         container.status = ContainerInstance.Status.FAILED
@@ -142,25 +188,41 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
 
     job = container.generation_job
     tag = f"backend/{container.name}:latest"
+    cid = ""
 
     try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            build_path = Path(tmpdir)
-            if job is not None:
-                from backend.runtime.services.scaffolding import HealingReport
-                from backend.runtime.services.scaffolding import prepare_build_dir
+        action.update_progress(40)
+        queued_seconds = max(0, (timezone.now() - action.created_at).total_seconds())
+        if job is not None:
+            from backend.runtime.services.sample_builds import build_sample
 
-                healing = HealingReport()
-                prepare_build_dir(job, build_path, report=healing)
-                container.metadata = {**(container.metadata or {}), "healing": healing.to_dict()}
-                container.save(update_fields=["metadata"])
-            else:
+            built = cached_build or build_sample(
+                job,
+                client=docker_manager.client(),
+                force_rebuild=bool((container.config or {}).get("force_rebuild")),
+                cancelled=cancelled,
+            )
+            tag = built.image_tag
+            run_image = built.image_id
+            build_log = built.log
+            container.metadata = {
+                **(container.metadata or {}),
+                "healing": built.healing,
+                "build": {**built.metrics(), "admission_seconds": round(queued_seconds, 3)},
+            }
+        else:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                build_path = Path(tmpdir)
                 _write_minimal_dockerfile(build_path)
+                from backend.runtime.services.build_backend import build
 
-            action.update_progress(40)
-            _, build_log = docker_manager.build_image(str(build_path), tag)
+                built_minimal = build(str(build_path), tag, client=docker_manager.client(), cancelled=cancelled)
+                build_log = built_minimal.log
+                run_image = built_minimal.image_id
 
         container.image = tag
+        # Persist the reference before creating the container so GC protects it.
+        container.save(update_fields=["image", "metadata"])
         action.update_progress(70)
 
         from django.conf import settings
@@ -172,8 +234,12 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
         if container.app_port and not apps_network:
             ports["8000/tcp"] = container.app_port
 
+        if cancelled is not None and cancelled():
+            msg = "Preview build cancelled before container startup"
+            raise RuntimeError(msg)
+        startup_started = time.monotonic()
         cid = docker_manager.run_container(
-            tag,
+            run_image,
             container.name,
             ports,
             env,
@@ -184,6 +250,11 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
         container.save(update_fields=["image", "container_id"])
 
         ok, detail = _verify_running(container)
+        container.metadata = {
+            **container.metadata,
+            "startup_seconds": round(time.monotonic() - startup_started, 3),
+        }
+        container.save(update_fields=["metadata"])
         if not ok:
             container.status = ContainerInstance.Status.FAILED
             container.save(update_fields=["status"])
@@ -191,6 +262,10 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
             action.mark_failed(detail[-4000:])
             publish_container_status(container)
             return
+
+        if cancelled is not None and cancelled():
+            msg = "Preview build cancelled during container startup"
+            raise RuntimeError(msg)
 
         container.status = ContainerInstance.Status.RUNNING
         container.save(update_fields=["status"])
@@ -211,6 +286,9 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
                 logger.exception("Smoke test errored for %s", container.name)
 
         action.update_progress(100)
+        if cancelled is not None and cancelled():
+            msg = "Preview build cancelled during readiness checks"
+            raise RuntimeError(msg)
         action.mark_completed(
             output=f"Built {tag}, container {cid}{smoke_note}\n\n{build_log[-2000:]}",
             exit_code=0,
@@ -219,6 +297,9 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
 
     except Exception as exc:
         logger.exception("Build failed for %s", container.name)
+        if cid:
+            docker_manager.remove(container.name)
+            traefik_router.delete_route(container)
         container.status = ContainerInstance.Status.FAILED
         container.save(update_fields=["status"])
         # Extract detailed Docker build log when available
@@ -226,7 +307,7 @@ def _do_build(action: ContainerAction, container: ContainerInstance) -> None:
             error_detail = docker_manager.extract_build_error(exc)
         except Exception:  # noqa: BLE001
             error_detail = ""
-        error_msg = error_detail or str(exc)
+        error_msg = getattr(exc, "log", "") or error_detail or str(exc)
         action.mark_failed(error_msg[-4000:])
         publish_container_status(container)
 
@@ -378,7 +459,12 @@ def _do_health(action: ContainerAction, container: ContainerInstance) -> None:
         )
 
 
-def build_for_job(job: GenerationJob, user: User | None) -> ContainerInstance:
+def build_for_job(
+    job: GenerationJob,
+    user: User | None,
+    *,
+    force_rebuild: bool = False,
+) -> ContainerInstance:
     """Create a ContainerInstance for *job* and kick off a build action.
 
     In bridge mode (DOCKER_APPS_NETWORK set) the app is reached via a unique
@@ -397,6 +483,7 @@ def build_for_job(job: GenerationJob, user: User | None) -> ContainerInstance:
         status=ContainerInstance.Status.PENDING,
         app_port=app_port,
         created_by=user,
+        config={"force_rebuild": force_rebuild},
     )
 
     if app_port is not None:
@@ -407,7 +494,17 @@ def build_for_job(job: GenerationJob, user: User | None) -> ContainerInstance:
         except PortAllocation.DoesNotExist:
             pass
 
-    create_action(instance, ContainerAction.ActionType.BUILD, user)
+    cached_build = None
+    if not force_rebuild:
+        from backend.runtime.services.sample_builds import cached_sample
+
+        try:
+            cached_build = cached_sample(job, client=docker_manager.client())
+        except Exception:  # noqa: BLE001 - a cache outage falls back to a queued build
+            # Lookup failure takes the ordinary queued build path, where the
+            # worker reports a useful error without losing the saved request.
+            logger.warning("Sample image cache lookup failed for %s", job.id, exc_info=True)
+    create_action(instance, ContainerAction.ActionType.BUILD, user, cached_build=cached_build)
     return instance
 
 

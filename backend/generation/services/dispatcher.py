@@ -31,6 +31,6 @@ def enqueue_jobs(jobs: Iterable[GenerationJob]) -> int:
     return execution_api.enqueue_jobs(jobs)
 
 
-def dispatch_evaluation(job: GenerationJob) -> bool:
+def dispatch_evaluation(job: GenerationJob, *, force_rebuild: bool = False) -> bool:
     """Queue a manual (re-)evaluation of a finished job; it ends in the job's previous status."""
-    return execution_api.request_reeval(job)
+    return execution_api.request_reeval(job, force_rebuild=force_rebuild)

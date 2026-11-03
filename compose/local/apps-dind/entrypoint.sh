@@ -46,7 +46,8 @@ echo "apps-dind: nested containers blocked from private ranges via $uplink"
 # daemon.json's builder GC.
 (
 	while sleep 3600; do
-		docker image prune --all --force --filter until=168h >/dev/null
+		# Sample artifacts have reference-aware TTL/size GC in the executor.
+		docker image prune --all --force --filter until=168h --filter 'label!=llmlab.sample_image=true' >/dev/null
 	done
 ) &
 

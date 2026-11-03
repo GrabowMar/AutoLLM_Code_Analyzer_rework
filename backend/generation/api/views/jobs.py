@@ -413,14 +413,14 @@ def get_job_artifacts(request, job_id: str):
 
 
 @router.post("/jobs/{job_id}/evaluate/", response={200: dict, 400: dict})
-def evaluate(request, job_id: str):
+def evaluate(request, job_id: str, force_rebuild: bool = False):
     """Re-run the platform evaluation (build, run, hidden conformance suite) for a finished job."""
     job = get_object_or_404(GenerationJob, id=_job_uuid(job_id), created_by=request.auth)
     if job.status != GenerationJob.Status.COMPLETED:
         return 400, {"detail": "Only completed jobs can be evaluated."}
     if job.app_requirement_id is None and not (job.resolved_bundle or {}).get("app_requirement"):
         return 400, {"detail": "This job has no app spec to evaluate against."}
-    if not dispatch_evaluation(job):
+    if not dispatch_evaluation(job, force_rebuild=force_rebuild):
         return 400, {"detail": "The job is already queued or running."}
     return {"status": "queued"}
 
