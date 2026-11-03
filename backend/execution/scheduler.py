@@ -188,6 +188,7 @@ class LaneState:
 @dataclass
 class TickResult:
     claimed: list[Claimed] = field(default_factory=list)
+    preview_builds: list[Any] = field(default_factory=list)
     lanes: dict[tuple[str, int], LaneState] = field(default_factory=dict)
     admitted_order: list[Any] = field(default_factory=list)  # dry runs: job ids in admission order
     snapshot: CapacitySnapshot | None = None
@@ -295,10 +296,18 @@ class Scheduler:
             eval_free = min(slots.eval_slots - snap.eval_used, pool_free.get("eval", 0))
             if slots.exclusive_eval and snap.sandbox_used:
                 eval_free = 0  # sandbox and evaluation take turns (memory rule)
+            if slots.defer_post_runs and pool_free.get("post", slots.post_run_slots) < slots.post_run_slots:
+                eval_free = 0
             if eval_free > 0:
                 evaluations = self._claim_evaluations(eval_free)
                 snap.eval_used += len(evaluations)
                 result.claimed.extend(evaluations)
+                remaining = eval_free - len(evaluations)
+                if remaining:
+                    from backend.execution.runtime_builds import claim
+
+                    result.preview_builds = claim(self.executor_id, remaining)
+                    snap.eval_used += len(result.preview_builds)
         # One past the largest per-tick admission, so a lane that filled its endpoint still reports why it waits.
         depth = min(MAX_LANE_DEPTH, max([s.job_cap for s in snap.endpoints.values()] + [1]) + 1)
         rows = read_lane_heads(snap.system_ep, depth, user_id=user_id)
@@ -359,7 +368,9 @@ class Scheduler:
                 state.reason = DRAINING
             return [], {}
 
-        sandbox_slots = 0 if slots.exclusive_eval and snap.eval_used else slots.sandbox_slots
+        post_busy = pool_free.get("post", slots.post_run_slots) < slots.post_run_slots
+        memory_busy = (slots.exclusive_eval and snap.eval_used) or (slots.defer_post_runs and post_busy)
+        sandbox_slots = 0 if memory_busy else slots.sandbox_slots
         free = {
             "sandbox": min(sandbox_slots - snap.sandbox_used, pool_free.get("sandbox", 0)),
             "llm": min(slots.llm_job_threads - snap.llm_used, pool_free.get("llm", 0)),

@@ -46,6 +46,7 @@ RUN groupadd --gid 1000 dev-user \
 # docker CLI for the devcontainer; DOCKER_HOST points it at the apps-dind
 # sandbox (see .devcontainer/docker-compose.devcontainer.yml).
 COPY --from=docker.io/library/docker:29.9.1-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker.io/library/docker:29.9.1-cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 
 # Empty, dev-user-owned mount points for the devcontainer's named volumes
 # (see .devcontainer/docker-compose.devcontainer.yml). Docker seeds a new named

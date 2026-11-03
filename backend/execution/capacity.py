@@ -86,7 +86,7 @@ class MemoryCheck:
 def _terms() -> dict[str, int]:
     return {
         "sandbox": parse_mem(settings.AGENT_SANDBOX_MEM_LIMIT) + parse_mem(SANDBOX_OVERHEAD),
-        "eval": parse_mem(settings.EVAL_SLOT_MEM),
+        "eval": max(parse_mem(settings.EVAL_SLOT_MEM), parse_mem(getattr(settings, "SAMPLE_BUILD_MEMORY", "1536m"))),
         "post": parse_mem(settings.ANALYSIS_WORKSPACE_MEM),
         "reserve": parse_mem(settings.APPS_DIND_APP_RESERVE),
     }
@@ -428,6 +428,10 @@ def snapshot(system_ep: int | None = None) -> CapacitySnapshot:
         system_ep = system_openrouter().pk
     now = timezone.now()
     snap = CapacitySnapshot(system_ep=system_ep, taken_at=now)
+    from backend.execution.models import RuntimeBuildLease
+    from backend.execution.runtime_builds import CACHED_START_PREFIX
+
+    snap.eval_used = RuntimeBuildLease.objects.exclude(owner__startswith=CACHED_START_PREFIX).count()
     with connection.cursor() as cursor:
         cursor.execute(_ACTIVE_SQL, [system_ep])
         rows = cursor.fetchall()

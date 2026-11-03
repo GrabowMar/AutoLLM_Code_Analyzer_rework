@@ -351,34 +351,36 @@ class TestEvaluatorClassification:
         assert job.metrics["functional"]["pass_rate"] is None
 
     def test_docker_client_errors_are_infra_build_step_errors_are_the_samples(self):
-        import requests
-
         from backend.generation.services.evaluation import runner
+        from backend.runtime.services.build_backend import BuildFailure
 
         evaluation = runner.Evaluation(self._job())
         evaluation.client = mock.MagicMock()
-        evaluation.client.api.build.side_effect = requests.exceptions.ConnectionError("Max retries exceeded")
-        ok, _log, client_error = evaluation._docker_build("build-ctx")
-        assert (ok, client_error is not None) == (False, True)
-
-        evaluation.client.api.build.side_effect = None
-        evaluation.client.api.build.return_value = iter([{"stream": "Step 1"}, {"error": "pip: no matching dist"}])
-        ok, log, client_error = evaluation._docker_build("build-ctx")
-        assert (ok, client_error) == (False, None)
-        assert "no matching dist" in log
-
-        with (
-            mock.patch.object(runner, "prepare_build_dir"),
-            mock.patch.object(runner.Evaluation, "_docker_build", return_value=(False, "ERROR: x", "APIError: 500")),
-        ):
+        with mock.patch.object(
+            runner.sample_builds,
+            "build_sample",
+            side_effect=BuildFailure("APIError: 500", infra_suspected=True),
+        ) as build_sample:
             build = evaluation._build()
         assert build["infra_suspected"] is True
         assert len(build["attempts"]) == 2  # retried once, like a registry outage
-        with (
-            mock.patch.object(runner, "prepare_build_dir"),
-            mock.patch.object(runner.Evaluation, "_docker_build", return_value=(False, "ERROR: bad import", None)),
-        ):
+        assert build_sample.call_count == 2
+        with mock.patch.object(
+            runner.sample_builds,
+            "build_sample",
+            side_effect=BuildFailure("pip: no matching dist"),
+        ) as build_sample:
             assert evaluation._build()["infra_suspected"] is False
+        assert build_sample.call_count == 1
+        with mock.patch.object(
+            runner.sample_builds,
+            "build_sample",
+            side_effect=BuildFailure("Build timed out", timed_out=True),
+        ) as build_sample:
+            build = evaluation._build()
+        assert build["infra_suspected"] is False
+        assert build["attempts"][0]["timed_out"] is True
+        assert build_sample.call_count == 1
         assert runner._INFRA_PATTERNS.search("write /var/lib/docker/x: no space left on device")
 
     def _run_with_tester_timeout(self, probe_output: bytes):

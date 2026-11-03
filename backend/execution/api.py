@@ -55,6 +55,11 @@ def wake() -> None:
         logger.warning("executor wake failed (Redis unavailable?)", exc_info=True)
 
 
+def wake_preview_build(action_id=None) -> None:
+    """A BUILD ContainerAction is the durable queue; Redis is only its doorbell."""
+    transaction.on_commit(wake)
+
+
 def _lane_for(job: GenerationJob) -> str:
     from backend.generation.models import GenerationJob
 
@@ -107,7 +112,7 @@ def enqueue_jobs(jobs: Iterable[GenerationJob]) -> int:
     return len(jobs)
 
 
-def request_reeval(job: GenerationJob) -> bool:
+def request_reeval(job: GenerationJob, *, force_rebuild: bool = False) -> bool:
     """Queue a manual re-evaluation: ``RUNNING/eval_queued`` with ``execution.reeval``.
 
     Sets ``queued_at = coalesce(queued_at, now())`` (so legacy jobs are
@@ -120,7 +125,7 @@ def request_reeval(job: GenerationJob) -> bool:
 
     now = timezone.now()
     prev_status = job.status
-    patch = {"reeval": True, "reeval_prev_status": prev_status}
+    patch = {"reeval": True, "reeval_prev_status": prev_status, "force_rebuild": force_rebuild}
     json_field = JSONField()
     updated = (
         GenerationJob.objects.filter(pk=job.pk)

@@ -309,7 +309,8 @@ def test_build_and_smoke_reject_other_users_job(auth_client, suffix):
 
 
 @pytest.mark.django_db
-def test_build_own_job_dispatches(auth_client):
+@pytest.mark.parametrize("force_rebuild", [False, True])
+def test_build_own_job_dispatches(auth_client, force_rebuild):
     from backend.generation.tests.factories import GenerationJobFactory
 
     client, user = auth_client
@@ -319,9 +320,9 @@ def test_build_own_job_dispatches(auth_client):
         patch("backend.runtime.services.docker_manager.ping", return_value=True),
         patch("backend.runtime.services.container_service.build_for_job", return_value=instance) as build,
     ):
-        resp = client.post(f"/api/runtime/jobs/{job.id}/build/")
+        resp = client.post(f"/api/runtime/jobs/{job.id}/build/?force_rebuild={str(force_rebuild).lower()}")
     assert resp.status_code == HTTPStatus.OK
-    build.assert_called_once()
+    build.assert_called_once_with(job, user, force_rebuild=force_rebuild)
 
 
 @pytest.mark.django_db

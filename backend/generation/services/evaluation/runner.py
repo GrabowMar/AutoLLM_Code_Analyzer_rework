@@ -53,9 +53,7 @@ import json
 import logging
 import re
 import secrets
-import tempfile
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -70,10 +68,10 @@ from backend.generation.services.evaluation import contract as contract_mod
 from backend.generation.services.profile_resolver import app_requirement_to_dict
 from backend.generation.services.prompt_renderer import templates_state_contract
 from backend.runtime.services import docker_manager
+from backend.runtime.services import sample_builds
+from backend.runtime.services.build_backend import BuildFailure
 from backend.runtime.services.scaffolding import HealingMode
-from backend.runtime.services.scaffolding import HealingReport
 from backend.runtime.services.scaffolding import get_stack_config
-from backend.runtime.services.scaffolding import prepare_build_dir
 from backend.runtime.services.scaffolding import resolve_stack_slug
 
 if TYPE_CHECKING:
@@ -87,7 +85,8 @@ logger = logging.getLogger(__name__)
 # and healed in Vue too, react-router-dom imports and the Tailwind 4
 # stylesheet entry healed, requirement names normalized, local modules and
 # passlib's bcrypt handled, placeholder backends serving ./static by path).
-EVALUATOR_VERSION = 2
+# 3: bounded BuildKit builds and reuse of immutable sample image generations.
+EVALUATOR_VERSION = 3
 LABEL = "llmlab.evaluation"
 BUILD_TIMEOUT_S = 1200
 TESTER_TIMEOUT_S = 600
@@ -141,8 +140,15 @@ def build_plan(job: GenerationJob, *, admin_password: str, has_frontend: bool) -
 
 
 class Evaluation:
-    def __init__(self, job: GenerationJob, *, healing: str | None = None) -> None:
+    def __init__(
+        self,
+        job: GenerationJob,
+        *,
+        healing: str | None = None,
+        force_rebuild: bool = False,
+    ) -> None:
         self.job = job
+        self.force_rebuild = force_rebuild
         # None: the job's own build_healing; set by the healing ablation.
         self.healing = healing
         self.short = str(job.id).replace("-", "")[:12]
@@ -153,6 +159,8 @@ class Evaluation:
         self.network = None
         self.containers: list = []
         self.image_tag = f"llmlab-eval/{self.short}:latest"
+        self.image_id = ""
+        self.build_key = ""
         # llmlab.started: the executor's orphan reaper skips containers younger than 2 minutes.
         self.labels = {LABEL: str(job.id), "llmlab.started": str(int(time.time()))}
 
@@ -191,8 +199,9 @@ class Evaluation:
             internal=True,
             labels=self.labels,
         )
+        startup_started = time.monotonic()
         app = self.client.containers.create(
-            self.image_tag,
+            self.image_id or self.image_tag,
             name=f"llmlab-eval-app-{self.short}",
             environment={contract_mod.ADMIN_PW_ENV: admin_password},
             network=self.network.name,
@@ -207,6 +216,7 @@ class Evaluation:
         self.network.disconnect(app)
         self.network.connect(app, aliases=["app"])
         app.start()
+        build["startup_seconds"] = round(time.monotonic() - startup_started, 3)
 
         tester = self.client.containers.create(
             tester_tag,
@@ -236,6 +246,8 @@ class Evaluation:
         app.reload()
         app_state = app.attrs.get("State", {})
         deps = _resolved_python_deps(app)
+        if self.build_key and deps:
+            sample_builds.record_resolved_dependencies(self.build_key, self.image_id, deps)
         app_log = app.logs(tail=200).decode("utf-8", errors="replace")
         if report is None:
             return {
@@ -309,61 +321,65 @@ class Evaluation:
 
     def _build(self) -> dict[str, Any]:
         attempts: list[dict[str, Any]] = []
-        report = HealingReport()
         for _attempt in range(2):
-            report = HealingReport()
-            with tempfile.TemporaryDirectory(prefix="llmlab-eval-") as tmp:
-                prepare_build_dir(self.job, Path(tmp), healing=self.healing, report=report)
-                started = time.monotonic()
-                ok, log, client_error = self._docker_build(tmp)
-            infra = not ok and (client_error is not None or bool(_INFRA_PATTERNS.search(log)))
-            attempt = {"ok": ok, "seconds": round(time.monotonic() - started, 1), "infra_suspected": infra}
-            if client_error is not None:
-                attempt["client_error"] = client_error[:1000]
-            attempts.append(attempt)
-            if ok or not infra:
+            started = time.monotonic()
+            try:
+                built = sample_builds.build_sample(
+                    self.job,
+                    client=self.client,
+                    healing=self.healing,
+                    force_rebuild=self.force_rebuild,
+                    cancelled=self._build_cancelled,
+                )
+            except BuildFailure as exc:
+                log = exc.log
+                infra = exc.infra_suspected
+                attempt = {
+                    "ok": False,
+                    "seconds": round(time.monotonic() - started, 3),
+                    "infra_suspected": infra,
+                    "timed_out": exc.timed_out,
+                }
+                attempts.append(attempt)
+                if infra and not exc.cancelled and _attempt == 0:
+                    continue
                 break
-        image_bytes = None
-        if ok:
-            image_bytes = self.client.images.get(self.image_tag).attrs.get("Size")
+            self.image_tag = built.image_tag
+            self.image_id = built.image_id
+            self.build_key = built.build_key
+            attempts.append({"ok": True, "seconds": built.seconds, "infra_suspected": False})
+            return {
+                **built.metrics(),
+                "ok": True,
+                "attempts": attempts,
+                "infra_suspected": False,
+                "log_tail": built.log[-6000:],
+                "healing": built.healing,
+            }
         return {
-            "ok": ok,
+            "ok": False,
             "attempts": attempts,
             "infra_suspected": attempts[-1]["infra_suspected"],
             "log_tail": log[-6000:],
-            "image_bytes": image_bytes,
-            "healing": report.to_dict(),
+            "image_bytes": None,
+            "healing": {"mode": self.healing or self.job.build_healing},
         }
 
-    def _docker_build(self, path: str) -> tuple[bool, str, str | None]:
-        """``(ok, log, client_error)``: ``client_error`` is set when the docker client/daemon failed."""
-        lines: list[str] = []
-        ok = True
-        client_error = None
-        try:
-            for chunk in self.client.api.build(
-                path=path,
-                tag=self.image_tag,
-                rm=True,
-                forcerm=True,
-                decode=True,
-                timeout=BUILD_TIMEOUT_S,
-                labels=self.labels,
-            ):
-                if chunk.get("stream"):
-                    lines.append(chunk["stream"])
-                if chunk.get("error"):
-                    lines.append("ERROR: " + chunk["error"] + "\n")
-                    ok = False
-        except requests.exceptions.ReadTimeout as exc:
-            # A build step silent for BUILD_TIMEOUT_S: counted against the sample.
-            lines.append(f"ERROR: build timed out: {exc}\n")
-            ok = False
-        except Exception as exc:
-            lines.append(f"ERROR: {exc}\n")
-            ok = False
-            client_error = f"{type(exc).__name__}: {exc}"
-        return ok, "".join(lines), client_error
+    def _build_cancelled(self) -> bool:
+        """Stop a solve when the executor loses this job's lease or it is cancelled."""
+        if not self.job.lease_owner:
+            return False
+        from django.utils import timezone
+
+        from backend.generation.models import GenerationJob
+
+        return not GenerationJob.objects.filter(
+            pk=self.job.pk,
+            attempt=self.job.attempt,
+            lease_owner=self.job.lease_owner,
+            lease_expires_at__gt=timezone.now(),
+            status=GenerationJob.Status.RUNNING,
+        ).exists()
 
     def _teardown(self) -> None:
         for container in self.containers:
@@ -376,11 +392,8 @@ class Evaluation:
                 self.network.remove()
             except Exception as exc:
                 logger.warning("Removing evaluation network failed: %s", exc)
-        if self.client is not None:
-            try:
-                self.client.images.remove(self.image_tag, force=True)
-            except Exception as exc:
-                logger.debug("Removing evaluation image failed: %s", exc)
+        # Immutable images outlive this evaluation; reference-aware cache GC
+        # removes unused generations without discarding preview build work.
 
 
 def _probe_health(tester, plan: dict[str, Any]) -> int | None:
@@ -445,7 +458,8 @@ def evaluate_job(
     ``execution.transitions.guarded_save`` so a requeued or cancelled job is
     never written to (it raises ``LeaseLost``). Default: a plain ``save``.
     """
-    outcome = Evaluation(job).run()
+    execution = job.execution if isinstance(job.execution, dict) else {}
+    outcome = Evaluation(job, force_rebuild=bool(execution.get("force_rebuild"))).run()
     # Only samples whose prompt stated this contract were asked for e.g. the
     # accounts endpoints: agent briefs v2+ (the snapshot freezes the contract)
     # and scaffolding prompts whose backend templates render it. Scores of

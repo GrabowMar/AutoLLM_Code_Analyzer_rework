@@ -631,10 +631,14 @@ export async function rerunGenerationJob(id: string): Promise<GenerationJob> {
 /** Re-run the platform evaluation (build, run, hidden conformance suite) for a finished job. */
 export async function evaluateGenerationJob(
   jobId: string,
+  forceRebuild = false,
 ): Promise<{ status: string }> {
-  const res = await apiFetch(`/generation/jobs/${jobId}/evaluate/`, {
-    method: "POST",
-  });
+  const res = await apiFetch(
+    `/generation/jobs/${jobId}/evaluate/${forceRebuild ? "?force_rebuild=true" : ""}`,
+    {
+      method: "POST",
+    },
+  );
   return res.json();
 }
 
