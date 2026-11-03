@@ -21,7 +21,7 @@ from backend.runtime.services import docker_manager
 logger = logging.getLogger(__name__)
 
 
-def clear_stuck_analysis_tasks(older_than_minutes: int = 60) -> int:
+def clear_stuck_analysis_runs(older_than_minutes: int = 60) -> int:
     from backend.analysis.services.runner import reap_stale_runs
 
     # Runs whose executing thread is gone (stale heartbeat), regardless of age.
@@ -36,7 +36,7 @@ def clear_stuck_analysis_tasks(older_than_minutes: int = 60) -> int:
     )
 
 
-def clear_stuck_generation_jobs(older_than_minutes: int = 60) -> int:
+def clear_stuck_generation_runs(older_than_minutes: int = 60) -> int:
     """Fail generation runs that can no longer finish on their own.
 
     Only two kinds of rows are touched, never a healthy PENDING run the

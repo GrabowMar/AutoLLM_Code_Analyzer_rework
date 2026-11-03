@@ -79,11 +79,15 @@ Incompatible combinations are **errors** unless the request sets `drop_incompati
 
 `POST /studies/{id}/resolve/` returns the plan without writing anything (cached in-process for 10 minutes by study and design hash). `freeze-plan` and `launch` persist it as an immutable `StudyPlan` whose payload (the full `ResolvedPlan`) and every rendered stimulus live in the blob store.
 
-For every (condition, unit) the resolver renders the stimuli once (they never depend on the repeat), resolves the effective policy, the environment (harness image and command, gateway mode, sandbox, image digests) and, in slot mode, the resolved context. Every cell then gets:
+The effective policies are resolved once per study (`budget.policy.resolve_study_policies`) over every condition, so the serving tier is one per study, the sandbox is raised to the largest stack minimum, and the cross-condition lint (`resources_vary_by_stack`, `mixed_serving_tier`) fires at resolve; once the stimuli are rendered, a second pass with each condition's largest brief, slot prompt and slot original sizes adds `brief_exceeds_call_cap`, `slot_output_cap_tight` and `slot_context_exceeds_model`.
+
+For every (condition, unit) the resolver renders the stimuli once (they never depend on the repeat), takes the condition's effective policy, the environment (harness image and command, gateway mode, sandbox, image digests) and, in slot mode, the resolved context. Every cell then gets:
 
 * its **CRN seed** `int(H({"base", "unit", "repeat"})[:12], 16) % 2**31` — equal across conditions, prose variants included, for one (unit, repeat), so conditions are paired;
 * its **block** and **sequence**: blocks are `(repeat, unit)` sorted by `(repeat, unit_order)` — every unit gets replicate 0 before any gets replicate 1, which keeps budget stops balanced — and the conditions are shuffled inside each block with a seed from `(order_seed, block_index)` (`blocked` keeps one model's conditions contiguous);
 * its identity keys from `identity.compute_keys` (the only implementation).
+
+The manifest also records, outside identity: for a local endpoint, the serving settings the proxy then uses instead of the live endpoint row (`model.endpoint.num_ctx`, `keep_alive`, `api_flavor`, `capabilities`; all null for OpenRouter); and `sampling.seed_forwarded`, true when the sampling preset forwards the seed, the model accepts one and the cell's gateway front carries it (a translated Anthropic Messages or OpenAI Responses front does; a native one does not). Results pair by CRN on `seed_forwarded`.
 
 With a pilot (`policy.pilot.enabled`) the plan also holds `stage="pilot"` cells: `pilot.repeats` repeats of the first `pilot.units` units in unit order. They come first in the claim sequence; the first pilot block is the smoke block. Pilot and main cells of one (condition, unit, repeat) share the seed.
 
@@ -99,7 +103,9 @@ Plan issues come from the registry (`contracts/issues.py`); any `error` blocks l
 * resolves the study cap (`Study.cap_usd`: the request's `study_cap`, else the preset's `study.max_cost_usd`; `auto` takes the estimate) and fills `max_parallel` and `execution_options` from the effective policy;
 * writes the plan's conditions and units, the cells of the launched stage, and one run per cell with its frozen manifest (cells the resolver excluded as `config_invalid` get none); runs are handed to the executor **after commit**;
 * locks a confirmatory study in the same save: `locked_at`, `analysis_plan_hash`, `prereg_hash = H({plan, analysis_plan, stop_rules, pilot_gates, evaluation})`. The design, analysis plan, budget preset and active plan can never change afterwards (clone instead);
-* attaches a `patterns` post-run to a slot study.
+* attaches a `patterns` post-run to a slot study;
+* for an app study whose evaluation runs the baseline stage, queues the starter baseline of every (starter, task version, auth mode) of the plan (`evaluation.baseline.queue_baseline`, after commit; one that already exists or is being evaluated is skipped). A starter that does not build or start gives no baseline: `baseline_pass_rate` stays null, never 0. A failure to queue one is logged and never blocks the launch;
+* for an app study whose evaluation runs the functional stage and whose `retest_fraction` is above 0, attaches a `completed` post-run that re-evaluates that fraction of the `tested` runs (`evaluation.retest.run_retests`); `retest_agreement` in the results reads those rows. It is listed as an `analysis` post-run with `config.retest: true`, no tools and no report.
 
 **Pilot → main** (`POST /studies/{id}/expand/`) evaluates the pilot gates and refuses on a failed gate unless `override_gates` with a `reason`. Exploratory studies with `pilot.reuse_as_main` keep the pilot cells as main repeats (same plan, same seeds); confirmatory studies never reuse pilot cells, and pilot cells are never in any analysis.
 
@@ -118,11 +124,11 @@ The **study cap** typed at launch (`study_cap`: a number or `auto`) is stored in
 `GET /studies/{id}/results/?metric=&fingerprint=majority|all&sensitivity=exclude_truncated&baseline=&common_cells=` (`study/results.py`):
 
 * **Sample**: the current run of every main-stage cell of the active plan. Pilot cells and beyond-plan runs never count.
-* **Intention-to-treat** (the default): `tested` runs with a measured evaluation contribute their pass rate; `build_fail`, `start_fail` and `output_invalid` contribute 0 when the evaluation level measures functional checks; truncated runs (budget, wall clock, idle, max turns) stay in. `sensitivity=exclude_truncated` repeats the analysis without them and `paired.sensitivity` names conditions whose direction or significance changes. A tested run with an unmeasured evaluation is *not measured* (never 0); `infra_error` and `excluded` runs are attrition.
+* **Intention-to-treat** (the default): `tested` runs with a measured evaluation contribute their pass rate; `build_fail`, `start_fail` and `output_invalid` contribute 0 when the evaluation level measures functional checks; truncated runs (budget, wall clock, idle, max turns) stay in. `sensitivity=exclude_truncated` repeats the analysis without them and `paired.sensitivity` names conditions whose direction or significance changes. A tested run with an unmeasured evaluation is *not measured* (never 0), and so is a `tested` run with `outcome_reason` `not_tested:<level>` (built, and started, at a level without the tester); `infra_error` and `excluded` runs are attrition.
 * **Unit of analysis**: the unit. Repeats collapse to unit means; common cells keep the `(unit, repeat)` cells every condition with data has.
 * **Pairing**: `paired_crn` when both conditions forward the seed (deltas paired by `(unit, repeat)`), else `independent_repeats` (unit mean differences). The method is recorded per comparison. Exact sign test, Wilcoxon signed-rank and the unit-level sign-flip permutation test; with fewer than 20 units the permutation test is the primary test and no cluster bootstrap CI is given (`few_clusters`).
 * **Gate**: p-values are confirmatory only for a locked confirmatory study whose plan declares the metric, with its pre-registered baseline (`analysis_plan.baseline`) and no deviation: `exclusions_differ`, `common_cells_off`, `fingerprint_filter` (the majority filter dropped cells), `stopped_early`, `multiplicity_family`, `exclusion_rate`, `differential_attrition`. `interim` withholds every p-value until the study ends. `significance_unreachable` tells when the units cannot reach significance under the plan's correction.
-* **Also**: `attrition` (per condition), `by_factor` (EMMs, `unbalanced` flag), `by_prose_variant` (stated / unstated pass rates), `common_pass_rate`, `retest_agreement`, and the issues `mixed_config_fingerprint`, `mixed_eval_suite`, `exclusion_rate`, `differential_attrition`, `few_clusters`.
+* **Also**: `attrition` (per condition), `by_factor` (EMMs, `unbalanced` flag), `by_prose_variant` (stated / unstated pass rates), `common_pass_rate` (the pass rate over the checks every auth mode of a unit reports, from `RunEvaluation.result.checks`: infra and flaky checks out; also `?metric=common_pass_rate`), `retest_agreement`, and the issues `mixed_config_fingerprint`, `mixed_eval_suite`, `exclusion_rate`, `differential_attrition`, `few_clusters`.
 
 ### Run-to-run variation
 
@@ -158,7 +164,7 @@ Intention-to-treat is the default (`itt: true`, `exclusions.truncated: false`); 
 * `POST /studies/{id}/prompt-overrides/ {owner_kind, owner_ref, template, role?, prompt_set_ref?}` (draft or planned studies only) saves an inline prompt edit as a forked library version and swaps the factor level that pinned the original. For `prompt` and `auth_fragment` owners the forked prompt set is `prompt_set_ref` (one of the study's prompt-set levels), else the single `prompt_set` level (the mode's default set when there is no `prompt_set` factor), else the one level whose roles or fragments use the edited template; anything else is 400 `prompt_set_ambiguous` with `data.candidates`.
 * `POST /studies/adhoc/ {design, launch: true}` creates, resolves and launches in one call (automation, "Generate a parent app") and returns `{study_id, plan_hash, run_ids, status, issues, estimate}`.
 * Schedules (`/studies/{id}/schedules/`): `top_up`, `add_replicates` (1–5), `clone_and_run` (exact copy with a fresh derived `base_seed`; straight to main when the source already reached main). Fires never burst after downtime; `skip_if_active` skips while the study or its last clone is active.
-* Post-runs (`/studies/{id}/post-runs/`): `analysis` (configured analyzers over usable current runs, then the study conditions report) or `patterns`; `manual` runs now, `completed` when the study completes or stops.
+* Post-runs (`/studies/{id}/post-runs/`): `analysis` (the retest sample first when `config.retest` is true, then configured analyzers over usable current runs, then the study conditions report) or `patterns`; `manual` runs now, `completed` when the study completes or stops.
 
 ## Export
 

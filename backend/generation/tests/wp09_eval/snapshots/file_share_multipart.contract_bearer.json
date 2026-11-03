@@ -1582,7 +1582,7 @@
    "restart_before": false,
    "setup": [
     {
-     "actor": null,
+     "actor": "user_a",
      "capture": {
       "fid": "$.id"
      },
@@ -1603,7 +1603,7 @@
      }
     },
     {
-     "actor": null,
+     "actor": "user_a",
      "capture": {
       "tok": "$.token"
      },
@@ -1618,7 +1618,7 @@
      }
     },
     {
-     "actor": null,
+     "actor": "user_a",
      "capture": {},
      "expect_status": 204,
      "request": {

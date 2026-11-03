@@ -17,6 +17,8 @@ paths = [
   '''backend/generation/tests/wp07_harnesses/fixtures/''',
   # Pattern-detector fixtures: deliberately vulnerable sample code (fake literal secrets).
   '''backend/generation/data/detectors/tests/''',
+  # Task reference apps (oracles / conformance kit): throwaway dev-default secrets of sample apps, no credentials.
+  '''backend/generation/data/tasks/[^/]+/reference/''',
 ]
 
 [[rules]]

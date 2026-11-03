@@ -122,9 +122,13 @@ Deviations from the spec text (please amend 5.3, lead):
 
 `run_smoke.sh` with `<render-dir>/env.extra` = `HTTPS_PROXY`/`HTTP_PROXY` pointing at the scripted upstream
 (which logs every `CONNECT` as protocol `connect`), `NO_PROXY=127.0.0.1,localhost,llm-gateway`. Model calls
-only: mini-swe-agent, aider, claude-code, codex, gemini-cli. Extra hosts: **opencode** `registry.npmjs.org`
-(one CONNECT ~1 s before the first call, despite `autoupdate: false` and the `OPENCODE_DISABLE_*` switches),
-**goose** `models.dev`, **qwen-code** `models.dev` + `*.rum.aliyuncs.com` (usage statistics, twice). Positive
+only: mini-swe-agent, aider, claude-code, codex, gemini-cli, and opencode since the pre-deploy follow-up
+(it used to open one `CONNECT registry.npmjs.org:443` ~1 s before the first call, despite `autoupdate: false`
+and the `OPENCODE_DISABLE_*` switches: its config loader npm-installs `@opencode-ai/plugin@<version>` into every
+config directory that lacks `node_modules` plus a covering `package-lock.json`. The image now pre-bakes that
+directory at `/opt/opencode/config` and the command sets up `$XDG_CONFIG_HOME/opencode` from it before
+`exec opencode`; probe re-run: 0 CONNECTs, and the same image without the setup line still shows the CONNECT).
+Extra hosts: **goose** `models.dev`, **qwen-code** `models.dev` + `*.rum.aliyuncs.com` (usage statistics, twice). Positive
 control: Gemini CLI without its system settings contacts `play.googleapis.com` (usage statistics), so the
 probe sees proxy-respecting traffic; a harness that ignores proxy variables would not show up here (the
 `--internal` network still blocks it).

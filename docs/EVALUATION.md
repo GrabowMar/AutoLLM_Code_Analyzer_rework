@@ -42,9 +42,13 @@ Postgres stacks (`database: postgres`, phase B) get a database sidecar on the ev
 fresh password, waits for `pg_isready` and passes `DATABASE_URL=postgresql://app:<pw>@db:5432/app` to the app; the
 sidecar outlives app restarts and is removed with the evaluation. A sidecar that cannot start (or a runtime without
 one, such as the local runtime) is `infra_error` (`postgres_sidecar_unavailable`), never `start_fail`. The
-`plaintext_password_db` probe reads the app's `./data` only, and the users live in the sidecar, so on postgres
-stacks it is `skipped(precondition_failed)` (evidence "passwords live in the postgres sidecar") without reading
-any file: other files under `./data` (uploads, logs, a fallback sqlite) never make it `not_exploited`.
+`plaintext_password_db` probe on postgres stacks reads the sidecar: after the tester, `dump_database()` runs
+`pg_dump --data-only` in the sidecar, split into one entry per table (`postgres:public.users`), and the verdict
+(`probes.plaintext_password_database_verdict`) looks in those rows and in the app's `./data` for user_a's
+password, verbatim or hex-encoded (a `bytea` column dumps as `\x<hex>`). A clean `not_exploited` needs user_a's
+username in some table or data file (the account was stored where we looked); otherwise the probe is
+`skipped(precondition_failed)`. A failed dump is a probe `error` (never `not_exploited`, not counted in
+`probes_tested`).
 
 ## 2. The platform lock (spec 6.10)
 
@@ -55,7 +59,18 @@ changed (`stale_starter_lock`) or a lock that misses a direct requirement (`not_
 Otherwise the platform resolves the manifest in a container of the sandbox base image (`uv pip compile
 --generate-hashes`, `npm install --package-lock-only`) and stores the lock at the starter-convention path
 (`<dir>/requirements.lock`, `<dir>/package-lock.json`), so the starter Dockerfiles install under it;
-`lock_source=platform`, `registry_snapshot_at` = now. Go and Maven are phase B.
+`lock_source=platform`, `registry_snapshot_at` = now.
+
+Go (phase B): a `go.mod` whose `go.sum` is missing or does not cover it gets the platform Go lock: `go mod
+download all` in the pinned `base_images.yaml` `go` image with `GOTOOLCHAIN=local` (the toolchain the stack
+profile names; never a newer one), on `go.mod` plus the tree's `go.sum`, written to `<dir>/go.sum`; `go.mod` must
+come out byte-identical. A `go.mod` with no `require`/`replace` (standard library only) needs no `go.sum` and is
+not locked. Model-attributable failures (`lock_unresolvable`, `build_fail`): an unknown module or version (proxy
+404/410, `unknown revision`, `invalid version`), a `go` directive or dependency newer than the pinned toolchain
+(`requires go >=`), a `go.mod` the go tool refuses or would have to update, a `go.sum` with a wrong checksum;
+anything else (network, proxy, docker) is `lock_infra`. A `go.mod` with `replace` directives cannot be coverage
+checked offline, so its downloaded `go.sum` is used as produced. Maven never reads its lock record
+(`dependency-list.txt`) and is not platform-locked.
 
 ## 3. The tester (spec 8.1-8.5)
 
@@ -140,7 +155,8 @@ three steps: (1) **precondition**: every check in `requires_checks` (default: th
 benign request (default: the endpoint's valid request; for `default_credential` the real admin login) must
 succeed, else `skipped(positive_control_failed)`; (3) the **attack**, giving `exploited` or `not_exploited` with
 evidence. Only step 3 counts in `probes_tested`. No severity is assigned. `plaintext_password_db` is read by
-the suite from the app's data directory after the run (`docker cp`). Probes that change shared state
+the suite after the run: from the app's data directory (`docker cp`), and on postgres stacks also from a
+`pg_dump` of the sidecar (section 1). Probes that change shared state
 (`mass_assignment`, `rate_limit_missing`, `default_credential`) run last.
 
 **Validity.** Every kind has a mutant pair in `evaluation/conformance/probe_mutants/`: one standard-library
@@ -165,6 +181,18 @@ and auth (cookie vs bearer). Status: `compliant` (no deviation), `partial` (styl
 mixed styling system), `violated` (backend, frontend, database or auth differs); free-choice stacks are always
 `compliant` and the detected stack is reported as an outcome. A dimension that cannot be detected is not a
 deviation. Adherence never filters a sample.
+
+Phase-B stacks: `go.mod` (`require` blocks and single-line requires, indirect ones included; every Go require is
+pinned), `pom.xml` (string scanning, no XML parser; comments, `<build>` plugin dependencies and
+`<dependencyManagement>` are cut out, `${prop}` versions resolved from `<properties>`; a dependency without a
+version is pinned when a `<parent>` with a literal version, a BOM import or a managed entry pins it; ranges,
+`LATEST`/`RELEASE` and `-SNAPSHOT` are unpinned) and `build.gradle(.kts)` (string coordinates) are parsed into
+`packages` (ecosystems `go`, `maven`; Maven names are `groupId:artifactId`). Go backend: a router module (`gin`,
+`echo`, `fiber`, `chi`, `gorilla`, `httprouter`, `beego`; go.mod or import) is that framework, otherwise
+`net/http` imports are `go-stdlib` (with the `go.mod` as second evidence kind). Java backend: Spring Boot
+(`org.springframework.boot:*` dependencies, `org.springframework.boot` imports), Quarkus, Micronaut, Javalin,
+Spark, Dropwizard, Vert.x. Database: Go driver modules/imports and `sql.Open("<driver>")`, Maven driver
+artifacts and `jdbc:<kind>:` URLs in Java sources and `.properties`/`.yml` files.
 
 ## 6. Baselines, oracles, conformance, test-retest (spec 8.5)
 

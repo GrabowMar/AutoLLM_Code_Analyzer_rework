@@ -1,7 +1,7 @@
 {
  "built": "2026-11-03",
  "builder": "host docker (BuildKit), one build per image, tagged llmlab-v3-wt/<image>:dev; agent-* built FROM llmlab-v3-wt/agent-base:dev",
- "note": "Local verification builds (WP-07, wave 3). Image ids are not reproducible across rebuilds (package mirrors, timestamps): the manifest records the digest of the image a run used; these ids identify the images the smoke runs and the reported versions came from.",
+ "note": "Local verification builds (WP-07, wave 3). Image ids are not reproducible across rebuilds (package mirrors, timestamps): the manifest records the digest of the image a run used; these ids identify the images the smoke runs and the reported versions came from. agent-opencode was rebuilt in the pre-deploy follow-up (pre-baked config directory, no npm at run time).",
  "images": {
   "agent-base": {
    "image_id": "sha256:7a0ed9c1418f75c7572eb77ca90d74a172dda6ab25b8d25f88676aa7a8a50ea3",
@@ -11,7 +11,7 @@
    "image": "agent-opencode",
    "version_command": "opencode --version",
    "reported": "1.18.35",
-   "image_id": "sha256:5818a3afc0f762d6033c459cbb28a295e2b3ade4333fd6e7c99ddbdc66e28eb7"
+   "image_id": "sha256:388f7447c96c4501e33b0cb3dbad0f27074881d1ec2a29a7cbb02416c421c30a"
   },
   "mini-swe-agent": {
    "image": "agent-mini-swe-agent",

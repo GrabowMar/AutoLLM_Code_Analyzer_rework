@@ -176,8 +176,8 @@ def app_stats() -> dict[str, Any]:
         return {"by_status": by_status, "last_24h": recent}
 
     res = {
-        "analysis_tasks": _counts(AnalysisRun),
-        "generation_jobs": _counts(GenerationRun),
+        "analysis_runs": _counts(AnalysisRun),
+        "generation_runs": _counts(GenerationRun),
         "reports": _counts(Report),
         "container_instances": _counts(ContainerInstance),
     }

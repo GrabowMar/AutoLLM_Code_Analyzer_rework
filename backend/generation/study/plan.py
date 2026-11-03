@@ -92,6 +92,7 @@ from backend.generation.study.expand import expand_grid
 from backend.generation.study.order import block_sequence
 from backend.generation.study.order import condition_order
 from backend.generation.study.order import unit_orders
+from backend.inference.snapshot import endpoint_section
 
 if TYPE_CHECKING:
     from backend.generation.contracts.resources import EffectivePolicy
@@ -157,6 +158,8 @@ _POLICY_EXECUTORS: Final = {
     "slot_single_shot": "single_shot",
     "slot_agent": "restricted_agent",
 }
+# budget lint rules that read token sizes (filled after rendering, ``_Resolver._token_lint``)
+_TOKEN_LINT_CODES: Final = frozenset({"brief_exceeds_call_cap", "slot_output_cap_tight", "slot_context_exceeds_model"})
 _KIND_EXECUTOR_LEVEL: Final = {"slot_single_shot": "single_shot", "slot_agent": "restricted_agent"}
 
 
@@ -279,6 +282,7 @@ class _Condition:
     treatment_view: dict[str, Any] = field(default_factory=dict)
     policy_dump: dict[str, Any] = field(default_factory=dict)
     starters: dict[int, Any] = field(default_factory=dict)  # stack pk -> Starter (app)
+    full: dict[str, str] = field(default_factory=dict)  # raw levels with the mode defaults
 
 
 @dataclass
@@ -294,6 +298,10 @@ class _Pair:
     excluded: str | None = None
     estimate: Any = None
     problems: list[Issue] = field(default_factory=list)
+    # Token sizes for the budget lint (``brief_exceeds_call_cap``, ``slot_*``), filled while rendering.
+    brief_tokens: int | None = None
+    prompt_tokens: int | None = None
+    original_tokens: int | None = None
 
 
 @dataclass
@@ -341,6 +349,38 @@ def _dedupe(issues: list[Issue]) -> list[Issue]:
     return list(seen.values())
 
 
+def _stack_minimums(stacks: list[Any]) -> tuple[str | None, int | None]:
+    """The largest ``resources.min_memory`` (as written) and ``min_cpus`` (nano CPUs) over ``stacks``."""
+    from backend.generation.study.environment import memory_bytes
+
+    memory: str | None = None
+    cpus: int | None = None
+    for stack in stacks:
+        resources = (getattr(stack, "content", None) or {}).get("resources") or {}
+        if resources.get("min_memory") and (
+            memory is None or memory_bytes(resources["min_memory"]) > memory_bytes(memory)
+        ):
+            memory = str(resources["min_memory"])
+        if resources.get("min_cpus"):
+            cpus = max(cpus or 0, int(float(resources["min_cpus"]) * 1_000_000_000))
+    return memory, cpus
+
+
+def _largest(values: Any) -> int | None:
+    present = [v for v in values if v is not None]
+    return max(present) if present else None
+
+
+def _original_tokens(target: Any) -> int | None:
+    """The estimated token size of a slot's original code (None when its blob is not stored)."""
+    from backend.generation import blobs
+
+    sha = getattr(target, "original_blob", None)
+    if not sha or not blobs.exists(sha):
+        return None
+    return _est_tokens(blobs.get_text(sha))
+
+
 def _supports_seed(model: LLMModel) -> bool:
     if model.endpoint_id is not None:
         return True  # local endpoints (ollama) honour the seed
@@ -371,7 +411,7 @@ class _Resolver:
         self.texts: dict[str, str] = {}
         self.pruned = 0
         self._env_cache: dict[tuple[Any, ...], CellEnvironment] = {}
-        self._policy_cache: dict[tuple[Any, ...], tuple[EffectivePolicy, dict[str, Any]]] = {}
+        self._stack_minimums: tuple[str | None, int | None] = (None, None)
         self.draw: study_parents.DrawnUnits | None = None
 
     # -- issues ----------------------------------------------------------------------------------
@@ -576,6 +616,7 @@ class _Resolver:
             kind=mode_kind,
             model=self.lib.model(full["model"], path="factors.model"),
             rows=rows,
+            full=full,
         )
         condition.label = " · ".join(_short(levels[key]) for key in varying if key in levels)[:200] or (
             condition.model.model_id
@@ -593,27 +634,107 @@ class _Resolver:
                 context_policy=design_rules.parse_context_policy(full["context_policy"]),
                 edit_policy="revert",
             )
-        self._condition_policy(condition, full)
         return condition
 
-    def _condition_policy(self, condition: _Condition, full: dict[str, str]) -> None:
-        policy_row = condition.rows["resource_policy"]
+    # -- effective policies (budget.policy.resolve_study_policies, WP-11) --------------------------------
+
+    @staticmethod
+    def _harness(condition: _Condition) -> str | None:
         preset = condition.rows.get("harness_preset")
-        harness = preset.harness if preset is not None else None
-        key = (policy_row.pk, condition.model.pk, harness)
-        if key not in self._policy_cache:
-            policy = self.deps.effective_policy(
-                policy_row,
-                study=self.study,
-                model=condition.model,
-                harness=harness,
-                executor=_POLICY_EXECUTORS[condition.kind],
+        return preset.harness if preset is not None else None
+
+    def _condition_inputs(self, conditions: list[_Condition]) -> list[Any]:
+        from backend.generation.budget.policy import ConditionInput
+
+        return [
+            ConditionInput(
+                index=c.index,
+                policy=c.rows["resource_policy"],
+                model=c.model,
+                harness=self._harness(c),
+                executor=_POLICY_EXECUTORS[c.kind],
+                stack=getattr(c.rows.get("stack_profile"), "slug", "") or "",
+                cells=(f"c{c.index}",),
             )
+            for c in conditions
+        ]
+
+    def _resolve_policies(self, conditions: list[_Condition], stacks: list[Any]) -> None:
+        """Every condition's effective policy, resolved once per study with the study context.
+
+        ``resolve_study_policies`` sees all conditions at once, so the serving tier is one per study and
+        the cross-condition lint (``resources_vary_by_stack``, ``mixed_serving_tier``) fires at resolve;
+        the stacks' largest minimums raise the sandbox as :func:`study_sandbox` does for the manifest.
+        Token-size rules need the rendered stimuli and run later (:meth:`_token_lint`).
+        """
+        policies: dict[int, EffectivePolicy] = {}
+        if self.deps.study_policies is None:
+            for c in conditions:  # a binding without the study-level seam (see ``StudyDeps.study_policies``)
+                policies[c.index] = self.deps.effective_policy(
+                    c.rows["resource_policy"],
+                    study=self.study,
+                    model=c.model,
+                    harness=self._harness(c),
+                    executor=_POLICY_EXECUTORS[c.kind],
+                )
+        else:
+            self._stack_minimums = _stack_minimums(stacks)
+            resolved = self.deps.study_policies(
+                self.study,
+                self._condition_inputs(conditions),
+                stack_min_memory=self._stack_minimums[0],
+                stack_min_nano_cpus=self._stack_minimums[1],
+            )
+            policies = dict(resolved.by_condition)
+            self.issues += list(resolved.issues)
+        views: dict[int, dict[str, Any]] = {}
+        for c in conditions:
+            policy = policies[c.index]
             for issue in policy.issues:
-                self.issues.append(issue.model_copy(update={"cells": [f"c{condition.index}"]}))
-            self._policy_cache[key] = (policy, self.deps.treatment_view(policy))
-        condition.policy, condition.treatment_view = self._policy_cache[key]
-        condition.policy_dump = condition.policy.model_dump(mode="json")
+                self.issues.append(issue.model_copy(update={"cells": [f"c{c.index}"]}))
+            if id(policy) not in views:
+                views[id(policy)] = self.deps.treatment_view(policy)
+            c.policy, c.treatment_view = policy, views[id(policy)]
+            c.policy_dump = policy.model_dump(mode="json")
+            self._network_policy(c)
+
+    def _token_lint(self, conditions: list[_Condition], pairs: dict[tuple[int, int], _Pair]) -> None:
+        """``brief_exceeds_call_cap``, ``slot_output_cap_tight``, ``slot_context_exceeds_model`` at resolve.
+
+        The rules read token sizes from the study context, so conditions are grouped by their largest
+        (brief, original, prompt) sizes and resolved again per group; only these rules' issues are kept
+        (the policies themselves were fixed by :meth:`_resolve_policies` and do not depend on them).
+        """
+        if self.deps.study_policies is None:
+            return
+        groups: dict[tuple[int | None, int | None, int | None], list[_Condition]] = {}
+        for c in conditions:
+            mine = [p for (ci, _), p in pairs.items() if ci == c.index]
+            key = (
+                _largest(p.brief_tokens for p in mine),
+                _largest(p.original_tokens for p in mine),
+                _largest(p.prompt_tokens for p in mine),
+            )
+            if key != (None, None, None):
+                groups.setdefault(key, []).append(c)
+        memory, cpus = self._stack_minimums
+        for (brief, original, prompt), group in groups.items():
+            resolved = self.deps.study_policies(
+                self.study,
+                self._condition_inputs(group),
+                stack_min_memory=memory,
+                stack_min_nano_cpus=cpus,
+                brief_tokens=brief,
+                slot_original_tokens=original,
+                slot_prompt_tokens=prompt,
+            )
+            for c in group:
+                for issue in resolved.by_condition[c.index].issues:
+                    if issue.code in _TOKEN_LINT_CODES:
+                        self.issues.append(issue.model_copy(update={"cells": [f"c{c.index}"]}))
+
+    def _network_policy(self, condition: _Condition) -> None:
+        full = condition.full
         if "network_policy" in full:
             condition.network_policy = full["network_policy"]
         else:
@@ -638,12 +759,20 @@ class _Resolver:
 
     def _manifest_model(self, model: LLMModel) -> ManifestModel:
         endpoint = model.endpoint
+        # The local serving settings (context size, residency, dialect, ``think`` capability) are frozen
+        # here, so the proxy uses them instead of the live endpoint row; all None for OpenRouter. Recorded,
+        # not identity inputs.
+        section = endpoint_section(model) or {}
         manifest_endpoint = ManifestEndpoint(
             id=endpoint.pk if endpoint is not None else 0,
             kind=endpoint.kind if endpoint is not None else "openrouter",
             served_model_name=(model.served_model_name or None) if endpoint is not None else None,
             digest=(model.digest or None) if endpoint is not None else None,
             cost_basis=endpoint.cost_basis if endpoint is not None else "billed",
+            num_ctx=section.get("num_ctx") or None,
+            keep_alive=section.get("keep_alive") or None,
+            api_flavor=section.get("api_flavor") or None,
+            capabilities=list(section.get("capabilities") or []) if section else None,
         )
         pricing = ManifestPricing(
             input_per_mtok=round(float(model.input_price_per_token or 0.0) * 1_000_000, 6),
@@ -653,7 +782,12 @@ class _Resolver:
         )
         return ManifestModel(slug=model.model_id, endpoint=manifest_endpoint, pricing=pricing)
 
-    def _sampling(self, condition: _Condition) -> ManifestSampling:
+    def _sampling(self, condition: _Condition, gateway: Any = None) -> ManifestSampling:
+        """The sampling section; ``seed_forwarded`` = the preset forwards the seed, the model accepts one and the
+        upstream request of the cell's gateway front/mode can carry it (``budget.gateway_config.seed_carried``:
+        a translated Anthropic/Responses front does, a native one does not). Results pair by CRN on it."""
+        from backend.generation.budget.gateway_config import seed_carried
+
         row = condition.rows["sampling_preset"]
         content = SamplingContent.model_validate(row.content)
         forced = {k: v for k, v in content.params.model_dump(mode="json").items() if v is not None}
@@ -666,7 +800,11 @@ class _Resolver:
             if content.policy == "explicit"
             else {k: v for k, v in forced.items() if k == "response_format"},
             seed=None,
-            seed_forwarded=bool(content.forward_seed and _supports_seed(condition.model)),
+            seed_forwarded=bool(
+                content.forward_seed
+                and _supports_seed(condition.model)
+                and (gateway is None or seed_carried(gateway.front_protocol, gateway.protocol_mode)),
+            ),
         )
 
     def _environment(self, condition: _Condition, unit: _Unit, brief: str, system: str | None) -> CellEnvironment:
@@ -768,6 +906,7 @@ class _Resolver:
         stimuli = self._render(condition, unit, levels)
         brief = next((s.text for s in stimuli if s.role == "brief"), "")
         system = next((s.text for s in stimuli if s.role == "system"), None)
+        pair.brief_tokens = _est_tokens(brief) if brief else None
         env = self._environment(condition, unit, brief, system)
         self._env_problems(pair, env, cell_ref)
         if pair.problems:
@@ -856,6 +995,11 @@ class _Resolver:
         }
         stimuli = self._render(condition, unit, levels)
         brief = next((s.text for s in stimuli if s.role == "slot_agent_brief"), "")
+        if condition.kind == "slot_single_shot":
+            pair.prompt_tokens = sum(_est_tokens(s.text) for s in stimuli) or None
+            pair.original_tokens = _original_tokens(target)
+        elif brief:
+            pair.brief_tokens = _est_tokens(brief)
         env = self._environment(condition, unit, brief, None)
         self._env_problems(pair, env, cell_ref)
         if pair.problems:
@@ -985,7 +1129,7 @@ class _Resolver:
             task=task,
             slot=slot,
             model=model,
-            sampling=self._sampling(condition),
+            sampling=self._sampling(condition, env.gateway),
             resources=resources,
             gateway=env.gateway,
             harness=env.harness,
@@ -1176,6 +1320,7 @@ class _Resolver:
         stacks = [c.rows["stack_profile"] for c in conditions if "stack_profile" in c.rows]
         stacks += [u.parent.stack_profile for u in units if u.parent is not None and u.parent.stack_profile_id]
         self.sandbox = study_sandbox(study_policy.sandbox.memory, study_policy.sandbox.nano_cpus, stacks)
+        self._resolve_policies(conditions, stacks)
         pairs: dict[tuple[int, int], _Pair] = {}
         for condition in conditions:
             for unit in units:
@@ -1200,6 +1345,7 @@ class _Resolver:
                 pairs[(condition.index, unit.index)] = pair
         if self.pruned and self.drop and not any(i.code == "unbalanced_grid" for i in self.issues):
             self._issue("unbalanced_grid", message=f"{self.pruned} combination(s) pruned; by-factor slices use EMMs")
+        self._token_lint(conditions, pairs)
         self._plan_issues(conditions, units, pairs)
         self._estimates(pairs)
         cells, n_blocks = self._build_cells(conditions, units, pairs, study_policy)

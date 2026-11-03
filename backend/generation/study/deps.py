@@ -7,12 +7,14 @@ interfaces lazily, so a missing or not-yet-implemented area fails at call time w
 
 * prompts (WP-03): ``prompts.context.build_render_context(mode=..., **levels)`` then
   ``prompts.render_set(prompt_set_content, context)``;
-* budget (WP-11): ``budget.policy.effective_policy`` / ``treatment_view``, ``budget.estimate.estimate_cell``
+* budget (WP-11): ``budget.policy.resolve_study_policies`` (every condition's policy with the study context,
+  one call per study) / ``treatment_view``, ``budget.estimate.estimate_cell``
   / ``estimate_plan``, ``budget.stop_rules.pilot_gates``;
 * slot (WP-12): ``slot.context.resolve_context`` and the target issues (``slot.validate.validation_issues`` /
   ``target_usable``, ``slot.leak.leak_issues(scan(...))``, ``single_shot.sampling_issues``);
 * runs (WP-08): ``agentic.manifest.build_manifest``;
 * execution (WP-11): ``execution.api.enqueue_runs`` / ``cancel_runs``;
+* evaluation (WP-09): ``evaluation.baseline.queue_baseline`` (starter baselines, queued at launch);
 * the tester conformance kit (WP-09): ``evaluation.conformance.coverage() -> {framework: bool}`` (None, i.e.
   "unknown", until it exists: every framework is then reported ``conformance_missing``);
 * the cell environment (harness, gateway, sandbox and image digests): :mod:`study.environment`.
@@ -31,6 +33,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 if TYPE_CHECKING:
+    from backend.generation.budget.policy import StudyPolicies
     from backend.generation.contracts.plan import CellEstimate
     from backend.generation.contracts.plan import Estimate
     from backend.generation.contracts.plan import ResolvedCell
@@ -66,6 +69,13 @@ class StudyDeps:
     enqueue_runs: Callable[[list[Any]], int]
     cancel_runs: Callable[..., dict[str, int]]
     conformance_coverage: Callable[[], dict[str, bool] | None]
+    # ``budget.policy.resolve_study_policies``. ``None`` (a binding that predates it, e.g. the WP-01
+    # ``FakeStudyEnv``) makes the resolver call ``effective_policy`` once per condition instead, without the
+    # cross-condition lint and the token-size rules.
+    study_policies: Callable[..., StudyPolicies] | None = None
+    # ``evaluation.baseline.queue_baseline(starter, task_version, auth_mode, suite)`` (WP-09), called at
+    # launch; ``None`` skips the starter baselines (``baseline_pass_rate`` then stays ``None``).
+    queue_baseline: Callable[..., Any] | None = None
 
 
 def _render_stimuli(mode: str, levels: dict[str, Any], prompt_set_content: Any) -> list[Stimulus]:
@@ -80,6 +90,18 @@ def _effective_policy(policy: Any, **kwargs: Any) -> EffectivePolicy:
     from backend.generation.budget.policy import effective_policy
 
     return effective_policy(policy, **kwargs)
+
+
+def _study_policies(study: Any, conditions: Any, **kwargs: Any) -> StudyPolicies:
+    from backend.generation.budget.policy import resolve_study_policies
+
+    return resolve_study_policies(study, conditions, **kwargs)
+
+
+def _queue_baseline(starter: Any, task_version: Any, auth_mode: str, suite: Any) -> Any:
+    from backend.generation.evaluation.baseline import queue_baseline
+
+    return queue_baseline(starter, task_version, auth_mode, suite)
 
 
 def _treatment_view(policy: EffectivePolicy) -> dict[str, Any]:
@@ -206,6 +228,8 @@ def default_deps() -> StudyDeps:
         enqueue_runs=_enqueue_runs,
         cancel_runs=_cancel_runs,
         conformance_coverage=_conformance_coverage,
+        study_policies=_study_policies,
+        queue_baseline=_queue_baseline,
     )
 
 

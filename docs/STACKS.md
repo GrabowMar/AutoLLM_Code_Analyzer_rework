@@ -92,6 +92,15 @@ Base images (`data/starters/base_images.yaml`) are pinned by index digest: `pyth
 `eclipse-temurin:21-jre-noble` (phase B). The sandbox and eval runtime use the same Debian slim family; no
 Alpine.
 
+**Go version (lead decision, 2026-11-03).** Go stays at the release that built and smoke-started in wave 3:
+`golang:1.25-trixie` at its recorded digest (go1.25.14), in the starter Dockerfiles, the lock image and the
+agent sandbox (`images/agent-base`, checked by `wp07_harnesses/test_images.py`); profiles say `runtime: go1.25`.
+Do not move it to a newer Go without the same verification (new digests in both places, new starter hashes, the
+`go-*-minimal` docker tests, fragment text). Go 1.25 is out of upstream support, and `go mod tidy` picks the newest
+module releases, some of which already need Go ≥ 1.26 (`modernc.org/sqlite` ≥ v1.60). The brief says Go 1.25 and
+the agent runs `go` 1.25 with `GOTOOLCHAIN=local` in its sandbox, so such a failure shows up during the run,
+where the agent can pin an older release (as the minimal starter does with v1.59.0).
+
 ### Lockfiles
 
 `manage.py build_starters --lock` runs one container per manifest in the pinned base image (files copied in

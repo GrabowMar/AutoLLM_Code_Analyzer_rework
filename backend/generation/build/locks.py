@@ -78,6 +78,7 @@ __all__ = [
     "MissingLockError",
     "StaleLockError",
     "check_tree_locks",
+    "eof_normalized",
     "generate_locks",
     "lock_covers",
     "lock_index",
@@ -627,6 +628,16 @@ def starters_docker_client() -> Any:
     return docker_manager.new_client()
 
 
+def eof_normalized(data: bytes) -> bytes:
+    """``data`` ending in exactly one newline (an empty lock stays empty).
+
+    The repository's ``end-of-file-fixer`` hook rewrites checked-in files that way. ``mvn dependency:list`` ends its
+    output with a blank line, so a lock written verbatim no longer matched its ``lock_sha`` once committed.
+    """
+    stripped = data.rstrip(b"\r\n")
+    return stripped + b"\n" if stripped else data
+
+
 def generate_locks(
     fragments: Iterable[str],
     runner: LockRunner,
@@ -669,7 +680,7 @@ def generate_locks(
         image = images[spec.ecosystem.image_key].pinned
         script = spec.ecosystem.script(tools)
         produced = runner.run(image, spec.input_files(root), script, [spec.ecosystem.lock])
-        data = produced[spec.ecosystem.lock]
+        data = eof_normalized(produced[spec.ecosystem.lock])
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path.write_bytes(data)
         record = {

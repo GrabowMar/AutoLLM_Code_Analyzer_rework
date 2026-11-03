@@ -2627,7 +2627,7 @@
    "restart_before": false,
    "setup": [
     {
-     "actor": null,
+     "actor": "user_a",
      "capture": {
       "oid": "$.id"
      },
@@ -2644,7 +2644,7 @@
      }
     },
     {
-     "actor": null,
+     "actor": "user_a",
      "capture": {
       "pid": "$.id"
      },

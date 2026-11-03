@@ -101,7 +101,7 @@
 						{@render actionIcon('caches', Eraser)}Clear caches
 					</DropdownMenu.Item>
 					<DropdownMenu.Item class={itemClass} disabled={pendingAction !== null} onSelect={() => onClearStuck?.()}>
-						{@render actionIcon('stuck', Activity)}Clear stuck jobs
+						{@render actionIcon('stuck', Activity)}Clear stuck runs
 					</DropdownMenu.Item>
 					<DropdownMenu.Separator class="-mx-1 my-1 h-px bg-border" />
 					<DropdownMenu.Item class={itemClass} onSelect={() => goto('/system')}>

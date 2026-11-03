@@ -22,7 +22,10 @@ from backend.generation.harnesses.gemini_cli import AUX_MODEL_ALIASES
 from backend.generation.harnesses.gemini_cli import SETTINGS_PATH as GEMINI_SETTINGS
 from backend.generation.harnesses.gemini_cli import SYSTEM_SETTINGS
 from backend.generation.harnesses.gemini_cli import WORKSPACE_GUARD
+from backend.generation.harnesses.opencode import CONFIG_DIR_SETUP as OPENCODE_SETUP
 from backend.generation.harnesses.opencode import CONFIG_PATH as OPENCODE_CONFIG
+from backend.generation.harnesses.opencode import GLOBAL_CONFIG_DIR as OPENCODE_GLOBAL_DIR
+from backend.generation.harnesses.opencode import PREBAKED_CONFIG_DIR as OPENCODE_PREBAKED
 
 from .conftest import ALL_HARNESSES
 from .conftest import FIXTURE_DIRS
@@ -132,6 +135,22 @@ class TestOpenCode:
     def test_prompt_set_override(self):
         rendered = _render("opencode", system_prompt="You build apps.")
         assert json.loads(rendered.files[OPENCODE_CONFIG])["agent"]["general"]["prompt"] == "You build apps."
+
+    def test_global_config_dir_is_prebaked_so_no_npm_install_runs(self):
+        """OpenCode npm-installs ``@opencode-ai/plugin`` into ``$XDG_CONFIG_HOME/opencode`` unless node_modules and
+        a covering package-lock.json are there (lead decision: no CONNECT registry.npmjs.org). The image pre-bakes
+        that directory for the pinned version and the command sets it up before ``exec opencode``."""
+        rendered = _render("opencode")
+        setup, run = rendered.command.splitlines()
+        assert setup == f"{OPENCODE_SETUP} || exit 70"
+        assert run.startswith("exec opencode run ")
+        assert f"{rendered.env['XDG_CONFIG_HOME']}/opencode" == OPENCODE_GLOBAL_DIR
+        for name in ("package.json", "package-lock.json", ".gitignore"):
+            assert f"{OPENCODE_PREBAKED}/{name}" in setup
+        assert f"ln -s {OPENCODE_PREBAKED}/node_modules {OPENCODE_GLOBAL_DIR}/node_modules" in setup
+        dockerfile = (IMAGES / "agent-opencode" / "Dockerfile").read_text()
+        assert f"mkdir -p {OPENCODE_PREBAKED}" in dockerfile
+        assert '"@opencode-ai/plugin@${OPENCODE_VERSION}"' in dockerfile
 
 
 class TestMiniSweAgent:

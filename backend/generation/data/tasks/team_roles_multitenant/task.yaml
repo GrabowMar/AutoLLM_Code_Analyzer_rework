@@ -327,12 +327,14 @@ acceptance:
       method: POST
       path: /api/orgs
       json: {name: zz org}
+    actor: user_a
     expect_status: 201
     capture: {oid: $.id}
   - request:
       method: POST
       path: /api/orgs/{oid}/projects
       json: {name: secret}
+    actor: user_a
     expect_status: 201
     capture: {pid: $.id}
   request: {method: GET, path: '/api/projects/{pid}'}

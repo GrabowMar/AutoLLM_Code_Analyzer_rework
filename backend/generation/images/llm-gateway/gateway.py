@@ -79,6 +79,7 @@ from protocols.common import json_or_none
 from protocols.common import sha
 from protocols.common import text_sha
 from protocols.translation import chat_error_text
+from protocols.translation import completion_failure
 from protocols.translation import completion_sse
 
 GATEWAY_VERSION = 3
@@ -605,7 +606,9 @@ class Gateway:
         payload = json_or_none(raw)
         if self._is_answer(status, payload):
             native = self.front.from_chat(payload, exchange.native_body, dropped=exchange.dropped, **exchange.options)
-            return handler.send_json(status, native)
+            # A failed turn (finish_reason=error, or an error object beside the choices) is a native error
+            # on every front, as a stream that ends that way is: never a 200 that looks like an answer.
+            return handler.send_json(502 if completion_failure(payload) else status, native)
         return handler.send_json(*self._native_error(status, payload, raw))
 
     def _translator(self, exchange: Exchange | None) -> Any:

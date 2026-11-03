@@ -47,11 +47,11 @@
   "go-vue-bare": "815eca15ac61c63ceb0e85fd65a92eab6c182b9065fc9356a8eedbad17d48e64",
   "go-vue-minimal": "d3073b156ad4e74eeca58b1a102f41def1a5110181badca2234d7bff764d5743",
   "spring-boot-none-bare": "e6b88d1329115e17b2c342c47c6ca42b7af2330548ba5b4d995826ee2484906e",
-  "spring-boot-none-minimal": "3f62d231e57a7e58a0f523f4098dbb183b7d53fbba2be30630d865552e1a5a74",
+  "spring-boot-none-minimal": "b5c8ca353e9e3635047ef2c313c255164c4381f7824268e3c2a314375189567b",
   "spring-boot-react-bare": "83569e1e977f73a206b1e4ef194bd160f7639222f6a502410f562ed32b9ccccc",
-  "spring-boot-react-minimal": "285a50d43155663e8df1b9fdb9c93328c21c95f8aefc0d30f0fef475e25db9e0",
+  "spring-boot-react-minimal": "8db8a89ac33189c704334ac0189d43a4570a5bec0b5c9d2e75f7d745ece5dc8e",
   "spring-boot-svelte-bare": "83569e1e977f73a206b1e4ef194bd160f7639222f6a502410f562ed32b9ccccc",
-  "spring-boot-svelte-minimal": "55d061455b9b169b36799a94bf53645320b2f5a9b2b6e2aa8bbe767b79bc86bf",
+  "spring-boot-svelte-minimal": "f9c301694743a3c134bd8ab11e705726ad2a8bd303b0d9750a06b66108cfd0bb",
   "spring-boot-vue-bare": "83569e1e977f73a206b1e4ef194bd160f7639222f6a502410f562ed32b9ccccc",
-  "spring-boot-vue-minimal": "fc3bb1dc8b996477c003d78109246225d527bcf6c7789beec91a542d28459884"
+  "spring-boot-vue-minimal": "58e0edfaf293d433b365a9d71124418f3854c575d4317534922fcbc1cdc8d04c"
 }

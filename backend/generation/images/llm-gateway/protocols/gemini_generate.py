@@ -36,7 +36,6 @@ from urllib.parse import unquote
 
 from protocols import budget_rules
 from protocols.common import content_text
-from protocols.translation import STREAM_ENDED_EARLY
 from protocols.translation import ChatStreamReader
 from protocols.translation import ChatTurn
 from protocols.translation import Dropped
@@ -44,7 +43,7 @@ from protocols.translation import ToolCall
 from protocols.translation import TurnBuilder
 from protocols.translation import as_dropped
 from protocols.translation import assistant_reasoning
-from protocols.translation import chat_error_text
+from protocols.translation import completion_failure
 from protocols.translation import decode_token
 from protocols.translation import details_text
 from protocols.translation import encode_token
@@ -55,6 +54,7 @@ from protocols.translation import merge_details
 from protocols.translation import parse_arguments
 from protocols.translation import synthetic_detail
 from protocols.translation import tool_call_id
+from protocols.translation import turn_failure
 from protocols.translation import turn_from_completion
 
 NAME = "gemini_generate"
@@ -80,7 +80,14 @@ CHAT_TO_FINISH = {
     "content_filter": "SAFETY",
     "error": "OTHER",
 }
-_MODEL_IN_PATH = re.compile(r"/models/([^/:]+):")
+# The model is everything between ``/models/`` and the method, so vendor-prefixed slugs
+# (``/models/deepseek/deepseek-v4.1-flash:streamGenerateContent``) keep their prefix.
+_MODEL_IN_PATH = re.compile(r"/models/(.+?):(?:generateContent|streamGenerateContent|countTokens)$")
+# Placeholder signatures a client puts on a replayed ``functionCall`` that had none (Gemini CLI's
+# ``SYNTHETIC_THOUGHT_SIGNATURE``; Google documents both as "skip validation" values). They carry no
+# reasoning: for a non-Google upstream they are dropped (``thoughtSignature.synthetic``), for a Google one
+# they are forwarded, since there they mean exactly what the client asked for.
+SYNTHETIC_SIGNATURES = frozenset({"skip_thought_signature_validator", "context_engineering_is_the_way_to_go"})
 # generationConfig keys mapped to chat keys verbatim (renamed).
 _GENERATION_KEYS = {
     "temperature": "temperature",
@@ -115,7 +122,7 @@ def route(method: str, path: str) -> str | None:
 def request_options(path: str, query: str = "") -> dict[str, Any]:
     """What the URL says about the call: ``stream``, the SSE framing (``alt=sse``) and the model."""
     clean = path.rstrip("/")
-    match = _MODEL_IN_PATH.search(clean + (":" if not clean.endswith(":") else ""))
+    match = _MODEL_IN_PATH.search(clean)
     alt = (parse_qs(query).get("alt") or [""])[0]
     return {
         "stream": clean.endswith(":streamGenerateContent"),
@@ -267,7 +274,8 @@ def to_chat(
     system = system_prompt(body)
     if system:
         messages.append({"role": "system", "content": system})
-    messages.extend(_contents_to_chat(body.get("contents"), dropped))
+    google = is_google_model(model or body.get("model"))
+    messages.extend(_contents_to_chat(body.get("contents"), dropped, google=google))
     out["messages"] = messages
     tools = _tools_to_chat(body.get("tools"), dropped)
     if tools:
@@ -289,7 +297,14 @@ def to_chat(
     return out, dropped.data
 
 
-def _contents_to_chat(contents: Any, dropped: Dropped) -> list[dict[str, Any]]:
+def is_google_model(model: Any) -> bool:
+    """Whether the presented model is a Google one (``google/...`` or a bare ``gemini-...`` name)."""
+    name = str(model or "").strip().lower()
+    vendor, _, rest = name.rpartition("/")
+    return vendor.split("/")[-1] == "google" or (not vendor and rest.startswith("gemini"))
+
+
+def _contents_to_chat(contents: Any, dropped: Dropped, *, google: bool = False) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     pending: dict[str, list[str]] = {}  # function name -> ids of the last model turn's calls, unanswered
     synthetic_ids = 0
@@ -298,7 +313,7 @@ def _contents_to_chat(contents: Any, dropped: Dropped) -> list[dict[str, Any]]:
             continue
         parts = [p for p in content.get("parts") or [] if isinstance(p, Mapping)]
         if content.get("role") == "model":
-            message, pending = _model_turn(parts, turn_no, dropped)
+            message, pending = _model_turn(parts, turn_no, dropped, google=google)
             messages.append(message)
             continue
         texts: list[str] = []
@@ -339,7 +354,13 @@ def _part_kind(part: Mapping[str, Any]) -> str:
     return keys[0] if keys else "empty"
 
 
-def _model_turn(parts: list[Mapping[str, Any]], turn_no: int, dropped: Dropped) -> tuple[dict, dict]:
+def _model_turn(
+    parts: list[Mapping[str, Any]],
+    turn_no: int,
+    dropped: Dropped,
+    *,
+    google: bool = False,
+) -> tuple[dict, dict]:
     texts: list[str] = []
     thoughts: list[str] = []
     # (signature, functionCall id of its part, index into ``calls`` of the first call it may cover)
@@ -348,6 +369,10 @@ def _model_turn(parts: list[Mapping[str, Any]], turn_no: int, dropped: Dropped) 
     pending: dict[str, list[str]] = {}
     for part in parts:
         signature = part.get("thoughtSignature") or part.get("thought_signature")
+        synthetic = isinstance(signature, str) and signature in SYNTHETIC_SIGNATURES and not google
+        if synthetic:
+            dropped.add("thoughtSignature.synthetic")  # a placeholder, not reasoning: "no signature"
+            signature = None
         call = part.get("functionCall") or part.get("function_call")
         call_id = None
         if isinstance(call, Mapping):
@@ -363,7 +388,7 @@ def _model_turn(parts: list[Mapping[str, Any]], turn_no: int, dropped: Dropped) 
             pending.setdefault(name, []).append(call_id)
         elif "text" in part:
             (thoughts if part.get("thought") else texts).append(str(part.get("text") or ""))
-        elif not signature:
+        elif not (signature or synthetic):
             dropped.add(f"model.{_part_kind(part)}")
         if signature:
             start = len(calls) - 1 if call_id is not None else len(calls)
@@ -580,9 +605,9 @@ def from_chat(
 ) -> dict[str, Any]:
     """A chat completion -> a ``GenerateContentResponse`` (an error payload -> Google's error shape)."""
     drops = as_dropped(dropped)
-    if chat_response.get("error") and not chat_response.get("choices"):
-        message, code = chat_error_text(chat_response)
-        return upstream_error(502, message, code)[1]
+    failure = completion_failure(chat_response)
+    if failure is not None:  # an error payload or a failed turn (finish_reason=error): the native error
+        return upstream_error(502, *failure)[1]
     turn = turn_from_completion(chat_response)
     parts: list[dict[str, Any]] = []
     if _include_thoughts(request_json) and details_text(turn.details):
@@ -653,9 +678,9 @@ class StreamTranslator:
             return b""
         self._finished = True
         turn = self._turn.finish()
-        problem = failure or turn.error
-        if problem or turn.finish_reason in (None, "error"):
-            message, code = chat_error_text({"error": problem}) if problem else (STREAM_ENDED_EARLY, None)
+        broken = turn_failure(turn, failure)
+        if broken is not None:
+            message, code = broken
             return self.fail(502, upstream_error(502, message, code)[1])
         parts = _final_parts(turn, self._drops, text_parts=[])
         if self._sink is not None:

@@ -5,6 +5,7 @@ import {
   filterByEndpointScope,
   groupModels,
   isLocalModel,
+  modelLevelsFromRefs,
   modelIneligibility,
   selectionByEndpoint,
 } from "./catalog";
@@ -211,5 +212,34 @@ describe("modelIneligibility", () => {
     expect(
       modelIneligibility(local(gpu2, "x"), { requireTools: true }),
     ).toBeNull();
+  });
+});
+
+describe("modelLevelsFromRefs", () => {
+  it("resolves pks, slugs and ids in link order, without duplicates", () => {
+    const a = model({
+      model_id: "local-box/qwen2.5-coder:7b",
+      canonical_slug: "local-box/qwen2.5-coder-7b",
+    });
+    const b = model({
+      model_id: "openai/gpt-5",
+      canonical_slug: "openai/gpt-5-2025",
+    });
+    expect(
+      modelLevelsFromRefs(
+        [a, b],
+        [String(b.id), "LOCAL-BOX/QWEN2.5-CODER-7B", "openai/gpt-5"],
+      ),
+    ).toEqual({
+      levels: ["openai/gpt-5", "local-box/qwen2.5-coder:7b"],
+      unknown: [],
+    });
+  });
+
+  it("keeps an unknown model id for the lint and drops an unknown pk", () => {
+    expect(modelLevelsFromRefs([], ["vendor/gone", "99999"])).toEqual({
+      levels: ["vendor/gone"],
+      unknown: ["99999"],
+    });
   });
 });

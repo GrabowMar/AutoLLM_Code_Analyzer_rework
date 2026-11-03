@@ -51,6 +51,63 @@ _DB_DEPS = {
     "sqlite3": "sqlite",
     "aiosqlite": "sqlite",
 }
+# Go: module path prefixes (go.mod requires and imports). A tree that serves HTTP through ``net/http`` with
+# none of the router modules below is ``go-stdlib``.
+_GO_BACKENDS = {
+    "github.com/gin-gonic/gin": "gin",
+    "github.com/labstack/echo": "echo",
+    "github.com/gofiber/fiber": "fiber",
+    "github.com/go-chi/chi": "chi",
+    "github.com/gorilla/mux": "gorilla",
+    "github.com/julienschmidt/httprouter": "httprouter",
+    "github.com/beego/beego": "beego",
+}
+_GO_DB = {
+    "modernc.org/sqlite": "sqlite",
+    "github.com/mattn/go-sqlite3": "sqlite",
+    "github.com/glebarez/sqlite": "sqlite",
+    "github.com/ncruces/go-sqlite3": "sqlite",
+    "github.com/lib/pq": "postgres",
+    "github.com/jackc/pgx": "postgres",
+    "github.com/go-sql-driver/mysql": "mysql",
+    "go.mongodb.org/mongo-driver": "mongodb",
+}
+# database/sql driver names in ``sql.Open("<driver>", ...)``.
+_GO_SQL_DRIVERS = {
+    "sqlite": "sqlite",
+    "sqlite3": "sqlite",
+    "postgres": "postgres",
+    "pgx": "postgres",
+    "mysql": "mysql",
+}
+# Maven/Gradle: ``groupId:artifactId`` (exact) or ``groupId:`` (any artifact of the group).
+_JAVA_BACKENDS = {
+    "org.springframework.boot:": "spring-boot",
+    "io.quarkus:": "quarkus",
+    "io.micronaut:": "micronaut",
+    "io.javalin:": "javalin",
+    "com.sparkjava:": "spark",
+    "io.dropwizard:": "dropwizard",
+    "io.vertx:": "vertx",
+}
+_JAVA_DB = {
+    "org.xerial:sqlite-jdbc": "sqlite",
+    "org.postgresql:postgresql": "postgres",
+    "com.mysql:mysql-connector-j": "mysql",
+    "mysql:mysql-connector-java": "mysql",
+    "org.mariadb.jdbc:mariadb-java-client": "mysql",
+    "org.mongodb:": "mongodb",
+    "org.springframework.boot:spring-boot-starter-data-mongodb": "mongodb",
+    "com.h2database:h2": "h2",
+    "org.hsqldb:hsqldb": "hsqldb",
+}
+_JAVA_IMPORTS = {
+    "org.springframework.boot": "spring-boot",
+    "io.quarkus": "quarkus",
+    "io.micronaut": "micronaut",
+    "io.javalin": "javalin",
+    "spark": "spark",
+}
 _COMPONENT_LIBS = (
     "@mui/material",
     "@material-ui/core",
@@ -78,6 +135,16 @@ _TW = re.compile(
 )
 _CLASS_ATTR = re.compile(r"""\bclass(?:Name)?\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*[`"']([^`"']*)[`"']\s*\})""")
 _CONN = re.compile(r"(postgres(?:ql)?|mysql|mongodb|sqlite)(?:\+\w+)?:/{2,3}", re.IGNORECASE)
+_JDBC = re.compile(r"jdbc:(sqlite|postgresql|mysql|mariadb|h2|hsqldb):", re.IGNORECASE)
+_JDBC_KINDS = {"postgresql": "postgres", "mariadb": "mysql"}
+_GO_SQL_OPEN = re.compile(r"""\bsql\.Open\(\s*["'`](\w+)["'`]""")
+_GO_IMPORT_BLOCK = re.compile(r"^import\s*\((.*?)^\)", re.MULTILINE | re.DOTALL)
+_GO_IMPORT_LINE = re.compile(r'^import\s+(?:[\w.]+\s+)?"([^"]+)"', re.MULTILINE)
+_JAVA_IMPORT = re.compile(r"^\s*import\s+(?:static\s+)?([\w.]+)", re.MULTILINE)
+_GRADLE_DEP = re.compile(
+    r"\b(?:implementation|api|compileOnly|runtimeOnly|testImplementation|annotationProcessor)\s*\(?\s*"
+    r"""["']([\w.\-]+):([\w.\-]+)(?::([^"']+))?["']""",
+)
 
 
 def _files(root: Path) -> list[Path]:
@@ -165,19 +232,147 @@ def _packages(root: Path, files: list[Path]) -> list[dict[str, Any]]:
                         },
                     )
         elif path.name == "go.mod":
-            for name, version in re.findall(r"^\s*([\w./\-]+)\s+(v[\w.\-+]+)", _read(path), re.M):
-                if name not in ("module", "go"):
-                    out.append(
-                        {
-                            "ecosystem": "go",
-                            "name": name,
-                            "version": version,
-                            "pinned": True,
-                            "declared_in": rel,
-                            "exists": None,
-                        },
-                    )
+            # go.mod pins exact (or pseudo-) versions and go.sum their checksums: every require is pinned.
+            for name, version, _indirect in _go_requires(_read(path)):
+                out.append(
+                    {
+                        "ecosystem": "go",
+                        "name": name,
+                        "version": version,
+                        "pinned": True,
+                        "declared_in": rel,
+                        "exists": None,
+                    },
+                )
+        elif path.name == "pom.xml":
+            for group, artifact, version, pinned in _pom_dependencies(_read(path)):
+                out.append(
+                    {
+                        "ecosystem": "maven",
+                        "name": f"{group}:{artifact}",
+                        "version": version,
+                        "pinned": pinned,
+                        "declared_in": rel,
+                        "exists": None,
+                    },
+                )
+        elif path.name in ("build.gradle", "build.gradle.kts"):
+            text = _read(path)
+            managed = "org.springframework.boot" in text or "platform(" in text
+            for group, artifact, version in _GRADLE_DEP.findall(text):
+                literal = bool(version) and not re.search(r"[+$\[\](]|latest\.|SNAPSHOT", version)
+                out.append(
+                    {
+                        "ecosystem": "maven",
+                        "name": f"{group}:{artifact}",
+                        "version": version or None,
+                        "pinned": literal or (not version and managed),
+                        "declared_in": rel,
+                        "exists": None,
+                    },
+                )
     return out
+
+
+_GO_REQUIRE_LINE = re.compile(r"^(\S+)\s+(v\S+)\s*(//\s*indirect\b)?")
+
+
+def _go_requires(text: str) -> list[tuple[str, str, bool]]:
+    """``[(module, version, indirect)]`` of a ``go.mod`` (``require`` blocks and single-line requires)."""
+    out: list[tuple[str, str, bool]] = []
+    block = False
+    for raw in text.replace("\r\n", "\n").split("\n"):
+        line = raw.strip()
+        if block:
+            if line.startswith(")"):
+                block = False
+            elif (match := _GO_REQUIRE_LINE.match(line)) is not None:
+                out.append((match.group(1), match.group(2), bool(match.group(3))))
+            continue
+        if re.match(r"^require\s*\(", line):
+            block = True
+        elif line.startswith("require ") and (match := _GO_REQUIRE_LINE.match(line[8:].strip())) is not None:
+            out.append((match.group(1), match.group(2), bool(match.group(3))))
+    return out
+
+
+def _xml_text(block: str, tag: str) -> str | None:
+    match = re.search(rf"<{tag}>\s*([^<]*?)\s*</{tag}>", block)
+    return match.group(1) if match else None
+
+
+def _section(text: str, tag: str) -> str:
+    start, end = text.find(f"<{tag}>"), text.find(f"</{tag}>")
+    return text[start:end] if 0 <= start < end else ""
+
+
+def _without(text: str, tag: str) -> str:
+    while (start := text.find(f"<{tag}>")) >= 0:
+        end = text.find(f"</{tag}>", start)
+        if end < 0:
+            return text[:start]
+        text = text[:start] + text[end + len(tag) + 3 :]
+    return text
+
+
+def _literal_version(version: str | None) -> bool:
+    return bool(version) and not re.search(r"[$\[\](,]|LATEST|RELEASE|SNAPSHOT", str(version))
+
+
+def _pom_dependencies(text: str) -> list[tuple[str, str, str | None, bool]]:
+    """``[(groupId, artifactId, version, pinned)]`` of a ``pom.xml``'s project dependencies.
+
+    String scanning, not an XML parser (the tree is untrusted, and the checker is stdlib only): comments,
+    ``<build>`` (plugin dependencies) and ``<dependencyManagement>`` are cut out first. ``${prop}`` versions are
+    resolved from ``<properties>``. A dependency without a version is pinned when something manages it: a
+    ``<parent>`` with a literal version (the Spring Boot BOM) or a ``<dependencyManagement>`` entry or BOM
+    import with one. Ranges, ``LATEST``/``RELEASE`` and ``-SNAPSHOT`` are not pinned.
+    """
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    props = {
+        name: value.strip() for name, value in re.findall(r"<([\w.\-]+)>([^<]*)</\1>", _section(text, "properties"))
+    }
+
+    def resolve(version: str | None) -> str | None:
+        if version is None:
+            return None
+        return re.sub(r"\$\{([\w.\-]+)\}", lambda m: props.get(m.group(1), m.group(0)), version)
+
+    management = _section(text, "dependencyManagement")
+    managed: set[str] = set()
+    bom = False
+    for block in re.findall(r"<dependency>(.*?)</dependency>", management, flags=re.DOTALL):
+        if not _literal_version(resolve(_xml_text(block, "version"))):
+            continue
+        if _xml_text(block, "scope") == "import":
+            bom = True
+        managed.add(f"{_xml_text(block, 'groupId')}:{_xml_text(block, 'artifactId')}")
+    parent = _section(text, "parent")
+    parent_pinned = bool(parent) and _literal_version(resolve(_xml_text(parent, "version")))
+    body = _without(_without(_without(text, "dependencyManagement"), "build"), "parent")
+    out: list[tuple[str, str, str | None, bool]] = []
+    for block in re.findall(r"<dependency>(.*?)</dependency>", body, flags=re.DOTALL):
+        group, artifact = _xml_text(block, "groupId"), _xml_text(block, "artifactId")
+        if not group or not artifact:
+            continue
+        version = resolve(_xml_text(block, "version"))
+        if version:
+            pinned = _literal_version(version)
+        else:
+            pinned = parent_pinned or bom or f"{group}:{artifact}" in managed
+        out.append((group, artifact, version or None, pinned))
+    return out
+
+
+def _prefix_value(name: str, table: dict[str, str]) -> str | None:
+    """The value of the first ``table`` key that ``name`` equals or extends (``key/...``, ``key:...``)."""
+    for key, value in table.items():
+        if key.endswith(":"):
+            if name.startswith(key):
+                return value
+        elif name == key or name.startswith(key + "/"):
+            return value
+    return None
 
 
 def _detected(votes: dict[str, list[str]]) -> dict[str, Any]:
@@ -203,6 +398,9 @@ def analyse(root: Path, expect: dict[str, Any]) -> dict[str, Any]:
     class_tokens = 0
     tw_tokens = 0
     css_files = css_modules = 0
+    go_routers: set[str] = set()  # Go router/framework modules seen (go.mod or imports)
+    go_http: list[str] = []  # evidence of net/http imports (go-stdlib unless a router is used)
+    go_mods: list[str] = []  # go.mod files with their go directive
     for pkg in packages:
         name = pkg["name"].lower()
         if name in _PY_BACKENDS:
@@ -213,8 +411,17 @@ def analyse(root: Path, expect: dict[str, Any]) -> dict[str, Any]:
             frontend.setdefault(_FRONTENDS[name], []).append(f"manifest:{pkg['declared_in']}:{name}")
         if name in _DB_DEPS:
             database.setdefault(_DB_DEPS[name], []).append(f"manifest:{pkg['declared_in']}:{name}")
-        if pkg["ecosystem"] == "go" and "gin-gonic/gin" in name:
-            backend.setdefault("gin", []).append(f"manifest:{pkg['declared_in']}:{name}")
+        if pkg["ecosystem"] == "go":
+            if (key := _prefix_value(pkg["name"], _GO_BACKENDS)) is not None:
+                go_routers.add(key)
+                backend.setdefault(key, []).append(f"manifest:{pkg['declared_in']}:{pkg['name']}")
+            if (key := _prefix_value(pkg["name"], _GO_DB)) is not None:
+                database.setdefault(key, []).append(f"manifest:{pkg['declared_in']}:{pkg['name']}")
+        if pkg["ecosystem"] == "maven":
+            if (key := _prefix_value(pkg["name"], _JAVA_BACKENDS)) is not None:
+                backend.setdefault(key, []).append(f"manifest:{pkg['declared_in']}:{pkg['name']}")
+            if (key := _prefix_value(pkg["name"], _JAVA_DB)) is not None:
+                database.setdefault(key, []).append(f"manifest:{pkg['declared_in']}:{pkg['name']}")
     for path in files:
         rel = path.relative_to(root).as_posix()
         suffix = path.suffix.lower()
@@ -225,6 +432,15 @@ def analyse(root: Path, expect: dict[str, Any]) -> dict[str, Any]:
             css_files += 1
             if path.name.endswith((".module.css", ".module.scss")):
                 css_modules += 1
+            continue
+        if path.name == "go.mod":
+            go_version = re.search(r"^go\s+(\S+)", _read(path), re.M)
+            go_mods.append(f"manifest:{rel}:go {go_version.group(1) if go_version else '?'}")
+            continue
+        if suffix in (".properties", ".yml", ".yaml"):
+            for m in _JDBC.finditer(_read(path)):
+                kind = m.group(1).lower()
+                database.setdefault(_JDBC_KINDS.get(kind, kind), []).append(f"conn:{rel}")
             continue
         if suffix == ".vue":
             frontend.setdefault("vue", []).append(f"ext:{rel}")
@@ -267,6 +483,30 @@ def analyse(root: Path, expect: dict[str, Any]) -> dict[str, Any]:
                         database.setdefault("sqlite", []).append(f"import:{rel}:{mod}")
                     if top in ("psycopg", "psycopg2", "asyncpg"):
                         database.setdefault("postgres", []).append(f"import:{rel}:{mod}")
+        elif suffix == ".go":
+            imports = list(_GO_IMPORT_LINE.findall(text))
+            for block in _GO_IMPORT_BLOCK.findall(text):
+                imports.extend(re.findall(r'"([^"]+)"', block))
+            for mod in imports:
+                if mod == "net/http":
+                    go_http.append(f"import:{rel}:net/http")
+                if (key := _prefix_value(mod, _GO_BACKENDS)) is not None:
+                    go_routers.add(key)
+                    backend.setdefault(key, []).append(f"import:{rel}:{mod}")
+                if (key := _prefix_value(mod, _GO_DB)) is not None:
+                    database.setdefault(key, []).append(f"import:{rel}:{mod}")
+            for driver in _GO_SQL_OPEN.findall(text):
+                if driver in _GO_SQL_DRIVERS:
+                    database.setdefault(_GO_SQL_DRIVERS[driver], []).append(f"conn:{rel}:sql.Open({driver})")
+        elif suffix == ".java":
+            for mod in _JAVA_IMPORT.findall(text):
+                for prefix, key in _JAVA_IMPORTS.items():
+                    if mod == prefix or mod.startswith(prefix + "."):
+                        backend.setdefault(key, []).append(f"import:{rel}:{mod}")
+                        break
+            for m in _JDBC.finditer(text):
+                kind = m.group(1).lower()
+                database.setdefault(_JDBC_KINDS.get(kind, kind), []).append(f"conn:{rel}")
         else:
             for mod in re.findall(r"""(?:from\s+|require\(\s*|import\s+)['"]([@\w./\-]+)['"]""", text):
                 top = mod if mod.startswith("@") and "/" in mod else mod.split("/", 1)[0]
@@ -291,6 +531,9 @@ def analyse(root: Path, expect: dict[str, Any]) -> dict[str, Any]:
         for m in _CONN.finditer(text):
             kind = m.group(1).lower()
             database.setdefault("postgres" if kind.startswith("postgres") else kind, []).append(f"conn:{rel}")
+    if go_http and not go_routers:
+        # net/http with no router module: the standard library serves HTTP (the go.mod is a second kind).
+        backend.setdefault("go-stdlib", []).extend(go_http + go_mods[:1])
     runtime = expect.get("runtime") or {}
     auth_votes: dict[str, list[str]] = {}
     if runtime.get("auth") in ("cookie", "bearer"):

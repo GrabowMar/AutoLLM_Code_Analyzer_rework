@@ -139,7 +139,10 @@ def test_adhoc_top_up_clone_export_schedules_post_runs(api, golden, fake_study):
     post_run = api.post(f"/studies/{study_id}/post-runs/", {"kind": "analysis", "trigger": "completed"})
     assert post_run.status_code == 200
     assert post_run.json()["status"] == "pending"
-    assert len(api.get(f"/studies/{study_id}/post-runs/").json()) == 1
+    listed = api.get(f"/studies/{study_id}/post-runs/").json()
+    # the launch attached the retest post-run (WP-09 test-retest), plus the one created here
+    assert len(listed) == 2
+    assert sum(1 for row in listed if (row.get("config") or {}).get("retest")) == 1
     assert api.get("/studies/cron-preview/", cron="0 3 * * *").json()["valid"] is True
 
 

@@ -1,7 +1,7 @@
 <script lang="ts">
 	// The Study builder (spec 10.2). `?draft=<id>` resumes a saved draft; `?clone=<id>[&clone_mode=latest_versions]`
 	// starts from a copy (exact pins by default); `?mode=slot&slot_sets=a,b&targets=x,y` pre-fills a slot study
-	// from the slot picker; `?model=<id>` pre-fills the model factor. The first save puts `?draft=<id>` in the URL, so a reload resumes the same draft.
+	// from the slot picker; `?model=<id>` or `?models=a,b` (endpoint page) pre-fills the model factor. The first save puts `?draft=<id>` in the URL, so a reload resumes the same draft.
 	import { onDestroy, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -15,12 +15,13 @@
 	import { BuilderState } from '$lib/components/studies/builder/builder.svelte';
 	import StudyBuilder from '$lib/components/studies/builder/StudyBuilder.svelte';
 	import { defaultDesign, setLevels } from '$lib/components/studies/builder/design';
-	import { findModel, loadModelCatalog } from '$lib/components/studies/shared/catalog';
+	import { loadModelCatalog, modelLevelsFromRefs } from '$lib/components/studies/shared/catalog';
 	import { isEditable } from '$lib/components/studies/format';
 
 	let builder = $state<BuilderState | null>(null);
 	let error = $state('');
 	let versionDiffs = $state<{ factor: string; from: string; to: string }[]>([]);
+	let unknownModels = $state<string[]>([]);
 	let started = '';
 
 	const list = (key: string) =>
@@ -39,6 +40,7 @@
 	async function init(key: string) {
 		started = key; // the clone branch and the first save move it on to `draft:<id>`
 		error = '';
+		unknownModels = [];
 		builder?.destroy();
 		builder = null;
 		const params = page.url.searchParams;
@@ -67,11 +69,16 @@
 				const mode: StudyMode = params.get('mode') === 'slot' ? 'slot' : 'app';
 				let design = defaultDesign(mode);
 				if (mode === 'slot') design.units = { tasks: [], slot_sets: list('slot_sets'), slot_targets: list('targets') };
-				const model = params.get('model');
-				if (model) {
-					// `?model=` from a model page: a canonical slug, an OpenRouter id or a pk.
-					const found = findModel(await loadModelCatalog().catch(() => []), model);
-					design = setLevels(design, 'model', [found?.model_id ?? model]);
+				// `?model=` (model page) and `?models=a,b` (endpoint page): canonical slugs, model ids or pks.
+				const refs = [...list('model'), ...list('models')];
+				if (refs.length) {
+					let resolved = modelLevelsFromRefs(await loadModelCatalog().catch(() => []), refs);
+					if (resolved.unknown.length) {
+						// A hidden local model picked on its endpoint page is only in the full list.
+						resolved = modelLevelsFromRefs(await loadModelCatalog({ includeUnavailable: true }).catch(() => []), refs);
+					}
+					unknownModels = resolved.unknown;
+					if (resolved.levels.length) design = setLevels(design, 'model', resolved.levels);
 				}
 				builder = new BuilderState(design, {}, { onCreated });
 			}
@@ -101,6 +108,11 @@
 	</PageHeader>
 
 	{#if error}<ErrorAlert message={error} onretry={() => init(page.url.search)} />{/if}
+	{#if unknownModels.length > 0}
+		<p class="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
+			Not in the model catalog, left out: <span class="font-mono">{unknownModels.join(', ')}</span>.
+		</p>
+	{/if}
 	{#if versionDiffs.length > 0}
 		<p class="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
 			Cloned with the latest versions:

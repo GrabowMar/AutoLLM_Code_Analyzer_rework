@@ -188,6 +188,28 @@ def test_maven_locks_record_the_dependency_list(tmp_path):
     assert outputs == ["dependency-list.txt"]
 
 
+def test_locks_are_written_with_one_final_newline(tmp_path):
+    """``mvn dependency:list`` ends with a blank line; the end-of-file-fixer hook then rewrote the committed file
+    and its ``lock_sha`` went stale. Written locks end in exactly one newline, so the index survives a commit."""
+    root = tmp_path / "starters"
+    (root / "backend/spring-boot/minimal/backend").mkdir(parents=True)
+    (root / "backend/spring-boot/minimal/backend/pom.xml").write_text("<project/>\n")
+
+    class TrailingBlankRunner(FakeRunner):
+        def run(self, image, files, script, outputs):
+            return dict.fromkeys(outputs, b"The following files have been resolved:\n   a:b:jar:1:compile\n\n")
+
+    lock_root = tmp_path / "lock"
+    locks.generate_locks(["backend/spring-boot/minimal"], TrailingBlankRunner(), root=root, lock_root=lock_root)
+    data = (lock_root / "backend/spring-boot/minimal/backend/dependency-list.txt").read_bytes()
+    assert data == b"The following files have been resolved:\n   a:b:jar:1:compile\n"
+    (entry,) = locks.lock_index(lock_root / "index.yaml").values()
+    assert entry["lock_sha"] == identity.bytes_sha(data)
+    assert locks.eof_normalized(b"") == b""
+    assert locks.eof_normalized(b"x") == b"x\n"
+    assert locks.eof_normalized(b"x\r\n\r\n") == b"x\n"
+
+
 class _FakeContainer:
     def __init__(self, status: int, outputs: dict[str, bytes]) -> None:
         self.status = status

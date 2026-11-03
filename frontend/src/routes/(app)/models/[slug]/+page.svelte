@@ -76,7 +76,7 @@
 	let insightsError = $state('');
 
 	const efficiency = $derived(model ? costEfficiencyGrade(model.cost_efficiency) : { grade: 'D', color: 'text-danger-fg' });
-	const applicationCount = $derived(insights?.generation.jobs_total);
+	const applicationCount = $derived(insights?.generation.runs_total);
 
 	// Keep ?tab= in the URL so a section can be linked and survives reload.
 	function syncTabParam(tab: string) {

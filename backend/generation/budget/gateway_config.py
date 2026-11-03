@@ -27,10 +27,19 @@ from backend.generation.contracts.resources import ResourcePolicyContent
 if TYPE_CHECKING:
     from backend.generation.models import GenerationRun
 
-__all__ = ["OPENROUTER_BASE_URL", "build", "provider_object"]
+__all__ = ["OPENROUTER_BASE_URL", "build", "provider_object", "seed_carried"]
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+# Fronts whose native body has no seed: in ``native``/``passthrough`` mode the gateway sends that body, so no
+# seed reaches the upstream. Translated to chat (``translate``), the canonical chat body carries one.
 _SEEDLESS_FRONTS = frozenset({"anthropic_messages", "openai_responses"})
+
+
+def seed_carried(front_protocol: str | None, protocol_mode: str | None) -> bool:
+    """Whether the upstream request of this front/mode can carry the run's seed (lead decision, wave 3:
+    forward it on translated Anthropic/Responses fronts too). The manifest's ``sampling.seed_forwarded``
+    must be ``forward_seed and model accepts a seed and seed_carried(front, mode)`` (``study/plan.py``)."""
+    return (front_protocol or "openai_chat") not in _SEEDLESS_FRONTS or protocol_mode == "translate"
 
 
 def provider_object(content: ResourcePolicyContent) -> dict[str, Any]:
@@ -114,14 +123,17 @@ def build(run: GenerationRun, *, attempt: int | None = None) -> GatewayConfig:
     request_class_source = _request_class_source(harness.get("name"))
     caching = content.caching
     front = gateway.get("front_protocol") or "openai_chat"
-    # Native Anthropic Messages and OpenAI Responses bodies have no seed; the gateway never adds one.
-    forward_seed = bool(sampling.get("seed_forwarded", True)) and front not in _SEEDLESS_FRONTS
+    mode = gateway.get("protocol_mode") or "native"
+    # Native Anthropic Messages and OpenAI Responses bodies have no seed (the gateway never adds one); the
+    # translated chat body does, so a translated run forwards the seed when the manifest says the model
+    # accepts one (``seed_forwarded``), and its pairing stays ``paired_crn``.
+    forward_seed = bool(sampling.get("seed_forwarded", True)) and seed_carried(front, mode)
     config = {
         "run_id": str(run.pk),
         "attempt": a,
         "session_id": str(run.pk) if caching.sticky_session else None,
         "front_protocol": front,
-        "protocol_mode": gateway.get("protocol_mode") or "native",
+        "protocol_mode": mode,
         "request_class_source": request_class_source,
         "upstream": {
             "kind": "local_proxy" if local else "openrouter",

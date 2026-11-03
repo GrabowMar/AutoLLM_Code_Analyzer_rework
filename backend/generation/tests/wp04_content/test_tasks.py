@@ -315,3 +315,35 @@ def test_reference_trees_follow_the_layout():
             assert tree.name in content.stacks(), (slug, tree.name)
             assert (tree / "Dockerfile").is_file(), (slug, tree.name)
             assert (tree / "PROVENANCE.md").is_file(), (slug, tree.name)
+
+
+# Section 8.5: the phase-A kit frameworks whose conformance-kit references are checked in (go and spring-boot
+# join when their references exist; until then ``coverage()`` reports them not covered).
+KIT_REFERENCE_STACKS = ("flask-none", "fastapi-none", "django-none", "express-none")
+
+
+@pytest.mark.parametrize("slug", content.KIT_TASKS)
+def test_kit_tasks_have_a_reference_for_every_phase_a_framework(slug):
+    """Without these trees ``conformance.coverage()`` is all-False and confirmatory app studies are blocked."""
+    root = content.TASKS_ROOT / slug / "reference"
+    for stack in KIT_REFERENCE_STACKS:
+        tree = root / stack
+        assert (tree / "Dockerfile").is_file(), (slug, stack)
+        assert (tree / "backend").is_dir(), (slug, stack)
+        provenance = (tree / "PROVENANCE.md").read_text(encoding="utf-8")
+        assert "No LLM was involved" in provenance, (slug, stack)
+        assert not list(tree.rglob("__pycache__")), (slug, stack)
+
+
+def test_a_check_not_run_as_user_a_names_the_actor_of_every_setup_step():
+    """A setup step without ``actor`` runs as the check's actor (WP-09 convention): for an ``anon``/``user_b``
+    check that silently makes the setup anonymous or the other tenant's, so a correct app fails it."""
+    implicit = [
+        (slug, check["id"], index)
+        for slug in SLUGS
+        for check in content.task(slug).get("acceptance") or []
+        if check.get("actor", "user_a") != "user_a"
+        for index, step in enumerate(check.get("setup") or [])
+        if "actor" not in step
+    ]
+    assert implicit == []

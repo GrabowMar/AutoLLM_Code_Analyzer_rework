@@ -1,6 +1,6 @@
-{"type":"init","timestamp":"2026-11-03T16:58:46.158Z","session_id":"82c92b20-d3fc-4341-b90a-6e74ab509507","model":"deepseek/deepseek-v4.1-flash"}
-{"type":"message","timestamp":"2026-11-03T16:58:46.160Z","role":"user","content":"Create a file named hello.txt in the workspace root that contains a greeting, then stop.\nDo not start any server.\n"}
-{"type":"tool_use","timestamp":"2026-11-03T16:58:46.244Z","tool_name":"run_shell_command","tool_id":"run_shell_command__run_shell_command_1793725126203_0","parameters":{"command":"printf 'hello from the scripted upstream\\n' > /workspace/hello.txt && ls /workspace"}}
-{"type":"tool_result","timestamp":"2026-11-03T16:58:46.324Z","tool_id":"run_shell_command__run_shell_command_1793725126203_0","status":"success","output":"README.md\nhello.txt"}
-{"type":"message","timestamp":"2026-11-03T16:58:46.334Z","role":"assistant","content":"Done. I created hello.txt in the workspace.","delta":true}
-{"type":"result","timestamp":"2026-11-03T16:58:46.336Z","status":"success","stats":{"total_tokens":2100,"input_tokens":2000,"output_tokens":100,"cached":0,"input":2000,"duration_ms":178,"tool_calls":1,"models":{"scripted":{"total_tokens":2100,"input_tokens":2000,"output_tokens":100,"cached":0,"input":2000}}}}
+{"type":"init","timestamp":"2026-11-03T19:07:38.898Z","session_id":"a7233316-105c-447b-b1cf-bf16939c1b08","model":"deepseek/deepseek-v4.1-flash"}
+{"type":"message","timestamp":"2026-11-03T19:07:38.900Z","role":"user","content":"Create a file named hello.txt in the workspace root that contains a greeting, then stop.\nDo not start any server.\n"}
+{"type":"tool_use","timestamp":"2026-11-03T19:07:38.985Z","tool_name":"run_shell_command","tool_id":"run_shell_command__run_shell_command_1793732858943_0","parameters":{"command":"printf 'hello from the scripted upstream\\n' > /workspace/hello.txt && ls /workspace"}}
+{"type":"tool_result","timestamp":"2026-11-03T19:07:39.064Z","tool_id":"run_shell_command__run_shell_command_1793732858943_0","status":"success","output":"README.md\nhello.txt"}
+{"type":"message","timestamp":"2026-11-03T19:07:39.074Z","role":"assistant","content":"Done. I created hello.txt in the workspace.","delta":true}
+{"type":"result","timestamp":"2026-11-03T19:07:39.076Z","status":"success","stats":{"total_tokens":2100,"input_tokens":2000,"output_tokens":100,"cached":0,"input":2000,"duration_ms":178,"tool_calls":1,"models":{"scripted":{"total_tokens":2100,"input_tokens":2000,"output_tokens":100,"cached":0,"input":2000}}}}

@@ -123,3 +123,24 @@ def test_native_fronts_without_a_seed_never_forward_one(user, system_ep):
     assert config.front_protocol == "anthropic_messages"
     assert config.sampling.forward_seed is False
     assert config.sampling.seed is None
+
+
+def test_translated_anthropic_and_responses_fronts_forward_the_seed(user, system_ep):
+    # Lead decision (wave 3): a translated call is canonical chat, which carries the seed.
+    tree = make_study(user, n_conditions=1, n_units=1, repeats=1)
+    run = tree.runs[0]
+    manifest = attach_manifest(run)
+    from django.db import connection
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE generation_runmanifest SET manifest = jsonb_set(jsonb_set(jsonb_set(manifest, "
+            "'{gateway,front_protocol}', '\"openai_responses\"'::jsonb), '{gateway,protocol_mode}', "
+            "'\"translate\"'::jsonb), '{sampling,seed}', '42'::jsonb) WHERE run_id = %s",
+            [str(manifest.pk)],
+        )
+    run = GenerationRun.objects.select_related("manifest").get(pk=run.pk)
+    config = gateway_config.build(run)
+    assert config.protocol_mode == "translate"
+    assert config.sampling.forward_seed is True
+    assert config.sampling.seed == 42

@@ -60,6 +60,7 @@ __all__ = [
     "RuntimeInfraError",
     "TesterCrashError",
     "get_runtime",
+    "split_pg_dump",
 ]
 
 LABEL = "llmlab.evaluation"
@@ -132,6 +133,8 @@ class EvalRuntime(Protocol):
     def wait_healthy(self, handle: AppHandle, path: str, timeout_s: float) -> bool: ...
 
     def start_database(self, kind: str) -> dict[str, str]: ...
+
+    def dump_database(self) -> dict[str, bytes]: ...
 
     def restart(self, handle: AppHandle) -> None: ...
 
@@ -266,6 +269,10 @@ class LocalProcessRuntime:
         msg = f"the local runtime has no {kind} sidecar"
         raise RuntimeInfraError(msg)
 
+    def dump_database(self) -> dict[str, bytes]:
+        msg = "the local runtime has no database sidecar"
+        raise RuntimeInfraError(msg)
+
     def wait_healthy(self, handle: AppHandle, path: str, timeout_s: float) -> bool:
         deadline = time.monotonic() + timeout_s
         url = f"http://127.0.0.1:{handle.port}{path}"
@@ -374,6 +381,30 @@ def _untar(chunks: Any) -> dict[str, bytes]:
     return out
 
 
+def split_pg_dump(dump: bytes) -> dict[str, bytes]:
+    """``{"postgres:<schema>.<table>": rows}`` of a plain ``pg_dump --data-only`` (one entry per ``COPY`` block).
+
+    Tables without rows are left out; everything outside the ``COPY ... FROM stdin;`` blocks (settings,
+    sequence values) is ignored.
+    """
+    out: dict[str, bytes] = {}
+    table: str | None = None
+    rows: list[bytes] = []
+    for line in dump.split(b"\n"):
+        if table is None:
+            if line.startswith(b"COPY ") and line.rstrip().endswith(b"FROM stdin;"):
+                table = line[5:].split(b" ", 1)[0].decode("utf-8", errors="replace").replace('"', "")
+                rows = []
+            continue
+        if line == b"\\.":
+            if rows:
+                out[f"postgres:{table}"] = b"\n".join(rows) + b"\n"
+            table = None
+            continue
+        rows.append(line)
+    return out
+
+
 class DockerEvalRuntime:
     """Builds with ``sample_builds``, runs app, tester and checker containers on an internal network."""
 
@@ -384,6 +415,8 @@ class DockerEvalRuntime:
         self._client = client
         self.network: Any = None
         self.containers: list[Any] = []
+        self.database: Any = None
+        self.database_password = ""
         self.short = os.urandom(5).hex()
         self.labels = {LABEL: self.short, "llmlab.started": str(int(time.time()))}
 
@@ -534,6 +567,7 @@ class DockerEvalRuntime:
             network.disconnect(database)
             network.connect(database, aliases=["db"])
             database.start()
+            self.database, self.database_password = database, password
         except Exception as exc:
             msg = f"starting the postgres sidecar failed: {exc}"
             raise RuntimeInfraError(msg) from exc
@@ -546,6 +580,30 @@ class DockerEvalRuntime:
             time.sleep(1.0)
         msg = "the postgres sidecar did not become ready within 60s"
         raise RuntimeInfraError(msg)
+
+    def dump_database(self) -> dict[str, bytes]:
+        """The sidecar's table rows, ``{"postgres:<schema>.<table>": COPY text}`` (``pg_dump --data-only``).
+
+        Read after the tester, while the app and the sidecar still run, for the suite-side
+        ``plaintext_password_db`` probe. Raises ``RuntimeInfraError`` when there is no sidecar or the dump fails.
+        """
+        if self.database is None:
+            msg = "no database sidecar was started"
+            raise RuntimeInfraError(msg)
+        try:
+            result = self.database.exec_run(
+                ["pg_dump", "-h", "127.0.0.1", "-U", "app", "-d", "app", "--data-only", "--no-owner"],
+                environment={"PGPASSWORD": self.database_password},
+                demux=True,
+            )
+        except Exception as exc:
+            msg = f"dumping the postgres sidecar failed: {exc}"
+            raise RuntimeInfraError(msg) from exc
+        stdout, stderr = result.output if isinstance(result.output, tuple) else (result.output, b"")
+        if result.exit_code != 0:
+            msg = f"pg_dump exited {result.exit_code}: {(stderr or b'').decode('utf-8', errors='replace')[-500:]}"
+            raise RuntimeInfraError(msg)
+        return split_pg_dump(stdout or b"")
 
     def _exec_probe(self, handle: AppHandle, path: str) -> int | None:
         """HTTP status of ``path`` fetched from a short-lived tester container on the eval network."""
@@ -728,3 +786,4 @@ class DockerEvalRuntime:
             with contextlib.suppress(Exception):
                 self.network.remove()
             self.network = None
+        self.database, self.database_password = None, ""

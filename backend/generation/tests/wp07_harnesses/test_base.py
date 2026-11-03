@@ -18,6 +18,7 @@ from backend.generation.harnesses.base import BRIEF_PATH
 from backend.generation.harnesses.base import COMMAND_SCRIPT
 from backend.generation.harnesses.base import ENTRY_SCRIPT
 from backend.generation.harnesses.base import CapturedPromptMissingError
+from backend.generation.harnesses.base import HarnessAdapter
 from backend.generation.harnesses.base import OptionField
 from backend.generation.harnesses.base import captured_prompt
 from backend.generation.harnesses.base import default_termination
@@ -88,9 +89,12 @@ class TestDefaultTermination:
         # A documented code never overrides the elapsed-time rule.
         assert default_termination(_exit(exit_code=53, elapsed_s=1300), TRAJ, QWEN) is Termination.WALL_CLOCK
 
-    def test_fake_harness_override_agrees_with_the_base_rules(self):
-        """WP-01's FakeHarness keeps its own copy of the rules; both must give the same answer everywhere."""
+    def test_fake_harness_classifies_with_the_base_rules(self):
+        """WP-01's FakeHarness inherits ``HarnessAdapter.classify_termination`` (no copy of the rules to drift)
+        and its facts (no documented exit codes) give the plain section 5.1 answer over the whole grid."""
         fake = FakeHarness()
+        assert "classify_termination" not in vars(FakeHarness)
+        assert FakeHarness.classify_termination is HarnessAdapter.classify_termination
         grid = itertools.product(
             (0, 1, 2, 124, 137, 143, None, -15),
             (10.0, 1199.0),

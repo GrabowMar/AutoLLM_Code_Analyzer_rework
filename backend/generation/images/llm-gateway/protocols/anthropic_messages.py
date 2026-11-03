@@ -39,7 +39,6 @@ from protocols.common import pin_model
 from protocols.common import set_cache_ttl
 from protocols.common import sse_event
 from protocols.common import strip_cache_control
-from protocols.translation import STREAM_ENDED_EARLY
 from protocols.translation import ChatStreamReader
 from protocols.translation import ChatTurn
 from protocols.translation import Dropped
@@ -47,7 +46,7 @@ from protocols.translation import ToolCall
 from protocols.translation import TurnBuilder
 from protocols.translation import as_dropped
 from protocols.translation import assistant_reasoning
-from protocols.translation import chat_error_text
+from protocols.translation import completion_failure
 from protocols.translation import decode_token
 from protocols.translation import detail_text
 from protocols.translation import dump_arguments
@@ -59,6 +58,7 @@ from protocols.translation import merge_details
 from protocols.translation import parse_arguments
 from protocols.translation import synthetic_detail
 from protocols.translation import tool_call_id
+from protocols.translation import turn_failure
 from protocols.translation import turn_from_completion
 
 NAME = "anthropic_messages"
@@ -699,9 +699,9 @@ def from_chat(
 ) -> dict[str, Any]:
     """A chat completion -> an Anthropic ``message`` (an error payload -> the Anthropic error shape)."""
     drops = as_dropped(dropped)
-    if chat_response.get("error") and not chat_response.get("choices"):
-        message, code = chat_error_text(chat_response)
-        return upstream_error(502, message, code)[1]
+    failure = completion_failure(chat_response)
+    if failure is not None:  # an error payload or a failed turn (finish_reason=error): the native error
+        return upstream_error(502, *failure)[1]
     turn = turn_from_completion(chat_response)
     content = _thinking_blocks(turn.details)
     if turn.content:
@@ -883,9 +883,9 @@ class StreamTranslator:
             out += self._open_block({"type": "thinking", "thinking": "", "signature": ""}, "thinking")
             self._block_fragments = self._late
             out += self._close()
-        problem = failure or turn.error
-        if problem or turn.finish_reason in (None, "error"):
-            message, code = chat_error_text({"error": problem}) if problem else (STREAM_ENDED_EARLY, None)
+        broken = turn_failure(turn, failure)
+        if broken is not None:
+            message, code = broken
             return out + stream_error(502, upstream_error(502, message, code)[1])
         for n, call in enumerate(turn.tool_calls):
             self._index += 1

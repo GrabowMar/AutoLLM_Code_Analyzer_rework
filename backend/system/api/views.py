@@ -88,14 +88,14 @@ def get_app_stats(request) -> Any:
 @router.post("/maintenance/clear-stuck-analysis", response=dict)
 def maintenance_clear_stuck_analysis(request, older_than_minutes: int = 60) -> Any:
     _assert_staff(request)
-    count = services.clear_stuck_analysis_tasks(older_than_minutes=older_than_minutes)
+    count = services.clear_stuck_analysis_runs(older_than_minutes=older_than_minutes)
     return {"updated": count}
 
 
 @router.post("/maintenance/clear-stuck-generation", response=dict)
 def maintenance_clear_stuck_generation(request, older_than_minutes: int = 60) -> Any:
     _assert_staff(request)
-    count = services.clear_stuck_generation_jobs(older_than_minutes=older_than_minutes)
+    count = services.clear_stuck_generation_runs(older_than_minutes=older_than_minutes)
     return {"updated": count}
 
 

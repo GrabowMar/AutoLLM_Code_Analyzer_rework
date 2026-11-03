@@ -13,6 +13,8 @@ Pinned on top of the release (all verified against the ``opencode-ai@1.18.35`` b
 * **Auxiliary calls.** ``small_model`` is the run's model and a constant session title is passed in
   (``--title llm-lab-run``, no run id, so ``command_sha`` holds per cell), so no hidden request names the session.
 * **Discovery.** Project/user config, AGENTS.md/CLAUDE.md, external skills and plugins are off.
+* **No npm at run time.** The plugin package OpenCode installs into its global config directory is pre-baked in
+  the image and set up in the fresh HOME before ``exec opencode`` (``CONFIG_DIR_SETUP``).
 * **Permissions.** Everything allowed inside the sandbox except the interactive ``doom_loop`` prompt
   (``deny``, explicit) and ``external_directory``.
 * **Knobs.** ``limit.context`` / ``limit.output`` (context window, output cap), compaction through
@@ -41,6 +43,7 @@ from backend.generation.contracts.harness import RenderedHarness
 from backend.generation.contracts.harness import Trajectory
 from backend.generation.contracts.harness import WireProtocol
 from backend.generation.harnesses.base import BRIEF_PATH
+from backend.generation.harnesses.base import HOME_DIR
 from backend.generation.harnesses.base import STDOUT_FILE
 from backend.generation.harnesses.base import HarnessAdapter
 from backend.generation.harnesses.base import captured_prompt
@@ -67,10 +70,25 @@ HARNESS_ENV: Final = {
     "OPENCODE_DISABLE_DEFAULT_PLUGINS": "1",
 }
 VERSION: Final = "1.18.35"
+# OpenCode runs ``npm install @opencode-ai/plugin@<version>`` (its bundled arborist, registry.npmjs.org) in its
+# global config directory unless node_modules + package-lock.json are already there. The image pre-bakes that
+# directory (agent-opencode/Dockerfile); the command copies its three small files into the fresh HOME and links
+# the read-only node_modules (64 MB, never written), so a run never fetches from npm (lead decision: no direct
+# registry.npmjs.org CONNECT; verified with the egress probe: 0 CONNECTs).
+PREBAKED_CONFIG_DIR: Final = "/opt/opencode/config"
+GLOBAL_CONFIG_DIR: Final = f"{HOME_DIR}/.config/opencode"  # $XDG_CONFIG_HOME/opencode (common_env)
+CONFIG_DIR_SETUP: Final = (
+    f"mkdir -p {GLOBAL_CONFIG_DIR} && cp {PREBAKED_CONFIG_DIR}/package.json {PREBAKED_CONFIG_DIR}/package-lock.json "
+    f"{PREBAKED_CONFIG_DIR}/.gitignore {GLOBAL_CONFIG_DIR}/ && ln -s {PREBAKED_CONFIG_DIR}/node_modules "
+    f"{GLOBAL_CONFIG_DIR}/node_modules"
+)
 
 FACTS: Final = HarnessFacts(
-    facts_version=1,
-    verified_against=f"opencode-ai@{VERSION} binary (v2 adapter + env-name scan of the binary), 2026-11-03",
+    facts_version=2,
+    verified_against=(
+        f"opencode-ai@{VERSION} binary (v2 adapter + env-name scan of the binary; config-dir npm install read from "
+        "the bundle, egress-probe smoke run), 2026-11-03"
+    ),
     license="MIT",
     install=f'npm install -g "opencode-ai@{VERSION}"',
     headless_cmd=f"opencode run --format json --pure --title {RUN_TITLE} < {BRIEF_PATH}",
@@ -204,7 +222,7 @@ class OpenCodeAdapter(HarnessAdapter):
         return RenderedHarness(
             files={ctx.brief_path: ctx.brief.encode("utf-8"), CONFIG_PATH: json_bytes(config)},
             env=env,
-            command=f"exec opencode run --format json --pure --title {RUN_TITLE}",
+            command=f"{CONFIG_DIR_SETUP} || exit 70\nexec opencode run --format json --pure --title {RUN_TITLE}",
             stdin_path=ctx.brief_path,
         )
 

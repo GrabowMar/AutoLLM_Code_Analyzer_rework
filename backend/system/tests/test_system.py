@@ -239,8 +239,8 @@ def test_app_stats_staff_ok(staff_client):
     resp = client.get("/api/system/app-stats")
     assert resp.status_code == HTTPStatus.OK
     data = resp.json()
-    assert "analysis_tasks" in data
-    assert "generation_jobs" in data
+    assert "analysis_runs" in data
+    assert "generation_runs" in data
     assert "reports" in data
     assert "container_instances" in data
 

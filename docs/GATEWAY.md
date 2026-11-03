@@ -69,8 +69,10 @@ A gateway serves only its run's front protocol; any other path is a native 404 a
   with a native 400.
 - **gemini_generate** serves `POST /v1beta/models/{m}:generateContent` and `:streamGenerateContent`
   (`?alt=sse`: `data: {...}\r\n\r\n` events; without it a streamed JSON array), answers `:countTokens`
-  locally (`{"totalTokens", "estimate": true}`) and serves `GET /v1beta/models`. The model in the URL is
-  recorded as `requested_model`; the pin applies as everywhere.
+  locally (`{"totalTokens", "estimate": true}`) and serves `GET /v1beta/models`. The model in the URL
+  (everything between `/models/` and the method, so a vendor-prefixed slug such as
+  `deepseek/deepseek-v4.1-flash` keeps its prefix) is recorded as `requested_model`; the pin applies as
+  everywhere.
 - Requests that contain images or files are refused with 400 `unsupported_content`, on every front.
 
 **Passthrough** forwards the harness's native body after applying the policy on that body. Everything that
@@ -92,7 +94,7 @@ Each translated front module exposes:
 | Function | Contract |
 |---|---|
 | `to_chat(native_body, **options) -> (chat_body, dropped)` | `options` from `request_options(path, query)` (Gemini: `stream`, `sse`, `model`; none for the others). Raises `ValueError` (`translation.TranslationError`) for a request it cannot express (refused natively, 400 `unsupported_request`) |
-| `from_chat(chat_completion, native_body=None, *, dropped=None, **options) -> native` | An error-only payload becomes the native error shape |
+| `from_chat(chat_completion, native_body=None, *, dropped=None, **options) -> native` | An error payload, or a failed turn (`finish_reason=error`, or an error object on the choice: `translation.completion_failure`), becomes the native error: Anthropic `{"type": "error", ...}`, Gemini `{"error": {code, message, status}}`, Responses a `failed` Response object with the partial output and `error: {code, message}` (as the stream's `response.failed`; an error-only payload keeps the OpenAI error shape). The gateway sends a failed turn with HTTP 502, never a 200 that looks like an answer; the call record stays the canonical one (upstream status, `finish_reason: "error"`) |
 | `StreamTranslator(native_body=None, *, dropped=None, **options)` | `.content_type`, `.feed(chat_sse_bytes) -> native_bytes` (whole native events only), `.finish(failure=None) -> closing bytes` (a stream that ended without a finish, or with an error, ends with the native error event), `.fail(status, native_error) -> bytes` |
 | `stream_from_chat(chat_sse_iter, native_body=None, **options) -> iterator` | Generator form; a `None` item means "upstream silent for one ping interval" and yields the native keepalive |
 | `upstream_error(status, message, code) -> (status, native)` | Upstream chat errors keep their status; a context overflow is worded the native way (Anthropic "prompt is too long: ...", OpenAI `context_length_exceeded`, Gemini "input token count ... exceeds") so the harness compacts |
@@ -115,7 +117,10 @@ per detail; encrypted details as `redacted_thinking.data`), Responses `reasoning
 `thoughtSignature` on the first `functionCall` part (else the first answer text part, else an empty text
 part; Gemini CLI drops `thought` parts from its history but keeps signatures). A native signature the
 gateway did not mint is forwarded as a detail of the front's format (`anthropic-claude-v1`,
-`openai-responses-v1`, `google-gemini-v1`), including Gemini CLI's own `skip_thought_signature_validator`.
+`openai-responses-v1`, `google-gemini-v1`). Gemini CLI's placeholder `skip_thought_signature_validator`
+(and Google's other "skip validation" value `context_engineering_is_the_way_to_go`) carries no reasoning:
+it is forwarded only when the requested model is a Google one (`google/...` or a bare `gemini-...`, where it
+means what the client asked for) and otherwise dropped and counted as `thoughtSignature.synthetic`.
 A plain `reasoning` string (local models) is replayed as `reasoning` text. The local overlay turns
 `reasoning_details` into `reasoning` text (signatures mean nothing to a local endpoint).
 
@@ -142,7 +147,7 @@ Applied on every call, after routing to the front module:
 |---|---|---|---|
 | Model pin | `model` = `model.upstream_model` (`:floor` for `serving_tier=flex`) | same | same |
 | Sampling | strip `sampling.stripped`, then force `sampling.forced` | `temperature`, `top_p`, `top_k` only | `temperature`, `top_p` only |
-| Seed | `seed` = `sampling.seed` when `forward_seed` | not applicable (noted in `policy_diff`) | not applicable (noted) |
+| Seed | `seed` = `sampling.seed` when `forward_seed` | not applicable (noted in `policy_diff`); in translate mode the chat row applies | not applicable (noted); in translate mode the chat row applies |
 | Output cap | `max_tokens = call.max_output_tokens + reasoning.max_tokens` (budget mode), clamped to `model.max_output`; harness `max_completion_tokens` stripped | `max_tokens` (same value) | `max_output_tokens` (same value) |
 | Reasoning | OpenRouter `reasoning {effort | max_tokens, exclude}` | `thinking {enabled, budget_tokens}` for a token budget; `output_config.effort` for an effort (minimal→low, xhigh→high; `none` disables thinking). `exclude` is ignored: signatures must replay | `reasoning {effort | max_tokens}` (the harness's `summary` kept); `store: false`; `include` gets `reasoning.encrypted_content` |
 | Routing | `provider` = `routing.provider` (harness routing fields stripped) | same | same |
@@ -300,8 +305,12 @@ against the scripted chat upstream on an `--internal` network: 2 calls each, all
   presence of `usage.cost` in native responses are open (spec appendix B); when `usage.cost` is missing the
   call is accounted at list price and the record keeps `usage.cost: null` for the backfill.
 - **Seeds are not sent on native passthrough bodies** (neither API has one); the policy diff records
-  `seed_not_applicable`. `gateway_config.build` should set `forward_seed=false` for these fronts so the
-  manifest's `seed_forwarded` stays truthful.
+  `seed_not_applicable`, and `budget.gateway_config.build` sets `forward_seed=false` for them.
+  **Translated** Anthropic/Responses calls are canonical chat and carry the seed (lead decision, wave 3):
+  `gateway_config.seed_carried(front, mode)` is false only for those two fronts outside `translate`, and
+  `forward_seed = manifest.sampling.seed_forwarded and seed_carried(...)`, so a translated run whose model
+  accepts a seed stays `paired_crn`. The manifest's `seed_forwarded` must apply the same rule
+  (`study/plan.py`, WP-10).
 - **`call.max_input_tokens` refusals are worded as context overflow** (on purpose: they exist to make the
   harness compact); budget refusals never are.
 - **`caching.prompt_cache=auto` strips explicit markers** (provider-implicit caching only).

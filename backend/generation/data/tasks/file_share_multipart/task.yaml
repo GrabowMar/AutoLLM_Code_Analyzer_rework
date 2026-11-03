@@ -205,12 +205,15 @@ acceptance:
       path: /api/files
       files:
         file: {filename: a.txt, content: hello, content_type: text/plain}
+    actor: user_a
     expect_status: 201
     capture: {fid: $.id}
   - request: {method: POST, path: '/api/files/{fid}/shares'}
+    actor: user_a
     expect_status: 201
     capture: {tok: $.token}
   - request: {method: DELETE, path: '/api/files/{fid}/shares/{tok}'}
+    actor: user_a
     expect_status: 204
   request: {method: GET, path: '/api/shared/{tok}'}
   expect: {status: 404}

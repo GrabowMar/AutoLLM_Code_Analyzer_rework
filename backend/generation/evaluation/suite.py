@@ -21,7 +21,7 @@ one). The stages follow the run's evaluation spec (``Design.evaluation`` of its 
    ``only_checks``).
 5. **probes** run inside the tester when the level includes them; unvalidated kinds are ``skipped(disabled)``,
    a level without probes lists the task's probes as ``skipped(level)``. ``plaintext_password_db`` is read here
-   from the app's data directory after the run.
+   after the run: from the app's data directory, and on postgres stacks from a ``pg_dump`` of the sidecar.
 6. **adherence** (``adherence.check_adherence``) with what the tester saw (login cookie vs bearer).
 7. **baseline**: ``EvalBaseline`` of (starter, task version, auth mode, suite) -> ``baseline_pass_rate`` /
    ``over_baseline`` (``None`` when there is no baseline yet; never 0).
@@ -475,13 +475,16 @@ class _Evaluation:
             self._stage("probes", "not_measured", None, reason="level", n=len(self.probe_rows))
 
     def _plaintext_passwords(self, handle: Any, raw: dict[str, Any], stack: Any) -> None:
-        """``plaintext_password_db``: user_a's password verbatim in the app's data directory (docker cp).
+        """``plaintext_password_db``: user_a's password verbatim in the app's stored data.
 
-        On ``database: postgres`` stacks the users live in the sidecar, not in ``./data``: whatever the app
-        writes there (uploads, logs, a fallback sqlite) says nothing about how passwords are stored, so the
-        probe is ``skipped(precondition_failed)`` without reading files, never ``not_exploited``.
+        SQLite stacks: the app's data directory (docker cp). ``database: postgres`` stacks: the sidecar's rows
+        (``runtime.dump_database``, ``pg_dump --data-only`` split per table) plus the data directory, judged by
+        ``probes.plaintext_password_database_verdict`` (a clean verdict needs user_a's account in the dump or
+        the data files). A runtime that cannot dump is ``skipped(precondition_failed)``; a dump that fails is
+        ``error``; neither is ever ``not_exploited``.
         """
         from backend.generation.evaluation import probes as probes_mod
+        from backend.generation.evaluation.runtime import RuntimeInfraError
 
         rows = [
             p
@@ -491,19 +494,32 @@ class _Evaluation:
         if not rows:
             return
         content = (stack.content if stack is not None else {}) or {}
-        if content.get("database") == "postgres":
-            for row in rows:
-                row.update(
-                    status="skipped",
-                    evidence="passwords live in the postgres sidecar",
-                    skip_reason="precondition_failed",
-                )
-            return
-        password = ((raw.get("actors") or {}).get("user_a") or {}).get("password") or ""
+        user_a = (raw.get("actors") or {}).get("user_a") or {}
+        password = str(user_a.get("password") or "")
         contract = content.get("run_contract") or {}
         files: dict[str, bytes] = {}
         with contextlib.suppress(Exception):
             files = self.runtime.read_data(handle, str(contract.get("data_dir") or "./data"))
+        if content.get("database") == "postgres":
+            dump = getattr(self.runtime, "dump_database", None)
+            verdict: tuple[str, str, str | None]
+            if dump is None:
+                verdict = ("skipped", "the runtime cannot dump the postgres sidecar", "precondition_failed")
+            else:
+                try:
+                    tables = dump()
+                except RuntimeInfraError as exc:
+                    verdict = ("error", f"dumping the postgres sidecar failed: {str(exc)[:300]}", None)
+                else:
+                    verdict = probes_mod.plaintext_password_database_verdict(
+                        tables,
+                        files,
+                        str(user_a.get("username") or ""),
+                        password,
+                    )
+            for row in rows:
+                row.update(status=verdict[0], evidence=verdict[1], skip_reason=verdict[2])
+            return
         for row in rows:
             status, evidence, skip = probes_mod.plaintext_password_verdict(files, password)
             row.update(status=status, evidence=evidence, skip_reason=skip)
