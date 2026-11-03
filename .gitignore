@@ -316,3 +316,6 @@ frontend/svelte-check-full-output.txt
 
 # scripts/deploy.sh writes its log next to itself when run from a checkout
 deploy.log
+
+# Worktree helpers' private state (.wt-test.sh env file, mode 600; holds DB credentials)
+.wt/

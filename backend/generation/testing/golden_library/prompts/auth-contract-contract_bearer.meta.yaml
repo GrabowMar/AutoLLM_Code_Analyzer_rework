@@ -1,0 +1,4 @@
+name: Auth contract, bearer token
+role: fragment
+modes: [app]
+variables: []

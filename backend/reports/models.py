@@ -81,7 +81,7 @@ class Report(models.Model):
 
     # Optional links back to source data.
     generation_job = models.ForeignKey(
-        "generation.GenerationJob",
+        "generation.GenerationRun",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

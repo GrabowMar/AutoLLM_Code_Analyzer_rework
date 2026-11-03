@@ -1,0 +1,4 @@
+name: Slot agent brief
+role: slot_agent_brief
+modes: [slot]
+variables: [slot]

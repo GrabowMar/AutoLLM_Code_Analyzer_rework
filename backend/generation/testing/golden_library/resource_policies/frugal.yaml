@@ -1,0 +1,166 @@
+name: Frugal
+description: The frugal budget preset (section 4.2 column F), frozen for tests.
+content:
+  run:
+    max_cost_usd: 0.3
+    max_total_tokens: 3000000
+    max_uncached_input_tokens: 1000000
+    max_output_tokens: 150000
+    max_llm_requests: 40
+    max_aux_requests: 10
+    max_turns: 40
+    max_workspace_bytes: 209715200
+  call:
+    max_output_tokens: 8192
+    max_input_tokens: 72000
+  context:
+    max_context_tokens: 64000
+    compaction: auto_prune
+  reasoning:
+    mode: effort
+    effort: low
+    max_tokens: null
+    exclude: false
+  caching:
+    prompt_cache: 'on'
+    ttl: 5m
+    sticky_session: true
+  routing:
+    provider_sort: price
+    max_price: "model\xD71.25"
+    allow_fallbacks: true
+    only: []
+    ignore: []
+    order: []
+    quantizations:
+    - fp8
+    - bf16
+    - fp16
+    - fp32
+    require_parameters: true
+    data_collection: allow
+    zdr: false
+    preferred_min_throughput: null
+    preferred_max_latency: null
+    serving_tier: auto_batch
+  time:
+    wall_clock_s: 1200
+    idle_timeout_s: 300
+    command_timeout_s: 120
+    llm_call_timeout_s: 300
+  retries:
+    upstream_retries: 2
+    backoff_s: 2.0
+    retry_on:
+    - '429'
+    - 5xx
+    infra_retries: 1
+    count_failed_calls: false
+  sandbox:
+    memory: 2g
+    nano_cpus: 1000000000
+  network_policy: packages
+  concurrency:
+    study_max_parallel: 2
+    per_endpoint: 1
+    per_model: 1
+    per_provider: null
+    rpm_per_model: 20
+    max_resident_models: 1
+    eval_parallel: 1
+  cell:
+    max_cost_usd: 0.6
+  study:
+    max_cost_usd: auto
+    max_total_tokens: null
+    max_runs: null
+    max_wall_hours: null
+    cap_basis: auto
+    budget_basis: auto
+    alert_at:
+    - 0.5
+    - 0.8
+    on_budget_exhausted: stop_balanced
+    stop_rules:
+    - code: infra_error_rate
+      scope: study
+      window: 20
+      threshold: 0.3
+      action: pause
+      stages:
+      - pilot
+      - main
+      features: []
+      n_min: 10
+      n_max: null
+    - code: no_provider_rate
+      scope: study
+      window: 20
+      threshold: 0.2
+      action: pause
+      stages:
+      - pilot
+      - main
+      features: []
+      n_min: 10
+      n_max: null
+    - code: consecutive_failures
+      scope: condition
+      window: 5
+      threshold: 5.0
+      action: pause_condition
+      stages:
+      - pilot
+      - main
+      features: []
+      n_min: 10
+      n_max: null
+    - code: cost_overrun
+      scope: condition
+      window: 5
+      threshold: 2.0
+      action: pause_condition
+      stages:
+      - pilot
+      - main
+      features: []
+      n_min: 10
+      n_max: null
+    - code: spend_fraction
+      scope: study
+      window: 20
+      threshold: 1.0
+      action: alert
+      stages:
+      - pilot
+      - main
+      features: []
+      n_min: 10
+      n_max: null
+  pilot:
+    enabled: true
+    repeats: 1
+    units: 3
+    smoke_first: true
+    reuse_as_main: true
+    gates:
+      max_infra_error_rate: 0.2
+      min_build_rate: 0.5
+      max_cost_overrun: 1.5
+      max_cap_hit_rate: 0.3
+      max_truncation_rate: 0.2
+      max_call_truncation_rate: 0.2
+      max_wall_clock_rate: 0.15
+      max_oom_rate: 0.05
+      usd_cap_binding: 0.05
+    auto_expand: false
+  caches:
+    dependency_cache: shared_ro
+    reuse_sample_images: true
+    reuse_parent_build: true
+    reuse_eval_by_tree: true
+  slot:
+    max_output_tokens: 4096
+  estimate:
+    method: priors
+    require_confirm_above_usd: 2.0

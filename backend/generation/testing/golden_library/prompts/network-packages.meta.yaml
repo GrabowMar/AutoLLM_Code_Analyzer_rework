@@ -1,0 +1,4 @@
+name: Network sentence, packages
+role: fragment
+modes: [app, slot]
+variables: []

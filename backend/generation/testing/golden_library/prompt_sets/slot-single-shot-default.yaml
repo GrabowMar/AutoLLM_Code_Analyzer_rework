@@ -1,0 +1,6 @@
+name: Slot single-shot (default)
+content:
+  mode: slot
+  roles:
+    slot_single_shot_system: slot-single-shot-system@1
+    slot_single_shot_user: slot-single-shot-user@1

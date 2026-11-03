@@ -1,0 +1,4 @@
+name: Slot single-shot system
+role: slot_single_shot_system
+modes: [slot]
+variables: []

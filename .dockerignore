@@ -25,3 +25,4 @@ htmlcov/
 *.png
 !frontend/static/**/*.png
 !backend/static/**/*.png
+.wt/

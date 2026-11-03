@@ -1,0 +1,5 @@
+name: opencode (native)
+description: opencode with its native system prompt and tools.
+content:
+  harness: opencode
+  harness_version: 1.18.35

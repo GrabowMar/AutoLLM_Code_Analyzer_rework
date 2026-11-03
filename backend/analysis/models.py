@@ -289,6 +289,14 @@ class InstalledTool(models.Model):
         return self.status == self.Status.INSTALLED and self.catalog_version != (self.tool.version or "")
 
 
+class CodeScope(models.TextChoices):
+    """The file set of a generation run handed to the analyzers (``RunView.code_files(scope)``)."""
+
+    APP = "app", _("App (whole non-artifact tree)")
+    MODEL = "model", _("Model-written files")
+    SLOT = "slot", _("Slot replacement")
+
+
 class AnalysisRun(models.Model):
     """A single analysis execution against some target code."""
 
@@ -315,13 +323,25 @@ class AnalysisRun(models.Model):
         related_name="runs",
     )
     generation_job = models.ForeignKey(
-        "generation.GenerationJob",
+        "generation.GenerationRun",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="analysis_runs",
     )
     source_code = models.JSONField(_("source code"), null=True, blank=True)
+    # Which file set of the run was analysed (spec v3 §8.8: always "app" for generation runs, so
+    # dependency scanners see manifests and lockfiles; model/slot attribution is by RunFile.origin at
+    # stats time). Blank for inline-source runs.
+    code_scope = models.CharField(
+        _("code scope"),
+        max_length=8,
+        choices=CodeScope,
+        blank=True,
+        default="",
+    )
+    # H(sorted analysed paths): which files the tools actually received.
+    code_scope_paths_sha = models.CharField(_("code scope paths sha"), max_length=64, blank=True, default="")
     tool_slugs = models.JSONField(_("tool slugs"), default=list, blank=True)
     # Runs launched together (one per app) share a batch id.
     batch_id = models.UUIDField(_("batch"), null=True, blank=True, db_index=True)

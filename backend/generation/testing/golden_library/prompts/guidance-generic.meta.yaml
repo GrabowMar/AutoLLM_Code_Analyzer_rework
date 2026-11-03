@@ -1,0 +1,4 @@
+name: Guidance fragment, generic
+role: fragment
+modes: [app, slot]
+variables: []
