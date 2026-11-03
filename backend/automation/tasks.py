@@ -1,7 +1,7 @@
 """Celery tasks of the retired automation pipelines (legacy, kept for existing data).
 
 The automation API router is unmounted and nothing enqueues or schedules these
-tasks any more: experiment schedules and post-run steps now run inside the
+tasks any more: study schedules and post-run steps now run inside the
 executor (see docs/BACKGROUND_SERVICES.md). They remain registered with the
 legacy models. ``trigger_run`` in
 ``services.py`` (no longer reachable from the API) still falls back to a

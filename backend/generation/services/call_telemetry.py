@@ -412,27 +412,27 @@ def link_llm_requests(calls: list[dict[str, Any]], rows: list[Any]) -> dict[int,
     return links
 
 
-def proxy_requests(job: Any, attempt: int | None = None) -> list[Any]:
-    """The executor-proxy ``LLMRequest`` rows of ``job``'s agent run (``attempt`` defaults to the job's)."""
+def proxy_requests(run: Any, attempt: int | None = None) -> list[Any]:
+    """The executor-proxy ``LLMRequest`` rows of ``run``'s agent attempt (``attempt`` defaults to the run's)."""
     from backend.inference.models import LLMRequest
 
     return list(
         LLMRequest.objects.filter(
-            job_id=job.pk,
-            job_attempt=job.attempt if attempt is None else attempt,
+            job_id=run.pk,
+            job_attempt=run.attempt if attempt is None else attempt,
             source=LLMRequest.Source.AGENT_PROXY,
         ).select_related("endpoint"),
     )
 
 
-def telemetry_for_calls(job: Any, calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """C1 telemetry for each gateway call of ``job``'s run (same order as ``calls``).
+def telemetry_for_calls(run: Any, calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """C1 telemetry for each gateway call of ``run`` (same order as ``calls``).
 
     Best effort: a failure here leaves the calls without telemetry, never
     fails the ingestion of the run.
     """
     try:
-        rows = proxy_requests(job)
+        rows = proxy_requests(run)
         links = link_llm_requests(calls, rows) if rows else {}
         out = []
         for call in calls:
@@ -442,7 +442,7 @@ def telemetry_for_calls(job: Any, calls: list[dict[str, Any]]) -> list[dict[str,
                 telemetry["local"] = local_from_llm_request(row)
             out.append(telemetry)
     except Exception:  # noqa: BLE001 - telemetry must never break run ingestion
-        logging.getLogger(__name__).warning("Call telemetry for job %s failed", job.pk, exc_info=True)
+        logging.getLogger(__name__).warning("Call telemetry for run %s failed", run.pk, exc_info=True)
         return [{} for _ in calls]
     return out
 
@@ -529,7 +529,7 @@ _CHOICE_KEYS = ("finish_reason", "native_finish_reason")
 
 def call_values(artifacts: Any):
     """``artifacts`` as light dicts (telemetry + the few payload keys it is derived from)."""
-    fields = ["id", "job_id", "stage", "telemetry", "created_at"]
+    fields = ["id", "run_id", "stage", "telemetry", "created_at"]
     fields += [f"response_payload__{k}" for k in _PAYLOAD_KEYS]
     fields += [f"response_payload__choices__0__{k}" for k in _CHOICE_KEYS]
     return artifacts.values(*fields)
@@ -549,7 +549,7 @@ def iter_calls(artifacts: Any, *, chunk_size: int = 500):
         payload = _light_payload(row)
         yield {
             "artifact_id": row["id"],
-            "job_id": row["job_id"],
+            "run_id": row["run_id"],
             "stage": row["stage"],
             "created_at": row["created_at"],
             "response_id": payload.get("id"),
@@ -558,8 +558,8 @@ def iter_calls(artifacts: Any, *, chunk_size: int = 500):
 
 
 def call_seq(stage: str) -> int | None:
-    """The gateway seq of an agent call artifact (``agent_call_0042`` → 42)."""
-    if stage.startswith("agent_call_"):
+    """The gateway seq of a call artifact (``agent_call_0042`` / ``slot_call_0042`` → 42)."""
+    if stage.startswith(("agent_call_", "slot_call_")):
         try:
             return int(stage.rsplit("_", 1)[1])
         except ValueError:
@@ -597,16 +597,16 @@ def summarize_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
     retried = retry_known = errors = fallbacks_n = fallback_known = 0
     eligible = covered = unavailable = 0
     finish: dict[str, int] = {}
-    modes: dict[str, int] = {}
+    kinds: dict[str, int] = {}
     served: dict[str, int] = {}
     permaslugs: dict[str, int] = {}
-    jobs: set[Any] = set()
+    runs: set[Any] = set()
     for call in calls:
         t = call["telemetry"]
-        jobs.add(call["job_id"])
-        mode = call.get("mode")
-        if mode:
-            modes[mode] = modes.get(mode, 0) + 1
+        runs.add(call["run_id"])
+        kind = call.get("kind")
+        if kind:
+            kinds[kind] = kinds.get(kind, 0) + 1
         orouter = t.get("openrouter") if isinstance(t.get("openrouter"), dict) else {}
         if is_openrouter_id(call.get("response_id")):
             eligible += 1
@@ -655,8 +655,8 @@ def summarize_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
     n = len(calls)
     return {
         "n_calls": n,
-        "n_jobs": len(jobs),
-        "modes": modes,
+        "n_runs": len(runs),
+        "kinds": kinds,
         "ttft_ms": _quantiles(ttft, p90=True, digits=0),
         "generation_time_ms": _quantiles(gen_ms, digits=0),
         "decode_tps": _quantiles(decode, digits=1),
@@ -697,18 +697,18 @@ PERFORMANCE_NOTES = (
 )
 
 
-def provider_performance(jobs: Any, *, mode: str | None = None) -> dict[str, Any]:
-    """Per upstream provider (and overall) call statistics over ``jobs``' LLM calls."""
+def provider_performance(runs: Any, *, kind: str | None = None) -> dict[str, Any]:
+    """Per upstream provider (and overall) call statistics over ``runs``' LLM calls (optionally one run kind)."""
     from backend.generation.models import GenerationArtifact
 
-    job_modes = dict(jobs.values_list("id", "mode"))
-    artifacts = GenerationArtifact.objects.filter(job_id__in=list(job_modes))
-    if mode:
-        artifacts = artifacts.filter(job__mode=mode)
+    if kind:
+        runs = runs.filter(kind=kind)
+    run_kinds = dict(runs.values_list("id", "kind"))
+    artifacts = GenerationArtifact.objects.filter(run_id__in=list(run_kinds))
     calls: list[dict[str, Any]] = []
     groups: dict[str, list[dict[str, Any]]] = {}
-    for call in iter_calls(artifacts.order_by("job_id", "id")):
-        call["mode"] = job_modes.get(call["job_id"])
+    for call in iter_calls(artifacts.order_by("run_id", "id")):
+        call["kind"] = run_kinds.get(call["run_id"])
         t = call["telemetry"]
         provider = t.get("provider") or (t.get("openrouter") or {}).get("provider_name") or "unknown"
         calls.append(call)
@@ -716,7 +716,7 @@ def provider_performance(jobs: Any, *, mode: str | None = None) -> dict[str, Any
     providers = [{"provider": name, **summarize_calls(group)} for name, group in groups.items()]
     providers.sort(key=lambda p: (-p["n_calls"], p["provider"]))
     return {
-        "mode": mode or None,
+        "kind": kind or None,
         "overall": summarize_calls(calls),
         "providers": providers,
         "notes": list(PERFORMANCE_NOTES),
@@ -724,12 +724,12 @@ def provider_performance(jobs: Any, *, mode: str | None = None) -> dict[str, Any
 
 
 CSV_COLUMNS = (
-    "job_id",
-    "experiment_id",
+    "run_id",
+    "study_id",
     "condition_label",
     "repeat_index",
     "model_id",
-    "mode",
+    "kind",
     "harness",
     "seq",
     "stage",
@@ -764,38 +764,47 @@ CSV_COLUMNS = (
 )
 
 
-def _job_meta(jobs: Any) -> dict[Any, dict[str, Any]]:
-    rows = jobs.values(
+_PER_MTOK = 1_000_000
+
+
+def _run_meta(runs: Any) -> dict[Any, dict[str, Any]]:
+    """Per run: the CSV identity columns and the frozen catalog prices (per token) from its manifest."""
+    rows = runs.values(
         "id",
-        "experiment_id",
+        "study_id",
         "condition__label",
         "repeat_index",
         "model__model_id",
-        "mode",
-        "resolved_bundle__harness__name",
-        "resolved_bundle__llm__input_price_per_token",
-        "resolved_bundle__llm__output_price_per_token",
+        "kind",
+        "manifest__manifest__harness__name",
+        "manifest__manifest__model__pricing__input_per_mtok",
+        "manifest__manifest__model__pricing__output_per_mtok",
     )
     return {
         r["id"]: {
-            "job_id": str(r["id"]),
-            "experiment_id": str(r["experiment_id"]) if r["experiment_id"] else None,
+            "run_id": str(r["id"]),
+            "study_id": str(r["study_id"]) if r["study_id"] else None,
             "condition_label": r["condition__label"] or None,
             "repeat_index": r["repeat_index"],
             "model_id": r["model__model_id"],
-            "mode": r["mode"],
-            "harness": r["resolved_bundle__harness__name"],
+            "kind": r["kind"],
+            "harness": r["manifest__manifest__harness__name"],
             "_prices": (
-                _num(r["resolved_bundle__llm__input_price_per_token"]),
-                _num(r["resolved_bundle__llm__output_price_per_token"]),
+                _per_token(r["manifest__manifest__model__pricing__input_per_mtok"]),
+                _per_token(r["manifest__manifest__model__pricing__output_per_mtok"]),
             ),
         }
         for r in rows
     }
 
 
+def _per_token(per_mtok: Any) -> float | None:
+    value = _num(per_mtok)
+    return None if value is None else value / _PER_MTOK
+
+
 def catalog_cost(tokens: dict[str, Any], prices: tuple[float | None, float | None]) -> float | None:
-    """Prompt/completion tokens at the catalog headline prices frozen in the job snapshot.
+    """Prompt/completion tokens at the catalog headline prices frozen in the run's manifest.
 
     ``None`` when a price is missing or 0 (local/subscription endpoints are not
     priced) or a token count is unknown. It ignores cache discounts and the
@@ -808,24 +817,24 @@ def catalog_cost(tokens: dict[str, Any], prices: tuple[float | None, float | Non
     return round(prompt * price_in + completion * price_out, 10)
 
 
-def csv_rows(jobs: Any):
-    """Yield the header, then one row per LLM call of ``jobs`` (no message content)."""
+def csv_rows(runs: Any):
+    """Yield the header, then one row per LLM call of ``runs`` (no message content)."""
     from backend.generation.models import GenerationArtifact
 
-    meta = _job_meta(jobs)
+    meta = _run_meta(runs)
     yield list(CSV_COLUMNS)
     order: dict[Any, int] = {}
-    artifacts = GenerationArtifact.objects.filter(job_id__in=list(meta)).order_by("job_id", "id")
+    artifacts = GenerationArtifact.objects.filter(run_id__in=list(meta)).order_by("run_id", "id")
     for call in iter_calls(artifacts):
-        job = meta[call["job_id"]]
+        run = meta[call["run_id"]]
         t = call["telemetry"]
         orouter = t.get("openrouter") if isinstance(t.get("openrouter"), dict) else {}
         tokens = t.get("tokens") if isinstance(t.get("tokens"), dict) else {}
-        order[call["job_id"]] = order.get(call["job_id"], 0) + 1
-        seq = call_seq(call["stage"]) or order[call["job_id"]]
+        order[call["run_id"]] = order.get(call["run_id"], 0) + 1
+        seq = call_seq(call["stage"]) or order[call["run_id"]]
         error = t.get("error") if isinstance(t.get("error"), dict) else {}
         values = {
-            **job,
+            **run,
             "seq": seq,
             "stage": call["stage"],
             "started_at": t.get("started_at"),
@@ -846,7 +855,7 @@ def csv_rows(jobs: Any):
             "cache_write_tokens": tokens.get("cache_write"),
             "cost": t.get("cost"),
             "list_cost": t.get("list_cost"),
-            "catalog_cost": catalog_cost(tokens, job["_prices"]),
+            "catalog_cost": catalog_cost(tokens, run["_prices"]),
             "billing_source": t.get("billing_source"),
             "finish_reason": t.get("finish_reason"),
             "native_finish_reason": t.get("native_finish_reason") or orouter.get("native_finish_reason"),

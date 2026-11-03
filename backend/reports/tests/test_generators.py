@@ -1,4 +1,4 @@
-"""Legacy report generators: measurement rules (one instrument set, code-only densities, unmeasured is not zero)."""
+"""Report generators: measurement rules (one instrument set, code-only densities, unmeasured is not zero)."""
 
 from __future__ import annotations
 
@@ -11,110 +11,96 @@ from backend.analysis.models import ToolResult
 from backend.analysis.tests.factories import AnalysisRunFactory
 from backend.analysis.tests.factories import AnalyzerToolFactory
 from backend.analysis.tests.factories import ToolResultFactory
-from backend.generation.models import GenerationJob
-from backend.generation.tests.factories import AppRequirementTemplateFactory
-from backend.generation.tests.factories import ExperimentConditionFactory
-from backend.generation.tests.factories import ExperimentFactory
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.models import GenerationRun
+from backend.generation.models import choices
+from backend.generation.testing import factories
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.rankings.services.constants import EMPIRICAL_DENSITY_CAP
 from backend.reports.services import generators
+from backend.reports.tests.helpers import add_file
+from backend.reports.tests.helpers import analyze
+from backend.reports.tests.helpers import cell_run
+from backend.reports.tests.helpers import evaluate
+from backend.reports.tests.helpers import high
+from backend.reports.tests.helpers import make_cell
+from backend.reports.tests.helpers import make_condition
+from backend.reports.tests.helpers import make_run
+from backend.reports.tests.helpers import make_study
+from backend.reports.tests.helpers import make_unit
 from backend.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
 
-CODE_1000 = {"backend_code": "x\n" * 1000}
+S = choices.RunStatus
 
 
-def _job(user, model, template, *, status=GenerationJob.Status.COMPLETED, result_data=None, **kwargs):
-    return GenerationJobFactory(
-        created_by=user,
-        model=model,
-        app_requirement=template,
-        status=status,
-        result_data=result_data or CODE_1000,
-        **kwargs,
-    )
+def _task():
+    return factories.TaskSpecVersionFactory.create()
 
 
-def _analyze(job, tools: dict[str, list[dict]], *, statuses: dict[str, str] | None = None):
-    """One analysis run of *job*: per tool slug, its findings (Finding field dicts)."""
-    run = AnalysisRunFactory(created_by=job.created_by, generation_job=job, status=AnalysisRun.Status.COMPLETED)
-    for slug, findings in tools.items():
-        status = (statuses or {}).get(slug, ToolResult.Status.COMPLETED)
-        result = ToolResultFactory(run=run, tool_slug=slug, status=status)
-        for f in findings:
-            Finding.objects.create(
-                result=result,
-                title=f.get("title", "f"),
-                **{k: v for k, v in f.items() if k != "title"},
-            )
-    return run
+# ── dependency advisories, runtime findings, test and starter code stay out of densities ─────────
 
 
-def _high(n=1, **extra):
-    return [{"severity": "high", **extra} for _ in range(n)]
-
-
-# ── legacy-reports-1: dependency advisories (and runtime / test code) stay out of densities ─────────
-
-
-def test_experiment_stats_density_counts_code_findings_only():
+def test_condition_stats_density_counts_model_code_findings_only():
     AnalyzerToolFactory(slug="zap", analysis_mode="dynamic")
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
-    job = _job(user, LLMModelFactory(model_id="m1"), template)
-    _analyze(
-        job,
+    run = make_run(user, LLMModelFactory(model_id="m1"), _task())
+    add_file(run, "backend/starter.py", "a = 1\n", origin=choices.FileOrigin.STARTER)
+    analyze(
+        run,
         {
             "bandit": [
                 {"severity": "high", "file_path": "app.py"},
                 # Test code is not the delivered app.
                 {"severity": "critical", "file_path": "tests/test_app.py"},
+                # The starter's own code is not the model's (attribution by origin).
+                {"severity": "critical", "file_path": "backend/starter.py"},
             ],
-            # A scaffold-pinned advisory is about a package, not code the model wrote.
+            # A starter-pinned advisory is about a package, not code the model wrote.
             "pip-audit": [{"severity": "critical", "category": "dependency", "file_path": "requirements.txt"}] * 3,
             # Only a dynamic scanner saw it: the running app, not a source line.
-            "zap": [{"severity": "high", "category": "security"}],
+            "zap": [{"severity": "high", "category": "security", "file_path": "/api"}],
         },
     )
 
-    stats = generators._experiment_stats(GenerationJob.objects.filter(id=job.id))
+    stats = generators._condition_stats(GenerationRun.objects.filter(id=run.id))
 
     assert stats["analyzed"] == 1
-    assert stats["findings_total"]["mean"] == 6.0  # every counted finding
-    assert stats["code_findings_total"]["mean"] == 1.0
+    assert stats["findings_total"]["mean"] == 7.0  # every counted finding
+    assert stats["code_findings_total"]["mean"] == 2.0  # the app tree's code (starter included)
     assert stats["dependency_findings_total"]["mean"] == 3.0
-    assert stats["critical_high_normalized"]["mean"] == 1.0
-    assert stats["weighted_score"]["mean"] == 5.0  # one high (5); no criticals from deps or tests
+    assert stats["critical_high_normalized"]["mean"] == 1.0  # the model's own file only
+    assert stats["weighted_score"]["mean"] == 5.0
     assert stats["weighted_per_kloc"]["mean"] == 5.0
+    assert stats["analyzed_loc"] == 1000
     assert stats["severity_basis"] == generators.NORMALIZED
 
 
-def test_template_sensitivity_ignores_dependency_advisories():
+def test_task_sensitivity_ignores_dependency_advisories():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
-    # m-deps: few code issues but a pile of scaffold advisories; m-code: more code issues.
-    deps = _job(user, LLMModelFactory(model_id="m-deps"), template)
-    _analyze(
+    task = _task()
+    # m-deps: few code issues but a pile of starter advisories; m-code: more code issues.
+    deps = make_run(user, LLMModelFactory(model_id="m-deps"), task)
+    analyze(
         deps,
         {
-            "bandit": _high(1, file_path="app.py"),
+            "bandit": high(1),
             "pip-audit": [
                 {
                     "severity": "critical",
                     "category": "dependency",
                     "rule_id": f"PYSEC-{i}",
+                    "file_path": "requirements.txt",
                     "tool_specific_data": {"package": f"pkg{i}", "vuln_id": f"PYSEC-{i}"},
                 }
                 for i in range(20)
             ],
         },
     )
-    code = _job(user, LLMModelFactory(model_id="m-code"), template)
-    _analyze(code, {"bandit": _high(4, file_path="app.py"), "pip-audit": []})
+    code = make_run(user, LLMModelFactory(model_id="m-code"), task)
+    analyze(code, {"bandit": high(4), "pip-audit": []})
 
-    data = generators.generate_template_comparison({"template_slug": template.slug})
+    data = generators.generate_task_comparison({"task_slug": task.task.slug})
 
     ranking = [r["model_id"] for r in data["sensitivity"]["baseline_ranking"]]
     assert ranking == ["m-deps", "m-code"]
@@ -124,24 +110,24 @@ def test_template_sensitivity_ignores_dependency_advisories():
     assert rows["m-deps"]["issues_dedup"]["code_unique"] == 1
 
 
-# ── legacy-reports-2: an app nothing measured is unknown, not zero findings / a perfect score ─────
+# ── an app nothing measured is unknown, not zero findings / a perfect score ──────────────────────
 
 
 def test_unanalyzed_rows_are_unmeasured_and_never_score():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
+    task = _task()
     m1 = LLMModelFactory(model_id="m1")
-    # m1's highest-success row was never analyzed; its analyzed row has a failed job too.
-    _job(user, m1, template, bundle_key="a@1")
-    analyzed = _job(user, m1, template, bundle_key="b@1")
-    _analyze(analyzed, {"bandit": _high(2)})
-    _job(user, m1, template, bundle_key="b@1", status=GenerationJob.Status.FAILED)
+    # m1's highest-success row was never analyzed; its analyzed row has an infra failure too.
+    make_run(user, m1, task, treatment_hash="a" * 64)
+    analyzed = make_run(user, m1, task, treatment_hash="b" * 64)
+    analyze(analyzed, {"bandit": high(2)})
+    make_run(user, m1, task, treatment_hash="b" * 64, status=S.FAILED)
     # m2: completed, never analyzed.
-    _job(user, LLMModelFactory(model_id="m2"), template)
+    make_run(user, LLMModelFactory(model_id="m2"), task)
 
-    data = generators.generate_template_comparison({"template_slug": template.slug})
+    data = generators.generate_task_comparison({"task_slug": task.task.slug})
 
-    rows = {(r["model_id"], r["bundle_key"]): r for r in data["models"]}
+    rows = {(r["model_id"], r["treatment_hash"]): r for r in data["models"]}
     unmeasured = rows[("m2", "")]
     assert unmeasured["runs_analyzed"] == 0
     assert unmeasured["total_findings"] is None
@@ -150,8 +136,9 @@ def test_unanalyzed_rows_are_unmeasured_and_never_score():
     assert unmeasured["stats"]["findings_total"] == {"mean": None, "stdev": None, "n": 0}
     assert unmeasured["stats"]["weighted_per_kloc"]["mean"] is None
     assert unmeasured["issues_dedup"]["code_unique"] is None
-    assert rows[("m1", "a@1")]["total_findings"] is None
-    assert rows[("m1", "b@1")]["total_findings"] == 2
+    assert rows[("m1", "a" * 64)]["total_findings"] is None
+    assert rows[("m1", "b" * 64)]["total_findings"] == 2
+    assert data["mixed_treatments"] is True
 
     sensitivity = data["sensitivity"]
     # m2 gets no score at all (not 1.0); m1 is scored on its analyzed row, not dropped.
@@ -163,21 +150,18 @@ def test_unanalyzed_rows_are_unmeasured_and_never_score():
     )
 
 
-# ── legacy-reports-3: the density divides analyzed findings by analyzed LOC ─────────────────────
-
-
-def test_template_sensitivity_density_uses_only_analyzed_loc():
+def test_task_sensitivity_density_uses_only_analyzed_loc():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
+    task = _task()
     model = LLMModelFactory(model_id="m1")
-    analyzed = _job(user, model, template)
-    _analyze(analyzed, {"bandit": _high(3)})
-    _job(user, model, template, result_data={"backend_code": "x\n" * 9000})  # completed, never analyzed
+    analyzed = make_run(user, model, task)
+    analyze(analyzed, {"bandit": high(3)})
+    make_run(user, model, task, code="x = 1\n" * 9000)  # completed, never analyzed
 
-    data = generators.generate_template_comparison({"template_slug": template.slug})
+    data = generators.generate_task_comparison({"task_slug": task.task.slug})
 
     row = data["models"][0]
-    assert row["loc"]["total_loc"] == 10000  # generation LOC: every job
+    assert row["loc"]["total_loc"] == 10000  # generation LOC: every run
     assert row["stats"]["analyzed_loc"] == 1000
     assert row["stats"]["density_basis"]["loc"] == 1000
     # 3 high = 15 weighted over 1,000 analyzed lines: density 15, score 1 - 15/cap.
@@ -186,22 +170,22 @@ def test_template_sensitivity_density_uses_only_analyzed_loc():
     )
 
 
-# ── legacy-reports-4 / study-report-1: one instrument set for every compared row ─────────────────
+# ── one instrument set for every compared row ────────────────────────────────────────────────────
 
 
-def test_template_comparison_rows_share_one_instrument_set():
+def test_task_comparison_rows_share_one_instrument_set():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
-    a = _job(user, LLMModelFactory(model_id="m-a"), template)
-    _analyze(a, {"bandit": _high(1)})
-    b = _job(user, LLMModelFactory(model_id="m-b"), template)
+    task = _task()
+    a = make_run(user, LLMModelFactory(model_id="m-a"), task)
+    analyze(a, {"bandit": high(1)})
+    b = make_run(user, LLMModelFactory(model_id="m-b"), task)
     # ruff ran on m-b's app only: its findings would make m-b look worse.
-    _analyze(
+    analyze(
         b,
-        {"bandit": _high(1), "ruff": [{"severity": "low", "file_path": "app.py", "line_number": n} for n in range(9)]},
+        {"bandit": high(1), "ruff": [{"severity": "low", "file_path": "app.py", "line_number": n} for n in range(9)]},
     )
 
-    data = generators.generate_template_comparison({"template_slug": template.slug})
+    data = generators.generate_task_comparison({"task_slug": task.task.slug})
 
     assert data["coverage"]["tools_common"] == ["bandit"]
     assert data["coverage"]["tools_partial"]["ruff"]["apps_measured"] == 1
@@ -213,25 +197,27 @@ def test_template_comparison_rows_share_one_instrument_set():
         assert rows[model_id]["stats"]["findings_total"]["mean"] == 1.0
 
 
-def test_experiment_report_measures_every_condition_with_one_instrument_set():
-    user = UserFactory()
-    template = AppRequirementTemplateFactory()
-    experiment = ExperimentFactory(created_by=user, repeats=1)
-    experiment.app_requirements.add(template)
-    # An unlabeled (legacy) condition: every table must give it the leaderboard's name.
-    cond_a = ExperimentConditionFactory(experiment=experiment, model=LLMModelFactory(model_id="m-a"), label="")
-    cond_b = ExperimentConditionFactory(experiment=experiment, model=LLMModelFactory(model_id="m-b"))
+def _two_condition_study(user, *, repeats=1):
+    study, plan = make_study(user, repeats=repeats)
+    unit = make_unit(plan)
+    cond_a = make_condition(plan, LLMModelFactory(model_id="m-a"), label="arm A", is_baseline=True)
+    cond_b = make_condition(plan, LLMModelFactory(model_id="m-b"), label="arm B")
+    return study, unit, cond_a, cond_b
 
-    job_a = _job(user, cond_a.model, template, experiment=experiment, condition=cond_a, repeat_index=0)
+
+def test_study_conditions_report_measures_every_condition_with_one_instrument_set():
+    user = UserFactory()
+    study, unit, cond_a, cond_b = _two_condition_study(user)
+    run_a = cell_run(make_cell(cond_a, unit), user)
     # jscpd failed on condition A's app: it must be left out of B's row too.
-    _analyze(job_a, {"bandit": _high(1), "jscpd": []}, statuses={"jscpd": ToolResult.Status.FAILED})
-    job_b = _job(user, cond_b.model, template, experiment=experiment, condition=cond_b, repeat_index=0)
-    _analyze(
-        job_b,
-        {"bandit": _high(1), "jscpd": [{"severity": "low", "file_path": "a.py", "line_number": n} for n in range(5)]},
+    analyze(run_a, {"bandit": high(1), "jscpd": []}, statuses={"jscpd": ToolResult.Status.FAILED})
+    run_b = cell_run(make_cell(cond_b, unit), user)
+    analyze(
+        run_b,
+        {"bandit": high(1), "jscpd": [{"severity": "low", "file_path": "app.py", "line_number": n} for n in range(5)]},
     )
 
-    data = generators.generate_experiment_report({"experiment_id": str(experiment.id)}, user=user)
+    data = generators.generate_study_conditions_report({"study_id": str(study.id)}, user=user)
 
     assert data["coverage"]["tools_common"] == ["bandit"]
     assert set(data["coverage"]["tools_partial"]) == {"jscpd"}
@@ -240,22 +226,39 @@ def test_experiment_report_measures_every_condition_with_one_instrument_set():
         assert rows[cid]["total_findings"] == 1
         assert rows[cid]["issues_dedup"]["raw_findings"] == 1
         assert rows[cid]["issues_dedup"]["code_unique"] == 1
-    assert any("jscpd (1 of 2 runs)" in note for note in data["results"]["notes"])
-    board = {r["condition_id"]: r["label"] for r in data["results"]["leaderboard"]}
-    assert rows[cond_a.id]["label"] == board[cond_a.id]
-    assert rows[cond_b.id]["label"] == board[cond_b.id]
+    assert rows[cond_a.id]["label"] == "arm A"
+    assert rows[cond_a.id]["is_baseline"] is True
+    assert data["study"]["baseline_condition_id"] == cond_a.id
+    assert any("jscpd (1 of 2 runs)" in note for note in data["notes"])
+
+
+def test_study_results_are_reported_as_unavailable_not_empty(monkeypatch):
+    """Until the study results land, the report says so instead of an empty (clean-looking) leaderboard."""
+    user = UserFactory()
+    study, _unit, _a, _b = _two_condition_study(user)
+
+    data = generators.generate_study_conditions_report({"study_id": str(study.id)}, user=user)
+    assert data["results"] is None
+    assert any("not available" in note for note in data["notes"])
+
+    monkeypatch.setattr(
+        "backend.generation.study.results.study_results",
+        lambda s: {"leaderboard": [], "notes": [], "interim": True},
+    )
+    data = generators.generate_study_conditions_report({"study_id": str(study.id)}, user=user)
+    assert data["results"]["interim"] is True
 
 
 def test_coverage_note_names_runs_no_tool_measured():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
-    measured = _job(user, LLMModelFactory(model_id="m-a"), template)
-    _analyze(measured, {"bandit": _high(1)})
+    task = _task()
+    measured = make_run(user, LLMModelFactory(model_id="m-a"), task)
+    analyze(measured, {"bandit": high(1)})
     # m-b's whole analysis failed: it drops out of the counts, and the note must say so.
-    failed = _job(user, LLMModelFactory(model_id="m-b"), template)
-    _analyze(failed, {"bandit": []}, statuses={"bandit": ToolResult.Status.FAILED})
+    failed = make_run(user, LLMModelFactory(model_id="m-b"), task)
+    analyze(failed, {"bandit": []}, statuses={"bandit": ToolResult.Status.FAILED})
 
-    data = generators.generate_template_comparison({"template_slug": template.slug})
+    data = generators.generate_task_comparison({"task_slug": task.task.slug})
 
     assert data["coverage"]["tools_partial"] == {}
     assert data["coverage"]["runs_unmeasured"] == [str(failed.id)]
@@ -280,80 +283,103 @@ def test_coverage_note_without_a_common_tool():
     assert generators._coverage_note({"apps": 2, "tools_common": ["bandit"], "tools_partial": {}}) is None
 
 
-def test_experiment_report_uses_the_results_tab_sample():
+def test_study_conditions_report_uses_the_current_runs():
+    """The first usable attempt of each main-stage cell; superseded, beyond-plan and pilot runs are left out."""
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
-    experiment = ExperimentFactory(created_by=user, repeats=1)
-    experiment.app_requirements.add(template)
-    cond = ExperimentConditionFactory(experiment=experiment, model=LLMModelFactory(model_id="m-a"))
-    cell = {"experiment": experiment, "condition": cond}
+    study, plan = make_study(user, repeats=1)
+    unit = make_unit(plan)
+    cond = make_condition(plan, LLMModelFactory(model_id="m-a"))
+    cell = make_cell(cond, unit)
 
-    superseded = _job(user, cond.model, template, repeat_index=0, **cell)
-    _analyze(superseded, {"bandit": _high(9)})
-    current = _job(user, cond.model, template, repeat_index=0, **cell)
-    _analyze(current, {"bandit": _high(1)})
-    beyond = _job(user, cond.model, template, repeat_index=1, **cell)  # a repeat added after launch
-    _analyze(beyond, {"bandit": _high(5)})
+    infra = cell_run(cell, user, attempt=1, status=S.FAILED)
+    analyze(infra, {"bandit": high(7)})
+    current = cell_run(cell, user, attempt=2)
+    analyze(current, {"bandit": high(1)})
+    beyond = cell_run(cell, user, attempt=3, beyond_plan=True)  # a top-up of a cell that had a usable run
+    analyze(beyond, {"bandit": high(5)})
+    pilot = cell_run(make_cell(cond, unit, stage=choices.Stage.PILOT, repeat_index=1, block_index=1), user)
+    analyze(pilot, {"bandit": high(3)})
 
-    data = generators.generate_experiment_report({"experiment_id": str(experiment.id)}, user=user)
+    data = generators.generate_study_conditions_report({"study_id": str(study.id)}, user=user)
 
-    # Version 2: code-only definitions and one instrument set (stored v1 payloads have no key).
-    assert data["report_version"] == generators.REPORT_VERSION == 2
+    assert data["report_version"] == generators.REPORT_VERSION == 3
     sample = data["sample"]
     assert sample["planned_repeats"] == 1
-    assert sample["superseded_attempts_excluded"] == 1
+    assert sample["runs"] == 1
     assert sample["beyond_plan_excluded"] == 1
+    assert sample["pilot_excluded"] == 1
+    assert sample["superseded_attempts_excluded"] == 1
     row = data["conditions"][0]
-    assert row["generation"]["total_jobs"] == 1
+    assert row["generation"]["total_runs"] == 1
     assert row["stats"]["trials"] == 1
     assert row["total_findings"] == 1
     assert row["issues_dedup"]["runs"] == 1
 
 
-# ── frontend-6: the report records which truncation rule applied, and why ────────────────────────
+# ── intention-to-treat by default; the locked plan's truncation rule wins ────────────────────────
 
 
-def test_experiment_report_records_the_plans_truncation_rule():
-    from backend.generation.services.analysis_plan import normalize_analysis_plan
-
+def test_truncated_runs_are_trials_by_default_and_excluded_only_as_sensitivity():
     user = UserFactory()
-    experiment = ExperimentFactory(created_by=user)
-    experiment.analysis_plan = normalize_analysis_plan(
-        {"primary_metric": "pass_rate", "exclusions": {"truncated": False}},
-    )
-    experiment.analysis_plan_frozen_at = timezone.now()
-    experiment.save(update_fields=["analysis_plan", "analysis_plan_frozen_at"])
+    task = _task()
+    model = LLMModelFactory(model_id="m1")
+    make_run(user, model, task)
+    make_run(user, model, task, validity={"truncated": True, "termination": "budget_exhausted"})
 
-    data = generators.generate_experiment_report(
-        {"experiment_id": str(experiment.id), "exclude_truncated": True},
+    itt = generators.generate_task_comparison({"task_slug": task.task.slug})["models"][0]["stats"]
+    assert (itt["trials"], itt["truncated"], itt["truncated_excluded"]) == (2, 1, 0)
+    sensitivity = generators.generate_task_comparison({"task_slug": task.task.slug, "exclude_truncated": True})
+    stats = sensitivity["models"][0]["stats"]
+    assert (stats["trials"], stats["truncated_excluded"]) == (1, 1)
+
+
+def test_study_conditions_report_records_the_locked_plans_truncation_rule():
+    user = UserFactory()
+    study, _unit, _a, _b = _two_condition_study(user)
+    study.analysis_plan = {"primary_metric": "pass_rate", "exclusions": {"truncated": False}}
+    study.save(update_fields=["analysis_plan"])
+    type(study).objects.filter(pk=study.pk).update(locked_at=timezone.now())
+    study.refresh_from_db()
+
+    data = generators.generate_study_conditions_report(
+        {"study_id": str(study.id), "exclude_truncated": True},
         user=user,
     )
 
     assert data["sample"]["truncation_rule"] == "analysis_plan"
     assert data["sample"]["exclude_truncated"] is False
-    assert any("frozen analysis plan keeps truncated runs" in n for n in data["results"]["notes"])
+    assert any("locked analysis plan keeps truncated runs" in n for n in data["notes"])
 
-    plain = ExperimentFactory(created_by=user)
-    data = generators.generate_experiment_report(
-        {"experiment_id": str(plain.id), "exclude_truncated": False},
-        user=user,
-    )
+    plain, _ = make_study(user)
+    data = generators.generate_study_conditions_report({"study_id": str(plain.id)}, user=user)
     assert (data["sample"]["truncation_rule"], data["sample"]["exclude_truncated"]) == ("report_config", False)
 
 
-# ── legacy-reports-6 / frontend-3: the tools' own levels are shown; the normalized split is labelled ──
+def test_study_conditions_report_refuses_another_users_study():
+    owner, outsider = UserFactory(), UserFactory()
+    study, _ = make_study(owner)
+    with pytest.raises(ValueError, match="Study not found"):
+        generators.generate_study_conditions_report({"study_id": str(study.id)}, user=outsider)
+    with pytest.raises(ValueError, match="Study not found"):
+        generators.generate_study_conditions_report({"study_id": "not-a-uuid"}, user=owner)
+
+
+# ── the tools' own levels are shown; the normalized split is labelled ────────────────────────────
 
 
 def test_rows_show_the_tools_own_levels():
     user = UserFactory()
     model = LLMModelFactory(model_id="m1")
-    job = _job(user, model, AppRequirementTemplateFactory())
-    _analyze(
-        job,
+    run = make_run(user, model, _task())
+    analyze(
+        run,
         {
             "bandit": [{"severity": "high", "tool_severity": "HIGH"}],
             # pip-audit prints no level: unrated, whatever the normalization guessed.
-            "pip-audit": [{"severity": "medium", "tool_severity": "", "category": "dependency"}] * 2,
+            "pip-audit": [
+                {"severity": "medium", "tool_severity": "", "category": "dependency", "file_path": "requirements.txt"},
+            ]
+            * 2,
         },
     )
 
@@ -366,33 +392,45 @@ def test_rows_show_the_tools_own_levels():
     assert data["issues_dedup"]["dependency_unique"] == 1
 
 
-# ── legacy-reports-5: owner scoping (staff and no-user callers see all) ──────────────────────────
+# ── owner scoping (staff and no-user callers see all) ────────────────────────────────────────────
 
 
 def test_generators_report_only_the_users_own_data():
     owner, outsider, staff = UserFactory(), UserFactory(), UserFactory(is_staff=True)
     model = LLMModelFactory(model_id="m1")
-    template = AppRequirementTemplateFactory()
-    job = _job(owner, model, template, metrics={"cost": 0.5})
-    _analyze(job, {"bandit": _high(2)})
+    task = _task()
+    run = make_run(owner, model, task, metrics={"cost_usd": 0.5})
+    analyze(run, {"bandit": high(2)})
 
     ma = generators.generate_model_analysis({"model_id": "m1"}, user=outsider)
-    assert ma["generation"]["total_jobs"] == 0
-    assert ma["loc"]["per_job"] == []
+    assert ma["generation"]["total_runs"] == 0
+    assert ma["loc"]["per_run"] == []
+    assert ma["loc"]["total_loc"] is None
     assert ma["total_findings"] is None
     assert generators.generate_model_analysis({"model_id": "m1"}, user=owner)["total_findings"] == 2
     assert generators.generate_model_analysis({"model_id": "m1"}, user=staff)["total_findings"] == 2
     assert generators.generate_model_analysis({"model_id": "m1"})["total_findings"] == 2  # CLI / no user
 
-    assert generators.generate_template_comparison({"template_slug": template.slug}, user=outsider)["models"] == []
+    assert generators.generate_task_comparison({"task_slug": task.task.slug}, user=outsider)["models"] == []
     assert generators.generate_tool_analysis({}, user=outsider)["total_findings"] is None
     assert generators.generate_tool_analysis({}, user=owner)["total_findings"] == 2
-    assert generators.generate_generation_analytics({"days": 7}, user=outsider)["summary"]["total_jobs"] == 0
+    assert generators.generate_generation_analytics({"days": 7}, user=outsider)["summary"]["total_runs"] == 0
     platform = generators.generate_comprehensive({"days": 7}, user=outsider)["platform"]
     # No analysis run: findings are unmeasured (as in tool_analysis), not zero.
-    assert (platform["total_jobs"], platform["total_runs"], platform["total_findings"]) == (0, 0, None)
+    assert (platform["total_runs"], platform["total_analysis_runs"], platform["total_findings"]) == (0, 0, None)
     staff_platform = generators.generate_comprehensive({"days": 7}, user=staff)["platform"]
-    assert (staff_platform["total_jobs"], staff_platform["total_findings"]) == (1, 2)
+    assert (staff_platform["total_runs"], staff_platform["total_findings"]) == (1, 2)
+
+
+def test_reference_runs_are_never_samples():
+    user = UserFactory()
+    task = _task()
+    make_run(user, LLMModelFactory(model_id="m1"), task)
+    factories.GenerationRunFactory.create(reference=True, created_by=user, task_version=task)
+
+    summary = generators.generate_generation_analytics({"days": 7})["summary"]
+    assert summary["total_runs"] == 1
+    assert generators.generate_comprehensive({"days": 7})["platform"]["total_runs"] == 1
 
 
 def test_report_service_scopes_every_type_to_the_creator():
@@ -400,7 +438,7 @@ def test_report_service_scopes_every_type_to_the_creator():
     from backend.reports.services import report_service
 
     owner, outsider = UserFactory(), UserFactory()
-    _job(owner, LLMModelFactory(model_id="m1"), AppRequirementTemplateFactory())
+    make_run(owner, LLMModelFactory(model_id="m1"), _task())
     report = Report.objects.create(
         report_type="model_analysis",
         title="t",
@@ -409,11 +447,11 @@ def test_report_service_scopes_every_type_to_the_creator():
     )
     report_service._generate(report)
     report.refresh_from_db()
-    assert report.report_data["generation"]["total_jobs"] == 0
+    assert report.report_data["generation"]["total_runs"] == 0
     assert frozenset(generators.GENERATORS) == generators.USER_SCOPED
 
 
-# ── legacy-reports-8: tool analysis counts executions, so a measured zero is not a missing tool ────
+# ── tool analysis counts executions, so a measured zero is not a missing tool ────────────────────
 
 
 def test_tool_analysis_lists_tools_that_found_nothing():
@@ -442,8 +480,9 @@ def test_tool_analysis_lists_tools_that_found_nothing():
         tools["htmlhint"]["measured"],
         tools["htmlhint"]["findings_per_measured_execution"],
     ) == (0, 1, 0.0)
+    # Nothing applicable to read: no measurement, never a measured zero (spec 8.8).
     assert tools["hadolint"]["skipped"] == {"not_applicable": 1}
-    assert tools["hadolint"]["measured"] == 1
+    assert (tools["hadolint"]["measured"], tools["hadolint"]["findings_per_measured_execution"]) == (0, None)
     assert (tools["mypy"]["failed"], tools["mypy"]["measured"], tools["mypy"]["findings_per_measured_execution"]) == (
         1,
         0,
@@ -460,21 +499,21 @@ def test_tool_analysis_lists_tools_that_found_nothing():
     assert only_bandit["total_runs"] == 1
 
 
-# ── legacy-reports-9: jobs still in flight have no outcome yet ───────────────────────────────────
+# ── runs still in flight have no outcome yet ─────────────────────────────────────────────────────
 
 
-def test_success_rate_leaves_in_flight_jobs_out():
+def test_success_rate_leaves_in_flight_runs_out():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
+    task = _task()
     model = LLMModelFactory(model_id="m1")
-    for status in (GenerationJob.Status.COMPLETED, GenerationJob.Status.FAILED, GenerationJob.Status.PENDING):
-        _job(user, model, template, status=status)
-    _job(user, model, template, status=GenerationJob.Status.RUNNING)
+    for status in (S.COMPLETED, S.FAILED, S.PENDING, S.RUNNING):
+        make_run(user, model, task, status=status)
     waiting = LLMModelFactory(model_id="m-waiting")
-    _job(user, waiting, template, status=GenerationJob.Status.PENDING)
+    make_run(user, waiting, task, status=S.PENDING)
 
     summary = generators.generate_model_analysis({"model_id": "m1"})["generation"]
-    assert (summary["total_jobs"], summary["in_flight_jobs"], summary["success_rate"]) == (4, 2, 0.5)
+    assert (summary["total_runs"], summary["in_flight_runs"], summary["success_rate"]) == (4, 2, 0.5)
+    assert (summary["usable_runs"], summary["usable_rate"]) == (1, 0.5)
     assert generators.generate_model_analysis({"model_id": "m-waiting"})["generation"]["success_rate"] is None
 
     by_model = {r["model_id"]: r for r in generators.generate_generation_analytics({"days": 7})["by_model"]}
@@ -482,23 +521,37 @@ def test_success_rate_leaves_in_flight_jobs_out():
     assert by_model["m-waiting"]["success_rate"] is None
 
     # A row with nothing finished sorts last instead of breaking the sort.
-    rows = generators.generate_template_comparison({"template_slug": template.slug})["models"]
+    rows = generators.generate_task_comparison({"task_slug": task.task.slug})["models"]
     assert [r["model_id"] for r in rows] == ["m1", "m-waiting"]
 
 
-def test_job_summary_counts_prior_attempt_spend_and_agent_truncation():
+def test_run_summary_counts_spend_and_truncation_and_never_invents_a_zero_cost():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
+    task = _task()
     model = LLMModelFactory(model_id="m1")
-    # A requeued job: its earlier attempts' spend is part of what the job cost.
-    _job(user, model, template, metrics={"cost": 0.1}, execution={"prior_attempts_cost": 0.2})
-    # An agent whose final response hit the token ceiling: truncated, like a cut-off file.
-    _job(user, model, template, result_data={**CODE_1000, "agent": {"final_response_truncated": True}})
+    make_run(user, model, task, metrics={"cost_usd": 0.1})
+    make_run(user, model, task, metrics={"cost_usd": 0.2}, validity={"truncated": True})
 
     summary = generators.generate_model_analysis({"model_id": "m1"})["generation"]
-
     assert summary["total_cost"] == pytest.approx(0.3)
-    assert summary["truncated_jobs"] == 1
+    assert summary["truncated_runs"] == 1
+
+    other = LLMModelFactory(model_id="m2")
+    make_run(user, other, task)
+    assert generators.generate_model_analysis({"model_id": "m2"})["generation"]["total_cost"] is None
+
+
+def test_functional_pass_rate_leaves_not_measured_evaluations_out():
+    user = UserFactory()
+    task = _task()
+    model = LLMModelFactory(model_id="m1")
+    evaluate(make_run(user, model, task), passed=3, failed=1)
+    evaluate(make_run(user, model, task), measured=False)
+
+    functional = generators.generate_task_comparison({"task_slug": task.task.slug})["models"][0]["stats"]["functional"]
+    assert functional["runs_measured"] == 1
+    assert functional["runs_not_measured"] == 1
+    assert functional["pass_rate"]["mean"] == 0.75
 
 
 def test_tool_analysis_days_window_and_comprehensive_pass_it_on():
@@ -523,3 +576,9 @@ def test_tool_analysis_days_window_and_comprehensive_pass_it_on():
     # The platform totals are all-time, and labelled so.
     assert comprehensive["platform"]["total_findings"] == 2
     assert comprehensive["periods"]["platform"] == "all time"
+
+
+def test_loc_of_a_run_without_a_tree_is_unknown():
+    user = UserFactory()
+    make_run(user, LLMModelFactory(model_id="m1"), _task(), status=S.PENDING, code=None)
+    assert generators.generate_model_analysis({"model_id": "m1"})["loc"]["total_loc"] is None

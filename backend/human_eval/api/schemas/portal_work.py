@@ -99,9 +99,8 @@ class WorkSpecEndpoint(Schema):
 class WorkAppSpecView(Schema):
     name: str
     description: str
-    backend_requirements: list[str]
+    prose: str
     frontend_requirements: list[str]
-    admin_requirements: list[str]
     api_endpoints: list[WorkSpecEndpoint]
     admin_api_endpoints: list[WorkSpecEndpoint]
 
@@ -117,6 +116,8 @@ class WorkPortalApp(Schema):
     hosting: WorkHostingInfo
     spec: WorkAppSpecView | None = None
     admin_credentials: WorkAdminCredentials | None = None
+    # "available", or "not_measured" when the app has no runtime credentials record; None when not shown.
+    admin_credentials_status: str | None = None
     has_source: bool
 
 

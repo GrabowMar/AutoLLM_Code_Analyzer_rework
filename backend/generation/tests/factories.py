@@ -1,8 +1,7 @@
 """Re-export of ``backend.generation.testing.factories`` (the v3 factories; spec section 2.1).
 
 Kept so that ``from backend.generation.tests.factories import ...`` stays the import path for tests. The v2
-factories (``GenerationJobFactory``, ``ExperimentFactory``, ...) are gone with their models; WP-02b re-points
-their consumers to the v3 names listed here.
+factories are gone with their models; their consumers use the v3 names listed here.
 """
 
 from backend.generation.testing.factories import BlobFactory

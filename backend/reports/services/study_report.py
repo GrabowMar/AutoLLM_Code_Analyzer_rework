@@ -1,45 +1,52 @@
-"""The study report: every table a paper needs from one scope of jobs, with its uncertainty.
+"""The study report: every table a paper needs from one scope of runs, with its uncertainty.
 
 Sections (each a JSON object/list in ``report_data``):
 
-* ``protocol`` -- what was run: scope, models, templates, repeats, stacks,
-  prompt versions, tool and evaluator versions, healing modes, seeds, the
-  pre-registered analysis plan and its hash, the instrument coverage, whether
-  the analysis is confirmatory, and a fingerprint of the data.
+* ``protocol`` -- what was run: scope, models, tasks, repeats, stacks, starters,
+  harnesses, run kinds, configuration fingerprints, tool and evaluation suite
+  versions, the pre-registered analysis plan and its hash, the instrument
+  coverage, whether the analysis is confirmatory, attrition, and a fingerprint
+  of the data.
 * ``definitions`` -- what "generated", "deployed" and "functionally
   correct" mean here, so the three are never conflated.
 * ``funnel`` -- generated -> analyzed -> evaluated -> deployed -> passes
-  every check, per group and template, with 95% intervals over apps.
+  every check, per group and task, with 95% intervals over apps.
 * ``model_outcomes`` -- the plan metrics per group, app means first.
-* ``issues`` -- cross-tool deduplicated issues per model/condition/template/
+* ``issues`` -- cross-tool deduplicated issues per model/condition/task/
   tool and the tool-overlap table (``statistics.services.study``).
 * ``security_bounds`` -- code security issues per normalized severity:
   issues, apps affected, and for a zero count the exact 95% upper bound on
   the per-app rate.
 * ``code_metrics`` -- size, backend share, complexity per app, group and
-  template; the spread across groups on the same template; app-level
-  correlations of size/complexity with issue density.
+  task; the spread across groups on the same task; app-level correlations
+  of size/complexity with issue density.
 * ``correlations`` -- model parameters (nominal and effective context
   window, output limit, prices) vs outcomes: Spearman rho, permutation p,
   bootstrap CI, Holm and BH across the whole family, leave-one-out influence.
 * ``ranking`` -- TOPSIS/WSM with weight and data sensitivity
   (``statistics.services.mcdm``).
-* ``planned_comparisons`` -- for an experiment with a pre-registered plan:
-  every declared metric, each condition vs the baseline, app-blocked,
-  sign + Wilcoxon tests corrected as the plan says.
-* ``healing``, ``accounting`` -- the build-healing ablation and what ran.
+* ``planned_comparisons`` -- for a study with a pre-registered plan: every
+  declared metric, each condition vs the baseline, app-blocked, sign +
+  Wilcoxon tests corrected as the plan says.
+* ``accounting`` -- what ran.
 * ``validity`` -- threats detected in this data, each with the section it
   affects.
 
-The unit of analysis is the app: one app spec under one condition
-(:func:`~backend.statistics.services.study.app_unit`). Its repeats are
-averaged before any per-group figure, and intervals and zero-count bounds are
-over apps, not runs. A *group* is the model, or the condition when some model
-ran under several conditions (harness or prompt-profile arms), so arms that
-share a model are never pooled (``protocol.grouped_by``; group rows keep the
-``model`` key, holding the condition label in that case, and the issue and
-healing tables get ``by_group`` rows under the same labels). Model-parameter
-correlations stay one point per model (a model's arms averaged).
+The sample of a study is its **current runs** (``generation.runs.view.current_runs``): the first usable
+attempt of every main-stage cell (never a later attempt), pilot runs and runs beyond the plan left out.
+Runs without a model-attributable outcome (infra errors, exclusions) are attrition: reported, never
+counted as failures. The default analysis is intention-to-treat (truncated runs included); a locked
+plan's ``exclusions.truncated`` or the report's ``exclude_truncated`` makes the sensitivity analysis.
+
+The unit of analysis is the app: one unit (task version or slot target) under one condition
+(``statistics.services.runs.app_unit``). Its repeats are averaged before any per-group figure, and
+intervals and zero-count bounds are over apps, not runs. A *group* is the model, or the condition when
+some model ran under several conditions (harness, prompt or stack arms), so arms that share a model are never pooled
+(``protocol.grouped_by``; group rows keep the ``model`` key, holding the condition label in that case,
+and the issue table gets ``by_group`` rows under the same labels). Model-parameter correlations stay one
+point per model (a model's arms averaged).
+
+Run content (files, LOC, labels, evaluations) is read only through ``generation.runs.view``.
 """
 
 from __future__ import annotations
@@ -49,47 +56,58 @@ import json
 import random
 from collections import Counter
 from collections import defaultdict
+from typing import TYPE_CHECKING
 from typing import Any
 
 from django.utils import timezone
 
 from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import ToolResult
-from backend.generation.models import Experiment
-from backend.generation.models import GenerationJob
-from backend.generation.services.analysis_plan import METRICS as PLAN_METRICS
-from backend.generation.services.analysis_plan import declared_metrics
-from backend.generation.services.evaluation.runner import NON_SAMPLE_STATUSES
-from backend.generation.services.experiment_results import MIN_APPS_FOR_CI
-from backend.generation.services.experiment_results import cluster_bootstrap_ci
-from backend.generation.services.experiment_results import output_truncated
-from backend.generation.services.experiment_results import planned_repeats
-from backend.generation.services.experiment_results import sign_test_p
-from backend.generation.services.experiment_results import wilcoxon_p
-from backend.reports.services.loc import loc_from_job
+from backend.generation.models import GenerationRun
+from backend.generation.models import RunAttempt
+from backend.generation.models import Study
+from backend.generation.models import choices
+from backend.reports.services.loc import loc_from_view
+from backend.reports.services.plan_stats import MIN_APPS_FOR_CI
+from backend.reports.services.plan_stats import PLAN_METRICS
+from backend.reports.services.plan_stats import cluster_bootstrap_ci
+from backend.reports.services.plan_stats import declared_metrics
+from backend.reports.services.plan_stats import plan_multiplicity
+from backend.reports.services.plan_stats import sign_test_p
+from backend.reports.services.plan_stats import wilcoxon_p
 from backend.statistics.services import inference as inf
-from backend.statistics.services.accounting import run_accounting
-from backend.statistics.services.accounting import tool_inventory
 from backend.statistics.services.mcdm import criteria_from_config
 from backend.statistics.services.mcdm import rank_models
+from backend.statistics.services.runs import app_unit
+from backend.statistics.services.runs import condition_label
+from backend.statistics.services.runs import run_labels
+from backend.statistics.services.runs import study_runs
 from backend.statistics.services.study import CODE_METRIC_COLUMNS
 from backend.statistics.services.study import CODE_METRIC_TOOLS
 from backend.statistics.services.study import SEVERITIES
-from backend.statistics.services.study import app_unit
-from backend.statistics.services.study import code_metrics_by_job
-from backend.statistics.services.study import condition_label
+from backend.statistics.services.study import code_metrics_by_run
 from backend.statistics.services.study import group_summary
-from backend.statistics.services.study import healing_impact
 from backend.statistics.services.study import issue_breakdowns
-from backend.statistics.services.study import job_labels
-from backend.statistics.services.study import study_jobs
 
-# 2: app-level aggregation, condition groups, code-only security bounds and
-# densities (dependency advisories, runtime issues and test code apart).
-REPORT_VERSION = 2
+if TYPE_CHECKING:
+    from backend.generation.runs.view import RunView
+
+# 3: v3 runs (current runs of a study, intention-to-treat by default, attrition apart, evaluation from
+# RunEvaluation, task/unit instead of template).
+REPORT_VERSION = 3
 SMALL_N_MODELS = 10
 MIN_APPS_PER_MODEL = 5
-_TERMINAL = (Experiment.Status.COMPLETED, Experiment.Status.CANCELLED, Experiment.Status.ARCHIVED)
+RunStatus = choices.RunStatus
+_TERMINAL = (choices.StudyStatus.COMPLETED, choices.StudyStatus.CANCELLED, choices.StudyStatus.STOPPED)
+_IN_FLIGHT = (RunStatus.PENDING, RunStatus.RUNNING)
+# Evaluations that produced no measurement about the sample (tester or platform error).
+_EVAL_INFRA = frozenset({choices.EvaluationStatus.NOT_MEASURED, choices.EvaluationStatus.ERROR})
+# Cells stopped before they ran: the planned sample was not collected.
+_STOPPED_CELLS = (
+    choices.CellExclusionReason.BUDGET_STOP,
+    choices.CellExclusionReason.STOPPED_BY_RULE,
+    choices.CellExclusionReason.CANCELLED,
+)
 # Per-app lizard / jscpd metric columns (radon keeps its avg_complexity / max_complexity names).
 TOOL_METRIC_KEYS = tuple(k for k, (tool, _key) in CODE_METRIC_COLUMNS.items() if tool != "radon")
 # Which per-app columns each metric tool feeds (code_metrics section; instrument-drift check).
@@ -100,25 +118,35 @@ _METRIC_TOOL_COLUMNS = {
 
 DEFINITIONS = {
     "app": (
-        "One app spec built under one condition (model and method), the unit of analysis: its repeats are "
-        "averaged before any per-model or per-condition figure."
+        "One unit (task version or slot target) built under one condition, the unit of analysis: its repeats "
+        "are averaged before any per-model or per-condition figure."
     ),
-    "run": "One generation job: one repeat of one app.",
-    "generated": "The generation job completed and returned code (not a measure of quality).",
-    "truncated": "The model's output hit max_tokens; the app is incomplete by construction.",
+    "run": "One generation run: one repeat of one app (a cell's current run: its first usable attempt).",
+    "attrition": (
+        "A cell whose current run has no model-attributable outcome (infra error or exclusion): left out of every "
+        "rate and reported apart, never counted as a failure."
+    ),
+    "generated": "The run completed with a usable outcome and valid output (not a measure of quality).",
+    "truncated": (
+        "The run was cut off by a budget, wall-clock, idle or turn cap; its app may be incomplete. Included by "
+        "default (intention-to-treat)."
+    ),
     "analyzed": "The app has a finished static-analysis run (each tool's latest result is counted).",
-    "evaluated": "The conformance evaluator produced an outcome about the sample (infra errors excluded).",
-    "deployed": "The app built in Docker and answered its health check (status passed or failed).",
-    "functionally_correct": "The app passed every conformance check (status passed).",
-    "pass_rate": "Share of conformance checks passed (0..1); 0 for apps that did not deploy.",
+    "evaluated": "The latest evaluation under the planned suite measured the app (tester errors excluded).",
+    "deployed": "The app built and started, and the tester ran against it (outcome tested).",
+    "functionally_correct": "The app passed every functional check (agent pass rate 1).",
+    "pass_rate": (
+        "Share of functional checks passed (0..1; infra and flaky checks excluded); 0 for evaluated apps that "
+        "did not build or start."
+    ),
     "unique_issue": "One deduplicated static issue: findings of equivalent rules from several tools at one location.",
     "code_issue": (
         "A unique issue in the app's own non-test code (deptry/depcheck manifest findings included); "
-        "per kLOC over non-test source lines."
+        "per kLOC over non-test model-scope source lines (authored, modified and slot files)."
     ),
     "dependency_advisory": (
         "A known vulnerability in a package version (pip-audit, npm-audit, osv-scanner, trivy, retire): not a "
-        "code issue; split into versions the model chose and versions inherited from the stack scaffold."
+        "code issue; split into versions the model chose and versions inherited from the starter."
     ),
     "runtime_issue": "An issue only dynamic scanners (DAST) reported against the running app; one per issue class.",
     "test_code_issue": "A unique issue in test files (tests/, *.test.*, conftest.py, smoke scripts); counted apart.",
@@ -126,7 +154,7 @@ DEFINITIONS = {
         "Complexity and duplication as the tools printed them, from each tool's latest result per app: radon "
         "(avg_complexity, max_complexity: Python only), lizard (lizard_*: Python and JS/JSX/TS functions; "
         "functions_over_15 = CCN above 15) and jscpd (jscpd_duplication_percentage, jscpd_clones). They read the "
-        "analyzed tree, test files included; missing when the tool did not measure the app."
+        "analyzed tree (the whole app), test files included; missing when the tool did not measure the app."
     ),
     "normalized_severity": (
         "The platform's heuristic critical..info level for a finding, assigned even where the tool prints none; "
@@ -138,39 +166,78 @@ DEFINITIONS = {
 # ── per-app table ────────────────────────────────────────────────────────
 
 
+def _evaluation_fields(view: RunView, run: GenerationRun) -> dict[str, Any]:
+    """The evaluation columns of a run row, from its latest evaluation under the planned suite."""
+    evaluation = view.latest_evaluation()
+    status = evaluation.status if evaluation is not None else ""
+    result = (evaluation.result if evaluation is not None else None) or {}
+    evaluated = status == choices.EvaluationStatus.MEASURED and bool(result.get("measured", True))
+    deployed = run.outcome == choices.Outcome.TESTED if evaluated else None
+    metrics = result.get("metrics") or {}
+    rate = metrics.get("agent_pass_rate")
+    if not evaluated:
+        pass_rate = None
+    elif not deployed:
+        pass_rate = 0.0  # built or started nothing: every functional check fails
+    else:
+        pass_rate = float(rate) if rate is not None else None
+    suite = evaluation.eval_suite if evaluation is not None else None
+    return {
+        "evaluation_status": status,
+        "eval_suite": suite.ref if suite is not None else "",
+        "tester_version": result.get("tester_version"),
+        "evaluated": evaluated,
+        "deployed": deployed,
+        "functional_passed": (pass_rate == 1.0) if evaluated and pass_rate is not None else None,
+        "pass_rate": pass_rate,
+    }
+
+
+def _providers_by_run(run_ids) -> dict[str, list[str]]:
+    """Upstream providers that served each run's calls (``RunAttempt.served``, every attempt)."""
+    out: dict[str, set[str]] = defaultdict(set)
+    for run_id, served in RunAttempt.objects.filter(run_id__in=list(run_ids)).values_list("run_id", "served"):
+        providers = (served or {}).get("providers") if isinstance(served, dict) else None
+        for name in providers or {}:
+            if name and name != "unknown":
+                out[str(run_id)].add(name)
+    return {k: sorted(v) for k, v in out.items()}
+
+
 def app_table(
-    jobs,
+    runs,
     *,
     include_ai: bool = False,
     line_tolerance: int = 2,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """One row per job (run) with every per-run quantity the report aggregates; plus the issue breakdowns."""
-    issues = issue_breakdowns(jobs, include_ai=include_ai, line_tolerance=line_tolerance)
-    by_job = {a["job_id"]: a for a in issues["per_app"]}
-    result_ids = ToolResult.latest_ids_per_job([j.id for j in jobs])
+    """One row per run with every per-run quantity the report aggregates; plus the issue breakdowns."""
+    from backend.generation.runs.view import run_views
+
+    by_id = GenerationRun.objects.select_related("model", "condition", "starter").in_bulk([r.pk for r in runs])
+    runs = [by_id[r.pk] for r in runs if r.pk in by_id]
+    issues = issue_breakdowns(runs, include_ai=include_ai, line_tolerance=line_tolerance)
+    by_run = {str(a["run_id"]): a for a in issues["per_app"]}
+    result_ids = ToolResult.latest_ids_per_job([r.id for r in runs])
     complexity: dict[str, dict[str, Any]] = {}
-    for job_id, metrics in ToolResult.objects.filter(id__in=result_ids, tool_slug="radon").values_list(
+    for run_id, metrics in ToolResult.objects.filter(id__in=result_ids, tool_slug="radon").values_list(
         "run__generation_job_id",
         "metrics",
     ):
         if isinstance(metrics, dict) and metrics.get("average_complexity") is not None:
-            complexity[str(job_id)] = metrics
+            complexity[str(run_id)] = metrics
     # lizard / jscpd metrics (radon's stay avg_complexity / max_complexity above).
-    tool_metrics = code_metrics_by_job(result_ids)
+    tool_metrics = code_metrics_by_run(result_ids)
+    providers = _providers_by_run([r.id for r in runs])
 
     rows = []
-    for job in jobs:
-        jid = str(job.id)
-        data = job.result_data if isinstance(job.result_data, dict) else {}
-        metrics = job.metrics if isinstance(job.metrics, dict) else {}
-        evaluation = data.get("evaluation") if isinstance(data.get("evaluation"), dict) else {}
-        status = evaluation.get("status")
-        evaluated = bool(status) and status not in NON_SAMPLE_STATUSES
-        summary = evaluation.get("summary") or {}
-        loc = loc_from_job(job)  # non-test source lines; test files are test_loc
+    for run, view in zip(runs, run_views(runs), strict=True):
+        rid = view.id
+        metrics = run.metrics if isinstance(run.metrics, dict) else {}
+        validity = run.validity if isinstance(run.validity, dict) else {}
+        loc = loc_from_view(view)  # non-test model-scope source lines; test files are test_loc
         backend, frontend = loc["backend_loc"], loc["frontend_loc"]
-        total = backend + frontend
-        analyzed = by_job.get(jid)
+        total = loc["total_loc"]
+        analyzed = by_run.get(rid)
 
         def counted(key: str, *fallbacks: str, analyzed=analyzed) -> Any:
             if not analyzed:
@@ -180,61 +247,60 @@ def app_table(
                     return analyzed[k]
             return None
 
-        cx = complexity.get(jid) or {}
-        healing = ((evaluation.get("build") or {}).get("healing")) or {}
+        cx = complexity.get(rid) or {}
+        stack = view.stack
         rows.append(
             {
-                **job_labels(job),
-                "condition_id": job.condition_id,
-                "app_id": job.app_requirement_id,
-                "stack": job.stack_slug,
-                "prompt_hash": job.prompt_hash,
-                "status": job.status,
-                "generated": job.status == GenerationJob.Status.COMPLETED,
-                "truncated": output_truncated(data),
+                **run_labels(run, view),
+                "stack": stack.ref if stack is not None else "",
+                "starter": run.starter.ref if run.starter_id else "",
+                "harness": "/".join(view.harness) if view.harness else "",
+                "prompt_hash": run.prompt_hash,
+                "config_fingerprint": run.config_fingerprint,
+                "status": run.status,
+                "outcome": run.outcome,
+                "usable": run.usable,
+                "generated": bool(run.usable) and run.outcome != choices.Outcome.OUTPUT_INVALID,
+                "truncated": bool(validity.get("truncated")),
                 "files": loc["source_files"],
                 "loc_backend": backend,
                 "loc_frontend": frontend,
+                # None when the tree was never collected: unknown, not zero.
                 "loc": total,
-                # None when the files have no paths (a single blob): test code unknown, not none.
                 "test_loc": loc.get("test_loc"),
                 "backend_share": round(backend / total, 4) if total else None,
-                "evaluation_status": status or "",
-                "evaluated": evaluated,
-                "deployed": status in ("passed", "failed") if evaluated else None,
-                "functional_passed": status == "passed" if evaluated else None,
-                "pass_rate": float(summary.get("pass_rate") or 0.0) if evaluated else None,
+                **_evaluation_fields(view, run),
                 "analyzed": analyzed is not None,
                 "raw_findings": counted("raw_findings"),
                 "unique_issues": counted("unique_issues"),
                 # Code issues only (P2-P4): advisories, runtime issues and test code are counted apart.
                 "code_unique": counted("code_unique"),
+                # Of code_unique: issues in the model's own files (authored, modified, slot).
+                "code_unique_model": counted("code_unique_model"),
                 "code_unique_tests": counted("code_unique_tests"),
                 "manifest_unique": counted("manifest_unique"),
-                # Of manifest_unique: "unused" findings on packages the stack scaffold preinstalls.
-                "manifest_unused_scaffold": counted("manifest_unused_scaffold"),
+                # Of manifest_unique: "unused" findings on packages the starter preinstalls.
+                "manifest_unused_starter": counted("manifest_unused_starter"),
                 "runtime_unique": counted("runtime_unique"),
                 "dependency_unique": counted("dependency_unique"),
                 "dependency_added": counted("dependency_added"),
                 "dependency_inherited": counted("dependency_inherited"),
                 "security_unique": counted("security_unique"),
+                "security_unique_model": counted("security_unique_model"),
                 "security_unique_tests": counted("security_unique_tests"),
                 "issues_per_kloc": counted("unique_per_kloc"),
                 # Normalized severities (a heuristic, named so; never the tool's own label): every
                 # issue kind, and code security issues only.
-                **{f"unique_normalized_{s}": counted(f"unique_normalized_{s}", f"unique_{s}") for s in SEVERITIES},
+                **{f"unique_normalized_{s}": counted(f"unique_normalized_{s}") for s in SEVERITIES},
                 **{f"security_normalized_{s}": counted(f"security_normalized_{s}") for s in SEVERITIES},
                 "avg_complexity": cx.get("average_complexity"),
                 "max_complexity": cx.get("max_complexity"),
-                # None when the tool did not measure the app (study.code_metrics_by_job).
-                **{k: (tool_metrics.get(jid) or {}).get(k) for k in TOOL_METRIC_KEYS},
-                "cost": float(metrics["cost"]) if metrics.get("cost") is not None else None,
+                # None when the tool did not measure the app (study.code_metrics_by_run).
+                **{k: (tool_metrics.get(rid) or {}).get(k) for k in TOOL_METRIC_KEYS},
+                "cost": float(metrics["cost_usd"]) if metrics.get("cost_usd") is not None else None,
                 "tokens": metrics.get("total_tokens"),
-                "healing_changed": healing.get("changed"),
                 # Upstream providers that served the run's LLM calls (OpenRouter routing).
-                "providers": sorted(
-                    p for p in ((data.get("agent") or {}).get("providers") or {}) if p and p != "unknown"
-                ),
+                "providers": providers.get(rid, []),
             },
         )
     return rows, issues
@@ -267,9 +333,9 @@ def _app_stats(rows: list[dict[str, Any]]) -> dict[str, float | None]:
         "pass_rate": _avg(r["pass_rate"] for r in rows),
         "functional_passed": _avg(r["functional_passed"] for r in rows),
         "unique_issues_per_app": _avg(r["unique_issues"] for r in analyzed),
-        "security_per_app": _avg(r["security_unique"] for r in analyzed),
+        "security_per_app": _avg(r["security_unique_model"] for r in analyzed),
         "cost_per_app": _avg(r["cost"] for r in rows if r["generated"]),
-        "_code": _avg(r["code_unique"] for r in analyzed),
+        "_code": _avg(r["code_unique_model"] for r in analyzed),
         "_loc": _avg(r["loc"] for r in analyzed),
     }
 
@@ -293,7 +359,7 @@ def model_criteria(rows: list[dict[str, Any]]) -> dict[str, float | None]:
     The unit is the app: each app's repeats are averaged first, then the
     group's value is the mean over its apps (as on the Results tab), so an
     app with more usable repeats does not weigh more. ``issues_per_kloc`` is
-    the apps' mean code issues over their mean non-test LOC, summed over apps
+    the apps' mean code issues in the model's own files over their mean non-test model LOC, summed over apps
     (the ``unique_per_kloc`` of the issue tables).
     """
     return _combine([_app_stats(v) for v in _units(rows).values()])
@@ -310,7 +376,7 @@ def label_groups(rows: list[dict[str, Any]]) -> str:
     """Set each row's ``group``: its model, or its condition when a model ran under several; returns which.
 
     A label shared by two different conditions gets the condition id appended.
-    Jobs outside an experiment keep their model.
+    Runs outside a study keep their model.
     """
     conditions: dict[str, set] = defaultdict(set)
     for r in rows:
@@ -386,7 +452,7 @@ def _funnel_row(rows, seed: int = 0) -> dict[str, Any]:
     passed = [r for r in evaluated if r["functional_passed"]]
     return {
         # Run counts; the rates below are over apps.
-        "jobs": len(rows),
+        "runs": len(rows),
         "apps": len(_units(rows)),
         "generated": len(generated),
         "truncated": sum(1 for r in generated if r["truncated"]),
@@ -410,7 +476,7 @@ def funnel_section(rows, seed: int = 0, grouped_by: str = "model") -> dict[str, 
         "by_model": [
             {**_group_fields(k, v, grouped_by), **_funnel_row(v, seed)} for k, v in _group(rows, "group").items()
         ],
-        "by_template": [{"template": k, **_funnel_row(v, seed)} for k, v in _group(rows, "template").items()],
+        "by_task": [{"task": k, **_funnel_row(v, seed)} for k, v in _group(rows, "task").items()],
     }
 
 
@@ -495,12 +561,12 @@ def _app_rows(items) -> list[dict[str, Any]]:
     for v in _units(items).values():
         analyzed = [r for r in v if r["analyzed"]]
         evaluated = [r for r in v if r["evaluated"]]
-        code = _avg(r["code_unique"] for r in analyzed)
+        code = _avg(r["code_unique_model"] for r in analyzed)
         loc = _avg(r["loc"] for r in analyzed)
         out.append(
             {
                 "group": v[0]["group"],
-                "template": v[0]["template"],
+                "task": v[0]["task"],
                 "runs": len(v),
                 **{k: _avg(r.get(k) for r in v) for k in _APP_MEANS},
                 "analyzed": bool(analyzed),
@@ -549,14 +615,14 @@ def code_metrics_section(rows, seed: int, grouped_by: str = "model") -> dict[str
         }
 
     spread = []
-    for template, items in _group(apps, "template").items():
+    for task, items in _group(apps, "task").items():
         per_model = {m: _mean(r["loc"] for r in v) for m, v in _group(items, "group").items()}
-        if not template or len(per_model) < 2:  # a spread needs two groups on one template
+        if not task or len(per_model) < 2:  # a spread needs two groups on one task
             continue
         cx = {m: _mean(r["avg_complexity"] for r in v) for m, v in _group(items, "group").items()}
         spread.append(
             {
-                "template": template,
+                "task": task,
                 "models": len(per_model),
                 "loc_cv_across_models": inf.coefficient_of_variation([v for v in per_model.values() if v is not None]),
                 "complexity_cv_across_models": inf.coefficient_of_variation([v for v in cx.values() if v is not None]),
@@ -571,7 +637,7 @@ def code_metrics_section(rows, seed: int, grouped_by: str = "model") -> dict[str
         "by_model": [
             {**_group_fields(k, by_group[k], grouped_by), **summary(v)} for k, v in _group(apps, "group").items()
         ],
-        "by_template": [{"template": k, **summary(v)} for k, v in _group(apps, "template").items()],
+        "by_task": [{"task": k, **summary(v)} for k, v in _group(apps, "task").items()],
         "spread_across_models": spread,
         # App-level (each app's repeats averaged), so n = apps; apps of one model are not independent.
         "app_level_correlations": [
@@ -581,15 +647,15 @@ def code_metrics_section(rows, seed: int, grouped_by: str = "model") -> dict[str
         ],
         "note": (
             "Per app (repeats averaged; LOC excludes test files). App-level correlations treat apps as "
-            "independent; apps of one model or template are clustered."
+            "independent; apps of one model or task are clustered."
         ),
     }
 
 
-def _model_parameters(jobs) -> dict[str, dict[str, Any]]:
+def _model_parameters(runs) -> dict[str, dict[str, Any]]:
     params: dict[str, dict[str, Any]] = {}
-    for job in jobs:
-        m = job.model
+    for run in runs:
+        m = run.model
         if m is None or m.model_id in params:
             continue
         caps = m.capabilities_json if isinstance(m.capabilities_json, dict) else {}
@@ -712,18 +778,29 @@ def _resampler(rows_by_model):
     return resample
 
 
-def design_state(rows, experiment: Experiment) -> dict[str, Any]:
-    """Where the experiment's design stands: planned repeats, extra repeats, cancelled cells, interim, frozen plan."""
-    planned = planned_repeats(experiment)
-    in_design = [r for r in rows if r["condition_id"] is not None]
+def _conditions(study: Study) -> list:
+    from backend.reports.services.generators import study_conditions
+
+    return study_conditions(study)
+
+
+def design_state(study: Study) -> dict[str, Any]:
+    """Where the study's design stands: planned repeats, excluded runs, stopped cells, interim, locked plan."""
+    runs = GenerationRun.objects.filter(study=study)
+    stopped_cells = study.cells.filter(
+        stage=choices.Stage.MAIN,
+        state=choices.CellState.EXCLUDED,
+        exclusion_reason__in=_STOPPED_CELLS,
+    ).count()
     return {
-        "planned_repeats": planned,
-        "beyond_plan_excluded": sum(1 for r in in_design if (r.get("repeat_index") or 0) >= planned),
-        "stopped_early": any(
-            r["status"] == GenerationJob.Status.CANCELLED for r in in_design if (r.get("repeat_index") or 0) < planned
-        ),
-        "interim": experiment.status not in _TERMINAL,
-        "plan_frozen": bool(experiment.analysis_plan) and experiment.analysis_plan_frozen_at is not None,
+        "planned_repeats": study.repeats,
+        # Never in the sample (current runs exclude them); counted for the record.
+        "beyond_plan_excluded": runs.filter(beyond_plan=True).count(),
+        "pilot_excluded": runs.filter(cell__stage=choices.Stage.PILOT).count(),
+        "stopped_cells": stopped_cells,
+        "stopped_early": study.status == choices.StudyStatus.STOPPED or stopped_cells > 0,
+        "interim": study.status not in _TERMINAL,
+        "plan_locked": bool(study.analysis_plan) and study.locked_at is not None,
     }
 
 
@@ -731,31 +808,29 @@ def exploratory_reasons(plan: dict[str, Any], design: dict[str, Any] | None) -> 
     """Why the declared metrics and the ranking are not confirmatory here (empty: they are).
 
     Confirmatory needs the plan's own analysis on the planned sample: a plan
-    frozen at launch, a finished experiment, every planned cell run, and no
-    repeats beyond the plan in the sample.
+    locked at launch, a finished study and every planned cell run (runs beyond
+    the plan and pilot runs are never in the sample).
     """
     if not plan or design is None:
         return ["no pre-registered analysis plan"]
     out = []
-    if not design["plan_frozen"]:
-        out.append("the analysis plan was never frozen at launch")
+    if not design["plan_locked"]:
+        out.append("the analysis plan was never locked at launch")
     if design["interim"]:
-        out.append("interim: the experiment has not finished")
+        out.append("interim: the study has not finished")
     if design["stopped_early"]:
         out.append("stopped early: planned cells were cancelled")
-    if design["beyond_plan_excluded"]:
-        out.append(f"{design['beyond_plan_excluded']} run(s) beyond the planned repeats are in the sample")
     return out
 
 
 def _app_key(r: dict[str, Any]) -> Any:
-    """The app a run of an experiment condition measures (a job without an app template is its own app)."""
-    return r["app_id"] if r["app_id"] is not None else r["job_id"]
+    """The app a run of a study condition measures (its unit; a run without one is its own app)."""
+    return r["unit_key"] or r["run_id"]
 
 
 def planned_comparisons_section(
     rows,
-    experiment: Experiment | None,
+    study: Study | None,
     plan: dict[str, Any],
     design: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
@@ -763,8 +838,8 @@ def planned_comparisons_section(
 
     The family covers the primary, secondary and research-question metrics
     (``declared_metrics``). With the plan's ``multiplicity = "all"`` one
-    correction covers every tested (metric, condition) pair; ``per_metric``
-    (plans frozen before the setting existed) corrects each metric apart.
+    correction covers every tested (metric, condition) pair (the default);
+    ``per_metric`` corrects each metric apart.
     ``family_size`` is the m the correction used: tests without a p-value
     (no non-zero delta) are not in it. The correction and ``significant``
     use the unrounded p-values; the stored ones are rounded.
@@ -773,16 +848,16 @@ def planned_comparisons_section(
     of the correction (``skipped``): ``below_min_apps`` (fewer analyzable
     apps than the plan's ``min_apps_per_condition``), ``no_baseline_data``
     (the baseline has no value for the metric) or ``no_pairs`` (no app has a
-    value in both). Only the sample planned at launch counts: repeats added
-    afterwards are left out (``beyond_plan_excluded``). A family is
-    ``confirmatory`` only under a plan frozen at launch and when no planned
-    cell was cancelled (``stopped_early``).
+    value in both). Only the sample planned at launch counts: runs beyond the
+    plan are never current runs (``beyond_plan_excluded`` counts them). A
+    family is ``confirmatory`` only under a plan locked at launch and when no
+    planned cell was cancelled or stopped (``stopped_early``).
     """
-    from backend.generation.services.analysis_plan import plan_multiplicity
-
-    if experiment is None or not plan or experiment.baseline_condition_id is None:
+    conditions = _conditions(study) if study is not None else []
+    baseline = next((c for c in conditions if c.is_baseline), None)
+    if study is None or not plan or not plan.get("primary_metric") or baseline is None:
         return None
-    design = design or design_state(rows, experiment)
+    design = design or design_state(study)
     primary = plan["primary_metric"]
     secondary = plan.get("secondary_metrics", [])
     questions_by_metric: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -798,10 +873,8 @@ def planned_comparisons_section(
     interim = design["interim"]
     alpha = plan.get("alpha", 0.05)
     correction = plan.get("correction", "holm")
-    base_id = experiment.baseline_condition_id
-    labels = {
-        c.id: condition_label(c) for c in experiment.conditions.select_related("model", "profile", "harness_preset")
-    }
+    base_id = baseline.id
+    labels = {c.id: condition_label(c) for c in conditions}
 
     def adjust(ps):
         # Unrounded: the decision must not depend on display rounding.
@@ -888,7 +961,7 @@ def planned_comparisons_section(
             {
                 "metric": metric,
                 "role": role,
-                "status": "confirmatory" if design["plan_frozen"] and not stopped_early else "exploratory",
+                "status": "confirmatory" if design["plan_locked"] and not stopped_early else "exploratory",
                 "alternative": alternative,
                 "common_cells": len(common_cells),
                 "research_questions": [
@@ -934,7 +1007,7 @@ def planned_comparisons_section(
 
 def _fingerprint(rows) -> str:
     payload = json.dumps(
-        sorted([r["job_id"], r["status"], r["evaluation_status"], r["unique_issues"]] for r in rows),
+        sorted([r["run_id"], r["status"], r["evaluation_status"], r["unique_issues"]] for r in rows),
         default=str,
     )
     return hashlib.sha256(payload.encode()).hexdigest()
@@ -995,65 +1068,66 @@ def _instruments(result_ids) -> dict[str, dict[str, Counter]]:
 
 
 def protocol_section(
-    jobs,
+    runs,
     rows,
-    experiment: Experiment | None,
+    study: Study | None,
     config: dict[str, Any],
     *,
     grouped_by: str = "model",
     design: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    result_ids = ToolResult.latest_ids_per_job([j.id for j in jobs])
+    result_ids = ToolResult.latest_ids_per_job([r.id for r in runs])
     observed = _instruments(result_ids)
     tools_used = sorted(observed)
     versions = dict(AnalyzerTool.objects.filter(slug__in=tools_used).values_list("slug", "version"))
-    evaluators = Counter()
-    for job in jobs:
-        ev = (job.result_data or {}).get("evaluation") if isinstance(job.result_data, dict) else None
-        if isinstance(ev, dict) and ev.get("tester_sha256"):
-            evaluators[
-                f"v{ev.get('evaluator_version')}/tester-{ev.get('tester_version')}/{ev['tester_sha256'][:12]}"
-            ] += 1
+    evaluators = Counter(
+        f"{r['eval_suite']}/tester-{r['tester_version']}" for r in rows if r["evaluated"] and r["eval_suite"]
+    )
     by_group = _group(rows, "group")
-    cells = Counter((r["group"], r["template"]) for r in rows)
-    # Agent builds run verbatim: build healing does not apply to them.
-    healable = [r for r in rows if r["mode"] != GenerationJob.Mode.AGENT]
-    baseline = experiment.baseline_condition if experiment is not None and experiment.baseline_condition_id else None
+    cells = Counter((r["group"], r["task"]) for r in rows)
+    fingerprints: dict[tuple, set] = defaultdict(set)
+    for r in rows:
+        if r["config_fingerprint"]:
+            fingerprints[(r["condition_id"], r["unit_key"] or r["run_id"])].add(r["config_fingerprint"])
+    conditions = _conditions(study) if study is not None else []
+    baseline = next((c for c in conditions if c.is_baseline), None)
     return {
         "report_version": REPORT_VERSION,
         "generated_at": timezone.now().isoformat(),
-        "scope": {k: config.get(k) for k in ("experiment_id", "batch_id")},
-        "experiment": None
-        if experiment is None
+        "scope": {k: config.get(k) for k in ("study_id", "run_ids")},
+        "study": None
+        if study is None
         else {
-            "id": str(experiment.id),
-            "name": experiment.name,
-            "hypothesis": experiment.hypothesis,
-            "status": experiment.status,
-            "mode": experiment.mode,
-            "repeats": experiment.repeats,
+            "id": str(study.id),
+            "name": study.name,
+            "hypothesis": study.hypothesis,
+            "kind": study.kind,
+            "mode": study.mode,
+            "status": study.status,
+            "repeats": study.repeats,
             "planned_repeats": (design or {}).get("planned_repeats"),
-            "base_seed": experiment.base_seed,
-            "baseline_condition_id": experiment.baseline_condition_id,
+            "base_seed": study.base_seed,
+            "baseline_condition_id": baseline.id if baseline is not None else None,
             "baseline_condition": condition_label(baseline) if baseline is not None else None,
-            "build_healing": experiment.build_healing,
-            "analysis_plan": experiment.analysis_plan or None,
-            "analysis_plan_hash": experiment.analysis_plan_hash or None,
-            "analysis_plan_frozen_at": experiment.analysis_plan_frozen_at.isoformat()
-            if experiment.analysis_plan_frozen_at
-            else None,
+            "analysis_plan": study.analysis_plan or None,
+            "analysis_plan_hash": study.analysis_plan_hash or None,
+            "prereg_hash": study.prereg_hash or None,
+            "locked_at": study.locked_at.isoformat() if study.locked_at else None,
         },
-        "jobs": len(rows),
+        "runs": len(rows),
         "apps": len(_units(rows)),
         "grouped_by": grouped_by,
         "groups": sorted(g for g in by_group if g),
         "models": sorted({r["model"] for r in rows if r["model"]}),
-        "templates": sorted({r["template"] for r in rows if r["template"]}),
-        "modes": dict(Counter(r["mode"] for r in rows)),
-        "stacks": dict(Counter(r["stack"] or "(default)" for r in rows)),
-        "build_healing": dict(Counter(r["build_healing"] for r in healable)),
-        "build_healing_not_applicable": len(rows) - len(healable),
+        "tasks": sorted({r["task"] for r in rows if r["task"]}),
+        "kinds": dict(Counter(r["kind"] for r in rows)),
+        "stacks": dict(Counter(r["stack"] or "(none)" for r in rows)),
+        "starters": dict(Counter(r["starter"] or "(none)" for r in rows)),
+        "harnesses": dict(Counter(r["harness"] or "(none)" for r in rows)),
         "prompt_versions": len({r["prompt_hash"] for r in rows if r["prompt_hash"]}),
+        "config_fingerprints": len({r["config_fingerprint"] for r in rows if r["config_fingerprint"]}),
+        # (condition, unit) groups whose repeats ran under more than one configuration fingerprint.
+        "mixed_fingerprint_cells": sum(1 for v in fingerprints.values() if len(v) > 1),
         # Group sizes: how many groups have this many apps (app units) / runs.
         "apps_per_model": dict(Counter(len(_units(v)) for v in by_group.values())),
         "runs_per_model": dict(Counter(len(v) for v in by_group.values())),
@@ -1076,7 +1150,7 @@ def protocol_section(
         "settings": {
             "include_ai": bool(config.get("include_ai")),
             "line_tolerance": int(config.get("line_tolerance", 2)),
-            "exclude_truncated": bool(config.get("exclude_truncated", True)),
+            "exclude_truncated": bool(config.get("exclude_truncated", False)),
             "seed": int(config.get("seed", 0)),
         },
         "data_fingerprint": _fingerprint(rows),
@@ -1108,7 +1182,6 @@ def validity_section(
     *,
     protocol,
     issues,
-    healing,
     accounting,
     correlations,
     security,
@@ -1164,13 +1237,24 @@ def validity_section(
             f"{truncated} generation(s) hit max_tokens"
             + (" and were excluded." if config.get("exclude_truncated", True) else "; their code is incomplete."),
         )
-    infra = sum(1 for r in rows if r["evaluation_status"] == "infra_error")
+    infra = sum(1 for r in rows if r["evaluation_status"] in _EVAL_INFRA)
     if infra:
         add(
             "infra_errors",
             "info",
             "funnel",
-            f"{infra} evaluation(s) failed for platform reasons and are excluded; re-evaluate them.",
+            f"{infra} evaluation(s) were not measured (tester or platform error) and are excluded; re-evaluate them.",
+        )
+    attrition = protocol.get("attrition_excluded") or {}
+    if attrition:
+        n_attrition = sum(attrition.values())
+        add(
+            "attrition",
+            "warning",
+            "all",
+            f"{n_attrition} cell(s) have no usable run ("
+            + ", ".join(f"{n} {k}" for k, n in sorted(attrition.items()))
+            + "): infra errors and exclusions are not model outcomes, so they are left out and reported here.",
         )
     not_evaluated = sum(1 for r in rows if r["generated"] and not r["evaluated"])
     if not_evaluated:
@@ -1180,20 +1264,21 @@ def validity_section(
             "funnel",
             f"{not_evaluated} generated run(s) have no evaluation; deploy rates exclude them.",
         )
-    if protocol["prompt_versions"] > len(protocol["templates"] or [1]):
+    mixed = protocol.get("mixed_fingerprint_cells") or 0
+    if mixed:
         add(
-            "mixed_prompts",
+            "mixed_fingerprints",
             "warning",
             "all",
-            "Some templates ran under more than one prompt version; results are pooled across them.",
+            f"{mixed} (condition, unit) cell group(s) ran under more than one configuration fingerprint; "
+            "their repeats are pooled across configurations.",
         )
-    if len(protocol["modes"]) > 1:
+    if len(protocol["kinds"]) > 1:
         add(
-            "mixed_modes",
+            "mixed_kinds",
             "warning",
             "all",
-            f"Generation modes are pooled ({', '.join(sorted(protocol['modes']))}); "
-            "scope the report to one experiment.",
+            f"Run kinds are pooled ({', '.join(sorted(protocol['kinds']))}); scope the report to one study.",
         )
     if len(protocol["stacks"]) == 1:
         add(
@@ -1202,13 +1287,6 @@ def validity_section(
             "all",
             f"One stack only ({next(iter(protocol['stacks']))}): results may not generalise to others.",
         )
-    healed = [r for r in rows if r["healing_changed"]]
-    if healed:
-        evaluated = sum(1 for r in rows if r["evaluated"])
-        msg = f"Build healing changed {len(healed)} of {evaluated} evaluated runs before deployment."
-        if "none" not in healing.get("modes", []):
-            msg += " No unhealed ablation exists: run manage.py healing_ablation to separate model from pipeline."
-        add("healing", "warning", "funnel, ranking", msg)
     zero = [s["severity"] for s in security["overall"] if s["severity"] in ("critical", "high") and s["issues"] == 0]
     if zero and security["apps_analyzed"]:
         bound = inf.zero_count_upper_bound(security["apps_analyzed"])
@@ -1217,7 +1295,7 @@ def validity_section(
             "warning",
             "security_bounds",
             f"No {' or '.join(zero)} code security issues (normalized severity) in {security['apps_analyzed']} "
-            f"apps: the per-app rate is bounded at {bound:.1%} (95%), not zero; the templates may not exercise "
+            f"apps: the per-app rate is bounded at {bound:.1%} (95%), not zero; the tasks may not exercise "
             "these classes.",
         )
     params = issues.get("params") or {}
@@ -1278,13 +1356,13 @@ def validity_section(
         if inherited is None:  # payloads without the split column
             inherited = dep_total - (issues["totals"].get("dependency_added") or 0)
         add(
-            "scaffold_dependencies",
+            "starter_dependencies",
             "warning" if inherited / dep_total >= 0.5 else "info",
             "issues, security_bounds",
             f"{inherited} of {dep_total} dependency advisories ({inherited / dep_total:.0%}) are in package versions "
-            "the model did not choose (pinned by the stack scaffold, or transitive): they measure the template more "
-            "than the model. Advisories are kept out of code issues, issues per kLOC and the security bounds; "
-            "compare models on the advisories in versions they chose.",
+            "the model did not choose (pinned by the starter, or transitive): they measure the starter more than "
+            "the model. Advisories are kept out of code issues, issues per kLOC and the security bounds; compare "
+            "models on the advisories in versions they chose.",
         )
     pass_values = {r["pass_rate"] for r in rows if r["evaluated"] and r["pass_rate"] is not None}
     n_graded = sum(1 for r in rows if r["evaluated"] and r["pass_rate"] is not None)
@@ -1293,9 +1371,9 @@ def validity_section(
             "ceiling",
             "warning",
             "funnel, ranking, planned_comparisons",
-            f"Every evaluated app scored a pass rate of {next(iter(pass_values)):g}: the conformance suite does "
+            f"Every evaluated app scored a pass rate of {next(iter(pass_values)):g}: the evaluation suite does "
             "not discriminate between models here (ceiling/floor effect); comparisons on it cannot show a "
-            "difference. Use harder apps or another metric.",
+            "difference. Use harder tasks or another metric.",
         )
     tied = (ranking or {}).get("tied_groups") or []
     if (ranking or {}).get("models_tied") and tied:
@@ -1323,7 +1401,8 @@ def validity_section(
             "in_flight",
             "warning",
             "all",
-            f"{protocol['in_flight_excluded']} job(s) are still queued or running and are left out; "
+            f"{protocol['in_flight_excluded']} run(s) are still queued, running or waiting for evaluation and are "
+            "left out; "
             "this is an interim view.",
         )
     if len(protocol.get("evaluators") or {}) > 1:
@@ -1331,7 +1410,7 @@ def validity_section(
             "mixed_evaluators",
             "warning",
             "funnel, ranking, planned_comparisons",
-            f"Apps were graded by {len(protocol['evaluators'])} different evaluator/test-suite versions "
+            f"Apps were graded by {len(protocol['evaluators'])} different evaluation suite / tester versions "
             f"({', '.join(sorted(protocol['evaluators']))}); pass rates are pooled across them. Re-evaluate "
             "the older ones for a single instrument.",
         )
@@ -1402,7 +1481,7 @@ def validity_section(
             "them. Re-analyze the older apps for a single instrument.",
         )
     unmeasured = (issues.get("coverage") or {}).get("apps_unmeasured") or []
-    not_analyzed = sum(1 for r in rows if r["generated"] and not r["analyzed"] and r["job_id"] not in set(unmeasured))
+    not_analyzed = sum(1 for r in rows if r["generated"] and not r["analyzed"] and r["run_id"] not in set(unmeasured))
     if not_analyzed:
         add(
             "not_analyzed",
@@ -1422,12 +1501,12 @@ def validity_section(
         )
     if not plan:
         add("no_plan", "info", "all", "No pre-registered analysis plan: every analysis here is exploratory.")
-    elif not (protocol.get("experiment") or {}).get("analysis_plan_frozen_at"):
+    elif not (protocol.get("study") or {}).get("locked_at"):
         add(
-            "plan_not_frozen",
+            "plan_not_locked",
             "warning",
             "all",
-            "The analysis plan was never frozen at launch: it was not pre-registered, so every analysis here "
+            "The analysis plan was never locked at launch: it was not pre-registered, so every analysis here "
             "is exploratory.",
         )
     if config.get("_exclusions_overridden"):
@@ -1446,18 +1525,17 @@ def validity_section(
             "stopped_early",
             "warning",
             "planned_comparisons",
-            "Planned cells were cancelled before they ran: the planned sample was not collected, so the planned "
-            "comparisons are exploratory (stopping on what the interim results showed would bias them). "
-            "Top up the experiment to complete the design.",
+            "Planned cells were cancelled or stopped before they ran: the planned sample was not collected, so the "
+            "planned comparisons are exploratory (stopping on what the interim results showed would bias them). "
+            "Top up the study to complete the design.",
         )
-    if planned and planned.get("beyond_plan_excluded"):
+    if protocol.get("beyond_plan_excluded"):
         add(
             "design_extended",
             "info",
-            "planned_comparisons",
-            f"Repeats were added after launch; the planned comparisons use the {planned['planned_repeats']} "
-            f"repeat(s) planned at launch and leave {planned['beyond_plan_excluded']} later job(s) out. The other "
-            "sections include them and are exploratory.",
+            "all",
+            f"{protocol['beyond_plan_excluded']} run(s) beyond the plan (top-ups of cells that already had a usable "
+            "run) are left out of every section.",
         )
     n_families = len(families)
     if planned and planned.get("multiplicity") == "per_metric" and n_families > 1:
@@ -1495,80 +1573,74 @@ def validity_section(
     return out
 
 
-# ── generator ────────────────────────────────────────────────────────────
-
-
-def _is_truncated(job: GenerationJob) -> bool:
-    return output_truncated(job.result_data)
-
-
 def _issues_by_group(per_app, rows, grouped_by: str) -> list[dict[str, Any]]:
     """The deduplicated issue table per report group, labelled as the funnel and ranking are.
 
     ``issues.by_condition`` keys on the raw condition label and puts every
-    job outside an experiment, whatever its model, in one row; this keys on
+    run outside a study, whatever its model, in one row; this keys on
     each run's ``group`` (:func:`label_groups`). Counts come from the one
     issue breakdown of the whole scope, so every group shares its instrument set.
     """
-    group_of = {r["job_id"]: r["group"] for r in rows}
+    group_of = {r["run_id"]: r["group"] for r in rows}
     groups: dict[str, list] = defaultdict(list)
     for app in per_app:
-        if group_of.get(app["job_id"]):
-            groups[group_of[app["job_id"]]].append(app)
+        if group_of.get(app["run_id"]):
+            groups[group_of[app["run_id"]]].append(app)
     return [{**_group_fields(g, v, grouped_by), **group_summary(v)} for g, v in sorted(groups.items())]
 
 
-def _healing_by_group(jobs_qs, rows, grouped_by: str, baseline: str) -> list[dict[str, Any]]:
-    """The build-healing ablation per report group (paired on each run, as ``healing_impact``'s rows)."""
-    by_group = _group([r for r in rows if r["group"]], "group")
-    out = []
-    for group, items in by_group.items():
-        totals = healing_impact(jobs_qs.filter(id__in=[r["job_id"] for r in items]), baseline=baseline)["totals"]
-        if totals.get("apps"):
-            out.append({**_group_fields(group, items, grouped_by), **totals})
-    return out
+# ── generator ────────────────────────────────────────────────────────────
 
 
-def _experiment(config, user) -> Experiment | None:
-    if not config.get("experiment_id"):
+def _study(config, user) -> Study | None:
+    if not config.get("study_id"):
         return None
-    from backend.reports.services.generators import owned_experiment
+    from backend.reports.services.generators import owned_study
 
-    return owned_experiment(config["experiment_id"], user)
+    return owned_study(config["study_id"], user)
+
+
+def scope_runs(config: dict[str, Any], user, study: Study | None):
+    """The runs a study report describes (``statistics.services.runs.study_runs``), reference runs left out.
+
+    A study's current runs (main stage), the given ``run_ids``, or every sample run *user* may report on
+    (staff and ``user=None``: everyone's). Reference runs are instruments, never samples.
+    """
+    run_ids = [str(r) for r in config["run_ids"]] if config.get("run_ids") else None
+    qs = study_runs(user, study_id=str(study.pk) if study is not None else None, run_ids=run_ids)
+    return qs.exclude(kind=choices.RunKind.REFERENCE).select_related("starter")
 
 
 def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any]:
-    experiment = _experiment(config, user)
+    study = _study(config, user)
     seed = int(config.get("seed", 0))
     include_ai = bool(config.get("include_ai", False))
     line_tolerance = int(config.get("line_tolerance", 2))
-    jobs_qs = study_jobs(user, experiment_id=config.get("experiment_id"), batch_id=config.get("batch_id"))
-    jobs = list(jobs_qs)
-    # Jobs still queued or running have no outcome yet; counting them would
+    runs = list(scope_runs(config, user, study))
+    # Runs still queued, running or being evaluated have no outcome yet; counting them would
     # read as "not generated" (a failure) in the funnel and rates.
-    in_flight = [j for j in jobs if j.status in (GenerationJob.Status.PENDING, GenerationJob.Status.RUNNING)]
-    if in_flight:
-        jobs = [j for j in jobs if j not in in_flight]
-        jobs_qs = jobs_qs.exclude(id__in=[j.id for j in in_flight])
-    total_jobs = len(jobs)
-    plan = (experiment.analysis_plan if experiment else None) or {}
-    if plan:
-        # A pre-registered plan's exclusions govern (the report setting would
-        # let a confirmatory analysis change its sample after the fact).
-        # Infra errors are always excluded: they never count as evaluated.
-        exclusions = plan.get("exclusions") or {}
+    in_flight = [r for r in runs if r.status in _IN_FLIGHT]
+    runs = [r for r in runs if r.status not in _IN_FLIGHT]
+    # Attrition: no model-attributable outcome (infra error, exclusion): reported, never a failure.
+    attrition = Counter(r.outcome or r.status for r in runs if r.usable is not True)
+    runs = [r for r in runs if r.usable is True]
+    total_runs = len(runs)
+    plan = (study.analysis_plan if study is not None and isinstance(study.analysis_plan, dict) else None) or {}
+    exclusions = plan.get("exclusions") or {}
+    if plan and "truncated" in exclusions:
+        # A pre-registered plan's exclusions govern (the report setting would let a confirmatory
+        # analysis change its sample after the fact).
         requested = config.get("exclude_truncated")
-        config = {**config, "exclude_truncated": bool(exclusions.get("truncated", True))}
+        config = {**config, "exclude_truncated": bool(exclusions["truncated"])}
         config["_exclusions_overridden"] = requested is not None and bool(requested) != config["exclude_truncated"]
-    if config.get("exclude_truncated", True):
-        # Truncated output measures the token ceiling, not the model.
-        jobs = [j for j in jobs if not _is_truncated(j)]
-        jobs_qs = jobs_qs.filter(id__in=[j.id for j in jobs])
+    if config.get("exclude_truncated", False):
+        # Sensitivity analysis: truncated runs measure the budget ceiling as much as the model.
+        runs = [r for r in runs if not bool((r.validity or {}).get("truncated"))]
 
-    rows, issues = app_table(jobs, include_ai=include_ai, line_tolerance=line_tolerance)
-    # Arms that share a model (harness or prompt-profile conditions) are never pooled.
+    rows, issues = app_table(runs, include_ai=include_ai, line_tolerance=line_tolerance)
+    # Arms that share a model (harness, prompt or stack conditions) are never pooled.
     grouped_by = label_groups(rows)
-    design = design_state(rows, experiment) if experiment is not None else None
+    design = design_state(study) if study is not None else None
     # The declared metrics and the ranking are confirmatory only for the plan's analysis on the planned sample.
     reasons = exploratory_reasons(plan, design)
 
@@ -1590,43 +1662,33 @@ def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any
 
     # Model parameters vary by model only: one point per model, never one per arm.
     correlations = correlations_section(
-        _model_parameters(jobs),
+        _model_parameters(runs),
         model_level_criteria(criteria_by_model, by_model),
         seed,
         arms_averaged=grouped_by == "condition",
     )
     security = security_bounds_section(rows, grouped_by)
-    healing = healing_impact(jobs_qs)
-    accounting = run_accounting(jobs_qs)
-    protocol = protocol_section(jobs, rows, experiment, config, grouped_by=grouped_by, design=design)
-    protocol["truncated_excluded"] = total_jobs - len(jobs)
+    from backend.statistics.services.accounting import run_accounting
+    from backend.statistics.services.accounting import tool_inventory
+
+    accounting = run_accounting(GenerationRun.objects.filter(id__in=[r.id for r in runs]))
+    protocol = protocol_section(runs, rows, study, config, grouped_by=grouped_by, design=design)
+    protocol["truncated_excluded"] = total_runs - len(runs)
     protocol["in_flight_excluded"] = len(in_flight)
-    protocol["settings"]["exclusions_source"] = "analysis_plan" if plan else "report_config"
+    protocol["attrition_excluded"] = dict(attrition)
+    protocol["beyond_plan_excluded"] = (design or {}).get("beyond_plan_excluded", 0)
+    protocol["pilot_excluded"] = (design or {}).get("pilot_excluded", 0)
+    protocol["settings"]["exclusions_source"] = "analysis_plan" if plan and "truncated" in exclusions else "report"
     protocol["confirmatory"] = {"design": not reasons, "reasons": reasons}
-    planned = planned_comparisons_section(rows, experiment, plan, design)
+    planned = planned_comparisons_section(rows, study, plan, design)
     # Which tools' findings the issue counts include (measured on every app) and which were left out.
     protocol["instrument_coverage"] = issues.get("coverage")
 
     issues_out = {k: v for k, v in issues.items() if k not in ("issues", "per_app")}
-    healing_out = {
-        k: healing[k]
-        for k in (
-            "baseline",
-            "modes",
-            "not_applicable",
-            "totals",
-            "by_model",
-            "by_condition",
-            "added_requirements",
-            "patches",
-        )
-    }
     if grouped_by == "condition":
         # The groups every other table uses: arms apart, colliding labels disambiguated,
-        # and jobs outside an experiment kept per model (by_condition pools them in one row).
+        # and runs outside a study kept per model (by_condition pools them in one row).
         issues_out["by_group"] = _issues_by_group(issues["per_app"], rows, grouped_by)
-        if healing["totals"].get("apps"):
-            healing_out["by_group"] = _healing_by_group(jobs_qs, rows, grouped_by, healing["baseline"])
     return {
         "protocol": protocol,
         "definitions": DEFINITIONS,
@@ -1648,7 +1710,6 @@ def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any
         "correlations": correlations,
         "ranking": ranking,
         "planned_comparisons": planned,
-        "healing": healing_out,
         "tool_inventory": tool_inventory()["counts"],
         "accounting": {k: accounting[k] for k in ("apps", "analysis_runs", "executions", "evaluations")},
         "per_app": rows,
@@ -1656,7 +1717,6 @@ def generate_study_report(config: dict[str, Any], *, user=None) -> dict[str, Any
             rows,
             protocol=protocol,
             issues=issues,
-            healing=healing,
             accounting=accounting,
             correlations=correlations,
             security=security,

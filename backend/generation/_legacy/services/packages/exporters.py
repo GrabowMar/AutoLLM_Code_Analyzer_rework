@@ -1,0 +1,281 @@
+"""Serialize bundles/templates into portable package payloads."""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING
+from typing import Any
+
+import yaml
+from backend.generation.services.packages.constants import BUNDLE_PACKAGE_KIND
+from backend.generation.services.packages.constants import BUNDLE_PACKAGE_SCHEMA_VERSION
+from backend.generation.services.packages.constants import TEMPLATE_PACKAGE_KIND
+from backend.generation.services.packages.constants import TEMPLATE_PACKAGE_SCHEMA_VERSION
+from backend.generation.services.packages.visibility import visible_app_templates_for
+from backend.generation.services.packages.visibility import visible_blocks_for
+from backend.generation.services.packages.visibility import visible_profiles_for
+from django.utils import timezone
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractUser
+
+    from backend.generation.models import AppRequirementTemplate
+    from backend.generation.models import ContentBlock
+    from backend.generation.models import GenerationProfile
+    from backend.generation.models import RunPreset
+
+
+# Why a profile's block ref was left out of a package (``omitted_blocks``).
+# Deliberately vague: an export must not tell another user's private block
+# apart from a deleted one.
+OMITTED_BLOCK_REASON = "missing or not visible to you"
+
+
+def export_bundle_package(bundle: GenerationProfile, user: AbstractUser | None) -> dict[str, Any]:
+    """A bundle package of *bundle* with the referenced blocks *user* can see.
+
+    Refs to other blocks are listed in ``omitted_blocks`` (present only when
+    non-empty); the profile keeps them, so importing it elsewhere needs them.
+    """
+    blocks, omitted = _bundle_blocks([bundle], user)
+    package = {
+        "bundle_package_schema_version": BUNDLE_PACKAGE_SCHEMA_VERSION,
+        "kind": BUNDLE_PACKAGE_KIND,
+        "exported_at": timezone.now().isoformat(),
+        "bundle": _serialize_bundle(bundle),
+        "blocks": [_serialize_block(block) for block in blocks],
+    }
+    if omitted:
+        package["omitted_blocks"] = omitted
+    return package
+
+
+def export_template_package(
+    *,
+    user: AbstractUser,
+    app_template_slugs: list[str] | None = None,
+    bundle_slugs: list[str] | None = None,
+    block_refs: list[dict[str, Any]] | None = None,
+    stack_slugs: list[str] | None = None,
+    preset_refs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """A v3 template package of the named assets *user* can see.
+
+    Profiles bring the blocks they reference and the user stack they target
+    (builtin stacks ship with every install). A profile ref to a block *user*
+    cannot see (another user's private block) is left out and reported in
+    ``omitted_blocks``. Presets are exported at their latest visible version.
+    """
+    app_template_slugs = app_template_slugs or []
+    bundle_slugs = bundle_slugs or []
+    block_refs = block_refs or []
+    stack_slugs = list(stack_slugs or [])
+    preset_refs = preset_refs or []
+
+    # Latest version of each slug (the queryset is slug-ordered, newest first):
+    # older versions would import as renamed duplicates.
+    latest: dict[str, GenerationProfile] = {}
+    for bundle in visible_profiles_for(user).filter(slug__in=bundle_slugs):
+        latest.setdefault(bundle.slug, bundle)
+    bundles = sorted(latest.values(), key=lambda bundle: bundle.name)
+    explicit_blocks = []
+    for ref in block_refs:
+        block = (
+            visible_blocks_for(user)
+            .filter(
+                slug=ref.get("slug"),
+                version=int(ref.get("version", 1)),
+            )
+            .first()
+        )
+        if block:
+            explicit_blocks.append(block)
+
+    bundle_blocks, omitted = _bundle_blocks(bundles, user)
+    blocks = _dedupe_blocks([*explicit_blocks, *bundle_blocks])
+    for bundle in bundles:
+        if bundle.scaffolding_slug and bundle.scaffolding_slug not in stack_slugs:
+            stack_slugs.append(bundle.scaffolding_slug)
+
+    package: dict[str, Any] = {
+        "template_package_schema_version": TEMPLATE_PACKAGE_SCHEMA_VERSION,
+        "kind": TEMPLATE_PACKAGE_KIND,
+        "exported_at": timezone.now().isoformat(),
+        "assets": {
+            "app_specs": [
+                _serialize_app_template(item)
+                for item in visible_app_templates_for(user).filter(slug__in=app_template_slugs).order_by("name")
+            ],
+            "blocks": [_serialize_block(block) for block in blocks],
+            "profiles": [_serialize_bundle(bundle) for bundle in bundles],
+            "stacks": [_serialize_stack(row) for row in _exportable_stacks(user, stack_slugs)],
+            "presets": [_serialize_preset(preset) for preset in _exportable_presets(user, preset_refs)],
+        },
+    }
+    if omitted:
+        package["omitted_blocks"] = omitted
+    return package
+
+
+def _exportable_presets(user: AbstractUser, preset_refs: list[dict[str, Any]]) -> list[RunPreset]:
+    """Latest visible version of each referenced ``{kind, slug}`` (unknown refs are skipped)."""
+    from backend.generation.services.presets import visible_q
+
+    from backend.generation.models import RunPreset
+
+    presets: dict[tuple[str, str], RunPreset] = {}
+    for ref in preset_refs:
+        key = (str(ref.get("kind", "")), str(ref.get("slug", "")))
+        if key in presets:
+            continue
+        preset = RunPreset.objects.filter(visible_q(user), kind=key[0], slug=key[1]).order_by("-version").first()
+        if preset is not None:
+            presets[key] = preset
+    return sorted(presets.values(), key=lambda p: (p.kind, p.slug))
+
+
+def _serialize_preset(preset: RunPreset) -> dict[str, Any]:
+    return {
+        "kind": preset.kind,
+        "slug": preset.slug,
+        "name": preset.name,
+        "description": preset.description,
+        "config": preset.config or {},
+    }
+
+
+def _exportable_stacks(user: AbstractUser, stack_slugs: list[str]):
+    """User-authored stacks only — builtins ship with every install (unknown slugs are skipped)."""
+    from django.db.models import Q
+
+    from backend.runtime.models import Stack
+
+    if not stack_slugs:
+        return []
+    latest: dict[str, Stack] = {}
+    qs = (
+        Stack.objects.filter(slug__in=stack_slugs, is_archived=False, is_builtin=False)
+        .filter(Q(is_approved=True) | Q(created_by=user))
+        .order_by("slug", "-version")
+    )
+    for row in qs:
+        latest.setdefault(row.slug, row)
+    return list(latest.values())
+
+
+def _serialize_stack(row) -> dict[str, Any]:
+    return {
+        "slug": row.slug,
+        "name": row.name,
+        "description": row.description,
+        "has_frontend": row.has_frontend,
+        "default_port": row.default_port,
+        "patch_profile": row.patch_profile,
+        "frontend_component": row.frontend_component,
+        "backend_filename": row.backend_filename,
+        "backend_base_image": row.backend_base_image,
+        "frontend_base_image": row.frontend_base_image,
+        "server_kind": row.server_kind,
+        "files": row.files or {},
+    }
+
+
+def dump_bundle_package(package: dict[str, Any], fmt: str) -> tuple[str, str]:
+    return _dump_package(package, fmt)
+
+
+def dump_template_package(package: dict[str, Any], fmt: str) -> tuple[str, str]:
+    return _dump_package(package, fmt)
+
+
+def _dump_package(package: dict[str, Any], fmt: str) -> tuple[str, str]:
+    if fmt == "yaml":
+        return yaml.safe_dump(package, sort_keys=False, allow_unicode=False), "application/yaml"
+    return json.dumps(package, indent=2, sort_keys=True), "application/json"
+
+
+def _bundle_blocks(
+    bundles: list[GenerationProfile],
+    user: AbstractUser | None,
+) -> tuple[list[ContentBlock], list[dict[str, Any]]]:
+    """(blocks the profiles reference that *user* can see, the refs left out).
+
+    Only visible blocks are exported: a profile may point at another user's
+    private block (``block_refs`` are free-form), and exporting it would hand
+    that block's content to the profile's owner.
+    """
+    visible = visible_blocks_for(user)
+    blocks: list[ContentBlock] = []
+    omitted: list[dict[str, Any]] = []
+    for bundle in bundles:
+        for ref in bundle.block_refs or []:
+            slug, version = ref.get("slug"), int(ref.get("version", 1))
+            block = visible.filter(slug=slug, version=version).first()
+            if block:
+                blocks.append(block)
+                continue
+            entry = {
+                "profile": bundle.slug,
+                "type": ref.get("type") or "",
+                "slug": slug,
+                "version": version,
+                "reason": OMITTED_BLOCK_REASON,
+            }
+            if entry not in omitted:
+                omitted.append(entry)
+    return _dedupe_blocks(blocks), omitted
+
+
+def _dedupe_blocks(blocks: list[ContentBlock]) -> list[ContentBlock]:
+    unique: dict[tuple[str, int], ContentBlock] = {}
+    for block in blocks:
+        unique[(block.slug, block.version)] = block
+    return sorted(unique.values(), key=lambda item: (item.block_type, item.slug, item.version))
+
+
+def _serialize_app_template(template: AppRequirementTemplate) -> dict[str, Any]:
+    """The spec in its own form: ``data_models`` for a v3 spec, else the legacy ``data_model``."""
+    data = {
+        "name": template.name,
+        "slug": template.slug,
+        "category": template.category,
+        "description": template.description,
+        "backend_requirements": template.backend_requirements or [],
+        "frontend_requirements": template.frontend_requirements or [],
+        "admin_requirements": template.admin_requirements or [],
+        "api_endpoints": template.api_endpoints or [],
+        "admin_api_endpoints": template.admin_api_endpoints or [],
+        "difficulty": template.difficulty or "",
+        "spec_schema_version": template.spec_schema_version,
+    }
+    if isinstance(template.data_model, list):
+        data["data_models"] = template.data_model
+    else:
+        data["data_model"] = template.data_model or {}
+    return data
+
+
+def _serialize_block(block: ContentBlock) -> dict[str, Any]:
+    return {
+        "block_type": block.block_type,
+        "slug": block.slug,
+        "version": block.version,
+        "name": block.name,
+        "description": block.description,
+        "content": block.content,
+        "metadata": block.metadata or {},
+    }
+
+
+def _serialize_bundle(bundle: GenerationProfile) -> dict[str, Any]:
+    return {
+        "name": bundle.name,
+        "slug": bundle.slug,
+        # Informational only: an import always starts a fresh version-1
+        # lineage under the importing user, so this isn't read back in.
+        "version": bundle.version,
+        "description": bundle.description,
+        "scaffolding_slug": bundle.scaffolding_slug,
+        "block_refs": bundle.block_refs or [],
+        "llm_config": bundle.llm_config or {},
+    }

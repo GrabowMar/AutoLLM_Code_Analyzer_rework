@@ -123,5 +123,5 @@ _V2_DEFAULT_STACK = "flask-react"
 
 
 def default_stack_slug() -> str:
-    """Historical field default of the deleted ``GenerationProfile.scaffolding_slug`` (migration 0016)."""
+    """Historical field default referenced by migration 0016; v3 code never calls it."""
     return _V2_DEFAULT_STACK

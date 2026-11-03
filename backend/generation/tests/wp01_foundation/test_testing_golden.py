@@ -1,7 +1,4 @@
-"""WP-01 testing infrastructure: the frozen golden library fixture and its parent app.
-
-Until WP-02a/WP-02b land, run with ``--ds=backend.generation.tests.wp01_foundation.settings_u1``.
-"""
+"""WP-01 testing infrastructure: the frozen golden library fixture and its parent app."""
 
 from __future__ import annotations
 

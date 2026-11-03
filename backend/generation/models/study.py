@@ -1,6 +1,6 @@
 """Study models (spec section 3.6): the factorial design, its frozen plans and its cells.
 
-``Study`` is the renamed v2 ``Experiment`` (``RenameModel``, ``db_table="generation_study"``), so the
+``Study`` keeps the v2 study table's identity (``RenameModel``, ``db_table="generation_study"``), so the
 foreign keys of other apps keep working. ``StudyCondition``, ``StudySchedule`` and ``StudyPostRun`` are
 new tables (the v2 rows are wiped before the cut-over, section 3.12).
 
@@ -116,7 +116,7 @@ class StudyQuerySet(models.QuerySet):
 
 
 class Study(ValidatedModel):
-    """A factorial design over factors x levels, units and replicates (formerly ``Experiment``)."""
+    """A factorial design over factors x levels, units and replicates."""
 
     CONTRACT_FIELDS: ClassVar[dict[str, Contract]] = {
         "design": Contract(Design),
@@ -628,7 +628,7 @@ class StudyPromptOverride(ValidatedModel):
 
 
 class StudySchedule(models.Model):
-    """A cron trigger on a study: top up, add replicates, or clone and run (port of ``ExperimentSchedule``)."""
+    """A cron trigger on a study: top up, add replicates, or clone and run."""
 
     study = models.ForeignKey(Study, on_delete=models.CASCADE, related_name="schedules")
     action = models.CharField(_("action"), max_length=16, choices=ScheduleAction.choices)

@@ -12,7 +12,7 @@ from django.db.models import Count
 from django.utils import timezone
 
 from backend.analysis.models import AnalysisRun
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
 from backend.reports.models import Report
 from backend.runtime.models import ContainerInstance
 
@@ -177,7 +177,7 @@ def app_stats() -> dict[str, Any]:
 
     res = {
         "analysis_tasks": _counts(AnalysisRun),
-        "generation_jobs": _counts(GenerationJob),
+        "generation_jobs": _counts(GenerationRun),
         "reports": _counts(Report),
         "container_instances": _counts(ContainerInstance),
     }

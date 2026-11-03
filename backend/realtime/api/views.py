@@ -50,7 +50,7 @@ def _channels(request: HttpRequest) -> list[str]:
 @transaction.non_atomic_requests
 @require_GET
 async def sse_stream(request: HttpRequest) -> HttpResponse:
-    """GET /api/realtime/stream?channels=experiment:<uuid>,capacity
+    """GET /api/realtime/stream?channels=study:<uuid>,run:<uuid>,capacity
 
     401 when unauthenticated, 400 without channels or with more than
     ``MAX_CHANNELS``, 403 when any channel is malformed, unknown or not the

@@ -1,7 +1,4 @@
-"""WP-01 testing infrastructure: the fake gateway, harness, sandbox and evaluator behave as specified.
-
-Until WP-02a/WP-02b land, run with ``--ds=backend.generation.tests.wp01_foundation.settings_u1``.
-"""
+"""WP-01 testing infrastructure: the fake gateway, harness, sandbox and evaluator behave as specified."""
 
 from __future__ import annotations
 

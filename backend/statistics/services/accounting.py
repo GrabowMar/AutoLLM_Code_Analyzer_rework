@@ -3,7 +3,7 @@
 ``tool_inventory`` lists every analyzer the platform ships (the catalog,
 enabled or not) plus the platform's own runtime evaluators, which are not
 catalog tools but do execute against apps. ``run_accounting`` counts what
-actually ran for a scope of jobs from the stored results — never
+actually ran for a scope of generation runs from the stored results — never
 ``tools x apps``: dynamic checks only run on apps that built, a tool can be
 skipped or fail, and a run may select a subset of tools.
 """
@@ -19,20 +19,24 @@ from backend.analysis.models import AnalysisRun
 from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import ToolKind
 from backend.analysis.models import ToolResult
-from backend.generation.models import GenerationJob
-from backend.generation.services.evaluation.runner import NON_SAMPLE_STATUSES
+from backend.generation.models import GenerationRun
+from backend.generation.models import RunEvaluation
+from backend.generation.models.choices import RunStatus
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from django.db.models import QuerySet
 
 # Evaluators the platform runs itself (not AnalyzerTool rows).
 PLATFORM_EVALUATORS: tuple[dict[str, str], ...] = (
     {
-        "slug": "conformance-tester",
-        "name": "Conformance tester",
+        "slug": "eval-tester",
+        "name": "Evaluation suite",
         "category": "dynamic",
-        "description": "Builds and starts the app on an isolated network, then runs the hidden API/accounts suite.",
-        "runs_on": "every evaluated app (build/start failures are outcomes, not skips)",
+        "description": "Locks, builds and starts the app on an isolated network, then runs the pinned EvalSuite "
+        "(acceptance checks and probes).",
+        "runs_on": "every evaluated run (build/start failures are outcomes, not skips)",
     },
     {
         "slug": "smoke",
@@ -82,15 +86,15 @@ def _tool_rows(results: QuerySet[ToolResult]) -> list[dict[str, Any]]:
     per_tool: dict[str, Counter] = defaultdict(Counter)
     apps: dict[str, set] = defaultdict(set)
     categories: dict[str, str] = {}
-    for slug, category, status, job_id in results.values_list(
+    for slug, category, status, run_id in results.values_list(
         "tool_slug",
         "category",
         "status",
         "run__generation_job_id",
     ):
         per_tool[slug][status] += 1
-        if job_id is not None:
-            apps[slug].add(job_id)
+        if run_id is not None:
+            apps[slug].add(run_id)
         categories.setdefault(slug, category)
     rows = []
     for slug, counts in sorted(per_tool.items()):
@@ -109,91 +113,106 @@ def _tool_rows(results: QuerySet[ToolResult]) -> list[dict[str, Any]]:
     return rows
 
 
-def _evaluation_counts(jobs: list[GenerationJob]) -> dict[str, Any]:
-    conformance = Counter()
-    smoke = Counter()
-    ablation: dict[str, Counter] = defaultdict(Counter)
-    for job in jobs:
-        result = job.result_data if isinstance(job.result_data, dict) else {}
-        evaluation = result.get("evaluation")
-        if isinstance(evaluation, dict) and evaluation.get("status"):
-            conformance[evaluation["status"]] += 1
-        functional = (job.metrics or {}).get("functional") or {}
-        if functional and functional.get("source") != "conformance" and "health_ok" in functional:
-            smoke["passed" if functional.get("passed") else "failed"] += 1
-        for mode, entry in (result.get("healing_ablation") or {}).items():
-            if isinstance(entry, dict) and entry.get("status"):
-                ablation[mode][entry["status"]] += 1
+# RunEvaluation statuses that say something about the app (an error or "not measured" does not).
+_EVALUATED = frozenset({"measured"})
 
-    def block(c: Counter) -> dict[str, Any]:
-        deployed = c.get("passed", 0) + c.get("failed", 0)
-        return {
-            "executions": sum(c.values()),
-            "by_status": dict(sorted(c.items())),
-            "deployed": deployed,
-            "not_deployed": c.get("build_failed", 0) + c.get("start_failed", 0),
-            "infra_error": c.get("infra_error", 0),
-            "not_applicable": c.get("not_applicable", 0),
-            # Outcomes that say something about the app (infra errors and
-            # "nothing to evaluate against" do not).
-            "evaluated": sum(n for status, n in c.items() if status not in NON_SAMPLE_STATUSES),
-        }
 
+def _evaluation_counts(run_ids: list[Any]) -> dict[str, Any]:
+    """Executions of the evaluation suite: every RunEvaluation (retests apart), and each run's latest.
+
+    ``deployed`` counts latest evaluations whose app built and started (``stages.start.status == ok``);
+    ``not_deployed`` those whose build or start failed. ``not_measured`` and ``error`` are never evaluated.
+    """
+    rows = list(
+        RunEvaluation.objects.filter(run_id__in=run_ids).values_list(
+            "id",
+            "run_id",
+            "status",
+            "stages",
+            "retest_of_id",
+            "created_at",
+        ),
+    )
+    executions = Counter(status for _id, _run, status, _stages, retest, _at in rows if retest is None)
+    retests = sum(1 for row in rows if row[4] is not None)
+    latest: dict[Any, tuple] = {}
+    for row in rows:
+        if row[4] is None and (row[1] not in latest or (row[5], row[0]) > (latest[row[1]][5], latest[row[1]][0])):
+            latest[row[1]] = row
+    by_status = Counter(row[2] for row in latest.values())
+
+    def stage(row: tuple, name: str) -> str | None:
+        stages = row[3] if isinstance(row[3], dict) else {}
+        record = stages.get(name) if isinstance(stages.get(name), dict) else {}
+        return record.get("status")
+
+    deployed = sum(1 for row in latest.values() if stage(row, "start") == "ok")
+    not_deployed = sum(1 for row in latest.values() if "fail" in (stage(row, "build"), stage(row, "start")))
     return {
-        "conformance": block(conformance),
-        "smoke": {"executions": sum(smoke.values()), "by_status": dict(smoke)},
-        "healing_ablation": {mode: block(c) for mode, c in sorted(ablation.items())},
+        "suite": {
+            "executions": sum(executions.values()),
+            "by_status": dict(sorted(executions.items())),
+            "retests": retests,
+            "runs": len(latest),
+            "latest_by_status": dict(sorted(by_status.items())),
+            "deployed": deployed,
+            "not_deployed": not_deployed,
+            "not_measured": by_status.get("not_measured", 0),
+            "error": by_status.get("error", 0),
+            # Latest evaluations that say something about the app.
+            "evaluated": sum(n for status, n in by_status.items() if status in _EVALUATED),
+        },
     }
 
 
-def run_accounting(jobs: QuerySet[GenerationJob]) -> dict[str, Any]:
-    """Apps, analysis runs and per-tool executions actually recorded for *jobs*.
+def run_accounting(runs: QuerySet[GenerationRun] | Iterable[GenerationRun]) -> dict[str, Any]:
+    """Runs, analysis runs, per-tool executions and evaluations actually recorded for *runs*.
 
-    ``tools.latest`` counts each job's latest result per tool (what the
-    result tables describe), ``analysis_runs.latest`` its latest finished run;
-    ``all_runs`` includes re-analyses and unfinished runs.
-    ``planned_static`` is what the runs asked for: per job, the distinct tools
-    selected across its finished runs (completed, partial or failed, the runs
-    ``tools.latest`` draws from). It counts the same (job, tool) universe as
-    ``static``, so a gap means a tool was requested and never produced a
+    ``tools.latest`` counts each run's latest result per tool (what the result tables describe),
+    ``analysis_runs.latest`` its latest finished analysis; ``all_runs`` includes re-analyses and unfinished
+    analyses. ``planned_static`` is what the analyses asked for: per run, the distinct tools selected across
+    its finished analyses (completed, partial or failed, the analyses ``tools.latest`` draws from). It counts
+    the same (run, tool) universe as ``static``, so a gap means a tool was requested and never produced a
     result, instead of a partial re-analysis looking like unplanned work.
     """
-    job_list = list(jobs)
-    job_ids = [j.id for j in job_list]
-    status = Counter(j.status for j in job_list)
-    latest_ids = AnalysisRun.latest_ids_per_job(job_ids)
-    all_runs = AnalysisRun.objects.filter(generation_job_id__in=job_ids)
-    # What the issue tables count: each job's latest result per tool (a later
+    run_list = list(runs)
+    run_ids = [r.pk for r in run_list]
+    status = Counter(r.status for r in run_list)
+    latest_ids = AnalysisRun.latest_ids_per_job(run_ids)
+    all_analyses = AnalysisRun.objects.filter(generation_job_id__in=run_ids)
+    # What the issue tables count: each run's latest result per tool (a later
     # partial re-analysis does not hide the tools it did not re-run).
-    latest_results = ToolResult.objects.filter(id__in=ToolResult.latest_ids_per_job(job_ids))
-    planned_by_job: dict[Any, set[str]] = defaultdict(set)
-    for job_id, slugs in all_runs.filter(
+    latest_results = ToolResult.objects.filter(id__in=ToolResult.latest_ids_per_job(run_ids))
+    planned_by_run: dict[Any, set[str]] = defaultdict(set)
+    for run_id, slugs in all_analyses.filter(
         status__in=[AnalysisRun.Status.COMPLETED, AnalysisRun.Status.PARTIAL, AnalysisRun.Status.FAILED],
     ).values_list("generation_job_id", "tool_slugs"):
-        planned_by_job[job_id].update(slugs or [])
-    planned = sum(len(slugs) for slugs in planned_by_job.values())
+        planned_by_run[run_id].update(slugs or [])
+    planned = sum(len(slugs) for slugs in planned_by_run.values())
 
     latest_tools = _tool_rows(latest_results)
-    evaluations = _evaluation_counts(job_list)
+    evaluations = _evaluation_counts(run_ids)
     static_exec = sum(t["executions"] for t in latest_tools)
-    dynamic_exec = evaluations["conformance"]["executions"] + evaluations["smoke"]["executions"]
+    dynamic_exec = evaluations["suite"]["executions"]
     return {
         "apps": {
-            "jobs": len(job_list),
+            "runs": len(run_list),
             "by_status": dict(sorted(status.items())),
-            "generated": status.get(GenerationJob.Status.COMPLETED, 0),
+            "by_outcome": dict(sorted(Counter(r.outcome or "" for r in run_list).items())),
+            "usable": sum(1 for r in run_list if r.usable),
+            "generated": status.get(RunStatus.COMPLETED, 0),
             "analyzed": len(latest_ids),
-            "evaluated": evaluations["conformance"]["evaluated"],
-            "deployed": evaluations["conformance"]["deployed"],
+            "evaluated": evaluations["suite"]["evaluated"],
+            "deployed": evaluations["suite"]["deployed"],
         },
         "analysis_runs": {
             "latest": len(latest_ids),
-            "all": all_runs.count(),
-            "by_status": dict(sorted(Counter(all_runs.values_list("status", flat=True)).items())),
+            "all": all_analyses.count(),
+            "by_status": dict(sorted(Counter(all_analyses.values_list("status", flat=True)).items())),
         },
         "tools": {
             "latest": latest_tools,
-            "all_runs": _tool_rows(ToolResult.objects.filter(run__generation_job_id__in=job_ids)),
+            "all_runs": _tool_rows(ToolResult.objects.filter(run__generation_job_id__in=run_ids)),
             "distinct_tools_executed": len(latest_tools),
         },
         "evaluations": evaluations,

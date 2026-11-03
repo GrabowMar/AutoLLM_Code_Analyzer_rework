@@ -109,7 +109,7 @@ def enqueue(
     path: str,
     body: dict[str, Any] | None,
     job=None,
-    source: str = "scaffolding",
+    source: str = "slot_call",
     priority: int = 0,
     digest: str = "",
     dedupe_key: str = "",

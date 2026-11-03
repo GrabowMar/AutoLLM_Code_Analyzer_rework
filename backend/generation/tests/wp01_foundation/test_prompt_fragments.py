@@ -3,8 +3,6 @@
 The text of a closed enum level (``auth_mode``, ``network_policy``) and the optional budget sentence must live
 in a pinned PromptTemplate that the prompt set names, so ``prompt_set.content_hash`` -- and ``treatment_hash``
 -- commit to it (Appendix A.1); an ``auth_fragment`` override forks the prompt set and swaps its level.
-
-Until WP-02a/WP-02b land, run with ``--ds=backend.generation.tests.wp01_foundation.settings_u1``.
 """
 
 from __future__ import annotations

@@ -257,15 +257,15 @@ def create_batch(request: HttpRequest, payload: BatchCreateSchema) -> Any:
     return 201, batch
 
 
-@router.get("/batches/{batch_id}/", response=BatchDetailSchema)
-def get_batch(request: HttpRequest, batch_id: str) -> Batch:
-    return get_object_or_404(Batch, id=batch_id, owner=request.auth)
+@router.get("/batches/{batch_pk}/", response=BatchDetailSchema)
+def get_batch(request: HttpRequest, batch_pk: str) -> Batch:
+    return get_object_or_404(Batch, id=batch_pk, owner=request.auth)
 
 
-@router.post("/batches/{batch_id}/cancel/", response={200: BatchDetailSchema})
-def cancel_batch(request: HttpRequest, batch_id: str) -> Any:
+@router.post("/batches/{batch_pk}/cancel/", response={200: BatchDetailSchema})
+def cancel_batch(request: HttpRequest, batch_pk: str) -> Any:
     """Cancel all in-flight (pending or running) runs in the batch."""
-    batch = get_object_or_404(Batch, id=batch_id, owner=request.auth)
+    batch = get_object_or_404(Batch, id=batch_pk, owner=request.auth)
     in_flight_run_ids = list(
         batch.items.filter(
             pipeline_run__status__in=["pending", "running"],

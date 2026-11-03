@@ -11,21 +11,22 @@ from django.utils import timezone
 
 from backend.execution.models import ExecutorInstance
 from backend.execution.models import ExecutorSettings
-from backend.generation.models import ExperimentPostRun
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
+from backend.generation.models import StudyPostRun
+from backend.generation.models.choices import WorkStatus
 
 
 def status_payload() -> dict:
     row = ExecutorSettings.get()
     leader = ExecutorInstance.objects.filter(is_leader=True, stopped_at__isnull=True).order_by("-last_seen_at").first()
     online = bool(leader and leader.last_seen_at > timezone.now() - timedelta(seconds=90))
-    running = GenerationJob.objects.exclude(lease_owner="").count()
-    post_runs = ExperimentPostRun.objects.filter(status=ExperimentPostRun.Status.RUNNING).count()
+    running = GenerationRun.objects.exclude(lease_owner="").count()
+    post_runs = StudyPostRun.objects.filter(status=WorkStatus.RUNNING).count()
     return {
         "online": online,
         "leader": leader.id if leader else None,
         "draining": row.draining,
-        "running_jobs": running,
+        "running_runs": running,
         "running_post_runs": post_runs,
         "safe_to_restart": running == 0 and post_runs == 0,
         "slots": {

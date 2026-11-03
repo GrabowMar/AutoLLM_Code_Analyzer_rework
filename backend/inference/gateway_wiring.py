@@ -77,7 +77,7 @@ def for_job(job, snapshot: dict) -> GatewayWiring:
             retryable=False,
             remediation=(
                 "Local-model agent runs need the apps-dind sandbox daemon (local compose), whose "
-                "gateways reach the executor's LLM proxy. Use scaffolding mode or an OpenRouter model."
+                "gateways reach the executor's LLM proxy. Use slot mode or an OpenRouter model."
             ),
         )
     section = snapshot["endpoint"]
@@ -96,7 +96,7 @@ def for_job(job, snapshot: dict) -> GatewayWiring:
         )
     from backend.inference.access import can_use_endpoint
 
-    # Re-authorize at run time like the scaffolding path (resolve_access): queued,
+    # Re-authorize at run time like the slot-mode path (resolve_access): queued,
     # replayed or rerun jobs must not keep using an endpoint the owner lost access to.
     if not can_use_endpoint(job.created_by, endpoint):
         raise LLMAccessError(

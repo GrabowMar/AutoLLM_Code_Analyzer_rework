@@ -12,13 +12,10 @@ from unittest import mock
 import pytest
 from django.utils import timezone
 
-from backend.generation.models import GenerationArtifact
 from backend.generation.services import call_telemetry
-from backend.generation.services.metrics import served_summary
 from backend.generation.services.openrouter_client import OpenRouterClient
 from backend.generation.services.openrouter_client import OpenRouterError
-from backend.generation.tests.factories import GenerationJobFactory
-from backend.llm_models.tests.factories import LLMModelFactory
+from backend.generation.tests.factories import GenerationRunFactory
 from backend.users.tests.factories import UserFactory
 
 # A real gateway llm_calls line (OpenRouter, opencode harness), content trimmed.
@@ -90,7 +87,7 @@ OPENCODE_LINE = {
     "upstream_retries": 0,
 }
 
-# A real template-mode (scaffolding frontend) OpenRouter response, content trimmed.
+# A real single-shot chat completion (OpenRouter shape), content trimmed.
 TEMPLATE_RESPONSE = {
     "id": "gen-1792681872-Xmc3qJ52o3c5FwuFOtyK",
     "provider": "Wafer",
@@ -354,99 +351,6 @@ class TestAttemptRecorder:
         assert recorder.attempts(succeeded=True) == 1
 
 
-class TestServedSummary:
-    def test_counts_all_calls_and_sums_details(self):
-        summary = served_summary(
-            [
-                ("backend", TEMPLATE_RESPONSE),
-                ("frontend", {**TEMPLATE_RESPONSE, "provider": "Crusoe"}),
-                ("backend_repair", {**TEMPLATE_RESPONSE, "provider": "Crusoe"}),
-                ("frontend_cont_1", None),
-            ],
-        )
-        assert summary["llm_calls"] == 4
-        assert summary["providers"] == {"Wafer": 1, "Crusoe": 2}
-        # Repairs are outside the job's token totals, so outside these sums too.
-        assert summary["reasoning_tokens"] == 2 * 1751
-        assert summary["cached_tokens"] == 0
-
-    def test_unknown_details_stay_none(self):
-        summary = served_summary([("custom", {"choices": [], "usage": {"prompt_tokens": 1}})])
-        assert summary["reasoning_tokens"] is None
-        assert summary["cached_tokens"] is None
-        assert summary["providers"] == {"unknown": 1}
-
-
-def _api_response(content, **extra):
-    return {
-        "id": "gen-1-abc",
-        "provider": "Wafer",
-        "model": "vendor/m",
-        "choices": [{"message": {"content": content}, "finish_reason": "stop", "native_finish_reason": "stop"}],
-        "usage": {
-            "prompt_tokens": 10,
-            "completion_tokens": 5,
-            "total_tokens": 15,
-            "cost": 0.001,
-            "completion_tokens_details": {"reasoning_tokens": 2},
-            "prompt_tokens_details": {"cached_tokens": 4},
-        },
-        **extra,
-    }
-
-
-@pytest.mark.django_db
-class TestOrchestratorCapture:
-    def _service(self, monkeypatch, side_effect):
-        from backend.generation.services.orchestrator import GenerationService
-
-        service = GenerationService()
-        client = mock.MagicMock()
-        client.chat_completion.side_effect = side_effect
-        monkeypatch.setattr(service, "_build_client_for", lambda job: client)
-        return service
-
-    def test_custom_call_records_telemetry_and_served_summary(self, monkeypatch):
-        job = GenerationJobFactory(mode="custom", model=LLMModelFactory(model_id="vendor/m"))
-        service = self._service(monkeypatch, [_api_response("print('hi')")])
-        service._run_custom(job)
-        artifact = GenerationArtifact.objects.get(job=job, stage="custom")
-        t = artifact.telemetry
-        assert t["source"] == "orchestrator"
-        assert t["provider"] == "Wafer"
-        assert t["attempts"] == 1
-        assert t["duration_s"] >= 0
-        assert t["started_at"] <= t["ended_at"]
-        assert t["tokens"] == {"prompt": 10, "completion": 5, "reasoning": 2, "cached": 4, "cache_write": None}
-        assert job.metrics["providers"] == {"Wafer": 1}
-        assert job.metrics["llm_calls"] == 1
-        assert job.metrics["reasoning_tokens"] == 2
-        assert job.metrics["cached_tokens"] == 4
-        # Existing keys unchanged.
-        assert job.metrics["prompt_tokens"] == 10
-        assert job.metrics["cost"] == pytest.approx(0.001)
-
-    def test_failed_call_records_status_and_message(self, monkeypatch):
-        job = GenerationJobFactory(mode="custom", model=LLMModelFactory(model_id="vendor/m2"))
-        service = self._service(monkeypatch, OpenRouterError("Rate limited (429): slow down", status_code=429))
-        with pytest.raises(OpenRouterError):
-            service._run_custom(job)
-        artifact = GenerationArtifact.objects.get(job=job, stage="custom")
-        assert artifact.response_payload == {"error": "API call failed"}  # unchanged payload
-        assert artifact.telemetry["status"] == 429
-        assert artifact.telemetry["error"]["message"].startswith("Rate limited (429)")
-        assert artifact.telemetry["duration_s"] >= 0
-
-    def test_execute_does_not_schedule_stats_under_tests(self, monkeypatch):
-        job = GenerationJobFactory(mode="custom", model=LLMModelFactory(model_id="vendor/m3"))
-        service = self._service(monkeypatch, [_api_response("x")])
-        with mock.patch("backend.generation.tasks.fetch_call_stats_task.apply_async") as send:
-            service.execute(job)
-        send.assert_not_called()
-        job.refresh_from_db()
-        assert job.status == job.Status.COMPLETED
-
-
 @pytest.mark.django_db
 class TestAgentIngestion:
     def _endpoint(self, owner):
@@ -462,16 +366,15 @@ class TestAgentIngestion:
             owner=owner,
         )
 
-    def test_write_call_artifacts_stores_telemetry_and_links_proxy_rows(self):
-        from backend.generation.services.agent.runner import AgentRunner
+    def test_telemetry_for_calls_links_proxy_rows(self):
         from backend.inference.models import LLMRequest
 
         owner = UserFactory()
-        job = GenerationJobFactory(mode="agent", created_by=owner)
+        run = GenerationRunFactory(created_by=owner)
         row = LLMRequest.objects.create(
             endpoint=self._endpoint(owner),
-            job=job,
-            job_attempt=0,
+            job=run,
+            job_attempt=run.attempt,
             source=LLMRequest.Source.AGENT_PROXY,
             path="/v1/chat/completions",
             status=LLMRequest.Status.DONE,
@@ -487,30 +390,20 @@ class TestAgentIngestion:
         openrouter_line = copy.deepcopy(GATEWAY_LINE)
         openrouter_line["seq"] = 2
 
-        AgentRunner(job)._write_call_artifacts([local_line, openrouter_line])
+        first, second = call_telemetry.telemetry_for_calls(run, [local_line, openrouter_line])
 
-        first = GenerationArtifact.objects.get(job=job, stage="agent_call_0001")
-        assert first.telemetry["list_cost"] == pytest.approx(0.01123188)
-        assert first.telemetry["local"]["request_id"] == str(row.pk)
-        assert first.telemetry["local"]["upstream_ms"] == 2955
-        assert first.telemetry["local"]["queue_wait_s"] == pytest.approx(0.007)
-        assert first.telemetry["local"]["endpoint"] == "opencode-go"
-        second = GenerationArtifact.objects.get(job=job, stage="agent_call_0002")
-        assert second.telemetry["provider"] == "CoreWeave"
-        assert "local" not in second.telemetry
-        # The compact payload is unchanged.
-        assert second.response_payload["duration_s"] == 1.207
-        assert "telemetry" not in second.response_payload
+        assert first["list_cost"] == pytest.approx(0.01123188)
+        assert first["local"]["request_id"] == str(row.pk)
+        assert first["local"]["upstream_ms"] == 2955
+        assert first["local"]["queue_wait_s"] == pytest.approx(0.007)
+        assert first["local"]["endpoint"] == "opencode-go"
+        assert second["provider"] == "CoreWeave"
+        assert "local" not in second
 
     def test_telemetry_failure_never_breaks_ingestion(self):
-        from backend.generation.services.agent.runner import AgentRunner
-
-        job = GenerationJobFactory(mode="agent")
+        run = GenerationRunFactory()
         with mock.patch.object(call_telemetry, "proxy_requests", side_effect=RuntimeError("db down")):
-            AgentRunner(job)._write_call_artifacts([GATEWAY_LINE])
-        artifact = GenerationArtifact.objects.get(job=job)
-        assert artifact.telemetry == {}
-        assert artifact.prompt_tokens == 2461
+            assert call_telemetry.telemetry_for_calls(run, [GATEWAY_LINE]) == [{}]
 
 
 class TestSummarizeCalls:
@@ -519,8 +412,18 @@ class TestSummarizeCalls:
         retried = call_telemetry.from_gateway_call({**GATEWAY_LINE, "duration_s": 15.0, "upstream_retries": 2})
         older = {k: v for k, v in GATEWAY_LINE.items() if k != "upstream_retries"}
         unknown = call_telemetry.from_gateway_call({**older, "duration_s": 30.0})  # older gateway: retries unknown
-        calls = [{"job_id": 1, "telemetry": t, "response_id": None} for t in (known, retried, unknown)]
+        calls = [{"run_id": 1, "telemetry": t, "response_id": None} for t in (known, retried, unknown)]
         summary = call_telemetry.summarize_calls(calls)
         assert summary["duration_s"] == {"n": 1, "median": 1.207, "p90": 1.207}
         assert summary["e2e_output_tps"]["n"] == 1
         assert summary["retry_rate"] == {"value": 0.5, "n": 2}
+        assert summary["n_runs"] == 1
+
+
+class TestCallSeq:
+    @pytest.mark.parametrize(
+        ("stage", "seq"),
+        [("agent_call_0042", 42), ("slot_call_0007", 7), ("agent_call_x", None), ("custom", None)],
+    )
+    def test_agent_and_slot_call_stages(self, stage, seq):
+        assert call_telemetry.call_seq(stage) == seq

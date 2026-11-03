@@ -4,15 +4,15 @@ Shared by every human-eval test module. Later agents may APPEND new factories at
 the end of this file (short, uniquely named block); never edit the existing ones.
 
 :func:`make_open_task` builds a realistic *open* (frozen) task directly in the
-database — completed jobs with an app spec and ``metrics.functional``, task apps
-with snapshots shaped like the spec (§5.2 + R1), items and the design hash —
-without calling the task / pool / items services, so tests of any area can use it.
+database — completed v3 ``GenerationRun`` rows of one task version (with collected
+``RunFile`` trees and a measured ``RunEvaluation``), task apps with snapshots taken by
+``snapshot.full_snapshots`` (§5.2 + R1), items and the design hash — without calling
+the task / pool / items services, so tests of any area can use it.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
+import itertools
 import random
 from typing import Any
 
@@ -20,11 +20,21 @@ import factory
 from django.utils import timezone
 from factory.django import DjangoModelFactory
 
-from backend.generation.models import GenerationJob
-from backend.generation.tests.factories import AppRequirementTemplateFactory
-from backend.generation.tests.factories import ExperimentConditionFactory
-from backend.generation.tests.factories import ExperimentFactory
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation import blobs
+from backend.generation.models import choices
+from backend.generation.testing import content as samples
+from backend.generation.testing.content import fake_sha
+from backend.generation.tests.factories import EvalSuiteFactory
+from backend.generation.tests.factories import GenerationRunFactory
+from backend.generation.tests.factories import HarnessPresetFactory
+from backend.generation.tests.factories import RunEvaluationFactory
+from backend.generation.tests.factories import RunFileFactory
+from backend.generation.tests.factories import StudyCellFactory
+from backend.generation.tests.factories import StudyConditionFactory
+from backend.generation.tests.factories import StudyFactory
+from backend.generation.tests.factories import StudyPlanFactory
+from backend.generation.tests.factories import StudyUnitFactory
+from backend.generation.tests.factories import TaskSpecVersionFactory
 from backend.human_eval.models import Assignment
 from backend.human_eval.models import Attachment
 from backend.human_eval.models import EvalInvite
@@ -184,95 +194,214 @@ class EvaluatorProfileFactory(DjangoModelFactory):
 # make_open_task
 # ---------------------------------------------------------------------------
 
-SPEC_API_ENDPOINTS = [
-    {"method": "GET", "path": "/api/items", "description": "List the user's items", "auth": "user"},
-    {"method": "POST", "path": "/api/items", "description": "Create an item", "auth": "user"},
-    {"method": "DELETE", "path": "/api/items/<id>", "description": "Delete an item", "auth": "user"},
+#: The task's endpoints (``contracts.library.Endpoint``); participants see non-admin and admin ones apart.
+TASK_ENDPOINTS: list[dict[str, Any]] = [
+    {"id": "auth.register", "method": "POST", "path": "/api/auth/register", "auth": "public"},
+    {"id": "auth.login", "method": "POST", "path": "/api/auth/login", "auth": "public"},
+    {"id": "items.list", "method": "GET", "path": "/api/items", "auth": "user"},
+    {"id": "items.create", "method": "POST", "path": "/api/items", "auth": "user", "success_status": 201},
+    {"id": "items.delete", "method": "DELETE", "path": "/api/items/{id}", "auth": "owner", "owner_entity": "Item"},
+    {"id": "admin.users", "method": "GET", "path": "/api/admin/users", "auth": "admin"},
 ]
-SPEC_ADMIN_API_ENDPOINTS = [
-    {"method": "GET", "path": "/api/admin/users", "description": "List all users", "auth": "admin"},
-]
+SPEC_API_ENDPOINTS = [endpoint for endpoint in TASK_ENDPOINTS if endpoint["auth"] != "admin"]
+SPEC_ADMIN_API_ENDPOINTS = [endpoint for endpoint in TASK_ENDPOINTS if endpoint["auth"] == "admin"]
+#: The task's ``ui`` requirements (the participants' ``frontend`` requirement items).
+UI_REQUIREMENTS = ["A list page shows the user's items", "Users can create, edit and delete items"]
+#: Files of every generated app: ``{path: (text, stored source LOC)}`` (app-scope LOC 120).
+APP_FILES: dict[str, tuple[str, int]] = {
+    "backend/app.py": ("from flask import Flask\n\napp = Flask(__name__)\n", 100),
+    "frontend/src/App.jsx": ("export default function App() { return <h1>Items</h1>; }\n", 20),
+}
+PROSE_VARIANT = "standard"
 
 
-def _spec_dict(spec) -> dict[str, Any]:
-    from backend.generation.services.profile_resolver import app_requirement_to_dict
-
-    return app_requirement_to_dict(spec)
-
-
-def _checks(index: int) -> list[dict[str, Any]]:
-    """Conformance api/admin checks named "METHOD /path" (one failing check per odd app)."""
-    checks = [
-        {"name": f"{endpoint['method']} {endpoint['path']}", "category": "api", "passed": True}
-        for endpoint in SPEC_API_ENDPOINTS
-    ]
-    checks += [
-        {"name": f"{endpoint['method']} {endpoint['path']}", "category": "admin", "passed": True}
-        for endpoint in SPEC_ADMIN_API_ENDPOINTS
-    ]
-    if index % 2:
-        checks[-1]["passed"] = False
-    return checks
-
-
-def _functional(checks: list[dict[str, Any]]) -> dict[str, Any]:
-    passed = sum(1 for check in checks if check["passed"])
-    return {
-        "source": "conformance",
-        "status": "passed" if passed == len(checks) else "failed",
-        "passed": passed == len(checks),
-        "pass_rate": round(passed / len(checks), 4),
-        "deployed": True,
-        "evaluator_version": "3",
-        "tester_sha256": "f" * 64,
-        "endpoints_ok": passed,
-        "endpoints_checked": len(checks),
-    }
-
-
-def _by_category(checks: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
-    summary: dict[str, dict[str, int]] = {}
-    for check in checks:
-        entry = summary.setdefault(check["category"], {"passed": 0, "total": 0})
-        entry["total"] += 1
-        entry["passed"] += int(check["passed"])
-    return summary
-
-
-def _snapshot(job, *, condition, spec_hash: str, checks: list[dict[str, Any]]) -> dict[str, Any]:
-    """A task-app snapshot with the keys of spec §5.2 + R1 (taken at first open)."""
-    model = job.model
-    experiment = job.experiment
-    functional = job.metrics["functional"]
-    spec = job.app_requirement
-    return {
-        "model_id": model.model_id,
-        "model_name": model.model_name,
-        "provider": model.provider,
-        "condition_id": condition.id if condition is not None else None,
-        "condition_label": (condition.label or f"{model.model_name} / {condition.method_label()}")
-        if condition
-        else "",
-        "experiment_id": str(experiment.id) if experiment is not None else None,
-        "experiment_name": experiment.name if experiment is not None else "",
-        "app_slug": spec.slug,
-        "app_name": spec.name,
-        "repeat_index": job.repeat_index,
-        "mode": job.mode,
-        "functional": {
-            "status": functional["status"],
-            "pass_rate": functional["pass_rate"],
-            "deployed": functional["deployed"],
-            "source": "conformance",
-            "by_category": _by_category(checks),
+def eval_task_content(*, title: str = "Item tracker") -> dict[str, Any]:
+    """A valid ``TaskSpecContent`` with :data:`TASK_ENDPOINTS` and :data:`UI_REQUIREMENTS`."""
+    content = samples.task_content(title=title)
+    content["entities"] = [
+        {
+            "name": "Item",
+            "fields": [{"name": "title", "type": "string", "required": True, "max_length": 200}],
+            "owned_by_user": True,
         },
-        "evaluator_version": functional["evaluator_version"],
-        "tester_sha256": functional["tester_sha256"],
-        "created_at": job.created_at.isoformat(),
-        "checks": [{"name": c["name"], "category": c["category"], "passed": c["passed"]} for c in checks],
-        "spec_content_hash": spec_hash,
-        "static_findings": {"count": 0, "loc": 120, "tools": []},
+    ]
+    content["endpoints"] = [dict(endpoint) for endpoint in TASK_ENDPOINTS]
+    content["ui"] = [
+        {"id": f"ui.{index}", "text": text, "endpoints": ["items.list"]} for index, text in enumerate(UI_REQUIREMENTS)
+    ]
+    content["acceptance"] = []
+    content["probes"] = []
+    return content
+
+
+def eval_task_version(**kwargs):
+    """A ``TaskSpecVersion`` of :func:`eval_task_content`."""
+    kwargs.setdefault("content", eval_task_content())
+    return TaskSpecVersionFactory(**kwargs)
+
+
+def _passed(index: int) -> dict[str, bool]:
+    """Per endpoint id, whether the tester's check of it passed (odd apps fail the admin endpoint)."""
+    verdicts = {endpoint["id"]: True for endpoint in TASK_ENDPOINTS}
+    if index % 2:
+        verdicts[SPEC_ADMIN_API_ENDPOINTS[-1]["id"]] = False
+    return verdicts
+
+
+def eval_result(index: int) -> dict[str, Any]:
+    """A measured ``EvalResult``: one functional check per task endpoint (see :func:`_passed`)."""
+    verdicts = _passed(index)
+    checks = [
+        {
+            "id": f"chk.{endpoint_id}",
+            "category": "functional",
+            "endpoint": endpoint_id,
+            "status": "pass" if ok else "fail",
+        }
+        for endpoint_id, ok in verdicts.items()
+    ]
+    passed = sum(verdicts.values())
+    total = len(verdicts)
+    return {
+        "tester_version": 1,
+        "compiler_version": 1,
+        "auth_mode": "contract_bearer",
+        "checks": checks,
+        "metrics": {
+            "infra_ok": True,
+            "agent_checks": total,
+            "agent_passed": passed,
+            "agent_pass_rate": round(passed / total, 4),
+            "by_category": {"functional": {"n": total, "passed": passed}},
+        },
+        "measured": True,
     }
+
+
+def add_app_files(run, files: dict[str, tuple[str, int]] | None = None) -> None:
+    """Store ``files`` (default :data:`APP_FILES`) as the run's collected tree (blobs + ``RunFile`` rows)."""
+    for path, (text, loc) in (APP_FILES if files is None else files).items():
+        sha = blobs.put_text(text)
+        RunFileFactory(
+            run=run,
+            path=path,
+            blob=sha,
+            size=len(text.encode("utf-8")),
+            loc=loc,
+            language="python" if path.endswith(".py") else "javascript",
+        )
+
+
+def evaluate_run(run, index: int = 0, *, suite=None, **fields):
+    """A measured ``RunEvaluation`` of ``run`` with :func:`eval_result` (``fields`` override)."""
+    values = {
+        "status": choices.EvaluationStatus.MEASURED,
+        "result": eval_result(index),
+        "stages": {stage: {"status": "ok"} for stage in ("lock", "build", "start", "tester")},
+    }
+    values.update(fields)
+    if suite is not None:
+        values["eval_suite"] = suite
+    return RunEvaluationFactory(run=run, **values)
+
+
+def eval_run(owner, *, task_version, model, study=None, condition=None, cell=None, repeat_index=None, **fields):
+    """A completed, tested ``app_agentic`` run of ``task_version`` (opencode harness, files not added)."""
+    values = {
+        "created_by": owner,
+        "task_version": task_version,
+        "model": model,
+        "study": study,
+        "condition": condition,
+        "cell": cell,
+        "repeat_index": repeat_index,
+        "stage": choices.Stage.MAIN if cell is not None else "",
+        "prose_variant": PROSE_VARIANT,
+        "auth_mode": choices.AuthMode.CONTRACT_BEARER,
+        "task_hash": fake_sha(f"task:{task_version.pk}:{PROSE_VARIANT}"),
+        "harness_preset": HarnessPresetFactory(),
+        "tested": True,
+    }
+    values.update(fields)
+    return GenerationRunFactory(**values)
+
+
+_EVAL_MODEL_SEQ = itertools.count(1)
+
+
+def eval_model(**overrides):
+    """An :class:`LLMModel` with pinned, source-free provider/id/name.
+
+    ``LLMModelFactory`` draws them from Faker (``catch_phrase``/``slug``/``company``), whose words
+    (``function``, ``interface``...) become blinding-scan model tokens that match ordinary source and
+    make ``blinding_scan`` assertions order-dependent.
+    """
+    n = next(_EVAL_MODEL_SEQ)
+    values = {
+        "model_id": f"zqvendor/zqmodel{n}",
+        "provider": "Zqvendor",
+        "model_name": f"Zqvendor: Zqmodel {n}",
+    }
+    values.update(overrides)
+    return LLMModelFactory(**values)
+
+
+def make_study(owner, conditions: int, *, label: str = "Condition", task_version=None, study=None):
+    """``(study, condition_rows, unit)``: a study with ``conditions`` conditions (each its own model).
+
+    The first condition is the baseline (``is_baseline``); ``unit`` is the study unit of ``task_version``.
+    """
+    study = study or StudyFactory(created_by=owner)
+    plan = StudyPlanFactory(study=study)
+    condition_rows = [
+        StudyConditionFactory(plan=plan, model=eval_model(), label=f"{label} {index + 1}", is_baseline=index == 0)
+        for index in range(conditions)
+    ]
+    unit = StudyUnitFactory(plan=plan, task_version=task_version) if task_version is not None else None
+    return study, condition_rows, unit
+
+
+def make_eval_runs(owner=None, n_runs: int = 3, conditions: int = 2, *, task_version=None, study=None, label="Arm"):
+    """``(study, condition_rows, runs)``: completed, evaluated app runs of one task version.
+
+    Run ``i`` uses condition ``i % conditions`` (each condition its own model) in its own study cell with
+    ``repeat_index = i // conditions``; ``conditions=0`` builds model-only runs without a study. Every
+    run carries :data:`APP_FILES` and a measured evaluation (odd runs fail the admin endpoint).
+    """
+    owner = owner or UserFactory()
+    task_version = task_version or eval_task_version()
+    condition_rows: list[Any] = []
+    unit = None
+    if conditions:
+        study, condition_rows, unit = make_study(
+            owner,
+            conditions,
+            label=label,
+            task_version=task_version,
+            study=study,
+        )
+    else:
+        study = None
+    models = [] if conditions else [eval_model(), eval_model()]
+    suite = EvalSuiteFactory()
+    runs = []
+    for index in range(n_runs):
+        condition = condition_rows[index % conditions] if conditions else None
+        repeat = index // conditions if conditions else None
+        cell = StudyCellFactory(condition=condition, unit=unit, repeat_index=repeat) if condition else None
+        run = eval_run(
+            owner,
+            task_version=task_version,
+            model=condition.model if condition is not None else models[index % len(models)],
+            study=study,
+            condition=condition,
+            cell=cell,
+            repeat_index=repeat,
+        )
+        add_app_files(run)
+        evaluate_run(run, index, suite=suite)
+        runs.append(run)
+    return study, condition_rows, runs
 
 
 def _pairs(apps: list[EvalTaskApp], snapshots: dict[str, dict[str, Any]], settings: dict[str, Any]):
@@ -299,14 +428,14 @@ def make_open_task(
     settings: dict[str, Any] | None = None,
     conditions: int = 2,
 ) -> EvalTask:
-    """An OPEN (frozen) task with ``n_apps`` completed jobs, task apps, snapshots and items.
+    """An OPEN (frozen) task with ``n_apps`` completed runs, task apps, snapshots and items.
 
-    - ``conditions`` experiment conditions (each its own LLM model); app ``i`` uses condition
-      ``i % conditions`` and ``repeat_index = i // conditions``. ``conditions=0`` builds model-only
-      jobs without an experiment.
-    - every job implements the same app spec, so all apps share one ``group_key``
-      (``f"{slug}:{spec_content_hash[:12]}"``); labels are ``App 01``..; ``metrics.functional`` is a
-      conformance verdict (odd apps fail one admin check).
+    - ``conditions`` study conditions (each its own LLM model; the first is the baseline); app ``i``
+      uses condition ``i % conditions`` and ``repeat_index = i // conditions``. ``conditions=0``
+      builds model-only runs without a study.
+    - every run implements the same task version, so all apps share one ``group_key``
+      (``f"{slug}:{spec_content_hash[:12]}"``); labels are ``App 01``..; each run has a measured
+      evaluation (odd apps fail the admin endpoint check).
     - ``design`` / ``settings`` default to ``design.default_design(mode)`` / defaults; ``settings`` is
       deep-merged over the defaults. Both are validated (ValueError when invalid).
     - single: one item per app; pairwise: all pairs (``pairing.cross_condition_only`` honoured).
@@ -321,29 +450,10 @@ def make_open_task(
         msg = f"make_open_task: invalid design/settings: {design_errors} {settings_errors}"
         raise ValueError(msg)
 
-    experiment = ExperimentFactory(created_by=owner) if conditions else None
-    condition_rows = []
-    for index in range(conditions):
-        condition_rows.append(
-            ExperimentConditionFactory(experiment=experiment, model=LLMModelFactory(), label=f"Condition {index + 1}"),
-        )
-    if experiment is not None:
-        experiment.baseline_condition = condition_rows[0]
-        experiment.save(update_fields=["baseline_condition"])
-    model_only = [] if conditions else [LLMModelFactory(), LLMModelFactory()]
+    from backend.human_eval.services import snapshot as snapshot_service
 
-    spec = AppRequirementTemplateFactory(
-        backend_requirements=["Users can register and log in", "Users can create, edit and delete items"],
-        frontend_requirements=["A list page shows the user's items"],
-        admin_requirements=["Admins can see all users"],
-        api_endpoints=SPEC_API_ENDPOINTS,
-        admin_api_endpoints=SPEC_ADMIN_API_ENDPOINTS,
-    )
-    spec_dict = _spec_dict(spec)
-    spec_hash = hashlib.sha256(
-        json.dumps(spec_dict, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8"),
-    ).hexdigest()
-    group_key = f"{spec.slug}:{spec_hash[:12]}"
+    study, _, runs = make_eval_runs(owner, n_apps, conditions, label="Condition")
+    snapshots_by_run = snapshot_service.full_snapshots(runs)
 
     now = timezone.now()
     task = EvalTaskFactory(
@@ -352,46 +462,23 @@ def make_open_task(
         status=EvalTask.Status.OPEN,
         design=normalized_design,
         settings=normalized_settings,
-        experiment=experiment,
         frozen_at=now,
         opened_at=now,
     )
+    task.study_id = study.pk if study is not None else None
     task.design_hash = design_service.design_hash(mode, normalized_design, normalized_settings)
-    task.save(update_fields=["design_hash"])
+    task.save(update_fields=["design_hash", "study_id"])
 
     apps: list[EvalTaskApp] = []
     snapshots: dict[str, dict[str, Any]] = {}
     width = max(2, len(str(n_apps)))
-    for index in range(n_apps):
-        condition = condition_rows[index % conditions] if conditions else None
-        model = condition.model if condition is not None else model_only[index % len(model_only)]
-        checks = _checks(index)
-        job = GenerationJobFactory(
-            created_by=owner,
-            mode=GenerationJob.Mode.AGENT,
-            status=GenerationJob.Status.COMPLETED,
-            model=model,
-            experiment=experiment,
-            condition=condition,
-            repeat_index=index // conditions if conditions else None,
-            app_requirement=spec,
-            resolved_bundle={"app_requirement": spec_dict},
-            metrics={"functional": _functional(checks)},
-            result_data={
-                "files": {
-                    "backend/app.py": "from flask import Flask\n\napp = Flask(__name__)\n",
-                    "frontend/src/App.jsx": "export default function App() { return <h1>Items</h1>; }\n",
-                },
-                "evaluation": {"checks": checks, "summary": {"by_category": _by_category(checks)}},
-            },
-            completed_at=now,
-        )
-        snapshot = _snapshot(job, condition=condition, spec_hash=spec_hash, checks=checks)
+    for index, run in enumerate(runs):
+        snapshot = snapshots_by_run[str(run.pk)]
         app = EvalTaskAppFactory(
             task=task,
-            job=job,
+            job=run,
             label=f"App {index + 1:0{width}d}",
-            group_key=group_key,
+            group_key=snapshot_service.group_key(snapshot, None),
             position=index,
             snapshot=snapshot,
         )
@@ -441,7 +528,7 @@ def workbench_design(*, finding_review: bool = True, max_findings: int = 5, min_
                 "id": "reqs",
                 "type": "requirements",
                 "title": "Requirements",
-                "sources": ["backend", "api"],
+                "sources": ["frontend", "api"],
                 "custom": [{"id": "readme", "text": "The app has a README"}],
                 "note": "required_unless_met",
             },
@@ -500,7 +587,7 @@ def workbench_design(*, finding_review: bool = True, max_findings: int = 5, min_
 
 
 def workbench_findings(
-    job,
+    run,
     tool_slug: str,
     count: int,
     *,
@@ -510,7 +597,7 @@ def workbench_findings(
     result_status: str = "completed",
     **fields,
 ) -> list:
-    """``count`` findings of one tool for ``job`` (a completed analysis run with one tool result)."""
+    """``count`` findings of one tool for the GenerationRun ``run`` (a completed analysis run, one tool result)."""
     from backend.analysis.models import AnalysisRun
     from backend.analysis.tests.factories import AnalysisRunFactory
     from backend.analysis.tests.factories import AnalyzerToolFactory
@@ -518,8 +605,8 @@ def workbench_findings(
     from backend.analysis.tests.factories import ToolResultFactory
 
     AnalyzerToolFactory(slug=tool_slug, name=f"Tool {tool_slug}", kind=kind, analysis_mode=analysis_mode)
-    run = AnalysisRunFactory(generation_job=job, created_by=job.created_by, status=AnalysisRun.Status.COMPLETED)
-    result = ToolResultFactory(run=run, tool_slug=tool_slug, status=result_status)
+    analysis = AnalysisRunFactory(generation_job=run, created_by=run.created_by, status=AnalysisRun.Status.COMPLETED)
+    result = ToolResultFactory(run=analysis, tool_slug=tool_slug, status=result_status)
     defaults = {"category": category, "severity": "high", "tool_severity": "ERROR", "rule_id": "rule-1"}
     defaults.update(fields)
     return [
@@ -544,59 +631,8 @@ def workbench_assignment(task: EvalTask, *, participant=None, item=None, status:
 
 
 # ---------------------------------------------------------------------------
-# Task / pool (A) helpers: completed jobs and a DRAFT task whose pool was filled by services.pool
+# Task / pool (A) helpers: a DRAFT task whose pool was filled by services.pool
 # ---------------------------------------------------------------------------
-
-
-def make_eval_jobs(owner=None, n_jobs: int = 3, conditions: int = 2, *, spec=None, experiment=None):
-    """``(experiment, condition_rows, jobs)``: completed agent jobs shaped like :func:`make_open_task`'s.
-
-    Job ``i`` uses condition ``i % conditions`` (each condition its own model) and ``repeat_index =
-    i // conditions``; ``conditions=0`` builds model-only jobs without an experiment. Every job
-    implements ``spec`` (a new one by default) and carries a conformance verdict + checks.
-    """
-    owner = owner or UserFactory()
-    if conditions and experiment is None:
-        experiment = ExperimentFactory(created_by=owner)
-    condition_rows = [
-        ExperimentConditionFactory(experiment=experiment, model=LLMModelFactory(), label=f"Arm {index + 1}")
-        for index in range(conditions)
-    ]
-    if experiment is not None and condition_rows and experiment.baseline_condition_id is None:
-        experiment.baseline_condition = condition_rows[0]
-        experiment.save(update_fields=["baseline_condition"])
-    models = [] if conditions else [LLMModelFactory(), LLMModelFactory()]
-    spec = spec or AppRequirementTemplateFactory(
-        backend_requirements=["Users can register and log in"],
-        frontend_requirements=["A list page shows the user's items"],
-        api_endpoints=SPEC_API_ENDPOINTS,
-        admin_api_endpoints=SPEC_ADMIN_API_ENDPOINTS,
-    )
-    spec_payload = _spec_dict(spec)
-    jobs = []
-    for index in range(n_jobs):
-        condition = condition_rows[index % conditions] if conditions else None
-        checks = _checks(index)
-        jobs.append(
-            GenerationJobFactory(
-                created_by=owner,
-                mode=GenerationJob.Mode.AGENT,
-                status=GenerationJob.Status.COMPLETED,
-                model=condition.model if condition is not None else models[index % len(models)],
-                experiment=experiment if conditions else None,
-                condition=condition,
-                repeat_index=index // conditions if conditions else None,
-                app_requirement=spec,
-                resolved_bundle={"app_requirement": spec_payload, "harness": {"name": "opencode"}},
-                metrics={"functional": _functional(checks)},
-                result_data={
-                    "files": {"backend/app.py": "from flask import Flask\n\napp = Flask(__name__)\n"},
-                    "evaluation": {"checks": checks, "summary": {"by_category": _by_category(checks)}},
-                },
-                completed_at=timezone.now(),
-            ),
-        )
-    return experiment, condition_rows, jobs
 
 
 def make_draft_task(
@@ -607,7 +643,7 @@ def make_draft_task(
     design: dict[str, Any] | None = None,
     settings: dict[str, Any] | None = None,
 ) -> EvalTask:
-    """A DRAFT task (validated design/settings) whose pool holds ``n_apps`` jobs added via ``services.pool``."""
+    """A DRAFT task (validated design/settings) whose pool holds ``n_apps`` runs added via ``services.pool``."""
     from backend.human_eval.services import pool as pool_service
 
     owner = owner or UserFactory()
@@ -619,15 +655,17 @@ def make_draft_task(
     if design_errors or settings_errors:
         msg = f"make_draft_task: invalid design/settings: {design_errors} {settings_errors}"
         raise ValueError(msg)
-    experiment, _, jobs = make_eval_jobs(owner, n_apps, conditions)
+    study, _, runs = make_eval_runs(owner, n_apps, conditions)
     task = EvalTaskFactory(
         created_by=owner,
         mode=mode,
         design=normalized_design,
         settings=normalized_settings,
-        experiment=experiment,
     )
-    pool_service.create_task_apps(task, jobs)
+    if study is not None:
+        task.study_id = study.pk
+        task.save(update_fields=["study_id"])
+    pool_service.create_task_apps(task, runs)
     return task
 
 

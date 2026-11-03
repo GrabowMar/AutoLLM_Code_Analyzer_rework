@@ -1,44 +1,37 @@
 """Run-to-run variability of repeats of one setup (descriptive statistics, no p-values).
 
-The Results tab's statistics average repeats away (the unit is the app);
-this module measures the repeats themselves. Three scopes share one set of
-pure estimators:
+A study's results average repeats away (the unit is the app); this module measures the repeats
+themselves. Three scopes share one set of pure estimators:
 
-* **Experiment** (:func:`experiment_variability`): the kept cells of the
-  Results tab (current attempts, planned repeats, common cells, exclusions
-  and fingerprint filter, mirroring ``experiment_results.compute``). Per
-  (condition, app) cell with r repeats, for each metric: n, mean, sd (r-1),
-  min, max, range, IQR (r >= 4) and CV (ratio-scale metrics only, never a
-  pass rate). Per condition: the pooled within-cell SD
-  ``sqrt(sum (r_a-1) s_a^2 / sum (r_a-1))``, the median cell CV and the
-  share of cells whose repeats agree on functional pass. Variance
-  components (condition, app, condition x app, repeat) by the method of
-  moments on unweighted cell means (harmonic r), negatives truncated at 0
-  and flagged; per condition the one-way ICC(1) over apps with the
-  unbalanced r0, a two-stage cluster-bootstrap 95% CI, the design effect
-  ``1 + (r0-1) ICC`` and the effective n. pass@k ``1 - C(n-c,k)/C(n,k)`` and
-  pass^k ``C(c,k)/C(n,k)``, check-level agreement, code similarity within
-  cells against a between-condition reference, finding overlap, bootstrap
-  rank intervals, and a precision planner (terminal experiments only, an
-  optional-stopping guard).
-* **Job** (:func:`job_replicates`): every visible job sharing the job's
-  ``config_fingerprint`` (legacy jobs: an approximate key), with each
-  member's relation (replicate / replay / rerun), metrics and similarity.
-* **Model** (:func:`model_variability`): within-group spread over all of a
-  model's same-setup groups.
+* **Study** (:func:`study_variability`): the study's current runs (``runs.view.current_runs``: the first
+  usable attempt per main-stage cell, ``beyond_plan`` runs excluded) that are usable, within the planned
+  repeats, on the majority configuration fingerprint of their (condition, unit) when asked
+  (``fingerprint="majority"``) and on the (unit, repeat) cells every condition has. The default is
+  intention-to-treat: truncated runs are kept; ``sensitivity="exclude_truncated"`` drops them. Per
+  (condition, unit) cell with r repeats, for each metric: n, mean, sd (r-1), min, max, range, IQR (r >= 4)
+  and CV (ratio-scale metrics only, never a pass rate). Per condition: the pooled within-cell SD
+  ``sqrt(sum (r_a-1) s_a^2 / sum (r_a-1))``, the median cell CV and the share of cells whose repeats agree
+  on functional pass. Variance components (condition, unit, condition x unit, repeat) by the method of
+  moments on unweighted cell means (harmonic r), negatives truncated at 0 and flagged; per condition the
+  one-way ICC(1) over units with the unbalanced r0, a two-stage cluster-bootstrap 95% CI, the design effect
+  ``1 + (r0-1) ICC`` and the effective n. pass@k ``1 - C(n-c,k)/C(n,k)`` and pass^k ``C(c,k)/C(n,k)``,
+  check-level agreement, code similarity within cells against a between-condition reference, finding
+  overlap, bootstrap rank intervals, and a precision planner (terminal studies only, an optional-stopping
+  guard: every block of a running study is flagged ``interim``).
+* **Run** (:func:`run_replicates`): every visible run sharing the run's ``config_fingerprint``, with each
+  member's relation (self / retry / replay / rerun / replicate), metrics and similarity.
+* **Model** (:func:`model_variability`): within-group spread over all of a model's same-setup groups.
 
-Pass rate: an experiment's cells count it as the Results tab does (the
-stored ``metrics.functional.pass_rate``; a kept run whose value is not a
-conformance-suite verdict is named in the notes); the job and model scopes
-count the conformance suite only (``conformance.conformance_pass_rate``: a
-generation-time smoke check or an ungraded outcome is None). A billed cost
-of $0 under a subscription is marked ``billing``, never a ceiling.
+Pass rate is the latest evaluation's agent pass rate as mirrored in ``GenerationRun.metrics["eval"]``
+(infra and flaky checks excluded by the tester): a run whose evaluation is pending, errored or not measured
+has None, never 0. Cost, tokens, LLM calls and wall time are the documented ``GenerationRun.metrics``
+contract keys. A billed cost of $0 on an endpoint whose ``cost_basis`` is not ``billed`` (subscription or
+local, from the run manifest) is marked ``billing``, never a floor.
 
 Missing measurements are None, never 0. Code issues come from one
-:func:`backend.statistics.services.study.issue_breakdowns` call over the
-whole scope (latest result per tool, common tools only). Source LOC comes
-from ``reports.services.loc``. Resampling uses seeds derived from the scope
-id, so a payload regenerates identically.
+:func:`backend.statistics.services.study.issue_breakdowns` call over the whole scope (latest result per
+tool, common tools only). Source LOC is the model scope's non-test source LOC. Resampling uses seeds
+derived from the scope id, so a payload regenerates identically.
 """
 
 from __future__ import annotations
@@ -68,8 +61,6 @@ from django.db.models.functions import MD5
 from django.db.models.functions import Cast
 from django.utils import timezone
 
-from backend.generation.services.conformance import conformance_pass_rate
-from backend.generation.services.conformance import conformance_passed
 from backend.statistics.services import similarity as sim
 
 if TYPE_CHECKING:
@@ -78,9 +69,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-PAYLOAD_VERSION = 4  # 4: conformance-only pass rate outside experiments; billed $0 cost is no ceiling
+PAYLOAD_VERSION = 5  # 5: v3 runs (current runs, metrics contract, EvalSuite pass rate, model-scope code)
 BOOTSTRAP_DRAWS = 1000
-MIN_APPS_FOR_CI = 3  # as the Results tab (experiment_results.MIN_APPS_FOR_CI)
+MIN_APPS_FOR_CI = 3  # as the study results
 _PAYLOAD_CACHE_SECONDS = 6 * 3600
 _BOOT_CACHE_SECONDS = 6 * 3600
 MAX_REPLICATES = 50
@@ -95,29 +86,23 @@ NOTE_DESCRIPTIVE = (
     "no p-values are computed here."
 )
 NOTE_TWO_REPEATS = "Cells with 2 repeats: each within-cell SD has 1 degree of freedom and is very imprecise."
-NOTE_INTERIM = "Interim: the experiment is still running; every estimate can still move."
+NOTE_INTERIM = "Interim: the study is still running; every estimate can still move."
 NOTE_SINGLE_TRIAL = "One repeat per cell: run-to-run variation cannot be estimated (plan 2 or more repeats)."
-NOTE_APPROX_SOURCE = (
-    "Some runs have neither a workspace manifest nor a stack skeleton: their code similarity includes "
-    "scaffold files (approximate)."
-)
 NOTE_REFERENCE = (
-    "Reference pairs are different conditions on the same app and repeat index: the similarity any two "
+    "Reference pairs are different conditions on the same unit and repeat index: the similarity any two "
     "solutions of the task share (boilerplate floor)."
 )
 NOTE_WALL = "Wall time is not comparable across endpoints (machine and load differ)."
 NOTE_SUBSCRIPTION = (
-    "{n} of {total} kept runs were subscription-billed ({sources}): their billed cost is $0, so Cost describes "
-    "billing, not usage; List-price cost is the provider's list-price equivalent (not billed)."
+    "{n} of {total} kept runs ran on endpoints that are not billed per call ({sources}): their billed cost is "
+    "$0, so Cost describes billing, not usage; List-price cost is the catalog list-price equivalent (not billed)."
 )
-NOTE_NOT_CONFORMANCE = (
-    "{n} of {total} kept runs have no conformance-suite pass rate: their stored value is the generation-time smoke "
-    "check (or an ungraded outcome). It is counted here as the Results tab counts it, so the two agree; "
-    "re-evaluate those runs for a conformance score."
+NOTE_GRADING = (
+    "Pass rate: the latest evaluation's agent pass rate (infra and flaky checks excluded); a run whose "
+    "evaluation is pending, errored or not measured shows —."
 )
-NOTE_CONFORMANCE_ONLY = (
-    "Pass rate: conformance-suite verdicts only; a generation-time smoke check or an ungraded outcome shows —."
-)
+NOTE_ITT = "Intention-to-treat: truncated runs (budget, wall clock, idle, max turns) are included."
+NOTE_SENSITIVITY_TRUNCATED = "Sensitivity analysis: truncated runs are excluded ({n} dropped)."
 
 
 @dataclass(frozen=True)
@@ -140,34 +125,33 @@ BASE_METRICS: tuple[MetricSpec, ...] = (
         "pass_rate",
         "Pass rate",
         "share",
-        "metrics.functional.pass_rate as the Results tab counts it (conformance suite; any other value is named "
-        "in the notes)",
+        "metrics.eval.agent_pass_rate (latest measured evaluation; infra and flaky checks excluded)",
         ratio=False,
         better="higher",
         core=True,
     ),
-    _spec("cost", "Cost", "USD", "metrics.cost (billed, this attempt)", ratio=True, better="lower", core=True),
+    _spec("cost", "Cost", "USD", "metrics.cost_usd (billed)", ratio=True, better="lower", core=True),
     _spec(
         "list_cost",
         "List-price cost",
         "USD",
-        "metrics.list_cost (provider-reported list-price equivalent of subscription-billed runs; not billed)",
+        "metrics.list_cost_usd (catalog list-price equivalent; not billed)",
         ratio=True,
         better="lower",
     ),
     _spec("total_tokens", "Tokens", "tokens", "metrics.total_tokens", ratio=True, better="lower", core=True),
-    _spec("llm_calls", "LLM calls", "calls", "metrics.llm_calls", ratio=True, better=None),
-    _spec("wall_seconds", "Wall time", "s", "agent.wall_seconds, else the job duration", ratio=True, better="lower"),
+    _spec("llm_calls", "LLM calls", "calls", "sum of metrics.requests_by_class", ratio=True, better=None),
+    _spec("wall_seconds", "Wall time", "s", "metrics.wall_s, else the run duration", ratio=True, better="lower"),
     _spec(
         "source_loc",
         "Source LOC",
         "lines",
-        "reports.services.loc (non-test source)",
+        "model-scope non-test source LOC (reports.services.loc rules)",
         ratio=True,
         better=None,
         core=True,
     ),
-    _spec("source_files", "Source files", "files", "reports.services.loc (non-test source)", ratio=True, better=None),
+    _spec("source_files", "Source files", "files", "model-scope non-test source files", ratio=True, better=None),
     _spec(
         "code_issues",
         "Code issues",
@@ -181,7 +165,7 @@ BASE_METRICS: tuple[MetricSpec, ...] = (
         "issues_per_kloc",
         "Issues / kLOC",
         "per kLOC",
-        "issue_breakdowns unique_per_kloc (code issues per source kLOC)",
+        "issue_breakdowns unique_per_kloc (model-scope code issues per model source kLOC)",
         ratio=True,
         better="lower",
         core=True,
@@ -197,9 +181,6 @@ BASE_METRICS: tuple[MetricSpec, ...] = (
         better="lower",
     ),
 )
-# Trajectory summary keys (metrics.behaviour) that are not ratio-scale or not numeric outcomes.
-_BEHAVIOUR_SKIP = frozenset({"parser_version", "comparable"})
-_BEHAVIOUR_NOT_RATIO = frozenset({"cache_hit_ratio", "reasoning_share", "first_build_action_index"})
 # Replicates / model summaries.
 REPLICATE_METRICS = (
     "pass_rate",
@@ -570,8 +551,8 @@ def precision_plan(
     if components.get("billing"):
         return {
             "available": False,
-            "reason": f"every run was subscription-billed ({', '.join(components['billing'])}): the billed $0 "
-            "describes billing, not usage, so there is nothing to plan from",
+            "reason": f"every run ran on an endpoint not billed per call ({', '.join(components['billing'])}): "
+            "the billed $0 describes billing, not usage, so there is nothing to plan from",
             "rows": [],
         }
     if components.get("ceiling"):
@@ -644,55 +625,44 @@ def _cached(prefix: str, payload: Any, fn, seconds: int = _BOOT_CACHE_SECONDS):
 # ── per-run measurements (Django) ─────────────────────────────────────
 
 
-def metric_specs(behaviour_keys: Iterable[str] = ()) -> list[MetricSpec]:
-    specs = list(BASE_METRICS)
-    for key in sorted(set(behaviour_keys)):
-        specs.append(
-            _spec(
-                f"behaviour.{key}",
-                key.replace("_", " ").capitalize().replace("Llm", "LLM"),
-                "",
-                "metrics.behaviour (agent trajectory summary; heuristic counts, compare within a harness)",
-                ratio=key not in _BEHAVIOUR_NOT_RATIO,
-                better=None,
-            ),
-        )
-    return specs
+def metric_specs() -> list[MetricSpec]:
+    return list(BASE_METRICS)
 
 
 _RUN_FIELDS = (
     "id",
     "status",
-    "mode",
+    "outcome",
+    "usable",
+    "kind",
     "updated_at",
     "duration_seconds",
-    "metrics__cost",
-    "metrics__list_cost",
-    "metrics__billing_source",
+    "endpoint_id",
+    "metrics__cost_usd",
+    "metrics__list_cost_usd",
     "metrics__total_tokens",
-    "metrics__llm_calls",
-    "metrics__behaviour",
-    "metrics__functional",
-    "metrics__functional__deployed",
-    "result_data__agent__wall_seconds",
-    "result_data__agent__termination",
-    "result_data__evaluation__checks",
-    "result_data__evaluation__tester_sha256",
+    "metrics__requests_by_class",
+    "metrics__wall_s",
+    "metrics__eval",
+    "validity__termination",
+    "validity__truncated",
 )
+# Usable outcomes whose app did / did not build and start (deploy agreement).
+_DEPLOYED = {"tested": True, "build_fail": False, "start_fail": False, "output_invalid": False}
 
 
-def _issue_values(job_ids: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str, Any] | None]:
-    """``{job_id: {code_issues, issues_per_kloc}}`` from one issue_breakdowns call over *job_ids*, and coverage."""
+def _issue_values(run_ids: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str, Any] | None]:
+    """``{run_id: {code_issues, issues_per_kloc}}`` from one issue_breakdowns call over *run_ids*, and coverage."""
     from backend.analysis.models import ToolResult
     from backend.statistics.services.study import issue_breakdowns
-    from backend.statistics.services.study import study_jobs
+    from backend.statistics.services.study import study_runs
 
-    if not job_ids or not ToolResult.objects.filter(run__generation_job_id__in=job_ids).exists():
+    if not run_ids or not ToolResult.objects.filter(run__generation_job_id__in=run_ids).exists():
         return {}, None
-    report = issue_breakdowns(study_jobs(None, job_ids=job_ids, current_only=False))
+    report = issue_breakdowns(study_runs(None, run_ids=run_ids, current_only=False))
     values = {
-        str(row["job_id"]): {
-            "code_issues": _num(row.get("code_unique")),
+        str(row["run_id"]): {
+            "code_issues": _num(row.get("code_unique_model")),
             "issues_per_kloc": _num(row.get("unique_per_kloc")),
         }
         for row in report["per_app"]
@@ -705,218 +675,288 @@ def _issue_values(job_ids: list[str]) -> tuple[dict[str, dict[str, Any]], dict[s
     }
 
 
-def _tool_metrics(job_ids: list[str]) -> dict[str, dict[str, float | None]]:
-    """lizard avg/max CCN and jscpd duplication % from each job's latest completed result of those tools."""
+def _tool_metrics(run_ids: list[str]) -> dict[str, dict[str, float | None]]:
+    """lizard avg/max CCN and jscpd duplication % from each run's latest measured result of those tools."""
     from backend.analysis.models import ToolResult
+    from backend.statistics.services.study import tool_measured
 
     out: dict[str, dict[str, float | None]] = defaultdict(dict)
-    if not job_ids:
+    if not run_ids:
         return {}
-    for job_id, slug, status, metrics in ToolResult.objects.filter(
-        id__in=ToolResult.latest_ids_per_job(job_ids),
+    for run_id, slug, status, summary, metrics in ToolResult.objects.filter(
+        id__in=ToolResult.latest_ids_per_job(run_ids),
         tool_slug__in=("lizard", "jscpd"),
-    ).values_list("run__generation_job_id", "tool_slug", "status", "metrics"):
-        if status != ToolResult.Status.COMPLETED or not isinstance(metrics, dict):
+    ).values_list("run__generation_job_id", "tool_slug", "status", "summary", "metrics"):
+        if not tool_measured(status, summary) or not isinstance(metrics, dict):
             continue
         if slug == "lizard":
-            out[str(job_id)]["avg_ccn"] = _num(metrics.get("avg_ccn"))
-            out[str(job_id)]["max_ccn"] = _num(metrics.get("max_ccn"))
+            out[str(run_id)]["avg_ccn"] = _num(metrics.get("avg_ccn"))
+            out[str(run_id)]["max_ccn"] = _num(metrics.get("max_ccn"))
         else:
-            out[str(job_id)]["duplication_pct"] = _num(metrics.get("duplication_percentage"))
+            out[str(run_id)]["duplication_pct"] = _num(metrics.get("duplication_percentage"))
     return dict(out)
 
 
-def _run_rows(job_ids: list[str]) -> dict[str, dict[str, Any]]:
-    from backend.generation.models import GenerationJob
+def _run_rows(run_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """The metrics contract keys of every run (``.values()``), plus the endpoint's cost basis from its manifest."""
+    from backend.generation.models import GenerationRun
+    from backend.generation.runs.view import run_views
 
     rows: dict[str, dict[str, Any]] = {}
-    for start in range(0, len(job_ids), 500):
-        for row in GenerationJob.objects.filter(id__in=job_ids[start : start + 500]).values(*_RUN_FIELDS):
+    for start in range(0, len(run_ids), 500):
+        chunk = GenerationRun.objects.filter(id__in=run_ids[start : start + 500])
+        for row in chunk.values(*_RUN_FIELDS):
             rows[str(row["id"])] = row
+        for view in run_views(chunk):
+            endpoint = (view.manifest().get("model") or {}).get("endpoint") or {}
+            if view.id in rows:
+                rows[view.id]["cost_basis"] = endpoint.get("cost_basis") if isinstance(endpoint, dict) else None
     return rows
 
 
+def _eval(row: dict[str, Any]) -> dict[str, Any]:
+    summary = row.get("metrics__eval")
+    return summary if isinstance(summary, dict) else {}
+
+
 def _seconds(row: dict[str, Any]) -> float | None:
-    wall = _num(row.get("result_data__agent__wall_seconds"))
+    wall = _num(row.get("metrics__wall_s"))
     return wall if wall is not None else _num(row.get("duration_seconds"))
 
 
 def _pass_rate(row: dict[str, Any]) -> float | None:
-    """A completed job's conformance-suite pass rate (``conformance_pass_rate``); None when not graded by it."""
-    return conformance_pass_rate(row.get("metrics__functional")) if row.get("status") == "completed" else None
+    """The latest measured evaluation's agent pass rate (``metrics.eval``); None when it was not measured."""
+    summary = _eval(row)
+    if summary.get("status") != "measured" or not summary.get("measured"):
+        return None
+    return _num(summary.get("agent_pass_rate"))
 
 
 def _passed(row: dict[str, Any]) -> bool | None:
-    """A completed job's conformance-suite pass (``conformance_passed``); None when not graded by it."""
-    return conformance_passed(row.get("metrics__functional")) if row.get("status") == "completed" else None
+    """Every agent check passed in the latest measured evaluation; None when it was not measured."""
+    rate = _pass_rate(row)
+    return None if rate is None else rate >= 1.0
+
+
+def _llm_calls(row: dict[str, Any]) -> float | None:
+    by_class = row.get("metrics__requests_by_class")
+    if not isinstance(by_class, dict) or not by_class:
+        return None
+    values = [_num(v) for v in by_class.values()]
+    return float(sum(v for v in values if v is not None)) if any(v is not None for v in values) else None
+
+
+def _billing(row: dict[str, Any]) -> str | None:
+    """The endpoint's cost basis when calls are not billed (``list_price``, ``free``); None when billed or unknown."""
+    basis = row.get("cost_basis")
+    return str(basis) if basis and basis != "billed" else None
 
 
 def run_measurements(
-    job_ids: list[str],
+    run_ids: list[str],
     store: sim.SourceStore,
     *,
     with_issues: bool = True,
-) -> tuple[dict[str, dict[str, float | None]], dict[str, dict[str, Any]], dict[str, Any] | None, list[str]]:
-    """Per job ``{metric: value}`` (None = unmeasured), the raw rows, issue coverage and behaviour keys."""
-    rows = _run_rows(job_ids)
-    store.load(job_ids, features=False)
-    issues, coverage = _issue_values(job_ids) if with_issues else ({}, None)
-    tools = _tool_metrics(job_ids)
-    behaviour_keys: set[str] = set()
+) -> tuple[dict[str, dict[str, float | None]], dict[str, dict[str, Any]], dict[str, Any] | None]:
+    """Per run ``{metric: value}`` (None = unmeasured), the raw rows and the issue coverage."""
+    rows = _run_rows(run_ids)
+    store.load(run_ids, features=False)
+    issues, coverage = _issue_values(run_ids) if with_issues else ({}, None)
+    tools = _tool_metrics(run_ids)
     values: dict[str, dict[str, float | None]] = {}
-    for job_id in job_ids:
-        row = rows.get(job_id, {})
-        loc = store.loc.get(job_id) or {}
-        total_loc = _num(loc.get("total_loc"))
-        v: dict[str, float | None] = {
+    for run_id in run_ids:
+        row = rows.get(run_id, {})
+        loc = store.loc.get(run_id) or {}
+        values[run_id] = {
             "pass_rate": _pass_rate(row),
-            "cost": _num(row.get("metrics__cost")),
-            "list_cost": _num(row.get("metrics__list_cost")),
+            "cost": _num(row.get("metrics__cost_usd")),
+            "list_cost": _num(row.get("metrics__list_cost_usd")),
             "total_tokens": _num(row.get("metrics__total_tokens")),
-            "llm_calls": _num(row.get("metrics__llm_calls")),
+            "llm_calls": _llm_calls(row),
             "wall_seconds": _seconds(row),
-            # A job without any source has no LOC measurement (not a 0-line app).
-            "source_loc": total_loc if total_loc else None,
-            "source_files": _num(loc.get("source_files")) if total_loc else None,
-            "code_issues": (issues.get(job_id) or {}).get("code_issues"),
-            "issues_per_kloc": (issues.get(job_id) or {}).get("issues_per_kloc"),
-            "avg_ccn": (tools.get(job_id) or {}).get("avg_ccn"),
-            "max_ccn": (tools.get(job_id) or {}).get("max_ccn"),
-            "duplication_pct": (tools.get(job_id) or {}).get("duplication_pct"),
+            # None when the run's tree was never collected (not a 0-line app); a model that wrote nothing is 0.
+            "source_loc": _num(loc.get("total_loc")),
+            "source_files": _num(loc.get("source_files")),
+            "code_issues": (issues.get(run_id) or {}).get("code_issues"),
+            "issues_per_kloc": (issues.get(run_id) or {}).get("issues_per_kloc"),
+            "avg_ccn": (tools.get(run_id) or {}).get("avg_ccn"),
+            "max_ccn": (tools.get(run_id) or {}).get("max_ccn"),
+            "duplication_pct": (tools.get(run_id) or {}).get("duplication_pct"),
         }
-        behaviour = row.get("metrics__behaviour")
-        if isinstance(behaviour, dict):
-            for key, raw in behaviour.items():
-                if key in _BEHAVIOUR_SKIP or isinstance(raw, bool):
-                    continue
-                num = _num(raw)
-                if num is not None or raw is None:
-                    behaviour_keys.add(key)
-                    v[f"behaviour.{key}"] = num
-        values[job_id] = v
-    return values, rows, coverage, sorted(behaviour_keys)
+    return values, rows, coverage
 
 
-# ── experiment scope ──────────────────────────────────────────────────
+# ── study scope ───────────────────────────────────────────────────────
+
+_TERMINAL = frozenset({"completed", "cancelled", "stopped"})
+SENSITIVITIES = ("exclude_truncated",)
 
 
-def kept_cells(experiment, filters=None) -> tuple[list[Any], dict[str, Any]]:
-    """The Results tab's kept cells (current attempts that count), with the selection's context.
+@dataclass
+class KeptRun:
+    """One current run of a study cell that the variability tables keep."""
 
-    Mirrors the selection in ``experiment_results.compute`` (which does not
-    expose it per run): planned repeats only, majority fingerprint per
-    (condition, app), invalid / truncated exclusions (the frozen plan's
-    truncation rule when unset) and the common (app, repeat) cells over
-    the conditions that have any usable cell.
+    run_id: str
+    condition_id: int
+    unit_key: str
+    repeat: int
+    fingerprint: str
+    truncated: bool
+    excluded: str = ""
+
+
+def kept_cells(study, *, fingerprint: str = "majority", sensitivity: str | None = None):
+    """The kept current runs of *study* and the selection's context.
+
+    Selection: the main stage's current run per cell (first usable attempt, ``beyond_plan`` excluded), usable
+    runs only (infra errors and exclusions are attrition, reported per condition by the study results),
+    planned repeats only, the majority ``config_fingerprint`` per (condition, unit) with
+    ``fingerprint="majority"``, and the (unit, repeat) cells common to every condition that kept any.
+    Intention-to-treat by default; ``sensitivity="exclude_truncated"`` drops truncated runs.
     """
-    from backend.generation.services import experiment_results as er
-    from backend.generation.services.analysis_plan import plan_excludes_truncated
+    from backend.generation.runs.view import current_runs
 
-    filters = filters or er.ResultFilters()
-    if filters.fingerprint not in ("all", "majority"):
+    if fingerprint not in ("all", "majority"):
         msg = "fingerprint must be 'all' or 'majority'"
         raise ValueError(msg)
-    now = timezone.now()
-    conditions = list(experiment.conditions.select_related("model__endpoint").order_by("id"))
-    plan = er.frozen_plan(experiment)
-    exclude_truncated = (
-        filters.exclude_truncated
-        if filters.exclude_truncated is not None
-        else (plan_excludes_truncated(plan) if plan else True)
+    if sensitivity and sensitivity not in SENSITIVITIES:
+        msg = f"sensitivity must be one of: {', '.join(SENSITIVITIES)}"
+        raise ValueError(msg)
+    planned = int(study.repeats or 1)
+    runs = list(
+        current_runs(study, "main")
+        .select_related("cell__unit")
+        .only(
+            "id",
+            "usable",
+            "condition_id",
+            "repeat_index",
+            "config_fingerprint",
+            "validity",
+            "cell__repeat_index",
+            "cell__unit__unit_key",
+        ),
     )
-    planned = er.planned_repeats(experiment)
-    ids = {c.id for c in conditions}
-    all_cells = [c for c in er._cells(experiment, now) if c.condition_id in ids]  # noqa: SLF001
-    cells = [c for c in all_cells if c.repeat < planned] if filters.planned_only else all_cells
-    if filters.fingerprint == "majority":
-        per: dict[tuple[int, int], list[Any]] = defaultdict(list)
-        for c in cells:
+    not_usable = sum(1 for r in runs if r.usable is not True)
+    candidates: list[KeptRun] = []
+    for r in runs:
+        repeat = r.repeat_index if r.repeat_index is not None else r.cell.repeat_index
+        if r.usable is not True or repeat >= planned or r.condition_id is None:
+            continue
+        validity = r.validity if isinstance(r.validity, dict) else {}
+        candidates.append(
+            KeptRun(
+                run_id=str(r.pk),
+                condition_id=r.condition_id,
+                unit_key=r.cell.unit.unit_key,
+                repeat=repeat,
+                fingerprint=r.config_fingerprint or "",
+                truncated=bool(validity.get("truncated")),
+            ),
+        )
+    if fingerprint == "majority":
+        per: dict[tuple[int, str], list[KeptRun]] = defaultdict(list)
+        for c in candidates:
             if c.fingerprint:
-                per[(c.condition_id, c.app_id)].append(c)
+                per[(c.condition_id, c.unit_key)].append(c)
         for group in per.values():
             prints = Counter(c.fingerprint for c in group)
             if len(prints) > 1:
-                majority = prints.most_common(1)[0][0]
+                # Most common, ties broken by the fingerprint itself (a payload regenerates identically).
+                majority = min(prints, key=lambda fp: (-prints[fp], fp))
                 for c in group:
                     if c.fingerprint != majority:
                         c.excluded = "fingerprint"
-
-    def usable(c) -> bool:
-        if c.value is None or c.excluded:
-            return False
-        if filters.exclude_invalid and c.valid is False:
-            return False
-        return not (exclude_truncated and c.truncated)
-
-    keys = {cid: {(c.app_id, c.repeat) for c in cells if c.condition_id == cid and usable(c)} for cid in ids}
+    truncated_dropped = 0
+    if sensitivity == "exclude_truncated":
+        for c in candidates:
+            if c.truncated and not c.excluded:
+                c.excluded = "truncated"
+                truncated_dropped += 1
+    usable = [c for c in candidates if not c.excluded]
+    ids = sorted({c.condition_id for c in usable})
+    keys = {cid: {(c.unit_key, c.repeat) for c in usable if c.condition_id == cid} for cid in ids}
     populated = [k for k in keys.values() if k]
     common = set.intersection(*populated) if populated else set()
-    kept = [c for c in cells if usable(c) and (not filters.common_cells or (c.app_id, c.repeat) in common)]
+    kept = [c for c in usable if (c.unit_key, c.repeat) in common]
+    conditions = list(study.conditions.filter(id__in=ids).select_related("model").order_by("index", "id"))
     return kept, {
         "conditions": conditions,
         "planned_repeats": planned,
-        "exclude_truncated": exclude_truncated,
-        "filters": filters,
-        "interim": experiment.status not in er._TERMINAL,  # noqa: SLF001
+        "current_runs": len(runs),
+        "not_usable": not_usable,
+        "excluded_fingerprint": sum(1 for c in candidates if c.excluded == "fingerprint"),
+        "excluded_truncated": truncated_dropped,
+        "outside_common_cells": len(usable) - len(kept),
+        "fingerprint": fingerprint,
+        "sensitivity": sensitivity or None,
+        "interim": study.status not in _TERMINAL,
     }
 
 
-def _payload_key(experiment, filters) -> str:
+def _payload_key(study, fingerprint: str, sensitivity: str | None) -> str:
     from backend.analysis.models import AnalysisRun
     from backend.analysis.models import ToolResult
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
 
     unfinished = (ToolResult.Status.PENDING, ToolResult.Status.RUNNING)
     run_finished = (AnalysisRun.Status.COMPLETED, AnalysisRun.Status.PARTIAL, AnalysisRun.Status.FAILED)
-    jobs = GenerationJob.objects.filter(experiment=experiment).aggregate(
+    runs = GenerationRun.objects.filter(study=study).aggregate(
         n=Count("id"),
         at=Max("updated_at"),
-        # Backfills (trajectory, call telemetry) add metrics keys without touching updated_at.
+        # Evaluation mirrors and backfills may add metrics keys without touching updated_at.
         metrics=MD5(StringAgg(MD5(Cast("metrics", TextField())), Value(""), order_by="id")),
     )
-    # A tool result is created running and finished in place, and the run is
+    # A tool result is created running and finished in place, and the analysis is
     # finalized after it: neither adds a row, so count the finished ones.
-    results = ToolResult.objects.filter(run__generation_job__experiment=experiment).aggregate(
+    results = ToolResult.objects.filter(run__generation_job__study=study).aggregate(
         n=Count("id"),
         at=Max("created_at"),
         finished=Count("id", filter=~Q(status__in=unfinished)),
     )
-    runs = AnalysisRun.objects.filter(generation_job__experiment=experiment).aggregate(
+    analyses = AnalysisRun.objects.filter(generation_job__study=study).aggregate(
         n=Count("id"),
         finished=Count("id", filter=Q(status__in=run_finished)),
     )
     parts = (
         PAYLOAD_VERSION,
         sim.ALGO_VERSION,
-        str(experiment.id),
-        experiment.status,
-        str(experiment.updated_at),
-        repr(filters),
-        jobs["n"],
-        str(jobs["at"]),
-        jobs["metrics"],
+        str(study.id),
+        study.status,
+        str(study.updated_at),
+        fingerprint,
+        sensitivity or "",
+        runs["n"],
+        str(runs["at"]),
+        runs["metrics"],
         results["n"],
         str(results["at"]),
         results["finished"],
-        runs["n"],
-        runs["finished"],
+        analyses["n"],
+        analyses["finished"],
     )
-    return "variability:experiment:" + hashlib.sha256(repr(parts).encode()).hexdigest()
+    return "variability:study:" + hashlib.sha256(repr(parts).encode()).hexdigest()
 
 
-def experiment_variability(experiment, filters=None) -> dict[str, Any]:
-    """The experiment's run-to-run variability payload (cached on its jobs' and results' state)."""
-    from backend.generation.services import experiment_results as er
+def study_variability(study, *, fingerprint: str = "majority", sensitivity: str | None = None) -> dict[str, Any]:
+    """The study's run-to-run variability payload (cached on its runs' and results' state).
 
-    filters = filters or er.ResultFilters()
-    key = _payload_key(experiment, filters)
+    Raises ``ValueError`` for an unknown *fingerprint* or *sensitivity* (the API answers 400).
+    """
+    if fingerprint not in ("all", "majority"):
+        msg = "fingerprint must be 'all' or 'majority'"
+        raise ValueError(msg)
+    if sensitivity and sensitivity not in SENSITIVITIES:
+        msg = f"sensitivity must be one of: {', '.join(SENSITIVITIES)}"
+        raise ValueError(msg)
+    key = _payload_key(study, fingerprint, sensitivity)
     try:
         hit = cache.get(key)
     except Exception:  # noqa: BLE001
         hit = None
     if hit is not None:
         return hit
-    payload = _compute_experiment(experiment, filters)
+    payload = _compute_study(study, fingerprint=fingerprint, sensitivity=sensitivity)
     try:
         cache.set(key, payload, _PAYLOAD_CACHE_SECONDS)
     except Exception:  # noqa: BLE001
@@ -924,34 +964,51 @@ def experiment_variability(experiment, filters=None) -> dict[str, Any]:
     return payload
 
 
-def _checks_of(row: dict[str, Any]) -> dict[str, tuple[bool, str]] | None:
-    checks = row.get("result_data__evaluation__checks")
-    if not isinstance(checks, list) or not checks:
-        return None
-    out = {}
-    for c in checks:
-        if isinstance(c, dict) and c.get("name") and isinstance(c.get("passed"), bool):
-            out[str(c["name"])] = (c["passed"], str(c.get("category") or ""))
-    return out or None
+def _checks_by_run(run_ids: list[str], rows: dict[str, dict[str, Any]]) -> dict[str, tuple[tuple, dict]]:
+    """Per run: (tester identity, ``{check_id: (passed, category)}``) of its latest measured evaluation.
+
+    Infra checks and the evaluation's flaky checks are left out (Appendix A #8); errored and skipped checks
+    say nothing about the app and are left out too.
+    """
+    from backend.generation.models import RunEvaluation
+
+    wanted = {}
+    for run_id in run_ids:
+        summary = _eval(rows.get(run_id, {}))
+        if summary.get("status") == "measured" and summary.get("evaluation_id"):
+            wanted[int(summary["evaluation_id"])] = (run_id, str(summary.get("eval_suite") or ""))
+    out: dict[str, tuple[tuple, dict]] = {}
+    for evaluation_id, result in RunEvaluation.objects.filter(id__in=list(wanted)).values_list("id", "result"):
+        run_id, suite = wanted[evaluation_id]
+        data = result if isinstance(result, dict) else {}
+        flaky = set(data.get("flaky_checks") or [])
+        checks = {}
+        for c in data.get("checks") or []:
+            if not isinstance(c, dict) or not c.get("id") or c.get("category") == "infra" or c["id"] in flaky:
+                continue
+            if c.get("status") in ("pass", "fail"):
+                checks[str(c["id"])] = (c["status"] == "pass", str(c.get("category") or ""))
+        if checks:
+            out[run_id] = ((suite, data.get("tester_version"), data.get("compiler_version")), checks)
+    return out
 
 
-def _cell_checks(job_ids: list[str], rows: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
-    """Check-level agreement of a cell's repeats (one tester version; checks every repeat ran)."""
-    graded = [(j, _checks_of(rows.get(j, {}))) for j in job_ids]
-    graded = [(j, c) for j, c in graded if c]
+def _cell_checks(run_ids: list[str], checks: dict[str, tuple[tuple, dict]]) -> dict[str, Any] | None:
+    """Check-level agreement of a cell's repeats (one suite and tester version; checks every repeat ran)."""
+    graded = [(r, checks[r]) for r in run_ids if r in checks]
     if len(graded) < 2:
         return None
-    testers = {rows[j].get("result_data__evaluation__tester_sha256") for j, _c in graded}
-    if len(testers) > 1:
-        return {"comparable": False, "reason": "repeats were graded by different tester versions"}
-    names = set.intersection(*[set(c) for _j, c in graded])
-    disagree = sorted(n for n in names if len({c[n][0] for _j, c in graded}) > 1)
+    if len({tester for _r, (tester, _c) in graded}) > 1:
+        return {"comparable": False, "reason": "repeats were graded by different suite or tester versions"}
+    sets = [c for _r, (_t, c) in graded]
+    names = set.intersection(*[set(c) for c in sets])
+    disagree = sorted(n for n in names if len({c[n][0] for c in sets}) > 1)
     return {
         "comparable": True,
         "n_checks": len(names),
         "disagree": disagree,
         "all_agree": not disagree,
-        "categories": {n: graded[0][1][n][1] for n in disagree},
+        "categories": {n: sets[0][n][1] for n in disagree},
     }
 
 
@@ -959,46 +1016,64 @@ def _summarize_pairs(pairs: list[dict[str, Any]], keys: Sequence[str]) -> dict[s
     out: dict[str, Any] = {"n_pairs": len(pairs)}
     for k in keys:
         out[f"median_{k}"] = _r(median(p.get(k) for p in pairs), 4)
-    out["approximate"] = any(p.get("approximate") for p in pairs)
     return out
 
 
 _SIM_KEYS = ("shingle_jaccard", "line_jaccard", "path_jaccard", "ast_jaccard", "identical_files")
 
 
-def _compute_experiment(experiment, filters) -> dict[str, Any]:
-    from backend.generation.services.experiments import condition_endpoint_slug
-    from backend.generation.services.experiments import condition_label
+def _unit_labels(run_ids: list[str]) -> dict[str, tuple[str, str]]:
+    """Per run: (task slug, task title) of its unit, through ``run_views``."""
+    from backend.generation.models import GenerationRun
+    from backend.generation.runs.view import run_views
 
-    kept, ctx = kept_cells(experiment, filters)
+    out = {}
+    for view in run_views(GenerationRun.objects.filter(id__in=run_ids)):
+        task = view.task
+        out[view.id] = (task.ref, task.title) if task is not None else (view.unit_key or "", view.unit_key or "")
+    return out
+
+
+def _compute_study(study, *, fingerprint: str, sensitivity: str | None) -> dict[str, Any]:
+    from backend.statistics.services.runs import condition_label
+
+    kept, ctx = kept_cells(study, fingerprint=fingerprint, sensitivity=sensitivity)
     conditions = ctx["conditions"]
     interim = ctx["interim"]
     labels = {c.id: condition_label(c) for c in conditions}
-    apps = {a.id: a for a in experiment.app_requirements.order_by("id")}
-    base_seed = experiment.id.int % (2**32)
+    base_seed = study.id.int % (2**32)
     store = sim.SourceStore()
 
-    by_cell: dict[tuple[int, int], list[Any]] = defaultdict(list)
-    for c in sorted(kept, key=lambda c: (c.condition_id, c.app_id, c.repeat)):
-        by_cell[(c.condition_id, c.app_id)].append(c)
-    job_ids = [c.job_id for cells in by_cell.values() for c in cells]
-    values, rows, coverage, behaviour_keys = run_measurements(job_ids, store)
-    # Pass rate (and k_passed below) as the Results tab counts the cell: its stored value,
-    # so these numbers match the Results tables; a value that is not a conformance verdict is named.
-    for c in kept:
-        values[c.job_id]["pass_rate"] = c.value
-    specs = metric_specs(behaviour_keys)
-    notes: list[str] = [NOTE_DESCRIPTIVE]
+    by_cell: dict[tuple[int, str], list[KeptRun]] = defaultdict(list)
+    for c in sorted(kept, key=lambda c: (c.condition_id, c.unit_key, c.repeat)):
+        by_cell[(c.condition_id, c.unit_key)].append(c)
+    run_ids = [c.run_id for cells in by_cell.values() for c in cells]
+    values, rows, coverage = run_measurements(run_ids, store)
+    checks = _checks_by_run(run_ids, rows)
+    units = _unit_labels(run_ids)
+    specs = metric_specs()
+    notes: list[str] = [NOTE_DESCRIPTIVE, NOTE_GRADING]
     if interim:
         notes.insert(0, NOTE_INTERIM)
-    not_conformance = [j for j in job_ids if conformance_pass_rate(rows.get(j, {}).get("metrics__functional")) is None]
-    if not_conformance:
-        notes.append(NOTE_NOT_CONFORMANCE.format(n=len(not_conformance), total=len(job_ids)))
-    # Subscription-billed runs: their billed cost is $0 by billing, not a measured floor.
-    billed = {j: str(source) for j in job_ids if (source := rows.get(j, {}).get("metrics__billing_source"))}
+    if ctx["sensitivity"] == "exclude_truncated":
+        notes.append(NOTE_SENSITIVITY_TRUNCATED.format(n=ctx["excluded_truncated"]))
+    else:
+        notes.append(NOTE_ITT)
+    if ctx["not_usable"]:
+        notes.append(
+            f"{ctx['not_usable']} of {ctx['current_runs']} current runs are not usable (infra error, excluded or "
+            "no outcome yet): they are attrition, not data, and are left out here.",
+        )
+    if ctx["excluded_fingerprint"]:
+        notes.append(
+            f"{ctx['excluded_fingerprint']} runs left out: not on the majority configuration fingerprint of their "
+            "(condition, unit).",
+        )
+    # Endpoints not billed per call: their billed cost is $0 by billing, not a measured floor.
+    billed = {j: source for j in run_ids if (source := _billing(rows.get(j, {})))}
 
     def billing_marker(key: str, ids: Iterable[str]) -> list[str] | None:
-        """The billing sources when every run with a *key* value was subscription-billed (cost only), else None."""
+        """The cost bases when every run with a *key* value ran on an endpoint not billed per call, else None."""
         if key != "cost":
             return None
         measured = [j for j in ids if values[j].get(key) is not None]
@@ -1010,9 +1085,9 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
     with_repeats = [k for k, v in by_cell.items() if len(v) >= 2]
     design = {
         "n_conditions": len({k[0] for k in by_cell}),
-        "n_apps": len({k[1] for k in by_cell}),
+        "n_units": len({k[1] for k in by_cell}),
         "n_cells": len(by_cell),
-        "n_runs": len(job_ids),
+        "n_runs": len(run_ids),
         "cells_with_repeats": len(with_repeats),
         "repeats_min": min(repeats) if repeats else None,
         "repeats_max": max(repeats) if repeats else None,
@@ -1023,13 +1098,13 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
         notes.append(NOTE_SINGLE_TRIAL)
     if any(r == 2 for r in repeats):
         notes.append(NOTE_TWO_REPEATS)
-    if len({condition_endpoint_slug(c) for c in conditions}) > 1:
+    if len({rows.get(j, {}).get("endpoint_id") for j in run_ids} - {None}) > 1:
         notes.append(NOTE_WALL)
 
     # ── per cell ──
     cell_rows = []
-    for (cid, app_id), cells in by_cell.items():
-        ids = [c.job_id for c in cells]
+    for (cid, unit_key), cells in by_cell.items():
+        ids = [c.run_id for c in cells]
         stats = {}
         vals_out = {}
         for spec in specs:
@@ -1038,32 +1113,34 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
                 continue
             vals_out[spec.key] = [_r(v) for v in series]
             stats[spec.key] = describe(series, ratio=spec.ratio)
-        passed = [c.passed for c in cells]
-        deployed = [rows.get(j, {}).get("metrics__functional__deployed") for j in ids]
+        # Pass is known only for measured evaluations: unmeasured repeats are left out, never counted as fails.
+        passed = [p for p in (_passed(rows.get(j, {})) for j in ids) if p is not None]
+        deployed = [_DEPLOYED.get(rows.get(j, {}).get("outcome") or "") for j in ids]
         deployed_known = [d for d in deployed if isinstance(d, bool)]
-        app = apps.get(app_id)
+        task, title = units.get(ids[0], (unit_key, unit_key))
         cell_rows.append(
             {
                 "condition_id": cid,
-                "app_id": app_id,
-                "app_slug": app.slug if app else str(app_id),
-                "app_name": app.name if app else str(app_id),
+                "unit_key": unit_key,
+                "task": task,
+                "task_title": title,
                 "n": len(cells),
-                "job_ids": ids,
+                "run_ids": ids,
                 "repeat_indexes": [c.repeat for c in cells],
                 "values": vals_out,
                 "stats": stats,
+                "n_pass_known": len(passed),
                 "k_passed": sum(1 for p in passed if p),
-                "pass_agree": (len(set(passed)) == 1) if len(cells) >= 2 else None,
+                "pass_agree": (len(set(passed)) == 1) if len(passed) >= 2 else None,
                 "deploy_agree": (len(set(deployed_known)) == 1)
                 if len(deployed_known) >= 2 and len(deployed_known) == len(ids)
                 else None,
-                "checks": _cell_checks(ids, rows) if len(cells) >= 2 else None,
+                "checks": _cell_checks(ids, checks) if len(cells) >= 2 else None,
                 "similarity": None,
                 "finding_overlap": None,
             },
         )
-    cell_index = {(r["condition_id"], r["app_id"]): r for r in cell_rows}
+    cell_index = {(r["condition_id"], r["unit_key"]): r for r in cell_rows}
 
     # ── per condition dispersion ──
     condition_rows = []
@@ -1074,13 +1151,13 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
             continue
         dispersion = {}
         for spec in specs:
-            groups = [[values[j].get(spec.key) for j in r["job_ids"]] for r in mine]
+            groups = [[values[j].get(spec.key) for j in r["run_ids"]] for r in mine]
             flat = [v for g in groups for v in g if v is not None]
             if not flat:
                 continue
             psd, df = pooled_sd(groups)
             cvs = [r["stats"][spec.key]["cv"] for r in mine if spec.key in r["stats"] and r["n"] >= 2]
-            marker = billing_marker(spec.key, [j for r in mine for j in r["job_ids"]])
+            marker = billing_marker(spec.key, [j for r in mine for j in r["run_ids"]])
             dispersion[spec.key] = {
                 "n_runs": len(flat),
                 "n_cells": sum(1 for g in groups if sum(1 for v in g if v is not None) >= 2),
@@ -1092,18 +1169,18 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
                 "ceiling": len(flat) >= 2 and len(set(flat)) == 1 and marker is None,
                 "billing": marker,
             }
-        repeated = [r for r in mine if r["n"] >= 2]
+        repeated = [r for r in mine if r["pass_agree"] is not None]
         agree = [r for r in repeated if r["pass_agree"]]
         deploy = [r for r in repeated if r["deploy_agree"] is not None]
         condition_rows.append(
             {
                 "condition_id": cond.id,
                 "label": labels[cond.id],
-                "model": cond.model.model_name,
-                "n_apps": len(mine),
+                "model": cond.model.model_name if cond.model_id else "",
+                "n_units": len(mine),
                 "n_cells": len(mine),
                 "n_runs": sum(r["n"] for r in mine),
-                "cells_with_repeats": len(repeated),
+                "cells_with_repeats": sum(1 for r in mine if r["n"] >= 2),
                 "pass_agreement": {
                     "cells": len(repeated),
                     "agree": len(agree),
@@ -1120,11 +1197,11 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
     billing = Counter(billed.values())
     if billing:
         notes.append(
-            NOTE_SUBSCRIPTION.format(n=sum(billing.values()), total=len(job_ids), sources=", ".join(sorted(billing))),
+            NOTE_SUBSCRIPTION.format(n=sum(billing.values()), total=len(run_ids), sources=", ".join(sorted(billing))),
         )
-    billing_by_metric = {spec.key: m for spec in specs if (m := billing_marker(spec.key, job_ids))}
+    billing_by_metric = {spec.key: m for spec in specs if (m := billing_marker(spec.key, run_ids))}
     for spec in specs:
-        flat = [values[j].get(spec.key) for j in job_ids]
+        flat = [values[j].get(spec.key) for j in run_ids]
         flat = [v for v in flat if v is not None]
         if len(flat) >= 2 and len(set(flat)) == 1:
             if spec.key in billing_by_metric:
@@ -1140,7 +1217,7 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
     icc = {}
     for spec in specs:
         data = {
-            k: [values[j].get(spec.key) for j in r["job_ids"]] for k, r in cell_index.items() if spec.key in r["stats"]
+            k: [values[j].get(spec.key) for j in r["run_ids"]] for k, r in cell_index.items() if spec.key in r["stats"]
         }
         if not data:
             continue
@@ -1172,7 +1249,7 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
         icc[spec.key] = per_cond
 
     # ── pass@k, checks ──
-    k_max = max((r["n"] for r in cell_rows), default=0)
+    k_max = max((r["n_pass_known"] for r in cell_rows), default=0)
     pass_rows = []
     for cond in conditions:
         mine = [r for r in cell_rows if r["condition_id"] == cond.id]
@@ -1180,11 +1257,11 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
             continue
         by_k = []
         for k in range(1, k_max + 1):
-            eligible = [r for r in mine if r["n"] >= k]
+            eligible = [r for r in mine if r["n_pass_known"] >= k]
             if not eligible:
                 continue
-            at = [pass_at_k(r["n"], r["k_passed"], k) for r in eligible]
-            hat = [pass_hat_k(r["n"], r["k_passed"], k) for r in eligible]
+            at = [pass_at_k(r["n_pass_known"], r["k_passed"], k) for r in eligible]
+            hat = [pass_hat_k(r["n_pass_known"], r["k_passed"], k) for r in eligible]
             entry = {
                 "k": k,
                 "n_cells": len(eligible),
@@ -1229,17 +1306,17 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
     compared_cells = sum(row["cells"] for row in checks_rows)
 
     # ── code similarity ──
-    within_pairs: list[tuple[str, str, tuple[int, int]]] = []
+    within_pairs: list[tuple[str, str, tuple[int, str]]] = []
     for key, r in cell_index.items():
-        ids = r["job_ids"]
+        ids = r["run_ids"]
         within_pairs.extend((ids[i], ids[j], key) for i in range(len(ids)) for j in range(i + 1, len(ids)))
     reference_pairs: list[tuple[str, str, int, int]] = []
-    slices: dict[tuple[int, int], dict[int, str]] = defaultdict(dict)
+    slices: dict[tuple[str, int], dict[int, str]] = defaultdict(dict)
     for c in kept:
-        slices[(c.app_id, c.repeat)][c.condition_id] = c.job_id
+        slices[(c.unit_key, c.repeat)][c.condition_id] = c.run_id
     cond_order = [c.id for c in conditions]
-    for slice_jobs in slices.values():
-        present = [cid for cid in cond_order if cid in slice_jobs]
+    for slice_runs in slices.values():
+        present = [cid for cid in cond_order if cid in slice_runs]
         if len(present) < 2:
             continue
         seen = set()
@@ -1249,12 +1326,12 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
             if other == cid or pair in seen:
                 continue
             seen.add(pair)
-            reference_pairs.append((slice_jobs[pair[0]], slice_jobs[pair[1]], pair[0], pair[1]))
+            reference_pairs.append((slice_runs[pair[0]], slice_runs[pair[1]], pair[0], pair[1]))
     sims = sim.pair_similarities([(a, b) for a, b, _k in within_pairs], store)
     ref_sims = sim.pair_similarities([(a, b) for a, b, _c1, _c2 in reference_pairs], store)
-    within_by_cell: dict[tuple[int, int], list[dict]] = defaultdict(list)
+    within_by_cell: dict[tuple[int, str], list[dict]] = defaultdict(list)
     for a, b, key in within_pairs:
-        within_by_cell[key].append({"job_a": a, "job_b": b, **sims[(a, b)]})
+        within_by_cell[key].append({"run_a": a, "run_b": b, **sims[(a, b)]})
     for key, pairs in within_by_cell.items():
         cell_index[key]["similarity"] = {**_summarize_pairs(pairs, _SIM_KEYS), "pairs": pairs}
     ref_by_cond: dict[int, list[dict]] = defaultdict(list)
@@ -1281,18 +1358,16 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
         )
     all_within = [p for pairs in within_by_cell.values() for p in pairs]
     all_ref = list(ref_sims.values())
-    if any(p.get("approximate") for p in [*all_within, *all_ref]):
-        notes.append(NOTE_APPROX_SOURCE)
     if all_ref:
         notes.append(NOTE_REFERENCE)
 
     # ── finding overlap ──
-    fsets = sim.finding_sets(job_ids)
-    overlap_by_cell: dict[tuple[int, int], list[dict]] = defaultdict(list)
+    fsets = sim.finding_sets(run_ids)
+    overlap_by_cell: dict[tuple[int, str], list[dict]] = defaultdict(list)
     for a, b, key in within_pairs:
         ov = sim.finding_overlap(fsets, a, b)
         if ov is not None:
-            overlap_by_cell[key].append({"job_a": a, "job_b": b, **ov})
+            overlap_by_cell[key].append({"run_a": a, "run_b": b, **ov})
     for key, r in cell_index.items():
         if r["n"] < 2:
             continue
@@ -1357,11 +1432,11 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
     if continuous:
         rank_metrics.append((continuous, False))
     for metric, higher in rank_metrics:
-        data: dict[int, dict[int, list[float]]] = defaultdict(dict)
-        for (cid, app_id), r in cell_index.items():
+        data: dict[int, dict[str, list[float]]] = defaultdict(dict)
+        for (cid, unit_key), r in cell_index.items():
             vals = [v for v in r["values"].get(metric, []) if v is not None]
             if vals:
-                data[cid][app_id] = vals
+                data[cid][unit_key] = vals
         seed = _seed(base_seed, "rank", metric)
         frozen = {c: dict(sorted(a.items())) for c, a in sorted(data.items())}
         block = _cached(
@@ -1380,8 +1455,7 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
     planner_reason = None
     if interim:
         planner_reason = (
-            "Withheld while the experiment is running (optional-stopping guard): plan the next experiment "
-            "from the finished one."
+            "Withheld while the study is running (optional-stopping guard): plan the next study from the finished one."
         )
     else:
         planner = {
@@ -1392,26 +1466,36 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
             },
             "min_apps_exact_test": min_apps_for_exact_test(0.05),
             "z": Z95,
-            "basis": "normal approximation from this experiment's variance components (planning guidance only)",
+            "basis": "normal approximation from this study's variance components (planning guidance only)",
         }
 
-    if coverage is not None and coverage["apps_measured"] < len(job_ids):
+    if coverage is not None and coverage["apps_measured"] < len(run_ids):
         notes.append(
-            f"Code issues: {coverage['apps_measured']} of {len(job_ids)} kept runs measured by the common "
+            f"Code issues: {coverage['apps_measured']} of {len(run_ids)} kept runs measured by the common "
             f"instrument set ({', '.join(coverage['tools_common']) or 'no tool'}); the rest show —.",
         )
 
     return {
-        "experiment_id": str(experiment.id),
-        "status": experiment.status,
+        "study_id": str(study.id),
+        "status": study.status,
+        "kind": study.kind,
         "interim": interim,
         "generated_at": timezone.now(),
         "filters": {
-            "exclude_invalid": filters.exclude_invalid,
-            "exclude_truncated": ctx["exclude_truncated"],
-            "common_cells": filters.common_cells,
-            "fingerprint": filters.fingerprint,
-            "planned_only": filters.planned_only,
+            "stage": "main",
+            "fingerprint": ctx["fingerprint"],
+            "sensitivity": ctx["sensitivity"],
+            "itt": ctx["sensitivity"] is None,
+            "planned_only": True,
+            "common_cells": True,
+        },
+        "selection": {
+            "current_runs": ctx["current_runs"],
+            "not_usable": ctx["not_usable"],
+            "excluded_fingerprint": ctx["excluded_fingerprint"],
+            "excluded_truncated": ctx["excluded_truncated"],
+            "outside_common_cells": ctx["outside_common_cells"],
+            "kept": len(run_ids),
         },
         "design": design,
         "metrics": [
@@ -1423,7 +1507,7 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
                 "better": s.better,
                 "source": s.source,
                 "core": s.core,
-                "n_runs": sum(1 for j in job_ids if values[j].get(s.key) is not None),
+                "n_runs": sum(1 for j in run_ids if values[j].get(s.key) is not None),
             }
             for s in specs
         ],
@@ -1457,11 +1541,11 @@ def _compute_experiment(experiment, filters) -> dict[str, Any]:
         "planner_reason": planner_reason,
         "issue_coverage": coverage,
         "ceilings": ceilings,
-        # Subscription billing of the kept runs; ``metrics`` lists those whose every value is a billed $0.
+        # Kept runs on endpoints not billed per call; ``metrics`` lists those whose every value is a billed $0.
         "billing": {
             "sources": sorted(billing),
             "n_runs": sum(billing.values()),
-            "n_kept": len(job_ids),
+            "n_kept": len(run_ids),
             "metrics": sorted(billing_by_metric),
         }
         if billing
@@ -1490,8 +1574,8 @@ def _mean_ci(values: list[float], seed: int, draws: int = BOOTSTRAP_DRAWS) -> li
 CSV_STAT_KEYS = ("mean", "sd", "min", "max", "cv")
 
 
-def experiment_variability_csv(payload: dict[str, Any]) -> str:
-    """One row per (condition, app) cell: n, pass agreement, per-metric mean/sd/min/max/cv, similarity, overlap."""
+def study_variability_csv(payload: dict[str, Any]) -> str:
+    """One row per (condition, unit) cell: n, pass agreement, per-metric mean/sd/min/max/cv, similarity, overlap."""
     from backend.export.services.csv_safe import safe_row
 
     labels = {r["condition_id"]: r["label"] for r in payload["conditions"]}
@@ -1499,8 +1583,10 @@ def experiment_variability_csv(payload: dict[str, Any]) -> str:
     header = [
         "condition_id",
         "condition_label",
-        "app_slug",
+        "unit_key",
+        "task",
         "n_repeats",
+        "n_pass_known",
         "k_passed",
         "pass_agree",
         "deploy_agree",
@@ -1511,7 +1597,7 @@ def experiment_variability_csv(payload: dict[str, Any]) -> str:
         "within_path_jaccard",
         "code_finding_jaccard",
         "dependency_finding_jaccard",
-        "job_ids",
+        "run_ids",
         "interim",
     ]
     buffer = io.StringIO()
@@ -1529,8 +1615,10 @@ def experiment_variability_csv(payload: dict[str, Any]) -> str:
         row = [
             r["condition_id"],
             labels.get(r["condition_id"], ""),
-            r["app_slug"],
+            r["unit_key"],
+            r["task"],
             r["n"],
+            r["n_pass_known"],
             r["k_passed"],
             cell(r["pass_agree"]),
             cell(r["deploy_agree"]),
@@ -1541,170 +1629,103 @@ def experiment_variability_csv(payload: dict[str, Any]) -> str:
             cell(sim_row.get("median_path_jaccard")),
             cell(ov.get("median_code_jaccard")),
             cell(ov.get("median_dependency_jaccard")),
-            " ".join(r["job_ids"]),
+            " ".join(r["run_ids"]),
             payload["interim"],
         ]
         writer.writerow(safe_row(row))
     return buffer.getvalue()
 
 
-# ── same-setup groups (job and model scopes) ──────────────────────────
+# ── same-setup groups (run and model scopes) ──────────────────────────
 
 
-def approximate_key(job) -> str | None:
-    """The legacy grouping key (mode, model, app, prompt hash, method, stack); None without a model or app."""
-    if not job.model_id or not job.app_requirement_id:
-        return None
-    return "|".join(
-        str(p)
-        for p in (
-            job.mode,
-            job.model_id,
-            job.app_requirement_id,
-            job.prompt_hash or "-",
-            job.bundle_key or "-",
-            job.stack_slug or "-",
-        )
-    )
+def _current_in_cells(members: list[Any]) -> set[str]:
+    """Ids of the members that are their cell's current run (``runs.view.current_runs``)."""
+    from backend.generation.runs.view import current_runs
+
+    current: set[str] = set()
+    for study_id, stage in {(m.study_id, m.cell.stage) for m in members if m.cell_id is not None and m.study_id}:
+        current.update(str(pk) for pk in current_runs(study_id, stage).values_list("pk", flat=True))
+    return current
 
 
-def _no_fingerprint() -> Q:
-    return (
-        Q(resolved_bundle__config_fingerprint__isnull=True)
-        | Q(resolved_bundle__config_fingerprint=None)
-        | Q(
-            resolved_bundle__config_fingerprint="",
-        )
-    )
+def _relation(member, self_run, current: set[str]) -> str:
+    """How *member* relates to *self_run*: self, retry (another attempt of its cell), replay, rerun or replicate.
 
-
-def _group_queryset(job, user):
-    """The visible jobs sharing *job*'s setup, and the grouping descriptor."""
-    from backend.generation.models import GenerationJob
-
-    rb = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
-    fingerprint = rb.get("config_fingerprint")
-    qs = GenerationJob.objects.filter(created_by=user)
-    if isinstance(fingerprint, str) and fingerprint:
-        return qs.filter(resolved_bundle__config_fingerprint=fingerprint), {
-            "key": "config_fingerprint",
-            "value": fingerprint,
-            "approximate": False,
-        }
-    key = approximate_key(job)
-    if key is None:
-        return qs.filter(id=job.id), {"key": None, "value": None, "approximate": False}
-    return (
-        qs.filter(_no_fingerprint()).filter(
-            mode=job.mode,
-            model_id=job.model_id,
-            app_requirement_id=job.app_requirement_id,
-            prompt_hash=job.prompt_hash,
-            bundle_key=job.bundle_key,
-            stack_slug=job.stack_slug,
-        ),
-        {"key": "approximate", "value": key, "approximate": True},
-    )
-
-
-def _superseded(jobs: list[Any]) -> set[str]:
-    """Experiment-cell jobs a newer attempt of the same cell replaced (retries)."""
-    from backend.generation.models import GenerationJob
-
-    cells = {
-        (j.experiment_id, j.condition_id, j.app_requirement_id, j.repeat_index)
-        for j in jobs
-        if j.experiment_id and j.condition_id and j.repeat_index is not None
-    }
-    if not cells:
-        return set()
-    current = set(
-        GenerationJob.objects.filter(
-            experiment_id__in={c[0] for c in cells},
-            condition_id__in={c[1] for c in cells},
-            repeat_index__isnull=False,
-        )
-        .order_by("experiment_id", "condition_id", "app_requirement_id", "repeat_index", "-created_at")
-        .distinct("experiment_id", "condition_id", "app_requirement_id", "repeat_index")
-        .values_list("id", flat=True),
-    )
-    return {
-        str(j.id)
-        for j in jobs
-        if j.experiment_id and j.condition_id and j.repeat_index is not None and j.id not in current
-    }
-
-
-def _relation(member, self_job, superseded: set[str]) -> str:
-    if member.id == self_job.id:
+    A replay shares the ``run_fingerprint`` (same manifest and seed); a rerun is outside any designed cell, a
+    beyond-plan run, or an attempt its cell's current run replaced.
+    """
+    if member.pk == self_run.pk:
         return "self"
-    rb_m = member.resolved_bundle if isinstance(member.resolved_bundle, dict) else {}
-    rb_s = self_job.resolved_bundle if isinstance(self_job.resolved_bundle, dict) else {}
-    if rb_m.get("run_fingerprint") and rb_m.get("run_fingerprint") == rb_s.get("run_fingerprint"):
+    if self_run.cell_id is not None and member.cell_id == self_run.cell_id:
+        return "retry"
+    if member.run_fingerprint and member.run_fingerprint == self_run.run_fingerprint:
         return "replay"
-    if member.repeat_index is None or str(member.id) in superseded:
+    if member.cell_id is None or member.beyond_plan or str(member.pk) not in current:
         return "rerun"
     return "replicate"
 
 
-def _seed_of(job) -> int | None:
-    rb = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
-    seed = rb.get("seed")
-    return seed if isinstance(seed, int) and not isinstance(seed, bool) else job.experiment_seed
+def _group_queryset(run, user):
+    """The visible runs sharing *run*'s ``config_fingerprint``, and the grouping descriptor."""
+    from backend.generation.models import GenerationRun
+
+    qs = GenerationRun.objects.filter(created_by=user)
+    if run.config_fingerprint:
+        return qs.filter(config_fingerprint=run.config_fingerprint), {
+            "key": "config_fingerprint",
+            "value": run.config_fingerprint,
+        }
+    return qs.filter(id=run.id), {"key": None, "value": None}
 
 
-def job_replicates(job, user, *, cap: int = MAX_REPLICATES) -> dict[str, Any]:
-    """Contract C3: every visible job sharing *job*'s setup, with relation, metrics and similarity to *job*."""
-    from backend.generation.services.experiments import condition_label
+def run_replicates(run, user, *, cap: int = MAX_REPLICATES) -> dict[str, Any]:
+    """Every visible run sharing *run*'s configuration fingerprint, with relation, metrics and similarity to it."""
+    from backend.statistics.services.runs import condition_label
 
-    qs, grouping = _group_queryset(job, user)
+    qs, grouping = _group_queryset(run, user)
     total = qs.count()
-    members = list(
-        qs.exclude(id=job.id)
-        .select_related("experiment", "condition__model")
-        .defer("result_data")
-        .order_by("-created_at")[: max(0, cap - 1)],
-    )
-    self_job = type(job).objects.select_related("experiment", "condition__model").defer("result_data").get(id=job.id)
-    members = sorted([self_job, *members], key=lambda j: j.created_at)
-    notes: list[str] = []
-    if grouping["approximate"]:
-        notes.append(
-            "No configuration fingerprint (legacy job): grouped by mode, model, app, prompt hash, method and "
-            "stack. Approximate: the runs may differ in settings this key does not cover.",
-        )
-    elif grouping["key"] is None:
-        notes.append("This job has no configuration fingerprint and no model/app to group by: no same-setup group.")
+    related = ("study", "condition__model", "cell")
+    members = list(qs.exclude(id=run.id).select_related(*related).order_by("-created_at")[: max(0, cap - 1)])
+    self_run = type(run).objects.select_related(*related).get(id=run.id)
+    members = sorted([self_run, *members], key=lambda m: (m.created_at, str(m.pk)))
+    notes: list[str] = [NOTE_GRADING]
+    if grouping["key"] is None:
+        notes.append("This run has no configuration fingerprint: no same-setup group.")
     if total > cap:
-        notes.append(f"The group has {total} jobs; the {cap} most recent (this one included) are shown.")
-    superseded = _superseded(members)
-    ids = [str(m.id) for m in members]
-    completed = [str(m.id) for m in members if m.status == "completed"]
+        notes.append(f"The group has {total} runs; the {cap} most recent (this one included) are shown.")
+    current = _current_in_cells(members)
+    ids = [str(m.pk) for m in members]
+    completed = [str(m.pk) for m in members if m.status == "completed"]
     store = sim.SourceStore()
-    values, rows, coverage, _bk = run_measurements(ids, store, with_issues=bool(completed))
+    values, rows, coverage = run_measurements(ids, store, with_issues=bool(completed))
     analyzed = coverage is not None and coverage["apps_measured"] > 0
-    self_id = str(job.id)
+    self_id = str(run.pk)
     sims = (
         sim.pair_similarities([(self_id, j) for j in completed if j != self_id], store) if self_id in completed else {}
     )
     out_members = []
     for m in members:
-        mid = str(m.id)
+        mid = str(m.pk)
         v = values.get(mid, {})
         s = sims.get((self_id, mid))
+        validity = m.validity if isinstance(m.validity, dict) else {}
         out_members.append(
             {
-                "job_id": mid,
+                "run_id": mid,
                 "is_self": mid == self_id,
-                "relation": _relation(m, self_job, superseded),
-                "seed": _seed_of(m),
+                "relation": _relation(m, self_run, current),
+                "seed": m.seed,
                 "repeat_index": m.repeat_index,
-                "experiment_id": str(m.experiment_id) if m.experiment_id else None,
-                "experiment_name": m.experiment.name if m.experiment_id else None,
+                "cell_attempt": m.cell_attempt,
+                "beyond_plan": m.beyond_plan,
+                "study_id": str(m.study_id) if m.study_id else None,
+                "study_name": m.study.name if m.study_id else None,
                 "condition_label": condition_label(m.condition) if m.condition_id else None,
-                "batch_id": str(m.batch_id) if m.batch_id else None,
                 "created_at": m.created_at,
                 "status": m.status,
+                "outcome": m.outcome or None,
+                "usable": m.usable,
                 "pass_rate": v.get("pass_rate"),
                 "source_loc": v.get("source_loc"),
                 "source_files": v.get("source_files"),
@@ -1712,8 +1733,8 @@ def job_replicates(job, user, *, cap: int = MAX_REPLICATES) -> dict[str, Any]:
                 "total_tokens": v.get("total_tokens"),
                 "llm_calls": v.get("llm_calls"),
                 "wall_seconds": v.get("wall_seconds"),
-                "termination": rows.get(mid, {}).get("result_data__agent__termination")
-                or ((m.metrics or {}).get("termination") if isinstance(m.metrics, dict) else None),
+                "termination": validity.get("termination"),
+                "truncated": bool(validity.get("truncated")),
                 "code_issues": v.get("code_issues"),
                 "issues_per_kloc": v.get("issues_per_kloc"),
                 "findings_measured": v.get("code_issues") is not None,
@@ -1722,7 +1743,6 @@ def job_replicates(job, user, *, cap: int = MAX_REPLICATES) -> dict[str, Any]:
                     "shingle_jaccard": s.get("shingle_jaccard"),
                     "line_jaccard": s.get("line_jaccard"),
                     "identical_files": s.get("identical_files"),
-                    "approximate": s.get("approximate"),
                 }
                 if s
                 else None,
@@ -1735,22 +1755,20 @@ def job_replicates(job, user, *, cap: int = MAX_REPLICATES) -> dict[str, Any]:
         summary[key] = {k: d[k] for k in ("n", "mean", "sd", "min", "max", "cv")}
     determinism = []
     for m in out_members:
-        if m["relation"] == "replay" and m["status"] == "completed" and self_job.status == "completed":
-            probe = sim.call_divergence(self_id, m["job_id"])
-            determinism.append({"job_id": m["job_id"], **probe})
+        if m["relation"] in ("replay", "retry") and m["status"] == "completed" and self_run.status == "completed":
+            probe = sim.call_divergence(self_id, m["run_id"])
+            determinism.append({"run_id": m["run_id"], "relation": m["relation"], **probe})
     if len(members) > 1:
         notes.append(
-            "The summary pools every completed member (replicates, replays and reruns): replays share the seed and "
-            "reruns ran outside a designed sample, so it is descriptive, not a design estimate.",
+            "The summary pools every completed member (replicates, retries, replays and reruns): replays and "
+            "retries share the seed and reruns ran outside a designed sample, so it is descriptive, not a design "
+            "estimate.",
         )
     else:
         notes.append("No other visible run shares this setup yet.")
     ungraded = sum(1 for j in completed if values.get(j, {}).get("pass_rate") is None)
     if ungraded:
-        notes.append(
-            f"{NOTE_CONFORMANCE_ONLY} {ungraded} of {len(completed)} completed members have no conformance-suite "
-            "pass rate.",
-        )
+        notes.append(f"{ungraded} of {len(completed)} completed members have no measured evaluation (—).")
     if completed and not analyzed:
         notes.append("No member has been analyzed: code issues are unmeasured (—).")
     elif analyzed and coverage["apps_measured"] < len(completed):
@@ -1758,21 +1776,19 @@ def job_replicates(job, user, *, cap: int = MAX_REPLICATES) -> dict[str, Any]:
             f"Code issues: one instrument set over the group's analyzed runs ({coverage['apps_measured']} of "
             f"{len(completed)}; tools: {', '.join(coverage['tools_common']) or 'none'}); the others show —.",
         )
-    billed = sorted(
-        {str(rows[j]["metrics__billing_source"]) for j in ids if rows.get(j, {}).get("metrics__billing_source")},
-    )
+    billed = sorted({source for j in ids if (source := _billing(rows.get(j, {})))})
     if billed:
         notes.append(
-            f"Subscription-billed runs ({', '.join(billed)}) record a billed cost of $0: Cost describes billing, not "
-            "usage (each run's page shows its list-price equivalent).",
+            f"Runs on endpoints not billed per call ({', '.join(billed)}) record a billed cost of $0: Cost describes "
+            "billing, not usage (each run's page shows its list-price equivalent).",
         )
     if determinism:
         notes.append(
-            "Replays send the same seed on every call; the determinism probe compares the stored call artifacts in "
-            "order (content truncated at 8000 chars).",
+            "Replays and retries send the same seed; the determinism probe compares the stored call artifacts of "
+            "each run's last attempt in order (content truncated at 8000 chars).",
         )
     return {
-        "job_id": self_id,
+        "run_id": self_id,
         "grouping": grouping,
         "n": total,
         "members": out_members,
@@ -1784,15 +1800,15 @@ def job_replicates(job, user, *, cap: int = MAX_REPLICATES) -> dict[str, Any]:
 
 
 def _model_payload_key(model, user) -> str:
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
 
-    agg = GenerationJob.objects.filter(created_by=user, model=model).aggregate(n=Count("id"), at=Max("updated_at"))
+    agg = GenerationRun.objects.filter(created_by=user, model=model).aggregate(n=Count("id"), at=Max("updated_at"))
     parts = (PAYLOAD_VERSION, sim.ALGO_VERSION, model.pk, getattr(user, "pk", None), agg["n"], str(agg["at"]))
     return "variability:model:" + hashlib.sha256(repr(parts).encode()).hexdigest()
 
 
 def model_variability(model, user) -> dict[str, Any]:
-    """Within-group spread over the model's same-setup groups of the user's completed jobs (cached)."""
+    """Within-group spread over the model's same-setup groups of the user's completed runs (cached)."""
     key = _model_payload_key(model, user)
     try:
         hit = cache.get(key)
@@ -1812,43 +1828,43 @@ _MODEL_METRICS = ("pass_rate", "cost", "total_tokens", "llm_calls", "wall_second
 
 
 def _compute_model(model, user) -> dict[str, Any]:
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
+    from backend.generation.runs.view import run_views
 
-    jobs = list(
-        GenerationJob.objects.filter(created_by=user, model=model, status=GenerationJob.Status.COMPLETED)
-        .select_related("app_requirement", "experiment")
-        .defer("result_data")
-        .order_by("created_at"),
+    runs = list(
+        GenerationRun.objects.filter(created_by=user, model=model, status="completed")
+        .select_related("study")
+        .order_by("created_at", "pk"),
     )
-    groups: dict[tuple[str, str], list[Any]] = defaultdict(list)
-    for j in jobs:
-        rb = j.resolved_bundle if isinstance(j.resolved_bundle, dict) else {}
-        fp = rb.get("config_fingerprint")
-        if isinstance(fp, str) and fp:
-            groups[("config_fingerprint", fp)].append(j)
+    groups: dict[str, list[Any]] = defaultdict(list)
+    unfingerprinted = 0
+    for r in runs:
+        if r.config_fingerprint:
+            groups[r.config_fingerprint].append(r)
         else:
-            key = approximate_key(j)
-            if key is not None:
-                groups[("approximate", key)].append(j)
+            unfingerprinted += 1
     multi = sorted(((k, v) for k, v in groups.items() if len(v) >= 2), key=lambda kv: (-len(kv[1]), kv[0]))
     notes = [
-        "Spread within same-setup groups (one configuration fingerprint, else an approximate legacy key), never "
-        "across setups; descriptive, no p-values.",
+        "Spread within same-setup groups (one configuration fingerprint), never across setups; descriptive, "
+        "no p-values.",
     ]
+    if unfingerprinted:
+        notes.append(f"{unfingerprinted} completed runs have no configuration fingerprint and are in no group.")
     if len(multi) > MAX_MODEL_GROUPS:
         notes.append(f"{len(multi)} groups; the {MAX_MODEL_GROUPS} largest are shown.")
         multi = multi[:MAX_MODEL_GROUPS]
-    ids = [str(j.id) for _k, members in multi for j in members]
+    ids = [str(r.pk) for _k, members in multi for r in members]
     store = sim.SourceStore()
-    values, _rows, _cov, _bk = run_measurements(ids, store, with_issues=False)
+    values, rows, _cov = run_measurements(ids, store, with_issues=False)
+    heads = {view.id: view for view in run_views([members[0] for _k, members in multi])}
     group_rows = []
     pooled: dict[str, list[list[float | None]]] = defaultdict(list)
     cvs: dict[str, list[float]] = defaultdict(list)
     all_sims: list[float] = []
     replays_total = 0
     replays_reproduced = 0
-    for (kind, value), members in multi:
-        mids = [str(m.id) for m in members]
+    for value, members in multi:
+        mids = [str(m.pk) for m in members]
         stats = {}
         for key in _MODEL_METRICS:
             spec = _SPECS[key]
@@ -1858,7 +1874,7 @@ def _compute_model(model, user) -> dict[str, Any]:
             pooled[key].append(series)
             if d["cv"] is not None:
                 cvs[key].append(d["cv"])
-        passed = [p for p in (_passed_job(m) for m in members) if p is not None]
+        passed = [p for p in (_passed(rows.get(j, {})) for j in mids) if p is not None]
         first = mids[:5]
         pair_list = [(first[i], first[k]) for i in range(len(first)) for k in range(i + 1, len(first))][
             :MAX_GROUP_PAIRS
@@ -1871,9 +1887,8 @@ def _compute_model(model, user) -> dict[str, Any]:
         replay_pairs = []
         by_run: dict[str, list[str]] = defaultdict(list)
         for m in members:
-            rfp = (m.resolved_bundle or {}).get("run_fingerprint") if isinstance(m.resolved_bundle, dict) else None
-            if rfp:
-                by_run[rfp].append(str(m.id))
+            if m.run_fingerprint:
+                by_run[m.run_fingerprint].append(str(m.pk))
         for same in by_run.values():
             for i in range(1, len(same)):
                 probe = sim.call_divergence(same[0], same[i])
@@ -1881,20 +1896,21 @@ def _compute_model(model, user) -> dict[str, Any]:
                     replays_total += 1
                     replays_reproduced += bool(probe["reproduced"])
                     replay_pairs.append(
-                        {"job_a": same[0], "job_b": same[i], "first_divergent_call": probe["first_divergent_call"]},
+                        {"run_a": same[0], "run_b": same[i], "first_divergent_call": probe["first_divergent_call"]},
                     )
-        head = members[0]
+        head = heads.get(mids[0])
         group_rows.append(
             {
-                "key": kind,
+                "key": "config_fingerprint",
                 "value": value,
-                "approximate": kind == "approximate",
                 "n": len(members),
-                "app_slug": head.app_requirement.slug if head.app_requirement_id else None,
-                "method": head.bundle_key or head.mode,
-                "mode": head.mode,
-                "experiments": sorted({m.experiment.name for m in members if m.experiment_id}),
-                "job_ids": mids,
+                "task": head.task.ref if head is not None and head.task is not None else None,
+                "unit_key": head.unit_key if head is not None else None,
+                "kind": members[0].kind,
+                "stack": head.stack.ref if head is not None and head.stack is not None else None,
+                "harness": list(head.harness) if head is not None and head.harness else None,
+                "studies": sorted({m.study.name for m in members if m.study_id}),
+                "run_ids": mids,
                 "pass": {
                     "n": len(passed),
                     "passed": sum(1 for p in passed if p),
@@ -1915,9 +1931,7 @@ def _compute_model(model, user) -> dict[str, Any]:
             "groups_with_cv": len(cvs[key]),
         }
     agree_known = [g["pass"]["agree"] for g in group_rows if g["pass"]["agree"] is not None]
-    notes.append(NOTE_CONFORMANCE_ONLY)
-    if any(g["approximate"] for g in group_rows):
-        notes.append("Approximate groups (legacy jobs without a fingerprint) may mix settings the key does not cover.")
+    notes.append(NOTE_GRADING)
     if replays_total:
         notes.append(
             "Seeded replays: the same seed was sent on every call; reproduced = every stored call response matched.",
@@ -1927,7 +1941,7 @@ def _compute_model(model, user) -> dict[str, Any]:
         "model_name": model.model_name,
         "n_groups": len(group_rows),
         "n_runs": sum(g["n"] for g in group_rows),
-        "n_completed_jobs": len(jobs),
+        "n_completed_runs": len(runs),
         "overall": {
             "metrics": overall_metrics,
             "pass_agreement": {
@@ -1943,19 +1957,11 @@ def _compute_model(model, user) -> dict[str, Any]:
     }
 
 
-def _passed_job(job) -> bool | None:
-    metrics = job.metrics if isinstance(job.metrics, dict) else {}
-    return _passed({"status": job.status, "metrics__functional": metrics.get("functional")})
-
-
 __all__ = [
     "BASE_METRICS",
     "describe",
-    "experiment_variability",
-    "experiment_variability_csv",
     "icc_bootstrap_ci",
     "icc_oneway",
-    "job_replicates",
     "kept_cells",
     "model_variability",
     "pass_at_k",
@@ -1963,5 +1969,8 @@ __all__ = [
     "pooled_sd",
     "precision_plan",
     "rank_intervals",
+    "run_replicates",
+    "study_variability",
+    "study_variability_csv",
     "variance_components",
 ]

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import shutil
 import stat
 import tempfile
 import threading
@@ -35,14 +36,15 @@ from backend.runtime.models import ContainerInstance
 from backend.runtime.models import SampleBuildArtifact
 from backend.runtime.services import build_backend
 from backend.runtime.services import docker_manager
-from backend.runtime.services.scaffolding import HealingReport
-from backend.runtime.services.scaffolding import prepare_build_dir
+from backend.runtime.services.build_context import BuildContextReport
+from backend.runtime.services.build_context import build_identity
+from backend.runtime.services.build_context import prepare_build_dir
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from collections.abc import Iterator
 
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,7 @@ class SampleBuildResult:
     seconds: float
     queue_seconds: float
     image_bytes: int
-    healing: dict[str, Any]
+    build_context: dict[str, Any]
     base_images: dict[str, Any] = field(default_factory=dict)
     resolved_python_deps: list[str] = field(default_factory=list)
     prepare_seconds: float = 0.0
@@ -151,18 +153,16 @@ def _platform_info(client) -> tuple[str, str]:
     return f"{info.get('OSType', 'linux')}/{arch}", str(info.get("ID", ""))
 
 
-def _context_key(job: GenerationJob, path: Path, *, platform: str, daemon_id: str, healing: str) -> str:
+def _context_key(job: GenerationRun, path: Path, *, platform: str, daemon_id: str) -> str:
     """Hash paths and bytes, never timestamps; reject special filesystem nodes."""
     owner = job.created_by_id
-    snapshot = job.resolved_bundle if isinstance(job.resolved_bundle, dict) else {}
     identity = {
         "recipe": _RECIPE_VERSION,
         "backend": getattr(settings, "SAMPLE_BUILD_BACKEND", "legacy"),
         "owner": owner if owner is not None else f"anonymous:{job.id}",
         "platform": platform,
         "daemon": daemon_id,
-        "stack": snapshot.get("stack"),
-        "healing": healing,
+        "build": build_identity(job),
     }
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode())
     for entry in sorted(path.rglob("*")):
@@ -206,7 +206,7 @@ def _cached_artifact(build_key: str, client) -> SampleBuildArtifact | None:
 def _result(
     artifact: SampleBuildArtifact,
     *,
-    report: HealingReport,
+    report: BuildContextReport,
     cache_hit: bool,
     queue_seconds: float,
     prepare_seconds: float,
@@ -225,7 +225,7 @@ def _result(
         seconds=seconds,
         queue_seconds=round(queue_seconds, 3),
         image_bytes=artifact.image_bytes,
-        healing=report.to_dict(),
+        build_context=report.to_dict(),
         base_images=metadata.get("base_images", {}),
         resolved_python_deps=metadata.get("resolved_python_deps", []),
         prepare_seconds=round(prepare_seconds, 3),
@@ -235,22 +235,21 @@ def _result(
 
 
 def cached_sample(
-    job: GenerationJob,
+    job: GenerationRun,
     *,
     client=None,
-    healing: str | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> SampleBuildResult | None:
     """Reserve a cache hit for immediate preview startup, without building a miss."""
     client = client if client is not None else docker_manager.new_client()
     _check_cancelled(cancelled)
     started = time.monotonic()
-    report = HealingReport()
+    report = BuildContextReport()
     with tempfile.TemporaryDirectory(prefix="llmlab-sample-peek-") as tmp:
         path = Path(tmp)
-        prepare_build_dir(job, path, healing=healing, report=report)
+        prepare_build_dir(job, path, report=report)
         platform, daemon_id = _platform_info(client)
-        build_key = _context_key(job, path, platform=platform, daemon_id=daemon_id, healing=str(report.mode))
+        build_key = _context_key(job, path, platform=platform, daemon_id=daemon_id)
         prepare_seconds = time.monotonic() - started
         queued = time.monotonic()
         with _build_lock(f"sample-key:{build_key}", cancelled=cancelled, blocking=False) as acquired:
@@ -272,23 +271,31 @@ def cached_sample(
 
 
 def build_sample(
-    job: GenerationJob,
+    job: GenerationRun,
     *,
     client=None,
-    healing: str | None = None,
     force_rebuild: bool = False,
     cancelled: Callable[[], bool] | None = None,
+    context_dir: Path | None = None,
 ) -> SampleBuildResult:
-    """Get this owner's unchanged sample image, or build one immutable generation."""
+    """Get this owner's unchanged sample image, or build one immutable generation.
+
+    ``context_dir`` (the opt-in ``benchmark_sample_builds`` command only) replaces ``prepare_build_dir``
+    with a copy of an already prepared, possibly edited, build context of ``job``. The run is never saved.
+    """
     client = client if client is not None else docker_manager.new_client()
     _check_cancelled(cancelled)
     started = time.monotonic()
-    report = HealingReport()
+    report = BuildContextReport()
     with tempfile.TemporaryDirectory(prefix="llmlab-sample-") as tmp:
         path = Path(tmp)
-        prepare_build_dir(job, path, healing=healing, report=report)
+        if context_dir is not None:
+            shutil.copytree(context_dir, path, symlinks=True, dirs_exist_ok=True)
+            report.notes.append("context: prepared by the caller (benchmark)")
+        else:
+            prepare_build_dir(job, path, report=report)
         platform, daemon_id = _platform_info(client)
-        build_key = _context_key(job, path, platform=platform, daemon_id=daemon_id, healing=str(report.mode))
+        build_key = _context_key(job, path, platform=platform, daemon_id=daemon_id)
         prepare_seconds = time.monotonic() - started
         queued = time.monotonic()
         with _build_lock(f"sample-key:{build_key}", cancelled=cancelled):

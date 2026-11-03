@@ -54,7 +54,7 @@ PAIRWISE_BLOCK_TYPES = ("pairwise", "bugs")
 BLOCK_TYPES_BY_MODE = {"single": SINGLE_BLOCK_TYPES, "pairwise": PAIRWISE_BLOCK_TYPES}
 QUESTION_KINDS = ("text", "textarea", "single", "multi", "scale", "number", "attention")
 CHOICE_KINDS = ("single", "multi", "attention")
-REQUIREMENT_SOURCES = ("backend", "frontend", "admin", "api", "admin_api")
+REQUIREMENT_SOURCES = ("frontend", "api", "admin_api")
 STANDARD_INSTRUMENTS = ("sus", "umux_lite", "nasa_tlx")
 COMMENT_MODES = ("off", "optional", "required")
 
@@ -249,7 +249,7 @@ class RequirementsBlock(_Model):
     type: Literal["requirements"]
     title: Label
     instructions: LongText = ""
-    sources: list[Literal["backend", "frontend", "admin", "api", "admin_api"]] = Field(
+    sources: list[Literal["frontend", "api", "admin_api"]] = Field(
         default_factory=lambda: list(REQUIREMENT_SOURCES),
     )
     custom: list[CustomRequirement] = Field(default_factory=list)

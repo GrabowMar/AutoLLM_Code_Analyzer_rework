@@ -14,7 +14,7 @@ from backend.analysis.models import AnalyzerTool
 from backend.analysis.models import Finding
 from backend.analysis.models import ToolResult
 from backend.analysis.services.base import ADVISORY_TOOLS
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
 from backend.llm_models.models import LLMModel
 from backend.statistics.services.helpers import _percent
 from backend.statistics.services.helpers import _scoped
@@ -27,7 +27,7 @@ def _finished_rate(succeeded: int, finished: int) -> float | None:
     """Success percent over the work that finished; None (not 0) when nothing finished yet.
 
     Pending, running and cancelled work is no outcome: counting it in the
-    denominator made a running experiment look like a wave of failures.
+    denominator made a running study look like a wave of failures.
     """
     return _percent(succeeded, finished) if finished > 0 else None
 
@@ -47,7 +47,7 @@ def get_system_overview(user: AbstractBaseUser | None = None) -> dict[str, Any]:
     if cached is not None:
         return cached
 
-    jobs = _scoped(GenerationJob.objects.all(), user, "created_by")
+    runs = _scoped(GenerationRun.objects.all(), user, "created_by")
     tasks = _scoped(AnalysisRun.objects.all(), user, "created_by")
     findings = _scoped(
         Finding.objects.all(),
@@ -55,7 +55,7 @@ def get_system_overview(user: AbstractBaseUser | None = None) -> dict[str, Any]:
         "result__run__created_by",
     )
 
-    job_counts = jobs.aggregate(
+    run_counts = runs.aggregate(
         total=Count("id"),
         completed=Count("id", filter=Q(status="completed")),
         failed=Count("id", filter=Q(status="failed")),
@@ -75,20 +75,20 @@ def get_system_overview(user: AbstractBaseUser | None = None) -> dict[str, Any]:
         avg_duration=Avg("duration_seconds", filter=Q(status="completed")),
     )
 
-    unique_models_used = jobs.exclude(model__isnull=True).values_list("model_id", flat=True).distinct().count()
+    unique_models_used = runs.exclude(model__isnull=True).values_list("model_id", flat=True).distinct().count()
 
     res = {
         "total_models": LLMModel.objects.count(),
         "models_in_use": unique_models_used,
-        "total_apps": job_counts["total"] or 0,
-        "apps_completed": job_counts["completed"] or 0,
-        "apps_failed": job_counts["failed"] or 0,
-        "apps_running": job_counts["running"] or 0,
-        "apps_pending": job_counts["pending"] or 0,
-        "apps_cancelled": job_counts["cancelled"] or 0,
+        "total_apps": run_counts["total"] or 0,
+        "apps_completed": run_counts["completed"] or 0,
+        "apps_failed": run_counts["failed"] or 0,
+        "apps_running": run_counts["running"] or 0,
+        "apps_pending": run_counts["pending"] or 0,
+        "apps_cancelled": run_counts["cancelled"] or 0,
         "apps_success_rate": _finished_rate(
-            job_counts["completed"] or 0,
-            (job_counts["completed"] or 0) + (job_counts["failed"] or 0),
+            run_counts["completed"] or 0,
+            (run_counts["completed"] or 0) + (run_counts["failed"] or 0),
         ),
         "total_analyses": task_counts["total"] or 0,
         "analyses_completed": task_counts["completed"] or 0,
@@ -166,24 +166,24 @@ def get_model_comparison(
     limit: int = 25,
     *,
     prompt_hash: str | None = None,
-    bundle_key: str | None = None,
-    experiment_id: str | None = None,
+    config_fingerprint: str | None = None,
+    study_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Per-model rollup on the shared rankings scoring (0..1 scales).
 
     Delegates to the rankings aggregator so this page can never contradict
-    /rankings: findings are deduped to each job's latest run, AI-reviewer
+    /rankings: findings are deduped to each run's latest analysis, AI-reviewer
     findings are excluded from the empirical score, and MSS/empirical/
-    composite mean the same thing everywhere. ``prompt_hash``/``bundle_key``/
-    ``experiment_id`` narrow the comparison to one prompt version or designed
-    experiment — see aggregate_rankings.
+    composite mean the same thing everywhere. ``prompt_hash``/``config_fingerprint``/
+    ``study_id`` narrow the comparison to one prompt version, one configuration
+    or one study — see aggregate_rankings.
     """
     from django.core.cache import cache
 
     from backend.rankings.services import aggregate_rankings
 
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
-    cache_key = f"stats_models_v2_{limit}_{u_key}_{prompt_hash or ''}_{bundle_key or ''}_{experiment_id or ''}"
+    cache_key = f"stats_models_v3_{limit}_{u_key}_{prompt_hash or ''}_{config_fingerprint or ''}_{study_id or ''}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -192,8 +192,8 @@ def get_model_comparison(
     for r in aggregate_rankings(
         user=user,
         prompt_hash=prompt_hash,
-        bundle_key=bundle_key,
-        experiment_id=experiment_id,
+        config_fingerprint=config_fingerprint,
+        study_id=study_id,
     ):  # sorted by composite desc
         if not r.get("apps"):
             continue
@@ -205,13 +205,14 @@ def get_model_comparison(
                 "apps": r["apps"],
                 "apps_completed": r["apps_completed"],
                 "apps_failed": r.get("apps_failed", 0),
-                # Over finished generations: pending, running and cancelled jobs are no outcome.
+                # Over finished generations: pending, running and cancelled runs are no outcome.
                 "success_rate": _finished_rate(r["apps_completed"], r["apps_completed"] + r.get("apps_failed", 0)),
                 "avg_duration_seconds": r["avg_duration"],
                 "mss": r["mss_score"],
                 "empirical_quality": r["empirical_quality_score"],
                 "composite": r["composite_score"],
-                "smoke_pass_rate": r["functional_pass_rate"],
+                # The latest evaluation's functional pass rate (None when no run was measured).
+                "pass_rate": r["functional_pass_rate"],
                 "n_trials": r["n_trials"],
                 "findings": r["findings"],
                 "ai_findings": r["ai_findings"],
@@ -229,11 +230,11 @@ def get_tool_effectiveness(
 ) -> list[dict[str, Any]]:
     """Per-analyzer scan and finding totals.
 
-    ``scans`` counts executions that measured the app: completed, or skipped
-    because the app has nothing the tool reads (zero findings is then the
-    truth). Failed, cancelled and app-not-running results measured nothing;
-    they are ``not_measured``, and stay out of ``avg_per_scan`` so a tool that
-    often fails does not look quieter than it is.
+    ``scans`` counts executions that measured the app (completed, without a
+    ``not_measured`` record). Not-applicable, failed, cancelled and
+    app-not-running results measured nothing (spec section 8.8); they are
+    ``not_measured``, and stay out of ``avg_per_scan`` so a tool that often
+    fails does not look quieter than it is.
     """
     from django.core.cache import cache
 
@@ -249,11 +250,11 @@ def get_tool_effectiveness(
         "run__created_by",
     )
 
-    from backend.analysis.services.runner import SKIP_NOT_APPLICABLE
+    from backend.analysis.services.runner import NOT_MEASURED
 
-    measured = Q(status=ToolResult.Status.COMPLETED) | Q(
-        status=ToolResult.Status.SKIPPED,
-        summary__skip_reason=SKIP_NOT_APPLICABLE,
+    # A missing ``measurement`` key is NULL in SQL: spelled out, or NOT(...) would drop those rows too.
+    measured = Q(status=ToolResult.Status.COMPLETED) & (
+        Q(summary__measurement__isnull=True) | ~Q(summary__measurement=NOT_MEASURED)
     )
     by_tool = (
         results.values("tool_slug", "category")
@@ -317,7 +318,7 @@ def get_top_findings(
     """Most frequent findings: ``title``, ``tool``, ``tool_severity`` (as the tool printed it) and ``count``.
 
     ``dependency_advisory`` marks rows of known-vulnerability advisories
-    (packages, mostly the scaffold's pins), which are not code issues (P2).
+    (packages, mostly the starter's pins), which are not code issues (P2).
     """
     from django.core.cache import cache
 
@@ -360,17 +361,23 @@ def get_top_findings(
 def get_code_generation_stats(
     user: AbstractBaseUser | None = None,
 ) -> dict[str, Any]:
+    """Generation-run counts, tokens, cost and source LOC from the ``GenerationRun.metrics`` contract keys.
+
+    ``total_tokens``/``total_cost_usd``/``total_lines_of_code`` sum the completed runs that recorded the
+    value (``*_runs`` says how many); each is ``None`` when none did (unmeasured is not 0). LOC is the
+    model scope's non-test source LOC (``metrics.loc_model``).
+    """
     from django.core.cache import cache
 
     u_key = f"user_{user.id}" if user and getattr(user, "is_authenticated", False) else "anonymous"
-    cache_key = f"stats_code_gen_{u_key}"
+    cache_key = f"stats_code_gen_v3_{u_key}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
-    jobs = _scoped(GenerationJob.objects.all(), user, "created_by")
+    runs = _scoped(GenerationRun.objects.all(), user, "created_by")
 
-    counts = jobs.aggregate(
+    counts = runs.aggregate(
         total=Count("id"),
         completed=Count("id", filter=Q(status="completed")),
         failed=Count("id", filter=Q(status="failed")),
@@ -380,25 +387,18 @@ def get_code_generation_stats(
         avg_duration=Avg("duration_seconds", filter=Q(status="completed")),
     )
 
-    # Lazy: backend.reports.services imports the statistics services (study report).
-    from backend.reports.services.loc import loc_from_result_data
-
-    total_tokens = 0
-    total_cost = 0.0
-    total_loc = 0
-    unique_templates = jobs.exclude(stack_slug="").values_list("stack_slug", flat=True).distinct().count()
-    for raw_metrics, result_data in (
-        jobs.filter(status="completed").values_list("metrics", "result_data").iterator(chunk_size=200)
+    sums: dict[str, float] = {"tokens": 0.0, "cost": 0.0, "loc": 0.0}
+    seen: dict[str, int] = {"tokens": 0, "cost": 0, "loc": 0}
+    for tokens, cost, loc in (
+        runs.filter(status="completed")
+        .values_list("metrics__total_tokens", "metrics__cost_usd", "metrics__loc_model")
+        .iterator(chunk_size=500)
     ):
-        metrics = raw_metrics if isinstance(raw_metrics, dict) else {}
-        total_tokens += int(metrics.get("total_tokens", 0) or 0)
-        cost = metrics.get("cost") or metrics.get("total_cost")
-        if isinstance(cost, (int, float)):
-            total_cost += float(cost)
-        # Source LOC, as in the study tables and reports: metrics.lines_of_code
-        # counts every generated line (lockfiles, configs, blank lines) and is
-        # only the fallback for legacy jobs without stored code.
-        total_loc += loc_from_result_data(result_data)["total_loc"] or int(metrics.get("lines_of_code") or 0)
+        for key, value in (("tokens", tokens), ("cost", cost), ("loc", loc)):
+            if isinstance(value, int | float) and not isinstance(value, bool):
+                sums[key] += float(value)
+                seen[key] += 1
+    unique_stacks = runs.exclude(stack_profile__isnull=True).values_list("stack_profile__slug", flat=True).distinct()
 
     res = {
         "total_apps": counts["total"] or 0,
@@ -409,10 +409,13 @@ def get_code_generation_stats(
         "cancelled": counts["cancelled"] or 0,
         "success_rate": _finished_rate(counts["completed"] or 0, (counts["completed"] or 0) + (counts["failed"] or 0)),
         "avg_duration_seconds": _rounded(counts["avg_duration"]),
-        "total_tokens": total_tokens,
-        "total_cost_usd": round(total_cost, 4),
-        "total_lines_of_code": total_loc,
-        "unique_templates": unique_templates,
+        "total_tokens": int(sums["tokens"]) if seen["tokens"] else None,
+        "tokens_runs": seen["tokens"],
+        "total_cost_usd": round(sums["cost"], 4) if seen["cost"] else None,
+        "cost_runs": seen["cost"],
+        "total_lines_of_code": int(sums["loc"]) if seen["loc"] else None,
+        "loc_runs": seen["loc"],
+        "unique_stacks": unique_stacks.count(),
     }
     cache.set(cache_key, res, 15)
     return res

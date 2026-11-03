@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from backend.analysis.tests.factories import AnalysisRunFactory
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.testing.factories import GenerationRunFactory
 from backend.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
@@ -20,7 +20,7 @@ def auth_client(client):
 
 def test_dashboard_endpoint(auth_client):
     client, user = auth_client
-    GenerationJobFactory(created_by=user)
+    GenerationRunFactory(created_by=user)
     AnalysisRunFactory(created_by=user)
 
     res = client.get("/api/statistics/dashboard/")
@@ -57,10 +57,9 @@ def test_unauthenticated_blocked(client):
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/statistics/models/?experiment_id=not-a-uuid",
-        "/api/statistics/study/breakdowns/?experiment_id=not-a-uuid",
-        "/api/statistics/study/healing/?batch_id=not-a-uuid",
-        "/api/statistics/study/accounting/?batch_id=not-a-uuid",
+        "/api/statistics/models/?study_id=not-a-uuid",
+        "/api/statistics/study/breakdowns/?study_id=not-a-uuid",
+        "/api/statistics/study/accounting/?study_id=not-a-uuid",
     ],
 )
 def test_malformed_scope_ids_are_a_bad_request(auth_client, path):
@@ -72,9 +71,10 @@ def test_malformed_scope_ids_are_a_bad_request(auth_client, path):
 
 def test_well_formed_scope_ids_are_accepted(auth_client):
     client, _ = auth_client
-    scope = "experiment_id=6f1c1d5e-9a43-4a8b-b6a4-3c3f4f0b9d2e"
+    scope = "study_id=6f1c1d5e-9a43-4a8b-b6a4-3c3f4f0b9d2e"
     assert client.get(f"/api/statistics/models/?{scope}").status_code == 200
     assert client.get(f"/api/statistics/study/accounting/?{scope}").status_code == 200
+    assert client.get(f"/api/statistics/study/breakdowns/?{scope}").status_code == 200
 
 
 def test_tools_endpoint_reports_unmeasured_executions(auth_client):

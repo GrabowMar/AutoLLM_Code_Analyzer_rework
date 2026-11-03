@@ -2,9 +2,9 @@
 
 ``GET https://openrouter.ai/api/v1/generation?id=gen-...`` (a free metadata
 query, not a completion) returns OpenRouter's own record of one call. It is
-fetched with the job owner's key (``credentials.services.resolver``, global
-fallback rules included) after the job ran, and for older calls by
-``manage.py backfill_call_telemetry --openrouter``. Only ``gen-`` ids exist
+fetched with the run owner's key (``credentials.services.resolver``, global
+fallback rules included) after the run's generation stage, by
+:func:`fetch_call_stats_task` (queued with :func:`schedule_for_run`). Only ``gen-`` ids exist
 there: OpenCode Go / local calls get no ``openrouter`` block (the UI shows n/a).
 
 What the fields measure (verified on live records, 2026-11):
@@ -26,7 +26,7 @@ What the fields measure (verified on live records, 2026-11):
   (a 429 retried on the same provider is a retry, not a fallback).
 
 The derived keys are recomputed from the stored measured fields by
-:func:`derived` (``backfill_call_telemetry --rederive``).
+:func:`derived` (:func:`rederive_stored`).
 
 Privacy: account/workspace/app identifiers and client headers
 (:data:`PRIVACY_FIELDS`) are dropped; only the allow-listed fields are kept.
@@ -46,6 +46,7 @@ from itertools import pairwise
 from typing import Any
 
 import requests
+from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
 
@@ -277,16 +278,16 @@ def _store(artifact_id: int, block: dict[str, Any]) -> None:
         GenerationArtifact.objects.filter(pk=artifact_id).update(telemetry=telemetry)
 
 
-def candidate_artifacts(job_ids: Iterable[Any] | None = None, since: Any = None):
-    """Artifacts with a ``gen-`` response id (optionally of ``job_ids`` / created since ``since``)."""
+def candidate_artifacts(run_ids: Iterable[Any] | None = None, since: Any = None):
+    """Artifacts with a ``gen-`` response id (optionally of ``run_ids`` / created since ``since``)."""
     from backend.generation.models import GenerationArtifact
 
     qs = GenerationArtifact.objects.filter(response_payload__id__startswith="gen-")
-    if job_ids is not None:
-        qs = qs.filter(job_id__in=list(job_ids))
+    if run_ids is not None:
+        qs = qs.filter(run_id__in=list(run_ids))
     if since is not None:
         qs = qs.filter(created_at__gte=since)
-    return qs.order_by("job_id", "id")
+    return qs.order_by("run_id", "id")
 
 
 def fetch_for_artifacts(
@@ -327,34 +328,57 @@ def fetch_for_artifacts(
     return counts
 
 
-def fetch_for_job(job_id: Any, *, final: bool = True, dry_run: bool = False) -> dict[str, Any]:
-    """Fetch stats for one job's OpenRouter calls with its owner's key. Never raises for missing keys."""
+def fetch_for_run(run_id: Any, *, final: bool = True, dry_run: bool = False) -> dict[str, Any]:
+    """Fetch stats for one run's OpenRouter calls with its owner's key. Never raises for missing keys."""
     from backend.credentials.services.resolver import MissingApiKeyError
     from backend.credentials.services.resolver import get_openrouter_key
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
 
-    job = GenerationJob.objects.select_related("created_by").filter(pk=job_id).first()
-    if job is None:
-        return {"skipped": "no_job"}
-    rows = list(candidate_artifacts([job.pk]).values_list("id", "response_payload__id", "telemetry"))
+    run = GenerationRun.objects.select_related("created_by").filter(pk=run_id).first()
+    if run is None:
+        return {"skipped": "no_run"}
+    rows = list(candidate_artifacts([run.pk]).values_list("id", "response_payload__id", "telemetry"))
     if not any(needs_stats(t) for _, _, t in rows):
         return {"skipped": "nothing_to_fetch"}
     try:
-        api_key = get_openrouter_key(job.created_by)
+        api_key = get_openrouter_key(run.created_by)
     except MissingApiKeyError:
         return {"skipped": "no_key"}
     try:
         counts = fetch_for_artifacts(rows, api_key, not_found="unavailable" if final else "defer", dry_run=dry_run)
     except StatsAuthError as exc:
-        logger.warning("OpenRouter stats for job %s: %s", job_id, exc)
+        logger.warning("OpenRouter stats for run %s: %s", run_id, exc)
         return {"skipped": "key_rejected"}
     return dict(counts)
 
 
-def schedule_for_job(job_id: Any, *, countdown: int = 90) -> bool:
-    """Queue :func:`backend.generation.tasks.fetch_call_stats_task` after commit (best effort).
+# Countdown between tries while some records are still missing (404).
+PENDING_RETRY_S = 600
 
-    Only for jobs with ``gen-`` calls; off under tests unless
+
+@shared_task(bind=True, ignore_result=True, max_retries=2, soft_time_limit=900, time_limit=1200)
+def fetch_call_stats_task(self, run_id: str) -> dict:
+    """Store ``telemetry["openrouter"]`` for ``run_id``'s ``gen-`` calls; failures are logged, never raised.
+
+    OpenRouter's record can lag the completion, so a call still unknown is retried later and marked
+    ``unavailable`` only on the last try. It never touches the run's status. Registered with the worker
+    through ``CELERY_IMPORTS`` (config/settings/components/generation.py).
+    """
+    final = self.request.retries >= self.max_retries
+    try:
+        summary = fetch_for_run(run_id, final=final)
+    except Exception:
+        logger.exception("OpenRouter stats for run %s failed", run_id)
+        return {"error": True}
+    if not final and (summary.get("pending") or summary.get("error")):
+        raise self.retry(countdown=PENDING_RETRY_S)
+    return summary
+
+
+def schedule_for_run(run_id: Any, *, countdown: int = 90) -> bool:
+    """Queue :func:`fetch_call_stats_task` after commit (best effort).
+
+    Only for runs with ``gen-`` calls; off under tests unless
     ``settings.CALL_TELEMETRY_AUTO_FETCH`` is set. Never raises.
     """
     from django.conf import settings
@@ -365,18 +389,17 @@ def schedule_for_job(job_id: Any, *, countdown: int = 90) -> bool:
     try:
         from backend.generation.models import GenerationArtifact
 
-        if not GenerationArtifact.objects.filter(job_id=job_id, response_payload__id__startswith="gen-").exists():
+        if not GenerationArtifact.objects.filter(run_id=run_id, response_payload__id__startswith="gen-").exists():
             return False
-        from backend.generation.tasks import fetch_call_stats_task
 
         def _send() -> None:
             try:
-                fetch_call_stats_task.apply_async(args=[str(job_id)], countdown=countdown)
-            except Exception:  # noqa: BLE001 - a broker outage must not affect the job
-                logger.warning("Could not queue OpenRouter stats for job %s", job_id, exc_info=True)
+                fetch_call_stats_task.apply_async(args=[str(run_id)], countdown=countdown)
+            except Exception:  # noqa: BLE001 - a broker outage must not affect the run
+                logger.warning("Could not queue OpenRouter stats for run %s", run_id, exc_info=True)
 
         transaction.on_commit(_send)
     except Exception:  # noqa: BLE001 - best effort, never raises
-        logger.warning("Could not schedule OpenRouter stats for job %s", job_id, exc_info=True)
+        logger.warning("Could not schedule OpenRouter stats for run %s", run_id, exc_info=True)
         return False
     return True

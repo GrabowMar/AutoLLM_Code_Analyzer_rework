@@ -1,6 +1,6 @@
 """Run models (spec section 3.7): runs, their frozen manifests, attempts, files and evaluations.
 
-``GenerationRun`` is the renamed v2 ``GenerationJob`` (``RenameModel``, ``db_table="generation_run"``), so
+``GenerationRun`` keeps the v2 run table's identity (``RenameModel``, ``db_table="generation_run"``), so
 the foreign keys of other apps (``AnalysisRun.generation_job``, ``LLMRequest.job``,
 ``ContainerInstance.generation_job``, ``Report.generation_job``, ``EvalTaskApp.job``) keep their names.
 The queue columns are owned by ``backend.execution`` and copied verbatim from v2.
@@ -135,7 +135,7 @@ def _library_fk(model: str, verbose_name: str) -> models.ForeignKey:
 
 
 class GenerationRun(ValidatedModel):
-    """One queued unit that produces one sample or one evaluation (formerly ``GenerationJob``)."""
+    """One queued unit that produces one sample or one evaluation."""
 
     CONTRACT_FIELDS: ClassVar[dict[str, Contract]] = {
         "validity": Contract(Validity),

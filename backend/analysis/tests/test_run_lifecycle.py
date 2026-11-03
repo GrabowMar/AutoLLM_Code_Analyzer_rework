@@ -214,7 +214,7 @@ def test_an_error_outside_the_tools_leaves_no_result_running(monkeypatch, user, 
             raise RuntimeError(msg)
 
     monkeypatch.setattr(runner, "_publish_result", publish_then_break)
-    # The caller (runner._execute, the experiment post-run) fails the run itself.
+    # The caller (runner._execute, the study post-run) fails the run itself.
     with pytest.raises(RuntimeError, match="broker down"):
         runner.execute(run)
     result = run.results.get()

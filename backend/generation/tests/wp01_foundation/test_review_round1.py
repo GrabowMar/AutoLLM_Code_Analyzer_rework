@@ -7,8 +7,6 @@ Each test mirrors one MAJOR finding of the WP-01 review (and the bulk-update MIN
 2. library refs inside content are stored hash-pinned, so equal entities hash alike;
 3. blob GC keeps the shas nested inside JSON columns and inside blob payloads;
 4. ``RunAttempt`` stores observed inputs and the trajectory blob.
-
-Run with ``--ds=backend.generation.tests.wp01_foundation.settings_u1`` until WP-02a/WP-02b land.
 """
 
 from __future__ import annotations

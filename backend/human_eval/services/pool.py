@@ -1,21 +1,25 @@
-"""App pool (owner A): candidate jobs, adding jobs / experiments to a task, task-app edits and serialization.
+"""App pool (owner A): candidate runs, adding runs / studies to a task, task-app edits and serialization.
 
 Spec §5.2 + R1/R2/R3:
 
-- **Candidate jobs** are COMPLETED generation jobs the user owns (staff: every job),
-  newest first. ``current_only`` keeps only the newest attempt of each experiment cell
-  (experiment, condition, app spec, repeat), exactly like the experiment's Results tab
-  (``statistics.services.study.study_jobs``): a cell whose newest attempt is not completed
-  offers nothing. Each row shows its functional summary (incl. ``deployed``) and whether a
-  RUNNING ``llm-*`` container exists.
-- **Adding** (draft only, else 409 ``design_frozen``) takes ``job_ids`` (each must be
-  visible to the user, else 404, and completed, else 400) and/or an ``experiment_id`` (the
-  user's own, else 404) whose completed (current) attempts are added. Jobs already in the
-  pool are skipped silently. Each new app gets a light snapshot (``snapshot.job_snapshot``
-  with ``full=False``), its ``group_key`` and a provisional ``App NN`` label numbered from the
-  highest existing number + 1. Everything is validated before the first write.
+- **Candidate runs** are COMPLETED app runs (``app_agentic`` and slot variants, never
+  ``reference`` runs) the user owns (staff: every run), newest first; ``beyond_plan`` runs
+  never. ``current_only`` keeps only the current run of each study cell, the rule of
+  ``generation.runs.view.current_runs``: the **first usable** attempt of the cell, else its
+  latest attempt (a cell whose current run is not completed offers nothing). Runs outside a
+  cell are kept. Each row shows its functional summary (latest evaluation, incl.
+  ``deployed``) and whether a RUNNING ``llm-*`` container exists.
+- **Adding** (draft only, else 409 ``design_frozen``) takes ``run_ids`` (each must be
+  visible to the user, else 404, and completed, else 400) and/or a ``study_id`` (the
+  user's own, else 404) whose completed current runs (``current_runs(study, "main")``) are
+  added. Runs already in the pool are skipped silently. Each new app gets a light snapshot
+  (``snapshot.run_snapshot`` with ``full=False``), its ``group_key`` and a provisional
+  ``App NN`` label numbered from the highest existing number + 1. Everything is validated
+  before the first write.
 - **PATCH** ``is_active`` any time (items follow, see ``items.sync_app_items``), ``label``
   only before freeze; **DELETE** only before freeze (409 ``design_frozen``; deactivate instead).
+
+``EvalTaskApp.job`` is the app's GenerationRun (the FK keeps its v2 attribute name, spec D5).
 """
 
 from __future__ import annotations
@@ -29,8 +33,9 @@ from django.db.models import Max
 from django.db.models import OuterRef
 from django.db.models import Q
 
-from backend.generation.models import Experiment
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
+from backend.generation.models import Study
+from backend.generation.models import choices
 from backend.human_eval.api.schemas.common import paginate
 from backend.human_eval.models import EvalTask
 from backend.human_eval.models import EvalTaskApp
@@ -38,6 +43,7 @@ from backend.human_eval.services import counts
 from backend.human_eval.services import hosting
 from backend.human_eval.services import items as items_service
 from backend.human_eval.services import snapshot as snapshot_service
+from backend.human_eval.services import studies
 from backend.human_eval.services.access import parse_uuid
 from backend.human_eval.services.errors import HumanEvalServiceError
 from backend.human_eval.services.errors import conflict
@@ -48,15 +54,21 @@ if TYPE_CHECKING:
     from django.db.models import QuerySet
 
 MAX_LABEL_LENGTH = 40
-#: Jobs one add call may bring in (an experiment's current attempts included).
-MAX_JOBS_PER_ADD = 1000
-_JOB_RELATIONS = (
-    "model",
-    "experiment",
-    "app_requirement",
-    "condition__model",
-    "condition__profile",
-    "condition__harness_preset",
+#: Runs one add call may bring in (a study's current runs included).
+MAX_RUNS_PER_ADD = 1000
+#: Run kinds that are hostable apps a participant can test.
+APP_KINDS = (choices.RunKind.APP_AGENTIC, choices.RunKind.SLOT_SINGLE_SHOT, choices.RunKind.SLOT_AGENT)
+#: Relations the snapshot and the run view read (one query for a page of candidates).
+RUN_RELATIONS = (
+    *snapshot_service.RUN_RELATIONS,
+    "task_version__task",
+    "stack_profile",
+    "style",
+    "guidance",
+    "harness_preset",
+    "cell__unit",
+    "manifest",
+    "parent_run__stack_profile",
 )
 
 
@@ -69,9 +81,9 @@ def _is_staff(user: Any) -> bool:
     return bool(getattr(user, "is_staff", False))
 
 
-def visible_jobs(user: Any) -> QuerySet[GenerationJob]:
-    """Generation jobs the user may put in a task: their own, every job for staff."""
-    qs = GenerationJob.objects.all()
+def visible_runs(user: Any) -> QuerySet[GenerationRun]:
+    """App runs the user may put in a task: their own, every one for staff (never ``beyond_plan``)."""
+    qs = GenerationRun.objects.filter(kind__in=APP_KINDS, beyond_plan=False)
     if user is None or not getattr(user, "is_authenticated", False):
         return qs.none()
     if _is_staff(user):
@@ -79,98 +91,94 @@ def visible_jobs(user: Any) -> QuerySet[GenerationJob]:
     return qs.filter(created_by=user)
 
 
-def current_attempts(qs: QuerySet[GenerationJob]) -> QuerySet[GenerationJob]:
-    """Only the newest attempt of each experiment cell (jobs outside a cell are kept)."""
-    newer_attempt = GenerationJob.objects.filter(
-        experiment_id=OuterRef("experiment_id"),
-        condition_id=OuterRef("condition_id"),
-        app_requirement_id=OuterRef("app_requirement_id"),
-        repeat_index=OuterRef("repeat_index"),
-        created_at__gt=OuterRef("created_at"),
+def current_attempts(qs: QuerySet[GenerationRun]) -> QuerySet[GenerationRun]:
+    """Only the current run of each study cell (the first usable attempt, else the latest); runs outside a cell kept.
+
+    The rule of ``generation.runs.view.current_runs``, as a filter over any run queryset (attempt order is
+    ``created_at``).
+    """
+    cell_runs = GenerationRun.objects.filter(cell_id=OuterRef("cell_id"), beyond_plan=False)
+    earlier_usable = cell_runs.filter(usable=True, created_at__lt=OuterRef("created_at"))
+    any_usable = cell_runs.filter(usable=True)
+    later = cell_runs.filter(created_at__gt=OuterRef("created_at"))
+    return qs.filter(
+        Q(cell__isnull=True) | (Q(usable=True) & ~Exists(earlier_usable)) | (~Exists(any_usable) & ~Exists(later)),
     )
-    # Ad-hoc jobs (no experiment cell) never match: NULL = NULL is not true in SQL.
-    return qs.exclude(Exists(newer_attempt))
 
 
-def owned_experiment(user: Any, experiment_id: Any) -> Experiment:
-    """The user's experiment (staff: any); 404 for unknown, foreign or malformed ids."""
-    pk = parse_uuid(experiment_id)
-    qs = Experiment.objects.all()
+def owned_study(user: Any, study_id: Any) -> Study:
+    """The user's study (staff: any); 404 for unknown, foreign or malformed ids."""
+    pk = parse_uuid(study_id)
+    qs = Study.objects.all()
     if not _is_staff(user):
         qs = qs.filter(created_by=user)
-    experiment = qs.filter(pk=pk).first() if pk is not None else None
-    if experiment is None:
-        msg = "Experiment not found"
+    study = qs.filter(pk=pk).first() if pk is not None else None
+    if study is None:
+        msg = "Study not found"
         raise not_found(msg)
-    return experiment
+    return study
 
 
 # ---------------------------------------------------------------------------
-# Candidate jobs
+# Candidate runs
 # ---------------------------------------------------------------------------
 
 
-def _experiment_ref(job: GenerationJob) -> dict[str, str] | None:
-    if job.experiment_id is None:
+def _study_ref(run: GenerationRun) -> dict[str, str] | None:
+    if run.study_id is None:
         return None
-    return {"id": str(job.experiment_id), "name": job.experiment.name}
+    return {"id": str(run.study_id), "name": run.study.name}
 
 
-def _condition_ref(job: GenerationJob) -> dict[str, Any] | None:
-    if job.condition_id is None:
+def _condition_ref(run: GenerationRun) -> dict[str, Any] | None:
+    if run.condition_id is None:
         return None
-    from backend.generation.services.experiments import condition_label
-
-    return {"id": job.condition_id, "label": condition_label(job.condition)}
+    return {"id": run.condition_id, "label": snapshot_service.condition_label(run.condition)}
 
 
-def _app_names(job: GenerationJob) -> tuple[str, str]:
-    if job.app_requirement_id is not None:
-        return job.app_requirement.name, job.app_requirement.slug
-    spec = snapshot_service.spec_dict(job) or {}
-    return str(spec.get("name") or ""), str(spec.get("slug") or "")
-
-
-def running_job_ids(job_ids: list[Any]) -> set[str]:
-    """Jobs (as str ids) with a RUNNING ``llm-*`` container."""
+def running_run_ids(run_ids: list[Any]) -> set[str]:
+    """Runs (as str ids) with a RUNNING ``llm-*`` container."""
     from backend.runtime.models import ContainerInstance
 
-    if not job_ids:
+    if not run_ids:
         return set()
     return {
-        str(job_id)
-        for job_id in ContainerInstance.objects.filter(
-            generation_job_id__in=job_ids,
+        str(run_id)
+        for run_id in ContainerInstance.objects.filter(
+            generation_job_id__in=run_ids,
             status=ContainerInstance.Status.RUNNING,
             name__startswith="llm-",
         ).values_list("generation_job_id", flat=True)
     }
 
 
-def serialize_candidate(job: GenerationJob, running: set[str]) -> dict[str, Any]:
-    """TS ``CandidateJob``."""
-    app_name, app_slug = _app_names(job)
-    model = job.model if job.model_id else None
+def serialize_candidate(run: GenerationRun, running: set[str]) -> dict[str, Any]:
+    """TS ``CandidateRun``."""
+    from backend.generation.runs.view import run_view
+
+    view = run_view(run)
+    model = run.model if run.model_id else None
     return {
-        "id": str(job.id),
+        "id": view.id,
         "model_name": model.model_name if model is not None else "",
         "model_id": model.model_id if model is not None else "",
-        "app_name": app_name,
-        "app_slug": app_slug,
-        "experiment": _experiment_ref(job),
-        "condition": _condition_ref(job),
-        "repeat_index": job.repeat_index,
-        "mode": job.mode,
-        "created_at": job.created_at,
-        "functional": snapshot_service.functional_summary(job.metrics),
-        "running": str(job.id) in running,
+        "app_name": view.task.title if view.task is not None else "",
+        "app_slug": view.task.slug if view.task is not None else "",
+        "study": _study_ref(run),
+        "condition": _condition_ref(run),
+        "repeat_index": view.repeat_index,
+        "kind": view.kind,
+        "stack": view.stack.ref if view.stack is not None else None,
+        "created_at": run.created_at,
+        "functional": snapshot_service.functional_summary(view, view.latest_evaluation()),
+        "running": view.id in running,
     }
 
 
-def candidate_jobs(
+def candidate_runs(
     user: Any,
     *,
-    experiment_id: str | None = None,
+    study_id: str | None = None,
     app_slug: str | None = None,
     model_id: str | None = None,
     search: str | None = None,
@@ -178,16 +186,16 @@ def candidate_jobs(
     page: int = 1,
     per_page: int = 20,
 ) -> dict[str, Any]:
-    """TS ``Paginated<CandidateJob>``: the user's completed jobs, filtered, newest first."""
-    qs = visible_jobs(user)
+    """TS ``Paginated<CandidateRun>``: the user's completed app runs, filtered, newest first."""
+    qs = visible_runs(user)
     if current_only:
         qs = current_attempts(qs)
-    qs = qs.filter(status=GenerationJob.Status.COMPLETED)
-    if experiment_id:
-        pk = parse_uuid(experiment_id)
-        qs = qs.filter(experiment_id=pk) if pk is not None else qs.none()
+    qs = qs.filter(status=choices.RunStatus.COMPLETED)
+    if study_id:
+        pk = parse_uuid(study_id)
+        qs = qs.filter(study_id=pk) if pk is not None else qs.none()
     if app_slug:
-        qs = qs.filter(app_requirement__slug=app_slug)
+        qs = qs.filter(task_version__task__slug=app_slug)
     if model_id:
         qs = qs.filter(model__model_id=model_id)
     if search and search.strip():
@@ -195,79 +203,76 @@ def candidate_jobs(
         qs = qs.filter(
             Q(model__model_name__icontains=term)
             | Q(model__model_id__icontains=term)
-            | Q(app_requirement__name__icontains=term)
-            | Q(app_requirement__slug__icontains=term)
-            | Q(experiment__name__icontains=term)
+            | Q(task_version__name__icontains=term)
+            | Q(task_version__task__slug__icontains=term)
+            | Q(study__name__icontains=term)
             | Q(condition__label__icontains=term),
         )
-    qs = qs.select_related(*_JOB_RELATIONS).defer("result_data", "resolved_bundle").order_by("-created_at", "-id")
+    qs = qs.select_related(*RUN_RELATIONS).order_by("-created_at", "-id")
     envelope = paginate(qs, page, per_page)
-    jobs = envelope["items"]
-    running = running_job_ids([job.id for job in jobs])
-    envelope["items"] = [serialize_candidate(job, running) for job in jobs]
+    runs = envelope["items"]
+    running = running_run_ids([run.pk for run in runs])
+    envelope["items"] = [serialize_candidate(run, running) for run in runs]
     return envelope
 
 
 # ---------------------------------------------------------------------------
-# Adding jobs
+# Adding runs
 # ---------------------------------------------------------------------------
 
 
-def resolve_job_ids(user: Any, job_ids: list[Any] | None, *, path: str = "job_ids") -> list[GenerationJob]:
-    """The listed jobs, in the given order without repeats; 404 for invisible ones, 400 for unfinished ones."""
-    if not job_ids:
+def resolve_run_ids(user: Any, run_ids: list[Any] | None, *, path: str = "run_ids") -> list[GenerationRun]:
+    """The listed runs, in the given order without repeats; 404 for invisible ones, 400 for unfinished ones."""
+    if not run_ids:
         return []
-    if not isinstance(job_ids, list):
-        msg = "job_ids must be a list"
-        raise invalid(msg, [{"path": path, "message": "Expected a list of job ids"}])
-    if len(job_ids) > MAX_JOBS_PER_ADD:
-        msg = f"At most {MAX_JOBS_PER_ADD} jobs can be added at once"
+    if not isinstance(run_ids, list):
+        msg = "run_ids must be a list"
+        raise invalid(msg, [{"path": path, "message": "Expected a list of run ids"}])
+    if len(run_ids) > MAX_RUNS_PER_ADD:
+        msg = f"At most {MAX_RUNS_PER_ADD} runs can be added at once"
         raise invalid(msg, [{"path": path, "message": msg}])
     wanted: list[Any] = []
     missing: list[dict[str, str]] = []
-    for index, raw in enumerate(job_ids):
+    for index, raw in enumerate(run_ids):
         pk = parse_uuid(raw)
         if pk is None:
-            missing.append({"path": f"{path}.{index}", "message": "Job not found"})
+            missing.append({"path": f"{path}.{index}", "message": "Run not found"})
         elif pk not in wanted:
             wanted.append(pk)
-    found = {
-        job.id: job
-        for job in visible_jobs(user).filter(id__in=wanted).select_related(*_JOB_RELATIONS).defer("result_data")
-    }
-    for index, raw in enumerate(job_ids):
+    found = {run.pk: run for run in visible_runs(user).filter(pk__in=wanted).select_related(*RUN_RELATIONS)}
+    for index, raw in enumerate(run_ids):
         pk = parse_uuid(raw)
         if pk is not None and pk not in found:
-            missing.append({"path": f"{path}.{index}", "message": "Job not found"})
+            missing.append({"path": f"{path}.{index}", "message": "Run not found"})
     if missing:
-        msg = "Job not found"
+        msg = "Run not found"
         raise HumanEvalServiceError(404, msg, "not_found", sorted(missing, key=lambda error: error["path"]))
     unfinished = [
-        {"path": f"{path}.{index}", "message": "Only completed jobs can be evaluated"}
-        for index, raw in enumerate(job_ids)
-        if found[parse_uuid(raw)].status != GenerationJob.Status.COMPLETED
+        {"path": f"{path}.{index}", "message": "Only completed runs can be evaluated"}
+        for index, raw in enumerate(run_ids)
+        if found[parse_uuid(raw)].status != choices.RunStatus.COMPLETED
     ]
     if unfinished:
-        msg = "Only completed jobs can be added"
+        msg = "Only completed runs can be added"
         raise invalid(msg, unfinished)
     return [found[pk] for pk in wanted]
 
 
-def experiment_jobs(user: Any, experiment: Experiment, *, current_only: bool = True) -> list[GenerationJob]:
-    """The experiment's completed jobs the user may add (its current attempts when ``current_only``)."""
-    qs = visible_jobs(user).filter(experiment=experiment)
+def study_runs(user: Any, study: Study, *, current_only: bool = True) -> list[GenerationRun]:
+    """The study's completed app runs the user may add (its current runs, ``current_runs(study)``, by default)."""
+    from backend.generation.runs.view import current_runs
+
+    qs = visible_runs(user).filter(study=study)
     if current_only:
-        qs = current_attempts(qs)
-    qs = qs.filter(status=GenerationJob.Status.COMPLETED)
-    jobs = list(
-        qs.select_related(*_JOB_RELATIONS)
-        .defer("result_data")
-        .order_by("condition_id", "app_requirement_id", "repeat_index", "created_at"),
+        qs = qs.filter(pk__in=current_runs(study, stage="main").values("pk"))
+    qs = qs.filter(status=choices.RunStatus.COMPLETED)
+    runs = list(
+        qs.select_related(*RUN_RELATIONS).order_by("condition_id", "cell__unit_id", "repeat_index", "created_at"),
     )
-    if len(jobs) > MAX_JOBS_PER_ADD:
-        msg = f"At most {MAX_JOBS_PER_ADD} jobs can be added at once"
-        raise invalid(msg, [{"path": "experiment_id", "message": msg}])
-    return jobs
+    if len(runs) > MAX_RUNS_PER_ADD:
+        msg = f"At most {MAX_RUNS_PER_ADD} runs can be added at once"
+        raise invalid(msg, [{"path": "study_id", "message": msg}])
+    return runs
 
 
 def ensure_draft(task: EvalTask) -> None:
@@ -277,50 +282,50 @@ def ensure_draft(task: EvalTask) -> None:
         raise conflict(msg, "design_frozen")
 
 
-def create_task_apps(task: EvalTask, jobs: list[GenerationJob]) -> list[EvalTaskApp]:
-    """Add ``jobs`` to the pool (skipping jobs already in it): light snapshot, group key, provisional label."""
+def create_task_apps(task: EvalTask, runs: list[GenerationRun]) -> list[EvalTaskApp]:
+    """Add ``runs`` to the pool (skipping runs already in it): light snapshot, group key, provisional label."""
     existing = set(EvalTaskApp.objects.filter(task=task, job__isnull=False).values_list("job_id", flat=True))
-    new_jobs = [job for job in jobs if job.id not in existing]
-    if not new_jobs:
+    new_runs = [run for run in runs if run.pk not in existing]
+    if not new_runs:
         return []
-    labels = items_service.provisional_labels(task, len(new_jobs))
+    labels = items_service.provisional_labels(task, len(new_runs))
     top = EvalTaskApp.objects.filter(task=task).aggregate(top=Max("position"))["top"]
     start = 0 if top is None else top + 1
     apps = []
-    for offset, (job, label) in enumerate(zip(new_jobs, labels, strict=True)):
-        app = EvalTaskApp(task=task, job=job, label=label, position=start + offset)
-        app.snapshot = snapshot_service.job_snapshot(job, full=False)
+    for offset, (run, label) in enumerate(zip(new_runs, labels, strict=True)):
+        app = EvalTaskApp(task=task, job=run, label=label, position=start + offset)
+        app.snapshot = snapshot_service.run_snapshot(run, full=False)
         app.group_key = snapshot_service.group_key(app.snapshot, app.id)
         apps.append(app)
     return EvalTaskApp.objects.bulk_create(apps)
 
 
-def add_jobs(
+def add_runs(
     task: EvalTask,
     user: Any,
     *,
-    job_ids: list[Any] | None = None,
-    experiment_id: Any = None,
+    run_ids: list[Any] | None = None,
+    study_id: Any = None,
     current_only: bool = True,
 ) -> list[EvalTaskApp]:
-    """Add jobs and/or an experiment's (current) completed jobs to a draft task's pool; returns the new apps.
+    """Add runs and/or a study's (current) completed runs to a draft task's pool; returns the new apps.
 
-    Validates everything before writing. A task without an experiment is linked to the added one.
+    Validates everything before writing. A task without a study is linked to the added one.
     """
     ensure_draft(task)
-    if not job_ids and not experiment_id:
-        msg = "Choose jobs or an experiment to add"
-        raise invalid(msg, [{"path": "job_ids", "message": msg}])
-    jobs = resolve_job_ids(user, job_ids)
-    experiment = owned_experiment(user, experiment_id) if experiment_id else None
-    if experiment is not None:
-        known = {job.id for job in jobs}
-        jobs += [job for job in experiment_jobs(user, experiment, current_only=current_only) if job.id not in known]
+    if not run_ids and not study_id:
+        msg = "Choose runs or a study to add"
+        raise invalid(msg, [{"path": "run_ids", "message": msg}])
+    runs = resolve_run_ids(user, run_ids)
+    study = owned_study(user, study_id) if study_id else None
+    if study is not None:
+        known = {run.pk for run in runs}
+        runs += [run for run in study_runs(user, study, current_only=current_only) if run.pk not in known]
     with transaction.atomic():
-        created = create_task_apps(task, jobs)
-        if experiment is not None and task.experiment_id is None:
-            task.experiment = experiment
-            task.save(update_fields=["experiment", "updated_at"])
+        created = create_task_apps(task, runs)
+        if study is not None and task.study_id is None:
+            studies.link_study(task, study)
+            task.save(update_fields=["study", "updated_at"])
     return created
 
 
@@ -330,12 +335,8 @@ def add_jobs(
 
 
 def _apps_qs() -> QuerySet[EvalTaskApp]:
-    """Task apps with their task, job and container (the job's large JSON columns deferred)."""
-    return EvalTaskApp.objects.select_related("task", "job", "container").defer(
-        "job__result_data",
-        "job__resolved_bundle",
-        "job__metrics",
-    )
+    """Task apps with their task, run and container."""
+    return EvalTaskApp.objects.select_related("task", "job", "container")
 
 
 def task_app_or_404(task: EvalTask, app_id: Any) -> EvalTaskApp:
@@ -356,7 +357,7 @@ def serialize_task_app(app: EvalTaskApp, stats: dict[str, Any]) -> dict[str, Any
     return {
         "id": str(app.id),
         "label": app.label,
-        "job_id": str(app.job_id) if app.job_id else None,
+        "run_id": str(app.job_id) if app.job_id else None,
         "group_key": app.group_key,
         "position": app.position,
         "is_active": app.is_active,

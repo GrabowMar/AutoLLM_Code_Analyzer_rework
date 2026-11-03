@@ -1,13 +1,13 @@
 """Render a report as Markdown or LaTeX (booktabs) tables.
 
-The study and experiment reports have curated tables, one per section, in
+The study and study-conditions reports have curated tables, one per section, in
 the order a paper reports them. Every other report type falls back to a
 generic rendering that keeps every value: top-level scalars as a key/value
 table, nested objects as their own tables (a mapping of records, such as
 ``metrics_by_tool``, as one table with a row per record), and every list of
 objects as a table whose nested objects become dotted columns, split into
 several tables when there are more columns than fit, with nested lists of
-objects as child tables. A template comparison also gets a curated table of
+objects as child tables. A task comparison also gets a curated table of
 its models.
 
 Severity buckets in any report are the platform's normalized severity (a
@@ -142,42 +142,43 @@ def _left_out(coverage: dict[str, Any]) -> str:
 
 def _protocol_rows(data: dict[str, Any]) -> list[tuple[str, Any]]:
     protocol = data.get("protocol") or {}
-    experiment = protocol.get("experiment") or {}
-    plan = experiment.get("analysis_plan") or {}
+    study = protocol.get("study") or {}
+    plan = study.get("analysis_plan") or {}
     planned = data.get("planned_comparisons") or {}
     coverage = protocol.get("instrument_coverage")
     settings = protocol.get("settings") or {}
     kv: list[tuple[str, Any]] = []
-    if experiment:
+    if study:
         kv += [
-            ("Experiment", experiment.get("name")),
-            ("Hypothesis", experiment.get("hypothesis") or "-"),
-            ("Status", experiment.get("status")),
-            ("Baseline condition", experiment.get("baseline_condition") or planned.get("baseline_condition")),
-            ("Planned repeats", experiment.get("planned_repeats") or experiment.get("repeats")),
+            ("Study", study.get("name")),
+            ("Kind", study.get("kind")),
+            ("Hypothesis", study.get("hypothesis") or "-"),
+            ("Status", study.get("status")),
+            ("Baseline condition", study.get("baseline_condition") or planned.get("baseline_condition")),
+            ("Planned repeats", study.get("planned_repeats") or study.get("repeats")),
         ]
     kv += [
-        ("Runs (jobs)", protocol.get("jobs")),
-        ("Apps (app x condition; repeats averaged)", protocol.get("apps")),
+        ("Runs", protocol.get("runs")),
+        ("Apps (unit x condition; repeats averaged)", protocol.get("apps")),
         ("Models", len(protocol.get("models") or [])),
     ]
     if protocol.get("grouped_by") == "condition":
         kv.append(("Grouped by", "condition: a model ran under several conditions, so arms are never pooled"))
     kv += [
-        ("Templates", len(protocol.get("templates") or [])),
-        ("Modes", protocol.get("modes")),
+        ("Tasks", len(protocol.get("tasks") or [])),
+        ("Run kinds", protocol.get("kinds")),
         ("Stacks", protocol.get("stacks")),
-    ]
-    healing = protocol.get("build_healing")
-    if not healing and protocol.get("build_healing_not_applicable"):
-        healing = "not applicable (agent builds are never healed)"
-    elif healing and protocol.get("build_healing_not_applicable"):
-        healing = f"{_fmt(healing)}; not applicable (agent): {protocol['build_healing_not_applicable']}"
-    kv += [
-        ("Build healing", healing),
+        ("Starters", protocol.get("starters")),
+        ("Harnesses", protocol.get("harnesses")),
         ("Prompt versions", protocol.get("prompt_versions")),
+        ("Configuration fingerprints", protocol.get("config_fingerprints")),
         ("Cells by trial count (trials: cells)", protocol.get("trials_per_cell")),
-        ("Truncated (excluded)", protocol.get("truncated_excluded")),
+        ("Truncated runs excluded (sensitivity analysis)", protocol.get("truncated_excluded")),
+        ("Attrition (no usable run; excluded)", protocol.get("attrition_excluded") or "-"),
+        (
+            "Beyond-plan / pilot runs excluded",
+            f"{protocol.get('beyond_plan_excluded') or 0} / {protocol.get('pilot_excluded') or 0}",
+        ),
         # The builds the counted results were produced with, as recorded on them (not today's catalog pins).
         ("Tools run (recorded builds)", ", ".join(_tool_builds(t) for t in protocol.get("tools") or [])),
     ]
@@ -189,19 +190,17 @@ def _protocol_rows(data: dict[str, Any]) -> list[tuple[str, Any]]:
     ai_counted = ((data.get("issues") or {}).get("params") or {}).get("ai_counted")
     if not settings.get("include_ai"):
         ai = "excluded"
-    elif ai_counted is None:  # payloads from before the instrument set was recorded
-        ai = "counted"
     elif ai_counted:
         ai = f"counted ({_join(ai_counted)})"
     else:
         ai = "requested, but none counted (no AI reviewer reviewed every analyzed run)"
     kv += [
         ("AI-reviewer findings", ai),
-        ("Evaluators", protocol.get("evaluators")),
+        ("Evaluation suites", protocol.get("evaluators")),
     ]
     if plan:
         questions = plan.get("research_questions") or []
-        multiplicity = planned.get("multiplicity") or plan.get("multiplicity") or "per_metric"
+        multiplicity = planned.get("multiplicity") or plan.get("multiplicity") or "all"
         kv += [
             (
                 "Research questions",
@@ -215,8 +214,9 @@ def _protocol_rows(data: dict[str, Any]) -> list[tuple[str, Any]]:
             ("Alpha / correction / multiplicity", f"{plan.get('alpha')} / {plan.get('correction')} / {multiplicity}"),
         ]
     kv += [
-        ("Analysis plan hash", experiment.get("analysis_plan_hash")),
-        ("Plan frozen at", experiment.get("analysis_plan_frozen_at")),
+        ("Analysis plan hash", study.get("analysis_plan_hash")),
+        ("Pre-registration hash", study.get("prereg_hash")),
+        ("Locked at", study.get("locked_at")),
     ]
     confirm = protocol.get("confirmatory")
     if confirm is not None:
@@ -233,120 +233,78 @@ def _protocol_rows(data: dict[str, Any]) -> list[tuple[str, Any]]:
     return kv
 
 
-def _condition_group(data: dict[str, Any], row: dict[str, Any]) -> str:
-    """A ``by_condition`` row's group label as the funnel and ranking print it (from ``per_app``).
-
-    Jobs outside an experiment (no condition) of every model share one such row.
-    """
-    cid = row.get("condition_id")
-    if cid is None:
-        return "outside an experiment (all models)"
-    for r in data.get("per_app") or []:
-        if r.get("condition_id") == cid and r.get("group"):
-            return r["group"]
-    return row.get("condition_label") or str(cid)
-
-
 def _issue_tables(data: dict[str, Any], group: str, group_word: str) -> list[Table]:
-    """The deduplicated issue tables: code issues by group and template, advisories, tools, rules."""
+    """The deduplicated issue tables: code issues by group and task, advisories, tools, rules."""
     protocol = data.get("protocol") or {}
     issues = data.get("issues") or {}
-    if protocol.get("grouped_by") == "condition":
-        by_group = issues.get("by_group")
-        if by_group is None:  # stored before by_group: name each condition as the other tables do
-            by_group = [{**r, "model": _condition_group(data, r)} for r in issues.get("by_condition") or []]
-    else:
-        by_group = issues.get("by_model") or []
+    by_key = "by_group" if protocol.get("grouped_by") == "condition" else "by_model"
+    by_group = issues.get(by_key) or []
     tables: list[Table] = []
-    legacy = (protocol.get("report_version") or 1) < 2  # version 2 split code issues out
-    if legacy and not any("code_unique" in r for r in [*by_group, *(issues.get("by_template") or [])]):
-        # Generated before code issues were split from dependency advisories.
-        cols = [
-            ("apps", "Runs"),
-            ("raw_findings", "Raw findings"),
-            ("unique_issues", "Unique issues"),
-            ("duplicate_findings", "Duplicates"),
-            ("mean_unique_per_app", "Mean/run"),
-            ("unique_per_kloc", "Unique issues / kLOC (incl. dependency advisories)"),
-            ("security_unique", "Security"),
-            ("unique_critical", "Critical (normalized, all kinds)"),
-            ("unique_high", "High (normalized, all kinds)"),
-        ]
-        note = "Generated before code issues were split from dependency advisories; regenerate the report."
-        tables.append(Table(f"Issues by {group_word} (deduplicated)", [("model", group), *cols], by_group, note))
+    code_cols = [
+        ("apps", "Apps"),
+        ("runs", "Runs"),
+        ("raw_findings", "Raw findings"),
+        ("unique_issues", "Unique issues (all kinds)"),
+        ("duplicate_findings", "Duplicates"),
+        ("mean_unique_per_app", "Unique / app"),
+        ("code_unique", "Code issues"),
+        ("unique_per_kloc", "Code issues / kLOC"),
+        ("security_unique", "Security (code)"),
+        ("code_unique_tests", "In test code"),
+        ("runtime_unique", "Runtime (DAST)"),
+    ]
+    note = (
+        "Apps are unit x condition units with repeats averaged; counts are totals over runs. Code issues are in "
+        "the app's own non-test code (deptry/depcheck manifest findings included); dependency advisories, "
+        "runtime (DAST) issues and test code are counted apart. Code issues / kLOC is over non-test source "
+        "lines. '-' means not measured (no tool of that kind counted), not zero."
+    )
+    tables.append(Table(f"Issues by {group_word} (deduplicated)", [("model", group), *code_cols], by_group, note))
+    tables.append(
+        Table(
+            "Issues by task (deduplicated)",
+            [
+                ("task", "Task"),
+                *code_cols,
+                ("dependency_unique", "Dependency advisories"),
+                ("dependency_added", "In versions the model chose"),
+            ],
+            issues.get("by_task") or [],
+            note,
+        ),
+    )
+    tables.append(
+        Table(
+            f"Dependency advisories by {group_word} (package vulnerabilities, not code issues)",
+            [
+                ("model", group),
+                ("apps", "Apps"),
+                ("dependency_unique", "Advisories"),
+                ("dependency_added", "In versions the model chose"),
+                ("dependency_inherited", "Inherited (starter pins or transitive)"),
+            ],
+            by_group,
+            "Known-vulnerability scanner findings about package versions. Inherited advisories are in versions "
+            "the starter pinned, or transitive packages it pulls in: they measure the starter, not the model. "
+            "'-' means no vulnerability scanner measured the apps.",
+        ),
+    )
+    if any(r.get("manifest_unique") is not None for r in by_group):
         tables.append(
             Table(
-                "Issues by template (deduplicated)",
-                [("template", "Template"), *cols],
-                issues.get("by_template") or [],
-            ),
-        )
-    else:
-        code_cols = [
-            ("apps", "Apps"),
-            ("runs", "Runs"),
-            ("raw_findings", "Raw findings"),
-            ("unique_issues", "Unique issues (all kinds)"),
-            ("duplicate_findings", "Duplicates"),
-            ("mean_unique_per_app", "Unique / app"),
-            ("code_unique", "Code issues"),
-            ("unique_per_kloc", "Code issues / kLOC"),
-            ("security_unique", "Security (code)"),
-            ("code_unique_tests", "In test code"),
-            ("runtime_unique", "Runtime (DAST)"),
-        ]
-        note = (
-            "Apps are app x condition units with repeats averaged; counts are totals over runs. Code issues are in "
-            "the app's own non-test code (deptry/depcheck manifest findings included); dependency advisories, "
-            "runtime (DAST) issues and test code are counted apart. Code issues / kLOC is over non-test source "
-            "lines. '-' means not measured (no tool of that kind counted), not zero."
-        )
-        tables.append(Table(f"Issues by {group_word} (deduplicated)", [("model", group), *code_cols], by_group, note))
-        tables.append(
-            Table(
-                "Issues by template (deduplicated)",
-                [
-                    ("template", "Template"),
-                    *code_cols,
-                    ("dependency_unique", "Dependency advisories"),
-                    ("dependency_added", "In versions the model chose"),
-                ],
-                issues.get("by_template") or [],
-                note,
-            ),
-        )
-        tables.append(
-            Table(
-                f"Dependency advisories by {group_word} (package vulnerabilities, not code issues)",
+                f"Dependency manifest findings by {group_word} (code issues)",
                 [
                     ("model", group),
                     ("apps", "Apps"),
-                    ("dependency_unique", "Advisories"),
-                    ("dependency_added", "In versions the model chose"),
-                    ("dependency_inherited", "Inherited (scaffold pins or transitive)"),
+                    ("manifest_unique", "Manifest issues (deptry/depcheck)"),
+                    ("manifest_unused_starter", "Of which: unused packages the starter preinstalls"),
                 ],
                 by_group,
-                "Known-vulnerability scanner findings about package versions. Inherited advisories are in versions "
-                "the stack scaffold pinned, or transitive packages it pulls in: they measure the template, not the "
-                "model. '-' means no vulnerability scanner measured the apps.",
+                "Undeclared, unused or transitive dependencies in the app's own manifest; they are code issues "
+                "and in the counts above. 'Unused' findings on packages the starter preinstalls are the "
+                "starter's, not the model's choice. '-' means no manifest checker measured the apps.",
             ),
         )
-        if any(r.get("manifest_unique") is not None for r in by_group):
-            tables.append(
-                Table(
-                    f"Dependency manifest findings by {group_word} (code issues)",
-                    [
-                        ("model", group),
-                        ("apps", "Apps"),
-                        ("manifest_unique", "Manifest issues (deptry/depcheck)"),
-                        ("manifest_unused_scaffold", "Of which: unused packages the scaffold preinstalls"),
-                    ],
-                    by_group,
-                    "Undeclared, unused or transitive dependencies in the app's own manifest; they are code issues "
-                    "and in the counts above. 'Unused' findings on packages the stack scaffold preinstalls are the "
-                    "template's, not the model's choice. '-' means no manifest checker measured the apps.",
-                ),
-            )
     tables.append(
         Table(
             "Issues by tool",
@@ -450,7 +408,7 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
         {
             "model": r.get("model", "all"),
             "apps": r.get("apps"),
-            "jobs": r["jobs"],
+            "runs": r["runs"],
             "generated": r["generated"],
             "evaluated": r["evaluated"],
             "deploy": _rate(r["deploy_rate"]),
@@ -459,7 +417,7 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
             "pass": r["mean_pass_rate"],
         }
         for r in [*(funnel.get("by_model") or []), {**(funnel.get("overall") or {}), "model": "All"}]
-        if r.get("jobs") is not None
+        if r.get("runs") is not None
     ]
     tables.append(
         Table(
@@ -467,7 +425,7 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
             [
                 ("model", group),
                 ("apps", "Apps"),
-                ("jobs", "Runs"),
+                ("runs", "Runs"),
                 ("generated", "Generated"),
                 ("evaluated", "Evaluated"),
                 ("deploy", "Deployed [95% CI]"),
@@ -506,20 +464,13 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
     tables.extend(_issue_tables(data, group, group_word))
 
     security = data.get("security_bounds") or {}
-    if security.get("population") == "code_security":
-        title = "Code security issues by normalized severity (heuristic), with bounds"
-        note = (
-            "Security and secret issues in the app's own non-test code; dependency advisories, runtime (DAST) "
-            "issues and test code are left out. Severity is the platform's normalized level (a heuristic; many "
-            "tools print none). Apps are app units (affected when any repeat has the issue); issues total the runs. "
-            "For a zero count the per-app rate is bounded (exact one-sided 95%), not zero."
-        )
-    else:
-        title = "Issues of every kind by normalized severity (heuristic), with bounds"
-        note = (
-            "Generated before the bounds were limited to code security issues: these count every issue kind, "
-            "dependency advisories and duplicate code included, and runs as apps. Regenerate the report."
-        )
+    title = "Code security issues by normalized severity (heuristic), with bounds"
+    note = (
+        "Security and secret issues in the app's own non-test code; dependency advisories, runtime (DAST) "
+        "issues and test code are left out. Severity is the platform's normalized level (a heuristic; many "
+        "tools print none). Apps are app units (affected when any repeat has the issue); issues total the runs. "
+        "For a zero count the per-app rate is bounded (exact one-sided 95%), not zero."
+    )
     tables.append(
         Table(
             title,
@@ -567,7 +518,8 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
                 {**r, **{f"_{key}": _measured_stat(r.get(key), stat) for key, _label, stat in tool_columns}}
                 for r in code_rows
             ],
-            "Per app (repeats averaged); LOC counts non-test source lines."
+            "Per app (repeats averaged); LOC counts non-test model-scope source lines (authored, modified and slot "
+            "files)."
             + (
                 " Mean CC is radon's (Python functions only); mean CCN is lizard's (Python and JS/TS functions) "
                 "and duplication jscpd's share of duplicated lines, as the tools printed them over the analyzed "
@@ -579,9 +531,9 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
     )
     tables.append(
         Table(
-            f"Spread across {group_word}s on the same template",
+            f"Spread across {group_word}s on the same task",
             [
-                ("template", "Template"),
+                ("task", "Task"),
                 ("models", f"{group}s"),
                 ("loc_cv_across_models", "LOC CV"),
                 ("complexity_cv_across_models", "CC CV"),
@@ -693,10 +645,8 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
                     note
                     for note in (
                         "Deltas are condition minus baseline, per app (repeats averaged).",
-                        "Interim: p-values are withheld until the experiment finishes."
-                        if planned.get("interim")
-                        else "",
-                        "Stopped early: planned cells were cancelled, so these p-values are exploratory."
+                        "Interim: p-values are withheld until the study finishes." if planned.get("interim") else "",
+                        "Stopped early: planned cells were cancelled or stopped, so these p-values are exploratory."
                         if planned.get("stopped_early")
                         else "",
                         f"Adjusted over all {planned.get('family_size')} planned tests (every declared metric)."
@@ -707,32 +657,6 @@ def _study_tables(data: dict[str, Any]) -> list[Table]:
                     )
                     if note
                 ),
-            ),
-        )
-
-    healing = data.get("healing") or {}
-    modes = healing.get("modes") or []
-    if len(modes) > 1:
-        if by_condition:
-            # Arms of one model are never pooled; older payloads only have the raw per-condition rows.
-            healing_rows = healing.get("by_group")
-            if healing_rows is None:
-                healing_rows = [{**r, "model": _condition_group(data, r)} for r in healing.get("by_condition") or []]
-        else:
-            healing_rows = healing.get("by_model") or []
-        # Newer payloads carry distinct apps and runs (jobs); older ones had only
-        # "apps", which counted jobs.
-        has_runs = any("runs" in r for r in healing_rows) or "runs" in (healing.get("totals") or {})
-        count_cols = [("apps", "Apps"), ("runs", "Runs")] if has_runs else [("apps", "Runs")]
-        tables.append(
-            Table(
-                "Deploy rate with and without build healing",
-                [("model", group), *count_cols]
-                + [(f"deploy_rate_{m}", f"Deploy % ({m})") for m in modes]
-                + [(f"rescued_vs_{m}", f"Rescued vs {m}") for m in modes if m != healing.get("baseline")]
-                + [(f"mcnemar_p_vs_{m}", f"McNemar p vs {m}") for m in modes if m != healing.get("baseline")],
-                [*healing_rows, {"model": "All", **(healing.get("totals") or {})}],
-                "Paired on each run (the same model output built under each mode); counts are runs.",
             ),
         )
 
@@ -756,9 +680,9 @@ def _competition_ranks(rows: list[dict[str, Any]], key: str) -> dict[int, int]:
     return ranks
 
 
-def _experiment_tables(data: dict[str, Any]) -> list[Table]:
-    """Curated tables of an experiment report: design, leaderboard, paired comparison, notes, code issues."""
-    exp = data.get("experiment") or {}
+def _study_conditions_tables(data: dict[str, Any]) -> list[Table]:
+    """Curated tables of a study conditions report: design, leaderboard, paired comparison, notes, code issues."""
+    study = data.get("study") or {}
     results = data.get("results") or {}
     conditions = data.get("conditions") or []
     leaderboard = results.get("leaderboard") or []
@@ -767,77 +691,56 @@ def _experiment_tables(data: dict[str, Any]) -> list[Table]:
     labels = {c["condition_id"]: c["label"] for c in conditions}
     labels.update({r["condition_id"]: r["label"] for r in leaderboard if r.get("condition_id") and r.get("label")})
     kv = [
-        ("Experiment", exp.get("name")),
-        ("Hypothesis", exp.get("hypothesis")),
-        ("Status", exp.get("status")),
-        ("Repeats", exp.get("repeats")),
+        ("Study", study.get("name")),
+        ("Kind", study.get("kind")),
+        ("Hypothesis", study.get("hypothesis")),
+        ("Status", study.get("status")),
+        ("Repeats", study.get("repeats")),
     ]
     if sample:
-        rule = "frozen analysis plan" if sample.get("truncation_rule") == "analysis_plan" else "report setting"
+        rule = "locked analysis plan" if sample.get("truncation_rule") == "analysis_plan" else "report setting"
         kv += [
-            ("Planned repeats (the analyzed sample)", sample.get("planned_repeats")),
+            ("Runs (current run per main-stage cell)", sample.get("runs")),
             (
                 "Truncated runs",
-                f"{'excluded' if sample.get('exclude_truncated') else 'kept'} ({rule}"
+                f"{'excluded' if sample.get('exclude_truncated') else 'kept (intention-to-treat)'} ({rule}"
                 + (f"; {sample['truncated_excluded']} excluded)" if sample.get("truncated_excluded") else ")"),
             ),
+            ("Beyond-plan runs excluded", sample.get("beyond_plan_excluded")),
+            ("Pilot runs excluded", sample.get("pilot_excluded")),
         ]
-    kv += [
-        ("Baseline", f"{labels.get(results.get('baseline_condition_id'), '-')} ({results.get('baseline_source')})"),
-        ("Interim", results.get("interim")),
-        ("Balanced", results.get("balanced")),
-        ("Results computed at", results.get("generated_at")),
-    ]
-    tables = [Table("Experiment", [("k", "Item"), ("v", "Value")], [{"k": k, "v": v} for k, v in kv])]
+    baseline = next((c for c in conditions if c.get("is_baseline")), None)
+    kv.append(("Baseline", labels.get(baseline["condition_id"], baseline.get("label")) if baseline else "-"))
+    if results:
+        kv += [
+            ("Interim", results.get("interim")),
+            ("Balanced", results.get("balanced")),
+            ("Results computed at", results.get("generated_at")),
+        ]
+    tables = [Table("Study", [("k", "Item"), ("v", "Value")], [{"k": k, "v": v} for k, v in kv])]
 
-    def missing(r: dict[str, Any]) -> Any:
-        m = r.get("n_missing")
-        # Repeats added after launch are outside the planned sample, not missing.
-        return sum(v for k, v in m.items() if k != "beyond_plan") if isinstance(m, dict) else m
-
-    def beyond(r: dict[str, Any]) -> int:
-        m = r.get("n_missing")
-        return int(m.get("beyond_plan") or 0) if isinstance(m, dict) else 0
-
-    ranks = _competition_ranks(leaderboard, "pass_rate_mean")
-    board = [
-        {**r, "rank": ranks[i], "missing": missing(r), "beyond_plan": beyond(r)} for i, r in enumerate(leaderboard)
-    ]
-    extended = any(r["beyond_plan"] for r in board)
-    tables.append(
-        Table(
-            "Leaderboard (conformance pass rate)",
-            [
-                ("rank", "Rank"),
-                ("label", "Condition"),
-                ("n_apps", "Apps"),
-                ("n_graded", "Graded"),
-                ("missing", "Missing"),
-                *([("beyond_plan", "Beyond plan")] if extended else []),
-                ("k_passed", "Fully passed"),
-                ("pass_rate_mean", "Mean pass rate"),
-                ("pass_rate_ci95", "95% CI (app bootstrap)"),
-                ("cost_usd", "Cost (USD)"),
-                ("median_seconds", "Median run (s)"),
-            ],
-            board,
-            "Graded and Missing count runs (app x repeat). The mean is over apps (each app's repeats averaged "
-            "first); no interval below 3 apps. Equal means share a rank."
-            + (
-                " Beyond plan: repeats added after launch, outside the planned sample and the analysis."
-                if extended
-                else ""
+    if leaderboard:
+        ranks = _competition_ranks(leaderboard, "pass_rate_mean")
+        tables.append(
+            Table(
+                "Leaderboard (pass rate)",
+                [
+                    ("rank", "Rank"),
+                    ("label", "Condition"),
+                    ("n_apps", "Apps"),
+                    ("n_graded", "Graded"),
+                    ("k_passed", "Fully passed"),
+                    ("pass_rate_mean", "Mean pass rate"),
+                    ("pass_rate_ci95", "95% CI (app bootstrap)"),
+                    ("cost_usd", "Cost (USD)"),
+                ],
+                [{**r, "rank": ranks[i]} for i, r in enumerate(leaderboard)],
+                "The mean is over apps (each app's repeats averaged first); no interval below 3 apps. Equal means "
+                "share a rank.",
             ),
-        ),
-    )
+        )
     paired = results.get("paired") or {}
     if paired.get("rows"):
-        rows = paired["rows"]
-        if any("p_adjusted" in r for r in rows):
-            adjusted = ("p_adjusted", f"p ({paired.get('correction') or 'holm'})")
-        else:
-            # Older reports stored only the Holm-adjusted p.
-            adjusted = ("p_holm", "p (holm)")
         alpha = paired.get("alpha")
         kind = f"{paired.get('status', 'exploratory')}, {paired.get('alternative', 'two-sided')}"
         tables.append(
@@ -852,68 +755,40 @@ def _experiment_tables(data: dict[str, Any]) -> list[Table]:
                     ("losses", "Below baseline"),
                     ("ties", "Ties"),
                     ("wilcoxon_p", "p (Wilcoxon)"),
-                    adjusted,
+                    ("p_adjusted", f"p ({paired.get('correction') or 'holm'})"),
                     ("significant", f"< {alpha}" if alpha is not None else "Significant"),
                 ],
-                [{**r, "condition": labels.get(r["condition_id"], r["condition_id"])} for r in rows],
+                [{**r, "condition": labels.get(r["condition_id"], r["condition_id"])} for r in paired["rows"]],
                 "App-blocked: each delta is one app's mean pass rate minus the baseline's on the same app.",
             ),
         )
-    notes = results.get("notes") or []
+    notes = [*(data.get("notes") or []), *(results.get("notes") or [])]
     if notes:
         tables.append(Table("Notes", [("note", "Note")], [{"note": n} for n in notes]))
-    dedup = [c.get("issues_dedup") or {} for c in conditions]
-    split = any("code_unique" in d for d in dedup)
-    analyzed = (
-        [("issues_dedup.apps", "Apps analyzed"), ("issues_dedup.runs", "Runs analyzed")]
-        if any("runs" in d for d in dedup)
-        else [("issues_dedup.apps", "Analyzed")]
-    )
-    # Kinds counted apart from code issues, when the payload has them (P2-P4).
-    apart = [
-        (f"issues_dedup.{key}", header)
-        for key, header in (
-            ("code_unique_tests", "In test code"),
-            ("runtime_unique", "Runtime (DAST)"),
-        )
-        if any(key in d for d in dedup)
-    ]
-    inherited = (
-        [("issues_dedup.dependency_inherited", "Inherited (scaffold pins or transitive)")]
-        if any("dependency_inherited" in d for d in dedup)
-        else []
-    )
     tables.append(
         Table(
             "Code issues per condition (deduplicated across tools)",
             [
                 ("label", "Condition"),
-                *analyzed,
+                ("issues_dedup.apps", "Apps analyzed"),
+                ("issues_dedup.runs", "Runs analyzed"),
                 ("issues_dedup.raw_findings", "Raw findings"),
                 ("issues_dedup.unique_issues", "Unique issues (all kinds)"),
                 ("issues_dedup.code_unique", "Code issues"),
-                (
-                    "issues_dedup.unique_per_kloc",
-                    "Code issues / kLOC" if split else "Unique issues / kLOC (incl. dependency advisories)",
-                ),
-                ("issues_dedup.security_unique", "Security (code)" if split else "Security"),
-                *apart,
+                ("issues_dedup.unique_per_kloc", "Code issues / kLOC"),
+                ("issues_dedup.security_unique", "Security (code)"),
+                ("issues_dedup.code_unique_tests", "In test code"),
+                ("issues_dedup.runtime_unique", "Runtime (DAST)"),
                 ("issues_dedup.dependency_unique", "Dependency advisories"),
                 ("issues_dedup.dependency_added", "In versions the model chose"),
-                *inherited,
+                ("issues_dedup.dependency_inherited", "Inherited (starter pins or transitive)"),
                 ("generation.total_cost", "Generation cost (USD)"),
             ],
             [{**c, "label": labels.get(c.get("condition_id"), c.get("label"))} for c in conditions],
-            (
-                "Each run's latest result per tool, counted only from the tools that measured every analyzed run "
-                "of the experiment (see Notes); AI-reviewer findings excluded. Code issues leave out dependency "
-                "advisories, runtime (DAST-only) issues and test code; code issues / kLOC is over the apps' "
-                "non-test source lines (repeats averaged). '-' means not measured, not zero."
-                if split
-                else "Each app's latest result per tool; AI-reviewer findings excluded. Generated before code issues "
-                "were split from dependency advisories: the density counts every unique issue; regenerate the "
-                "report for code-issue densities."
-            ),
+            "Each run's latest result per tool, counted only from the tools that measured every analyzed run "
+            "of the study (see Notes); AI-reviewer findings excluded. Code issues leave out dependency "
+            "advisories, runtime (DAST-only) issues and test code; code issues / kLOC is over the apps' "
+            "non-test model-scope source lines (repeats averaged). '-' means not measured, not zero.",
         ),
     )
     return tables
@@ -1075,7 +950,7 @@ def _generic_tables(data: dict[str, Any], prefix: str = "") -> list[Table]:
     return tables
 
 
-def _template_comparison_tables(data: dict[str, Any]) -> list[Table]:
+def _task_comparison_tables(data: dict[str, Any]) -> list[Table]:
     """A curated models table first; every field follows in the generic tables."""
 
     def measured(block: dict[str, Any], key: str, count: str) -> Any:
@@ -1089,8 +964,9 @@ def _template_comparison_tables(data: dict[str, Any]) -> list[Table]:
         unmeasured = analyzed == 0
         return {
             **m,
-            "jobs": (m.get("generation") or {}).get("total_jobs"),
-            "completed": (m.get("generation") or {}).get("completed_jobs"),
+            "runs": (m.get("generation") or {}).get("total_runs"),
+            "completed": (m.get("generation") or {}).get("completed_runs"),
+            "treatment": (m.get("treatment_hash") or "")[:12],
             "analyzed": analyzed,
             "loc": measured(m.get("loc") or {}, "total_loc", "counted"),
             # Not analyzed is unmeasured, not zero findings.
@@ -1106,21 +982,20 @@ def _template_comparison_tables(data: dict[str, Any]) -> list[Table]:
         }
 
     models = data.get("models") or []
-    split = any("code_unique" in (m.get("issues_dedup") or {}) for m in models)
     return [
         Table(
             "Models",
             [
                 ("model_id", "Model"),
-                ("bundle_key", "Method"),
-                ("jobs", "Jobs"),
+                ("treatment", "Treatment"),
+                ("runs", "Runs"),
                 ("completed", "Completed"),
                 ("analyzed", "Analyzed"),
                 ("loc", "LOC"),
                 ("raw", "Raw findings"),
                 ("unique", "Unique issues"),
                 ("code", "Code issues"),
-                ("per_kloc", "Code issues / kLOC" if split else "Unique issues / kLOC"),
+                ("per_kloc", "Code issues / kLOC"),
                 ("security", "Security"),
                 ("deps", "Dependency advisories"),
                 ("deps_added", "In versions the model chose"),
@@ -1138,10 +1013,10 @@ def report_tables(report: Report) -> list[Table]:
     data = report.report_data or {}
     if report.report_type == Report.Type.STUDY_REPORT:
         tables = _study_tables(data)
-    elif report.report_type == Report.Type.EXPERIMENT_REPORT and "results" in data:
-        tables = _experiment_tables(data)
-    elif report.report_type == "template_comparison" and _is_records(data.get("models")):
-        tables = _template_comparison_tables(data) + _generic_tables(data)
+    elif report.report_type == Report.Type.STUDY_CONDITIONS and "conditions" in data:
+        tables = _study_conditions_tables(data)
+    elif report.report_type == Report.Type.TASK_COMPARISON and _is_records(data.get("models")):
+        tables = _task_comparison_tables(data) + _generic_tables(data)
     else:
         tables = _generic_tables(data)
     for table in tables:

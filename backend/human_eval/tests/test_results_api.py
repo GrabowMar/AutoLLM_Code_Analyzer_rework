@@ -540,7 +540,7 @@ def sample_results(task) -> dict:
                 "model_name": "Model A",
                 "condition_label": "Condition 1",
                 "app_slug": "todo",
-                "job_id": None,
+                "run_id": None,
                 "n_submitted": 3,
                 "n_unavailable": 0,
             },
@@ -581,7 +581,7 @@ def sample_results(task) -> dict:
                         "n_raters": 2,
                         "compliance": 0.75,
                         "compliance_strict": 0.6,
-                        "by_source": {"backend": 1, "api": None},
+                        "by_source": {"frontend": 1, "api": None},
                         "blocked": 1,
                         "cannot_test": 1,
                         "conformance_pass_rate": 0.8,
@@ -592,8 +592,8 @@ def sample_results(task) -> dict:
                 "per_group": [_group_score()],
                 "per_requirement": [
                     {
-                        "req_id": "b_1",
-                        "source": "backend",
+                        "req_id": "f_1",
+                        "source": "frontend",
                         "text": "Users can log in",
                         "n_ratings": 2,
                         "met": 1,

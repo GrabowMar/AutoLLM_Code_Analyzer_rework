@@ -1,7 +1,7 @@
 """Generalised chat client (spec §D.2).
 
-``chat`` is the single entry point for scaffolding, repairs and AI-review
-analysis calls:
+``chat`` is the single entry point for in-process LLM calls (AI-review
+analysis, endpoint probes; agent runs go through ``proxy_server``):
 
 - ``kind=openrouter``: delegates to ``OpenRouterClient(access.api_key).chat_completion``
   with today's behaviour and retries; ``OpenRouterError`` is re-raised unchanged.
@@ -9,7 +9,7 @@ analysis calls:
   ``requests.wait_result`` → translation to the OpenAI ``chat.completion``
   shape (``usage.cost = 0.0``, ``provider = endpoint.slug``,
   ``model = f"{served}@{digest[7:19]}"``). Adds ``leased_at - created_at`` to
-  ``job.execution.llm_queue_wait_s``.
+  the run's ``execution.llm_queue_wait_s`` (``job`` = the ``GenerationRun``).
 
 Errors raise ``inference.access.LLMAccessError`` (``upstream_error``,
 ``upstream_oom``, ``timeout``, ``lease_expired``, ``cancelled``, ...).
@@ -248,15 +248,18 @@ def served_info(row: LLMRequest, access: Access) -> dict[str, Any]:
 
 
 def add_queue_wait(job, row: LLMRequest) -> None:
-    """Add ``leased_at - created_at`` to ``job.execution.llm_queue_wait_s`` (one guarded jsonb UPDATE)."""
+    """Add ``leased_at - created_at`` to the run's ``execution.llm_queue_wait_s`` (one guarded jsonb UPDATE).
+
+    ``job`` is the ``GenerationRun`` (or any object with its ``pk``) the request belongs to.
+    """
     if job is None or row.leased_at is None or row.created_at is None:
         return
     seconds = max(0.0, (row.leased_at - row.created_at).total_seconds())
     from django.db import connection
 
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
 
-    table = GenerationJob._meta.db_table  # noqa: SLF001
+    table = GenerationRun._meta.db_table  # noqa: SLF001
     with connection.cursor() as cursor:
         cursor.execute(
             f"""
@@ -281,13 +284,16 @@ def chat(
     messages: list[dict[str, Any]],
     params: dict[str, Any],
     seed: int | None,
+    source: str,
     job=None,
-    source: str = "scaffolding",
     cancel_check: Callable[[], bool] | None = None,
     priority: int = 0,
 ) -> ChatResult:
     """Run one chat completion for ``access`` and return it in OpenAI shape.
 
+    ``source`` is the ``LLMRequest.Source`` value the queued row records
+    (required: there is no default caller kind in v3). ``job`` is the
+    ``GenerationRun`` the call belongs to, if any.
     ``params`` are the resolved LLM params (max_tokens, temperature, ...);
     unsupported ones are dropped per ``params.STATIC_PARAMS``.
     ``cancel_check`` is polled every 5 s while waiting; True cancels the

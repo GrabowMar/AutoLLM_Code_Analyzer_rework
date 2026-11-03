@@ -5,14 +5,17 @@ studies, runs, slots, patterns, eval), each without a prefix: every area declare
 the spec's tables (``/library/{kind}/``, ``/config/``, ``/runs/{id}/``). Django Ninja matches routes in
 registration order, so the order also keeps static paths ahead of parameterised ones across areas.
 
-The retained routers (``telemetry``, ``trajectory``, ``variability``, ``job_insights``) are appended after
-the areas by WP-02a once they are re-pointed and moved from ``api/views/`` to ``api/``. The v2 view
-modules are deliberately not imported: they read the deleted v2 models. ``config/api.py`` mounts
+The retained routers (``telemetry``, ``trajectory``, ``variability``, ``job_insights``; re-pointed to
+``GenerationRun`` by WP-02a) are appended after the areas (``RETAINED_ROUTERS``). ``config/api.py`` mounts
 ``backend.generation.api.router``.
 """
 
 from ninja import Router
 
+from backend.generation.api import job_insights as job_insights_api
+from backend.generation.api import telemetry as telemetry_api
+from backend.generation.api import trajectory as trajectory_api
+from backend.generation.api import variability as variability_api
 from backend.generation.budget import api as budget_api
 from backend.generation.evaluation import api as evaluation_api
 from backend.generation.harnesses import api as harnesses_api
@@ -23,7 +26,7 @@ from backend.generation.runs import api as runs_api
 from backend.generation.slot import api as slot_api
 from backend.generation.study import api as study_api
 
-__all__ = ["AREA_ROUTERS", "router"]
+__all__ = ["AREA_ROUTERS", "RETAINED_ROUTERS", "router"]
 
 AREA_ROUTERS: tuple[tuple[str, Router], ...] = (
     ("library", library_api.router),
@@ -37,6 +40,13 @@ AREA_ROUTERS: tuple[tuple[str, Router], ...] = (
     ("eval", evaluation_api.router),
 )
 
+RETAINED_ROUTERS: tuple[tuple[str, Router], ...] = (
+    ("telemetry", telemetry_api.router),
+    ("trajectory", trajectory_api.router),
+    ("variability", variability_api.router),
+    ("job_insights", job_insights_api.router),
+)
+
 router = Router(tags=["generation"])
-for _area, _area_router in AREA_ROUTERS:
+for _area, _area_router in (*AREA_ROUTERS, *RETAINED_ROUTERS):
     router.add_router("", _area_router)

@@ -1,4 +1,4 @@
-"""Reports app — service tests."""
+"""Reports app: service tests (generators, report service, summaries)."""
 
 from __future__ import annotations
 
@@ -6,92 +6,60 @@ import time
 
 import pytest
 
-from backend.generation.models import GenerationJob
-from backend.generation.tests.factories import AppRequirementTemplateFactory
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.analysis.models import AnalysisRun
+from backend.analysis.models import Finding
+from backend.analysis.tests.factories import AnalysisRunFactory
+from backend.analysis.tests.factories import ToolResultFactory
+from backend.generation.models import GenerationRun
+from backend.generation.models import choices
+from backend.generation.testing import factories
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.reports import services
 from backend.reports.models import Report
 from backend.reports.services import generators
-from backend.reports.services import loc as loc_mod
+from backend.reports.tests.helpers import cell_run
+from backend.reports.tests.helpers import evaluate
+from backend.reports.tests.helpers import make_cell
+from backend.reports.tests.helpers import make_condition
+from backend.reports.tests.helpers import make_run
+from backend.reports.tests.helpers import make_study
+from backend.reports.tests.helpers import make_unit
 from backend.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
 
+S = choices.RunStatus
 
-def test_loc_from_job_counts_non_blank_non_comment():
-    user = UserFactory()
-    job = GenerationJobFactory(
+
+def _run_with_findings(user, model, task, severities, *, code="x = 1\n" * 100, **kwargs):
+    run = make_run(user, model, task, code=code, **kwargs)
+    analysis = AnalysisRunFactory(
         created_by=user,
-        result_data={
-            "backend_code": "import os\n# comment\n\nprint('hi')\n",
-            "frontend_code": "import React from 'react';\n// comment\n\nReact.foo();\n",
-        },
+        generation_job=run,
+        source_code={},
+        status=AnalysisRun.Status.COMPLETED,
     )
-    out = loc_mod.loc_from_job(job)
-    assert out["backend_loc"] == 2
-    assert out["frontend_loc"] == 2
-    assert out["total_loc"] == 4
-
-
-def test_loc_from_job_sums_multi_file_result_by_extension():
-    user = UserFactory()
-    job = GenerationJobFactory(
-        created_by=user,
-        result_data={
-            "result_schema_version": 2,
-            "files": {
-                "app.py": "import os\n# comment\nprint('hi')\n",
-                "models.py": "import sqlalchemy\n",
-                "frontend/src/App.jsx": "export default function App() {}\n// comment\nconst x = 1;\n",
-            },
-        },
-    )
-    out = loc_mod.loc_from_job(job)
-    assert out["backend_loc"] == 3  # app.py (2) + models.py (1)
-    assert out["frontend_loc"] == 2  # App.jsx, comment line excluded
-    assert out["total_loc"] == 5
-
-
-def test_loc_for_jobs_aggregates():
-    user = UserFactory()
-    j1 = GenerationJobFactory(
-        created_by=user,
-        result_data={"backend_code": "a\nb\n", "frontend_code": "x\n"},
-    )
-    j2 = GenerationJobFactory(
-        created_by=user,
-        result_data={"backend_code": "c\nd\ne\n"},
-    )
-    out = loc_mod.loc_for_jobs(GenerationJob.objects.filter(id__in=[j1.id, j2.id]))
-    assert out["total_loc"] == 6
-    assert out["counted"] == 2
-    assert len(out["per_job"]) == 2
+    result = ToolResultFactory(run=analysis, tool_slug="bandit")
+    for sev in severities:
+        Finding.objects.create(result=result, severity=sev, title="f", file_path="app.py")
+    return run
 
 
 def test_generate_model_analysis_returns_aggregates():
     user = UserFactory()
     model = LLMModelFactory(model_id="openai/gpt-4o", model_name="GPT-4o")
-    GenerationJobFactory.create_batch(
-        2,
-        created_by=user,
-        model=model,
-        status=GenerationJob.Status.COMPLETED,
-        duration_seconds=10.0,
-        result_data={"backend_code": "x\ny\n"},
-    )
-    GenerationJobFactory(
-        created_by=user,
-        model=model,
-        status=GenerationJob.Status.FAILED,
-    )
+    task = factories.TaskSpecVersionFactory.create()
+    for _ in range(2):
+        make_run(user, model, task, duration_seconds=10.0, code="x = 1\ny = 2\n")
+    make_run(user, model, task, status=S.FAILED, code=None)
     data = generators.generate_model_analysis({"model_id": model.model_id})
     assert data["model"]["model_id"] == model.model_id
-    assert data["generation"]["total_jobs"] == 3
-    assert data["generation"]["completed_jobs"] == 2
-    assert data["generation"]["failed_jobs"] == 1
+    assert data["generation"]["total_runs"] == 3
+    assert data["generation"]["completed_runs"] == 2
+    assert data["generation"]["failed_runs"] == 1
+    assert data["generation"]["by_outcome"] == {"tested": 2, "infra_error": 1}
     assert data["loc"]["total_loc"] == 4
-    # No job was analyzed: the counts are unknown, not zero findings.
+    # No run was analyzed: the counts are unknown, not zero findings.
     assert data["runs_analyzed"] == 0
     assert data["total_findings"] is None
     assert data["reported_levels"] is None
@@ -100,271 +68,147 @@ def test_generate_model_analysis_returns_aggregates():
     assert data["issues_dedup"]["code_unique"] is None
 
 
-def test_generate_model_analysis_counts_only_latest_run_per_job():
-    from backend.analysis.models import AnalysisRun
-    from backend.analysis.tests.factories import AnalysisRunFactory
-    from backend.analysis.tests.factories import ToolResultFactory
-
+def test_generate_model_analysis_counts_only_the_latest_result_per_run():
     user = UserFactory()
     model = LLMModelFactory(model_id="openai/gpt-4o", model_name="GPT-4o")
-    job = GenerationJobFactory(
-        created_by=user,
-        model=model,
-        status=GenerationJob.Status.COMPLETED,
-        result_data={"backend_code": "x\n"},
-    )
+    run = make_run(user, model, factories.TaskSpecVersionFactory.create())
 
-    def run_with_findings(n, **kwargs):
-        run = AnalysisRunFactory(
+    def analysis_with_findings(n):
+        analysis = AnalysisRunFactory(
             created_by=user,
-            generation_job=job,
+            generation_job=run,
+            source_code={},
             status=AnalysisRun.Status.COMPLETED,
-            **kwargs,
         )
-        result = ToolResultFactory(run=run, tool_slug="bandit", metrics={"score": n})
-        from backend.analysis.models import Finding
-
+        result = ToolResultFactory(run=analysis, tool_slug="bandit", metrics={"score": n})
         for _ in range(n):
-            Finding.objects.create(result=result, severity="low", title="f")
-        return run
+            Finding.objects.create(result=result, severity="low", title="f", file_path="app.py")
+        return analysis
 
-    run_with_findings(10)  # stale earlier analysis of the same code
-    run_with_findings(3)  # latest
+    analysis_with_findings(10)  # stale earlier analysis of the same code
+    analysis_with_findings(3)  # latest
 
     data = generators.generate_model_analysis({"model_id": model.model_id})
-    # Re-analyzing a job must not double-count: only the latest run counts.
+    # Re-analyzing a run must not double-count: only the latest result per tool counts.
     assert data["total_findings"] == 3
     assert data["tools"] == [{"analyzer": "bandit", "tasks": 1}]
     assert data["metrics_by_tool"]["bandit"]["numeric"]["score"]["avg"] == 3
 
 
-def test_job_summary_reports_truncated_jobs():
+def test_task_comparison_stats_mean_and_stdev():
     user = UserFactory()
-    model = LLMModelFactory(model_id="openai/x")
-    GenerationJobFactory(
-        created_by=user,
-        model=model,
-        status=GenerationJob.Status.COMPLETED,
-        result_data={"backend_code": "x\n", "frontend_truncated": True},
-    )
-    GenerationJobFactory(
-        created_by=user,
-        model=model,
-        status=GenerationJob.Status.COMPLETED,
-        result_data={"backend_code": "x\n"},
-    )
-    data = generators.generate_model_analysis({"model_id": model.model_id})
-    assert data["generation"]["truncated_jobs"] == 1
-
-
-def _job_with_run_findings(
-    user,
-    model,
-    template,
-    severities,
-    *,
-    result_data=None,
-    metrics=None,
-    bundle_key="",
-    prompt_hash="",
-):
-    from backend.analysis.models import AnalysisRun
-    from backend.analysis.models import Finding
-    from backend.analysis.tests.factories import AnalysisRunFactory
-    from backend.analysis.tests.factories import ToolResultFactory
-
-    job = GenerationJobFactory(
-        created_by=user,
-        model=model,
-        app_requirement=template,
-        status=GenerationJob.Status.COMPLETED,
-        result_data=result_data or {"backend_code": "x\n" * 100},
-        metrics=metrics or {},
-        bundle_key=bundle_key,
-        prompt_hash=prompt_hash,
-    )
-    run = AnalysisRunFactory(created_by=user, generation_job=job, status=AnalysisRun.Status.COMPLETED)
-    result = ToolResultFactory(run=run, tool_slug="bandit")
-    for sev in severities:
-        Finding.objects.create(result=result, severity=sev, title="f")
-    return job
-
-
-def test_template_comparison_stats_mean_and_stdev():
-    user = UserFactory()
-    template = AppRequirementTemplateFactory()
+    task = factories.TaskSpecVersionFactory.create()
     model = LLMModelFactory(model_id="m1")
-    # Two trials: 2 vs 4 findings (all high) → mean 3, stdev sqrt(2).
-    _job_with_run_findings(user, model, template, ["high"] * 2, metrics={"cost": 0.01, "total_duration": 100})
-    _job_with_run_findings(user, model, template, ["high"] * 4, metrics={"cost": 0.03, "total_duration": 200})
+    # Two trials: 2 vs 4 findings (all high) -> mean 3, stdev sqrt(2).
+    _run_with_findings(user, model, task, ["high"] * 2, metrics={"cost_usd": 0.01}, duration_seconds=100)
+    _run_with_findings(user, model, task, ["high"] * 4, metrics={"cost_usd": 0.03}, duration_seconds=200)
 
-    data = generators.generate_template_comparison({"template_slug": template.slug})
+    data = generators.generate_task_comparison({"task_slug": task.task.slug})
     stats = data["models"][0]["stats"]
     assert stats["trials"] == 2
     assert stats["analyzed"] == 2
     assert stats["findings_total"] == {"mean": 3.0, "stdev": pytest.approx(1.4142, abs=1e-3), "n": 2}
     assert stats["critical_high_normalized"]["mean"] == 3.0
-    # weighted: high=5 → 10 and 20 → mean 15
+    # weighted: high=5 -> 10 and 20 -> mean 15
     assert stats["weighted_score"]["mean"] == 15.0
     assert stats["cost"]["total"] == pytest.approx(0.04)
     assert stats["duration"]["mean"] == 150.0
 
 
-def test_template_comparison_excludes_truncated_trials_by_default():
+def test_task_comparison_groups_by_model_and_treatment():
+    """Runs under different treatments (stack, prompts, harness) must not be pooled into one row."""
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
+    task = factories.TaskSpecVersionFactory.create()
     model = LLMModelFactory(model_id="m1")
-    _job_with_run_findings(user, model, template, ["high"])
-    _job_with_run_findings(
-        user,
-        model,
-        template,
-        ["high"] * 9,
-        result_data={"backend_code": "x\n", "frontend_truncated": True},
-    )
+    _run_with_findings(user, model, task, ["high"], treatment_hash="a" * 64)
+    _run_with_findings(user, model, task, ["high"] * 3, treatment_hash="b" * 64)
 
-    data = generators.generate_template_comparison({"template_slug": template.slug})
-    stats = data["models"][0]["stats"]
-    assert stats["trials"] == 1
-    assert stats["truncated_excluded"] == 1
-    assert stats["findings_total"]["mean"] == 1.0
-
-    included = generators.generate_template_comparison(
-        {"template_slug": template.slug, "exclude_truncated": False},
-    )
-    assert included["models"][0]["stats"]["trials"] == 2
-
-
-def test_template_comparison_groups_by_model_and_bundle_key():
-    """Jobs from different prompt/bundle versions must not be pooled into one row."""
-    user = UserFactory()
-    template = AppRequirementTemplateFactory()
-    model = LLMModelFactory(model_id="m1")
-    _job_with_run_findings(user, model, template, ["high"], bundle_key="bundle-a@1")
-    _job_with_run_findings(user, model, template, ["high"] * 3, bundle_key="bundle-a@2")
-
-    data = generators.generate_template_comparison({"template_slug": template.slug})
+    data = generators.generate_task_comparison({"task_slug": task.task.slug})
 
     assert data["total_models"] == 2
-    assert set(data["bundle_keys"]) == {"bundle-a@1", "bundle-a@2"}
-    assert data["mixed_bundle_versions"] is True
-    assert {row["bundle_key"] for row in data["models"]} == {"bundle-a@1", "bundle-a@2"}
+    assert set(data["treatment_hashes"]) == {"a" * 64, "b" * 64}
+    assert data["mixed_treatments"] is True
+    assert {row["treatment_hash"] for row in data["models"]} == {"a" * 64, "b" * 64}
     assert all(row["model_id"] == "m1" for row in data["models"])
 
+    one = generators.generate_task_comparison({"task_slug": task.task.slug, "treatment_hash": "a" * 64})
+    assert one["total_models"] == 1
+    assert one["models"][0]["treatment_hash"] == "a" * 64
+    assert one["mixed_treatments"] is False
 
-def test_template_comparison_bundle_key_filter_isolates_one_version():
+
+def test_task_comparison_prompt_hash_filter_isolates_one_version():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
+    task = factories.TaskSpecVersionFactory.create()
     model = LLMModelFactory(model_id="m1")
-    _job_with_run_findings(user, model, template, ["high"], bundle_key="bundle-a@1")
-    _job_with_run_findings(user, model, template, ["high"] * 3, bundle_key="bundle-a@2")
+    _run_with_findings(user, model, task, ["high"], prompt_hash="a" * 64)
+    _run_with_findings(user, model, task, ["high"] * 3, prompt_hash="b" * 64)
 
-    data = generators.generate_template_comparison(
-        {"template_slug": template.slug, "bundle_key": "bundle-a@1"},
-    )
-
-    assert data["total_models"] == 1
-    assert data["models"][0]["bundle_key"] == "bundle-a@1"
-    assert data["mixed_bundle_versions"] is False
-
-
-def test_template_comparison_prompt_hash_filter_isolates_one_version():
-    user = UserFactory()
-    template = AppRequirementTemplateFactory()
-    model = LLMModelFactory(model_id="m1")
-    _job_with_run_findings(user, model, template, ["high"], prompt_hash="hash-a")
-    _job_with_run_findings(user, model, template, ["high"] * 3, prompt_hash="hash-b")
-
-    data = generators.generate_template_comparison(
-        {"template_slug": template.slug, "prompt_hash": "hash-a"},
-    )
+    data = generators.generate_task_comparison({"task_slug": task.task.slug, "prompt_hash": "a" * 64})
 
     assert data["total_models"] == 1
     assert data["models"][0]["stats"]["trials"] == 1
 
 
-def test_template_comparison_single_bundle_key_not_flagged_mixed():
+def test_task_comparison_spans_task_versions_unless_one_is_chosen():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
+    v1 = factories.TaskSpecVersionFactory.create()
+    v2 = factories.TaskSpecVersionFactory.create(task=v1.task)
     model = LLMModelFactory(model_id="m1")
-    _job_with_run_findings(user, model, template, ["high"], bundle_key="bundle-a@1")
+    _run_with_findings(user, model, v1, ["high"])
+    _run_with_findings(user, model, v2, ["high"])
 
-    data = generators.generate_template_comparison({"template_slug": template.slug})
+    data = generators.generate_task_comparison({"task_slug": v1.task.slug})
+    assert data["task"]["versions"] == [v1.version, v2.version]
+    assert data["models"][0]["stats"]["trials"] == 2
+    only = generators.generate_task_comparison({"task_slug": v1.task.slug, "task_version": v2.version})
+    assert only["models"][0]["stats"]["trials"] == 1
 
-    assert data["mixed_bundle_versions"] is False
-    assert data["bundle_keys"] == ["bundle-a@1"]
 
-
-def test_experiment_stats_reports_mixed_prompt_hashes():
+def test_condition_stats_reports_mixed_prompt_hashes():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
+    task = factories.TaskSpecVersionFactory.create()
     model = LLMModelFactory(model_id="m1")
-    job_a = _job_with_run_findings(user, model, template, ["high"], prompt_hash="hash-a")
-    job_b = _job_with_run_findings(user, model, template, ["high"], prompt_hash="hash-b")
+    a = _run_with_findings(user, model, task, ["high"], prompt_hash="a" * 64)
+    b = _run_with_findings(user, model, task, ["high"], prompt_hash="b" * 64)
 
-    jobs_qs = GenerationJob.objects.filter(id__in=[job_a.id, job_b.id])
-    stats = generators._experiment_stats(jobs_qs)
-
-    assert stats["prompt_hashes"] == ["hash-a", "hash-b"]
+    stats = generators._condition_stats(GenerationRun.objects.filter(id__in=[a.id, b.id]))
+    assert stats["prompt_hashes"] == ["a" * 64, "b" * 64]
     assert stats["mixed_prompt_versions"] is True
 
+    single = generators._condition_stats(GenerationRun.objects.filter(id=a.id))
+    assert single["prompt_hashes"] == ["a" * 64]
+    assert single["mixed_prompt_versions"] is False
 
-def test_experiment_stats_single_prompt_hash_not_mixed():
+
+def test_task_comparison_functional_rollup():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
+    task = factories.TaskSpecVersionFactory.create()
     model = LLMModelFactory(model_id="m1")
-    job = _job_with_run_findings(user, model, template, ["high"], prompt_hash="hash-a")
+    evaluate(_run_with_findings(user, model, task, []), passed=4, failed=0)
+    evaluate(_run_with_findings(user, model, task, []), passed=2, failed=2)
 
-    jobs_qs = GenerationJob.objects.filter(id=job.id)
-    stats = generators._experiment_stats(jobs_qs)
-
-    assert stats["prompt_hashes"] == ["hash-a"]
-    assert stats["mixed_prompt_versions"] is False
-
-
-def test_template_comparison_functional_rollup():
-    user = UserFactory()
-    template = AppRequirementTemplateFactory()
-    model = LLMModelFactory(model_id="m1")
-    _job_with_run_findings(
-        user,
-        model,
-        template,
-        [],
-        metrics={"functional": {"passed": True, "pass_rate": 1.0}},
-    )
-    _job_with_run_findings(
-        user,
-        model,
-        template,
-        [],
-        metrics={"functional": {"passed": False, "pass_rate": 0.5}},
-    )
-
-    data = generators.generate_template_comparison({"template_slug": template.slug})
+    data = generators.generate_task_comparison({"task_slug": task.task.slug})
     functional = data["models"][0]["stats"]["functional"]
-    assert functional["jobs_probed"] == 2
-    assert functional["jobs_passed"] == 1
+    assert functional["runs_measured"] == 2
+    assert functional["runs_all_passed"] == 1
     assert functional["pass_rate"]["mean"] == 0.75
 
 
-def test_template_comparison_splits_ai_findings_from_static():
-    from backend.analysis.models import AnalysisRun
-    from backend.analysis.models import Finding
+def test_task_comparison_splits_ai_findings_from_static():
     from backend.analysis.tests.factories import AnalyzerToolFactory
-    from backend.analysis.tests.factories import ToolResultFactory
 
     AnalyzerToolFactory(slug="llm_review", kind="ai", category="ai")
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
+    task = factories.TaskSpecVersionFactory.create()
     model = LLMModelFactory(model_id="m1")
-    job = _job_with_run_findings(user, model, template, ["high"] * 2)
-    run = AnalysisRun.objects.get(generation_job=job)
-    ai_result = ToolResultFactory(run=run, tool_slug="llm_review")
+    run = _run_with_findings(user, model, task, ["high"] * 2)
+    analysis = AnalysisRun.objects.get(generation_job=run)
+    ai_result = ToolResultFactory(run=analysis, tool_slug="llm_review")
     for _ in range(5):
-        Finding.objects.create(result=ai_result, severity="critical", title="opinion")
+        Finding.objects.create(result=ai_result, severity="critical", title="opinion", file_path="app.py")
 
-    data = generators.generate_template_comparison({"template_slug": template.slug})
+    data = generators.generate_task_comparison({"task_slug": task.task.slug})
 
     row = data["models"][0]
     # The normalized split is labelled as such; the tools printed no level (unrated).
@@ -382,17 +226,17 @@ def test_template_comparison_splits_ai_findings_from_static():
     assert stats["ai_critical_high_normalized"]["mean"] == 5.0
 
 
-def test_template_comparison_includes_weight_sensitivity():
+def test_task_comparison_includes_weight_sensitivity():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
+    task = factories.TaskSpecVersionFactory.create()
     # crit-heavy vs low-heavy model on 1000 LOC each: baseline densities 30 vs
-    # 25 per KLOC rank low/m first; under "flat" (crit weight 10 → 1) the
+    # 25 per KLOC rank low/m first; under "flat" (crit weight 10 -> 1) the
     # densities become 3 vs 25 and the order flips.
-    code = {"backend_code": "x\n" * 1000}
-    _job_with_run_findings(user, LLMModelFactory(model_id="crit/m"), template, ["critical"] * 3, result_data=code)
-    _job_with_run_findings(user, LLMModelFactory(model_id="low/m"), template, ["low"] * 25, result_data=code)
+    code = "x = 1\n" * 1000
+    _run_with_findings(user, LLMModelFactory(model_id="crit/m"), task, ["critical"] * 3, code=code)
+    _run_with_findings(user, LLMModelFactory(model_id="low/m"), task, ["low"] * 25, code=code)
 
-    data = generators.generate_template_comparison({"template_slug": template.slug})
+    data = generators.generate_task_comparison({"task_slug": task.task.slug})
 
     sensitivity = data["sensitivity"]
     assert sensitivity["models_evaluated"] == 2
@@ -415,28 +259,21 @@ def test_generate_model_analysis_unknown_model_raises():
         generators.generate_model_analysis({"model_id": "x/none"})
 
 
-def test_generate_template_comparison():
+def test_generate_task_comparison():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
+    task = factories.TaskSpecVersionFactory.create()
     m1 = LLMModelFactory(model_id="m1")
-    m2 = LLMModelFactory(model_id="m2")
-    GenerationJobFactory.create_batch(
-        2,
-        created_by=user,
-        model=m1,
-        app_requirement=template,
-        status=GenerationJob.Status.COMPLETED,
-    )
-    GenerationJobFactory(
-        created_by=user,
-        model=m2,
-        app_requirement=template,
-        status=GenerationJob.Status.FAILED,
-    )
+    for _ in range(2):
+        make_run(user, m1, task)
+    make_run(user, LLMModelFactory(model_id="m2"), task, status=S.FAILED)
 
-    data = generators.generate_template_comparison({"template_slug": template.slug})
-    assert data["template"]["slug"] == template.slug
+    data = generators.generate_task_comparison({"task_slug": task.task.slug})
+    assert data["task"]["slug"] == task.task.slug
     assert data["total_models"] == 2
+    with pytest.raises(ValueError, match="task_slug required"):
+        generators.generate_task_comparison({})
+    with pytest.raises(ValueError, match="Task not found"):
+        generators.generate_task_comparison({"task_slug": "no-such-task"})
 
 
 def test_generate_tool_analysis_empty_is_unmeasured():
@@ -448,9 +285,6 @@ def test_generate_tool_analysis_empty_is_unmeasured():
 
 
 def test_generate_tool_analysis_aggregates_metrics():
-    from backend.analysis.tests.factories import AnalysisRunFactory
-    from backend.analysis.tests.factories import ToolResultFactory
-
     user = UserFactory()
     for avg, dist in ((3.0, {"A": 4, "B": 1}), (5.0, {"A": 2, "F": 1})):
         ToolResultFactory(
@@ -475,147 +309,106 @@ def test_generate_tool_analysis_aggregates_metrics():
 def test_generate_generation_analytics_includes_summary_and_by_model():
     user = UserFactory()
     model = LLMModelFactory(model_id="m1")
-    GenerationJobFactory.create_batch(
-        3,
-        created_by=user,
-        model=model,
-        status=GenerationJob.Status.COMPLETED,
-    )
+    for _ in range(3):
+        make_run(user, model)
     data = generators.generate_generation_analytics({"days": 7})
     assert data["window_days"] == 7
-    assert data["summary"]["total_jobs"] >= 3
+    assert data["summary"]["total_runs"] >= 3
+    assert data["by_kind"] == {"app_agentic": 3}
     assert any(row["model_id"] == "m1" for row in data["by_model"])
 
 
 def test_generate_comprehensive_returns_platform_metrics():
     user = UserFactory()
     LLMModelFactory(model_id="m1")
-    GenerationJobFactory(
-        created_by=user,
-        model=LLMModelFactory(model_id="m2"),
-    )
+    make_run(user, LLMModelFactory(model_id="m2"), status=S.PENDING, code=None)
     data = generators.generate_comprehensive({"days": 30})
     assert "generation_analytics" in data
     assert "tool_analysis" in data
     assert data["platform"]["catalog_models"] >= 2
-    assert data["platform"]["models_with_jobs"] == 1
+    assert data["platform"]["models_with_runs"] == 1
 
 
-def test_generate_experiment_report_missing_id_raises():
-    with pytest.raises(ValueError, match="experiment_id required"):
-        generators.generate_experiment_report({})
+def test_study_conditions_report_requires_an_owned_study():
+    owner, stranger = UserFactory(), UserFactory()
+    study, _plan = make_study(owner)
+    config = {"study_id": str(study.id)}
+
+    with pytest.raises(ValueError, match="study_id required"):
+        generators.generate_study_conditions_report({})
+    with pytest.raises(ValueError, match="Study not found"):
+        generators.generate_study_conditions_report({"study_id": "00000000-0000-0000-0000-000000000000"}, user=owner)
+    with pytest.raises(ValueError, match="Study not found"):
+        generators.generate_study_conditions_report(config, user=stranger)
+    with pytest.raises(ValueError, match="Study not found"):
+        generators.generate_study_conditions_report(config)  # no user: nothing is visible
+    assert generators.generate_study_conditions_report(config, user=owner)["study"]["id"] == str(study.id)
+    staff = UserFactory(is_staff=True)
+    assert generators.generate_study_conditions_report(config, user=staff)["study"]["id"] == str(study.id)
 
 
-def test_generate_experiment_report_unknown_id_raises():
-    with pytest.raises(ValueError, match="Experiment not found"):
-        generators.generate_experiment_report({"experiment_id": "00000000-0000-0000-0000-000000000000"})
-
-
-def test_generate_experiment_report_malformed_id_raises():
-    with pytest.raises(ValueError, match="Experiment not found"):
-        generators.generate_experiment_report({"experiment_id": "not-a-uuid"})
-
-
-def test_generate_experiment_report_per_condition_stats_and_deltas():
-    from backend.generation.tests.factories import ExperimentConditionFactory
-    from backend.generation.tests.factories import ExperimentFactory
-    from backend.generation.tests.factories import GenerationProfileFactory
-
+def test_study_conditions_report_per_condition_stats():
     user = UserFactory()
-    template = AppRequirementTemplateFactory()
-    experiment = ExperimentFactory(created_by=user)
-    model_a = LLMModelFactory(model_id="m-a")
-    model_b = LLMModelFactory(model_id="m-b")
-    bundle = GenerationProfileFactory()
-    condition_a = ExperimentConditionFactory(experiment=experiment, model=model_a, profile=bundle)
-    condition_b = ExperimentConditionFactory(experiment=experiment, model=model_b, profile=bundle)
+    study, plan = make_study(user)
+    unit = make_unit(plan)
+    cond_a = make_condition(plan, LLMModelFactory(model_id="m-a"), is_baseline=True)
+    cond_b = make_condition(plan, LLMModelFactory(model_id="m-b"))
+    cell_run(make_cell(cond_a, unit), user)
+    cell_run(make_cell(cond_b, unit), user)
 
-    job_a = _job_with_run_findings(user, model_a, template, ["high"])
-    job_a.experiment = experiment
-    job_a.condition = condition_a
-    job_a.save(update_fields=["experiment", "condition"])
+    data = generators.generate_study_conditions_report({"study_id": str(study.id)}, user=user)
 
-    job_b = _job_with_run_findings(user, model_b, template, ["high"] * 3)
-    job_b.experiment = experiment
-    job_b.condition = condition_b
-    job_b.save(update_fields=["experiment", "condition"])
-
-    data = generators.generate_experiment_report({"experiment_id": str(experiment.id)}, user=user)
-
-    assert data["experiment"]["id"] == str(experiment.id)
+    assert data["study"]["id"] == str(study.id)
     assert data["total_conditions"] == 2
     by_condition = {row["condition_id"]: row for row in data["conditions"]}
-    assert by_condition[condition_a.id]["model_id"] == "m-a"
-    assert by_condition[condition_a.id]["stats"]["trials"] == 1
-    assert by_condition[condition_b.id]["model_id"] == "m-b"
-    assert by_condition[condition_b.id]["stats"]["trials"] == 1
-
-    # The statistics come from experiment_results.compute: a leaderboard and one
-    # paired row per non-baseline condition, never all N^2 pairs.
+    assert by_condition[cond_a.id]["model_id"] == "m-a"
+    assert by_condition[cond_a.id]["stats"]["trials"] == 1
+    assert by_condition[cond_b.id]["model_id"] == "m-b"
+    assert by_condition[cond_b.id]["stats"]["trials"] == 1
     assert "comparisons" not in data
-    results = data["results"]
-    assert {row["condition_id"] for row in results["leaderboard"]} == {condition_a.id, condition_b.id}
-    assert results["paired"]["pairing"] == "app_blocked"
-    assert [row["condition_id"] for row in results["paired"]["rows"]] == [condition_b.id]
 
 
-def test_generate_experiment_report_is_owner_scoped():
-    from backend.generation.tests.factories import ExperimentFactory
-
-    owner, stranger = UserFactory(), UserFactory()
-    experiment = ExperimentFactory(created_by=owner)
-    config = {"experiment_id": str(experiment.id)}
-
-    with pytest.raises(ValueError, match="Experiment not found"):
-        generators.generate_experiment_report(config, user=stranger)
-    with pytest.raises(ValueError, match="Experiment not found"):
-        generators.generate_experiment_report(config)  # no user: nothing is visible
-    assert generators.generate_experiment_report(config, user=owner)["experiment"]["id"] == str(experiment.id)
-    staff = UserFactory(is_staff=True)
-    assert generators.generate_experiment_report(config, user=staff)["experiment"]["id"] == str(experiment.id)
-
-
-def test_create_and_dispatch_refuses_another_users_experiment_report():
-    from backend.generation.tests.factories import ExperimentFactory
-
-    experiment = ExperimentFactory(created_by=UserFactory())
-    with pytest.raises(ValueError, match="Experiment not found"):
+def test_create_and_dispatch_refuses_another_users_study_report():
+    study, _plan = make_study(UserFactory())
+    with pytest.raises(ValueError, match="Study not found"):
         services.create_and_dispatch(
             report_type="experiment_report",
-            config={"experiment_id": str(experiment.id)},
+            config={"study_id": str(study.id)},
             user=UserFactory(),
         )
-    assert not Report.objects.filter(report_type="experiment_report").exists()
+    with pytest.raises(ValueError, match="Study not found"):
+        services.create_and_dispatch(
+            report_type="study_report",
+            config={"study_id": str(study.id)},
+            user=UserFactory(),
+        )
+    assert not Report.objects.exists()
 
 
 def test_create_and_run_generates_synchronously_with_the_owner():
-    from backend.generation.tests.factories import ExperimentFactory
-
     owner = UserFactory()
-    experiment = ExperimentFactory(created_by=owner)
+    study, _plan = make_study(owner)
     report = services.report_service.create_and_run(
         report_type="experiment_report",
-        config={"experiment_id": str(experiment.id)},
+        config={"study_id": str(study.id)},
         user=owner,
     )
     assert report.status == Report.Status.COMPLETED
-    assert report.report_data["experiment"]["id"] == str(experiment.id)
-    assert report.summary["experiment_id"] == str(experiment.id)
+    assert report.report_data["study"]["id"] == str(study.id)
+    assert report.summary["study_id"] == str(study.id)
+    assert report.title == f"Study conditions: {study.id}"
 
 
-def test_generate_experiment_report_registered_in_generators():
-    assert generators.GENERATORS["experiment_report"] is generators.generate_experiment_report
+def test_study_conditions_report_registered_in_generators():
+    assert generators.GENERATORS["experiment_report"] is generators.generate_study_conditions_report
+    assert generators.GENERATORS["template_comparison"] is generators.generate_task_comparison
 
 
 @pytest.mark.django_db(transaction=True)
 def test_create_and_dispatch_generates_report():
     user = UserFactory()
     LLMModelFactory(model_id="m1")
-    GenerationJobFactory(
-        created_by=user,
-        model=LLMModelFactory(model_id="m2"),
-        status=GenerationJob.Status.COMPLETED,
-    )
+    make_run(user, LLMModelFactory(model_id="m2"))
 
     report = services.create_and_dispatch(
         report_type="generation_analytics",
@@ -631,7 +424,7 @@ def test_create_and_dispatch_generates_report():
         time.sleep(0.1)
 
     assert report.status == Report.Status.COMPLETED, report.error_message
-    assert report.report_data["summary"]["total_jobs"] >= 1
+    assert report.report_data["summary"]["total_runs"] >= 1
     assert report.summary["window_days"] == 30
 
 
@@ -643,18 +436,8 @@ def test_create_and_dispatch_unknown_type_raises():
 def test_list_reports_filters_by_user():
     u1 = UserFactory()
     u2 = UserFactory()
-    Report.objects.create(
-        report_type="comprehensive",
-        title="A",
-        config={},
-        created_by=u1,
-    )
-    Report.objects.create(
-        report_type="comprehensive",
-        title="B",
-        config={},
-        created_by=u2,
-    )
+    Report.objects.create(report_type="comprehensive", title="A", config={}, created_by=u1)
+    Report.objects.create(report_type="comprehensive", title="B", config={}, created_by=u2)
     qs, total = services.list_reports(user=u1)
     assert total == 1
     assert next(iter(qs)).title == "A"
@@ -676,18 +459,22 @@ def test_source_loc_ignores_lockfiles_manifests_and_docs():
     assert loc_from_files(files) == {"backend_loc": 2, "frontend_loc": 2, "total_loc": 4, "source_files": 3}
 
 
-def test_experiment_report_markdown_keeps_paired_rows_and_notes():
+def test_study_conditions_markdown_keeps_paired_rows_and_notes():
     from backend.reports.services.renderers import render_markdown
 
     data = {
-        "experiment": {"name": "E", "status": "completed", "repeats": 2},
+        "study": {"name": "E", "status": "completed", "repeats": 2},
         "conditions": [
-            {"condition_id": 1, "label": "Base", "issues_dedup": {"apps": 2, "code_unique": 3}, "generation": {}},
+            {
+                "condition_id": 1,
+                "label": "Base",
+                "is_baseline": True,
+                "issues_dedup": {"apps": 2, "code_unique": 3},
+                "generation": {},
+            },
             {"condition_id": 2, "label": "Other", "issues_dedup": {"apps": 2, "code_unique": 5}, "generation": {}},
         ],
         "results": {
-            "baseline_condition_id": 1,
-            "baseline_source": "preregistered",
             "leaderboard": [{"rank": 1, "label": "Base", "pass_rate_mean": 0.9}],
             "paired": {
                 "status": "confirmatory",
@@ -699,14 +486,16 @@ def test_experiment_report_markdown_keeps_paired_rows_and_notes():
             },
             "notes": ["Every graded cell scored 1"],
         },
+        "notes": ["Finding counts use only the 1 tool(s) that measured every analyzed run"],
     }
-    report = Report(report_type=Report.Type.EXPERIMENT_REPORT, title="T", report_data=data)
+    report = Report(report_type=Report.Type.STUDY_CONDITIONS, title="T", report_data=data)
     md = render_markdown(report)
     assert "## Paired vs baseline (confirmatory, two-sided)" in md
     assert "| Other | 6 | -0.1 |" in md
     assert "p (holm)" in md
     assert "Every graded cell scored 1" in md
-    assert "Base (preregistered)" in md
+    assert "Finding counts use only" in md
+    assert "| Baseline | Base |" in md
 
 
 def test_create_and_dispatch_starts_the_thread_only_after_commit(django_capture_on_commit_callbacks):
@@ -759,7 +548,7 @@ def _summary(leaderboard):
     return _make_summary("experiment_report", {"results": {"leaderboard": leaderboard}, "total_conditions": 3})
 
 
-def test_experiment_report_summary_names_no_leader_on_a_tie():
+def test_study_conditions_summary_names_no_leader_on_a_tie():
     tied = _summary(
         [
             {"label": "A", "pass_rate_mean": 1.0},
@@ -811,19 +600,20 @@ def test_model_analysis_summary_keeps_unmeasured_values_unset():
     from backend.reports.services.report_service import _make_summary
 
     model = LLMModelFactory(model_id="openai/never-analyzed")
-    GenerationJobFactory(created_by=UserFactory(), model=model, status=GenerationJob.Status.PENDING)
+    make_run(UserFactory(), model, status=S.PENDING, code=None)
 
     summary = _make_summary("model_analysis", generators.generate_model_analysis({"model_id": model.model_id}))
 
-    assert summary["total_jobs"] == 1
-    # Nothing finished and nothing analyzed: unknown, not 0% and not zero findings.
+    assert summary["total_runs"] == 1
+    # Nothing finished, nothing analyzed, no tree: unknown, not 0% / zero findings / zero LOC.
     assert (summary["success_rate"], summary["runs_analyzed"], summary["total_findings"]) == (None, 0, None)
+    assert summary["total_loc"] is None
 
 
 def _study_summary(ranking):
     from backend.reports.services.report_service import _make_summary
 
-    return _make_summary("study_report", {"ranking": ranking, "funnel": {"overall": {"jobs": 6}}})
+    return _make_summary("study_report", {"ranking": ranking, "funnel": {"overall": {"runs": 6}}})
 
 
 def test_study_report_summary_names_no_leader_on_a_tie():
@@ -838,7 +628,7 @@ def test_study_report_summary_names_no_leader_on_a_tie():
             ],
         },
     )
-    assert (tied["leader"], tied["tied_leaders"]) == (None, 3)
+    assert (tied["leader"], tied["tied_leaders"], tied["runs"]) == (None, 3, 6)
 
     # A tie below the top does not take the leader away.
     clear = _study_summary(

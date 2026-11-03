@@ -6,7 +6,7 @@ Each dispatcher receives:
   - run_params: top-level PipelineRun.params
 
 Each dispatcher returns an output dict that is stored on PipelineStepRun.output.
-Dispatchers BLOCK until the underlying job/task reaches a terminal state so
+Dispatchers BLOCK until the underlying runs/task reach a terminal state so
 the engine can wait on them inside a thread without extra polling logic in
 runner.py.
 
@@ -37,54 +37,81 @@ _POLL_INTERVAL = 2  # seconds between status polls
 # ---------------------------------------------------------------------------
 
 
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
+_GENERATE_TIMEOUT_S = 6 * 3600
+
+
+def _wait_for_runs(run_ids: list[str], timeout: float) -> dict[Any, str] | None:
+    """``{run id: status}`` once every run is terminal; None when ``timeout`` seconds passed first."""
+    from backend.generation.models import GenerationRun
+
+    deadline = time.monotonic() + timeout
+    while True:
+        statuses = dict(GenerationRun.objects.filter(id__in=run_ids).values_list("id", "status"))
+        if len(statuses) == len(run_ids) and all(v in _TERMINAL_RUN_STATUSES for v in statuses.values()):
+            return statuses
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(_POLL_INTERVAL)
+
+
 def dispatch_generate(
     step_run: PipelineStepRun,
     params: dict[str, Any],
     run_params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Create and execute a GenerationJob, poll until terminal, return output."""
-    from backend.generation.models import GenerationJob
-    from backend.generation.services.generation_service import GenerationService
+    """Launch an ad-hoc study from a design, wait until its runs are terminal, return output.
+
+    The step's ``design`` (or the pipeline run's) is a ``contracts.plan.Design`` payload; it is
+    resolved and launched through ``study.launch.launch_adhoc`` (spec section 9.4), which returns
+    the study and the created run ids. The step then blocks until every created run reached a
+    terminal status (or ``timeout_seconds`` passed).
+    """
+    from pydantic import ValidationError
+
+    from backend.generation.contracts.plan import Design
+    from backend.generation.study.launch import launch_adhoc
     from backend.users.models import User
 
-    model_id = params.get("model_id") or run_params.get("model_id")
-    mode = params.get("mode", "custom")
+    raw = params.get("design") or run_params.get("design")
+    if not isinstance(raw, dict):
+        return {"status": "failed", "error": "generate step needs a 'design' (contracts.plan.Design)"}
+    try:
+        design = Design.model_validate(raw)
+    except ValidationError as exc:
+        return {"status": "failed", "error": f"invalid design: {exc.error_count()} error(s)", "details": exc.errors()}
 
     triggered_by = step_run.run.triggered_by
     user = triggered_by if triggered_by else User.objects.first()
-
-    job = GenerationJob.objects.create(
-        mode=mode,
-        created_by=user,
-        model_id=model_id,
-    )
-
-    # Run inline (GenerationService.execute is synchronous)
     try:
-        service = GenerationService()
-        service.execute(
-            GenerationJob.objects.select_related(
-                "model",
-                "app_requirement",
-                "batch",
-            ).get(id=job.id),
-        )
+        launched = launch_adhoc(design, user=user, launch=True)
     except Exception as exc:
-        logger.exception("GenerationService failed for step_run %s", step_run.id)
-        job.refresh_from_db()
-        return {
-            "generation_job_id": str(job.id),
-            "status": "failed",
-            "error": str(exc),
-        }
+        logger.exception("launch_adhoc failed for step_run %s", step_run.id)
+        return {"status": "failed", "error": str(exc)}
 
-    job.refresh_from_db()
+    run_ids = [str(run_id) for run_id in launched.get("run_ids") or []]
     output: dict[str, Any] = {
-        "generation_job_id": str(job.id),
-        "status": job.status,
+        "study_id": str(launched["study_id"]) if launched.get("study_id") else None,
+        "plan_hash": launched.get("plan_hash"),
+        "generation_run_ids": run_ids,
     }
-    if job.status == "failed":
-        output["error"] = job.error_message or "Generation failed"
+    if not run_ids:
+        return {**output, "status": "failed", "error": "the launch created no runs"}
+
+    timeout = float(params.get("timeout_seconds") or _GENERATE_TIMEOUT_S)
+    statuses = _wait_for_runs(run_ids, timeout)
+    if statuses is None:
+        return {**output, "status": "failed", "error": f"runs not finished after {timeout:.0f}s"}
+
+    counts: dict[str, int] = {}
+    for status in statuses.values():
+        counts[status] = counts.get(status, 0) + 1
+    output["run_statuses"] = counts
+    # The first run is what a following analyze step analyses by default.
+    output["generation_run_id"] = run_ids[0]
+    if counts.get("completed", 0) == 0:
+        output["error"] = "no run completed"
+    output["status"] = "failed" if "error" in output else "completed"
     return output
 
 
@@ -121,9 +148,7 @@ def dispatch_analyze(
     triggered_by = step_run.run.triggered_by
     user = triggered_by if triggered_by else User.objects.first()
 
-    generation_job_id = params.get("generation_job_id") or run_params.get(
-        "generation_job_id",
-    )
+    generation_run_id = params.get("generation_run_id") or run_params.get("generation_run_id")
     source_code = params.get("source_code")
     # Accept either the new ``tool_slugs`` or the legacy ``analyzers`` key.
     tool_slugs = params.get("tool_slugs") or params.get("analyzers") or []
@@ -134,7 +159,7 @@ def dispatch_analyze(
         name=f"Automation step {step_run.id}",
         created_by=user,
         workspace=workspace,
-        generation_job_id=generation_job_id or None,
+        generation_job_id=generation_run_id or None,
         source_code=source_code,
         tool_slugs=list(tool_slugs),
     )

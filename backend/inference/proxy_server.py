@@ -6,12 +6,13 @@ A stdlib ``ThreadingHTTPServer`` thread inside the executor, bound only to
 overlay of every local agent job talks to it:
 
 - ``POST /v1/chat/completions``, ``GET /v1/models``, ``GET /healthz``;
-- auth: ``Bearer`` = ``gateway_wiring.proxy_token(job)``, re-checked against
-  the job's live state (RUNNING, ``phase=running``, same ``attempt``, lease
-  not expired; cached for 5 s);
+- auth: ``Bearer`` = ``gateway_wiring.proxy_token(run)``, re-checked against
+  the ``GenerationRun``'s live state (RUNNING, ``phase=running``, same
+  ``attempt``, lease not expired; cached for 5 s);
 - the body becomes an ``LLMRequest`` (``source=agent_proxy``) built from the
-  job's **frozen** ``snapshot["endpoint"]``; identical bodies of the same
-  attempt re-attach to one request by ``dedupe_key``;
+  run's **frozen** endpoint (``RunManifest.manifest["model"]["endpoint"]``,
+  see :func:`frozen_endpoint`); identical bodies of the same attempt re-attach
+  to one request by ``dedupe_key``;
 - non-stream waits are capped at ``chain.proxy_wait_s`` and answer 504
   (the overlay retries 504 and re-attaches); streamed calls get synthesized
   SSE with ``: ping`` keep-alives;
@@ -58,30 +59,66 @@ _NON_PARAM_KEYS = ("model", "messages", "tools", "tool_choice", "stream", "paral
 
 @dataclass
 class JobAuth:
+    """A ``GenerationRun`` attempt as the proxy sees it (``job_*`` names follow ``LLMRequest.job``)."""
+
     job_id: str
     attempt: int
     status: str
     phase: str
     lease_expires_at: datetime | None
-    snapshot: dict[str, Any]
+    # The run's frozen endpoint section (``RunManifest.manifest["model"]["endpoint"]``, see
+    # :func:`frozen_endpoint`); None without a manifest or for OpenRouter runs (they never use the proxy).
+    endpoint: dict[str, Any] | None
+    model_slug: str
+    wall_clock_s: int
     priority: int
     endpoint_id: int | None
     checked: float
 
-    @property
-    def model_slug(self) -> str:
-        return str(((self.snapshot or {}).get("llm") or {}).get("model_slug") or "")
-
     def live(self) -> bool:
-        from backend.generation.models import GenerationJob
+        from backend.generation.models.choices import RunPhase
+        from backend.generation.models.choices import RunStatus
 
         return (
-            self.status == GenerationJob.Status.RUNNING
-            and self.phase == GenerationJob.Phase.RUNNING
+            self.status == RunStatus.RUNNING
+            and self.phase == RunPhase.RUNNING
             and self.lease_expires_at is not None
             and self.lease_expires_at > timezone.now()
-            and bool((self.snapshot or {}).get("endpoint"))
+            and bool(self.endpoint)
         )
+
+
+def frozen_endpoint(manifest: dict[str, Any], model) -> dict[str, Any] | None:
+    """The endpoint section the proxy builds upstream bodies from; None for OpenRouter or no manifest.
+
+    The manifest's ``model.endpoint`` (id, kind, served name, digest) is authoritative. Keys
+    the v3 manifest does not freeze yet (``num_ctx``, ``keep_alive``, ``api_flavor``,
+    ``capabilities``) come from :func:`backend.inference.snapshot.endpoint_section` of the
+    run's model, so a local run never silently falls back to the server's default context.
+    """
+    from backend.inference.models import LLMEndpoint
+    from backend.inference.snapshot import endpoint_section
+
+    section = ((manifest or {}).get("model") or {}).get("endpoint") or {}
+    if not section.get("id") or section.get("kind") == LLMEndpoint.Kind.OPENROUTER:
+        return None
+    live = (endpoint_section(model) if model is not None else None) or {}
+    return {**live, **{key: value for key, value in section.items() if value is not None}}
+
+
+def manifest_wall_clock_s(manifest: dict[str, Any]) -> int:
+    """``time.wall_clock_s`` of the run's effective resource policy, else :data:`DEFAULT_WALL_CLOCK_S`."""
+    effective = ((manifest or {}).get("resources") or {}).get("effective") or {}
+    content = effective.get("content") or {}
+    candidates = (
+        (content.get("time") or {}).get("wall_clock_s"),  # EffectivePolicy dump
+        (effective.get("time") or {}).get("wall_clock_s"),  # bare ResourcePolicyContent
+        effective.get("time.wall_clock_s"),  # flat knob map
+    )
+    for value in candidates:
+        if value:
+            return int(value)
+    return DEFAULT_WALL_CLOCK_S
 
 
 class AuthCache:
@@ -96,26 +133,29 @@ class AuthCache:
             cached = self._jobs.get(key)
         if cached is not None and not fresh and now - cached.checked < AUTH_CACHE_S:
             return cached
-        from backend.generation.models import GenerationJob
+        from backend.generation.models import GenerationRun
+        from backend.generation.models import RunManifest
 
-        row = (
-            GenerationJob.objects.filter(pk=job_id)
-            .values("status", "phase", "attempt", "lease_expires_at", "resolved_bundle", "priority", "endpoint_id")
-            .first()
-        )
-        if row is None or int(row["attempt"] or 0) != attempt:
+        run = GenerationRun.objects.filter(pk=job_id).select_related("manifest", "model__endpoint").first()
+        if run is None or int(run.attempt or 0) != attempt:
             with self._lock:
                 self._jobs.pop(key, None)
             return None
+        try:
+            manifest = run.manifest.manifest if isinstance(run.manifest.manifest, dict) else {}
+        except RunManifest.DoesNotExist:
+            manifest = {}
         auth = JobAuth(
             job_id=job_id,
             attempt=attempt,
-            status=row["status"],
-            phase=row["phase"],
-            lease_expires_at=row["lease_expires_at"],
-            snapshot=row["resolved_bundle"] if isinstance(row["resolved_bundle"], dict) else {},
-            priority=int(row["priority"] or 0),
-            endpoint_id=row["endpoint_id"],
+            status=run.status,
+            phase=run.phase,
+            lease_expires_at=run.lease_expires_at,
+            endpoint=frozen_endpoint(manifest, run.model),
+            model_slug=str((manifest.get("model") or {}).get("slug") or ""),
+            wall_clock_s=manifest_wall_clock_s(manifest),
+            priority=int(run.priority or 0),
+            endpoint_id=run.endpoint_id,
             checked=now,
         )
         with self._lock:
@@ -130,10 +170,11 @@ _auth_cache = AuthCache()
 
 def record_infra_error(job_id: str, attempt: int, code: str, status: int) -> None:
     """Append ``{at, code, status}`` to ``execution.infra_errors`` of a running attempt (guarded jsonb UPDATE)."""
-    from backend.generation.models import GenerationJob
+    from backend.generation.models import GenerationRun
+    from backend.generation.models.choices import RunStatus
 
     entry = json.dumps([{"at": timezone.now().isoformat(), "code": code, "status": status}])
-    table = GenerationJob._meta.db_table  # noqa: SLF001
+    table = GenerationRun._meta.db_table  # noqa: SLF001
     with connection.cursor() as cursor:
         cursor.execute(
             f"""
@@ -145,7 +186,7 @@ def record_infra_error(job_id: str, attempt: int, code: str, status: int) -> Non
                    )
              WHERE id = %s AND attempt = %s AND status = %s
             """,  # noqa: S608 — table name from model meta, values parameterised
-            [entry, job_id, attempt, GenerationJob.Status.RUNNING],
+            [entry, job_id, attempt, RunStatus.RUNNING],
         )
 
 
@@ -154,12 +195,12 @@ def _error(code: str, message: str, status: int) -> dict[str, Any]:
 
 
 def upstream_request(auth: JobAuth, body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    """Translate the gateway's OpenAI body into the upstream ``(path, body)`` using the frozen snapshot."""
+    """Translate the gateway's OpenAI body into the upstream ``(path, body)`` using the frozen endpoint."""
     from backend.inference.access import access_from_snapshot
     from backend.inference.chat import build_upstream_body
     from backend.inference.models import LLMEndpoint
 
-    section = auth.snapshot["endpoint"]
+    section = auth.endpoint
     endpoint = LLMEndpoint.objects.get(pk=section["id"])
     access = access_from_snapshot(section, endpoint)
     clean = {k: v for k, v in body.items() if k not in DROPPED_KEYS}
@@ -201,16 +242,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         try:
             # Unsign without age first to learn the job, then check the age
-            # against that job's own wall clock.
+            # against that run's own wall clock.
             job_id, attempt = read_proxy_token(token.strip(), max_age=None)
         except signing.BadSignature:
             return None
         auth = _auth_cache.get(job_id, attempt)
         if auth is None or not auth.live():
             return None
-        wall = int(((auth.snapshot.get("agent") or {}).get("wall_clock_seconds")) or DEFAULT_WALL_CLOCK_S)
         try:
-            read_proxy_token(token.strip(), max_age=wall + TOKEN_MARGIN_S)
+            read_proxy_token(token.strip(), max_age=auth.wall_clock_s + TOKEN_MARGIN_S)
         except signing.BadSignature:
             return None
         return auth
@@ -315,20 +355,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
         )
         if existing is not None:
             return existing
-        section = auth.snapshot["endpoint"]
+        section = auth.endpoint
         try:
             path, upstream_body = upstream_request(auth, body)
         except LLMAccessError as exc:
             self._send_json(400, _error("bad_request", str(exc), 400))
             return None
         except LLMEndpoint.DoesNotExist:
-            self._send_json(503, _error("endpoint_unavailable", "the job's endpoint no longer exists", 503))
+            self._send_json(503, _error("endpoint_unavailable", "the run's endpoint no longer exists", 503))
             record_infra_error(auth.job_id, auth.attempt, "endpoint_unavailable", 503)
             return None
         endpoint = LLMEndpoint.objects.get(pk=section["id"])
-        from backend.generation.models import GenerationJob
+        from backend.generation.models import GenerationRun
 
-        job = GenerationJob(pk=auth.job_id, attempt=auth.attempt)
+        job = GenerationRun(pk=auth.job_id, attempt=auth.attempt)
         return enqueue(
             access_from_snapshot(section, endpoint),
             path,
@@ -343,9 +383,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def _cancel_check(self, auth: JobAuth):
         def check() -> bool:
             fresh = _auth_cache.get(auth.job_id, auth.attempt)
-            from backend.generation.models import GenerationJob
+            from backend.generation.models.choices import RunStatus
 
-            return fresh is None or fresh.status == GenerationJob.Status.CANCELLED
+            return fresh is None or fresh.status == RunStatus.CANCELLED
 
         return check
 
@@ -358,9 +398,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         from backend.inference.chat import translate
 
         if row.first_delivery:
-            from backend.generation.models import GenerationJob
+            from backend.generation.models import GenerationRun
 
-            add_queue_wait(GenerationJob(pk=auth.job_id), row)
+            add_queue_wait(GenerationRun(pk=auth.job_id), row)
         try:
             if row.status != row.Status.DONE or int(row.response_status or 200) >= 400:
                 raise_for_request(row)
@@ -372,7 +412,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if exc.code == "upstream_error" and exc.status_code and exc.status_code < 500:
                 return exc.status_code, _error("upstream_error", str(exc), exc.status_code), None
             return 503, _error("endpoint_unavailable", str(exc), 503), "endpoint_unavailable"
-        section = auth.snapshot["endpoint"]
+        section = auth.endpoint
         access = access_from_snapshot(section, row.endpoint)
         return 200, translate(row, access), None
 
@@ -381,7 +421,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         from backend.inference.requests import wait_result
         from backend.inference.timeouts import chain
 
-        endpoint_id = auth.snapshot["endpoint"]["id"]
+        endpoint_id = auth.endpoint["id"]
         from backend.inference.models import LLMEndpoint
 
         endpoint = LLMEndpoint.objects.filter(pk=endpoint_id).first()

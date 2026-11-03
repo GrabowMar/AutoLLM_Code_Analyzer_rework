@@ -12,7 +12,7 @@ from django.conf import settings
 from django.test import Client
 from django.utils import timezone
 
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.tests.factories import GenerationRunFactory
 from backend.inference.models import LLMEndpoint
 from backend.inference.models import LLMRequest
 from backend.inference.models import RelaySession
@@ -231,7 +231,7 @@ class TestModelsTokensProbes:
         now = timezone.now()
         LLMRequest.objects.create(
             endpoint=endpoint,
-            source="scaffolding",
+            source=LLMRequest.Source.ANALYSIS,
             path="/api/chat",
             status="done",
             leased_at=now,
@@ -264,7 +264,7 @@ class TestInstallAndDelete:
         assert f'echo "{unit_sha.hexdigest()}  llmlab-relay.service" | sha256sum -c -' in data["commands"]["systemd"]
 
     def test_delete_in_use_is_409(self, owner, endpoint, local_model):
-        GenerationJobFactory(model=local_model, created_by=owner)
+        GenerationRunFactory(model=local_model, created_by=owner)
         resp = _client(owner).delete(f"{API}{endpoint.pk}/")
         assert resp.status_code == 409
 

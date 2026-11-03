@@ -108,7 +108,7 @@ def test_block_defaults_per_type():
     )
     assert errors == []
     req, sec, scen, quest, bugs = normalized["blocks"]
-    assert req["sources"] == ["backend", "frontend", "admin", "api", "admin_api"]
+    assert req["sources"] == ["frontend", "api", "admin_api"]
     assert req["note"] == "optional"
     assert sec["checklist"] == DEFAULT_SECURITY_CHECKLIST
     assert sec["reports"] is True

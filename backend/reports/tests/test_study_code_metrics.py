@@ -2,20 +2,15 @@
 
 from __future__ import annotations
 
-import csv
-
 import pytest
-from django.core.management import call_command
 
 from backend.analysis.tests.factories import AnalysisRunFactory
 from backend.analysis.tests.factories import ToolResultFactory
-from backend.generation.models import GenerationJob
-from backend.generation.tests.factories import AppRequirementTemplateFactory
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.models import GenerationRun
 from backend.llm_models.tests.factories import LLMModelFactory
 from backend.reports.services import study_report
-from backend.statistics.services.study import CODE_METRIC_PER_APP_KEYS
-from backend.statistics.services.study import code_metrics_by_job
+from backend.reports.tests.helpers import make_run
+from backend.statistics.services.study import code_metrics_by_run
 from backend.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
@@ -24,19 +19,12 @@ LIZARD = {"functions": 10, "avg_ccn": 2.5, "max_ccn": 9, "functions_over_15": 0,
 JSCPD = {"clones": 3, "duplication_percentage": 4.2, "duplicated_lines": 12, "total_lines": 300}
 
 
-def _job(user, model, template):
-    return GenerationJobFactory(
-        created_by=user,
-        mode="scaffolding",
-        status=GenerationJob.Status.COMPLETED,
-        model=model,
-        app_requirement=template,
-        result_data={"files": {"app.py": "x = 1\n" * 40, "frontend/src/App.jsx": "let a\n" * 10}},
-    )
+def _run(user, model):
+    return make_run(user, model, code=None, files={"app.py": "x = 1\n" * 40, "frontend/src/App.jsx": "let a\n" * 10})
 
 
-def _results(job, specs):
-    run = AnalysisRunFactory(created_by=job.created_by, generation_job=job, source_code=None, status="completed")
+def _results(gen_run, specs):
+    run = AnalysisRunFactory(created_by=gen_run.created_by, generation_job=gen_run, source_code={}, status="completed")
     for tool, status, metrics, summary in specs:
         ToolResultFactory(run=run, tool_slug=tool, category="quality", status=status, metrics=metrics, summary=summary)
     return run
@@ -53,8 +41,8 @@ def apps():
     """
     user = UserFactory()
     models = [LLMModelFactory(model_id=f"vendor/cm{i}") for i in range(2)]
-    # One template each: four apps (repeats of one app would be averaged into one unit).
-    a, b, c, d = (_job(user, models[i % 2], AppRequirementTemplateFactory(slug=f"cm-app-{i}")) for i in range(4))
+    # One task each: four apps (repeats of one app would be averaged into one unit).
+    a, b, c, d = (_run(user, models[i % 2]) for i in range(4))
     _results(
         a,
         [
@@ -87,8 +75,8 @@ def apps():
 
 def test_app_rows_carry_each_tools_latest_metrics_and_none_when_unmeasured(apps):
     user, jobs = apps
-    rows, _issues = study_report.app_table(list(GenerationJob.objects.filter(created_by=user)))
-    by_job = {r["job_id"]: r for r in rows}
+    rows, _issues = study_report.app_table(list(GenerationRun.objects.filter(created_by=user)))
+    by_job = {r["run_id"]: r for r in rows}
     a, b, c, d = (by_job[str(jobs[k].id)] for k in "abcd")
     # The later lizard result of a counts, not the first one (avg_ccn 9.9).
     assert (a["lizard_avg_ccn"], a["lizard_functions"], a["lizard_max_ccn"]) == (2.5, 10, 9)
@@ -97,18 +85,18 @@ def test_app_rows_carry_each_tools_latest_metrics_and_none_when_unmeasured(apps)
     assert b["lizard_functions_over_15"] == 2
     # A measured zero stays zero.
     assert (b["jscpd_duplication_percentage"], b["jscpd_clones"]) == (0.0, 0)
-    # lizard failed on c: unmeasured, never 0. jscpd had nothing to read: zero clones, no percentage.
+    # lizard failed on c and jscpd had nothing to read: both unmeasured, never 0 (spec 8.8).
     assert c["lizard_avg_ccn"] is None
     assert c["lizard_functions"] is None
-    assert (c["jscpd_clones"], c["jscpd_duplication_percentage"]) == (0, None)
+    assert (c["jscpd_clones"], c["jscpd_duplication_percentage"]) == (None, None)
     assert all(d[k] is None for k in study_report.TOOL_METRIC_KEYS)
 
 
-def test_metrics_by_job_records_the_instrument(apps):
+def test_metrics_by_run_records_the_instrument(apps):
     from backend.analysis.models import ToolResult
 
     _user, jobs = apps
-    metrics = code_metrics_by_job(ToolResult.latest_ids_per_job([j.id for j in jobs.values()]))
+    metrics = code_metrics_by_run(ToolResult.latest_ids_per_job([j.id for j in jobs.values()]))
     a, c = metrics[str(jobs["a"].id)], metrics[str(jobs["c"].id)]
     assert (a["lizard_status"], a["lizard_version"], a["lizard_parser_sha"]) == ("measured", "1.17.31", "p1")
     assert (a["radon_avg_complexity"], a["radon_status"]) == (3.0, "measured")
@@ -122,11 +110,11 @@ def test_code_metrics_section_describes_the_apps_each_tool_measured(apps):
     overall = data["code_metrics"]["overall"]
     assert overall["lizard_avg_ccn"]["n"] == 2
     assert overall["lizard_avg_ccn"]["mean"] == pytest.approx(2.5)
-    assert overall["jscpd_clones"]["n"] == 3  # a, b, and c's measured zero
+    assert overall["jscpd_clones"]["n"] == 2  # a and b; c's jscpd had nothing applicable to read
     assert overall["jscpd_duplication_percentage"]["n"] == 2
     assert overall["avg_complexity"]["n"] == 1
     assert "code_metrics_tools" in data["definitions"]
-    per_app = {r["job_id"]: r for r in data["per_app"]}
+    per_app = {r["run_id"]: r for r in data["per_app"]}
     assert set(study_report.TOOL_METRIC_KEYS) <= set(next(iter(per_app.values())))
 
 
@@ -146,24 +134,3 @@ def test_one_instrument_raises_no_metric_warning(apps):
     ToolResult.objects.filter(tool_slug="lizard", summary__parser_sha="p2").update(summary={"parser_sha": "p1"})
     data = study_report.generate_study_report({"seed": 0, "bootstrap": False}, user=user)
     assert "mixed_metric_instruments" not in {v["code"] for v in data["validity"]}
-
-
-def test_export_writes_code_metrics_per_app(apps, tmp_path):
-    _user, jobs = apps
-    call_command("export_study_tables", out=str(tmp_path))
-    with (tmp_path / "code_metrics_per_app.csv").open(encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        assert tuple(reader.fieldnames or ()) == CODE_METRIC_PER_APP_KEYS
-        rows = {r["job_id"]: r for r in reader}
-    assert set(rows) == {str(jobs[k].id) for k in "abc"}  # d: no metric tool ran
-    a, c = rows[str(jobs["a"].id)], rows[str(jobs["c"].id)]
-    assert (a["lizard_avg_ccn"], a["jscpd_clones"], a["lizard_parser_sha"]) == ("2.5", "3", "p1")
-    assert a["loc"] == "50"
-    # Unmeasured is an empty cell, never 0.
-    assert (c["lizard_avg_ccn"], c["jscpd_clones"], c["lizard_status"]) == ("", "0", "failed")
-
-
-def test_export_of_an_empty_scope_keeps_the_header(tmp_path):
-    call_command("export_study_tables", out=str(tmp_path), experiment="00000000-0000-0000-0000-000000000000")
-    header = (tmp_path / "code_metrics_per_app.csv").read_text(encoding="utf-8").splitlines()[0]
-    assert header.split(",") == list(CODE_METRIC_PER_APP_KEYS)

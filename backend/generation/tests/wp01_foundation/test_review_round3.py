@@ -6,8 +6,6 @@
    to the manifest (appendix A #13);
 4. ``RunView`` keeps the run it was built from (for WP-02a's accessors);
 5. ``EvalBaseline.reference_run`` is a starter-baseline reference run.
-
-Run with ``--ds=backend.generation.tests.wp01_foundation.settings_u1`` until WP-02a/WP-02b land.
 """
 
 from __future__ import annotations

@@ -564,7 +564,7 @@ def test_normalize_content_fills_defaults_and_is_idempotent():
 
 def test_unknown_kind():
     with pytest.raises(KeyError, match="unknown library kind"):
-        library.validate_content("scaffold", {})
+        library.validate_content("no_such_kind", {})
 
 
 def test_aliases_keep_spec_key_names():

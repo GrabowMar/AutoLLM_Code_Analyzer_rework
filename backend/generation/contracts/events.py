@@ -1,13 +1,13 @@
 """SSE event payload schemas (spec sections 4.7, 6, 9.5).
 
-Channels: ``run:<uuid>`` and ``study:<uuid>`` (they replace ``generation:`` and
-``experiment:``). Every payload has a ``type`` discriminator; the realtime
+Channels: ``run:<uuid>`` and ``study:<uuid>`` (they replace the v2 channels).
+Every payload has a ``type`` discriminator; the realtime
 publisher adds ``channel`` and ``published_at``. Payloads never carry other
 tenants' model names, hosts or addresses.
 
 * ``run:<id>``: ``status``, ``step``, ``usage``, ``trajectory_step``, ``log``, ``evaluation``.
 * ``study:<id>``: ``run``, ``tick``, ``state``, ``post_run`` (ported from the
-  experiment channel) plus ``spend``, ``budget_alert``, ``stopped`` and ``paused``.
+  v2 channel) plus ``spend``, ``budget_alert``, ``stopped`` and ``paused``.
 """
 
 from typing import Annotated
@@ -138,7 +138,7 @@ RunEvent = Annotated[
 
 
 class StudyRunEvent(ContractModel):
-    """A run of the study changed state (port of the experiment ``job`` event)."""
+    """A run of the study changed state (port of the v2 ``job`` event)."""
 
     type: Literal["run"] = "run"
     run_id: NonEmptyStr

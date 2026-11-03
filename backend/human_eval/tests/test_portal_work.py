@@ -11,7 +11,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
 from django.urls import reverse
 
-from backend.generation.models import GenerationJob
+from backend.generation.models import RunFile
+from backend.generation.models import Study
 from backend.human_eval.models import Assignment
 from backend.human_eval.models import Attachment
 from backend.human_eval.models import EvalTask
@@ -22,10 +23,14 @@ from backend.human_eval.models import Response
 from backend.human_eval.services import access
 from backend.human_eval.services import allocation
 from backend.human_eval.services import context
+from backend.human_eval.services import credentials as credentials_service
 from backend.human_eval.services import source
 from backend.human_eval.services.instruments import SUS_QUESTION_IDS
+from backend.human_eval.tests.factories import APP_FILES
 from backend.human_eval.tests.factories import PNG_BYTES
+from backend.human_eval.tests.factories import HostingContainerFactory
 from backend.human_eval.tests.factories import ParticipantFactory
+from backend.human_eval.tests.factories import add_app_files
 from backend.human_eval.tests.factories import make_open_task
 from backend.human_eval.tests.factories import workbench_assignment
 from backend.human_eval.tests.factories import workbench_design
@@ -55,7 +60,7 @@ PORTAL_ASSIGNMENT_KEYS = {
     "allow_skip",
     "http_console",
 }
-PORTAL_APP_KEYS = {"slot", "label", "hosting", "spec", "admin_credentials", "has_source"}
+PORTAL_APP_KEYS = {"slot", "label", "hosting", "spec", "admin_credentials", "admin_credentials_status", "has_source"}
 HOSTING_KEYS = {"state", "url", "progress", "message", "error"}
 ERROR_KEYS = {"detail", "code", "errors"}
 
@@ -157,8 +162,10 @@ def test_get_assignment_opens_it_and_matches_the_contract():
     assert set(app["hosting"]) == HOSTING_KEYS
     assert app["slot"] == "single"
     assert app["label"] == "App 01"
-    assert app["admin_credentials"] == {"username": "admin", "password": "admin"}
-    assert app["spec"]["api_endpoints"][0]["method"] == "GET"
+    # No runtime credentials record (WP-09 not implemented yet): never a default password.
+    assert app["admin_credentials"] is None
+    assert app["admin_credentials_status"] == "not_measured"
+    assert app["spec"]["api_endpoints"][0]["method"] == "POST"  # POST /api/auth/register
     assert app["has_source"] is False  # show_source_code is off by default
     assert [block["id"] for block in body["blocks"]] == ["ratings", "reqs", "sec", "tasks", "sus", "extra", "bugs"]
     assert "expected" not in json.dumps(body["blocks"])  # attention answers never reach participants
@@ -184,6 +191,7 @@ def test_blinding_settings_hide_spec_and_credentials_and_show_source():
     (app,) = _open(client, assignment)["apps"]
     assert app["spec"] is None
     assert app["admin_credentials"] is None
+    assert app["admin_credentials_status"] is None
     assert app["has_source"] is True
 
 
@@ -198,8 +206,7 @@ def test_portal_assignment_never_reveals_who_built_the_app():
         model.save()
         app.job.condition.label = f"ZzCondition {index}"
         app.job.condition.save()
-    task.experiment.name = "ZzExperimentName"
-    task.experiment.save()
+    Study.objects.filter(pk=task.study_id).update(name="ZzStudyName")
     assignment, client = _work(task, item=item)
     context.open_assignment(assignment)
     # Provenance with container details may sit in the stored context: it is never sent.
@@ -219,12 +226,12 @@ def test_portal_assignment_never_reveals_who_built_the_app():
         str(item.app_a_id),
         str(item.app_b_id),
         str(item.id),
-        str(task.experiment_id),
+        str(task.study_id),
         "zzsecretvendor",
         "ZzSecretModel",
         "ZzSecretProvider",
         "ZzCondition",
-        "ZzExperimentName",
+        "ZzStudyName",
         "zzcontainer-id",
         "llm-zz123456",
     ]
@@ -519,8 +526,7 @@ def test_source_tree_and_file_for_agent_jobs():
     assert tree.status_code == 200
     files = tree.json()["files"]
     assert [entry["path"] for entry in files] == ["backend/app.py", "frontend/src/App.jsx"]
-    job = assignment.item.app_a.job
-    expected = job.result_data["files"]["backend/app.py"]
+    expected = APP_FILES["backend/app.py"][0]
     assert files[0]["size"] == len(expected.encode())
     file = client.get(_url(assignment, "source/file/?slot=single&path=backend/app.py"))
     assert file.status_code == 200
@@ -531,18 +537,19 @@ def test_source_tree_and_file_for_agent_jobs():
     assert client.get(_url(assignment, "source/file/?slot=single")).status_code == 404
 
 
-def test_source_for_scaffolding_jobs_and_large_files():
+def test_source_of_large_files_is_capped():
     task = _source_task()
-    job = task.apps.get().job
+    run = task.apps.get().job
     big = "é" * (source.MAX_FILE_BYTES // 2 + 10)  # two bytes per character
-    GenerationJob.objects.filter(pk=job.pk).update(
-        mode=GenerationJob.Mode.SCAFFOLDING,
-        result_data={"backend_code": "from flask import Flask\n", "frontend_code": big, "backend_scan": {"x": 1}},
-    )
+    add_app_files(run, {"frontend/src/Big.jsx": (big, 1)})
     assignment, client = _work(task)
     tree = client.get(_url(assignment, "source/?slot=single")).json()
-    assert [entry["path"] for entry in tree["files"]] == ["backend/app.py", "frontend/App.jsx"]
-    file = client.get(_url(assignment, "source/file/?slot=single&path=frontend/App.jsx")).json()
+    assert [entry["path"] for entry in tree["files"]] == [
+        "backend/app.py",
+        "frontend/src/App.jsx",
+        "frontend/src/Big.jsx",
+    ]
+    file = client.get(_url(assignment, "source/file/?slot=single&path=frontend/src/Big.jsx")).json()
     assert file["truncated"] is True
     assert len(file["content"].encode()) <= source.MAX_FILE_BYTES
     assert file["content"] == big[: len(file["content"])]
@@ -554,7 +561,7 @@ def test_source_is_404_when_not_shown_or_missing():
     assert client.get(_url(assignment, "source/file/?slot=single&path=backend/app.py")).status_code == 404
 
     task = _source_task()
-    GenerationJob.objects.filter(pk=task.apps.get().job_id).update(result_data={"files": {}})
+    RunFile.objects.filter(run_id=task.apps.get().job_id).delete()
     empty, empty_client = _work(task)
     assert empty_client.get(_url(empty, "source/?slot=single")).status_code == 404
     assert _open(empty_client, empty)["apps"][0]["has_source"] is False
@@ -596,14 +603,14 @@ def test_participants_see_the_spec_frozen_at_first_open():
     """C18: the spec view comes from the task app's frozen copy (the one the requirement items use)."""
     task = _task()
     app = task.apps.get()
-    app.snapshot = {**app.snapshot, "spec": {"name": "Frozen spec", "backend_requirements": ["Only this"]}}
+    frozen = {"title": "Frozen spec", "structured": {"ui": [{"id": "only", "text": "Only this"}]}}
+    app.snapshot = {**app.snapshot, "spec": frozen}
     app.save(update_fields=["snapshot"])
-    GenerationJob.objects.filter(pk=app.job_id).update(resolved_bundle={"app_requirement": {"name": "Live spec"}})
     assignment, client = _work(task)
     body = _open(client, assignment)
     (shown,) = body["apps"]
     assert shown["spec"]["name"] == "Frozen spec"
-    assert shown["spec"]["backend_requirements"] == ["Only this"]
+    assert shown["spec"]["frontend_requirements"] == ["Only this"]
     texts = [item["text"] for item in body["context"]["blocks"]["reqs"]["requirements"]["single"]]
     assert texts == ["Only this", "The app has a README"]
 
@@ -624,3 +631,84 @@ def test_nul_characters_in_answers_and_reports_are_a_400_not_a_500():
     assert not Observation.objects.filter(assignment=assignment).exists()
     assignment.refresh_from_db()
     assert assignment.status != Assignment.Status.SKIPPED
+
+
+def _hosted_container(task: EvalTask, metadata: dict | None = None):
+    """Attach a running hosted container to the task's (single) app, with runtime's env stamp *metadata*."""
+    app = task.apps.get()
+    container = HostingContainerFactory(generation_job=app.job, status="running", metadata=metadata or {})
+    app.container = container
+    app.save(update_fields=["container"])
+    return container
+
+
+def _env_stamp(password: str) -> dict:
+    return {
+        credentials_service.RUNTIME_ENV_KEY: {
+            "source": credentials_service.RUNTIME_ENV_SOURCE,
+            "admin_password_sha256": credentials_service.password_fingerprint(password),
+        },
+    }
+
+
+def test_admin_credentials_come_from_the_runs_runtime_credentials_record(monkeypatch):
+    """WP-09 contract: the portal shows the app's real admin password, never a platform default."""
+    from backend.generation import evaluation
+
+    task = _task()
+    run_id = task.apps.get().job_id
+    _hosted_container(task, _env_stamp("s3cret-from-start"))
+    seen = []
+
+    def credentials(run):
+        seen.append(run.pk)
+        return {"admin_password": "s3cret-from-start", "secret_key": "never shown"}
+
+    monkeypatch.setattr(evaluation, "credentials", credentials)
+    assignment, client = _work(task)
+    response = client.get(_url(assignment))
+    (app,) = response.json()["apps"]
+    assert app["admin_credentials"] == {"username": "admin", "password": "s3cret-from-start"}
+    assert app["admin_credentials_status"] == "available"
+    assert "never shown" not in response.content.decode()
+    assert seen
+    assert set(seen) == {run_id}
+
+    def broken(run):
+        msg = "credentials record unreadable"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(evaluation, "credentials", broken)
+    (app,) = client.get(_url(assignment)).json()["apps"]
+    assert app["admin_credentials"] is None
+    assert app["admin_credentials_status"] == "not_measured"
+
+    monkeypatch.setattr(evaluation, "credentials", lambda run: {"secret_key": "x"})  # no admin password stored
+    (app,) = client.get(_url(assignment)).json()["apps"]
+    assert app["admin_credentials"] is None
+    assert app["admin_credentials_status"] == "not_measured"
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        None,  # no hosted container at all
+        {},  # hosted, but started without the record (today's build_for_job: empty env)
+        {"runtime_env": {"source": "evaluation.credentials", "admin_password_sha256": "0" * 64}},  # rotated record
+        {"runtime_env": {"source": "something-else", "admin_password_sha256": None}},
+    ],
+)
+def test_admin_credentials_are_withheld_unless_the_hosted_container_runs_with_them(monkeypatch, metadata):
+    """The record is shown only when the instance the participant tests was started with it."""
+    from backend.generation import evaluation
+
+    task = _task()
+    if metadata is not None:
+        _hosted_container(task, metadata)
+    monkeypatch.setattr(evaluation, "credentials", lambda run: {"admin_password": "pw-of-eval-start"})
+    assignment, client = _work(task)
+    response = client.get(_url(assignment))
+    (app,) = response.json()["apps"]
+    assert app["admin_credentials"] is None
+    assert app["admin_credentials_status"] == "not_measured"
+    assert "pw-of-eval-start" not in response.content.decode()

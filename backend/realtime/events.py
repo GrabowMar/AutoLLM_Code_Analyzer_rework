@@ -23,7 +23,7 @@ def publish(channel: str, event: dict) -> None:
     """Publish an event dict to a Redis pub/sub channel.
 
     Channel naming convention:
-      - ``generation:<job_id>``
+      - ``run:<run_id>`` / ``study:<study_id>`` (payloads in ``generation.contracts.events``)
       - ``analysis:<task_id>``
       - ``runtime:<container_id>``
       - ``capacity`` (broadcast)
@@ -41,8 +41,9 @@ def publish(channel: str, event: dict) -> None:
         logger.exception("Failed to publish SSE event to channel %s", channel)
 
 
-# ── Experiments rework channels (spec §F.6) ────────────────────────────
-#   experiment:<uuid>         job | tick | state | post_run
+# ── channels (SAMPLE_GEN_V3 §2.3, §9.5) ──────────────────────────────────
+#   run:<uuid>                status | step | usage | trajectory_step | log | evaluation
+#   study:<uuid>              run | tick | state | post_run | spend | budget_alert | stopped | paused
 #   endpoint:<id>             endpoint | session   (owner/staff payload)
 #   endpoint:<id>:public      the redacted variant for everyone else
 #   capacity                  capacity (aggregate)
@@ -50,20 +51,46 @@ def publish(channel: str, event: dict) -> None:
 CAPACITY_CHANNEL = "capacity"
 
 
-def experiment_channel(experiment_id) -> str:
-    return f"experiment:{experiment_id}"
+def run_channel(run_id) -> str:
+    return f"run:{run_id}"
+
+
+def study_channel(study_id) -> str:
+    return f"study:{study_id}"
 
 
 def endpoint_channel(endpoint_id, *, public: bool = False) -> str:
     return f"endpoint:{endpoint_id}:public" if public else f"endpoint:{endpoint_id}"
 
 
-def publish_experiment_event(experiment_id, event: dict) -> None:
-    """Publish ``event`` (``{"type": "job"|"tick"|"state"|"post_run", ...}``) on ``experiment:<id>``.
+def _publish_checked(channel: str, event: dict, parse) -> None:
+    """Publish ``event`` only when it matches its contract; a malformed event is logged, never sent."""
+    try:
+        parse(event)
+    except Exception:
+        logger.exception("Refusing to publish a malformed %s event on %s", event.get("type"), channel)
+        return
+    publish(channel, event)
+
+
+def publish_run_event(run_id, event: dict) -> None:
+    """Publish a ``run:<id>`` event (``contracts.events.RunEvent``).
+
+    Types: status, step, usage, trajectory_step, log, evaluation.
+    """
+    from backend.generation.contracts.events import parse_run_event
+
+    _publish_checked(run_channel(run_id), event, parse_run_event)
+
+
+def publish_study_event(study_id, event: dict) -> None:
+    """Publish a ``study:<id>`` event (``contracts.events.StudyEvent``: run, tick, state, post_run, spend, ...).
 
     Payloads must not carry other tenants' model names, IPs or hostnames.
     """
-    publish(experiment_channel(experiment_id), event)
+    from backend.generation.contracts.events import parse_study_event
+
+    _publish_checked(study_channel(study_id), event, parse_study_event)
 
 
 def publish_endpoint_event(endpoint_id, event: dict, public_event: dict | None = None) -> None:

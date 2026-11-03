@@ -36,15 +36,19 @@ from backend.execution.api_schemas import QueueOut
 from backend.execution.models import ExecutorInstance
 from backend.execution.models import ExecutorSettings
 from backend.execution.scheduler import Scheduler
-from backend.generation.models import Experiment
-from backend.generation.models import ExperimentPostRun
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
+from backend.generation.models import Study
+from backend.generation.models import StudyPostRun
+from backend.generation.models.choices import RunPhase
+from backend.generation.models.choices import RunStatus
+from backend.generation.models.choices import WorkStatus
 
 router = Router(tags=["execution"])
 
 LEADER_STALE_S = 90
 THROUGHPUT_WINDOW_S = 1800
-S = GenerationJob.Status
+S = RunStatus
+ACTIVE_STUDY_STATUSES = ("piloting", "running", "paused")
 
 
 def _require_staff(request) -> None:
@@ -91,8 +95,8 @@ def get_capacity(request):
     config = (leader.config if leader is not None else {}) or {}
     open_circuits = {int(ep) for ep in config.get("circuit_open") or []}
     blocked = {int(k): v for k, v in (config.get("blocked_by_endpoint") or {}).items()}
-    running_jobs = GenerationJob.objects.exclude(lease_owner="").count()
-    post_used = ExperimentPostRun.objects.filter(status=ExperimentPostRun.Status.RUNNING).count()
+    running_runs = GenerationRun.objects.exclude(lease_owner="").count()
+    post_used = StudyPostRun.objects.filter(status=WorkStatus.RUNNING).count()
 
     requests = defaultdict(Counter)
     for ep_id, status, n in (
@@ -104,12 +108,12 @@ def get_capacity(request):
         requests[ep_id][status] = n
     models_by_ep_user: dict[int, dict[int, set[str]]] = defaultdict(lambda: defaultdict(set))
     for ep_id, user_id, served, model_name in (
-        GenerationJob.objects.filter(status=S.RUNNING, phase=GenerationJob.Phase.RUNNING, queued_at__isnull=False)
+        GenerationRun.objects.filter(status=S.RUNNING, phase=RunPhase.RUNNING, queued_at__isnull=False)
         .exclude(endpoint_id=None)
         .values_list(
             "endpoint_id",
             "created_by_id",
-            "resolved_bundle__endpoint__served_model_name",
+            "pinned_served_name",
             "model__model_name",
         )
         .distinct()
@@ -156,32 +160,32 @@ def get_capacity(request):
             },
         )
 
-    experiments_qs = Experiment.objects.filter(status__in=[Experiment.Status.RUNNING, Experiment.Status.PAUSED])
+    studies_qs = Study.objects.filter(status__in=ACTIVE_STUDY_STATUSES)
     if not user.is_staff:
-        experiments_qs = experiments_qs.filter(created_by=user)
-    experiments = list(experiments_qs.order_by("-priority", "launched_at")[:50])
+        studies_qs = studies_qs.filter(created_by=user)
+    studies = list(studies_qs.order_by("-priority", "launched_at")[:50])
     since = timezone.now() - timedelta(seconds=THROUGHPUT_WINDOW_S)
     stats = {
-        r["experiment_id"]: r
-        for r in GenerationJob.objects.filter(experiment__in=experiments)
+        r["study_id"]: r
+        for r in GenerationRun.objects.filter(study__in=studies)
         .order_by()
-        .values("experiment_id")
+        .values("study_id")
         .annotate(
             running=Count("id", filter=Q(status=S.RUNNING)),
             pending=Count("id", filter=Q(status=S.PENDING)),
             recent=Count("id", filter=Q(status__in=[S.COMPLETED, S.FAILED], completed_at__gte=since)),
         )
     }
-    experiment_rows = []
-    for experiment in experiments:
-        st = stats.get(experiment.id, {})
+    study_rows = []
+    for study in studies:
+        st = stats.get(study.id, {})
         running, pending = st.get("running", 0), st.get("pending", 0)
-        experiment_rows.append(
+        study_rows.append(
             {
-                "id": experiment.id,
-                "name": experiment.name,
-                "status": experiment.status,
-                "priority": experiment.priority,
+                "id": study.id,
+                "name": study.name,
+                "status": study.status,
+                "priority": study.priority,
                 "running": running,
                 "pending": pending,
                 "eta_seconds": _eta(running + pending, st.get("recent", 0)),
@@ -204,7 +208,7 @@ def get_capacity(request):
             ),
             "code_stale": bool(leader is not None and leader.code_version != capacity.code_version()),
             "draining": row.draining,
-            "draining_remaining": {"jobs": running_jobs, "post_runs": post_used},
+            "draining_remaining": {"runs": running_runs, "post_runs": post_used},
         },
         "settings": {k: v for k, v in _settings_out(row).items() if k != "draining"},
         "limits": {
@@ -219,18 +223,18 @@ def get_capacity(request):
             "post": {"used": post_used, "total": slots.post_run_slots},
         },
         "endpoints": endpoints,
-        "experiments": experiment_rows,
+        "studies": study_rows,
     }
 
 
 @router.get("/queue/", response=QueueOut)
 def get_queue(
     request,
-    experiment_id: str = Query(""),
+    study_id: str = Query(""),
     endpoint: str = Query(""),
     limit: int = Query(50, ge=1, le=200),
 ):
-    """The caller's next pending jobs in scheduler order, with why each lane waits (simulated, no locks)."""
+    """The caller's next pending runs in scheduler order, with why each lane waits (simulated, no locks)."""
     from backend.inference.access import system_openrouter
     from backend.inference.models import LLMEndpoint
 
@@ -246,48 +250,50 @@ def get_queue(
     reasons = {key: state.reason for key, state in plan.lanes.items()}
     system_ep = system_openrouter().pk
 
-    qs = GenerationJob.objects.filter(status=S.PENDING, queued_at__isnull=False)
+    qs = GenerationRun.objects.filter(status=S.PENDING, queued_at__isnull=False)
     if not user.is_staff:
         qs = qs.filter(created_by=user)
-    if experiment_id:
+    if study_id:
         try:
-            qs = qs.filter(experiment_id=uuid.UUID(experiment_id))
+            qs = qs.filter(study_id=uuid.UUID(study_id))
         except ValueError as exc:
-            raise HttpError(400, "experiment_id must be a UUID") from exc
+            raise HttpError(400, "study_id must be a UUID") from exc
     if endpoint:
         ep = LLMEndpoint.objects.filter(slug=endpoint).first()
         if ep is None:
             raise HttpError(404, "Unknown endpoint")
         qs = qs.filter(endpoint__isnull=True) if ep.is_system else qs.filter(endpoint=ep)
-    jobs = list(
+    runs = list(
         qs.select_related("model", "endpoint")
-        .defer("result_data", "resolved_bundle", "custom_system_prompt", "custom_user_prompt")
+        .defer("result", "metrics", "validity", "execution")
         .order_by("-priority", "sequence", "queued_at", "id")[: limit * 4],
     )
     now = timezone.now()
     items = []
-    for job in jobs:
-        ep_id = job.endpoint_id or system_ep
-        key = (str(job.experiment_id) if job.experiment_id else f"adhoc:{job.created_by_id}", ep_id)
-        if str(job.id) in admitted:
+    for run in runs:
+        ep_id = run.endpoint_id or system_ep
+        key = (str(run.study_id) if run.study_id else f"adhoc:{run.created_by_id}", ep_id)
+        if str(run.id) in admitted:
             reason = None
-        elif job.run_after and job.run_after > now:
+        elif run.run_after and run.run_after > now:
             reason = "retry_backoff"
         else:
             reason = reasons.get(key)
         items.append(
             {
-                "job_id": job.id,
-                "experiment_id": job.experiment_id,
-                "condition_id": job.condition_id,
-                "model_name": job.model.model_name if job.model else "",
-                "endpoint_slug": job.endpoint.slug if job.endpoint else "openrouter",
-                "lane": job.lane,
-                "sequence": job.sequence,
-                "priority": job.priority,
-                "queued_at": job.queued_at,
-                "run_after": job.run_after,
-                "attempt": job.attempt,
+                "run_id": run.id,
+                "kind": run.kind,
+                "study_id": run.study_id,
+                "condition_id": run.condition_id,
+                "cell_id": run.cell_id,
+                "model_name": run.model.model_name if run.model else "",
+                "endpoint_slug": run.endpoint.slug if run.endpoint else "openrouter",
+                "lane": run.lane,
+                "sequence": run.sequence,
+                "priority": run.priority,
+                "queued_at": run.queued_at,
+                "run_after": run.run_after,
+                "attempt": run.attempt,
                 "blocked_reason": reason,
             },
         )
@@ -296,7 +302,7 @@ def get_queue(
 
     others_ahead: dict[str, int] = {}
     mine = (
-        GenerationJob.objects.filter(status=S.PENDING, queued_at__isnull=False, created_by=user)
+        GenerationRun.objects.filter(status=S.PENDING, queued_at__isnull=False, created_by=user)
         .order_by()
         .values("endpoint_id")
         .annotate(first=Min("queued_at"), top=Max("priority"))
@@ -305,7 +311,7 @@ def get_queue(
     for entry in mine:
         ep_filter = Q(endpoint_id=entry["endpoint_id"]) if entry["endpoint_id"] else Q(endpoint_id__isnull=True)
         ahead = (
-            GenerationJob.objects.filter(ep_filter, status=S.PENDING, queued_at__isnull=False)
+            GenerationRun.objects.filter(ep_filter, status=S.PENDING, queued_at__isnull=False)
             .exclude(created_by=user)
             .filter(Q(priority__gt=entry["top"]) | Q(priority=entry["top"], queued_at__lt=entry["first"]))
             .count()

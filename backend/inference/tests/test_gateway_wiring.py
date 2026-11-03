@@ -1,4 +1,7 @@
-"""Gateway wiring for agent jobs (spec §D.6) and the sandbox's use of it."""
+"""Gateway wiring for agent runs (spec §D.6).
+
+The v2 ``AgentSandbox`` tests are gone with the sandbox; the v3 sandbox (``agentic/sandbox.py``) tests its own use.
+"""
 
 from __future__ import annotations
 
@@ -8,8 +11,7 @@ from unittest import mock
 import pytest
 from django.core import signing
 
-from backend.generation.services.agent.sandbox import AgentSandbox
-from backend.generation.tests.factories import GenerationJobFactory
+from backend.generation.tests.factories import GenerationRunFactory
 from backend.inference.access import LLMAccessError
 from backend.inference.gateway_wiring import EGRESS_LABEL
 from backend.inference.gateway_wiring import ensure_egress_network
@@ -28,9 +30,9 @@ def _local_agent_runs_supported(settings):
 
 
 def test_openrouter_wiring_is_todays(owner):
-    job = GenerationJobFactory(created_by=owner)
+    job = GenerationRunFactory(created_by=owner)
     with mock.patch("backend.credentials.services.resolver.get_openrouter_key", return_value="sk-or"):
-        wiring = for_job(job, {"mode": "agent"})
+        wiring = for_job(job, {})
     assert (wiring.image_local, wiring.upstream, wiring.api_key, wiring.network) == (
         False,
         "https://openrouter.ai/api/v1",
@@ -42,7 +44,7 @@ def test_openrouter_wiring_is_todays(owner):
 
 
 def test_local_wiring(owner, endpoint, local_model, settings):
-    job = GenerationJobFactory(created_by=owner, model=local_model, attempt=2)
+    job = GenerationRunFactory(created_by=owner, model=local_model, attempt=2)
     wiring = for_job(job, {"endpoint": endpoint_section(local_model)})
     assert wiring.image_local
     assert (wiring.upstream, wiring.network, wiring.api_key) == (
@@ -63,14 +65,14 @@ def test_local_wiring_refused_without_apps_dind(owner, endpoint, local_model, se
     # Production compose (host daemon, no apps-dind): the gateway cannot reach the
     # internal LLM proxy, so the run fails fast instead of burning infra retries.
     settings.LLM_LOCAL_AGENT_RUNS = False
-    job = GenerationJobFactory(created_by=owner, model=local_model)
+    job = GenerationRunFactory(created_by=owner, model=local_model)
     with pytest.raises(LLMAccessError) as exc:
         for_job(job, {"endpoint": endpoint_section(local_model)})
     assert exc.value.retryable is False
     assert "not supported" in str(exc.value)
     # OpenRouter agent runs are unaffected.
     with mock.patch("backend.credentials.services.resolver.get_openrouter_key", return_value="sk-or"):
-        assert for_job(job, {"mode": "agent"}).network == "bridge"
+        assert for_job(job, {}).network == "bridge"
 
 
 def test_local_wiring_rechecks_endpoint_access(owner, endpoint, local_model):
@@ -80,7 +82,7 @@ def test_local_wiring_rechecks_endpoint_access(owner, endpoint, local_model):
     other = UserFactory()
     endpoint.visibility = LLMEndpoint.Visibility.SHARED
     endpoint.save()
-    job = GenerationJobFactory(created_by=other, model=local_model)
+    job = GenerationRunFactory(created_by=other, model=local_model)
     section = endpoint_section(local_model)
     assert for_job(job, {"endpoint": section}).image_local
     # The owner makes the endpoint private: queued / replayed jobs of other users stop.
@@ -91,11 +93,11 @@ def test_local_wiring_rechecks_endpoint_access(owner, endpoint, local_model):
     assert exc.value.code == "endpoint_forbidden"
     assert exc.value.retryable is False
     # The owner's own jobs are unaffected.
-    assert for_job(GenerationJobFactory(created_by=owner, model=local_model), {"endpoint": section}).image_local
+    assert for_job(GenerationRunFactory(created_by=owner, model=local_model), {"endpoint": section}).image_local
 
 
 def test_proxy_token_is_signed_and_salted(owner):
-    job = GenerationJobFactory(created_by=owner)
+    job = GenerationRunFactory(created_by=owner)
     token = proxy_token(job)
     with pytest.raises(signing.BadSignature):
         read_proxy_token(token + "x", max_age=60)
@@ -157,49 +159,6 @@ def test_egress_network_created_and_reconciled(settings):
     ensure_egress_network(SimpleNamespace(networks=networks))
     wrong_idle.remove.assert_called_once()
     assert len(networks.created) == 1
-
-
-def test_sandbox_names_carry_the_attempt():
-    with mock.patch("backend.generation.services.agent.sandbox.docker_manager.new_client"):
-        sandbox = AgentSandbox("12345678-1234-1234-1234-123456789abc", 3, snapshot={}, api_key="k")
-    assert sandbox.short == "123456781234-a3"
-    assert sandbox.wiring.network == "bridge"
-    assert sandbox.wiring.api_key == "k"
-
-
-def test_sandbox_starts_the_local_gateway_with_its_wiring(owner, endpoint, local_model):
-    import json
-
-    from backend.inference.gateway_wiring import GatewayWiring
-
-    wiring = GatewayWiring(
-        image_local=True,
-        upstream="http://172.30.99.2:8090/v1",
-        api_key="",
-        network="llmlab-gw-egress",
-        extra_env={"LLMLAB_UPSTREAM_TOKEN": "tok"},
-        upstream_timeout_s=1200.0,
-    )
-    snapshot = {
-        "agent": {"max_llm_requests": 5, "max_total_tokens": 0, "max_cost_usd": 0, "network_policy": "none"},
-        "gateway": {"forced_params": {"seed": 1}, "stripped_params": []},
-        "llm": {"model_slug": local_model.model_id},
-    }
-    client = mock.Mock()
-    gateway = client.containers.create.return_value
-    gateway.status = "running"
-    gateway.exec_run.return_value = (0, b"")
-    with mock.patch("backend.generation.services.agent.sandbox.docker_manager.new_client", return_value=client):
-        sandbox = AgentSandbox("12345678-1234-1234-1234-123456789abc", 1, snapshot=snapshot, wiring=wiring)
-        sandbox.network = mock.Mock()
-        sandbox._start_gateway("llmlab/llm-gateway-local:abc")
-    kwargs = client.containers.create.call_args.kwargs
-    assert kwargs["network"] == "llmlab-gw-egress"
-    assert kwargs["name"] == "llmlab-gateway-123456781234-a1"
-    assert kwargs["environment"]["LLMLAB_UPSTREAM_TOKEN"] == "tok"  # noqa: S105
-    assert kwargs["environment"]["OPENROUTER_API_KEY"] == ""
-    config = json.loads(kwargs["environment"]["GATEWAY_CONFIG"])
-    assert (config["upstream"], config["upstream_timeout_s"]) == ("http://172.30.99.2:8090/v1", 1200.0)
 
 
 def test_egress_network_creation_race_is_tolerated(settings):

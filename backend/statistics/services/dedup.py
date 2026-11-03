@@ -244,7 +244,7 @@ def issue_class(  # noqa: PLR0911
 class IssueCluster:
     """One deduplicated issue: every finding (from one or more tools) that reports it.
 
-    ``run_id`` is the app (generation job) the findings describe.
+    ``run_id`` is the app (the GenerationRun) the findings describe.
     """
 
     run_id: str
@@ -291,8 +291,8 @@ class IssueCluster:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            # The generation job: per-app tables' ``run_id`` is the AnalysisRun.
-            "job_id": self.run_id,
+            # The GenerationRun (per-app tables name the AnalysisRun ``analysis_run_id``).
+            "run_id": self.run_id,
             "issue_class": self.issue_class,
             "file_path": self.file_path,
             "line": self.line,

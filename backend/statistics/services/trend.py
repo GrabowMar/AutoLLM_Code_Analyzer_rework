@@ -13,7 +13,7 @@ from django.db.models import Q
 from django.db.models.functions import TruncDate
 
 from backend.analysis.models import AnalysisRun
-from backend.generation.models import GenerationJob
+from backend.generation.models import GenerationRun
 from backend.statistics.services.helpers import _scoped
 
 if TYPE_CHECKING:
@@ -105,8 +105,8 @@ def get_recent_activity(
 
     limit = max(1, min(limit, 100))
 
-    jobs = (
-        _scoped(GenerationJob.objects.all(), user, "created_by")
+    runs = (
+        _scoped(GenerationRun.objects.all(), user, "created_by")
         .select_related("model")
         .order_by("-created_at")[:limit]
     )
@@ -117,12 +117,12 @@ def get_recent_activity(
     items: list[dict[str, Any]] = [
         {
             "kind": "generation",
-            "id": str(j.id),
-            "title": (f"Generation {j.mode} job — {j.model.model_name if j.model else 'no model'}"),
-            "status": j.status,
-            "created_at": j.created_at.isoformat(),
+            "id": str(r.id),
+            "title": f"Generation run ({r.get_kind_display()}) — {r.model.model_name if r.model else 'no model'}",
+            "status": r.status,
+            "created_at": r.created_at.isoformat(),
         }
-        for j in jobs
+        for r in runs
     ]
     items.extend(
         {
