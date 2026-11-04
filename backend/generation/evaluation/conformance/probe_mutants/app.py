@@ -60,6 +60,18 @@ class HttpError(Exception):
 def db() -> sqlite3.Connection:
     conn = sqlite3.connect(os.path.join(DATA_DIR, "app.db"), check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    if "sqli_time" in VULN:
+        # SQLite has no SLEEP(); give the time-based mutant one (MySQL-style, once per statement's
+        # connection) so the exploit does not depend on how fast the host runs the heavy-CTE payload.
+        slept: list[bool] = []
+
+        def _sleep(seconds: float) -> int:
+            if not slept:
+                slept.append(True)
+                time.sleep(min(float(seconds), 5.0))
+            return 0
+
+        conn.create_function("SLEEP", 1, _sleep)
     return conn
 
 
