@@ -151,6 +151,8 @@ class TestOpenCode:
         dockerfile = (IMAGES / "agent-opencode" / "Dockerfile").read_text()
         assert f"mkdir -p {OPENCODE_PREBAKED}" in dockerfile
         assert '"@opencode-ai/plugin@${OPENCODE_VERSION}"' in dockerfile
+        # The root-run installs must not leave root-owned entries in the harness HOME (E2E-6: cp exit 70).
+        assert "find /run/home -mindepth 1 -delete" in dockerfile.split("USER node")[0]
 
 
 class TestMiniSweAgent:

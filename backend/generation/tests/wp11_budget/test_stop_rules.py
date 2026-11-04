@@ -66,6 +66,34 @@ def test_infra_error_rate_pauses(user, on_commit, events):
     assert GenerationRun.objects.filter(study=study, status="pending").count() == len(runs) - 5
 
 
+def test_topped_up_failures_no_longer_count(user, on_commit):
+    """An attempt a top-up replaced (a newer run on its cell) is acknowledged: the rule does not re-fire on it."""
+    tree = _study(user, [_rule("infra_error_rate", threshold=0.30, action="pause")])
+    failed = tree.runs[:5]
+    _finish(failed, "infra_error")
+    study, fired = _evaluate(tree, on_commit)
+    assert study.pause_reason == "rule:infra_error_rate"
+    # The researcher fixes the cause, tops the cells up (a new attempt per cell) and resumes.
+    retries = [
+        GenerationRun.objects.create(
+            **{
+                f.attname: getattr(run, f.attname)
+                for f in GenerationRun._meta.concrete_fields
+                if f.attname not in ("id", "created_at", "updated_at", "status", "outcome", "outcome_reason", "usable")
+            },
+        )
+        for run in failed
+    ]
+    Study.objects.filter(pk=study.pk).update(status="running", pause_reason="")
+    study, fired = _evaluate(tree, on_commit)
+    assert fired == []
+    assert study.status in ("piloting", "running")
+    _finish(retries, "tested")
+    _finish(tree.runs[5:7], "infra_error")
+    _study_row, fired = _evaluate(tree, on_commit)
+    assert fired == []  # 2 / 7 current failures, the 5 replaced ones are not counted
+
+
 def test_rates_need_enough_runs(user, on_commit):
     tree = _study(user, [_rule("infra_error_rate", threshold=0.30, action="pause")])
     _finish(tree.runs[:2], "infra_error")

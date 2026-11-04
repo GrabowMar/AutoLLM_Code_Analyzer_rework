@@ -229,7 +229,12 @@ def workspace_loss(logs_dir: Path, record: ExitRecord | None) -> str | None:
 
 
 def proxy_env(network_policy: str) -> dict[str, str]:
-    """Egress through the gateway's CONNECT allowlist (policy ``packages`` only; HTTPS only, loopback direct)."""
+    """Egress through the gateway (policy ``packages`` only; the gateway and loopback direct).
+
+    HTTPS goes through the gateway's CONNECT allowlist; plain ``http://`` goes through its forward proxy, which
+    only reaches the dependency caches (``GATEWAY_PROXY_HOSTS``; the caches are ``http://`` URLs on a network
+    the agent cannot route to, so without ``HTTP_PROXY`` pip/uv/go could not use them).
+    """
     if network_policy != "packages":
         return {}
     proxy = f"http://{GATEWAY_ALIAS}:{GATEWAY_PORT}"
@@ -237,9 +242,12 @@ def proxy_env(network_policy: str) -> dict[str, str]:
     return {
         "HTTPS_PROXY": proxy,
         "https_proxy": proxy,
+        "HTTP_PROXY": proxy,
+        "http_proxy": proxy,
         "NO_PROXY": no_proxy,
         "no_proxy": no_proxy,
         "npm_config_https_proxy": proxy,
+        "npm_config_proxy": proxy,
     }
 
 

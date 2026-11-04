@@ -106,6 +106,9 @@ services:
       default: {}
       llmproxy:
         ipv4_address: "${LLM_PROXY_ADDR:-172.30.99.2}"
+      # Only to health-probe the dependency caches at their sandbox-facing addresses (build/depcache.py).
+      depcache:
+        ipv4_address: "${EXECUTOR_DEPCACHE_ADDR:-172.30.98.13}"
     environment:
       <<: *django-env
       CONN_MAX_AGE: "0"
@@ -115,6 +118,13 @@ services:
       LLM_PROXY_BIND: "${LLM_PROXY_ADDR:-172.30.99.2}:8090"
       LLM_PROXY_UPSTREAM: "http://${LLM_PROXY_ADDR:-172.30.99.2}:8090/v1"
       LLM_GATEWAY_EGRESS_SUBNET: "${LLM_GATEWAY_EGRESS_SUBNET:-10.213.0.0/24}"
+      # WP-05 depcache (profile `depcache`): the caches' fixed addresses on the internal depcache network,
+      # reached by sandbox gateways on llmlab-gw-egress (apps-dind firewall). Without the profile the probe
+      # fails and runs record `depcache_unavailable` (public registries).
+      DEPCACHE_NPM_URL: "${DEPCACHE_NPM_URL:-http://172.30.98.2:4873}"
+      DEPCACHE_PYPI_URL: "${DEPCACHE_PYPI_URL:-http://172.30.98.3:3141}"
+      DEPCACHE_GOPROXY_URL: "${DEPCACHE_GOPROXY_URL:-http://172.30.98.4:3000}"
+      DEPCACHE_MAVEN_URL: "${DEPCACHE_MAVEN_URL:-http://172.30.98.5:8080/maven-central}"
     # No extra_hosts: direct endpoints (tailnet/VPN) are reached through host
     # routing + masquerade; host.docker.internal would expose every host-bound
     # service and is rejected by the SSRF validator anyway.
@@ -190,6 +200,12 @@ services:
     volumes:
       - ./compose/local/depcache/verdaccio/config.yaml:/verdaccio/conf/config.yaml:ro
       - depcache_npm:/verdaccio/storage
+    environment:
+      # Tarball URLs in the metadata it serves name the public registry, so a lockfile written in a sandbox
+      # records https://registry.npmjs.org/... (npm still downloads through this cache: its default
+      # replace-registry-host=npmjs swaps the host for the configured registry). Without it every lock an
+      # agent writes pins http://<cache address>/..., which no evaluation build can reach.
+      VERDACCIO_PUBLIC_URL: https://registry.npmjs.org/
     networks:
       default: {}
       depcache:
