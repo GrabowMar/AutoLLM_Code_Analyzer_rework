@@ -425,8 +425,10 @@ def quality_metrics(run: GenerationRun, user) -> dict[str, Any]:
         "measured": sum(1 for t in tools if t["measured"]),
         "tools": tools,
         "notes": [
-            "Lizard counts every function it parses, anonymous JavaScript callbacks included, so its averages mix "
-            "backend and frontend code.",
+            (
+                "Lizard counts every function it parses, anonymous JavaScript callbacks included, so its averages mix "
+                "backend and frontend code."
+            ),
             "Metrics from different tool versions are not directly comparable.",
         ],
     }

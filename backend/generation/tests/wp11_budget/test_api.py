@@ -150,9 +150,11 @@ def test_caps_crud_and_permissions(client, staff, user):
     )
     listed = client.get("/budget/caps/").json()
     assert {c["scope"] for c in listed} == {"user", "model"}
-    assert client.delete(f"/budget/caps/{cap_id}/").json() == {"deleted": cap_id}
+    deleted = client.delete(f"/budget/caps/{cap_id}/")
+    assert deleted.json() == {"deleted": cap_id}
     assert not SpendCap.objects.filter(pk=cap_id).exists()
-    assert client.delete(f"/budget/caps/{staff_cap['id']}/").status_code == 403
+    forbidden = client.delete(f"/budget/caps/{staff_cap['id']}/")
+    assert forbidden.status_code == 403
 
 
 def test_priors_listing(client):

@@ -135,8 +135,9 @@ def newcombe_independent(k1: int, n1: int, k2: int, n2: int, z: float = Z95) -> 
     p1, p2 = k1 / n1, k2 / n2
     (l1, u1), (l2, u2) = w1, w2
     d = p1 - p2
-    delta = math.sqrt((p1 - l1) ** 2 + (u2 - p2) ** 2)
-    eps = math.sqrt((u1 - p1) ** 2 + (p2 - l2) ** 2)
+    # Newcombe's method 10: root-sum-of-squares of the Wilson interval arms (not a distance).
+    delta = math.hypot(p1 - l1, u2 - p2)
+    eps = math.hypot(u1 - p1, p2 - l2)
     return d, max(-1.0, d - delta), min(1.0, d + eps)
 
 
