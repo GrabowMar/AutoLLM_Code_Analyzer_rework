@@ -105,10 +105,23 @@ def _finished(study: Study, stages: Iterable[str]) -> list[GenerationRun]:
     )
 
 
-def _cost(run: GenerationRun) -> float | None:
+def _cost(run: GenerationRun, basis: str = "billed") -> float | None:
+    """The run's cost in the study cap's unit: ``metrics.list_cost_usd`` for a list-basis study (the
+    billed amount when no list amount was recorded), else ``metrics.cost_usd``."""
     metrics = run.metrics if isinstance(run.metrics, dict) else {}
     value = metrics.get("cost_usd")
-    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    if basis == "list" and _is_number(metrics.get("list_cost_usd")):
+        value = metrics.get("list_cost_usd")
+    return float(value) if _is_number(value) else None
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _estimate(cell: StudyCell, basis: str) -> float:
+    """The cell's expected cost in the study cap's unit (``estimate_list_usd`` for a list-basis study)."""
+    return float(cell.estimate_list_usd if basis == "list" else cell.estimate_usd)
 
 
 def _group(runs: list[GenerationRun], scope: str) -> dict[Any, list[GenerationRun]]:
@@ -186,12 +199,15 @@ def _evaluate_rule(rule: StopRule, study: Study, runs: list[GenerationRun], now:
             value, n = float(streak), len(group)
             fired = streak >= rule.threshold and not any_tested
         elif code == "cost_overrun":
-            sample = [r for r in group[: rule.window] if _cost(r) is not None]
-            estimates = [float(r.cell.estimate_usd) for r in sample if r.cell_id and r.cell.estimate_usd]
+            # Cost and estimate in the cap's unit (E2E-13): a list-basis study on a subscription endpoint
+            # bills 0, so billed against billed would never measure.
+            basis = study.cap_basis
+            sample = [r for r in group[: rule.window] if _cost(r, basis) is not None]
+            estimates = [_estimate(r.cell, basis) for r in sample if r.cell_id and _estimate(r.cell, basis)]
             n = len(sample)
             if n < rule.window or not estimates:
                 continue
-            mean_cost = sum(_cost(r) or 0.0 for r in sample) / n
+            mean_cost = sum(_cost(r, basis) or 0.0 for r in sample) / n
             mean_estimate = sum(estimates) / len(estimates)
             value = mean_cost / mean_estimate if mean_estimate else None
             fired = value is not None and value > rule.threshold
@@ -451,12 +467,13 @@ def pilot_gates(study: Study, *, runs: list[GenerationRun] | None = None) -> lis
     out: list[dict[str, Any]] = []
     cap_hits: Counter[str] = Counter()
     tokens_basis = study.budget_basis == "tokens"
+    basis = study.cap_basis  # max_cost_overrun compares cost and estimate in the cap's unit
     for condition_id, group in sorted(by_condition.items(), key=lambda kv: str(kv[0])):
         n = len(group)
         usable = [r for r in group if r.outcome in USABLE_OUTCOMES]
         built = [r for r in usable if r.outcome in ("tested", "start_fail")]
-        costs = [c for c in (_cost(r) for r in group) if c is not None]
-        estimates = [float(r.cell.estimate_usd) for r in group if r.cell_id and r.cell.estimate_usd]
+        costs = [c for c in (_cost(r, basis) for r in group) if c is not None]
+        estimates = [_estimate(r.cell, basis) for r in group if r.cell_id and _estimate(r.cell, basis)]
         notes = [_note_codes(r) for r in group]
         hit = [
             any(c.startswith("budget_exhausted") or c in ("wall_clock", "idle_timeout") for c in codes)
@@ -496,7 +513,17 @@ def pilot_gates(study: Study, *, runs: list[GenerationRun] | None = None) -> lis
         overrun = None
         if costs and estimates and sum(estimates) > 0:
             overrun = (sum(costs) / len(costs)) / (sum(estimates) / len(estimates))
-        out.append(_gate("max_cost_overrun", overrun, gates.max_cost_overrun, upper=True, n=len(costs), **extra))
+        out.append(
+            _gate(
+                "max_cost_overrun",
+                overrun,
+                gates.max_cost_overrun,
+                upper=True,
+                n=len(costs),
+                cap_basis=basis,
+                **extra,
+            ),
+        )
         out.append(_gate("max_cap_hit_rate", sum(hit) / n, gates.max_cap_hit_rate, upper=True, n=n, **extra))
         truncated = sum(1 for r in group if (r.validity or {}).get("truncated"))
         out.append(_gate("max_truncation_rate", truncated / n, gates.max_truncation_rate, upper=True, n=n, **extra))
@@ -528,10 +555,11 @@ def gates_pass(gates: list[dict[str, Any]]) -> bool:
 
 
 def pilot_observations(study: Study) -> dict[int, list[float]]:
-    """``{condition_index: [cost of each finished pilot run]}`` for ``estimate.reestimate_after_pilot``."""
+    """``{condition_index: [cost of each finished pilot run]}`` for ``estimate.reestimate_after_pilot``
+    (in the study cap's unit, like the estimate's ``cap_basis``)."""
     out: dict[int, list[float]] = defaultdict(list)
     for run in _pilot_runs(study):
-        cost = _cost(run)
+        cost = _cost(run, study.cap_basis)
         if cost is not None and run.condition_id:
             out[run.condition.index].append(cost)
     return dict(out)

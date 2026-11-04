@@ -21,7 +21,7 @@
 	import ErrorAlert from '$lib/components/ErrorAlert.svelte';
 	import NumberField from '../shared/NumberField.svelte';
 	import { formatSecondsRange, formatUsd, plural } from '../format';
-	import { launchStudyCap } from './policy';
+	import { estimateBasisTotals, launchStudyCap } from './policy';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Play from '@lucide/svelte/icons/play';
 
@@ -40,9 +40,12 @@
 	let { open, plan, policy, policyRef = '', policyError = '', busy = false, error = '', onlaunch, onclose }: Props = $props();
 
 	const estimate = $derived(plan?.estimate ?? null);
+	// Expected / p90 in the cap's unit: list price when the endpoint is not billed (E2E-13).
+	const totals = $derived(estimate ? estimateBasisTotals(estimate) : null);
+	const listBasis = $derived(totals?.basis === 'list');
 	const threshold = $derived(policy?.estimate.require_confirm_above_usd ?? 0);
-	const needsConfirm = $derived(!!estimate && estimate.p90_total > threshold);
-	const p90Text = $derived(estimate ? estimate.p90_total.toFixed(2) : '');
+	const needsConfirm = $derived(!!totals && totals.p90 > threshold);
+	const p90Text = $derived(totals ? totals.p90.toFixed(2) : '');
 	const policyCap = $derived(policy?.study.max_cost_usd ?? 'auto');
 
 	let capMode = $state<'auto' | 'fixed'>('auto');
@@ -58,8 +61,8 @@
 		cap = policyCap === 'auto' ? (estimate?.cap_usd ?? null) : Number(policyCap);
 	});
 
-	const confirmed = $derived(!needsConfirm || Number(typed.replace(/[$,\s]/g, '')) >= (estimate?.p90_total ?? 0) - 0.005);
-	const capTooLow = $derived(capMode === 'fixed' && cap !== null && !!estimate && cap < estimate.expected_total);
+	const confirmed = $derived(!needsConfirm || Number(typed.replace(/[$,\s]/g, '')) >= (totals?.p90 ?? 0) - 0.005);
+	const capTooLow = $derived(capMode === 'fixed' && cap !== null && !!totals && cap < totals.expected);
 	const EXHAUSTED: Record<string, string> = {
 		stop_balanced: 'claim no new block; started blocks finish (balanced: no unit ends at full n while another has none)',
 		pause: 'pause the study until you raise the cap',
@@ -67,9 +70,9 @@
 	};
 
 	function launch() {
-		if (!estimate || !policy) return;
+		if (!estimate || !totals || !policy) return;
 		onlaunch({
-			confirm_usd: needsConfirm ? Number(typed.replace(/[$,\s]/g, '')) : estimate.p90_total,
+			confirm_usd: needsConfirm ? Number(typed.replace(/[$,\s]/g, '')) : totals.p90,
 			study_cap: launchStudyCap(policyCap, capMode, cap),
 			pilot_override: pilotOverride,
 		});
@@ -89,11 +92,11 @@
 				<dl class="grid grid-cols-3 gap-2 text-center">
 					<div class="rounded-md border border-border px-2 py-1.5">
 						<dt class="kpi-label">Expected</dt>
-						<dd class="font-mono text-lg tabular-nums">{formatUsd(estimate.expected_total)}</dd>
+						<dd class="font-mono text-lg tabular-nums">{formatUsd(totals?.expected)}</dd>
 					</div>
 					<div class="rounded-md border border-border px-2 py-1.5">
 						<dt class="kpi-label">p90</dt>
-						<dd class="font-mono text-lg tabular-nums">{formatUsd(estimate.p90_total)}</dd>
+						<dd class="font-mono text-lg tabular-nums">{formatUsd(totals?.p90)}</dd>
 					</div>
 					<div class="rounded-md border border-border px-2 py-1.5">
 						<dt class="kpi-label">Worst case</dt>
@@ -101,7 +104,7 @@
 					</div>
 				</dl>
 				<p class="text-xs text-muted-foreground">
-					At list price ≈ {formatUsd(estimate.expected_list_total)}.
+					{#if listBasis}At list price: the endpoint bills {formatUsd(estimate.expected_total)}, and the cap counts list price.{:else}At list price ≈ {formatUsd(estimate.expected_list_total)}.{/if}
 					{#if estimate.time}Wall time {formatSecondsRange(estimate.time.expected_wall_s_low, estimate.time.expected_wall_s_high)} at {estimate.time.effective_parallel} parallel.{/if}
 					{#if estimate.fit.max_repeats_under_cap !== null}Fits {estimate.fit.max_repeats_under_cap} repeats under the cap.{/if}
 					p90 is the sum of per-cell p90s (conservative).

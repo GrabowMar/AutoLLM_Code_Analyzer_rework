@@ -30,6 +30,8 @@ cells are legitimate but carry a harness-model affinity confound that results re
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any
 from typing import ClassVar
 from typing import Final
@@ -82,7 +84,7 @@ DISABLE_ENV: Final = {
 }
 
 FACTS: Final = HarnessFacts(
-    facts_version=1,
+    facts_version=2,
     verified_against=(
         f"@anthropic-ai/claude-code@{VERSION} linux-x64 binary: --help, env-name scan, scripted-upstream smoke "
         "run, 2026-11-03"
@@ -131,11 +133,14 @@ FACTS: Final = HarnessFacts(
         r"(?s)gitStatus: .*?(?=\n\n|\Z)",
     ),
     unsupported_knobs=(),
-    open_questions=(
-        "OpenRouter /api/v1/messages: acceptance of provider routing fields and usage.cost in the native "
-        "response (WP-06 passthrough; else /generation backfill + routing_partial)",
-        "real-model smoke run through the WP-06 gateway on three model families (no paid calls in wave 2)",
-    ),
+    # E2E-13: the OpenRouter passthrough question moved to ClaudeCodeAdapter.endpoint_open_questions (it
+    # concerns /api/v1/messages only), the missing real-model smoke run to exploratory_only.
+    open_questions=(),
+)
+
+OPENROUTER_PASSTHROUGH_QUESTION: Final = (
+    "OpenRouter /api/v1/messages: acceptance of provider routing fields and usage.cost in the native "
+    "response (WP-06 passthrough; else /generation backfill + routing_partial)"
 )
 
 
@@ -162,9 +167,15 @@ class ClaudeCodeAdapter(HarnessAdapter):
     image_dir: ClassVar[str] = "agent-claude-code"
     facts: ClassVar[HarnessFacts] = FACTS
     versions: ClassVar[tuple[str, ...]] = (VERSION,)
-    wants_enabled: ClassVar[bool] = False
-    blocked_reason: ClassVar[str] = (
-        "passthrough needs WP-06's /v1/messages route verified against OpenRouter, and a real-model smoke run"
+    wants_enabled: ClassVar[bool] = True
+    # Local endpoints reach it through the gateway's anthropic_messages translator (canonical chat upstream);
+    # the OpenRouter passthrough route stays unverified (E2E-13).
+    endpoint_open_questions: ClassVar[Mapping[str, tuple[str, ...]]] = MappingProxyType(
+        {"openrouter": (OPENROUTER_PASSTHROUGH_QUESTION,)},
+    )
+    exploratory_only: ClassVar[str] = (
+        "no real-model smoke run on three model families is logged yet (scripted-upstream and translate-mode "
+        "gateway smoke runs only)"
     )
 
     def image_spec(self, version: str) -> ImageSpec:

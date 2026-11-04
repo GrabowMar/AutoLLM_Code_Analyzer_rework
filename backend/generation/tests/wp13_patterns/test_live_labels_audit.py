@@ -226,3 +226,20 @@ def test_audit_needs_a_completed_run(detectors):
     pattern_run = create_pattern_run(synthetic.study, detectors=[detectors["py-sql-fstring"].pinned_ref])
     with pytest.raises(audit_service.AuditError):
         audit_service.create_audit(pattern_run, "py-sql-fstring")
+
+
+def test_a_live_scorer_failure_does_not_crash_the_variant_evaluation(detectors, fake_semgrep_runner, caplog):
+    """E2E-12: a study launched with an unpinned primary feature crashed every evaluation (``eval_lost``)."""
+    from backend.generation.slot import evaluate as slot_evaluate
+
+    synthetic = build_slot_study(
+        [TargetSpec(path="app/routes.py", file_text=ROUTES, span=(4, 6))],
+        repeats=1,
+        status="running",
+        primary_features=["py-sql-fstring"],  # bare slug: resolve_refs refuses it
+    )
+    run = FakeSlotExecutor(synthetic).produce(0, 0, 0, INSECURE)
+    with pytest.raises(det.DetectorRefError):
+        live.score_variant(run)
+    slot_evaluate._live_score(run)  # the eval-stage hook itself
+    assert "live pattern scoring failed" in caplog.text

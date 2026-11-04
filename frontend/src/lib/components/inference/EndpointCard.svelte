@@ -139,11 +139,11 @@
 		{#if endpoint.is_system}
 			<OpenRouterKeyBanner class="px-0" />
 			<dl class="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-				<dt class="text-muted-foreground">Agent jobs at once</dt>
+				<dt class="text-muted-foreground">Agent runs at once</dt>
 				<dd class="text-right tabular-nums">{endpoint.max_active_jobs_effective.sandbox}</dd>
-				<dt class="text-muted-foreground">LLM jobs at once</dt>
+				<dt class="text-muted-foreground">LLM runs at once</dt>
 				<dd class="text-right tabular-nums">{endpoint.max_active_jobs_effective.llm}</dd>
-				<dt class="text-muted-foreground">Active jobs</dt>
+				<dt class="text-muted-foreground">Active runs</dt>
 				<dd class="text-right tabular-nums">{endpoint.live.active_jobs}</dd>
 			</dl>
 		{:else}
@@ -170,7 +170,7 @@
 
 			<dl class="grid grid-cols-3 gap-2 text-xs">
 				<div>
-					<dt class="text-muted-foreground">Active jobs</dt>
+					<dt class="text-muted-foreground">Active runs</dt>
 					<dd class="font-medium tabular-nums">{endpoint.live.active_jobs}</dd>
 				</div>
 				<div>

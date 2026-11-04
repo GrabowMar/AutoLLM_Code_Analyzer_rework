@@ -21,8 +21,10 @@ import threading
 import time
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import datetime
 
 from django.db import close_old_connections
+from django.utils import timezone
 
 from backend.inference import doorbell
 from backend.inference.db import close_db
@@ -37,6 +39,12 @@ MANAGER_TICK_S = 5.0
 WATCH_TICK_S = 2.0
 IDLE_WAIT_S = 2.0
 SHOW_TIMEOUT_S = 30
+# Non-stream OpenAI chat calls of these sources are streamed upstream under per-call limits (E2E-17).
+STREAMED_SOURCES = frozenset({LLMRequest.Source.AGENT_PROXY, LLMRequest.Source.SLOT_CALL})
+# The cut answer is due this long (at most 10 % of the timeout) before the gateway's per-call timeout.
+CUT_MARGIN_S = 30
+# Less than this left of a call's policy wall clock: the call fails at once, without an upstream call (E2E-20).
+MIN_CALL_WALL_S = 1.0
 
 
 @dataclass
@@ -93,6 +101,28 @@ def run_one(endpoint_id: int, owner: str, inflight: _Inflight | None = None) -> 
     row = rows[0]
     endpoint = LLMEndpoint.objects.get(pk=endpoint_id)
     rid = str(row.pk)
+    try:
+        limits = stream_limits(row, endpoint)
+    except Exception:  # never lose the claimed row over the limits lookup
+        logger.exception("Stream limits for request %s failed; calling without them", rid)
+        limits = None
+    # The policy's per-call wall clock runs from the row's creation (the gateway's call), across its
+    # queue time and every attempt; once it is spent the gateway has given up, so neither call nor requeue.
+    call_deadline = None
+    if limits is not None and limits.call_wall_left_s is not None:
+        call_deadline = time.monotonic() + limits.call_wall_left_s
+        if limits.call_wall_left_s < MIN_CALL_WALL_S:
+            llm_requests.complete(
+                row.pk,
+                row.claim_token,
+                pump_owner=owner,
+                ok=False,
+                error_kind="timeout",
+                error_message="the per-call wall clock was spent in the queue and earlier attempts",
+                requeue=False,
+            )
+            close_db()
+            return True
     close_db()
 
     def on_socket(sock):
@@ -108,9 +138,11 @@ def run_one(endpoint_id: int, owner: str, inflight: _Inflight | None = None) -> 
             timeout=float(endpoint.request_timeout_s),
             api_key=_api_key(endpoint),
             on_socket=on_socket,
+            stream_limits=limits,
         )
     except upstream.UpstreamError as exc:
         cancelled = LLMRequest.objects.filter(pk=row.pk, status=LLMRequest.Status.CANCELLED).exists()
+        requeue = call_deadline is None or time.monotonic() + MIN_CALL_WALL_S < call_deadline
         llm_requests.complete(
             row.pk,
             row.claim_token,
@@ -118,7 +150,8 @@ def run_one(endpoint_id: int, owner: str, inflight: _Inflight | None = None) -> 
             ok=False,
             status_code=exc.status,
             error_kind="cancelled" if cancelled else exc.kind,
-            error_message=str(exc),
+            error_message=str(exc) if requeue else f"{exc} (per-call wall clock spent; not retried)",
+            requeue=requeue,
         )
     else:
         ok = 200 <= resp.status < 300
@@ -136,6 +169,79 @@ def run_one(endpoint_id: int, owner: str, inflight: _Inflight | None = None) -> 
     finally:
         close_db()
     return True
+
+
+def _positive_int(value) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _policy_content(job_id) -> dict:
+    """The run's frozen effective ``ResourcePolicyContent`` (``{}`` without a run or manifest)."""
+    if job_id is None:
+        return {}
+    from backend.generation.models import RunManifest
+    from backend.inference.proxy_server import _effective_content
+
+    manifest = RunManifest._base_manager.filter(run_id=job_id).values_list("manifest", flat=True).first()  # noqa: SLF001
+    return _effective_content(manifest) if isinstance(manifest, dict) else {}
+
+
+def stream_limits(row: LLMRequest, endpoint: LLMEndpoint):
+    """The per-call limits a run's non-stream OpenAI chat call is streamed under (E2E-17), else None.
+
+    Agent-proxy and slot calls only (the sandbox path and single-shot slot calls). The output cap is
+    the body's policy-pinned ``max_tokens`` (``call.max_output_tokens`` plus the reasoning budget),
+    else the same sum from the manifest; the wall clock is the policy's ``time.llm_call_timeout_s``
+    less :data:`CUT_MARGIN_S` (so the cut answer reaches the run's gateway before its own per-call
+    timeout fires), anchored at the row's ``created_at`` (time spent queued and in earlier attempts
+    is already gone; E2E-20), never above the endpoint's ``request_timeout_s``.
+    """
+    from backend.inference import upstream
+    from backend.inference.chat import OPENAI_CHAT_PATH
+    from backend.inference.proxy_server import budget_rules
+
+    body = row.body
+    if (
+        row.source not in STREAMED_SOURCES
+        or str(row.method).upper() != "POST"
+        or row.path != OPENAI_CHAT_PATH
+        or not isinstance(body, dict)
+        or body.get("stream")
+    ):
+        return None
+    content = _policy_content(row.job_id)
+    call = content.get("call") or {}
+    reasoning = content.get("reasoning") or {}
+    cap = _positive_int(body.get("max_tokens"))
+    if cap is None and _positive_int(call.get("max_output_tokens")):
+        extra = _positive_int(reasoning.get("max_tokens")) if reasoning.get("mode") == "max_tokens" else None
+        cap = int(call["max_output_tokens"]) + (extra or 0)
+    wall = float(endpoint.request_timeout_s)
+    left = None
+    policy_wall = _positive_int((content.get("time") or {}).get("llm_call_timeout_s"))
+    if policy_wall:
+        left = policy_wall - min(CUT_MARGIN_S, policy_wall * 0.1) - _age_s(row)
+        wall = max(0.0, min(wall, left))
+    rules = budget_rules()
+    prompt = rules.estimate_tokens(rules.prompt_text(body))
+    return upstream.StreamLimits(
+        max_output_tokens=cap,
+        wall_clock_s=wall,
+        prompt_tokens_estimate=prompt,
+        call_wall_left_s=left,
+    )
+
+
+def _age_s(row: LLMRequest) -> float:
+    """Seconds since the row was created (its queue time plus earlier attempts); 0 when unknown."""
+    created = getattr(row, "created_at", None)
+    if not isinstance(created, datetime):
+        return 0.0
+    return max(0.0, (timezone.now() - created).total_seconds())
 
 
 def refresh_inventory(endpoint: LLMEndpoint) -> None:

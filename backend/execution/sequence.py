@@ -52,18 +52,48 @@ def order_seed(study: Any) -> int:
     return int(study.id.int % 2_147_483_647)
 
 
-def resident_limit(endpoint: Any, study: Any = None) -> int | None:
+def hosts_models_locally(endpoint: Any) -> bool:
+    """Whether ``endpoint`` loads models into memory it owns, so a residency limit means something.
+
+    Residency (``max_resident_models``) is a GPU/VRAM limit of a server that swaps models in and
+    out. It holds for Ollama, for anything behind a relay (a GPU box), for endpoints accounted
+    ``free`` (tokens only: local models) and for any endpoint whose owner declared its own K. A
+    remote API (OpenRouter, Anthropic, a subscription such as OpenCode Go: direct, billed or list
+    price, no declared K) serves every model at once, so a study's residency option must not
+    serialize its models there; ``per_endpoint``/``per_model`` and the endpoint's job cap still apply.
+    """
+    if endpoint is None or getattr(endpoint, "is_system", False):
+        return False
+    if _finite(getattr(endpoint, "max_resident_models", None)) is not None:
+        return True
+    return (
+        getattr(endpoint, "kind", "") == "ollama"
+        or getattr(endpoint, "connection", "") == "relay"
+        or getattr(endpoint, "cost_basis", "") == "free"
+    )
+
+
+def _finite(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return int(value)
+    return None
+
+
+def resident_limit(endpoint: Any, study: Any = None, *, options: Mapping[str, Any] | None = None) -> int | None:
     """K for ``endpoint`` under ``study``: the tighter of the endpoint's and ``execution_options.max_resident_models``.
 
-    The system (OpenRouter) endpoint serves everything and has no residency.
+    The system (OpenRouter) endpoint serves everything and has no residency. The study's option
+    (a local-model policy knob, frugal = 1) applies only where :func:`hosts_models_locally`; the
+    endpoint's own declared K always applies. ``options`` stands in for ``study.execution_options``.
     """
     if endpoint is None or getattr(endpoint, "is_system", False):
         return None
-    limits = [getattr(endpoint, "max_resident_models", None)]
-    options = getattr(study, "execution_options", None) or {}
-    if isinstance(options, dict):
-        limits.append(options.get("max_resident_models"))
-    finite = [int(v) for v in limits if isinstance(v, int) and not isinstance(v, bool) and v > 0]
+    limits = [_finite(getattr(endpoint, "max_resident_models", None))]
+    if options is None:
+        options = getattr(study, "execution_options", None) or {}
+    if isinstance(options, Mapping) and hosts_models_locally(endpoint):
+        limits.append(_finite(options.get("max_resident_models")))
+    finite = [v for v in limits if v is not None]
     return min(finite) if finite else None
 
 

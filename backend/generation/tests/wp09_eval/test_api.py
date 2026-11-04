@@ -112,8 +112,8 @@ def test_library_oracle_endpoint_no_longer_answers_501(golden: Any) -> None:
     client.force_login(staff)
     resp = client.post(
         f"{BASE}/library/tasks/crud_todo_list/versions/1/oracle/",
-        {"stacks": ["flask-react@1"]},
+        {"stacks": ["fastapi-vue@1"]},
         content_type="application/json",
     )
     assert resp.status_code == 200, resp.content
-    assert resp.json() == {"queued_runs": []}  # no reference tree yet: recorded missing
+    assert resp.json() == {"queued_runs": []}  # no fastapi-vue reference tree: recorded missing

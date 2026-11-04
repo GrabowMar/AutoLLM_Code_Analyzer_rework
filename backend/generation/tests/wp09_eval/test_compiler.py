@@ -112,6 +112,25 @@ def test_unvalidated_probe_kinds_are_disabled(monkeypatch: pytest.MonkeyPatch) -
     assert "probe_unvalidated" in idor.params["disabled_reason"]
 
 
+def test_public_checks_create_their_resource_visible() -> None:
+    """E2E-25: an anon check reads what user_a created, so its setup sends visibility flags as ``true``.
+
+    The boolean sample value is ``false``: the public page of an unpublished note (and an inactive product) is a
+    404 by the task's own rules, so every correct app failed ``public.render.ok`` (``oracle_validate``).
+    """
+    notes = {
+        c.id: c
+        for c in acceptance.compile_content(task_content("notes_markdown_render"), "contract_bearer", STACK).checks
+    }
+    assert notes["public.render.ok"].setup[-1].request.json_body["published"] is True
+    # an owner-only check keeps the sample value (the flag is not about who may read it)
+    assert notes["notes.get.anon_401"].setup[-1].request.json_body["published"] is False
+    shop = {
+        c.id: c for c in acceptance.compile_content(task_content("ecommerce_cart"), "contract_bearer", STACK).checks
+    }
+    assert shop["products.get.ok"].setup[-1].request.json_body["is_active"] is True
+
+
 def test_all_applicable_adds_generic_probes() -> None:
     content = task_content("crud_todo_list")
     plan = acceptance.compile_content(content, "contract_bearer", STACK, probes="all_applicable")

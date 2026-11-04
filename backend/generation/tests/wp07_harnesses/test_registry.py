@@ -28,7 +28,8 @@ def test_every_harness_is_registered_once():
 def test_wave_2_enablement(settings):
     settings.GATEWAY_TRANSLATORS = []
     enabled = {e.adapter.name for e in registry.entries() if e.enabled}
-    assert enabled == {"opencode", "mini-swe-agent", "aider"}
+    # E2E-13: claude-code and goose are enabled with narrower gates (endpoint questions, exploratory only).
+    assert enabled == {"opencode", "mini-swe-agent", "aider", "claude-code", "goose"}
     for item in registry.entries():
         if not item.enabled:
             assert item.blocked_reason, item.adapter.name
@@ -126,9 +127,43 @@ class TestPlanIssues:
         assert self.codes("opencode", model_slug="deepseek/deepseek-v4.1-flash", max_output_tokens=8192) == {}
 
     def test_not_enabled(self):
-        issues = self.codes("goose", model_slug="x/y", cells=["c0-u0-r0-main"])
+        issues = self.codes("qwen-code", model_slug="x/y", cells=["c0-u0-r0-main"])
         assert issues["harness_not_enabled"].severity == "error"
         assert issues["harness_not_enabled"].cells == ["c0-u0-r0-main"]
+
+    def test_endpoint_open_questions_block_only_their_endpoint_kind(self):
+        """E2E-13: Claude Code's OpenRouter passthrough question blocks OpenRouter cells only; a local endpoint
+        (OpenCode Go: openai_compatible, served through the local proxy and the anthropic translator) runs."""
+        remote = self.codes("claude-code", model_slug="deepseek/deepseek-v4.1-flash", max_output_tokens=16384)
+        assert remote["harness_not_enabled"].severity == "error"
+        assert remote["harness_not_enabled"].data["reason"] == "endpoint_open_questions"
+        assert "/api/v1/messages" in remote["harness_not_enabled"].message
+        for kind in ("openai_compatible", "ollama"):
+            local = self.codes(
+                "claude-code",
+                model_slug="local-opencode-go/deepseek-v4.1-flash",
+                endpoint_kind=kind,
+                max_output_tokens=16384,
+            )
+            assert "harness_not_enabled" not in local, kind
+            assert "harness_protocol_unavailable_for_endpoint" not in local, kind
+
+    @pytest.mark.parametrize("harness", ["claude-code", "goose"])
+    def test_exploratory_only_harness_warns_in_exploratory_and_blocks_confirmatory(self, harness):
+        args = {"model_slug": "local-opencode-go/qwen3.8-flash", "endpoint_kind": "openai_compatible"}
+        exploratory = self.codes(harness, **args, max_output_tokens=16384)
+        assert exploratory["harness_exploratory_only"].severity == "warn"
+        assert not [i for i in exploratory.values() if i.severity == "error"]
+        confirmatory = self.codes(harness, **args, max_output_tokens=16384, study_kind="confirmatory")
+        assert confirmatory["harness_exploratory_only"].severity == "error"
+        assert "harness_exploratory_only" not in self.codes("opencode", **args)
+
+    def test_endpoint_question_keys_must_be_endpoint_kinds(self):
+        class Typo(OpenCodeAdapter):
+            endpoint_open_questions: ClassVar = {"open_router": ("?",)}
+
+        with pytest.raises(HarnessRegistryError, match="endpoint kinds"):
+            registry.validate(Typo())
 
     def test_passthrough_needs_a_remote_endpoint(self, settings):
         settings.GATEWAY_TRANSLATORS = []

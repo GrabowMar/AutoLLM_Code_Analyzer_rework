@@ -214,6 +214,13 @@ remaining "real-model smoke" open questions.
 - `HarnessAdapter.wants_enabled` + `blocked_reason`: an adapter is enabled only when it asks to be, its facts have
   no open questions and the operator has not switched it off. Real-model smoke runs are required before
   `wants_enabled=True` for the new harnesses.
+- Narrower gates (E2E-13): `endpoint_open_questions` (per upstream kind, `openrouter` / `local_proxy`) block only
+  cells on that kind (`harness_not_enabled`, `data.reason=endpoint_open_questions`); `exploratory_only` marks an
+  enabled adapter that is not verified for confirmatory use (`harness_exploratory_only`: warn exploratory, error
+  confirmatory). claude-code (OpenRouter passthrough unverified; local endpoints use the `anthropic_messages`
+  translator) and goose (built-in skills still advertised) are enabled this way; both still need a logged
+  real-model smoke run before confirmatory use. claude-code needs `call.max_output_tokens >= 16384`, which the
+  frugal tier (8192) does not meet: override it in the study.
 - The goose pin is written `1.57.0` (the release tag `v1.57.0` is built from it).
 - Translated gateway records log the canonical chat body as `request`, so `trajectory.common` reads a
   `protocol_mode=translate` record by the body's shape, not by its front protocol.

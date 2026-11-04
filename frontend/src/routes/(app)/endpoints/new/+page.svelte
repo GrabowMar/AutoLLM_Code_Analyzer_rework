@@ -135,7 +135,7 @@
 <div class="space-y-4">
 	<PageHeader
 		title="New endpoint"
-		description="Connect an Ollama or OpenAI-compatible server so experiments can run its models."
+		description="Connect an Ollama or OpenAI-compatible server so studies can run its models."
 		back={{ href: '/endpoints', label: 'Endpoints' }}
 	>
 		{#snippet nav()}

@@ -91,7 +91,7 @@
 										<td class="num">{formatUsd(s.spent)}</td>
 										<td class="num">{formatUsd(s.spent_list)}</td>
 										<td class="num">{s.cap === null ? '—' : formatUsd(s.cap)}</td>
-										<td class="num">{formatPct(spendFraction(s.spent, s.cap))}</td>
+										<td class="num" title={s.cap_basis === 'list' ? 'Of the cap, at list price' : 'Of the cap, billed'}>{formatPct(spendFraction(s.cap_basis === 'list' ? s.spent_list : s.spent, s.cap))}</td>
 									</tr>
 								{/each}
 							</tbody>

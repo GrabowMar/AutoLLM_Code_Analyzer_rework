@@ -109,9 +109,9 @@ class EstimateIn(Schema):
 def budget_estimate(request, payload: EstimateIn):
     """``Estimate`` for ``{design}``, ``{study}`` (its current design) or ``{study, plan_hash}`` (a frozen plan)."""
     try:
-        plan = _plan_for(request, payload)
+        plan, kind = _plan_for(request, payload)
         try:
-            estimate = estimate_mod.estimate_plan(plan, cap_override=payload.cap)
+            estimate = estimate_mod.estimate_plan(plan, cap_override=payload.cap, study_kind=kind)
         except ValueError as exc:
             raise ApiError(422, "estimate_unavailable", str(exc)) from None
     except ApiError as exc:
@@ -119,7 +119,8 @@ def budget_estimate(request, payload: EstimateIn):
     return estimate.model_dump(mode="json")
 
 
-def _plan_for(request: Any, payload: EstimateIn) -> ResolvedPlan:
+def _plan_for(request: Any, payload: EstimateIn) -> tuple[ResolvedPlan, str]:
+    """The plan and its study kind (E2E-28: a confirmatory plan never reuses pilot cells)."""
     from backend.generation import blobs
 
     if payload.study is not None and payload.plan_hash:
@@ -127,7 +128,7 @@ def _plan_for(request: Any, payload: EstimateIn) -> ResolvedPlan:
         row = StudyPlan.objects.filter(study=study, plan_hash=payload.plan_hash).first()
         if row is None:
             raise ApiError(404, "not_found", "plan not found")
-        return ResolvedPlan.model_validate(blobs.get_json(row.payload_blob))
+        return ResolvedPlan.model_validate(blobs.get_json(row.payload_blob)), study.kind
     if payload.study is not None:
         study = _study(request, str(payload.study))
     elif payload.design is not None:
@@ -137,7 +138,7 @@ def _plan_for(request: Any, payload: EstimateIn) -> ResolvedPlan:
     try:
         from backend.generation.study.plan import resolve
 
-        return resolve(study, persist=False)
+        return resolve(study, persist=False), study.kind
     except NotImplementedError as exc:
         raise ApiError(422, "resolver_unavailable", str(exc)) from None
     except (ValueError, KeyError) as exc:
@@ -156,6 +157,7 @@ def _draft_study(request: Any, design: dict[str, Any]) -> Study:
     return Study(
         name="estimate",
         slug="estimate",
+        kind=parsed.kind,
         design=parsed.model_dump(mode="json"),
         resource_policy=policy,
         created_by=user,

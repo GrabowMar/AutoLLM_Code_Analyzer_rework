@@ -33,6 +33,7 @@ from collections.abc import Callable
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import ClassVar
@@ -431,6 +432,12 @@ class HarnessAdapter(ABC):
     versions: ClassVar[tuple[str, ...]] = ()  # releases whose facts (and captured prompt) are verified
     wants_enabled: ClassVar[bool] = False
     blocked_reason: ClassVar[str] = ""
+    # Open questions that concern one endpoint kind only ("openrouter" / "local_proxy", e.g. a passthrough
+    # route): cells on that kind get ``harness_not_enabled``, the other kinds may run (E2E-13).
+    endpoint_open_questions: ClassVar[Mapping[str, tuple[str, ...]]] = MappingProxyType({})
+    # Non-empty: enabled, but not yet verified for confirmatory use (no real-model smoke run, or a known
+    # tool-surface caveat). Cells get ``harness_exploratory_only`` (warn exploratory, error confirmatory).
+    exploratory_only: ClassVar[str] = ""
     brief_copies: ClassVar[tuple[str, ...]] = ()  # rendered files that embed the brief (stimulus, not config)
 
     # -- abstract surface (section 5.1) ---------------------------------------------------------------

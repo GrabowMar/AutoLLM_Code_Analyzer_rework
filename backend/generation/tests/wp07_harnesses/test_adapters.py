@@ -204,6 +204,11 @@ class TestAider:
 
 
 class TestClaudeCode:
+    def test_image_leaves_the_harness_home_empty(self):
+        """npm ran as root with HOME=/run/home and left a root-owned ~/.npm (an agent's npm install: EACCES)."""
+        dockerfile = (IMAGES / "agent-claude-code" / "Dockerfile").read_text()
+        assert "find /run/home -mindepth 1 -delete" in dockerfile.split("USER node")[0]
+
     def test_command_and_env(self):
         rendered = _render("claude-code", model=MODEL)
         assert rendered.command.startswith("exec claude --bare -p --output-format stream-json --verbose")

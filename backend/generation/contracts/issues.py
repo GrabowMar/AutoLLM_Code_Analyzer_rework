@@ -86,6 +86,13 @@ _CORE_CODES: Final[tuple[IssueCode, ...]] = (
         "warn when p90_total > study cap; error when expected_total > study cap",
         alternatives=("error",),
     ),
+    _c(
+        "cap_admits_fewer_blocks",
+        "warn",
+        "warn",
+        "budget/estimate.py",
+        "the study cap admits fewer replicate blocks than planned (whole-block worst-case reservation, E2E-28)",
+    ),
     # --- budget/policy.py: policy lint (4.3) ----------------------------------------------------
     _c("context_cap_above_call_cap", "error", "error", _POLICY, "call.max_input_tokens < 1.1 x context cap"),
     _c(
@@ -142,6 +149,13 @@ _CORE_CODES: Final[tuple[IssueCode, ...]] = (
     ),
     # --- study/plan.py ----------------------------------------------------------------------------
     _c("harness_not_enabled", "error", "error", _PLAN, "harness adapter has open questions (registry enabled=False)"),
+    _c(
+        "harness_exploratory_only",
+        "warn",
+        "error",
+        _PLAN,
+        "harness enabled but not verified for confirmatory use (no real-model smoke run / tool-surface caveat)",
+    ),
     _c(
         "harness_protocol_unavailable_for_endpoint",
         "error",

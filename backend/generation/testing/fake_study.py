@@ -64,6 +64,9 @@ class FakeStudyEnv:
 
     cost_per_cell: float = 0.01
     p90_factor: float = 2.2
+    # A list-price (subscription) endpoint: cells bill 0, ``cost_per_cell`` is the list cost and the plan's
+    # cap counts list price (``Estimate.cap_basis = "list"``).
+    list_price: bool = False
     gates: list[dict[str, Any]] = field(
         default_factory=lambda: [{"code": "max_infra_error_rate", "ok": True, "value": 0.0, "threshold": 0.3}],
     )
@@ -130,11 +133,14 @@ class FakeStudyEnv:
     def estimate_cell(self, cell: ResolvedCell) -> CellEstimate:
         cap = float(((cell.effective_policy or {}).get("content") or {}).get("run", {}).get("max_cost_usd", 1.0))
         expected = self.cost_per_cell
+        billed = 0.0 if self.list_price else expected
         return CellEstimate(
-            expected_usd=expected,
+            expected_usd=billed,
             expected_list_usd=expected,
-            p10_usd=round(expected * 0.4, 6),
-            p90_usd=round(expected * self.p90_factor, 6),
+            p10_usd=round(billed * 0.4, 6),
+            p90_usd=round(billed * self.p90_factor, 6),
+            p10_list_usd=round(expected * 0.4, 6),
+            p90_list_usd=round(expected * self.p90_factor, 6),
             cap_usd=cap,
             expected_tokens=10_000,
             expected_wall_s=300.0,
@@ -142,7 +148,7 @@ class FakeStudyEnv:
             basis="heuristic",
         )
 
-    def estimate_plan(self, plan: ResolvedPlan) -> Estimate:
+    def estimate_plan(self, plan: ResolvedPlan, **_kwargs: Any) -> Estimate:
         by_condition: dict[int, list[CellEstimate]] = {}
         for cell in plan.cells:
             if cell.estimate is not None:
@@ -154,6 +160,7 @@ class FakeStudyEnv:
                 expected_usd=round(sum(e.expected_usd for e in items), 6),
                 p90_usd=round(sum(e.p90_usd for e in items), 6),
                 expected_list_usd=round(sum(e.expected_list_usd for e in items), 6),
+                p90_list_usd=round(sum(e.p90_list_usd or 0.0 for e in items), 6),
             )
             for index, items in sorted(by_condition.items())
         ]
@@ -162,7 +169,9 @@ class FakeStudyEnv:
             expected_total=expected,
             p90_total=round(sum(r.p90_usd for r in rows), 6),
             worst_case_total=round(sum(e.cap_usd for items in by_condition.values() for e in items), 6),
-            expected_list_total=expected,
+            expected_list_total=round(sum(r.expected_list_usd for r in rows), 6),
+            p90_list_total=round(sum(r.p90_list_usd for r in rows), 6),
+            cap_basis="list" if self.list_price else "billed",
             by_condition=rows,
             fit=EstimateFit(),
             method="heuristic",

@@ -1,8 +1,7 @@
 # Harness preset (spec 5.3/5.5). Values are WP-07's (it may edit these files directly; see CHANGES).
 name: claude-code (native)
-description: claude-code 2.1.316 with its native system prompt, tools and defaults. Archived until the adapter is
-  enabled.
-archived: true
+description: claude-code 2.1.316 with its native system prompt, tools and defaults.
+archived: false
 content:
   harness: claude-code
   harness_version: 2.1.316

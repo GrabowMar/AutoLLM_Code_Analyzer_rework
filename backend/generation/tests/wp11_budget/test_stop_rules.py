@@ -181,6 +181,29 @@ def test_cost_overrun_pauses_the_condition(user, on_commit):
     assert not StudyCondition.objects.get(pk=tree.conditions[1].pk).paused
 
 
+def test_cost_overrun_on_a_list_basis_study_compares_list_cost_with_the_list_estimate(user, on_commit):
+    """E2E-13: a subscription endpoint bills 0 (``cost_usd`` and ``estimate_usd`` 0); the cap counts list
+    price, so the rule measures ``list_cost_usd`` against ``estimate_list_usd``."""
+    rules = [_rule("cost_overrun", threshold=2.0, action="pause_condition", scope="condition", window=5)]
+    tree = _study(user, rules, estimate_usd=0.0, estimate_list_usd=0.10, cap_basis="list")
+    c0 = tree.runs_of(condition=0)
+    _finish(c0[:5], "tested", metrics={"cost_usd": 0.0, "list_cost_usd": 0.25})
+    c1 = tree.runs_of(condition=1)
+    _finish(c1[:5], "tested", metrics={"cost_usd": 0.0, "list_cost_usd": 0.15})
+    _study_row, fired = _evaluate(tree, on_commit)
+    assert [(f["scope_key"], f["value"]) for f in fired] == [(tree.conditions[0].pk, pytest.approx(2.5))]
+    assert StudyCondition.objects.get(pk=tree.conditions[0].pk).paused
+    assert not StudyCondition.objects.get(pk=tree.conditions[1].pk).paused
+
+
+def test_cost_overrun_on_a_billed_study_ignores_the_list_amounts(user, on_commit):
+    rules = [_rule("cost_overrun", threshold=2.0, action="pause_condition", scope="condition", window=5)]
+    tree = _study(user, rules, estimate_usd=0.10, estimate_list_usd=1.0, cap_basis="billed")
+    _finish(tree.runs_of(condition=0)[:5], "tested", metrics={"cost_usd": 0.25, "list_cost_usd": 0.25})
+    _study_row, fired = _evaluate(tree, on_commit)
+    assert [(f["scope_key"], f["value"]) for f in fired] == [(tree.conditions[0].pk, pytest.approx(2.5))]
+
+
 def test_spend_fraction_alert_and_pause(user, on_commit, tick):
     from backend.generation.budget import ledger
 
@@ -348,6 +371,52 @@ def test_pilot_gates(user):
     assert gates[("cap_hits_by_kind", None)]["value"] == {"wall_clock": 3}
     assert not stop_rules.gates_pass(list(gates.values()))
     assert stop_rules.pilot_observations(study) == {0: [0.2, 0.2, 0.2], 1: [0.1] * 5}
+
+
+@pytest.mark.parametrize("basis", ["list", "billed"])
+def test_pilot_cost_overrun_gate_uses_the_cap_basis(user, basis):
+    """E2E-13: on a list-basis study (subscription endpoint, billed 0) the gate is measured on list cost
+    against the list estimate; on a billed study it stays billed against billed."""
+    listed = basis == "list"
+    tree = make_study(
+        user,
+        n_conditions=1,
+        n_units=1,
+        repeats=4,
+        stage="pilot",
+        status="piloting",
+        estimate_usd=0.0 if listed else 0.10,
+        estimate_list_usd=0.10 if listed else 0.40,
+        cap_basis=basis,
+    )
+    metrics = {"cost_usd": 0.0, "list_cost_usd": 0.30} if listed else {"cost_usd": 0.30, "list_cost_usd": 0.30}
+    _finish(tree.runs_of(condition=0), "tested", metrics=metrics)
+    study = Study.objects.select_related("resource_policy").get(pk=tree.study.pk)
+    gate = _gates(stop_rules.pilot_gates(study))[("max_cost_overrun", tree.conditions[0].pk)]
+    assert gate["measured"] is True
+    assert gate["value"] == pytest.approx(3.0)
+    assert gate["cap_basis"] == basis
+    assert not gate["ok"]
+    assert stop_rules.pilot_observations(study) == {0: [0.30] * 4}
+
+
+def test_pilot_cost_overrun_gate_is_unmeasured_without_a_list_estimate(user):
+    """A list-basis cell launched before E2E-13 with no list estimate leaves the gate unmeasured, never 0."""
+    tree = make_study(
+        user,
+        n_conditions=1,
+        n_units=1,
+        repeats=2,
+        stage="pilot",
+        status="piloting",
+        estimate_usd=0.0,
+        estimate_list_usd=0.0,
+        cap_basis="list",
+    )
+    _finish(tree.runs_of(condition=0), "tested", metrics={"cost_usd": 0.0, "list_cost_usd": 0.30})
+    study = Study.objects.select_related("resource_policy").get(pk=tree.study.pk)
+    gate = _gates(stop_rules.pilot_gates(study))[("max_cost_overrun", tree.conditions[0].pk)]
+    assert gate["measured"] is False
 
 
 def test_pilot_gate_without_usable_runs_fails_and_is_not_measured(user):

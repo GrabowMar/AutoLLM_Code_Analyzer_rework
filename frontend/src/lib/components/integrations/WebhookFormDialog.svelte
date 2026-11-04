@@ -41,7 +41,7 @@
 	let clearSecret = $state(false);
 	let chatId = $state('');
 	let events = $state<string[]>([]);
-	let includeExperimentJobs = $state(false);
+	let includeStudyRuns = $state(false);
 	let saving = $state(false);
 	let error = $state('');
 
@@ -68,7 +68,7 @@
 		clearSecret = false;
 		chatId = s?.telegram_chat_id ?? '';
 		events = s ? [...s.events] : eventTypes.map((e) => e.id).filter((id) => !id.endsWith('.cancelled'));
-		includeExperimentJobs = s?.include_experiment_jobs ?? false;
+		includeStudyRuns = s?.include_study_runs ?? false;
 		error = '';
 	});
 
@@ -87,7 +87,7 @@
 				const patch: WebhookPatchPayload = {
 					name: name.trim(),
 					events,
-					include_experiment_jobs: includeExperimentJobs,
+					include_study_runs: includeStudyRuns,
 				};
 				if (info.usesUrl && url.trim()) patch.url = url.trim();
 				if (!info.usesUrl && chatId.trim() && chatId.trim() !== subscription.telegram_chat_id)
@@ -102,7 +102,7 @@
 					...(info.usesUrl ? { url: url.trim() } : { telegram_chat_id: chatId.trim() }),
 					...(secret.trim() ? { secret: secret.trim() } : {}),
 					events,
-					include_experiment_jobs: includeExperimentJobs,
+					include_study_runs: includeStudyRuns,
 				});
 			}
 			open = false;
@@ -127,7 +127,7 @@
 			<Dialog.Description>
 				{editing
 					? 'Leave the URL and secret empty to keep the stored ones.'
-					: 'Post a message when runs, analyses, experiments or reports finish.'}
+					: 'Post a message when runs, analyses, studies or reports finish.'}
 			</Dialog.Description>
 		</Dialog.Header>
 		<form class="mt-4 space-y-4" onsubmit={submit}>
@@ -207,11 +207,11 @@
 					</label>
 				{/each}
 				<label class="flex cursor-pointer items-start gap-2 border-t border-border pt-2 text-sm">
-					<Checkbox class="mt-0.5" bind:checked={includeExperimentJobs} />
+					<Checkbox class="mt-0.5" bind:checked={includeStudyRuns} />
 					<span>
-						Include experiment jobs
+						Include study runs
 						<span class="block text-xs text-muted-foreground">
-							Also send generation events for each job of an experiment (can be many messages).
+							Also send run events for each run of a study (can be many messages).
 						</span>
 					</span>
 				</label>

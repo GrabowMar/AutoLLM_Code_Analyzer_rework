@@ -10,9 +10,12 @@ includes it). Contents:
 - ``variants/<target>/<run_id>.<ext>``: each variant's regenerated part (the raw replacement when stored);
 - ``original/<target>.<ext>``: each target's original part;
 - ``manifest.json``: study plan, detector set, normalizer version, tool versions, PatternRun label;
-- ``README.md``: the columns and the offline model formula.
+- ``README.md``: the files, every column of every CSV and the offline model formula.
 
-The column lists are a published contract (header snapshot test in ``tests/wp13_patterns``).
+The column lists are a published contract (header snapshot test in ``tests/wp13_patterns``). The README's
+column section is generated from the headers the writers actually emit (:func:`columns_markdown` over
+``CSV_COLUMNS`` plus this export's feature columns) and :data:`COLUMN_DOCS`, which must document every
+fixed column (a missing entry fails the export; ``test_export_readme`` checks every written header).
 """
 
 from __future__ import annotations
@@ -170,6 +173,188 @@ AUDIT_COLUMNS = (
     "eval_task",
 )
 
+# What each fixed column of each CSV holds (E2E-16). Keys must equal the column tuples above; the README's
+# column section is rendered from the written headers with these texts, so a new column needs a text here.
+_VALUES = "`present` / `absent` / `error` (unknown, never clean) / `n/a`"
+COLUMN_DOCS: dict[str, dict[str, str]] = {
+    "variants.csv": {
+        "run_id": "The variant's run (GenerationRun id); the file `variants/<target_id>/<run_id>.<ext>`.",
+        "study_id": "The study.",
+        "cell_id": "The study cell (StudyCell id) the variant ran in.",
+        "condition_id": "The condition (StudyCondition id).",
+        "condition_index": "The condition's position in the plan (0-based).",
+        "condition_label": "The condition's label (its factor levels in words).",
+        "condition_levels": "The condition's factor levels as JSON (`{factor: level}`).",
+        "target_id": "The slot target (the regenerated part; SlotTarget id).",
+        "target_label": "The target's label (e.g. the endpoint or function it holds).",
+        "match_key": "The part's key shared across parents (same part in different parent apps).",
+        "slot_set_id": "The slot set (frozen parent tree) the target belongs to.",
+        "parent_run": "The parent app run the part was cut from.",
+        "parent_model": "The model that wrote the parent app.",
+        "parent_harness": "The harness that wrote the parent app.",
+        "model": "The model that regenerated the part (the condition's model level).",
+        "same_author": "`true` when `model` equals `parent_model`; empty when the model is unknown.",
+        "repeat_index": "The repeat of the cell (0-based); with `target_id` the pairing key of paired designs.",
+        "outcome": "The run's outcome (e.g. `tested`, `output_invalid`, `build_fail`, `infra_error`).",
+        "usable": "`true` when the run counts in results (infrastructure failures do not).",
+        "has_output": "`true` when the variant produced a part; `false` rows are attrition (ITT, never absent).",
+        "parse_status": "The single-shot / agent output parse status (`ok`, `truncated`, ...).",
+        "eval_status": "The variant evaluation's status.",
+        "normalized_sha": "sha256 of the normalized part; empty when it could not be normalized.",
+        "normalize_reason": "Why the part could not be normalized (`parse_error`, `empty`, "
+        "`unsupported_language`); empty when it was.",
+        "exact_cluster": "The exact-duplicate cluster key (equals `normalized_sha`).",
+        "cluster_id": "The cluster in `clusters.json` holding the variant (exact or MinHash).",
+        "cluster_size": "The number of variants in that cluster.",
+        "leak_score": "The share of the original part's 8-token shingles found in what the model was shown "
+        "(the target's leak report); numeric, not a prevalence feature.",
+        "equal_to_original": f"Derived: the normalized part equals the normalized original ({_VALUES}).",
+        "slot_tests_all_pass": "Derived: every discriminating, non-flaky check passes; `absent` for a "
+        f"build_fail / start_fail / output_invalid variant ({_VALUES}).",
+        "exploited_any": f"Derived: any probe exploited the variant ({_VALUES}).",
+        "uses_new_dependency": f"Derived: the variant added a dependency the parent did not have ({_VALUES}).",
+        "out_of_slot_edit": f"Derived: the variant edited outside its slot ({_VALUES}).",
+        "adaptive_n": "`true` when the cell used adaptive N (repeats added by looks; see `prevalence.csv`).",
+        "started_at": "When the run started (ISO 8601).",
+    },
+    "features.csv": {
+        "run_id": "The variant's run (as in `variants.csv`).",
+        "condition_id": "The condition (StudyCondition id).",
+        "condition_label": "The condition's label.",
+        "target_id": "The slot target.",
+        "match_key": "The part's key shared across parents.",
+        "parent_run": "The parent app run the part was cut from.",
+        "parent_model": "The model that wrote the parent app.",
+        "same_author": "`true` when the variant's model wrote the parent.",
+        "repeat_index": "The repeat of the cell (0-based).",
+        "feature": "The feature key (detector feature or derived feature).",
+        "scope": "`span` (the regenerated part), `file` (the assembled file) or `derived`.",
+        "column": "`<feature>@<scope>` for detector features, the feature key for derived ones; the "
+        "`variants.csv` column is `f:<column>`.",
+        "kind": "`detector` or `derived`.",
+        "detector": "The pinned detector ref (`slug@version#hash12`); empty for derived features.",
+        "value": f"The variant's value: {_VALUES}.",
+        "y": "`1` (present), `0` (absent) or empty (error, n/a): the binary outcome of the offline model.",
+        "tool_severity": "The detector tool's own severity label, verbatim (never a normalized severity).",
+        "adaptive_n": "`true` when the cell used adaptive N.",
+    },
+    "prevalence.csv": {
+        "condition": "The condition (StudyCondition id).",
+        "condition_label": "The condition's label.",
+        "target": "The slot target, or `all` for the pooled row over every target.",
+        "pooled": "`true` for the row over all targets.",
+        "feature": "The feature key.",
+        "scope": "`span`, `file` or `derived`.",
+        "column": "The feature column (`<feature>@<scope>` or the derived feature key).",
+        "conditional_on": "Set (`slot_tests_all_pass`) on the rows restricted to variants that pass the "
+        "slot tests; empty on unconditional rows.",
+        "k": "Variants with the feature present.",
+        "n_measured": "Variants measured (present + absent).",
+        "n_itt": "Planned variants in the group (intention to treat; attrition included).",
+        "errors": "Variants whose value is `error` (unknown, never counted clean).",
+        "na": "Variants where the feature does not apply (`n/a`).",
+        "missing": "Variants without output (attrition).",
+        "p": "`k / n_measured`.",
+        "ci_low": "Lower bound of the Wilson 95% CI (alpha/K for adaptive N).",
+        "ci_high": "Upper bound of the Wilson 95% CI (alpha/K for adaptive N).",
+        "method": "`wilson`, or `wilson_repeated_looks` for adaptive-N groups.",
+        "cp_low": "Clopper-Pearson lower bound, when `n_measured` < 30.",
+        "cp_high": "Clopper-Pearson upper bound, when `n_measured` < 30.",
+        "bounds_low": "Best-case bound `k / (n_itt - na)` when attrition + errors exceed 5%.",
+        "bounds_high": "Worst-case bound `(k + missing + errors) / (n_itt - na)` when attrition + errors exceed 5%.",
+        "attrition": "`missing / n_itt`.",
+        "adaptive_n": "`true` when any cell of the group used adaptive N.",
+        "looks": "The number of interim looks K of an adaptive-N group (empty otherwise).",
+        "low_effective_n": "`true` when more than half of the group's variants are exact duplicates.",
+        "correctness_p": "For security features: the share of the group's measured variants passing the slot tests.",
+        "correctness_n": "For security features: the variants with a measured `slot_tests_all_pass`.",
+        "audit_precision": "The detector's audited precision (complete human audits only; `audit.csv`).",
+        "audit_npv": "The detector's audited negative predictive value (complete audits only).",
+    },
+    "comparisons.csv": {
+        "feature": "The feature key.",
+        "scope": "`span`, `file` or `derived`.",
+        "column": "The feature column.",
+        "a": "The first condition (StudyCondition id).",
+        "a_label": "The first condition's label.",
+        "b": "The second condition.",
+        "b_label": "The second condition's label.",
+        "method": "`paired` (both conditions forward the seed; pairs by target and repeat) or `independent`.",
+        "test": "`mcnemar_exact` (paired) or `fisher_exact` (independent).",
+        "diff": "Prevalence difference a - b (Newcombe paired or hybrid score estimate).",
+        "ci_low": "Lower bound of the 95% CI of `diff`.",
+        "ci_high": "Upper bound of the 95% CI of `diff`.",
+        "p": "Raw p of planned comparisons (confirmatory primary features); empty for exploratory rows and "
+        "at interim.",
+        "q": "Benjamini-Hochberg q of exploratory rows over their family; empty at interim.",
+        "family_size": "The number of comparisons in the row's correction family.",
+        "planned": "`true` for comparisons of the study plan's locked primary features.",
+        "interim": "`true` while the study is not finished: every p, q and decision is withheld.",
+        "n_pairs": "Paired: the measured pairs.",
+        "k_a": "Independent: variants of `a` with the feature present.",
+        "n_a": "Independent: measured variants of `a`.",
+        "k_b": "Independent: variants of `b` with the feature present.",
+        "n_b": "Independent: measured variants of `b`.",
+        "p_adjusted": "Planned rows: p adjusted with the plan's `correction` over the planned family.",
+        "correction": "`bh` for exploratory rows, the plan's correction (`holm`, `bh`, `none`) for planned ones.",
+        "alpha": "The plan's alpha (planned rows only).",
+        "significant": "Planned rows: `p_adjusted < alpha`; empty for exploratory rows and at interim.",
+    },
+    "audit.csv": {
+        "audit_id": "The audit.",
+        "feature_key": "The audited feature.",
+        "status": "The audit's status (`complete` audits feed `prevalence.csv`).",
+        "scope": "The audited scope.",
+        "n_hits": "Sampled variants the detector flagged.",
+        "n_non_hits": "Sampled variants the detector did not flag.",
+        "precision": "Share of coded hits confirmed by the human coders.",
+        "precision_ci_low": "Lower Wilson 95% bound of `precision`.",
+        "precision_ci_high": "Upper Wilson 95% bound of `precision`.",
+        "npv": "Share of coded non-hits confirmed clean (negative predictive value).",
+        "npv_ci_low": "Lower Wilson 95% bound of `npv`.",
+        "npv_ci_high": "Upper Wilson 95% bound of `npv`.",
+        "unsure": "Sampled items coded unsure.",
+        "uncoded": "Sampled items not coded yet.",
+        "seed": "The sampling seed.",
+        "eval_task": "The human-evaluation task that codes the sample.",
+    },
+}
+CSV_COLUMNS: dict[str, tuple[str, ...]] = {
+    "variants.csv": VARIANT_COLUMNS,
+    "features.csv": FEATURE_COLUMNS,
+    "prevalence.csv": PREVALENCE_COLUMNS,
+    "comparisons.csv": COMPARISON_COLUMNS,
+    "audit.csv": AUDIT_COLUMNS,
+}
+
+
+def _feature_column_doc(column: feat.Column) -> str:
+    detector = f", detector `{column.detector_ref}`" if column.detector_ref else ""
+    return (
+        f"{column.kind.capitalize()} feature `{column.feature}`, scope `{column.scope}`{detector}, polarity "
+        f"`{column.polarity}`: {_VALUES}."
+    )
+
+
+def columns_markdown(headers: dict[str, list[str]], feature_columns: list[feat.Column]) -> str:
+    """The README's column section for the headers as written (every column of every CSV).
+
+    ``headers`` maps a CSV name to its written header; fixed columns take their text from
+    :data:`COLUMN_DOCS` (``KeyError`` when one is missing, so an undocumented column fails the export) and
+    ``variants.csv``'s ``f:<column>`` columns are described from this export's feature columns.
+    """
+    by_header = {f"f:{c.key}": c for c in feature_columns}
+    lines = ["## Columns", ""]
+    for name, header in headers.items():
+        docs = COLUMN_DOCS[name]
+        lines += [f"### `{name}`", "", "| column | meaning |", "| --- | --- |"]
+        for column in header:
+            text = _feature_column_doc(by_header[column]) if column in by_header else docs[column]
+            lines.append(f"| `{column}` | {text.replace('|', '/')} |")
+        lines.append("")
+    return "\n".join(lines)
+
+
 README = """# Pattern analysis export
 
 PatternRun `{pattern_run}` of study `{study}` (label **{label}**, normalizer v{normalizer}, detector set
@@ -199,6 +384,8 @@ PatternRun `{pattern_run}` of study `{study}` (label **{label}**, normalizer v{n
 - `audit.csv` -- human audits of detector precision and NPV (Wilson CIs).
 - `variants/<target>/<run_id>.<ext>`, `original/<target>.<ext>` -- the regenerated parts and originals.
 - `manifest.json` -- study plan hash, detector set, normalizer version, tool versions, label.
+
+Every column of every CSV is described under **Columns** below.
 
 ## Offline mixed model
 
@@ -445,17 +632,19 @@ def build_export(pattern_run: PatternRun) -> bytes:
         "issues": summary.get("issues") or [],
         "records_frozen": summary.get("records") is not None,
     }
+    headers = {name: list(columns) for name, columns in CSV_COLUMNS.items()}
+    headers["variants.csv"] += feature_cols
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("variants.csv", _csv(VARIANT_COLUMNS + feature_cols, variant_rows(pattern_run, dataset, matrix)))
-        zf.writestr("features.csv", _csv(FEATURE_COLUMNS, feature_rows(dataset, matrix)))
+        zf.writestr("variants.csv", _csv(tuple(headers["variants.csv"]), variant_rows(pattern_run, dataset, matrix)))
+        zf.writestr("features.csv", _csv(tuple(headers["features.csv"]), feature_rows(dataset, matrix)))
         zf.writestr(
             "prevalence.csv",
-            _csv(PREVALENCE_COLUMNS, prevalence_rows(summary, audits_by_feature(pattern_run))),
+            _csv(tuple(headers["prevalence.csv"]), prevalence_rows(summary, audits_by_feature(pattern_run))),
         )
-        zf.writestr("comparisons.csv", _csv(COMPARISON_COLUMNS, list(summary.get("comparisons") or [])))
+        zf.writestr("comparisons.csv", _csv(tuple(headers["comparisons.csv"]), list(summary.get("comparisons") or [])))
         zf.writestr("pooled.json", json.dumps(summary.get("pooled") or [], indent=2, sort_keys=True))
-        zf.writestr("audit.csv", _csv(AUDIT_COLUMNS, audit_rows(pattern_run)))
+        zf.writestr("audit.csv", _csv(tuple(headers["audit.csv"]), audit_rows(pattern_run)))
         zf.writestr("clusters.json", json.dumps(clusters_doc(pattern_run, summary), indent=2, sort_keys=True))
         zf.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
         for record in dataset.with_output():
@@ -483,6 +672,8 @@ def build_export(pattern_run: PatternRun) -> bytes:
                 normalizer=pattern_run.normalizer_version,
                 detector_set_hash=pattern_run.detector_set_hash,
                 version=EXPORT_VERSION,
-            ),
+            )
+            + "\n"
+            + columns_markdown(headers, list(matrix.columns)),
         )
     return buffer.getvalue()

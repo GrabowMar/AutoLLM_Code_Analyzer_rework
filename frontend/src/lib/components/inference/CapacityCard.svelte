@@ -106,7 +106,7 @@
 			? [
 					{ key: 'sandbox', label: 'Sandboxes', value: capacity.lanes.sandbox },
 					{ key: 'eval', label: 'Evaluation', value: capacity.lanes.eval },
-					{ key: 'llm', label: 'LLM jobs', value: capacity.lanes.llm },
+					{ key: 'llm', label: 'LLM runs', value: capacity.lanes.llm },
 					{ key: 'post', label: 'Post-run', value: capacity.lanes.post },
 				]
 			: []
@@ -150,7 +150,7 @@
 	const slotFields: { key: SlotKey; label: string; hint: string }[] = [
 		{ key: 'sandbox_slots', label: 'Sandbox slots', hint: 'Agent runs at once (each needs apps-dind memory).' },
 		{ key: 'eval_slots', label: 'Evaluation slots', hint: 'Test containers at once.' },
-		{ key: 'llm_job_threads', label: 'LLM job threads', hint: 'Generation runs calling an LLM at once.' },
+		{ key: 'llm_job_threads', label: 'LLM run threads', hint: 'Generation runs calling an LLM at once.' },
 		{ key: 'post_run_slots', label: 'Post-run slots', hint: 'Analyses and reports at once.' },
 	];
 </script>

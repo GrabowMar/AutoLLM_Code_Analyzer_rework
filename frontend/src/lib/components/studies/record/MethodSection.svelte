@@ -106,7 +106,7 @@
 			<PlanCellsTable studyId={study.id} planHash={plan.plan_hash} {conditions} units={units.map(({ index, label }) => ({ index, label }))} />
 			{#snippet caption()}
 				Plan <span class="font-mono">{shortHash(plan.plan_hash, 16)}</span> (resolver v{plan.resolver_version}): {plural(plan.n_conditions, 'condition')}, {plural(plan.n_units, 'unit')},
-				{plural(plan.n_cells, 'cell')} in {plural(plan.n_blocks, 'block')}. Estimated {formatUsd(plan.estimate?.expected_total)} (p90 {formatUsd(plan.estimate?.p90_total)}).
+				{plural(plan.n_cells, 'cell')} in {plural(plan.n_blocks, 'block')}. {#if plan.estimate?.cap_basis === 'list'}Estimated {formatUsd(plan.estimate.expected_list_total)} at list price (p90 {formatUsd(plan.estimate.p90_list_total)}; billed {formatUsd(plan.estimate.expected_total)}).{:else}Estimated {formatUsd(plan.estimate?.expected_total)} (p90 {formatUsd(plan.estimate?.p90_total)}).{/if}
 			{/snippet}
 		</StudyFigure>
 	{:else}

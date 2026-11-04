@@ -22,7 +22,7 @@
 	<CredentialRow
 		provider="openrouter"
 		title="OpenRouter"
-		description="Runs the generation jobs and experiments you submit; never shared with other users. Get one at"
+		description="Runs the studies you launch; never shared with other users. Get one at"
 		signupUrl="https://openrouter.ai/keys"
 		signupLabel="openrouter.ai/keys"
 		placeholder="sk-or-v1-…"

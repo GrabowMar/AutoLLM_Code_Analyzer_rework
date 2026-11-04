@@ -189,7 +189,9 @@ def study_payload(study: Study, *, now: Any = None) -> dict[str, Any]:
     limits = claims._study_limits(study)  # noqa: SLF001
     cells = _cells(study)
     remaining_cells = [c for c in cells if c.state not in ("done", "excluded")]
-    expected_remaining = sum((Decimal(c.estimate_usd or 0) for c in remaining_cells), ZERO)
+    # In the cap's unit, like the burn rate it is divided by (list for a list-basis study).
+    estimate_field = "estimate_list_usd" if study.cap_basis == "list" else "estimate_usd"
+    expected_remaining = sum((Decimal(getattr(c, estimate_field) or 0) for c in remaining_cells), ZERO)
     burn = _burn_rate(study, now)
     eta = (float(expected_remaining) / burn * 3600) if burn and expected_remaining else None
     spent_by_run = dict(
@@ -351,6 +353,8 @@ def me_payload(user: Any, *, now: Any = None) -> dict[str, Any]:
                 "spent": float(study.spent_usd),
                 "spent_list": float(study.spent_list_usd),
                 "cap": _f(cap),
+                # The cap's unit: a list-basis cap is measured against spent_list (budget page "Used").
+                "cap_basis": study.cap_basis,
             },
         )
     for row in periods:

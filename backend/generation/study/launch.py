@@ -7,7 +7,8 @@ Spec sections 4.6, 6.2, 6.14 and 9.4. Every operation runs in one transaction wi
 **Launch** takes a ``plan_hash``: the persisted ``StudyPlan`` of that hash, or a fresh resolve that must hash
 to it (409 ``plan_stale`` when the design changed). A plan with ``error`` issues is refused (400
 ``plan_has_errors``); a plan whose p90 total exceeds ``estimate.require_confirm_above_usd`` needs
-``confirm_usd >= p90_total`` (400 ``confirmation_required``). Launch writes the plan's conditions and units,
+``confirm_usd >= p90_total`` (in the study cap's unit, ``estimate.basis_totals``; 400
+``confirmation_required``). Launch writes the plan's conditions and units,
 the cells of the launched stage (``pilot`` when the plan has pilot cells and no ``pilot_override``) and one
 run per cell with its frozen manifest (``agentic.manifest.build_manifest``, which copies the identity keys
 from the resolved cell). Cells the resolver marked ``excluded:config_invalid`` get no run. A confirmatory
@@ -176,7 +177,35 @@ def _normalized_design(raw: Any, user: User | None) -> tuple[dict[str, Any], dic
         raise StudyError(400, "unknown_resource_policy", exc.issue.message) from exc
     if design.resource_policy not in (policy.ref, policy.pinned_ref):
         dump["resource_policy"] = policy.pinned_ref  # pin a bare slug to the version the FK names
+    if design.slot_primary_features:
+        dump["slot_primary_features"] = _pinned_features(design.slot_primary_features)
     return dump, plan, policy
+
+
+def _pinned_features(refs: list[str]) -> list[str]:
+    """``slot_primary_features`` as detector refs that resolve: a bare slug is pinned to its latest version.
+
+    The live scorer and the pattern runs read these refs with ``patterns.detectors.resolve_refs``, which accepts
+    only ``slug@version[#hash12]``; an unpinned or unknown ref is refused here (400 ``unknown_detector``) instead
+    of failing every variant's evaluation later.
+    """
+    from backend.generation.models import PatternDetector
+    from backend.generation.patterns import detectors as det
+
+    pinned: list[str] = []
+    for ref in refs:
+        text = str(ref).strip()
+        if "@" not in text:
+            row = PatternDetector.objects.filter(slug=text, is_archived=False).order_by("-version").first()
+            if row is None:
+                raise StudyError(400, "unknown_detector", f"slot_primary_features: unknown detector {text!r}")
+            text = f"{row.slug}@{row.version}#{row.content_hash[:12]}"
+        try:
+            det.resolve_refs([text])
+        except det.DetectorRefError as exc:
+            raise StudyError(400, "unknown_detector", f"slot_primary_features: {exc}") from exc
+        pinned.append(text)
+    return pinned
 
 
 def create_study(
@@ -375,6 +404,7 @@ def _create_cells(
             state=CellState.EXCLUDED if excluded else CellState.PLANNED,
             exclusion_reason=CellExclusionReason.CONFIG_INVALID if excluded else "",
             estimate_usd=_money(estimate.expected_usd if estimate is not None else 0.0),
+            estimate_list_usd=_money(estimate.expected_list_usd if estimate is not None else 0.0),
             cap_usd=_money(estimate.cap_usd if estimate is not None else 0.0),
             cell_cap_usd=_cell_caps(cell),
             beyond_plan=beyond_plan,
@@ -523,16 +553,22 @@ def _resolved_cap(policy: ResourcePolicyContent, bundle: PlanBundle, study_cap: 
 
 
 def _confirm(policy: ResourcePolicyContent, bundle: PlanBundle, confirm_usd: float | None) -> None:
+    """The p90 in the study cap's unit (list for a list-basis study) above the preset's threshold needs
+    ``confirm_usd >= p90``."""
+    from backend.generation.budget.estimate import basis_totals
+
     estimate = bundle.plan.estimate
     if estimate is None:
         return
     threshold = policy.estimate.require_confirm_above_usd
-    if estimate.p90_total > threshold and (confirm_usd is None or confirm_usd < estimate.p90_total):
+    expected, p90 = basis_totals(estimate)
+    if p90 > threshold and (confirm_usd is None or confirm_usd < p90):
+        unit = " (list price)" if estimate.cap_basis == "list" else ""
         raise StudyError(
             400,
             "confirmation_required",
-            f"p90 estimate {estimate.p90_total:.2f} USD exceeds {threshold:.2f} USD; confirm with confirm_usd",
-            {"p90_total": estimate.p90_total, "expected_total": estimate.expected_total, "threshold": threshold},
+            f"p90 estimate {p90:.2f} USD{unit} exceeds {threshold:.2f} USD; confirm with confirm_usd",
+            {"p90_total": p90, "expected_total": expected, "threshold": threshold, "cap_basis": estimate.cap_basis},
         )
 
 

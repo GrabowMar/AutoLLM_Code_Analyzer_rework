@@ -23,6 +23,7 @@
 	import { expandGrid, unitCount } from './expansion';
 	import { hasErrors, type SummaryIssue } from './issues';
 	import { FACTOR_BY_KEY } from './design';
+	import { estimateBasisTotals } from './policy';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Lock from '@lucide/svelte/icons/lock';
 	import Play from '@lucide/svelte/icons/play';
@@ -59,6 +60,8 @@
 	const total = $derived(fresh && plan ? plan.n_cells_by_stage.main ?? plan.n_cells : nConditions !== null ? nConditions * nUnits * design.repeats : null);
 	const estimate = $derived(plan?.estimate ?? null);
 	const cap = $derived(estimate?.cap_usd ?? null);
+	// Expected / p90 in the cap's unit: list price when the endpoint is not billed (E2E-13).
+	const totals = $derived(estimate ? estimateBasisTotals(estimate) : null);
 	const issues = $derived(b.issues);
 	const errors = $derived(issues.filter((i) => i.severity === 'error').length);
 	const status = $derived(
@@ -116,11 +119,11 @@
 			<dl class="grid grid-cols-3 gap-1.5 text-center">
 				<div class="rounded border border-border px-1.5 py-1">
 					<dt class="text-[11px] text-muted-foreground">expected</dt>
-					<dd class="font-mono text-sm tabular-nums">{formatUsd(estimate.expected_total)}</dd>
+					<dd class="font-mono text-sm tabular-nums">{formatUsd(totals?.expected)}</dd>
 				</div>
 				<div class="rounded border border-border px-1.5 py-1">
 					<dt class="text-[11px] text-muted-foreground">p90</dt>
-					<dd class="font-mono text-sm tabular-nums">{formatUsd(estimate.p90_total)}</dd>
+					<dd class="font-mono text-sm tabular-nums">{formatUsd(totals?.p90)}</dd>
 				</div>
 				<div class="rounded border border-border px-1.5 py-1">
 					<dt class="text-[11px] text-muted-foreground">worst case</dt>
@@ -128,7 +131,7 @@
 				</div>
 			</dl>
 			<p class="text-xs text-muted-foreground">
-				Cap {cap === null ? 'not set' : formatUsd(cap)} · list price {formatUsd(estimate.expected_list_total)}
+				{#if totals?.basis === 'list'}Cap {cap === null ? 'not set' : formatUsd(cap)} at list price · billed {formatUsd(estimate.expected_total)}{:else}Cap {cap === null ? 'not set' : formatUsd(cap)} · list price {formatUsd(estimate.expected_list_total)}{/if}
 				{#if estimate.time}· {formatSecondsRange(estimate.time.expected_wall_s_low, estimate.time.expected_wall_s_high)} at {estimate.time.effective_parallel} parallel{/if}
 				{#if estimate.time?.eval_machine_minutes}· {Math.round(estimate.time.eval_machine_minutes)} eval machine-min{/if}
 			</p>

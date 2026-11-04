@@ -8,6 +8,12 @@ that asks to be enabled while ``facts.open_questions`` is non-empty is refused (
 an unverified harness must never reach a study by accident. A disabled adapter is still listed, with its
 ``blocked_reason``, and the plan resolver turns it into the issue ``harness_not_enabled``
 (:func:`plan_issues`).
+
+Two narrower gates (E2E-13): ``endpoint_open_questions`` holds questions that concern one endpoint kind only
+(Claude Code's OpenRouter ``/v1/messages`` passthrough): cells on that kind get ``harness_not_enabled``, the
+others run. ``exploratory_only`` marks an enabled adapter that is not verified for confirmatory use yet (no
+real-model smoke run, a known tool-surface caveat): cells get ``harness_exploratory_only`` (warn in an
+exploratory study, error in a confirmatory one).
 """
 
 from __future__ import annotations
@@ -84,6 +90,8 @@ class RegistryEntry:
             "versions": list(adapter.versions),
             "pinned_version": adapter.version(),
             "open_questions": list(adapter.facts.open_questions),
+            "endpoint_open_questions": {k: list(v) for k, v in adapter.endpoint_open_questions.items()},
+            "exploratory_only": adapter.exploratory_only or None,
         }
 
 
@@ -96,6 +104,10 @@ def validate(adapter: HarnessAdapter) -> None:
         raise HarnessRegistryError(msg)
     if not adapter.wants_enabled and not adapter.blocked_reason and not facts.open_questions:
         msg = f"{name}: a disabled adapter needs a blocked_reason"
+        raise HarnessRegistryError(msg)
+    unknown_kinds = set(adapter.endpoint_open_questions) - set(ENDPOINT_KINDS)
+    if unknown_kinds:
+        msg = f"{name}: endpoint_open_questions keys must be endpoint kinds {ENDPOINT_KINDS}: {sorted(unknown_kinds)}"
         raise HarnessRegistryError(msg)
     if facts.front_protocol != adapter.protocol:
         msg = f"{name}: facts.front_protocol {facts.front_protocol!r} != adapter.protocol {adapter.protocol!r}"
@@ -238,6 +250,32 @@ def plan_issues(
                 "harness_not_enabled",
                 kind,
                 message=f"{adapter.label} is not enabled: {item.blocked_reason}",
+                cells=cell_keys,
+                data={"harness": harness},
+            ),
+        )
+    # Every non-OpenRouter endpoint (ollama, openai_compatible) is served through the local proxy.
+    upstream_kind = "openrouter" if endpoint_kind == "openrouter" else "local_proxy"
+    endpoint_questions = adapter.endpoint_open_questions.get(upstream_kind, ())
+    if item.enabled and endpoint_questions:
+        issues.append(
+            make_issue(
+                "harness_not_enabled",
+                kind,
+                message=(
+                    f"{adapter.label} is not enabled for an {upstream_kind} endpoint; open questions: "
+                    + "; ".join(endpoint_questions)
+                ),
+                cells=cell_keys,
+                data={"harness": harness, "endpoint_kind": upstream_kind, "reason": "endpoint_open_questions"},
+            ),
+        )
+    if item.enabled and adapter.exploratory_only:
+        issues.append(
+            make_issue(
+                "harness_exploratory_only",
+                kind,
+                message=f"{adapter.label} is enabled for exploratory studies only: {adapter.exploratory_only}",
                 cells=cell_keys,
                 data={"harness": harness},
             ),

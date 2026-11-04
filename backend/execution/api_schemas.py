@@ -24,6 +24,12 @@ BlockedReason = Literal[
     "circuit_open",
     "draining",
     "retry_backoff",
+    "condition_paused",
+    # Per-study concurrency knobs (scheduler.STUDY_*_CAP); missing here made /queue/ answer 500 (E2E-27).
+    "study_endpoint_cap",
+    "study_model_cap",
+    "study_provider_cap",
+    "budget",
 ]
 
 

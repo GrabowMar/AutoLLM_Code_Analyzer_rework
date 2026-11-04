@@ -536,7 +536,7 @@
 							</table>
 						</div>
 					{:else if sensitivity}
-						<p class="text-[11px] italic">Fewer than two models have local measurements — run experiments on more models to compare rank stability.</p>
+						<p class="text-[11px] italic">Fewer than two models have local measurements — run studies on more models to compare rank stability.</p>
 					{:else if sensitivityError}
 						<p class="text-[11px] italic">Sensitivity data unavailable.</p>
 					{:else}

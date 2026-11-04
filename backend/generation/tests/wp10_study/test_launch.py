@@ -106,6 +106,26 @@ def test_confirmation_is_required_above_the_threshold(make_study, fake_study):
     svc.launch(study, plan.plan_hash, confirm_usd=plan.estimate.p90_total)
 
 
+def test_a_list_basis_launch_confirms_and_stores_list_estimates(make_study, fake_study):
+    """E2E-13: on a subscription endpoint the billed p90 is 0; the confirmation and the cells' estimates use
+    list price, so the gates and stop rules have a list estimate to compare list cost with."""
+    fake_study.list_price = True
+    fake_study.cost_per_cell = 1.0
+    study = make_study()
+    plan = planner.resolve(study)
+    assert plan.estimate.p90_total == 0.0
+    assert plan.estimate.p90_list_total > 0
+    with pytest.raises(StudyError) as refused:
+        svc.launch(study, plan.plan_hash, confirm_usd=0.0)
+    assert refused.value.code == "confirmation_required"
+    assert refused.value.data["p90_total"] == pytest.approx(plan.estimate.p90_list_total)
+    assert refused.value.data["cap_basis"] == "list"
+    svc.launch(study, plan.plan_hash, confirm_usd=plan.estimate.p90_list_total)
+    cells = StudyCell.objects.filter(study=study)
+    assert cells.exists()
+    assert {(c.estimate_usd, c.estimate_list_usd) for c in cells} == {(Decimal("0"), Decimal("1"))}
+
+
 def test_confirmatory_lock_is_immutable_and_prereg_covers_patterns(make_study, fake_study):
     study = make_study(kind="confirmatory", analysis_plan=PLAN)
     svc.launch(study, planner.resolve(study).plan_hash)
@@ -307,8 +327,8 @@ def test_launch_cap_is_the_cap_claims_enforce(make_study, fake_study, study_cap,
 
     base_estimate = get_deps().estimate_plan
 
-    def estimate_plan(plan):
-        return base_estimate(plan).model_copy(update={"cap_usd": estimate_cap})
+    def estimate_plan(plan, **kwargs):
+        return base_estimate(plan, **kwargs).model_copy(update={"cap_usd": estimate_cap})
 
     with override_deps(estimate_plan=estimate_plan):
         study = make_study()

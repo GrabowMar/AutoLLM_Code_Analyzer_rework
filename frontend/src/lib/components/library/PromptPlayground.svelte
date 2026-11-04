@@ -46,9 +46,11 @@
 	let setB = $state<string>('');
 	let compare = $state(false);
 
-	// Fill the defaults once the lists arrive.
+	// Fill the defaults once every list has arrived: filling from a partial set (tasks and stacks in, styles
+	// still loading) froze a cell without a style and the first render failed with a 422.
+	const listsSettled = $derived([tasks, stacks, styles, guidance, harnesses].every((l) => l.loaded || !!l.error));
 	$effect(() => {
-		if (!ctxA) {
+		if (!ctxA && listsSettled) {
 			ctxA =
 				initial ??
 				defaultAppContext({ tasks: tasks.items, stacks: stacks.items, styles: styles.items, guidance: guidance.items, harnessPresets: harnesses.items });

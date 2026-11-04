@@ -481,7 +481,7 @@ class _Resolver:
 
     def _drawn_targets(self) -> list[SlotTarget]:
         """Units of a design that draws its parents (``study/parents.py``; nothing is created here)."""
-        drawn = study_parents.drawn_units(self.design, user=self.user, create=False)
+        drawn = study_parents.drawn_units(self.design, user=self.user, create=False, study=self.study)
         self.draw = drawn
         if not drawn.parents:
             msg = "the parent pool of parent_selection is empty (no usable tested app_agentic run matches it)"
@@ -495,6 +495,7 @@ class _Resolver:
             data = {
                 "seed": drawn.seed,
                 "pool_size": drawn.pool_size,
+                "pinned": drawn.pinned,
                 "parents": [str(p.pk) for p in drawn.parents],
                 "missing_sets": drawn.missing_sets,
                 "missing_targets": drawn.missing_targets,
@@ -1401,7 +1402,7 @@ class _Resolver:
             estimate=None,
             issues=[],
         )
-        estimate = self.deps.estimate_plan(plan) if cells else None
+        estimate = self.deps.estimate_plan(plan, study_kind=self.kind) if cells else None
         if estimate is not None:
             self.issues += list(estimate.issues)
         plan.estimate = estimate
@@ -1433,7 +1434,17 @@ _CACHE_LOCK = threading.Lock()
 
 
 def _cache_key(study: Study, design: Design, drop_incompatible: bool, repeats: int | None) -> tuple[Any, ...]:
-    return (str(study.pk), identity.design_hash(design.model_dump(mode="json")), drop_incompatible, repeats)
+    # The pinned parent draw (E2E-14) decides a drawing design's units, so it is part of the key.
+    pin = (getattr(study, "parent_draw", None) or {}).get("selection_hash", "")
+    pinned = ",".join(str(p) for p in (getattr(study, "parent_draw", None) or {}).get("parents") or [])
+    return (
+        str(study.pk),
+        identity.design_hash(design.model_dump(mode="json")),
+        drop_incompatible,
+        repeats,
+        pin,
+        pinned,
+    )
 
 
 def clear_cache() -> None:
@@ -1473,7 +1484,7 @@ def resolve_bundle(
     design = design_rules.parse_design(study.design)
     if persist and study_parents.uses_draw(design):
         # Freeze the drawn parents and match the templates first (ephemeral resolves never write rows).
-        if study_parents.materialize(design, user=study.created_by).created:
+        if study_parents.materialize(design, user=study.created_by, study=study).created:
             _drop_cached(study)
     key = _cache_key(study, design, drop_incompatible, repeats)
     bundle: PlanBundle | None = None
@@ -1514,7 +1525,10 @@ def persist_bundle(study: Study, bundle: PlanBundle) -> PlanBundle:
     plan = bundle.plan
     existing = StudyPlan.objects.filter(study=study, plan_hash=plan.plan_hash).first()
     if existing is not None:
-        return PlanBundle(plan=plan, texts=bundle.texts, row=existing, unbalanced=bundle.unbalanced)
+        if not _stale_draft(study, existing, plan):
+            return PlanBundle(plan=plan, texts=bundle.texts, row=existing, unbalanced=bundle.unbalanced)
+        # E2E-21: same plan, newer diagnostics (a target validated since, fresher priors): replace the draft.
+        existing.delete()
     for text in bundle.texts.values():
         blobs.put_text(text)
     payload_sha = blobs.put_json(plan.model_dump(mode="json"))
@@ -1541,6 +1555,26 @@ def persist_bundle(study: Study, bundle: PlanBundle) -> PlanBundle:
     return PlanBundle(plan=plan, texts=bundle.texts, row=row, unbalanced=bundle.unbalanced)
 
 
+def _stale_draft(study: Study, row: StudyPlan, plan: ResolvedPlan) -> bool:
+    """A never-launched plan row whose stored issues or estimate differ from a fresh resolve of the same hash.
+
+    The plan hash covers what runs (design, conditions, units, cells, prompts), not the diagnostics: a slot
+    target's validation (``slot_tests_uninformative`` "validation is pending") or the estimate's priors change
+    without changing the hash. Since the parent draw is pinned (E2E-14) a re-freeze after target validation
+    yields the same hash, so the row frozen first would keep its blocking issues for ever. Such a row is
+    replaced, but only while nothing refers to it (not launched, not the active plan, no materialized rows).
+    """
+    from backend.generation.models.choices import PlanStatus
+
+    if row.status == PlanStatus.LAUNCHED or study.active_plan_id == row.pk:
+        return False
+    if row.conditions.exists() or row.units.exists() or row.cells.exists():
+        return False
+    issues = [issue.model_dump(mode="json") for issue in plan.issues]
+    estimate = plan.estimate.model_dump(mode="json") if plan.estimate is not None else None
+    return row.issues != issues or row.estimate != estimate
+
+
 def _mirror_factors(study: Study) -> None:
     """``StudyFactor`` rows mirror the design's factors (for querying)."""
     from backend.generation.models import StudyFactor
@@ -1563,13 +1597,24 @@ def load_bundle(row: StudyPlan) -> PlanBundle:
     return PlanBundle(plan=ResolvedPlan.model_validate(payload), row=row)
 
 
-def freeze(study: Study, *, drop_incompatible: bool = False) -> StudyPlan:
-    """Persist the resolved plan as a draft ``StudyPlan`` (older draft plans of the study are superseded)."""
+def freeze(study: Study, *, drop_incompatible: bool = False, redraw_parents: bool = False) -> StudyPlan:
+    """Persist the resolved plan as a draft ``StudyPlan`` (older draft plans of the study are superseded).
+
+    A drawing design reuses the parents pinned at its first freeze; ``redraw_parents`` drops that pin first,
+    so the parents are drawn again from the current pool (refused once the study has launched or is locked).
+    """
     from backend.generation.models import StudyPlan
     from backend.generation.models.choices import PlanStatus
     from backend.generation.models.choices import StudyStatus
 
-    bundle = resolve_bundle(study, persist=True, drop_incompatible=drop_incompatible)
+    if redraw_parents:
+        if study.locked_at is not None or study.status not in (StudyStatus.DRAFT, StudyStatus.PLANNED):
+            msg = "the parents of a launched or locked study cannot be redrawn"
+            raise design_rules.DesignError(msg, path="parent_selection")
+        if study_parents.forget_draw(study):
+            _drop_cached(study)
+    # A freeze resolves afresh (E2E-21): the ephemeral cache does not see target validation finishing.
+    bundle = resolve_bundle(study, persist=True, drop_incompatible=drop_incompatible, use_cache=False)
     assert bundle.row is not None
     StudyPlan.objects.filter(study=study, status=PlanStatus.DRAFT).exclude(pk=bundle.row.pk).update(
         status=PlanStatus.SUPERSEDED,

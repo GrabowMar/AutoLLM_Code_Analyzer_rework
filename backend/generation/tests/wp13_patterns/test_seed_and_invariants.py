@@ -132,6 +132,37 @@ def test_drafts_from_a_selection_compile_and_match_the_selection():
         assert det.run_in_process(spec, variant, ["file"])[0].status == "present", engine
 
 
+def test_a_one_line_ts_query_draft_covers_the_whole_line_not_its_first_token():
+    """E2E-26: a row-only cover let a single token (``string_start``, one identifier) become the whole rule."""
+    text = (
+        "def login(row, password):\n"
+        '    if row is None or not check_password_hash(row["password_hash"], password):\n'
+        "        return 401\n"
+        "    return 200\n"
+    )
+    rule = drafts.ts_query_for(text, "python", 2, 2)
+    assert rule.startswith("((if_statement"), rule
+    assert "string_start" not in rule
+    # A selection of one call on its own line drafts that call.
+    call = 'x = 1\nfoo(bar, "baz")\n'
+    assert drafts.ts_query_for(call, "python", 2, 2).startswith(("((expression_statement", "((call")), call
+    # Unrelated strings elsewhere do not match the drafted rule.
+    draft = drafts.draft_from_selection(
+        text=text,
+        language="python",
+        path="a.py",
+        start_line=2,
+        end_line=2,
+        engine="ts_query",
+        feature_key="drafted",
+        polarity="secure",
+    )
+    spec = det.DetectorSpec(slug="drafted", version=1, content_hash="0" * 64, content=draft)
+    other = 'MESSAGE = "hello"\n'
+    variant = det.VariantInput(run_id="r", path="a.py", language="python", file_text=other)
+    assert det.run_in_process(spec, variant, ["file"])[0].status == "absent"
+
+
 def test_diff_vs_original():
     original = "def f(x):\n    return x + 1\n"
     renamed = "def f(y):\n    # c\n    return y + 1\n"

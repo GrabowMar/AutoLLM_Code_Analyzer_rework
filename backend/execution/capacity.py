@@ -247,6 +247,7 @@ class EndpointState:
     max_active_jobs: int | None
     max_resident_models: int | None
     keep_alive: str
+    cost_basis: str = "billed"
     online: bool = False
     served: set[tuple[str, str]] | None = None  # None: serves everything (OpenRouter)
     loaded: set[str] = field(default_factory=set)  # names on fresh /api/ps
@@ -366,6 +367,7 @@ def _endpoint_states(now: datetime) -> dict[int, EndpointState]:
             max_active_jobs=ep.max_active_jobs,
             max_resident_models=ep.max_resident_models,
             keep_alive=ep.keep_alive,
+            cost_basis=ep.cost_basis,
             loaded=loaded,
             loaded_fresh=fresh,
         )

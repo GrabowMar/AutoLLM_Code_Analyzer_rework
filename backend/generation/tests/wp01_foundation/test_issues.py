@@ -17,7 +17,16 @@ from backend.generation.contracts.issues import make_issue
 SPEC = Path(__file__).resolve().parents[4] / "docs" / "design" / "SAMPLE_GEN_V3.md"
 
 # Registered codes that the spec describes without naming (recorded in SAMPLE_GEN_V3_CHANGES.md, WP-01 decisions).
-CODES_NOT_NAMED_IN_SPEC = frozenset({"combination_pruned", "mixed_config_fingerprint", "parent_draw_pending"})
+# Codes added after the spec froze, recorded in SAMPLE_GEN_V3_CHANGES.md (harness_exploratory_only: E2E-13).
+CODES_NOT_NAMED_IN_SPEC = frozenset(
+    {
+        "combination_pruned",
+        "mixed_config_fingerprint",
+        "parent_draw_pending",
+        "harness_exploratory_only",
+        "cap_admits_fewer_blocks",
+    },
+)
 
 # Phrases the spec uses when it names an issue code.
 ISSUE_CONTEXT_PATTERNS = (
@@ -114,6 +123,7 @@ def test_library_lint_codes_are_preregistered_for_wp03():
 def test_6_15_severities():
     expectations = {
         "harness_not_enabled": ("error", "error"),
+        "harness_exploratory_only": ("warn", "error"),
         "mixed_harness_profiles": ("warn", "warn"),
         "vendor_affinity": ("info", "info"),
         "oracle_missing": ("warn", "error"),

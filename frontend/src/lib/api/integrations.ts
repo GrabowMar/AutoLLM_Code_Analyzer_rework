@@ -209,7 +209,7 @@ export interface WebhookSubscription {
   has_secret: boolean;
   telegram_chat_id: string;
   events: string[];
-  include_experiment_jobs: boolean;
+  include_study_runs: boolean;
   enabled: boolean;
   last_success_at: string | null;
   last_error: string;
@@ -227,7 +227,7 @@ export interface WebhookCreatePayload {
   secret?: string;
   telegram_chat_id?: string;
   events: string[];
-  include_experiment_jobs?: boolean;
+  include_study_runs?: boolean;
   enabled?: boolean;
 }
 
@@ -238,7 +238,7 @@ export interface WebhookPatchPayload {
   secret?: string;
   telegram_chat_id?: string;
   events?: string[];
-  include_experiment_jobs?: boolean;
+  include_study_runs?: boolean;
   enabled?: boolean;
 }
 

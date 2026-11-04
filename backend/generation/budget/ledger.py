@@ -531,7 +531,21 @@ def _from_calls(path: Path, pricing: tuple[float, float] | None) -> FinalUsage |
                 continue
             usage = record.get("usage")
             if not isinstance(usage, dict):
-                continue  # a failed call without usage costs nothing billable
+                # A call the gateway settled at its reservation (``usage_estimated``: an answer without a
+                # usage chunk, or a failure after the upstream accepted it) counts what the gateway charged,
+                # so the ledger equals the ``calls.jsonl`` sum (E2E-29); any other call without usage is free.
+                if record.get("usage_estimated"):
+                    listed = record.get("list_cost")
+                    accrued = record.get("cost")
+                    if isinstance(listed, (int, float)) and not isinstance(listed, bool):
+                        list_cost += to_decimal(listed)
+                    billed_basis = record.get("cost_source") not in ("list_price", "free")
+                    if billed_basis and isinstance(accrued, (int, float)) and not isinstance(accrued, bool):
+                        cost += to_decimal(accrued)
+                    tokens_in += int(record.get("reserved_prompt_tokens") or record.get("est_prompt_tokens") or 0)
+                    tokens_out += int(record.get("upstream_max_tokens") or 0)
+                    requests += 1
+                continue
             prompt = int(usage.get("prompt_tokens") or 0)
             completion = int(usage.get("completion_tokens") or 0)
             tokens_in += prompt

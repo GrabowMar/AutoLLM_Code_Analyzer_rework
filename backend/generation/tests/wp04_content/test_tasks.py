@@ -317,21 +317,26 @@ def test_reference_trees_follow_the_layout():
             assert (tree / "PROVENANCE.md").is_file(), (slug, tree.name)
 
 
-# Section 8.5: the phase-A kit frameworks whose conformance-kit references are checked in (go and spring-boot
-# join when their references exist; until then ``coverage()`` reports them not covered).
+# Section 8.5: the kit frameworks whose conformance-kit references are checked in. The WP-09 trees were written by
+# hand; the go-stdlib and spring-boot trees (E2E-25) were written by an AI coding assistant, which their
+# PROVENANCE.md says (no generation run and no model under study was involved).
 KIT_REFERENCE_STACKS = ("flask-none", "fastapi-none", "django-none", "express-none")
+KIT_REFERENCE_STACKS_ASSISTED = ("go-none", "spring-boot-none")
 
 
 @pytest.mark.parametrize("slug", content.KIT_TASKS)
 def test_kit_tasks_have_a_reference_for_every_phase_a_framework(slug):
     """Without these trees ``conformance.coverage()`` is all-False and confirmatory app studies are blocked."""
     root = content.TASKS_ROOT / slug / "reference"
-    for stack in KIT_REFERENCE_STACKS:
+    for stack in KIT_REFERENCE_STACKS + KIT_REFERENCE_STACKS_ASSISTED:
         tree = root / stack
         assert (tree / "Dockerfile").is_file(), (slug, stack)
         assert (tree / "backend").is_dir(), (slug, stack)
         provenance = (tree / "PROVENANCE.md").read_text(encoding="utf-8")
-        assert "No LLM was involved" in provenance, (slug, stack)
+        if stack in KIT_REFERENCE_STACKS:
+            assert "No LLM was involved" in provenance, (slug, stack)
+        else:
+            assert "no model under study was involved" in provenance, (slug, stack)
         assert not list(tree.rglob("__pycache__")), (slug, stack)
 
 

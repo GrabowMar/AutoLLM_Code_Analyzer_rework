@@ -671,6 +671,39 @@ def _list_checks(ep: Mapping[str, Any], content: Mapping[str, Any], actor: str) 
     return out
 
 
+# A public (anon) check reads a resource that user_a created: its setup must create it visible to everyone. The
+# sample value of a boolean is ``false``, which hides a resource behind a visibility flag (an unpublished note, an
+# inactive product), so the setup sets the flags it sends to ``true``.
+_VISIBILITY_FLAGS: Final = frozenset(
+    {
+        "published",
+        "is_published",
+        "public",
+        "is_public",
+        "visible",
+        "is_visible",
+        "active",
+        "is_active",
+        "listed",
+        "is_listed",
+        "shared",
+        "is_shared",
+    },
+)
+
+
+def _publicly_visible(setup: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for step in setup:
+        body = (step.get("request") or {}).get("json")
+        if isinstance(body, dict) and any(k in _VISIBILITY_FLAGS and body[k] is False for k in body):
+            body = {k: (True if k in _VISIBILITY_FLAGS and v is False else v) for k, v in body.items()}
+            out.append({**step, "request": {**step["request"], "json": body}})
+        else:
+            out.append(step)
+    return out
+
+
 def _endpoint_checks(ep: Mapping[str, Any], content: Mapping[str, Any]) -> list[dict[str, Any]]:
     path = str(ep["path"])
     if path.startswith("/api/auth/"):
@@ -683,6 +716,8 @@ def _endpoint_checks(ep: Mapping[str, Any], content: Mapping[str, Any]) -> list[
     setup = _setup_for(path, owner_actor, content)
     if setup is None:
         return []
+    if actor == "anon":
+        setup = _publicly_visible(setup)
     req = _request_for(ep, content)
     status = ep.get("success_status", 200)
     auth = str(ep["auth"])

@@ -72,6 +72,8 @@ class HarnessOut(Schema):
     vendor_affinity: str | None = None
     min_call_output_tokens: int
     open_questions: list[str]
+    endpoint_open_questions: dict[str, list[str]] = Field(default_factory=dict)
+    exploratory_only: str | None = None
 
 
 class IssueCodeOut(Schema):

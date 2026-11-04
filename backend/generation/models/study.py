@@ -209,6 +209,11 @@ class Study(ValidatedModel):
         blank=True,
         related_name="+",
     )
+    # E2E-14: the parents a ``parent_selection`` draw picked at the first freeze, pinned so a later resolve or
+    # re-freeze reuses them instead of redrawing from a pool that grows ({"selection_hash", "seed",
+    # "pool_size", "parents": [run ids in draw order], "at"}; ``{}`` = not drawn yet). Only an explicit
+    # ``freeze-plan`` with ``redraw_parents`` (or a changed ``parent_selection``) draws again.
+    parent_draw = models.JSONField(_("pinned parent draw"), default=dict, blank=True)
     stop_reason = models.JSONField(_("stop reason"), null=True, blank=True)
     pause_reason = models.CharField(
         _("pause reason"),
@@ -616,6 +621,9 @@ class StudyCell(ValidatedModel):
         default="",
     )
     estimate_usd = _money(_("estimate (USD)"), digits=10)
+    # The cell's expected list-price cost: what a ``cap_basis: list`` study's gates and stop rules compare
+    # the runs' list cost with (``estimate_usd`` is billed, 0 on subscription and local endpoints).
+    estimate_list_usd = _money(_("estimate (list USD)"), digits=10)
     cap_usd = _money(_("per-attempt cap (USD)"), digits=10)
     cell_cap_usd = _money(_("cell cap (USD)"), digits=10)
     spent_usd = _money(_("spent (USD)"), digits=10)

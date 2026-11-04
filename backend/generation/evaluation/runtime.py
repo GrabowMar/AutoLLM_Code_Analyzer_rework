@@ -358,6 +358,22 @@ class LocalProcessRuntime:
 # =====================================================================================
 
 
+def _attach_alias(network: Any, container: Any, alias: str) -> None:
+    """Re-attach a created container to its eval network under ``alias``.
+
+    The container was created on the network without an alias, so it is disconnected and connected again.
+    Under load the daemon intermittently answers the disconnect with "container ... is not connected to the
+    network" (seen on dev1 as an ``infra`` start failure of a slot validation run); the container is then simply
+    not attached yet, so that one answer is ignored and the connect proceeds. Any other error propagates.
+    """
+    try:
+        network.disconnect(container)
+    except Exception as exc:  # docker APIError; only the "not connected" answer is tolerated
+        if "is not connected to the network" not in str(exc):
+            raise
+    network.connect(container, aliases=[alias])
+
+
 def _tar(files: Mapping[str, bytes], prefix: str = "") -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as tar:
@@ -521,8 +537,7 @@ class DockerEvalRuntime:
                 security_opt=["no-new-privileges"],
             )
             self.containers.append(container)
-            network.disconnect(container)
-            network.connect(container, aliases=["app"])
+            _attach_alias(network, container, "app")
             if overlay_files:
                 workdir = container.attrs.get("Config", {}).get("WorkingDir") or "/app"
                 container.put_archive(workdir, _tar(dict(overlay_files)))
@@ -564,8 +579,7 @@ class DockerEvalRuntime:
                 security_opt=["no-new-privileges"],
             )
             self.containers.append(database)
-            network.disconnect(database)
-            network.connect(database, aliases=["db"])
+            _attach_alias(network, database, "db")
             database.start()
             self.database, self.database_password = database, password
         except Exception as exc:
@@ -683,8 +697,7 @@ class DockerEvalRuntime:
                 security_opt=["no-new-privileges"],
             )
             self.containers.append(tester)
-            self.network.disconnect(tester)
-            self.network.connect(tester, aliases=["mock.internal"])
+            _attach_alias(self.network, tester, "mock.internal")
             files = {"plan.json": json.dumps(plan).encode()}
             tester.put_archive("/in", _tar(files))
             if state is not None:
