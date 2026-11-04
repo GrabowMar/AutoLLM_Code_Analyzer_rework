@@ -115,6 +115,22 @@ def test_a_digest_mismatch_never_proceeds() -> None:
     assert caught.value.role == "harness"
 
 
+def test_starter_bases_pinned_as_full_references_match_their_digest() -> None:
+    """``StarterContent.base_images`` digests are ``ref@sha256:...`` (``dockerfiles.pinned_bases``)."""
+    digest = "sha256:" + "c" * 64
+    containerd = FakeImage(id=digest, attrs={"RepoDigests": [f"node@{digest}"]})  # containerd store: id = index
+    classic = FakeImage(id="sha256:" + "b" * 64, attrs={"RepoDigests": [f"node@{digest}"]})
+    for image in (containerd, classic):
+        assert images.digest_matches(image, f"node:24-slim@{digest}")
+        assert images.digest_matches(image, digest)
+        assert not images.digest_matches(image, "node:24-slim@sha256:" + "d" * 64)
+    client = FakeClient({"agent-mini-swe-agent": HARNESS, "llm-gateway": GATEWAY})
+    manifest = _manifest(HARNESS, GATEWAY)
+    manifest["starter"]["base_images"] = [{"ref": "python:3.13-slim", "digest": f"python:3.13-slim@{digest}"}]
+    result = images.ensure_images(manifest, SPEC, client=client)
+    assert result.starter_base == {"python:3.13-slim": f"python:3.13-slim@{digest}"}
+
+
 @pytest.mark.django_db
 def test_pending_digests_are_recorded_and_issue_image_built_after_plan() -> None:
     tag = images.image_tag("agent-mini-swe-agent", {**SPEC.build_args, "BASE_IMAGE": images.image_tag("agent-base")})

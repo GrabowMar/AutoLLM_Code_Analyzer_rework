@@ -78,6 +78,19 @@ def _policy(study: Study) -> ResourcePolicyContent | None:
 
 
 def _finished(study: Study, stages: Iterable[str]) -> list[GenerationRun]:
+    """Finished runs, newest first, without attempts a top-up already replaced (a newer run on the same cell).
+
+    A topped-up failure is acknowledged: counting it again would re-fire the rule on every evaluation after
+    the researcher fixed the cause and resumed (the replacement attempt is what is counted from then on).
+    """
+    from django.db.models import Exists
+    from django.db.models import OuterRef
+
+    replaced = GenerationRun.objects.filter(
+        cell=OuterRef("cell"),
+        beyond_plan=False,
+        created_at__gt=OuterRef("created_at"),
+    )
     return list(
         GenerationRun.objects.filter(
             study=study,
@@ -86,6 +99,7 @@ def _finished(study: Study, stages: Iterable[str]) -> list[GenerationRun]:
             beyond_plan=False,
         )
         .exclude(kind="reference")
+        .exclude(Exists(replaced))
         .select_related("cell")
         .order_by("-completed_at", "-created_at"),
     )

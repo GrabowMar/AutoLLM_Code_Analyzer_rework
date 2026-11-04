@@ -123,3 +123,15 @@ def test_step_recorder_times_and_publishes(monkeypatch) -> None:
     assert steps.steps[0] == {"step": "images", "status": "ok", "seconds": 1.5}
     assert steps.steps[1]["status"] == "skipped"
     assert [p["status"] for p in published] == ["started", "ok", "skipped"]
+
+
+def test_packages_policy_proxies_http_and_https_through_the_gateway() -> None:
+    # The dependency caches are plain http:// URLs on a network only the gateway reaches (E2E-3): without
+    # HTTP_PROXY, pip/uv/go in the agent would try them directly and fail.
+    env = sandbox.proxy_env("packages")
+    gateway = f"http://{sandbox.GATEWAY_ALIAS}:{sandbox.GATEWAY_PORT}"
+    keys = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "npm_config_https_proxy", "npm_config_proxy")
+    assert all(env[key] == gateway for key in keys)
+    assert sandbox.GATEWAY_ALIAS in env["NO_PROXY"].split(",")
+    assert env["no_proxy"] == env["NO_PROXY"]
+    assert sandbox.proxy_env("none") == {}

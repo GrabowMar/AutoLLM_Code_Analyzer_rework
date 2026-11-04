@@ -144,6 +144,8 @@ def digest_matches(image: Any, expected: str) -> bool:
     """Whether a docker image is the one ``expected`` pins (image id, or a registry ``RepoDigests`` entry)."""
     if not expected:
         return False
+    # Starter ``base_images`` pin the full reference (``node:24-slim@sha256:...``): compare its digest.
+    expected = expected.rsplit("@", 1)[-1]
     if _image_id(image) == expected:
         return True
     return any(entry == expected or entry.endswith(f"@{expected}") for entry in _repo_digests(image))

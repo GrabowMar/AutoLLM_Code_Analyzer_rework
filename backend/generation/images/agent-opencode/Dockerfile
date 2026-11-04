@@ -15,5 +15,9 @@ RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" \
     && cd /opt/opencode/config \
     && npm install --save-exact --ignore-scripts --no-audit --no-fund "@opencode-ai/plugin@${OPENCODE_VERSION}" \
     && printf 'node_modules\npackage.json\npackage-lock.json\nbun.lock\n.gitignore' > .gitignore \
-    && npm cache clean --force
+    && npm cache clean --force \
+    && find /run/home -mindepth 1 -delete
+# The installs above ran as root with HOME=/run/home and left root-owned .npm/.config/.cache/.local there;
+# the harness (user node) could then not write its config dir (cp: Permission denied, exit 70). HOME stays
+# empty and node-owned, as agent-base leaves it.
 USER node
