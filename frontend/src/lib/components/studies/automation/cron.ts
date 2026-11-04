@@ -101,9 +101,9 @@ export const SCHEDULE_ACTION_DESCRIPTIONS: Record<ScheduleAction, string> = {
   top_up:
     "Re-runs infra-failed and missing cells with their original manifest and seed; a usable run is never superseded.",
   add_replicates:
-    "Adds repeats beyond the plan (exploratory studies; the runs are marked beyond plan).",
+    "Adds repeats beyond the plan (exploratory experiments; the runs are marked beyond plan).",
   clone_and_run:
-    "Clones the study with its exact pins and launches the clone: a fresh replication.",
+    "Clones the experiment with its exact pins and launches the clone: a fresh replication.",
 };
 
 /** The viewer's IANA timezone (falls back to UTC). */

@@ -90,7 +90,7 @@
 	{:else if error}
 		<div class="p-4"><ErrorAlert message={error} /></div>
 	{:else if rows.length === 0}
-		<EmptyState compact title="No variants yet" description="Variants appear as the slot study runs." />
+		<EmptyState compact title="No variants yet" description="Variants appear as the slot experiment runs." />
 	{:else}
 		<div class="overflow-x-auto">
 			<div class="min-w-max text-xs" role="table" aria-label="Variants by feature" aria-rowcount={rows.length + 1}>

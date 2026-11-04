@@ -76,7 +76,7 @@
 			</table>
 			{#if capHits.some((g) => !g.ok)}
 				<p class="text-xs text-warning-fg">
-					Runs hit their caps: raise the run cap in the Budget preset and re-pilot (<a class="underline" href="/studies/new?clone={studyId}">clone and edit</a>). Pilots with a different plan are never pooled.
+					Runs hit their caps: raise the run cap in the Budget preset and re-pilot (<a class="underline" href="/experiments/new?clone={studyId}">clone and edit</a>). Pilots with a different plan are never pooled.
 				</p>
 			{/if}
 		{:else}
@@ -88,7 +88,7 @@
 				Override {failed.length} failed gate{failed.length === 1 ? '' : 's'}
 			</label>
 			{#if override}
-				<Input class="h-8 text-sm" placeholder="Reason (recorded with the study)" bind:value={reason} {disabled} />
+				<Input class="h-8 text-sm" placeholder="Reason (recorded with the experiment)" bind:value={reason} {disabled} />
 			{/if}
 		{/if}
 		{#if error}<ErrorAlert message={error} />{/if}

@@ -78,7 +78,7 @@
 				<Card.Title class="text-base">Applications</Card.Title>
 				<Badge variant="outline" class="text-xs">{total}</Badge>
 			</div>
-			<Button size="sm" href="/studies/new?mode=app" title="Generate apps with this model in an app study (pick {slug} as a model level)">
+			<Button size="sm" href="/experiments/new?mode=app" title="Generate apps with this model in an app experiment (pick {slug} as a model level)">
 				<Sparkles class="h-3.5 w-3.5 mr-1.5" />New
 			</Button>
 		</Card.Header>
@@ -91,7 +91,7 @@
 				<div class="p-4">
 					<EmptyState compact icon={AppWindow} title="No applications yet" description="No applications have been generated with this model.">
 						{#snippet action()}
-							<Button size="sm" variant="outline" href="/studies/new?mode=app">
+							<Button size="sm" variant="outline" href="/experiments/new?mode=app">
 								<Sparkles class="h-3.5 w-3.5 mr-1.5" />Generate the first one
 							</Button>
 						{/snippet}

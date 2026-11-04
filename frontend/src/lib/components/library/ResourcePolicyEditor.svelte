@@ -145,7 +145,7 @@
 			{@render knobList(grouped.get(KEY_LIMITS_GROUP.id) ?? [])}
 		</div>
 		<p class="border-t border-border px-3 py-2 text-[11px] text-muted-foreground">
-			Repeats are set per study (builder step 4), not in the preset.
+			Repeats are set per experiment (builder step 4), not in the preset.
 		</p>
 	</section>
 

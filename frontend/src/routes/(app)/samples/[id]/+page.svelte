@@ -185,7 +185,7 @@
 		<LoadingState label="loading sample" />
 	{:else if live.notFound}
 		<PageHeader title="Sample not found" back={{ href: '/applications', label: 'Applications' }} />
-		<EmptyState title="No such sample" description="It does not exist, or it belongs to someone else's study." />
+		<EmptyState title="No such sample" description="It does not exist, or it belongs to someone else's experiment." />
 	{:else}
 		<PageHeader title="Sample" back={{ href: '/applications', label: 'Applications' }} />
 		<ErrorAlert message={live.error || 'Could not load the sample.'} onretry={() => live.refresh()} />

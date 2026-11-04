@@ -152,11 +152,11 @@
 	const scopeItems = $derived(
 		(context?.scopes_available ?? []).map((sc) => ({
 			value: sc,
-			label: sc === 'study' ? 'Study' : 'All my apps',
+			label: sc === 'study' ? 'Experiment' : 'All my apps',
 			title:
 				sc === 'study'
-					? "The app's study: the current run of each main-stage cell"
-					: 'Every app of yours with a finished analysis (the current run of each study cell, plus ad-hoc runs)',
+					? "The app's experiment: the current run of each main-stage cell"
+					: 'Every app of yours with a finished analysis (the current run of each experiment cell, plus ad-hoc runs)',
 		}))
 	);
 	/** The analyzed GenerationRun (null for pasted code or a deleted app). */
@@ -165,7 +165,7 @@
 	const truncatedBy = $derived(((run.summary?.truncated_inputs ?? []) as string[]).filter(Boolean));
 	const truncated = $derived(
 		truncatedBy.length
-			? `The generation run was truncated (${truncatedBy.map((t) => t.replace(/_/g, ' ')).join(', ')}): these findings describe an app that may be unfinished. Truncated runs stay in the study sample (intention-to-treat).`
+			? `The generation run was truncated (${truncatedBy.map((t) => t.replace(/_/g, ' ')).join(', ')}): these findings describe an app that may be unfinished. Truncated runs stay in the experiment sample (intention-to-treat).`
 			: ''
 	);
 	const metrics = $derived((run.summary?.metrics_by_tool ?? {}) as Record<string, Record<string, any>>);
@@ -212,7 +212,7 @@
 			type="button"
 			class="kpi-card cursor-pointer text-left hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
 			style="--kpi-accent: var(--chart-1)"
-			title={codeHeadline && testFindings > 0 ? `The app's own source: ${testFindings} finding${testFindings === 1 ? '' : 's'} in test files are counted apart, as in the study` : undefined}
+			title={codeHeadline && testFindings > 0 ? `The app's own source: ${testFindings} finding${testFindings === 1 ? '' : 's'} in test files are counted apart, as in the experiment` : undefined}
 			onclick={() => onfilter(codeHeadline && testFindings > 0 ? { scope: 'source' } : codeHeadline && nonCode ? { scope: 'code' } : {})}
 		>
 			<span class="kpi-label">{codeHeadline ? 'Code findings' : `Findings${active ? ' so far' : ''}`}</span>
@@ -246,7 +246,7 @@
 				<span class="kpi-label">{loc.scope === 'model' ? 'Model code' : 'Code'} · {loc.files} source file{loc.files === 1 ? '' : 's'}</span>
 				<span
 					class="kpi-value"
-					title="Non-empty, non-comment lines of source files, test files apart: the study's LOC (the per-kLOC denominator){loc.scope === 'model' ? ', counted over what the model wrote or changed' : ''}. Stored: {run.source_files.length} files, {codeLines.toLocaleString()} raw lines incl. manifests and lockfiles."
+					title="Non-empty, non-comment lines of source files, test files apart: the experiment's LOC (the per-kLOC denominator){loc.scope === 'model' ? ', counted over what the model wrote or changed' : ''}. Stored: {run.source_files.length} files, {codeLines.toLocaleString()} raw lines incl. manifests and lockfiles."
 				>{loc.total.toLocaleString()}<span class="text-base text-muted-foreground"> LOC</span></span>
 				{#if loc.scope === 'model' && loc.app_total != null}
 					<span class="truncate text-[11px] text-muted-foreground" title="Source LOC of the whole app tree the tools read (starter included)">{loc.app_total.toLocaleString()} LOC in the whole app</span>
@@ -389,7 +389,7 @@
 							<Card.Title class="text-base">Most frequent rules</Card.Title>
 							{#if context?.scope}
 								<Card.Description class="text-xs">
-									How common each rule is in {context.scope_label} (n = {context.n} analyzed app{context.n === 1 ? '' : 's'}{context.model_n != null ? `, ${context.model_n} of this model` : ''}): apps whose latest result of that tool reports it, over the apps the tool measured.{context.interim ? ' Interim: the study is still running.' : ''}
+									How common each rule is in {context.scope_label} (n = {context.n} analyzed app{context.n === 1 ? '' : 's'}{context.model_n != null ? `, ${context.model_n} of this model` : ''}): apps whose latest result of that tool reports it, over the apps the tool measured.{context.interim ? ' Interim: the experiment is still running.' : ''}
 								</Card.Description>
 							{/if}
 						</div>

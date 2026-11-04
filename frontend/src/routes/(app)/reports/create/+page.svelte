@@ -54,7 +54,7 @@
 		{ key: 'tool_analysis', label: REPORT_TYPE_LABELS.tool_analysis, description: 'Findings breakdown across analyzers / security tools.', icon: Wrench },
 		{ key: 'generation_analytics', label: REPORT_TYPE_LABELS.generation_analytics, description: 'Throughput and success rate over a time window.', icon: TrendingUp },
 		{ key: 'comprehensive', label: REPORT_TYPE_LABELS.comprehensive, description: 'Platform-wide rollup of generation, analysis, and tools.', icon: Layers },
-		{ key: 'experiment_report', label: REPORT_TYPE_LABELS.experiment_report, description: "Leaderboard and paired comparisons against the pre-registered baseline condition of one study (current runs of the main stage).", icon: FlaskConical },
+		{ key: 'experiment_report', label: REPORT_TYPE_LABELS.experiment_report, description: "Leaderboard and paired comparisons against the pre-registered baseline condition of one experiment (current runs of the main stage).", icon: FlaskConical },
 		{ key: 'study_report', label: REPORT_TYPE_LABELS.study_report, description: 'Paper-ready tables: outcome funnel, deduplicated issues, correlations and rankings with uncertainty, validity threats. Exports to Markdown and LaTeX.', icon: Microscope }
 	];
 
@@ -155,7 +155,7 @@
 		}
 		if (selectedType === 'experiment_report') {
 			if (!studyId) {
-				error = 'Pick a study';
+				error = 'Pick an experiment';
 				return;
 			}
 			const c: StudyConditionsConfig = { study_id: studyId, ...excludeTruncatedConfig(excludeTruncated) };
@@ -323,16 +323,16 @@
 					</div>
 				{:else if selectedType === 'experiment_report'}
 					<div class="space-y-2">
-						<label for="rep-study" class="text-sm font-medium">Study</label>
-						<Select.Simple id="rep-study" bind:value={studyId} placeholder="Select a study" items={studyItems} />
+						<label for="rep-study" class="text-sm font-medium">Experiment</label>
+						<Select.Simple id="rep-study" bind:value={studyId} placeholder="Select an experiment" items={studyItems} />
 						<p class="text-xs text-muted-foreground">
 							Uses the current run of every main-stage cell; pilot, beyond-plan and superseded runs are left out and counted.
 						</p>
 					</div>
-					{@render excludeTruncatedOption("If the study's analysis plan is locked, its truncated-runs rule applies instead.")}
+					{@render excludeTruncatedOption("If the experiment's analysis plan is locked, its truncated-runs rule applies instead.")}
 				{:else if selectedType === 'study_report'}
 					<div class="space-y-2">
-						<label for="rep-study-scope" class="text-sm font-medium">Study (optional)</label>
+						<label for="rep-study-scope" class="text-sm font-medium">Experiment (optional)</label>
 						<Select.Simple
 							id="rep-study-scope"
 							bind:value={studyId}
@@ -340,10 +340,10 @@
 							items={[{ value: '', label: 'All my apps' }, ...studyItems]}
 						/>
 						<p class="text-xs text-muted-foreground">
-							With a study, its locked analysis plan decides which comparisons are confirmatory (and its exclusions win over the option below).
+							With an experiment, its locked analysis plan decides which comparisons are confirmatory (and its exclusions win over the option below).
 						</p>
 					</div>
-					{@render excludeTruncatedOption("With a study whose analysis plan is locked, the plan's truncated-runs rule applies; leave this off to follow it.")}
+					{@render excludeTruncatedOption("With an experiment whose analysis plan is locked, the plan's truncated-runs rule applies; leave this off to follow it.")}
 					<div class="space-y-2">
 						<label for="rep-seed" class="text-sm font-medium">Random seed</label>
 						<input id="rep-seed" type="number" min="0" bind:value={seed} class="block w-full std-select py-2" />

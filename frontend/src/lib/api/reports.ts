@@ -24,8 +24,8 @@ export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
   tool_analysis: "Tool analysis",
   generation_analytics: "Generation analytics",
   comprehensive: "Comprehensive",
-  experiment_report: "Study conditions",
-  study_report: "Study report",
+  experiment_report: "Experiment conditions",
+  study_report: "Experiment report",
 };
 
 /** `config` of a task comparison (`template_comparison`). */
@@ -232,9 +232,9 @@ export function summaryItems(
     }
     if (key === "study_id" && typeof v === "string" && v) {
       items.push({
-        label: "Study",
+        label: "Experiment",
         value: v.slice(0, 8),
-        href: `/studies/${v}`,
+        href: `/experiments/${v}`,
       });
       continue;
     }

@@ -47,13 +47,13 @@
 
 <header class="overflow-clip rounded-md border border-border bg-card shadow-[var(--shadow-card)]">
 	<div class="flex flex-wrap items-start gap-x-4 gap-y-3 px-4 pb-3 pt-3.5 sm:px-5">
-		<a href="/studies" class="page-header-back mt-0.5" aria-label="Back to Studies" title="Back to Studies">
+		<a href="/experiments" class="page-header-back mt-0.5" aria-label="Back to Experiments" title="Back to Experiments">
 			<ArrowLeft class="size-4" aria-hidden="true" />
 		</a>
 		<div class="min-w-0 flex-[1_1_20rem] space-y-1.5">
 			<p class="page-eyebrow flex-wrap">
 				<FlaskConical class="size-3.5" aria-hidden="true" />
-				<span>Study</span>
+				<span>Experiment</span>
 				<span aria-hidden="true">·</span>
 				<span>{MODE_LABELS[study.mode]}</span>
 				<span aria-hidden="true">·</span>
@@ -69,7 +69,7 @@
 				{#if study.created_at}<span>Registered {dateFmt.format(new Date(study.created_at))}</span>{/if}
 				{#if study.launched_at}<span aria-hidden="true">·</span><span>launched {dateFmt.format(new Date(study.launched_at))}</span>{/if}
 				{#if study.completed_at}<span aria-hidden="true">·</span><span>finished {dateFmt.format(new Date(study.completed_at))}</span>{/if}
-				{#if study.cloned_from}<span aria-hidden="true">·</span><span>clone of <a class="settings-link" href="/studies/{study.cloned_from}">{accessionId(study.cloned_from)}</a></span>{/if}
+				{#if study.cloned_from}<span aria-hidden="true">·</span><span>clone of <a class="settings-link" href="/experiments/{study.cloned_from}">{accessionId(study.cloned_from)}</a></span>{/if}
 				{#if study.locked}
 					<span class="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-foreground" title="Pre-registered: design and analysis plan are locked. prereg_hash {study.prereg_hash ?? ''}">
 						<Lock class="size-3" aria-hidden="true" /> Pre-registered <span class="font-mono">{shortHash(study.prereg_hash)}</span>

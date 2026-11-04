@@ -26,8 +26,8 @@ export interface IssueAction {
 
 /** Titles for the codes the builder shows most; any other code is humanized (`config` registry summaries win). */
 const TITLES: Record<string, string> = {
-  estimate_exceeds_cap: "Estimate above the study cap",
-  cap_admits_fewer_blocks: "Study cap stops before the last block",
+  estimate_exceeds_cap: "Estimate above the experiment cap",
+  cap_admits_fewer_blocks: "Experiment cap stops before the last block",
   combination_pruned: "Combination dropped",
   unbalanced_grid: "Unbalanced grid",
   aliasing: "Aliased main effects",
@@ -36,13 +36,13 @@ const TITLES: Record<string, string> = {
   prose_variant_in_unit: "Prose variant inside a unit",
   mixed_parents: "Slot sets of different tasks",
   primary_feature_missing: "Primary features missing",
-  adaptive_stop_in_confirmatory: "Adaptive stop in a confirmatory study",
+  adaptive_stop_in_confirmatory: "Adaptive stop in a confirmatory experiment",
   harness_not_enabled: "Harness not enabled",
-  harness_exploratory_only: "Harness for exploratory studies only",
+  harness_exploratory_only: "Harness for exploratory experiments only",
   few_clusters: "Few units",
   plan_stale: "Plan out of date",
   invalid_design: "Design incomplete",
-  model_alias_in_confirmatory: "Model alias in a confirmatory study",
+  model_alias_in_confirmatory: "Model alias in a confirmatory experiment",
   free_model_rate_limit: "Free model rate limits",
 };
 

@@ -620,6 +620,14 @@ def estimate_plan(
 
     if raw_cap == "auto":
         cap = auto_cap(basis_p90, tier)
+        # "auto" must never stop the plan before it starts: the scheduler reserves each block's
+        # per-attempt worst case before admitting it, so on a $0 (free/subscription) billed basis the
+        # p90-based cap would admit nothing. Raise it to the smallest cap that admits every block.
+        running, full = 0.0, 0.0
+        for block_expected, block_reserved in _block_amounts(pairs, amount):
+            full = max(full, running + block_reserved)
+            running += block_expected
+        cap = max(cap, math.ceil(round(full * 100, 6)) / 100)
     elif raw_cap is not None:
         cap = float(raw_cap)
     if cap is not None:

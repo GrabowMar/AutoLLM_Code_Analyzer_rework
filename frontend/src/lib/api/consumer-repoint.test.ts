@@ -199,9 +199,13 @@ describe("validity of displayed values", () => {
 describe("reports", () => {
   it("labels the re-purposed report types and links a study summary", () => {
     expect(REPORT_TYPE_LABELS.template_comparison).toBe("Task comparison");
-    expect(REPORT_TYPE_LABELS.experiment_report).toBe("Study conditions");
+    expect(REPORT_TYPE_LABELS.experiment_report).toBe("Experiment conditions");
     expect(summaryItems({ study_id: STUDY })).toEqual([
-      { label: "Study", value: STUDY.slice(0, 8), href: `/studies/${STUDY}` },
+      {
+        label: "Experiment",
+        value: STUDY.slice(0, 8),
+        href: `/experiments/${STUDY}`,
+      },
     ]);
   });
 });

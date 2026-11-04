@@ -66,7 +66,7 @@
 			<p>
 				A precision stop at {pp(threshold)} would end near n ≈ <b class="font-mono tabular-nums">{stop.stopAt}</b>
 				{#if stop.saving > 0}(saves about {formatPct(stop.saving)} of the variants){:else}(no saving at this size){/if};
-				exploratory studies only.
+				exploratory experiments only.
 			</p>
 		{/if}
 	{/if}

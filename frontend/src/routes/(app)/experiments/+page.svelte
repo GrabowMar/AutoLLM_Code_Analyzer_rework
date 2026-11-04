@@ -1,6 +1,7 @@
 <script lang="ts">
-	// Every study of the user, newest first (spec 10.1). Filters and page live in the URL
-	// (`?q&status&mode&kind&page`); while any visible row is active the list refetches every 15 s.
+	// Every experiment (API: study) of the user, newest first (spec 10.1). Filters and page live in the URL
+	// (`?q&status&mode&kind&quick&page`); while any visible row is active the list refetches every 15 s.
+	// Quick generations (the "Generate app" page) are hidden unless `?quick=1`; they carry a "Quick" badge.
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -15,6 +16,8 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
 	import { Button } from '$lib/components/ui/button';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { TableToolbar, rowLink, tableFrame } from '$lib/components/table';
 	import { formatApiError } from '$lib/api/core';
 	import { listStudies } from '$lib/api/v3/studies';
@@ -32,6 +35,7 @@
 	const status = $derived(params.get('status') ?? '');
 	const mode = $derived(params.get('mode') ?? '');
 	const kind = $derived(params.get('kind') ?? '');
+	const showQuick = $derived(params.get('quick') === '1');
 	const pageNum = $derived(Math.max(1, Math.floor(Number(params.get('page'))) || 1));
 
 	let data = $state<Page<StudyListOut> | null>(null);
@@ -51,6 +55,7 @@
 				status: (status || undefined) as StudyStatus | undefined,
 				mode: (mode || undefined) as StudyMode | undefined,
 				kind: (kind || undefined) as StudyKind | undefined,
+				include_quick: showQuick || undefined,
 				page: pageNum,
 				page_size: PAGE_SIZE,
 			});
@@ -59,7 +64,7 @@
 			error = '';
 		} catch (e) {
 			if (mine !== seq) return;
-			if (!silent || !data) error = formatApiError(e, 'Could not load the studies.');
+			if (!silent || !data) error = formatApiError(e, 'Could not load the experiments.');
 		} finally {
 			if (mine === seq) loading = false;
 		}
@@ -70,6 +75,7 @@
 		void status;
 		void mode;
 		void kind;
+		void showQuick;
 		void pageNum;
 		untrack(() => load());
 	});
@@ -122,14 +128,14 @@
 		].filter(Boolean) as FilterTag[],
 	);
 
-	const href = (s: StudyListOut) => (s.status === 'draft' ? `/studies/new?draft=${s.id}` : `/studies/${s.id}`);
+	const href = (s: StudyListOut) => (s.status === 'draft' ? `/experiments/new?draft=${s.id}` : `/experiments/${s.id}`);
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="Studies" description="Designed comparisons of models, harnesses and prompts: agentic whole apps or regenerated parts.">
+	<PageHeader title="Experiments" description="Designed comparisons of models, harnesses and prompts: agentic whole apps or regenerated parts.">
 		{#snippet actions()}
-			<Button href="/slots/new" size="sm" variant="outline">Slot study…</Button>
-			<Button href="/studies/new" size="sm"><Plus />New study</Button>
+			<Button href="/slots/new" size="sm" variant="outline">Slot experiment…</Button>
+			<Button href="/experiments/new" size="sm"><Plus />New experiment</Button>
 		{/snippet}
 	</PageHeader>
 
@@ -142,8 +148,14 @@
 			bind:searchValue={searchInput}
 			onSearchInput={onSearch}
 			activeTags={tags}
-			onClearAll={() => goto('/studies', { replaceState: true })}
+			onClearAll={() => goto('/experiments', { replaceState: true })}
 		>
+			{#snippet actions()}
+				<label class="flex cursor-pointer items-center gap-2 text-sm whitespace-nowrap" title="Single apps launched from Generate app">
+					<Checkbox checked={showQuick} onCheckedChange={(v) => setParam('quick', v ? '1' : '')} />
+					Show quick generations
+				</label>
+			{/snippet}
 			{#snippet filters()}
 				<div class="flex flex-wrap gap-3">
 					<div class="space-y-1">
@@ -162,18 +174,18 @@
 			{/snippet}
 		</FilterBar>
 		{#if loading && !data}
-			<LoadingState label="loading studies" />
+			<LoadingState label="loading experiments" />
 		{:else if items.length === 0}
 			<EmptyState
 				icon={FlaskConical}
-				title={tags.length || q ? 'No study matches' : 'No studies yet'}
-				description={tags.length || q ? 'Change or clear the filters.' : 'Design a study: pick tasks, models and harnesses, preview every prompt, then start it within a budget.'}
+				title={tags.length || q ? 'No experiment matches' : 'No experiments yet'}
+				description={tags.length || q ? 'Change or clear the filters.' : 'Design an experiment: pick tasks, models and harnesses, preview every prompt, then start it within a budget.'}
 			>
-				{#snippet action()}<Button href="/studies/new" size="sm"><Plus />New study</Button>{/snippet}
+				{#snippet action()}<Button href="/experiments/new" size="sm"><Plus />New experiment</Button>{/snippet}
 			</EmptyState>
 		{:else}
 			<TableToolbar>
-				{#snippet summary()}{data?.total ?? 0} studies{/snippet}
+				{#snippet summary()}{data?.total ?? 0} experiments{/snippet}
 			</TableToolbar>
 			<div class="table-frame" {@attach tableFrame}>
 				<table>
@@ -194,6 +206,7 @@
 							<tr class="row-link" onclick={rowLink(href(s))}>
 								<td class="col-sticky">
 									<a href={href(s)} class="font-medium text-foreground hover:underline">{s.name}</a>
+									{#if s.is_quick}<Badge variant="outline" class="ml-1.5 align-middle" title="A single app launched from Generate app">Quick</Badge>{/if}
 									{#if s.locked}<Lock class="ml-1 inline size-3 text-muted-foreground" aria-label="Locked (pre-registered)" />{/if}
 									<span class="cell-sub block text-xs text-muted-foreground">{s.created_at ? new Date(s.created_at).toLocaleDateString() : ''}</span>
 								</td>
@@ -211,7 +224,7 @@
 					</tbody>
 				</table>
 			</div>
-			<PaginationBar class="border-t border-border" page={pageNum} {pages} onGoToPage={(p) => setParam('page', String(p))} resultsText="{data?.total ?? 0} studies" />
+			<PaginationBar class="border-t border-border" page={pageNum} {pages} onGoToPage={(p) => setParam('page', String(p))} resultsText="{data?.total ?? 0} experiments" />
 		{/if}
 	</Card.Root>
 </div>

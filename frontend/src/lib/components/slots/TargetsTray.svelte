@@ -3,7 +3,7 @@
 	 * TargetsTray — saved targets across the frozen parents (spec 10.5 step 3): validation status (pending /
 	 * ok / uninformative with the dropped checks / error), leak score, the original run's result, "add the
 	 * matching part from other parents" (same `match_key`), revalidate / delete, and "Create slot study"
-	 * (`/studies/new?mode=slot&slot_sets=…&targets=…`, usable targets only). Pending targets are re-read every
+	 * (`/experiments/new?mode=slot&slot_sets=…&targets=…`, usable targets only). Pending targets are re-read every
 	 * 10 s (each read lets the server settle a finished validation).
 	 *
 	 * Props: `sets` (frozen SlotSets with their targets), `onchanged()` (reload the sets), `compact`.
@@ -88,7 +88,7 @@
 			<Badge variant="outline">{targets.length}</Badge>
 			{#if pending.length}<Badge variant="secondary">{pending.length} validating</Badge>{/if}
 		</Card.Title>
-		<Card.Description>Usable in a study once validation is ok or uninformative (uninformative: warn in exploratory, error in confirmatory).</Card.Description>
+		<Card.Description>Usable in an experiment once validation is ok or uninformative (uninformative: warn in exploratory, error in confirmatory).</Card.Description>
 	</Card.Header>
 	<Card.Content class="space-y-2 py-3">
 		{#if targets.length === 0}
@@ -144,8 +144,8 @@
 		</ul>
 		<div class="flex flex-wrap items-center gap-2 border-t border-border pt-2">
 			<span class="text-xs text-muted-foreground">{usableCount} usable of {targets.length}</span>
-			<Button size="sm" class="ml-auto" href={usableCount ? studyHref : undefined} disabled={usableCount === 0} title={usableCount ? 'Prefilled slot study with these parents and targets' : 'Wait for at least one target to validate'}>
-				<FlaskConical class="mr-1.5 h-3.5 w-3.5" />Create slot study
+			<Button size="sm" class="ml-auto" href={usableCount ? studyHref : undefined} disabled={usableCount === 0} title={usableCount ? 'Prefilled slot experiment with these parents and targets' : 'Wait for at least one target to validate'}>
+				<FlaskConical class="mr-1.5 h-3.5 w-3.5" />Create slot experiment
 			</Button>
 		</div>
 	</Card.Content>
@@ -154,7 +154,7 @@
 <ConfirmDialog
 	bind:open={deleteOpen}
 	title="Delete this target?"
-	description="Only targets no study uses can be deleted; its validation runs are removed with it."
+	description="Only targets no experiment uses can be deleted; its validation runs are removed with it."
 	confirmLabel="Delete"
 	destructive
 	busy={busy !== null}

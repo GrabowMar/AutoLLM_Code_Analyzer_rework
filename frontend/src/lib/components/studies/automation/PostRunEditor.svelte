@@ -80,7 +80,7 @@
 
 <div class="space-y-4">
 	<div class="space-y-2">
-		<p class="text-sm font-medium">Static analysis when the study completes</p>
+		<p class="text-sm font-medium">Static analysis when the experiment completes</p>
 		<p class="text-xs text-muted-foreground">
 			Runs the chosen analyzers over the usable runs that a tool has not measured yet. A tool with no applicable files records
 			"not measured", never a clean result.
@@ -126,7 +126,7 @@
 			onCheckedChange={(v) => update({ ...value, report: v })}
 		/>
 		<div class="min-w-0 space-y-0.5">
-			<label for="{idPrefix}-report" class="text-sm font-medium">Study report</label>
+			<label for="{idPrefix}-report" class="text-sm font-medium">Experiment report</label>
 			<p id="{idPrefix}-report-note" class="text-xs text-muted-foreground">
 				Generated after analysis: leaderboard and paired comparisons against the baseline, intention-to-treat.
 			</p>
@@ -135,8 +135,8 @@
 
 	{#if mode === 'slot'}
 		<p class="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-			Slot studies also run the pattern analysis (default detectors) automatically when they complete. It needs no LLM calls; a
-			confirmatory study's pre-registered pattern plan is used as is.
+			Slot experiments also run the pattern analysis (default detectors) automatically when they complete. It needs no LLM calls; a
+			confirmatory experiment's pre-registered pattern plan is used as is.
 		</p>
 	{/if}
 </div>

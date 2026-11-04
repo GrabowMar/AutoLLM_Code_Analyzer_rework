@@ -96,7 +96,7 @@
 
 	<section class="space-y-3" aria-labelledby="stack-resources">
 		<h3 id="stack-resources" class="section-label">Minimum resources</h3>
-		<p class="text-xs text-muted-foreground">A study's sandbox gets the maximum over its stacks' minimums and the Budget preset's values (applied to every cell).</p>
+		<p class="text-xs text-muted-foreground">An experiment's sandbox gets the maximum over its stacks' minimums and the Budget preset's values (applied to every cell).</p>
 		<div class="grid gap-4 sm:grid-cols-2">
 			<FormRow label="Memory" help="e.g. 2g, 3g for a Postgres sidecar.">
 				<Input value={value.resources.min_memory} oninput={(e) => /^[1-9][0-9]*[kmg]$/.test(e.currentTarget.value) && setResources({ min_memory: e.currentTarget.value })} class="h-8 w-32 font-mono" readonly={readonly} />

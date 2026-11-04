@@ -171,7 +171,7 @@ export const KEY_LIMITS_GROUP: PolicyGroup = {
   id: "key",
   title: "Key limits",
   description:
-    "Caps and settings that decide most of a study's cost; always visible.",
+    "Caps and settings that decide most of an experiment's cost; always visible.",
 };
 
 /** Accordion groups, in display order (spec 10.2 step 5). */
@@ -209,7 +209,7 @@ export const POLICY_GROUPS: PolicyGroup[] = [
     id: "concurrency",
     title: "Concurrency",
     description:
-      "How many runs and evaluations of the study may run at once, per model, endpoint and provider.",
+      "How many runs and evaluations of the experiment may run at once, per model, endpoint and provider.",
   },
   {
     id: "caches",
@@ -219,9 +219,9 @@ export const POLICY_GROUPS: PolicyGroup[] = [
   },
   {
     id: "study",
-    title: "Study caps & estimate",
+    title: "Experiment caps & estimate",
     description:
-      "Token, run and wall-clock caps for the whole study, cap basis, budget alerts and the estimator.",
+      "Token, run and wall-clock caps for the whole experiment, cap basis, budget alerts and the estimator.",
   },
   {
     id: "stop",
@@ -521,7 +521,9 @@ export function summaryLine(
   const head = opts.version ? `${name} v${opts.version}` : name;
   const cap = content.study.max_cost_usd;
   const capText =
-    cap === "auto" ? "auto study cap" : `${formatMoney(Number(cap))} study cap`;
+    cap === "auto"
+      ? "auto experiment cap"
+      : `${formatMoney(Number(cap))} experiment cap`;
   const r = content.reasoning;
   const reasoning =
     r.mode === "effort"
@@ -606,7 +608,7 @@ export function policyHints(
 const KNOB_LABELS: Record<string, string> = {
   "run.max_cost_usd": "Run cap",
   "cell.max_cost_usd": "Cell cap",
-  "study.max_cost_usd": "Study cap",
+  "study.max_cost_usd": "Experiment cap",
   "concurrency.study_max_parallel": "Max parallel runs",
   reasoning: "Reasoning",
   "reasoning.exclude": "Exclude reasoning text",

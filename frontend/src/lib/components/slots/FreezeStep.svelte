@@ -157,7 +157,7 @@
 								{#if entry.run.outcome !== 'tested'}
 									<label class="flex items-start gap-2 text-xs">
 										<Checkbox checked={entry.allowUnbuilt} onCheckedChange={(v) => patch(i, { allowUnbuilt: v === true })} />
-										<span>Allow an unbuilt parent: no runtime slot tests, never in confirmatory studies.</span>
+										<span>Allow an unbuilt parent: no runtime slot tests, never in confirmatory experiments.</span>
 									</label>
 								{/if}
 							{:else}

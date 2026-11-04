@@ -97,7 +97,7 @@
 						<span class="min-w-0">
 							<span class="block truncate font-medium" title={level}>{m?.model_name ?? level}</span>
 							<span class="block truncate text-muted-foreground">
-								{price(m)}{#if costByLevel?.[level] !== undefined} · ≈ {formatUsd(costByLevel[level])} in this study{/if}
+								{price(m)}{#if costByLevel?.[level] !== undefined} · ≈ {formatUsd(costByLevel[level])} in this experiment{/if}
 								{#if !m && catalog.length > 0}<span class="text-warning-fg"> · not in the catalog</span>{/if}
 							</span>
 							{#if isFree(level)}

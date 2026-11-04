@@ -54,7 +54,7 @@ export function keyNumbers(
   return [
     { label: "per run", value: `$${content.run.max_cost_usd.toFixed(2)}` },
     {
-      label: "study cap",
+      label: "experiment cap",
       value: cap === "auto" ? "auto" : `$${Number(cap).toFixed(2)}`,
     },
     {
@@ -113,8 +113,8 @@ export async function savePolicy(
       slug,
       name,
       description: base
-        ? `Edited from ${base.pinned_ref} in the Study builder.`
-        : "Created in the Study builder.",
+        ? `Edited from ${base.pinned_ref} in the Experiment builder.`
+        : "Created in the Experiment builder.",
       content,
     });
   }

@@ -22,7 +22,7 @@
 	>
 		{#snippet help()}
 			<p>
-				This is the same renderer the study plan uses (sandboxed Jinja, a fixed context). The context never contains numbers from the Budget
+				This is the same renderer the experiment plan uses (sandboxed Jinja, a fixed context). The context never contains numbers from the Budget
 				preset, the seed or any id, so the prompt hash depends only on the levels shown here.
 			</p>
 		{/snippet}

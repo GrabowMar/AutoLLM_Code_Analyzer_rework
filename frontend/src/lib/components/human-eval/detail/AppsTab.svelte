@@ -591,7 +591,7 @@
 	<Dialog.Content class="max-h-[90vh] max-w-4xl overflow-y-auto">
 		<Dialog.Header>
 			<Dialog.Title>Add apps</Dialog.Title>
-			<Dialog.Description>Pick completed app runs, or add a whole study. Apps already in the pool are skipped.</Dialog.Description>
+			<Dialog.Description>Pick completed app runs, or add a whole experiment. Apps already in the pool are skipped.</Dialog.Description>
 		</Dialog.Header>
 		<div class="py-2">
 			<AppPoolPicker bind:selected={addSelected} bind:studyId={addStudy} excludeRunIds={existingRunIds} />
@@ -599,8 +599,8 @@
 		<Dialog.Footer class="flex-wrap gap-2">
 			<Button variant="outline" size="sm" disabled={adding} onclick={() => (addOpen = false)}>Cancel</Button>
 			{#if addStudy}
-				<Button variant="outline" size="sm" disabled={adding} onclick={() => addApps(true)} title="The current run of every main-stage cell of the study">
-					Add whole study
+				<Button variant="outline" size="sm" disabled={adding} onclick={() => addApps(true)} title="The current run of every main-stage cell of the experiment">
+					Add whole experiment
 				</Button>
 			{/if}
 			<Button size="sm" disabled={adding || addSelected.length === 0} aria-busy={adding} onclick={() => addApps(false)}>

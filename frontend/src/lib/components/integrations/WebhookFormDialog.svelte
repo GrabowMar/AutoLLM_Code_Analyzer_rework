@@ -127,7 +127,7 @@
 			<Dialog.Description>
 				{editing
 					? 'Leave the URL and secret empty to keep the stored ones.'
-					: 'Post a message when runs, analyses, studies or reports finish.'}
+					: 'Post a message when runs, analyses, experiments or reports finish.'}
 			</Dialog.Description>
 		</Dialog.Header>
 		<form class="mt-4 space-y-4" onsubmit={submit}>
@@ -209,9 +209,9 @@
 				<label class="flex cursor-pointer items-start gap-2 border-t border-border pt-2 text-sm">
 					<Checkbox class="mt-0.5" bind:checked={includeStudyRuns} />
 					<span>
-						Include study runs
+						Include experiment runs
 						<span class="block text-xs text-muted-foreground">
-							Also send run events for each run of a study (can be many messages).
+							Also send run events for each run of an experiment (can be many messages).
 						</span>
 					</span>
 				</label>

@@ -65,14 +65,14 @@
 			const res = await listStudies({ page_size: 100 });
 			studies = res.items.filter((x) => x.status !== 'draft');
 		} catch (e) {
-			studiesError = formatApiError(e, 'Could not load studies.');
+			studiesError = formatApiError(e, 'Could not load experiments.');
 		}
 	});
 
 	const studyItems = $derived(
 		studies.map((x) => ({ value: x.id, label: x.name, description: studyOptionDescription(x) }))
 	);
-	const linkedName = $derived(studyId ? (studies.find((x) => x.id === studyId)?.name ?? 'Linked study') : '');
+	const linkedName = $derived(studyId ? (studies.find((x) => x.id === studyId)?.name ?? 'Linked experiment') : '');
 
 	// ── filters ───────────────────────────────────────────────────────
 	let filterStudy = $state(untrack(() => studyId ?? ''));
@@ -247,7 +247,7 @@
 		<Checkbox
 			checked
 			disabled
-			aria-label="{run.app_name} by {run.model_name}: {state === 'pool' ? 'already in the pool' : 'included with the linked study'}"
+			aria-label="{run.app_name} by {run.model_name}: {state === 'pool' ? 'already in the pool' : 'included with the linked experiment'}"
 		/>
 	{/if}
 {/snippet}
@@ -286,7 +286,7 @@
 					clearLabel="All my generated apps"
 					items={studyItems}
 					onValueChange={setFilterStudy}
-					aria-label="Study"
+					aria-label="Experiment"
 				/>
 			</div>
 			<div class="relative min-w-48 flex-1">
@@ -300,7 +300,7 @@
 					class="h-9 pl-8"
 				/>
 			</div>
-			<label class="flex items-center gap-2 px-1 text-sm" title="Only the current run of each study cell (condition × task × repeat): its first usable attempt, else its latest">
+			<label class="flex items-center gap-2 px-1 text-sm" title="Only the current run of each experiment cell (condition × task × repeat): its first usable attempt, else its latest">
 				<Checkbox
 					checked={currentOnly}
 					onCheckedChange={(v) => {
@@ -319,9 +319,9 @@
 			<label class="flex items-start gap-2.5 border-b border-border bg-surface-2 px-3 py-2 text-sm">
 				<Checkbox class="mt-0.5" checked={studyId === filterStudy} onCheckedChange={(v) => linkStudy(!!v)} />
 				<span>
-					<span class="font-medium">Add the whole study</span>
+					<span class="font-medium">Add the whole experiment</span>
 					<span class="block text-xs text-muted-foreground">
-						The current run of every main-stage cell of “{studies.find((x) => x.id === filterStudy)?.name ?? 'this study'}” joins the pool (pilot and beyond-plan runs never do), and pairing and condition contrasts can use its baseline condition. To evaluate part of it, pick apps instead (or remove apps from the pool before opening).
+						The current run of every main-stage cell of “{studies.find((x) => x.id === filterStudy)?.name ?? 'this experiment'}” joins the pool (pilot and beyond-plan runs never do), and pairing and condition contrasts can use its baseline condition. To evaluate part of it, pick apps instead (or remove apps from the pool before opening).
 					</span>
 					{#if studyId && studyId !== filterStudy}
 						<span class="block text-xs text-warning-fg">Linking replaces the current link to “{linkedName}”.</span>
@@ -350,7 +350,7 @@
 					compact
 					icon={AppWindow}
 					title="No completed app runs yet"
-					description="Apps appear here once an agentic or slot run of a study (or an ad-hoc run) has completed."
+					description="Apps appear here once an agentic or slot run of an experiment (or an ad-hoc run) has completed."
 				/>
 			{/if}
 		{:else}
@@ -384,7 +384,7 @@
 									<td class="max-w-0 min-w-[12rem] w-[26%]">
 										<span class="block truncate font-medium" title={run.app_name}>{run.app_name || run.app_slug || 'Untitled app'}</span>
 										<span class="cell-sub block truncate text-xs text-muted-foreground">
-											{run.app_slug}{state === 'pool' ? ' · in the pool' : state === 'study' ? ' · with the study' : ''}
+											{run.app_slug}{state === 'pool' ? ' · in the pool' : state === 'study' ? ' · with the experiment' : ''}
 										</span>
 									</td>
 									<td class="max-w-0 min-w-[10rem]">

@@ -122,7 +122,7 @@
 	});
 
 	const GROUP_ITEMS = [
-		{ value: 'condition', label: 'Condition', title: 'Study condition (the factor levels of the cell); apps without one fall back to their model' },
+		{ value: 'condition', label: 'Condition', title: 'Experiment condition (the factor levels of the cell); apps without one fall back to their model' },
 		{ value: 'model', label: 'Model' },
 		{ value: 'app', label: 'App', title: 'Every app on its own' },
 	];
@@ -290,7 +290,7 @@
 			<section class="space-y-3">
 				<SectionHeading number={sectionNo.contrasts} title="Contrasts against the baseline" lead="Each condition minus the baseline condition, per pre-registered metric." />
 				{#if results.contrasts.length === 0}
-					<p class="text-sm text-muted-foreground">No contrasts: they need a baseline condition (pairing baseline or the study’s baseline condition) and data in both groups.</p>
+					<p class="text-sm text-muted-foreground">No contrasts: they need a baseline condition (pairing baseline or the experiment’s baseline condition) and data in both groups.</p>
 				{:else}
 					<StudyFigure id="tab-contrasts" kind="table" number="{sectionNo.contrasts}.1" title="Difference to the baseline per metric" flush>
 						<div class="overflow-x-auto">

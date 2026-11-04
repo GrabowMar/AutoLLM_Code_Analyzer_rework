@@ -80,7 +80,7 @@
 <Card.Root class="gap-0 overflow-clip py-0">
 	<Card.Header class="border-b border-border py-3">
 		<Card.Title>Spend caps</Card.Title>
-		<Card.Description>A blocking cap pauses studies that would cross it (reason "spend cap", or "quota" for 5 h / week model caps); running runs finish.</Card.Description>
+		<Card.Description>A blocking cap pauses experiments that would cross it (reason "spend cap", or "quota" for 5 h / week model caps); running runs finish.</Card.Description>
 	</Card.Header>
 	<Card.Content class="space-y-3 p-0">
 		{#if error}<div class="px-4 pt-3"><ErrorAlert message={error} onretry={load} /></div>{/if}

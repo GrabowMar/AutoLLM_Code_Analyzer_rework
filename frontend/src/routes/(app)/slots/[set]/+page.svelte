@@ -69,7 +69,7 @@
 			{#if set}
 				<Button variant="outline" size="sm" href={`/slots/new?sets=${set.id}`}><Scissors class="mr-1.5 h-3.5 w-3.5" />Choose parts</Button>
 				<Button size="sm" href={slotStudyHref([set.id], set.targets)} disabled={!set.targets.some((t) => t.usable)}>
-					<FlaskConical class="mr-1.5 h-3.5 w-3.5" />New slot study
+					<FlaskConical class="mr-1.5 h-3.5 w-3.5" />New slot experiment
 				</Button>
 			{/if}
 		{/snippet}

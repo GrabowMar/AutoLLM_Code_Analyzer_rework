@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * PlanCellsTable — the cells of a persisted plan (spec 10.3 §2): paginated, filterable by condition
-	 * and unit, each linking to the cell inspector (`/studies/[id]/cells/[cell]`).
+	 * and unit, each linking to the cell inspector (`/experiments/[id]/cells/[cell]`).
 	 *
 	 * Props: `studyId`, `planHash`, `conditions` / `units` (filter options: `{index, label}`).
 	 */
@@ -60,7 +60,7 @@
 	});
 
 	const pages = $derived(data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1);
-	const href = (c: ResolvedCellOut) => `/studies/${studyId}/cells/${c.cell_key}?plan=${planHash}`;
+	const href = (c: ResolvedCellOut) => `/experiments/${studyId}/cells/${c.cell_key}?plan=${planHash}`;
 	const condLabel = (i: number) => conditions.find((c) => c.index === i)?.label ?? `c${i}`;
 </script>
 

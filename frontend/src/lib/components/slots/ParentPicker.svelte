@@ -326,7 +326,7 @@
 			<Card.Header>
 				<Card.Title class="font-display">Pick by hand</Card.Title>
 				<Card.Description>
-					Recorded as a manual selection. Confirmatory studies with manual or single parents need the estimand
+					Recorded as a manual selection. Confirmatory experiments with manual or single parents need the estimand
 					"conditional on parent".
 				</Card.Description>
 			</Card.Header>

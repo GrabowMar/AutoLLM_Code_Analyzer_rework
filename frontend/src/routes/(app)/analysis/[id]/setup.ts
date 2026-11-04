@@ -37,13 +37,13 @@ export function runSetupItems(job: RunSetup): {
   const cell: SetupItem[] = [];
   if (job.study_id) {
     cell.push({
-      label: job.study_name || "Study",
-      href: `/studies/${job.study_id}`,
-      title: "Open the study",
+      label: job.study_name || "Experiment",
+      href: `/experiments/${job.study_id}`,
+      title: "Open the experiment",
     });
   }
   if (job.condition_label) {
-    cell.push({ label: job.condition_label, title: "Study condition" });
+    cell.push({ label: job.condition_label, title: "Experiment condition" });
   }
   if (job.stage === "pilot") {
     cell.push({
@@ -56,7 +56,7 @@ export function runSetupItems(job: RunSetup): {
     cell.push({
       label: repeat,
       title:
-        "Repeat of this (condition, task) cell / repeats planned by the study",
+        "Repeat of this (condition, task) cell / repeats planned by the experiment",
     });
   }
   const method: SetupItem[] = [];

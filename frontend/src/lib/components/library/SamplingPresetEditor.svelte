@@ -47,7 +47,7 @@
 			{/each}
 		</div>
 		{#if value.params.temperature === 0}
-			<p class="text-xs text-warning-fg">Temperature 0 makes repeats near-identical; slot studies refuse it.</p>
+			<p class="text-xs text-warning-fg">Temperature 0 makes repeats near-identical; slot experiments refuse it.</p>
 		{/if}
 	{/if}
 	<label class="flex items-start gap-2 text-sm">

@@ -185,7 +185,7 @@
 		<FormRow label="Role" for="tpl-role" help="Which stimulus this template renders (fragments are embedded in others).">
 			<Select.Simple id="tpl-role" value={value.role} items={roleItems} disabled={readonly} onValueChange={(v) => set({ role: v as PromptRole })} />
 		</FormRow>
-		<FormRow label="Modes" help="Study modes the template may be used in.">
+		<FormRow label="Modes" help="Experiment modes the template may be used in.">
 			<div class="flex gap-4 pt-1.5">
 				{#each ['app', 'slot'] as const as mode (mode)}
 					<label class="flex items-center gap-2 text-sm">

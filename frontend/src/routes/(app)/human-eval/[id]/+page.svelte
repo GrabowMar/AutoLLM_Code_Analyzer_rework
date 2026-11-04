@@ -359,7 +359,7 @@
 				<span class="header-stat"><b>{task.counts.active_apps}</b> active apps</span>
 				{#if task.counts.items}<span class="header-stat"><b>{task.counts.items}</b> items</span>{/if}
 				{#if task.study}
-					<span class="header-stat">from <a class="settings-link" href="/studies/{task.study.id}">{task.study.name}</a></span>
+					<span class="header-stat">from <a class="settings-link" href="/experiments/{task.study.id}">{task.study.name}</a></span>
 				{/if}
 			</div>
 		</PageHeader>

@@ -150,7 +150,7 @@
 		<Button variant="outline" size="sm" href="/models/compare?models={slug}" title="Compare with other models">
 			<GitCompareArrows class="h-3.5 w-3.5" />Compare
 		</Button>
-		<Button size="sm" href="/studies/new?model={encodeURIComponent(slug)}" title="Generate an app with this model">
+		<Button size="sm" href="/generate?model={encodeURIComponent(slug)}" title="Generate an app with this model">
 			<Sparkles class="h-3.5 w-3.5" />Generate app
 		</Button>
 	{/snippet}

@@ -161,10 +161,10 @@
 				title={filtered ? 'No application matches' : 'No applications yet'}
 				description={filtered
 					? 'Change or clear the filters.'
-					: 'Agentic app runs appear here when a study (or a “Generate a parent app” run) creates them.'}
+					: 'Agentic app runs appear here when an experiment (or a “Generate a parent app” run) creates them.'}
 			>
 				{#snippet action()}
-					{#if !filtered}<Button size="sm" href="/studies/new?mode=app">New study</Button>{/if}
+					{#if !filtered}<Button size="sm" href="/experiments/new?mode=app">New experiment</Button>{/if}
 				{/snippet}
 			</EmptyState>
 		{:else}

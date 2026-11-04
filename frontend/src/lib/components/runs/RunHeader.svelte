@@ -28,7 +28,7 @@
 	const backLink = $derived(
 		back ??
 			(run.study.study_id
-				? { href: `/studies/${run.study.study_id}?tab=data`, label: run.study.study_name ?? 'Study' }
+				? { href: `/experiments/${run.study.study_id}?tab=data`, label: run.study.study_name ?? 'Experiment' }
 				: { href: '/applications', label: 'Applications' }),
 	);
 	const live = $derived(run.status === 'running' || run.status === 'pending');
@@ -37,7 +37,7 @@
 <PageHeader
 	{title}
 	documentTitle={`Sample ${shortSha(run.id, 8)}`}
-	description={`${kindLabel(run.kind)} · ${run.protocol}${run.study.study_name ? ` · study ${run.study.study_name}` : ''}`}
+	description={`${kindLabel(run.kind)} · ${run.protocol}${run.study.study_name ? ` · experiment ${run.study.study_name}` : ''}`}
 	back={backLink}
 	{actions}
 	{nav}
@@ -65,9 +65,15 @@
 				truncated
 			</Badge>
 		{/if}
-		{#if live && stream === 'open'}
-			<span class="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-				<span class="status-dot-live h-1.5 w-1.5 rounded-full bg-info" aria-hidden="true"></span>live
+		{#if live}
+			<!-- A queued or running run says where it is; the page follows it (SSE, polling when the stream is down). -->
+			<span
+				class="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"
+				role="status"
+				title={stream === 'open' ? 'Live: updates as the run progresses' : 'Refreshing every few seconds'}
+			>
+				<span class="status-dot-live h-1.5 w-1.5 rounded-full bg-info" aria-hidden="true"></span>
+				{run.status === 'pending' ? 'queued, waiting for the executor' : run.phase ? run.phase.replace(/_/g, ' ') : 'running'}{stream === 'open' ? ' · live' : ''}
 			</span>
 		{/if}
 	{/snippet}

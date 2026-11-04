@@ -29,7 +29,7 @@
 		<Sheet.Header>
 			<Sheet.Title>Cell <span class="font-mono">{cellKey}</span></Sheet.Title>
 			<Sheet.Description>
-				Everything this sample will be generated from, pinned. <a class="underline" href="/studies/{studyId}/cells/{cellKey}?plan={planHash}">Open as a page</a>
+				Everything this sample will be generated from, pinned. <a class="underline" href="/experiments/{studyId}/cells/{cellKey}?plan={planHash}">Open as a page</a>
 			</Sheet.Description>
 		</Sheet.Header>
 		<div class="px-4 pb-6">

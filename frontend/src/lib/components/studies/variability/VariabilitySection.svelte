@@ -105,7 +105,7 @@
 		csvBusy = true;
 		try {
 			const blob = await downloadStudyVariabilityCsv(studyId, $state.snapshot(query) as VariabilityQuery);
-			downloadBlob(blob, `study-${studyId.slice(0, 8)}-variability.csv`);
+			downloadBlob(blob, `experiment-${studyId.slice(0, 8)}-variability.csv`);
 		} catch (e) {
 			error = formatApiError(e, 'Could not download the CSV');
 		} finally {
@@ -123,7 +123,7 @@
 	const metricItems = $derived(
 		measured.map((m) => ({ value: m.key, label: m.label, description: `${m.source} · n ${m.n_runs}` }))
 	);
-	const interimTag = $derived(data?.interim ? ' Interim: the study is still running.' : '');
+	const interimTag = $derived(data?.interim ? ' Interim: the experiment is still running.' : '');
 
 	/** The server's `billing` marker (cost only): every run was subscription-billed, so the billed $0 is no ceiling. */
 	function billingOf(row: unknown): string[] | null {
@@ -489,13 +489,13 @@
 				</div>
 				{#snippet caption()}
 					<strong class="font-medium text-foreground">Table 6.</strong>
-					Joint app-blocked bootstrap ({rankBlocks[0]?.draws ?? 1000} draws, seeded by the study): the apps every condition has are resampled
+					Joint app-blocked bootstrap ({rankBlocks[0]?.draws ?? 1000} draws, seeded by the experiment): the apps every condition has are resampled
 					once per draw for all conditions, then each app's repeats; conditions are ranked on the mean of app means (competition ranking). From 3
 					shared apps. Exploratory.{interimTag}
 				{/snippet}
 			</StudyFigure>
 
-			<StudyFigure id="table-7" kind="table" number={7} title="Precision of a next study" flush>
+			<StudyFigure id="table-7" kind="table" number={7} title="Precision of a next experiment" flush>
 				{#if !data.planner}
 					<p class="px-4 py-3 text-sm text-muted-foreground">{data.planner_reason ?? 'Not available.'}</p>
 				{:else if !plan}
@@ -539,7 +539,7 @@
 				{#snippet caption()}
 					<strong class="font-medium text-foreground">Table 7.</strong>
 					95% CI half-width of a condition mean (top) and of a paired difference between two conditions (Δ, below) for a new design of A apps × r
-					repeats, from this study's variance components (normal approximation; planning guidance only). Shown for finished studies only,
+					repeats, from this experiment's variance components (normal approximation; planning guidance only). Shown for finished experiments only,
 					so it cannot steer when to stop this one.{#if exactTestApps != null}
 						An exact sign or Wilcoxon test needs at least {exactTestApps} apps to reach p &lt; 0.05 two-sided.{/if}
 				{/snippet}

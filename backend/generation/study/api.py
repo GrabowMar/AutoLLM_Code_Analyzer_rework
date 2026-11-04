@@ -148,6 +148,8 @@ class AdhocIn(Schema):
     launch: bool = True
     name: str | None = None
     confirm_usd: float | None = None
+    # A quick generation ("Generate app" page): hidden from the list; with ``launch=False`` a dry run.
+    quick: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -206,11 +208,15 @@ def list_studies(
     mode: str | None = None,
     kind: str | None = None,
     q: str | None = None,
+    include_quick: bool = False,
     page: int = 1,
     page_size: int = _PAGE_SIZE,
 ):
-    """``Page[StudyListOut]`` of the caller's studies (newest first)."""
+    """``Page[StudyListOut]`` of the caller's studies (newest first); quick generations only with
+    ``include_quick``."""
     qs = _visible(request.auth).order_by("-created_at")
+    if not include_quick:
+        qs = qs.filter(is_quick=False)
     if status:
         qs = qs.filter(status=status)
     if mode:
@@ -258,6 +264,7 @@ def adhoc(request, payload: AdhocIn):
             launch=payload.launch,
             name=payload.name,
             confirm_usd=payload.confirm_usd,
+            quick=payload.quick,
         )
     except (StudyError, DesignError, PlanError) as exc:
         return _error(exc)

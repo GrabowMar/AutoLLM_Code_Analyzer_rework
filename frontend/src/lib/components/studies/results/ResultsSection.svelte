@@ -117,7 +117,7 @@
 	{:else}
 		<div class={cn('space-y-6', loading && 'opacity-70')}>
 			<p class="text-sm">
-				<b>{exploratoryView ? 'Exploratory view' : data.gate.locked ? 'Pre-registered analysis' : 'Exploratory study'}</b>
+				<b>{exploratoryView ? 'Exploratory view' : data.gate.locked ? 'Pre-registered analysis' : 'Exploratory experiment'}</b>
 				— {data.common_cells ? 'common cells only' : 'all cells'} · {data.fingerprint_filter} fingerprint · {data.itt ? 'ITT' : 'truncated excluded'} ·
 				baseline {label(data.baseline_condition_id)} ({data.baseline_source.replace(/_/g, ' ')}){#if data.interim} · <span class="text-warning-fg">interim: p-values withheld</span>{/if}
 				{#if exploratoryView}<button type="button" class="ml-2 cursor-pointer text-primary underline" onclick={() => (query = {})}>back to the pre-registered analysis</button>{/if}

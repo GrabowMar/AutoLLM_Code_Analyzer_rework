@@ -66,7 +66,7 @@ export const CELL_STATE_TONES: Record<string, Tone> = {
 /** Why a study or condition is paused (closed vocabulary, `PausedEvent.reason`). */
 export const PAUSE_LABELS: Record<string, string> = {
   manual: "Paused by you",
-  budget: "Study cap reached",
+  budget: "Experiment cap reached",
   quota: "Model quota reached (5h / week)",
   spend_cap: "A spend cap blocks new runs",
   infra: "Infrastructure problems",

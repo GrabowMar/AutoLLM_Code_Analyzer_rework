@@ -101,7 +101,7 @@
 				icon={Repeat}
 				title="No setup has been run twice yet"
 				description={data.n_completed_runs
-					? `${data.n_completed_runs} completed run${data.n_completed_runs === 1 ? '' : 's'}, each with its own setup. Plan 2 or more repeats in a study to measure run-to-run variation.`
+					? `${data.n_completed_runs} completed run${data.n_completed_runs === 1 ? '' : 's'}, each with its own setup. Plan 2 or more repeats in an experiment to measure run-to-run variation.`
 					: 'Generate apps with this model, with 2 or more repeats, to measure run-to-run variation.'}
 			/>
 		{:else if data && overall}

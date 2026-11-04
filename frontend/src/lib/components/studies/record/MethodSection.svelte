@@ -40,8 +40,8 @@
 <StudySection id="method" {number} title="Method">
 	{#snippet aside()}
 		<div class="flex gap-2">
-			<Button variant="outline" size="sm" href="/studies/new?clone={study.id}"><Copy />Clone</Button>
-			<Button variant="ghost" size="sm" href="/studies/new?clone={study.id}&clone_mode=latest_versions">Clone with latest versions</Button>
+			<Button variant="outline" size="sm" href="/experiments/new?clone={study.id}"><Copy />Clone</Button>
+			<Button variant="ghost" size="sm" href="/experiments/new?clone={study.id}&clone_mode=latest_versions">Clone with latest versions</Button>
 		</div>
 	{/snippet}
 

@@ -173,7 +173,7 @@
 	}
 </script>
 
-<StudySection id="operations" {number} title="Operations" lead="How the study is running: spend, progress, failures and automation. None of this changes what a sample is.">
+<StudySection id="operations" {number} title="Operations" lead="How the experiment is running: spend, progress, failures and automation. None of this changes what a sample is.">
 	{#if !study}
 		<p class="text-xs text-muted-foreground">Loading…</p>
 	{:else}
@@ -305,8 +305,8 @@
 						<div class="flex flex-wrap items-center gap-2 text-xs">
 							<StatusBadge status={p.status} />
 							<span class="font-medium">{p.kind}</span>
-							<span class="text-muted-foreground">{p.trigger === 'completed' ? 'when the study completes' : 'manual'}</span>
-							{#if p.pattern_run_id}<a class="text-primary underline" href="/studies/{study.id}?tab=patterns">patterns</a>{/if}
+							<span class="text-muted-foreground">{p.trigger === 'completed' ? 'when the experiment completes' : 'manual'}</span>
+							{#if p.pattern_run_id}<a class="text-primary underline" href="/experiments/{study.id}?tab=patterns">patterns</a>{/if}
 							{#if p.report_id}<a class="text-primary underline" href="/reports/{p.report_id}">report</a>{/if}
 							{#if p.error}<span class="text-danger-fg">{p.error}</span>{/if}
 						</div>
@@ -317,7 +317,7 @@
 						<PostRunEditor bind:value={newPostRun} mode={study.mode} />
 						<div class="flex gap-2">
 							<Button size="sm" onclick={() => auto(async () => { await createPostRun(study.id, { kind: 'analysis', trigger: isTerminal(study.status) ? 'manual' : 'completed', config: { ...newPostRun! } }); newPostRun = null; }, 'Could not queue the post-run.')}>
-								{isTerminal(study.status) ? 'Run now' : 'Run when the study completes'}
+								{isTerminal(study.status) ? 'Run now' : 'Run when the experiment completes'}
 							</Button>
 							<Button variant="ghost" size="sm" onclick={() => (newPostRun = null)}>Cancel</Button>
 						</div>

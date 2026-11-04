@@ -73,15 +73,15 @@ Rules (see `src/lib/components/charts/theme.ts`):
 
 ```svelte
 <div class="space-y-4">
-  <PageHeader title="Studies" description="One sentence on what this page is for."
-              back={{ href: '/studies', label: 'Studies' }}>   <!-- detail/create pages only -->
+  <PageHeader title="Experiments" description="One sentence on what this page is for."
+              back={{ href: '/experiments', label: 'Experiments' }}>   <!-- detail/create pages only -->
     {#snippet meta()}<StatusBadge status={x.status} />{/snippet}         <!-- optional -->
-    {#snippet actions()}<Button href="/studies/new" size="sm"><Plus />New study</Button>{/snippet}
+    {#snippet actions()}<Button href="/experiments/new" size="sm"><Plus />New experiment</Button>{/snippet}
   </PageHeader>
 
   {#if error}<ErrorAlert message={error} onretry={load} />{/if}
-  {#if loading}<LoadingState label="loading studies" />
-  {:else if items.length === 0}<EmptyState title="No studies yet" description="…">{#snippet action()}…{/snippet}</EmptyState>
+  {#if loading}<LoadingState label="loading experiments" />
+  {:else if items.length === 0}<EmptyState title="No experiments yet" description="…">{#snippet action()}…{/snippet}</EmptyState>
   {:else} …content… {/if}
 </div>
 ```
@@ -219,7 +219,7 @@ browser-only cache); loading uses an inline spinner or `LoadingState`, failures 
 
 | Component / module                        | Use for                                                                                                                                    |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `StudyBuilder`                            | the single-page design form (`/studies/new`): numbered `ComposerSection`s; sticky `PlanRail` from 56rem, `StartBar` below                  |
+| `StudyBuilder`                            | the single-page design form (`/experiments/new`): numbered `ComposerSection`s; sticky `PlanRail` from 56rem, `StartBar` below              |
 | `ComposerSection`, `ComposerSectionNav`   | one numbered step (`done` / `meta` / `invalid` / `collapsible`); the section index above the plan on the rail                              |
 | `FactorTable`, `LevelPicker`              | factors × levels; the role (crossed / fixed / fraction) follows the level count; an empty factor shows "default: …"                        |
 | `ResourcePolicyPicker`                    | tier cards (Frugal / Standard / Generous) + Custom + `ResourcePolicyEditor`; "Save as preset" pins a new immutable preset                  |
@@ -262,7 +262,7 @@ browser-only cache); loading uses an inline spinner or `LoadingState`, failures 
 - Statistics: never show a pooled pass rate across conditions; p-values only when results are not interim;
   anything not measured is "—" / "not measured", never 0.
 
-### Study page (`/studies/[id]`) — the study record
+### Study page (`/experiments/[id]`) — the study record
 
 Laid out like a paper, not a dashboard (ui-ux-pro-max query `"scientific research experiment results academic
 paper data" --design-system --density 7 --variance 3 --motion 2`, mapped onto this system's tokens and fonts):

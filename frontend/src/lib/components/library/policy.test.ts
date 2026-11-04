@@ -202,7 +202,7 @@ describe("Budget preset summaries", () => {
         knobs: META,
       }),
     ).toBe(
-      "Frugal v1 · $0.30/run · auto study cap · 2 parallel · effort low · no overrides",
+      "Frugal v1 · $0.30/run · auto experiment cap · 2 parallel · effort low · no overrides",
     );
     const generous = KNOBS.tiers.generous;
     expect(
@@ -213,7 +213,7 @@ describe("Budget preset summaries", () => {
         knobs: META,
       }),
     ).toBe(
-      "Generous v1 · $10.00/run · auto study cap · 8 parallel · effort high · no pilot · no overrides",
+      "Generous v1 · $10.00/run · auto experiment cap · 8 parallel · effort high · no pilot · no overrides",
     );
     const custom = setKnob(
       setKnob(frugal(), "study.max_cost_usd", 25),
@@ -228,7 +228,7 @@ describe("Budget preset summaries", () => {
         knobs: META,
       }),
     ).toBe(
-      "Mine · $0.30/run · $25.00 study cap · 2 parallel · effort low · 2 overrides",
+      "Mine · $0.30/run · $25.00 experiment cap · 2 parallel · effort low · 2 overrides",
     );
   });
 
@@ -250,7 +250,7 @@ describe("Budget preset summaries", () => {
           knobs: META,
         }),
       ).toBe(
-        "Mine v1 · $0.30/run · $25.00 study cap · 2 parallel · effort low · 2 overrides",
+        "Mine v1 · $0.30/run · $25.00 experiment cap · 2 parallel · effort low · 2 overrides",
       );
     }
     // A tier-tagged preset without a base is compared against its own tier.

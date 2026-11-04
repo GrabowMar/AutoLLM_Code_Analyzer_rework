@@ -17,6 +17,7 @@ import FileText from "@lucide/svelte/icons/file-text";
 import BookOpen from "@lucide/svelte/icons/book-open";
 import Activity from "@lucide/svelte/icons/activity";
 import ClipboardCheck from "@lucide/svelte/icons/clipboard-check";
+import Sparkles from "@lucide/svelte/icons/sparkles";
 
 export interface NavItem {
   label: string;
@@ -42,7 +43,8 @@ export const navSections: NavSection[] = [
       { label: "Models", href: "/models", icon: Boxes },
       { label: "Endpoints", href: "/endpoints", icon: Server },
       { label: "Library", href: "/library", icon: Library },
-      { label: "Studies", href: "/studies", icon: FlaskConical },
+      { label: "Generate app", href: "/generate", icon: Sparkles },
+      { label: "Experiments", href: "/experiments", icon: FlaskConical },
       { label: "Slots", href: "/slots/new", icon: Scissors },
       { label: "Budget", href: "/budget", icon: Wallet },
     ],
@@ -84,7 +86,7 @@ const extraLabels: Record<string, string> = {
   "/models/compare": "Compare",
   "/models/import": "Import",
   "/analysis/create": "New analysis",
-  "/studies/new": "New study",
+  "/experiments/new": "New experiment",
   "/endpoints/new": "New endpoint",
   "/slots": "Slots",
   "/samples": "Samples",

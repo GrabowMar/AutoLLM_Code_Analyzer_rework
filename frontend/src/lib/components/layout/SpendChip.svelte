@@ -57,7 +57,7 @@
 	);
 	const title = $derived(
 		paused.length
-			? `${paused.length} stud${paused.length === 1 ? 'y' : 'ies'} paused: ${[...new Set(paused.map((p) => pauseLabel(p.reason)))].join(', ')}`
+			? `${paused.length} experiment${paused.length === 1 ? '' : 's'} paused: ${[...new Set(paused.map((p) => pauseLabel(p.reason)))].join(', ')}`
 			: data
 				? `Spend this ${PERIOD[data.period] ?? data.period}${data.unit === 'list_usd' ? ' (list price)' : ''}${data.period_cap === null ? ' (no cap set)' : ''}`
 				: '',

@@ -96,9 +96,9 @@ describe("summaryItems", () => {
     });
     expect(items).toEqual([
       {
-        label: "Study",
+        label: "Experiment",
         value: "f170be08",
-        href: "/studies/f170be08-a3e8-4adf-9ea8-7b2badaada44",
+        href: "/experiments/f170be08-a3e8-4adf-9ea8-7b2badaada44",
       },
       { label: "Condition count", value: "3" },
       { label: "Leader", value: "Tie: 3 conditions share the top" },

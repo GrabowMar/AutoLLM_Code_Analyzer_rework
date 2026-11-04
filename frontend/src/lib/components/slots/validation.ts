@@ -30,7 +30,7 @@ export function validationLabel(
   }
 }
 
-/** `/studies/new?mode=slot&slot_sets=a,b&targets=x,y` with only usable targets (and the sets they belong to). */
+/** `/experiments/new?mode=slot&slot_sets=a,b&targets=x,y` with only usable targets (and the sets they belong to). */
 export function slotStudyHref(
   setIds: string[],
   targets: Pick<SlotTargetOut, "id" | "slot_set" | "usable">[],
@@ -45,5 +45,5 @@ export function slotStudyHref(
   const params = new URLSearchParams({ mode: "slot" });
   if (sets.length) params.set("slot_sets", sets.join(","));
   if (usable.length) params.set("targets", usable.map((t) => t.id).join(","));
-  return `/studies/new?${params.toString().replace(/%2C/g, ",")}`;
+  return `/experiments/new?${params.toString().replace(/%2C/g, ",")}`;
 }

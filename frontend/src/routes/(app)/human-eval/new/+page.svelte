@@ -275,7 +275,7 @@
 	const appCountText = $derived.by(() => {
 		const parts: string[] = [];
 		if (draft.studyId) {
-			parts.push(`${studyApps != null ? studyApps : 'all'} current app${studyApps === 1 ? '' : 's'} of ${studyName ? `“${studyName}”` : 'the linked study'}`);
+			parts.push(`${studyApps != null ? studyApps : 'all'} current app${studyApps === 1 ? '' : 's'} of ${studyName ? `“${studyName}”` : 'the linked experiment'}`);
 		}
 		if (draft.runIds.length) parts.push(`${draft.runIds.length} picked app${draft.runIds.length === 1 ? '' : 's'}`);
 		return parts.length ? parts.join(' + ') : 'None yet';
@@ -350,7 +350,7 @@
 		<div class="header-stats">
 			<span class="header-stat">{draft.mode === 'pairwise' ? 'Pairwise' : 'Single app'}</span>
 			<span class="header-stat"><b>{draft.design.blocks.length}</b>block{draft.design.blocks.length === 1 ? '' : 's'}</span>
-			<span class="header-stat"><b>{draft.runIds.length}</b>picked app{draft.runIds.length === 1 ? '' : 's'}{draft.studyId ? ' + linked study' : ''}</span>
+			<span class="header-stat"><b>{draft.runIds.length}</b>picked app{draft.runIds.length === 1 ? '' : 's'}{draft.studyId ? ' + linked experiment' : ''}</span>
 			{#if restored}<span class="header-stat text-muted-foreground">Restored from this browser session</span>{/if}
 		</div>
 	</PageHeader>

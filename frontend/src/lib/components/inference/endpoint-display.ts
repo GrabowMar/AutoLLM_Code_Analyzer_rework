@@ -50,14 +50,14 @@ export const BLOCKED_REASON_LABELS: Record<BlockedReason, string> = {
   model_not_served: "Model not on the relay",
   residency_wait: "Waiting for a model swap slot",
   warming_model: "Loading model",
-  study_cap: "Study concurrency cap reached",
+  study_cap: "Experiment concurrency cap reached",
   circuit_open: "Paused after repeated errors",
   draining: "Executor draining",
   retry_backoff: "Retrying after backoff",
   condition_paused: "Condition paused (stop rule or manual)",
-  study_endpoint_cap: "Study per-endpoint concurrency reached",
-  study_model_cap: "Study per-model concurrency reached",
-  study_provider_cap: "Study per-provider concurrency reached",
+  study_endpoint_cap: "Experiment per-endpoint concurrency reached",
+  study_model_cap: "Experiment per-model concurrency reached",
+  study_provider_cap: "Experiment per-provider concurrency reached",
   budget: "Waiting for budget admission",
 };
 

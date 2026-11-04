@@ -45,7 +45,7 @@
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="Budget" description="What you spent, billed and at list price, against your caps; and what each study spent." />
+	<PageHeader title="Budget" description="What you spent, billed and at list price, against your caps; and what each experiment spent." />
 
 	{#if error}<ErrorAlert message={error} onretry={load} />{/if}
 	{#if !data && !error}
@@ -75,18 +75,18 @@
 		</section>
 
 		<section class="space-y-3">
-			<SectionHeading title="Studies" size="sm" count={data.studies.length} />
+			<SectionHeading title="Experiments" size="sm" count={data.studies.length} />
 			{#if data.studies.length === 0}
-				<EmptyState compact icon={Wallet} title="No study has spent anything yet" />
+				<EmptyState compact icon={Wallet} title="No experiment has spent anything yet" />
 			{:else}
 				<Card.Root class="gap-0 overflow-clip py-0">
 					<div class="table-frame" {@attach tableFrame}>
 						<table>
-							<thead><tr><th>Study</th><th>Status</th><th class="num">Billed</th><th class="num">List price</th><th class="num">Cap</th><th class="num">Used</th></tr></thead>
+							<thead><tr><th>Experiment</th><th>Status</th><th class="num">Billed</th><th class="num">List price</th><th class="num">Cap</th><th class="num">Used</th></tr></thead>
 							<tbody>
 								{#each data.studies as s (s.id)}
-									<tr class="row-link" onclick={rowLink(`/studies/${s.id}?tab=operations`)}>
-										<td><a class="font-medium hover:underline" href="/studies/{s.id}?tab=operations">{s.name}</a></td>
+									<tr class="row-link" onclick={rowLink(`/experiments/${s.id}?tab=operations`)}>
+										<td><a class="font-medium hover:underline" href="/experiments/{s.id}?tab=operations">{s.name}</a></td>
 										<td><StatusBadge status={s.status} tone={STUDY_STATUS_TONES[s.status]} /></td>
 										<td class="num">{formatUsd(s.spent)}</td>
 										<td class="num">{formatUsd(s.spent_list)}</td>

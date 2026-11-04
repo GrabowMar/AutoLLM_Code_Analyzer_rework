@@ -141,7 +141,7 @@
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="Reports" description="Generated insights across models, studies, tasks and analysis tools.">
+	<PageHeader title="Reports" description="Generated insights across models, experiments, tasks and analysis tools.">
 		{#snippet actions()}
 			<Button variant="outline" size="sm" onclick={load}>
 				<RefreshCw class="mr-2 h-4 w-4" />Refresh
@@ -213,7 +213,7 @@
 				compact
 				icon={GitCompareArrows}
 				title="No reports yet"
-				description="Generate your first report to get insights across models, studies, tasks and tools."
+				description="Generate your first report to get insights across models, experiments, tasks and tools."
 			>
 				{#snippet action()}
 					<Button size="sm" onclick={() => goto('/reports/create')}>

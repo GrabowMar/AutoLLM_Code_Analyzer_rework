@@ -128,7 +128,7 @@
 				<FormRow label="Name" for="new-name">
 					<Input id="new-name" bind:value={name} placeholder="A short display name" />
 				</FormRow>
-				<FormRow label="Slug" for="new-slug" help="Permanent id: studies pin slug@version." error={slugError || (slug && !isValidSlug(slug) ? 'Letters, digits, _ and -; start with a letter or digit.' : '')}>
+				<FormRow label="Slug" for="new-slug" help="Permanent id: experiments pin slug@version." error={slugError || (slug && !isValidSlug(slug) ? 'Letters, digits, _ and -; start with a letter or digit.' : '')}>
 					<Input id="new-slug" bind:value={slug} oninput={() => (slugTouched = true)} class="font-mono" />
 				</FormRow>
 				<FormRow label="Description" for="new-desc" class="md:col-span-2">

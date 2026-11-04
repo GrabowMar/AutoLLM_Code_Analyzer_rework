@@ -387,7 +387,7 @@
 				<span class="header-stat font-mono">#{shown.content_hash.slice(0, 12)}</span>
 				<span class="header-stat">{shown.created_by?.username ?? 'system'} · {date(shown.created_at)}</span>
 				{#if shown.derived_from}<span class="header-stat">from <span class="font-mono">{shown.derived_from}</span></span>{/if}
-				{#if usage}<span class="header-stat"><b>{usage.studies.length}</b> studies · <b>{usage.runs}</b> runs</span>{/if}
+				{#if usage}<span class="header-stat"><b>{usage.studies.length}</b> experiments · <b>{usage.runs}</b> runs</span>{/if}
 			</div>
 		</PageHeader>
 
@@ -452,9 +452,9 @@
 							<Card.Root class="gap-2 py-3">
 								<Card.Header class="px-4"><Card.Title class="text-sm">Before saving</Card.Title></Card.Header>
 								<Card.Content class="space-y-2 px-4 text-xs">
-									<p class="text-muted-foreground">Saving creates v{latest.version + 1}; v{latest.version} stays exactly as it is for the studies that pin it.</p>
+									<p class="text-muted-foreground">Saving creates v{latest.version + 1}; v{latest.version} stays exactly as it is for the experiments that pin it.</p>
 									{#if inUse}
-										<p class="text-warning-fg">Used by {usage?.studies.length} studies and {usage?.runs} runs: they keep their pinned version. New studies get the new one.</p>
+										<p class="text-warning-fg">Used by {usage?.studies.length} experiments and {usage?.runs} runs: they keep their pinned version. New experiments get the new one.</p>
 									{/if}
 									{#if validation.validating}
 										<p class="flex items-center gap-2 text-muted-foreground"><LoaderCircle class="size-3.5 animate-spin" />Checking</p>
@@ -531,17 +531,17 @@
 				{:else if !usage}
 					<LoadingState label="loading usage" />
 				{:else if usage.studies.length === 0 && usage.runs === 0}
-					<p class="text-sm text-muted-foreground">No study or run uses any version of it yet.</p>
+					<p class="text-sm text-muted-foreground">No experiment or run uses any version of it yet.</p>
 				{:else}
 					<p class="text-sm"><b class="font-mono">{usage.runs}</b> runs used a version of it.</p>
 					{#if usage.studies.length}
 						<div class="overflow-x-auto rounded-md border border-border">
 							<table class="w-full text-sm">
-								<thead><tr><th>Study</th><th>Status</th><th class="num">Version</th></tr></thead>
+								<thead><tr><th>Experiment</th><th>Status</th><th class="num">Version</th></tr></thead>
 								<tbody>
 									{#each usage.studies as s (s.id + s.version)}
 										<tr>
-											<td><a class="hover:text-primary hover:underline" href="/studies/{s.id}">{s.name}</a></td>
+											<td><a class="hover:text-primary hover:underline" href="/experiments/{s.id}">{s.name}</a></td>
 											<td><StatusBadge status={s.status} /></td>
 											<td class="num font-mono">v{s.version}</td>
 										</tr>
@@ -592,7 +592,7 @@
 <ConfirmDialog
 	bind:open={confirmArchive}
 	title="Archive {latest?.slug ?? ''}?"
-	description="Archived entities disappear from pickers and lists (unless “Archived” is ticked). Every version is kept, and studies that pin one keep working. You can restore it any time."
+	description="Archived entities disappear from pickers and lists (unless “Archived” is ticked). Every version is kept, and experiments that pin one keep working. You can restore it any time."
 	confirmLabel="Archive"
 	busy={actionBusy}
 	onConfirm={toggleArchive}

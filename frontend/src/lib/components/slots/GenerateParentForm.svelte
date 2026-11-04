@@ -154,7 +154,7 @@
 			issues = out.issues.filter((i) => i.severity !== 'info');
 			estimate = out.estimate;
 			if (!out.run_ids.length) {
-				submitError = 'The study was resolved but launched no run; see the issues.';
+				submitError = 'The experiment was resolved but launched no run; see the issues.';
 				return;
 			}
 			follow(out.run_ids[0]);
@@ -214,7 +214,7 @@
 		<Dialog.Header>
 			<Dialog.Title>Generate a parent app</Dialog.Title>
 			<Dialog.Description>
-				One agentic run of one task (an ad-hoc exploratory study, one repeat), evaluated at the chosen level. When
+				One agentic run of one task (an ad-hoc exploratory experiment, one repeat), evaluated at the chosen level. When
 				it finishes tested you land on the slot picker with it as the parent.
 			</Dialog.Description>
 		</Dialog.Header>

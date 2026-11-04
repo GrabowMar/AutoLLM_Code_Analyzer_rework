@@ -1392,6 +1392,8 @@ export interface StudyOut {
   kind: StudyKind;
   mode: StudyMode;
   status: StudyStatus;
+  /** A quick generation ("Generate app" page). */
+  is_quick: boolean;
   pause_reason: string;
   stop_reason: StopReasonOut | null;
   design: Design;
@@ -1444,6 +1446,8 @@ export interface StudyListOut {
   /** `null` until the study has cells (never 0 for "no data"). */
   exclusion_rate: number | null;
   locked: boolean;
+  /** A quick generation ("Generate app" page); listed only with `include_quick`. */
+  is_quick: boolean;
   created_at: string | null;
 }
 
@@ -1452,6 +1456,8 @@ export interface StudyListQuery {
   mode?: StudyMode | "";
   kind?: StudyKind | "";
   q?: string;
+  /** Also list quick generations (hidden by default). */
+  include_quick?: boolean;
   page?: number;
   page_size?: number;
 }
@@ -1963,12 +1969,18 @@ export interface AdhocIn {
   launch?: boolean;
   name?: string | null;
   confirm_usd?: number | null;
+  /** A quick generation (`Study.is_quick`); with `launch: false` a dry run that creates nothing. */
+  quick?: boolean;
 }
 
 export interface AdhocOut {
-  study_id: string;
+  /** `null` for a quick dry run (`quick` without `launch`). */
+  study_id: string | null;
   plan_hash: string;
   run_ids: string[];
+  status?: StudyStatus;
+  issues?: Issue[];
+  estimate?: Estimate | null;
   [key: string]: unknown;
 }
 

@@ -289,7 +289,7 @@
 				{/snippet}
 				{#snippet controls()}
 					<form class="flex items-center gap-1" onsubmit={(e) => { e.preventDefault(); setParam('study', studyInput.trim()); }}>
-						<Input class="h-8 w-64" placeholder="Filter by study id, Enter" aria-label="Study id" bind:value={studyInput} />
+						<Input class="h-8 w-64" placeholder="Filter by experiment id, Enter" aria-label="Experiment id" bind:value={studyInput} />
 					</form>
 				{/snippet}
 			</TableToolbar>
@@ -298,7 +298,7 @@
 			{:else if !variants}
 				<LoadingState label="loading variants" />
 			{:else if variants.items.length === 0}
-				<EmptyState compact title="No variants" description="Use this target as a unit of a slot study to regenerate it." />
+				<EmptyState compact title="No variants" description="Use this target as a unit of a slot experiment to regenerate it." />
 			{:else}
 				<div class="table-frame" {@attach tableFrame}>
 					<table>

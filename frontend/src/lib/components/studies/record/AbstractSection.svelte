@@ -40,7 +40,7 @@
 	<div class="max-w-3xl space-y-3 font-display text-[15px] leading-relaxed">
 		{#if study.description}<p>{study.description}</p>{/if}
 		<p>
-			A {KIND_LABELS[study.kind].toLowerCase()} {MODE_LABELS[study.mode].toLowerCase()} study
+			{study.kind === 'exploratory' ? 'An' : 'A'} {KIND_LABELS[study.kind].toLowerCase()} {MODE_LABELS[study.mode].toLowerCase()} experiment
 			{#if varied.length}varying {varied.join(', ')}{/if}
 			over {plural(units, study.mode === 'app' ? 'task' : 'slot target')} with {plural(study.repeats, 'repeat')} per condition and unit
 			(common random numbers: every condition gets the same seed for the same unit and repeat).
@@ -57,7 +57,7 @@
 				over {plural(best.n_units, 'unit')}.
 			</li>
 			{#if results.interim}
-				<li class="text-muted-foreground">Results are interim: p-values are withheld until the study completes.</li>
+				<li class="text-muted-foreground">Results are interim: p-values are withheld until the experiment completes.</li>
 			{:else if results.paired.rows.some((r) => r.p_adjusted !== null && r.p_adjusted < results.paired.alpha)}
 				<li>
 					{plural(results.paired.rows.filter((r) => r.p_adjusted !== null && r.p_adjusted < results.paired.alpha).length, 'condition')} differ from the baseline after {results.paired.correction} correction.

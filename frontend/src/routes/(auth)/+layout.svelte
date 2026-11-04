@@ -8,7 +8,7 @@
 	const pillars = [
 		{ n: '01', title: 'Generate', text: 'Build applications with any model, harness and sampling preset.' },
 		{ n: '02', title: 'Evaluate', text: 'Static, dynamic and runtime analysis of every generated app.' },
-		{ n: '03', title: 'Compare', text: 'Pre-registered studies, paired deltas and confidence intervals.' },
+		{ n: '03', title: 'Compare', text: 'Pre-registered experiments, paired deltas and confidence intervals.' },
 	];
 </script>
 

@@ -5,7 +5,7 @@
 	 * span of an editable owner calls `onedit`), the effective roles per harness ("system: ignored
 	 * (harness_native)" and the captured native prompt), the effective parameters with their knob class,
 	 * model effects, harness, identity keys and the estimate, plus a diff against another cell.
-	 * Used by `ResolvedCellDrawer` (builder) and `/studies/[id]/cells/[cell]`.
+	 * Used by `ResolvedCellDrawer` (builder) and `/experiments/[id]/cells/[cell]`.
 	 *
 	 * Props: `studyId`, `planHash`, `cellKey`, `compareKeys` (cell keys offered for the diff),
 	 * `onedit(span, role)` (omit for read-only).

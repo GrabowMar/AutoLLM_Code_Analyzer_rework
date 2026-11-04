@@ -22,7 +22,7 @@
 	let error = $state('');
 	let versionDiffs = $state<{ factor: string; from: string; to: string }[]>([]);
 	let unknownModels = $state<string[]>([]);
-	// null until the first init: a bare `/studies/new` has the key '' (empty search), which must still init.
+	// null until the first init: a bare `/experiments/new` has the key '' (empty search), which must still init.
 	let started: string | null = null;
 
 	const list = (key: string) =>
@@ -51,7 +51,7 @@
 			if (draftId) {
 				const study = await getStudy(draftId);
 				if (!isEditable(study.status, study.locked)) {
-					await goto(`/studies/${study.id}`, { replaceState: true });
+					await goto(`/experiments/${study.id}`, { replaceState: true });
 					return;
 				}
 				const b = new BuilderState(study.design, {}, { onCreated });
@@ -84,11 +84,11 @@
 				builder = new BuilderState(design, {}, { onCreated });
 			}
 		} catch (e) {
-			error = formatApiError(e, 'Could not open the study.');
+			error = formatApiError(e, 'Could not open the experiment.');
 		}
 	}
 
-	// A fresh `/studies/new` (or another draft) re-initialises; our own `?draft=` replacement does not.
+	// A fresh `/experiments/new` (or another draft) re-initialises; our own `?draft=` replacement does not.
 	$effect(() => {
 		const key = page.url.searchParams.get('draft') ? `draft:${page.url.searchParams.get('draft')}` : page.url.search;
 		untrack(() => {
@@ -98,11 +98,11 @@
 
 	onDestroy(() => builder?.destroy());
 
-	const title = $derived(builder?.study ? `Design: ${builder.study.name}` : 'New study');
+	const title = $derived(builder?.study ? `Design: ${builder.study.name}` : 'New experiment');
 </script>
 
 <div class="space-y-4">
-	<PageHeader {title} description="Design the study, inspect every prompt and the cost, then freeze the plan and start." back={{ href: '/studies', label: 'Studies' }}>
+	<PageHeader {title} description="Design the experiment, inspect every prompt and the cost, then freeze the plan and start." back={{ href: '/experiments', label: 'Experiments' }}>
 		{#snippet meta()}
 			{#if builder?.study}<StatusBadge status={builder.study.status} />{/if}
 		{/snippet}
@@ -122,7 +122,7 @@
 		</p>
 	{/if}
 	{#if builder}
-		<StudyBuilder {builder} onlaunched={(id) => goto(`/studies/${id}?tab=operations`)} />
+		<StudyBuilder {builder} onlaunched={(id) => goto(`/experiments/${id}?tab=operations`)} />
 	{:else if !error}
 		<LoadingState label="opening the builder" />
 	{/if}

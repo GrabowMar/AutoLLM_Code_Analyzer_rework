@@ -278,7 +278,7 @@
 			<p class="text-sm font-medium">Locked pattern plan</p>
 			<p class="text-xs text-muted-foreground">
 				Detector set, primary features, normalizer and cluster parameters enter the pre-registration; any other pattern run on this
-				study is labelled exploratory.
+				experiment is labelled exploratory.
 			</p>
 			<div class="space-y-1.5">
 				<Label for="plan-detectors" class="text-xs">Detectors</Label>

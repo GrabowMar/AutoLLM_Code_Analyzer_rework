@@ -38,7 +38,7 @@ export const FACTOR_DEFS: FactorDef[] = [
   {
     key: "model",
     label: "Model",
-    help: "LLM under study (OpenRouter or a local endpoint).",
+    help: "The LLM that writes the code (OpenRouter or a local endpoint).",
     source: { type: "model" },
     modes: ["app", "slot"],
   },
@@ -618,7 +618,7 @@ export function localChecks(
     out.push({
       code: "no_analysis_plan",
       severity: "error",
-      detail: "A confirmatory study needs an analysis plan.",
+      detail: "A confirmatory experiment needs an analysis plan.",
     });
   }
   if (design.grid.type === "fractional" && !design.grid.fraction?.generator) {

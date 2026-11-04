@@ -70,7 +70,7 @@
 </script>
 
 {#if runs.length === 0}
-	<EmptyState compact title="No run is generating" description="The live trajectory appears here while a run of this study is in its sandbox." />
+	<EmptyState compact title="No run is generating" description="The live trajectory appears here while a run of this experiment is in its sandbox." />
 {:else}
 	<div class="space-y-2">
 		<div class="flex flex-wrap items-end gap-3">

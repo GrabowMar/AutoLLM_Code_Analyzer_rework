@@ -217,14 +217,14 @@
 				size="sm"
 				class="h-9"
 				value={study}
-				placeholder="Every study and ad-hoc run"
-				clearLabel="Every study and ad-hoc run"
+				placeholder="Every experiment and ad-hoc run"
+				clearLabel="Every experiment and ad-hoc run"
 				items={studyItems}
 				onValueChange={(v) => {
 					study = v;
 					pageNo = 1;
 				}}
-				aria-label="Study"
+				aria-label="Experiment"
 			/>
 		</div>
 		<div class="w-full sm:w-52">
@@ -285,13 +285,13 @@
 			compact
 			icon={AppWindow}
 			title={anyFilter ? 'No apps match' : 'No generated apps yet'}
-			description={anyFilter ? undefined : 'Run a study (or generate a single app) first, or paste code instead.'}
+			description={anyFilter ? undefined : 'Run an experiment (or generate a single app) first, or paste code instead.'}
 		>
 			{#snippet action()}
 				{#if anyFilter}
 					<Button variant="outline" size="sm" onclick={clearFilters}>Show all apps</Button>
 				{:else}
-					<Button variant="outline" size="sm" href="/studies/new">New study</Button>
+					<Button variant="outline" size="sm" href="/experiments/new">New experiment</Button>
 				{/if}
 			{/snippet}
 		</EmptyState>

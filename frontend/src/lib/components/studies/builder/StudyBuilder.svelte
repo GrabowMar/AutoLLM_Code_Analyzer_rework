@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * StudyBuilder — `/studies/new` (spec 10.2): numbered steps on the left, the live PlanRail on the right
+	 * StudyBuilder — `/experiments/new` (spec 10.2): numbered steps on the left, the live PlanRail on the right
 	 * (sticky from 56rem; below that the rail follows the form and the StartBar sticks to the bottom).
 	 *
 	 *   1 Mode & kind · 2 Units · 3 Factors · 4 Replicates & seeds · 5 Budget preset · 6 Evaluation ·
@@ -138,7 +138,7 @@
 			launchOpen = false;
 			if (b.studyId) onlaunched(b.studyId);
 		} catch (e) {
-			launchError = formatApiError(e, 'Could not start the study.');
+			launchError = formatApiError(e, 'Could not start the experiment.');
 		}
 	}
 
@@ -150,7 +150,7 @@
 		postRunNote = '';
 		try {
 			await createPostRun(b.studyId, { kind: 'analysis', trigger: 'completed', config: { ...postRun } });
-			postRunNote = 'Attached: it runs when the study completes or stops.';
+			postRunNote = 'Attached: it runs when the experiment completes or stops.';
 		} catch (e) {
 			postRunNote = formatApiError(e, 'Could not attach the post-run.');
 		}
@@ -199,7 +199,7 @@
 					<div class="grid gap-3 sm:grid-cols-2">
 						<div class="space-y-1.5">
 							<Label for="study-name">Name</Label>
-							<Input id="study-name" value={b.meta.name} placeholder="Untitled study" oninput={(e) => b.setMeta({ name: (e.currentTarget as HTMLInputElement).value })} />
+							<Input id="study-name" value={b.meta.name} placeholder="Untitled experiment" oninput={(e) => b.setMeta({ name: (e.currentTarget as HTMLInputElement).value })} />
 						</div>
 						<div class="space-y-1.5">
 							<Label for="study-hypothesis">Hypothesis</Label>
@@ -316,7 +316,7 @@
 				step={5}
 				id="step-budget"
 				title="Budget preset"
-				description="Limits enforced outside the model: the gateway per run, the scheduler per cell and study. Never part of the prompt."
+				description="Limits enforced outside the model: the gateway per run, the scheduler per cell and experiment. Never part of the prompt."
 				collapsible
 				bind:open={budgetOpen}
 				summary={budgetSummary}
@@ -362,11 +362,11 @@
 				</ComposerSection>
 			{/if}
 
-			<ComposerSection step={design.kind === 'confirmatory' ? 8 : 7} id="step-after" title="After the runs" description="Static analysis and the report when the study completes. Schedules are set on the study's Operations page.">
+			<ComposerSection step={design.kind === 'confirmatory' ? 8 : 7} id="step-after" title="After the runs" description="Static analysis and the report when the experiment completes. Schedules are set on the experiment's Operations page.">
 				<div class="space-y-3">
 					<PostRunEditor bind:value={postRun} mode={design.mode} />
 					<div class="flex flex-wrap items-center gap-2">
-						<Button variant="outline" size="sm" disabled={!b.studyId || postRun.tool_slugs.length === 0} onclick={attachPostRun}>Attach to this study</Button>
+						<Button variant="outline" size="sm" disabled={!b.studyId || postRun.tool_slugs.length === 0} onclick={attachPostRun}>Attach to this experiment</Button>
 						{#if postRunNote}<span class="text-xs text-muted-foreground" role="status">{postRunNote}</span>{/if}
 					</div>
 				</div>

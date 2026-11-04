@@ -17,12 +17,12 @@
 <div class="space-y-6">
 	<PageHeader
 		title="Library"
-		description="Everything a sample is generated from — tasks, stacks, starters, styles, guidance, prompts and presets — versioned and immutable: studies pin exact versions."
+		description="Everything a sample is generated from — tasks, stacks, starters, styles, guidance, prompts and presets — versioned and immutable: experiments pin exact versions."
 	>
 		{#snippet help()}
 			<p>
 				Every entity is immutable per <span class="font-mono">slug@version</span> and carries a content hash. Editing saves the next version; archiving
-				hides a slug from pickers but keeps every version for the studies that pin it. System entities are seeded; fork one to make your own.
+				hides a slug from pickers but keeps every version for the experiments that pin it. System entities are seeded; fork one to make your own.
 			</p>
 		{/snippet}
 		{#snippet actions()}

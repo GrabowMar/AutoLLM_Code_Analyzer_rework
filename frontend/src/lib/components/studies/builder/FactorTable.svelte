@@ -105,7 +105,7 @@
 						{#if levels.length === 0}
 							<p class="mt-1 text-xs text-muted-foreground">
 								{#if def.key === 'resource_policy'}
-									default: the study's Budget preset (step 5)
+									default: the experiment's Budget preset (step 5)
 								{:else if fallback}
 									default: <span class="font-mono">{fallback}</span>
 								{:else if def.key === 'model' || def.key === 'stack_profile'}

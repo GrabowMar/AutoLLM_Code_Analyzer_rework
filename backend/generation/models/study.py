@@ -214,6 +214,9 @@ class Study(ValidatedModel):
     # "pool_size", "parents": [run ids in draw order], "at"}; ``{}`` = not drawn yet). Only an explicit
     # ``freeze-plan`` with ``redraw_parents`` (or a changed ``parent_selection``) draws again.
     parent_draw = models.JSONField(_("pinned parent draw"), default=dict, blank=True)
+    # A single app launched from the "Generate app" page (``POST /studies/adhoc/`` with ``quick``): an ordinary
+    # one-cell study, hidden from the experiments list unless ``include_quick`` asks for it.
+    is_quick = models.BooleanField(_("quick generation"), default=False)
     stop_reason = models.JSONField(_("stop reason"), null=True, blank=True)
     pause_reason = models.CharField(
         _("pause reason"),

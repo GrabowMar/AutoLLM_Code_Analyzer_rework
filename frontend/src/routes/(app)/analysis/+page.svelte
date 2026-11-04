@@ -510,7 +510,7 @@
 <ConfirmDialog
 	bind:open={confirmOpen}
 	title="Delete {selected.size - selectedActive} analysis run{selected.size - selectedActive === 1 ? '' : 's'}?"
-	description="Their tool results and findings are removed permanently; study tables and reports that counted them will change. Active runs in the selection are skipped."
+	description="Their tool results and findings are removed permanently; experiment tables and reports that counted them will change. Active runs in the selection are skipped."
 	confirmLabel="Delete"
 	destructive
 	busy={bulkBusy}

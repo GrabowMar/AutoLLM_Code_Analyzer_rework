@@ -1,7 +1,2 @@
-// v2 "New experiment" → the v3 Study builder.
-import { redirect } from "@sveltejs/kit";
-import type { PageLoad } from "./$types";
-
-export const load: PageLoad = () => {
-  redirect(308, "/studies/new");
-};
+// Client-rendered: the page reads live data from the API and SSE after mount.
+export const ssr = false;

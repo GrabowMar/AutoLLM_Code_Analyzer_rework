@@ -40,7 +40,7 @@
 
 	let { picker, onsaved }: Props = $props();
 
-	const DEFAULT_TAG = 'default (can be varied in the study)';
+	const DEFAULT_TAG = 'default (can be varied in the experiment)';
 	const HOLE_HELP: Record<string, string> = {
 		stub: 'Signature and decorators kept; docstring and in-span comments stripped; the body replaced by a neutral placeholder.',
 		remove: 'The part (or file) is removed; the prompt describes its role.',
@@ -134,7 +134,7 @@
 
 {#snippet defaultTag(field: 'default_hole_mode' | 'default_keep_docstring' | 'default_context_policy', reset: () => void)}
 	{#if isDefault(field)}
-		<span class="text-[11px] text-muted-foreground" title="The kind default; a study factor can vary it per condition">{DEFAULT_TAG}</span>
+		<span class="text-[11px] text-muted-foreground" title="The kind default; an experiment factor can vary it per condition">{DEFAULT_TAG}</span>
 	{:else}
 		<button type="button" class="inline-flex cursor-pointer items-center gap-1 text-[11px] text-primary hover:underline" onclick={reset}>
 			<RotateCcw class="h-3 w-3" />use the default

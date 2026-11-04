@@ -118,7 +118,7 @@
 		{:else if error}
 			<div class="p-4"><ErrorAlert message={error} onretry={load} /></div>
 		{:else if !harnesses.length}
-			<EmptyState compact icon={Activity} title="No agentic runs yet" description="Generate apps with this model in an app study to see how it works inside a harness." />
+			<EmptyState compact icon={Activity} title="No agentic runs yet" description="Generate apps with this model in an app experiment to see how it works inside a harness." />
 		{:else if !anyRecords}
 			<EmptyState
 				compact

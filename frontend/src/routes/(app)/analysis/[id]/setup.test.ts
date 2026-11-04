@@ -41,14 +41,14 @@ describe("repeatLabel", () => {
 });
 
 describe("runSetupItems", () => {
-  it("links the study and the sample, never a v2 experiment or application page", () => {
+  it("links the experiment record and the sample, never an application page", () => {
     const { cell, method } = runSetupItems(SETUP);
     expect(cell.map((c) => c.label)).toEqual([
       "Harness study",
       "opencode · deepseek",
       "repeat 2/5",
     ]);
-    expect(cell[0].href).toBe(`/studies/${SETUP.study_id}`);
+    expect(cell[0].href).toBe(`/experiments/${SETUP.study_id}`);
     expect(method.map((m) => m.label)).toEqual([
       "V4 Flash",
       "opencode 1.4.2",
@@ -58,11 +58,10 @@ describe("runSetupItems", () => {
     expect(method[2].href).toBe(`/samples/${SETUP.id}`);
     expect(method[2].title).toBe("todo-api@2 · fastapi-react@1");
     const hrefs = [...cell, ...method].map((i) => i.href ?? "");
-    expect(
-      hrefs.some(
-        (h) => h.includes("/experiments/") || h.includes("/applications/"),
-      ),
-    ).toBe(false);
+    expect(hrefs.some((h) => h.includes("/applications/"))).toBe(false);
+    expect(hrefs.filter((h) => h.includes("/experiments/"))).toEqual([
+      `/experiments/${SETUP.study_id}`,
+    ]);
   });
 
   it("marks a pilot run and leaves out the cell of an ad-hoc run", () => {

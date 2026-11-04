@@ -1,6 +1,6 @@
 # Quickstart
 
-Get a local LLM Lab instance running with Docker Compose, from clone to your first study: an agentic harness builds an app in a sandbox, the app is evaluated and analyzed.
+Get a local LLM Lab instance running with Docker Compose, from clone to your first experiment: an agentic harness builds an app in a sandbox, the app is evaluated and analyzed.
 
 ## Prerequisites
 
@@ -47,7 +47,7 @@ The generation library (tasks with their prose variants, stack profiles and star
 1. Open http://localhost:8000. On an empty database the sign-up page creates the **initial admin account**: a superuser whose email is `admin@<DJANGO_DOMAIN>` (`admin@example.com` with the template's `DJANGO_DOMAIN`), which you then sign in with. `just manage createsuperuser` works too if you prefer your own email. Later sign-ups create normal accounts; locally email verification is optional and the mails land in mailpit.
 2. Add your OpenRouter key under **Settings → API keys** (`/users/settings#credentials`). It is stored encrypted and takes precedence over the global fallback key.
 3. Open **Models** and sync the catalog. Sync is staff-only and uses the staff user's own key, not the global fallback.
-4. Generate something: **Studies** → **New study**. Pick one task as the unit and one model and one stack profile in the factor table; every other factor has a default (harness preset `opencode-native`, style `model-choice`, auth `contract_bearer`, prose variant `standard`, the `frugal` budget preset). The plan rail previews every rendered prompt, the seeds, the cost estimate against the cap and any issues; **Start** launches it (see [Studies](/docs/STUDIES)). The executor picks the runs up within a few seconds. The same flow is one API call: `POST /api/generation/studies/adhoc/` with a design.
+4. Generate something. The quickest way is **Generate app** (`/generate`): pick a task, a stack and a model, check the estimate and click **Generate**. To design a comparison, use **Experiments** → **New experiment**. Pick one task as the unit and one model and one stack profile in the factor table; every other factor has a default (harness preset `opencode-native`, style `model-choice`, auth `contract_bearer`, prose variant `standard`, the `frugal` budget preset). The plan rail previews every rendered prompt, the seeds, the cost estimate against the cap and any issues; **Start** launches it (see [Studies](/docs/STUDIES)). The executor picks the runs up within a few seconds. The same flow is one API call: `POST /api/generation/studies/adhoc/` with a design. The UI calls them experiments; the API and the data model still call them studies.
 5. Open the finished sample under **Applications** (its outcome, manifest, files, trajectory and evaluation) and start an analysis. The first run provisions your personal analyzer workspace container (building the `backend/analyzer-base:latest` image) and installs the selected tools, so it takes a while; later runs reuse it.
 
 > [!NOTE]

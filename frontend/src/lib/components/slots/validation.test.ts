@@ -11,13 +11,15 @@ describe("slot study link", () => {
         { id: "t3", slot_set: "s3", usable: true },
       ],
     );
-    expect(href).toBe("/studies/new?mode=slot&slot_sets=s1,s3&targets=t1,t3");
+    expect(href).toBe(
+      "/experiments/new?mode=slot&slot_sets=s1,s3&targets=t1,t3",
+    );
   });
 
   it("still opens the builder in slot mode with nothing usable", () => {
     expect(
       slotStudyHref(["s1"], [{ id: "t1", slot_set: "s1", usable: false }]),
-    ).toBe("/studies/new?mode=slot");
+    ).toBe("/experiments/new?mode=slot");
   });
 
   it("labels validation states", () => {

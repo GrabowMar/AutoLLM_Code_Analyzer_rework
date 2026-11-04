@@ -237,7 +237,7 @@
 		<Card.Root class="gap-3">
 			<Card.Header>
 				<Card.Title class="flex items-center gap-2">What participants see {@render frozenMark(frozen && !readOnly)}</Card.Title>
-				<Card.Description>Model, condition, study and run names are never shown; apps appear as “App 07”.</Card.Description>
+				<Card.Description>Model, condition, experiment and run names are never shown; apps appear as “App 07”.</Card.Description>
 			</Card.Header>
 			<Card.Content class="space-y-3">
 				<label class="flex items-start gap-2.5 text-sm">
@@ -315,16 +315,16 @@
 							<Select.Simple
 								id="settings-baseline"
 								value={settings.pairing.baseline_condition_id != null ? String(settings.pairing.baseline_condition_id) : ''}
-								placeholder={baselineItems.length ? 'The study’s baseline' : 'Link a study to choose'}
-								clearLabel="The study’s baseline"
+								placeholder={baselineItems.length ? 'The experiment’s baseline' : 'Link an experiment to choose'}
+								clearLabel="The experiment’s baseline"
 								items={baselineItems}
 								disabled={locked('pairing.baseline_condition_id') || baselineItems.length === 0}
 								onValueChange={setBaseline}
 							/>
 							{@render note(
 								unknownBaseline
-									? `Condition #${settings.pairing.baseline_condition_id} is not in the linked study.`
-									: 'Leave empty to use the linked study’s pre-registered baseline.',
+									? `Condition #${settings.pairing.baseline_condition_id} is not in the linked experiment.`
+									: 'Leave empty to use the linked experiment’s pre-registered baseline.',
 								err('pairing', 'baseline_condition_id')
 							)}
 						</div>
@@ -333,7 +333,7 @@
 						<Checkbox class="mt-0.5" bind:checked={settings.pairing.cross_condition_only} disabled={locked('pairing.cross_condition_only')} />
 						<span>
 							Only pair different conditions
-							<span class="block text-xs text-muted-foreground">Skip pairs of two apps from the same condition (same model without a study).</span>
+							<span class="block text-xs text-muted-foreground">Skip pairs of two apps from the same condition (same model without an experiment).</span>
 						</span>
 					</label>
 				</Card.Content>

@@ -1069,16 +1069,24 @@ def launch_adhoc(
     launch: bool = True,
     name: str | None = None,
     confirm_usd: float | None = None,
+    quick: bool = False,
 ) -> dict[str, Any]:
-    """Resolve and launch in one call (automation, the slot picker's "Generate a parent app").
+    """Resolve and launch in one call (automation, the slot picker's "Generate a parent app", the "Generate
+    app" page).
 
     Returns ``{"study_id", "plan_hash", "run_ids", "status", "issues", "estimate"}``; a plan with blocking
-    issues raises ``StudyError`` (400 ``plan_has_errors``) and nothing is created.
+    issues raises ``StudyError`` (400 ``plan_has_errors``) and nothing is created. ``quick`` marks the study
+    as a quick generation (``Study.is_quick``). A quick call with ``launch=False`` is a dry run: the plan is
+    resolved and priced, then everything is rolled back, so pricing a form never leaves draft studies behind
+    (``study_id`` is then ``None``).
     """
     raw = design.model_dump(mode="json") if hasattr(design, "model_dump") else dict(design)
     stamp = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M")
     with transaction.atomic():
         study = create_study(user=user, name=name or f"Ad-hoc {stamp}", design=raw)
+        if quick:
+            study.is_quick = True
+            study.save(update_fields=["is_quick", "updated_at"])
         bundle = resolve_bundle(study, use_cache=False)
         payload: dict[str, Any] = {
             "study_id": str(study.pk),
@@ -1092,6 +1100,9 @@ def launch_adhoc(
             result = _launch(study, bundle.plan.plan_hash, confirm_usd=confirm_usd, user=user)
             payload["run_ids"] = result["run_ids"]
             payload["status"] = result["status"]
+        elif quick:
+            payload["study_id"] = None
+            transaction.set_rollback(True)
     return payload
 
 

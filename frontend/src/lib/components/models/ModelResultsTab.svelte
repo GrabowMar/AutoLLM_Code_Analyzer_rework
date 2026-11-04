@@ -131,11 +131,11 @@
 {:else if !insights || !gen || !res}
 	<LoadingState label="loading results" />
 {:else if gen.runs_total === 0}
-	<EmptyState icon={FlaskConical} title="No measurements yet" description="Generate apps with this model — or add it to a study — to see build success, conformance, code findings and its ranking here.">
+	<EmptyState icon={FlaskConical} title="No measurements yet" description="Generate apps with this model — or add it to an experiment — to see build success, conformance, code findings and its ranking here.">
 		{#snippet action()}
 			<div class="flex flex-wrap justify-center gap-2">
-				<Button size="sm" variant="outline" href="/studies/new">New study</Button>
-				<Button size="sm" href="/studies/new?model={encodeURIComponent(slug)}"><Sparkles class="size-3.5" />Generate an app</Button>
+				<Button size="sm" variant="outline" href="/experiments/new">New experiment</Button>
+				<Button size="sm" href="/generate?model={encodeURIComponent(slug)}"><Sparkles class="size-3.5" />Generate an app</Button>
 			</div>
 		{/snippet}
 	</EmptyState>
@@ -359,17 +359,17 @@
 
 			<Card.Root class="gap-0 overflow-clip py-0">
 				<Card.Header class="border-b border-border py-3">
-					<Card.Title class="text-sm font-medium">Studies</Card.Title>
-					<Card.Description class="text-xs">Studies this model ran in</Card.Description>
+					<Card.Title class="text-sm font-medium">Experiments</Card.Title>
+					<Card.Description class="text-xs">Experiments this model ran in</Card.Description>
 				</Card.Header>
 				<Card.Content class="p-0">
 					{#if insights.studies.length === 0}
-						<p class="p-4 text-sm text-muted-foreground">Not part of a study yet.</p>
+						<p class="p-4 text-sm text-muted-foreground">Not part of an experiment yet.</p>
 					{:else}
 						<ul class="divide-y divide-border">
 							{#each insights.studies as e (e.id)}
 								<li>
-									<a href="/studies/{e.id}" class="flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-muted/40">
+									<a href="/experiments/{e.id}" class="flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-muted/40">
 										<span class="min-w-0 truncate">{e.name}</span>
 										<span class="flex shrink-0 items-center gap-2">
 											<span class="font-mono text-xs tabular-nums text-muted-foreground">{e.runs} apps</span>

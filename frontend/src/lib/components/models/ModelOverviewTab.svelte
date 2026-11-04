@@ -142,7 +142,7 @@
 	{#if expiration}
 		<div class="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning-fg" role="status">
 			<TriangleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-			<span>OpenRouter retires this model on <b class="font-mono">{expiration}</b>. Studies that pin it will stop running after that date.</span>
+			<span>OpenRouter retires this model on <b class="font-mono">{expiration}</b>. Experiments that pin it will stop running after that date.</span>
 		</div>
 	{/if}
 
@@ -231,7 +231,7 @@
 						<LoadingState label="loading measurements" class="py-6" />
 					{:else if gen.runs_total === 0}
 						<p class="text-sm text-muted-foreground">Not generated with yet. Run it on a task to measure build success, conformance and code findings.</p>
-						<Button size="sm" variant="outline" class="mt-3" href="/studies/new?model={encodeURIComponent(slug)}">
+						<Button size="sm" variant="outline" class="mt-3" href="/generate?model={encodeURIComponent(slug)}">
 							<Sparkles class="size-3.5" />Generate an app
 						</Button>
 					{:else}

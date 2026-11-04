@@ -73,6 +73,7 @@ def study_out(study: Study) -> dict[str, Any]:
         "kind": study.kind,
         "mode": study.mode,
         "status": study.status,
+        "is_quick": study.is_quick,
         "pause_reason": study.pause_reason,
         "stop_reason": study.stop_reason,
         "design": study.design,
@@ -129,6 +130,7 @@ def study_list_item(study: Study, counts: dict[str, int] | None = None) -> dict[
         "cap_usd": _money(study.cap_usd),
         "exclusion_rate": round(excluded / total, 4) if total else None,
         "locked": study.locked_at is not None,
+        "is_quick": study.is_quick,
         "created_at": _iso(study.created_at),
     }
 

@@ -275,7 +275,7 @@
 									<td class="max-w-0 min-w-[16rem] w-[34%]">
 										<a {href} class="block truncate font-medium hover:text-primary" title={task.title}>{task.title}</a>
 										<span class="cell-sub block truncate text-xs text-muted-foreground">
-											{task.study ? task.study.name : 'No linked study'}
+											{task.study ? task.study.name : 'No linked experiment'}
 											{#if task.opens_at || task.closes_at}
 												· {task.opens_at ? `from ${formatDate(task.opens_at)}` : ''}{task.opens_at && task.closes_at ? ' ' : ''}{task.closes_at ? `until ${formatDate(task.closes_at)}` : ''}
 											{/if}

@@ -61,7 +61,7 @@
 	<PageHeader
 		title="Cell {cellKey}"
 		description={planned ? `${planned.unit_key} · repeat ${planned.repeat_index} · ${planned.stage} · seed ${planned.seed} · block ${planned.block_index}` : 'One planned sample, fully pinned.'}
-		back={{ href: `/studies/${studyId}?tab=method`, label: study?.name ?? 'Study' }}
+		back={{ href: `/experiments/${studyId}?tab=method`, label: study?.name ?? 'Experiment' }}
 	/>
 	{#if error}<ErrorAlert message={error} onretry={load} />{/if}
 
@@ -93,6 +93,6 @@
 			</Card.Content>
 		</Card.Root>
 	{:else if study}
-		<p class="text-sm text-muted-foreground">This study has no frozen plan yet. Open its cells from the builder's plan rail.</p>
+		<p class="text-sm text-muted-foreground">This experiment has no frozen plan yet. Open its cells from the builder's plan rail.</p>
 	{/if}
 </div>

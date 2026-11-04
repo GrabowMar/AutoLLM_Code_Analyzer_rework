@@ -66,7 +66,7 @@
 				onValueChange={pickHarness}
 			/>
 			{#if harness && !harness.enabled}
-				<p class="text-xs text-warning-fg">Not enabled: {harness.blocked_reason ?? harness.open_questions.join('; ')}. Studies using it are refused at resolve.</p>
+				<p class="text-xs text-warning-fg">Not enabled: {harness.blocked_reason ?? harness.open_questions.join('; ')}. Experiments using it are refused at resolve.</p>
 			{/if}
 		</FormRow>
 		<FormRow label="Version" help="Only versions with verified harness facts can run.">

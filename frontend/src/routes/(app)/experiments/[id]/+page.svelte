@@ -78,7 +78,7 @@
 			});
 			live = next;
 			void next.start().then(() => {
-				if (next.study && next.study.status === 'draft') void goto(`/studies/new?draft=${studyId}`, { replaceState: true });
+				if (next.study && next.study.status === 'draft') void goto(`/experiments/new?draft=${studyId}`, { replaceState: true });
 			});
 			void loadResults();
 		});
@@ -124,12 +124,12 @@
 	{#if live?.error && !study}
 		<ErrorAlert message={live.error} onretry={() => live?.resync()} />
 	{:else if !study}
-		<LoadingState label="loading the study" />
+		<LoadingState label="loading the experiment" />
 	{:else}
 		<StudyMasthead {study}>
 			{#snippet actions()}
 				{#if isEditable(study.status, study.locked)}
-					<Button size="sm" href="/studies/new?draft={study.id}"><Pencil />Continue designing</Button>
+					<Button size="sm" href="/experiments/new?draft={study.id}"><Pencil />Continue designing</Button>
 				{/if}
 				{#if study.status === 'running' || study.status === 'piloting'}
 					<Button variant="outline" size="sm" disabled={busy} onclick={() => act(() => pauseStudy(study.id), 'Could not pause.')}><Pause />Pause</Button>
@@ -183,9 +183,9 @@
 
 <ConfirmDialog
 	bind:open={confirmCancel}
-	title="Cancel the study?"
+	title="Cancel the experiment?"
 	description="Pending runs are cancelled; running runs finish. Cancelled cells are reported as excluded, never as results."
-	confirmLabel="Cancel the study"
+	confirmLabel="Cancel the experiment"
 	destructive
 	{busy}
 	onConfirm={async () => {

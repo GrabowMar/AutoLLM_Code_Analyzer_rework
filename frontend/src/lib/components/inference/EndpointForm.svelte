@@ -364,7 +364,7 @@
 						placeholder="Unlimited"
 						error={errors.max_resident_models ?? ''}
 						hint={isOllama
-							? 'Match OLLAMA_MAX_LOADED_MODELS. Studies group runs to limit model swaps.'
+							? 'Match OLLAMA_MAX_LOADED_MODELS. Experiments group runs to limit model swaps.'
 							: 'Models the server keeps loaded; blank if it serves a fixed set.'}
 						bind:invalid={() => !!invalid.max_resident_models, (v) => setInvalid('max_resident_models', v)}
 					/>

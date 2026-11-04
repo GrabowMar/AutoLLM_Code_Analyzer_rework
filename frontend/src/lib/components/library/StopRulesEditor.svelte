@@ -35,6 +35,8 @@
 	const SCOPES: StopRule['scope'][] = ['study', 'condition', 'unit'];
 	const ACTIONS: StopRule['action'][] = ['pause', 'stop', 'pause_condition', 'alert'];
 	const items = (xs: string[]) => xs.map((x) => ({ value: x, label: x.replace(/_/g, ' ') }));
+	// The `study` scope is an experiment in the UI (the stored value keeps the API name).
+	const scopeItems = SCOPES.map((x) => ({ value: x, label: x === 'study' ? 'experiment' : x }));
 
 	function update(i: number, patch: Partial<StopRule>) {
 		onchange(value.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -57,13 +59,13 @@
 
 <div class="space-y-2">
 	{#if value.length === 0}
-		<p class="text-xs text-muted-foreground">No stop rules: only the budget caps stop the study.</p>
+		<p class="text-xs text-muted-foreground">No stop rules: only the budget caps stop the experiment.</p>
 	{/if}
 	{#each value as rule, i (i)}
 		<div class="space-y-2 rounded-md border border-border p-2">
 			<div class="grid gap-2 sm:grid-cols-[minmax(0,12rem)_minmax(0,8rem)_minmax(0,9rem)_auto]">
 				<Select.Simple value={rule.code} items={items(CODES)} size="sm" disabled={readonly} aria-label="Rule" onValueChange={(v) => update(i, { code: v as StopRule['code'] })} />
-				<Select.Simple value={rule.scope} items={items(SCOPES)} size="sm" disabled={readonly} aria-label="Scope" onValueChange={(v) => update(i, { scope: v as StopRule['scope'] })} />
+				<Select.Simple value={rule.scope} items={scopeItems} size="sm" disabled={readonly} aria-label="Scope" onValueChange={(v) => update(i, { scope: v as StopRule['scope'] })} />
 				<Select.Simple value={rule.action} items={items(ACTIONS)} size="sm" disabled={readonly} aria-label="Action" onValueChange={(v) => update(i, { action: v as StopRule['action'] })} />
 				{#if !readonly}
 					<Button variant="ghost" size="icon" aria-label="Remove rule" onclick={() => onchange(value.filter((_, j) => j !== i))}><Trash2 /></Button>

@@ -27,7 +27,7 @@
 	const server = [
 		{ title: 'Your account', desc: 'Email address, name and profile details. Passwords are stored only as salted hashes.' },
 		{ title: 'Keys and secrets', desc: 'OpenRouter, Hugging Face and provider API keys, your GitHub token and notification-channel secrets, encrypted at rest. Personal API tokens are stored only as a hash.' },
-		{ title: 'Your work', desc: 'Generated applications, analyses and their findings, studies (drafts included: they are saved on the server) and reports you create. Staff of this instance can see every run.' },
+		{ title: 'Your work', desc: 'Generated applications, analyses and their findings, experiments (drafts included: they are saved on the server) and reports you create. Staff of this instance can see every run.' },
 	];
 
 	const outbound = [

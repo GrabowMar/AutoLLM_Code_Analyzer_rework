@@ -526,7 +526,7 @@
 <ConfirmDialog
 	bind:open={confirmDelete}
 	title="Delete this analysis run?"
-	description="Its tool results and findings are removed permanently. Study tables and reports that counted them will change."
+	description="Its tool results and findings are removed permanently. Experiment tables and reports that counted them will change."
 	confirmLabel="Delete"
 	destructive
 	busy={busy === 'delete'}

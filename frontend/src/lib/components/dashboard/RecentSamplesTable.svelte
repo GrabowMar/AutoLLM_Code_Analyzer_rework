@@ -70,7 +70,7 @@
 							<td colspan="4">
 								<EmptyState compact icon={AppWindow} title="No samples yet">
 									{#snippet action()}
-										<Button href="/studies/new" size="sm" variant="outline">Start a study</Button>
+										<Button href="/experiments/new" size="sm" variant="outline">Start an experiment</Button>
 									{/snippet}
 								</EmptyState>
 							</td>

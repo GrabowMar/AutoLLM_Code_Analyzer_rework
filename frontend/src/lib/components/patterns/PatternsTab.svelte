@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * PatternsTab — the Patterns section of a slot study's record (spec 7.9, 10.3 §4; mounted by WP-15's
-	 * `/studies/[id]`). A PatternRun selector labelled planned (matches the pre-registered pattern plan) or
+	 * `/experiments/[id]`). A PatternRun selector labelled planned (matches the pre-registered pattern plan) or
 	 * exploratory, with the live provisional run listed apart; "Re-run patterns (no LLM cost)" queues a new
 	 * PatternRun over the existing variants; export zip. Sections: prevalence (ITT and measured n, Wilson CIs,
 	 * audit), comparisons (paired / independent; q-values in exploratory), clusters per target, the
@@ -169,7 +169,7 @@
 	<EmptyState
 		icon={ScanSearch}
 		title="No pattern run yet"
-		description="Slot studies run their pattern analysis after the variants are evaluated. You can also start one now: it reuses the variants (no LLM cost)."
+		description="Slot experiments run their pattern analysis after the variants are evaluated. You can also start one now: it reuses the variants (no LLM cost)."
 	>
 		{#snippet action()}
 			<Button size="sm" disabled={rerunning} onclick={rerun}>
@@ -193,7 +193,7 @@
 					<Badge variant={detail.label === 'planned' ? 'default' : 'outline'} title={detail.label === 'planned' ? 'Matches the pre-registered pattern plan' : 'Not the pre-registered plan: exploratory'}>{detail.label}</Badge>
 					<StatusBadge status={detail.status} />
 				{/if}
-				{#if summary.interim}<Badge variant="secondary" title="The study is still running: p and q are withheld">interim</Badge>{/if}
+				{#if summary.interim}<Badge variant="secondary" title="The experiment is still running: p and q are withheld">interim</Badge>{/if}
 			{/if}
 			<div class="ml-auto flex gap-2">
 				<Button variant="outline" size="sm" disabled={rerunning} onclick={rerun} title="New PatternRun over the existing variants (normalise, cluster, detect); no model calls">

@@ -426,7 +426,7 @@ export class StudyLive {
         this.callbacks.onState?.(study.status);
     } catch (e) {
       if (!this.destroyed)
-        this.error = formatApiError(e, "Could not load the study.");
+        this.error = formatApiError(e, "Could not load the experiment.");
     } finally {
       this.statusInFlight = false;
     }

@@ -252,7 +252,7 @@
 			<Segmented aria-label="Write or preview" size="sm" value={proseView} items={[{ value: 'write', label: 'Write' }, { value: 'preview', label: 'Preview' }]} onValueChange={(v) => (proseView = v === 'preview' ? 'preview' : 'write')} />
 		</div>
 		<p class="text-xs text-muted-foreground">
-			The prose variant is a study factor. Standard and exhaustive name every endpoint as <span class="font-mono">METHOD /path</span>; system tasks need all three variants. {errors.prose ?? ''}
+			The prose variant is an experiment factor. Standard and exhaustive name every endpoint as <span class="font-mono">METHOD /path</span>; system tasks need all three variants. {errors.prose ?? ''}
 		</p>
 		{#if proseView === 'preview'}
 			<div class="docs-article max-w-none rounded-md border border-border bg-surface-1 px-4 py-3 text-sm">{@html proseHtml}</div>

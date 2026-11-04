@@ -106,9 +106,9 @@
 				{/if}
 				{#if run.study.study_id}
 					<div>
-						<p class="section-label">Study cell</p>
+						<p class="section-label">Experiment cell</p>
 						<p>
-							<a class="text-primary hover:underline" href={`/studies/${run.study.study_id}`}>{run.study.study_name ?? 'Study'}</a>
+							<a class="text-primary hover:underline" href={`/experiments/${run.study.study_id}`}>{run.study.study_name ?? 'Experiment'}</a>
 							· unit <span class="font-mono">{run.study.unit_key ?? '—'}</span>
 							· repeat {run.study.repeat_index ?? '—'} · {run.study.stage || 'main'}
 							{#if run.cell_attempt}· cell attempt {run.cell_attempt}{/if}

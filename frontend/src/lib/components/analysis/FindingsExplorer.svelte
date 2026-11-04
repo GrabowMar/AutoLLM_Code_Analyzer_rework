@@ -144,7 +144,7 @@
 	// The code scope's two parts, as the study counts them (test code apart).
 	const CODE_PARTS: { value: 'source' | 'tests'; label: string; title: string }[] = [
 		{ value: 'source', label: 'App source', title: "Code findings outside test files: the app's own code issues" },
-		{ value: 'tests', label: 'Test files', title: 'Code findings in tests/, *.test.*, *.spec.*, conftest.py and smoke scripts: counted apart, as in the study' },
+		{ value: 'tests', label: 'Test files', title: 'Code findings in tests/, *.test.*, *.spec.*, conftest.py and smoke scripts: counted apart, as in the experiment' },
 	];
 	/** Code findings outside / inside test files (null when code is unmeasured). */
 	const codeParts = $derived(facets?.code_parts ?? null);
@@ -575,7 +575,7 @@
 											<p class="font-medium leading-5 [overflow-wrap:anywhere]">{f.title}</p>
 											{#if f.rule_id || cls}
 												<p class="cell-sub truncate font-mono text-[11px] text-muted-foreground">
-													{f.rule_id}{#if cls}<span title="Issue class: the cross-tool unit the study deduplicates on">{`${f.rule_id ? ' · ' : ''}${cls}`}</span>{/if}
+													{f.rule_id}{#if cls}<span title="Issue class: the cross-tool unit the experiment deduplicates on">{`${f.rule_id ? ' · ' : ''}${cls}`}</span>{/if}
 												</p>
 											{/if}
 										</div>
@@ -583,7 +583,7 @@
 								</td>
 								<td class="max-w-0 w-[22%] font-mono text-xs text-muted-foreground">
 									{#if f.file_path}<span class="block truncate" title={locationText(f)} dir="rtl">&lrm;{locationText(f)}</span>{:else}—{/if}
-									{#if f.in_tests}<span class="cell-sub mt-0.5 block text-right"><span class="inline-block rounded border border-border px-1 font-sans text-[11px]" title="Test code: counted apart from the app's code issues, as in the study">test file</span></span>{/if}
+									{#if f.in_tests}<span class="cell-sub mt-0.5 block text-right"><span class="inline-block rounded border border-border px-1 font-sans text-[11px]" title="Test code: counted apart from the app's code issues, as in the experiment">test file</span></span>{/if}
 								</td>
 								<td class="whitespace-nowrap text-xs">
 									<span class="inline-flex items-center gap-1.5" title={slugs.map(toolName).join(', ')}>

@@ -213,7 +213,7 @@
 
 	<label class="flex items-center gap-2 text-xs">
 		<Checkbox checked={value.skip_if_active} {disabled} onCheckedChange={(v) => patch({ skip_if_active: v === true })} />
-		Skip a run while the study still has queued or running cells
+		Skip a run while the experiment still has queued or running cells
 	</label>
 
 	<div class="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs" aria-live="polite">

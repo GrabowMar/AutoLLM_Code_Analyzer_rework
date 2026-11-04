@@ -115,7 +115,7 @@
 			<Plus class="h-3.5 w-3.5" />
 			New analysis
 		</Button>
-		<Button href="/studies/new" size="sm" class="gap-1.5">
+		<Button href="/generate" size="sm" class="gap-1.5">
 			<Wand2 class="h-3.5 w-3.5" />
 			Generate app
 		</Button>

@@ -322,7 +322,7 @@ export class BuilderState {
       this.saving = true;
       try {
         const study = await this.deps.createStudy({
-          name: meta.name.trim() || "Untitled study",
+          name: meta.name.trim() || "Untitled experiment",
           description: meta.description,
           hypothesis: meta.hypothesis,
           design,
@@ -343,7 +343,7 @@ export class BuilderState {
         const patch: StudyPatchIn = {};
         if (designJson !== this.savedDesign) patch.design = design;
         if (metaJson !== this.savedMeta) {
-          patch.name = meta.name.trim() || "Untitled study";
+          patch.name = meta.name.trim() || "Untitled experiment";
           patch.description = meta.description;
           patch.hypothesis = meta.hypothesis;
         }
@@ -381,7 +381,9 @@ export class BuilderState {
     const status = apiErrorStatus(e);
     this.saveError = formatApiError(
       e,
-      status === 409 ? "The study is locked." : "Could not save the draft.",
+      status === 409
+        ? "The experiment is locked."
+        : "Could not save the draft.",
     );
     this.saveIssues = issuesOf(e);
   }

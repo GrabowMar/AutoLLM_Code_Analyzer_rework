@@ -136,7 +136,7 @@
 		<Dialog.Header>
 			<Dialog.Title>Edit prompt text</Dialog.Title>
 			<Dialog.Description>
-				Saving forks the owner as your own version and switches this study to it. Library rows never change in place.
+				Saving forks the owner as your own version and switches this experiment to it. Library rows never change in place.
 			</Dialog.Description>
 		</Dialog.Header>
 		<div class="space-y-3">

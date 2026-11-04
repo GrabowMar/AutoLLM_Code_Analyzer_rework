@@ -78,7 +78,7 @@
 	};
 </script>
 
-<StudySection id="data" {number} title="Data" lead="Every run with its manifest; the archive holds what is needed to re-analyse the study offline.">
+<StudySection id="data" {number} title="Data" lead="Every run with its manifest; the archive holds what is needed to re-analyse the experiment offline.">
 	{#snippet aside()}
 		<Button variant="outline" size="sm" href={studyExportUrl(studyId)} download><Download />Export (zip)</Button>
 	{/snippet}

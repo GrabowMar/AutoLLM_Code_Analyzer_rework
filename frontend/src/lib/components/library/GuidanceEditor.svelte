@@ -30,7 +30,7 @@
 </script>
 
 <div class="space-y-5">
-	<FormRow label="Security hint" inline help="A study factor: compare no guidance, generic advice and CWE-specific advice.">
+	<FormRow label="Security hint" inline help="An experiment factor: compare no guidance, generic advice and CWE-specific advice.">
 		<Segmented
 			aria-label="Security hint"
 			value={value.security_hint}

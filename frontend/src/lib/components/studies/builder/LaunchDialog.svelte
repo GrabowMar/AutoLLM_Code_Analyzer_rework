@@ -65,7 +65,7 @@
 	const capTooLow = $derived(capMode === 'fixed' && cap !== null && !!totals && cap < totals.expected);
 	const EXHAUSTED: Record<string, string> = {
 		stop_balanced: 'claim no new block; started blocks finish (balanced: no unit ends at full n while another has none)',
-		pause: 'pause the study until you raise the cap',
+		pause: 'pause the experiment until you raise the cap',
 		stop: 'cancel the pending runs and stop',
 	};
 
@@ -82,7 +82,7 @@
 <Dialog.Root {open} onOpenChange={(v) => !v && onclose()}>
 	<Dialog.Content class="max-w-lg">
 		<Dialog.Header>
-			<Dialog.Title>Start the study</Dialog.Title>
+			<Dialog.Title>Start the experiment</Dialog.Title>
 			<Dialog.Description>
 				{#if plan}{plural(plan.n_cells, 'cell')} in {plural(plan.n_blocks, 'block')}{#if plan.n_cells_by_stage.pilot} · the pilot runs first ({plural(plan.n_cells_by_stage.pilot, 'cell')}){/if}.{/if}
 			</Dialog.Description>
@@ -111,10 +111,10 @@
 				</p>
 
 				<div class="space-y-2">
-					<p class="text-sm font-medium">Study cap</p>
+					<p class="text-sm font-medium">Experiment cap</p>
 					<div class="flex flex-wrap items-end gap-3">
 						<Segmented
-							aria-label="Study cap"
+							aria-label="Experiment cap"
 							size="sm"
 							value={capMode}
 							items={[
@@ -127,7 +127,7 @@
 							<NumberField id="launch-cap" label="Cap (USD)" bind:value={cap} min={0} integer={false} step={0.5} class="w-36" />
 						{/if}
 					</div>
-					{#if capTooLow}<p class="text-xs text-danger-fg">The cap is below the expected total; the study would stop early.</p>{/if}
+					{#if capTooLow}<p class="text-xs text-danger-fg">The cap is below the expected total; the experiment would stop early.</p>{/if}
 					<p class="text-xs text-muted-foreground">
 						When it is reached the scheduler will {EXHAUSTED[policy?.study.on_budget_exhausted ?? 'stop_balanced'] ?? policy?.study.on_budget_exhausted}.
 					</p>

@@ -130,7 +130,7 @@
 			<span class="header-stat"><b class={step === 'parents' ? 'text-primary' : ''}>0</b> choose parents</span>
 			<span class="header-stat"><b class={step === 'freeze' ? 'text-primary' : ''}>1</b> freeze</span>
 			<span class="header-stat"><b class={step === 'parts' ? 'text-primary' : ''}>2</b> choose parts</span>
-			<span class="header-stat"><b>3</b> targets → study</span>
+			<span class="header-stat"><b>3</b> targets → experiment</span>
 		</div>
 	</PageHeader>
 
